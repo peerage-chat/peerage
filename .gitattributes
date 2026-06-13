@@ -1,0 +1,5 @@
+# bash-скрипты должны оставаться с LF — иначе ломаются при запуске в WSL/Linux.
+*.sh text eol=lf
+# Go/Rust исходники — LF для единообразия между Windows и WSL.
+*.go text eol=lf
+*.rs text eol=lf
