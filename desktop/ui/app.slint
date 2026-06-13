@@ -1,0 +1,345 @@
+// P2P Messenger — Holo-интерфейс на Slint (нативная отрисовка, без WebView).
+import { ListView } from "std-widgets.slint";
+
+export struct ContactItem {
+    key: string,
+    name: string,
+    fingerprint: string,
+    online: bool,
+    unread: int,
+}
+export struct MsgItem {
+    text: string,
+    mine: bool,
+    time: string,
+    status: string,
+}
+
+// --- переиспользуемые элементы Holo ---
+
+component HoloButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> filled: false;
+    in property <color> accent: #33b5e5;
+    callback clicked;
+    height: 40px;
+    border-width: 1px;
+    border-color: root.filled ? root.accent : #333333;
+    background: ta.has-hover ? (root.filled ? root.accent.brighter(0.15) : #2a2a2a)
+                             : (root.filled ? root.accent : #222222);
+    ta := TouchArea { clicked => { root.clicked(); } }
+    Text {
+        text: root.text;
+        color: root.filled ? #04222e : root.accent;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component HoloInput inherits Rectangle {
+    in-out property <string> text <=> ti.text;
+    in property <string> placeholder;
+    in property <bool> single-line: true;
+    callback accepted;
+    callback edited;
+    height: root.single-line ? 40px : 74px;
+    background: #222222;
+    border-width: 1px;
+    border-color: #333333;
+    Rectangle { y: parent.height - 2px; height: 2px; background: #33b5e5; }
+    HorizontalLayout {
+        padding: 10px;
+        ti := TextInput {
+            color: white;
+            font-size: 14px;
+            single-line: root.single-line;
+            wrap: root.single-line ? no-wrap : word-wrap;
+            accepted => { root.accepted(); }
+            edited => { root.edited(); }
+        }
+    }
+    if root.text == "": Text {
+        x: 12px;
+        y: 11px;
+        text: root.placeholder;
+        color: #666666;
+    }
+}
+
+component TopBar inherits Rectangle {
+    in property <string> title;
+    in property <bool> show-back: false;
+    callback back;
+    height: 50px;
+    background: #222222;
+    Rectangle { y: parent.height - 1px; height: 1px; background: #333333; }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 14px;
+        spacing: 10px;
+        alignment: start;
+        if root.show-back: TouchArea {
+            width: 26px;
+            clicked => { root.back(); }
+            Text { text: "‹"; color: #33b5e5; font-size: 26px; vertical-alignment: center; }
+        }
+        Text {
+            text: root.title;
+            color: #33b5e5;
+            font-size: 16px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+        Rectangle {} // распорка
+        @children
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "P2P Messenger";
+    preferred-width: 440px;
+    preferred-height: 820px;
+    background: #1a1a1a;
+
+    // 0 main, 1 mycode, 2 add, 3 chat, 4 info
+    in-out property <int> screen: 0;
+
+    in property <string> net-status: "подключение…";
+    in property <bool> net-online: false;
+    in property <string> my-address;
+    in property <string> my-pubkey;
+    in property <[string]> my-words;
+    in property <[ContactItem]> contacts;
+    in property <[MsgItem]> messages;
+    in property <string> chat-name;
+    in property <bool> chat-online;
+    in property <string> add-error;
+    in-out property <string> info-name;
+    in property <string> info-key;
+    in property <[string]> info-words;
+    in property <bool> info-online;
+    in property <string> info-error;
+    in property <string> copy-label: "Скопировать ключ";
+
+    callback open-chat(string);
+    callback open-info();
+    callback send-message(string);
+    callback add-contact(string, string);
+    callback rename-contact(string);
+    callback delete-contact();
+    callback search-changed(string);
+    callback copy-pubkey();
+
+    // ===== Главный экран =====
+    if root.screen == 0: VerticalLayout {
+        TopBar { title: "P2P Messenger";
+            Text {
+                text: root.net-status;
+                color: root.net-online ? #8bc34a : #888888;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle {
+            height: 50px;
+            TouchArea { clicked => { root.screen = 1; } }
+            HorizontalLayout {
+                padding: 16px; spacing: 12px;
+                Text { text: "▣"; color: #33b5e5; vertical-alignment: center; }
+                Text { text: "Мой код"; color: white; vertical-alignment: center; }
+                Rectangle {}
+                Text { text: "›"; color: #888888; vertical-alignment: center; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: #333333; }
+        }
+        Rectangle {
+            height: 56px; background: #1a1a1a;
+            Rectangle { y: parent.height - 1px; height: 1px; background: #333333; }
+            HorizontalLayout {
+                padding: 10px;
+                HoloInput {
+                    placeholder: "🔍 Поиск контактов";
+                    edited => { root.search-changed(self.text); }
+                }
+            }
+        }
+        ListView {
+            for c in root.contacts: Rectangle {
+                height: 56px;
+                TouchArea { clicked => { root.open-chat(c.key); } }
+                HorizontalLayout {
+                    padding-left: 16px; padding-right: 16px; spacing: 12px;
+                    Text {
+                        text: "●";
+                        color: c.online ? #8bc34a : #666666;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                    Text { text: c.name; color: white; vertical-alignment: center; }
+                    Rectangle {}
+                    if c.unread > 0: Rectangle {
+                        width: 22px; height: 20px; border-radius: 10px; background: #33b5e5;
+                        Text { text: c.unread; color: #04222e; font-size: 11px;
+                            horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Text {
+                        text: c.fingerprint;
+                        color: #666666;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle { y: parent.height - 1px; height: 1px; background: #333333; }
+            }
+        }
+    }
+
+    // ===== FAB (только на главном) =====
+    if root.screen == 0: Rectangle {
+        x: parent.width - 70px;
+        y: parent.height - 70px;
+        width: 52px; height: 52px; border-radius: 26px; background: #33b5e5;
+        TouchArea { clicked => { root.screen = 2; } }
+        Text { text: "+"; color: #04222e; font-size: 28px;
+            horizontal-alignment: center; vertical-alignment: center; }
+    }
+
+    // ===== Мой код =====
+    if root.screen == 1: VerticalLayout {
+        TopBar { title: "Мой код"; show-back: true; back => { root.screen = 0; } }
+        VerticalLayout {
+            padding: 16px; spacing: 8px; alignment: start;
+            Text { text: "АДРЕС YGGDRASIL"; color: #888888; font-size: 11px; }
+            Text { text: root.my-address; color: #888888; font-size: 12px;
+                font-family: "monospace"; wrap: word-wrap; }
+            Text { text: "ПУБЛИЧНЫЙ КЛЮЧ (ПОДЕЛИТЕСЬ С ДРУГОМ)"; color: #888888; font-size: 11px; }
+            Rectangle {
+                background: #222222; border-width: 1px; border-color: #333333;
+                vertical-stretch: 0;
+                HorizontalLayout { padding: 10px;
+                    Text { text: root.my-pubkey; color: white; font-size: 12px;
+                        font-family: "monospace"; wrap: word-wrap; }
+                }
+            }
+            HoloButton { text: root.copy-label; clicked => { root.copy-pubkey(); } }
+            Text { text: "FINGERPRINT (СВЕРЬТЕ ГОЛОСОМ)"; color: #888888; font-size: 11px; }
+            HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout { spacing: 6px;
+                    for w in root.my-words: Rectangle {
+                        background: #222222; border-width: 1px; border-color: #333333; height: 28px;
+                        HorizontalLayout { padding-left: 10px; padding-right: 10px;
+                            Text { text: w; color: #33b5e5; vertical-alignment: center; } }
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== Добавить контакт =====
+    if root.screen == 2: VerticalLayout {
+        TopBar { title: "Добавить контакт"; show-back: true; back => { root.screen = 0; } }
+        VerticalLayout {
+            padding: 16px; spacing: 8px; alignment: start;
+            Text { text: "ПУБЛИЧНЫЙ КЛЮЧ ДРУГА (64 HEX)"; color: #888888; font-size: 11px; }
+            add-key := HoloInput { placeholder: "например 8a88e3dd…"; single-line: false; }
+            Text { text: "ИМЯ"; color: #888888; font-size: 11px; }
+            add-name := HoloInput { placeholder: "Имя контакта"; }
+            HoloButton { text: "Подключиться"; filled: true;
+                clicked => { root.add-contact(add-key.text, add-name.text); } }
+            Text { text: root.add-error; color: #e53935; wrap: word-wrap; }
+        }
+    }
+
+    // ===== Чат =====
+    if root.screen == 3: VerticalLayout {
+        TopBar { title: root.chat-name; show-back: true; back => { root.screen = 0; }
+            TouchArea {
+                width: 28px;
+                clicked => { root.open-info(); }
+                Text { text: "ⓘ"; color: #33b5e5; font-size: 18px; vertical-alignment: center; }
+            }
+        }
+        Rectangle {
+            height: 22px; background: #1a1a1a;
+            Text {
+                x: 16px;
+                text: root.chat-online ? "● онлайн" : "⚫ офлайн";
+                color: root.chat-online ? #8bc34a : #888888;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+        ListView {
+            for m in root.messages: HorizontalLayout {
+                padding: 6px;
+                alignment: m.mine ? end : start;
+                Rectangle {
+                    max-width: 320px;
+                    background: m.mine ? #0c3b4d : #222222;
+                    border-width: m.mine ? 0px : 1px;
+                    border-color: #333333;
+                    border-radius: 3px;
+                    VerticalLayout {
+                        padding: 8px; spacing: 2px;
+                        Text { text: m.text; color: white; wrap: word-wrap; }
+                        Text {
+                            text: m.time + " " + m.status;
+                            color: m.status == "не доставлено" ? #e53935 : #889;
+                            font-size: 10px;
+                            horizontal-alignment: right;
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            height: 56px; background: #222222;
+            Rectangle { height: 1px; background: #333333; }
+            HorizontalLayout {
+                padding: 8px; spacing: 8px;
+                msg-input := HoloInput {
+                    placeholder: "Сообщение…";
+                    accepted => { root.send-message(self.text); self.text = ""; }
+                }
+                Rectangle {
+                    width: 44px; background: #33b5e5;
+                    TouchArea { clicked => { root.send-message(msg-input.text); msg-input.text = ""; } }
+                    Text { text: "➤"; color: #04222e; font-size: 18px;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    // ===== Инфо о контакте =====
+    if root.screen == 4: VerticalLayout {
+        TopBar { title: "Контакт"; show-back: true; back => { root.screen = 3; } }
+        VerticalLayout {
+            padding: 16px; spacing: 8px; alignment: start;
+            Text { text: "ИМЯ"; color: #888888; font-size: 11px; }
+            HorizontalLayout {
+                spacing: 8px;
+                info-name-in := HoloInput { text <=> root.info-name; }
+                HoloButton { text: "Сохранить"; width: 110px;
+                    clicked => { root.rename-contact(info-name-in.text); } }
+            }
+            Text { text: "СТАТУС"; color: #888888; font-size: 11px; }
+            Text { text: root.info-online ? "онлайн" : "офлайн"; color: #888888; }
+            Text { text: "FINGERPRINT"; color: #888888; font-size: 11px; }
+            HorizontalLayout { VerticalLayout { spacing: 6px;
+                for w in root.info-words: Rectangle {
+                    background: #222222; border-width: 1px; border-color: #333333; height: 28px;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px;
+                        Text { text: w; color: #33b5e5; vertical-alignment: center; } }
+                }
+            } }
+            Text { text: "ПУБЛИЧНЫЙ КЛЮЧ"; color: #888888; font-size: 11px; }
+            Text { text: root.info-key; color: white; font-size: 12px;
+                font-family: "monospace"; wrap: word-wrap; }
+            HoloButton { text: "Удалить контакт"; accent: #e53935;
+                clicked => { root.delete-contact(); } }
+            Text { text: root.info-error; color: #e53935; wrap: word-wrap; }
+        }
+    }
+}

@@ -8,7 +8,7 @@
 Общее **ядро на Rust** (`core/`) — единый источник истины для протокола, крипто
 и сети. Используется обеими платформами:
 
-- **Desktop** (Windows/Linux/Mac) — Tauri, зовёт ядро напрямую.
+- **Desktop** (Windows/Linux/Mac) — Slint (нативный Rust-GUI), зовёт ядро напрямую.
 - **Android** — Kotlin + NDK, зовёт ядро через JNI.
 
 Транспорт — оверлейная mesh-сеть **Yggdrasil** (даёт каждому узлу постоянный
@@ -33,10 +33,9 @@ messenger/            Rust: слой сессии (транспорт + прот
   examples/chat_loopback.rs  E2E текст-чат между двумя узлами (localhost)
   examples/chat.rs    настраиваемый узел чата для реальной сети
   examples/reliability.rs    демо персистентности + presence/Ack/offline/TTL
-desktop/              Tauri v2 десктоп-приложение (Holo UI)
-  src/main.rs         бэкенд: команды + проброс событий движка в UI
-  tauri.conf.json     конфиг (статический фронт, без npm)
-  ui/                 фронтенд: index.html / style.css / app.js (Holo тема)
+desktop/              десктоп-приложение (Slint — нативный Rust-GUI, без WebView)
+  ui/app.slint        декларативный Holo-интерфейс
+  src/main.rs         проводка движка: модели, колбэки, события → UI
 ygg/                  Go: c-shared обёртка вокруг yggdrasil-go
   libygg/ygg.go       экспорт датаграммного API (ygg_start/write/read/...)
   cmd/yggaddr/        валидатор адреса средствами самого yggdrasil-go
@@ -50,7 +49,7 @@ scripts/
   run-realnet-chat.sh   E2E чат двух процессов через реальную сеть (WSL)
   run-reliability.sh    демо персистентности и надёжности сессии (WSL)
   run-desktop.sh        сборка и запуск десктоп-приложения (WSL+WSLg)
-  setup-desktop-deps.sh установка зависимостей Tauri (WSL, apt)
+  setup-desktop-deps.sh установка зависимостей Slint (WSL, apt)
   verify-persist.sh     две копии через реальную сеть + проверка истории на диске
   validate-ygg-addr.sh  кросс-проверка Go vs Rust вывода адреса
 ```
@@ -68,6 +67,10 @@ scripts/
   и используем его `PacketConn` напрямую (датаграммы по ключу узла) вместо
   поднятия TUN-интерфейса. Не нужны права root/админа и драйвер wintun — это
   настоящее библиотечное встраивание.
+- **Slint вместо Tauri для десктопа.** ТЗ указывает Tauri (WebView), но мы взяли
+  Slint — нативный Rust-GUI. Один самодостаточный бинарь без системного WebView,
+  UI вызывает движок напрямую (без слоя команд/сериализации). Holo-тема рисуется
+  декларативно. Ядро/транспорт/мессенджер UI-агностичны и не затронуты.
 
 ## Важные технические находки
 
@@ -100,19 +103,16 @@ scripts/
 - [x] Надёжность сессии: keepalive-ping, статус онлайн/офлайн (presence),
       очередь исходящих с повтором до Ack и сдачей по TTL, чистая остановка
       (`scripts/run-reliability.sh`)
-- [x] Desktop UI (Tauri v2, Holo тема): мой код (адрес/ключ/fingerprint),
-      контакты с онлайн-статусом, чат с ✓✓, добавление контакта по ключу.
-      Бэкенд встраивает движок; запуск в WSL через WSLg (`scripts/run-desktop.sh`)
+- [x] Desktop UI (Slint, нативный Rust-GUI, Holo тема): мой код (адрес/ключ/
+      fingerprint), контакты с онлайн-статусом, чат с ✓✓, добавление контакта.
+      UI вызывает движок напрямую; запуск в WSL через WSLg (`scripts/run-desktop.sh`).
+      Без WebView/Node (переход с Tauri — отклонение от ТЗ ради единого бинаря)
 - [x] Полировка: история сообщений на диске (`core::store::MessageStore`),
       управление контактами (переименование/удаление/инфо), TOFU-добавление
       входящих, поиск, счётчик непрочитанных, время сообщений
 - [ ] Добавление контакта по QR-коду (сейчас — по hex-ключу)
 - [ ] Android (JNI-мост к ядру)
-- [ ] E2E-шифрование сообщений (NaCl Box)
-- [ ] Добавление контакта по коду/QR (TOFU)
-- [ ] Desktop UI (Tauri)
-- [ ] Android (JNI-мост к ядру)
-- [ ] Голос / видео / шаринг экрана
+- [ ] Голос / видео / шаринг экрана (Opus / H.264 / SRTP)
 - [ ] Группы (MLS) / торрент-стриминг
 
 ## Разработка
@@ -130,14 +130,14 @@ bash scripts/run-reliability.sh          # (WSL) персистентность 
 Публичные пиры в `peers/public-peers.txt` со временем устаревают — актуальный
 список: <https://publicpeers.neilalexander.dev/>.
 
-### Десктоп-приложение (Tauri)
+### Десктоп-приложение (Slint)
 
-Собирается и запускается в WSL; окно отображается на Windows через **WSLg**
-(нужен Windows 11 либо Windows 10 с WSLg). Сборка не требует Node/npm —
-фронтенд статический.
+Нативный Rust-GUI (Slint) — один бинарь, **без WebView/Node**, UI вызывает движок
+напрямую в процессе. Собирается и запускается в WSL; окно отображается на Windows
+через **WSLg**.
 
 ```sh
-bash scripts/setup-desktop-deps.sh   # один раз: WebKitGTK и пр. (apt)
+bash scripts/setup-desktop-deps.sh   # один раз: рантайм-библиотеки Slint (apt)
 bash scripts/run-desktop.sh          # собрать и запустить приложение
 ```
 

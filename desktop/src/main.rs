@@ -1,332 +1,370 @@
-//! Десктоп-приложение (Tauri v2): Holo-интерфейс поверх движка p2p-messenger.
-//!
-//! Бэкенд — источник истины: хранит идентичность, контакты и историю сообщений
-//! на диске, отдаёт команды фронтенду и пробрасывает события движка в UI.
+//! Десктоп-приложение: Holo-интерфейс на Slint (нативная отрисовка) поверх
+//! движка p2p-messenger. Ядро/транспорт/мессенджер не зависят от UI.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
-use tauri::{Emitter, Manager, State};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
 use p2p_messenger::{Event, Messenger};
 use p2p_ygg::Node;
 
-/// Встроенный список публичных пиров (входим в глобальную сеть при старте).
+slint::include_modules!();
+
 const PUBLIC_PEERS: &str = include_str!("../../peers/public-peers.txt");
 
-type Contacts = Arc<Mutex<ContactStore>>;
-type Messages = Arc<Mutex<MessageStore>>;
-
-struct AppState {
+/// Общее состояние (Send+Sync) — доступно колбэкам UI и потоку событий.
+struct Core {
     messenger: Arc<Messenger>,
-    contacts: Contacts,
-    messages: Messages,
+    contacts: Mutex<ContactStore>,
+    messages: Mutex<MessageStore>,
     me_pub: [u8; 32],
-    me_address: String,
-    me_fingerprint: Vec<String>,
+    current_chat: Mutex<Option<[u8; 32]>>,
+    unread: Mutex<HashMap<[u8; 32], i32>>,
+    search: Mutex<String>,
 }
 
 fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
-
-fn parse_key(hex_str: &str) -> Option<[u8; 32]> {
-    let b = hex::decode(hex_str.trim()).ok()?;
-    b.as_slice().try_into().ok()
+fn parse_key(s: &str) -> Option<[u8; 32]> {
+    hex::decode(s.trim()).ok()?.as_slice().try_into().ok()
 }
-
-fn spawn_connect(messenger: Arc<Messenger>, key: [u8; 32]) {
+fn spawn_connect(m: Arc<Messenger>, key: [u8; 32]) {
     std::thread::spawn(move || loop {
-        let _ = messenger.connect(&key, Duration::from_secs(20));
+        let _ = m.connect(&key, Duration::from_secs(20));
         std::thread::sleep(Duration::from_secs(5));
     });
 }
-
-// ---- Команды ----
-
-#[derive(Serialize)]
-struct Me {
-    address: String,
-    pubkey: String,
-    fingerprint: Vec<String>,
-}
-
-#[tauri::command]
-fn my_identity(state: State<AppState>) -> Me {
-    Me {
-        address: state.me_address.clone(),
-        pubkey: hex::encode(state.me_pub),
-        fingerprint: state.me_fingerprint.clone(),
+fn status_mark(s: &str) -> &'static str {
+    match s {
+        "delivered" => "✓✓",
+        "failed" => "не доставлено",
+        "sent" => "✓",
+        _ => "",
     }
 }
 
-#[derive(Serialize)]
-struct Net {
-    peers: i32,
-    tree: i32,
-    online: bool,
-}
-
-#[tauri::command]
-fn net_status(state: State<AppState>) -> Net {
-    let peers = state.messenger.net_peers();
-    let tree = state.messenger.net_tree();
-    Net { peers, tree, online: peers >= 1 && tree > 2 }
-}
-
-#[derive(Serialize)]
-struct ContactView {
-    key: String,
-    name: String,
-    fingerprint: String,
-    online: bool,
-    added: i64,
-}
-
-fn view_of(c: &p2p_core::store::Contact, messenger: &Messenger) -> ContactView {
-    let online = parse_key(&c.key)
-        .map(|k| messenger.is_online(&k))
-        .unwrap_or(false);
-    ContactView {
-        key: c.key.clone(),
-        name: c.name.clone(),
-        fingerprint: c.fingerprint.clone(),
-        online,
-        added: c.added,
+/// TOFU: добавить неизвестного пира в контакты. Возвращает true, если новый.
+fn ensure_contact(core: &Arc<Core>, peer: [u8; 32]) -> bool {
+    let mut store = core.contacts.lock().unwrap();
+    if store.contains(&peer) {
+        false
+    } else {
+        let _ = store.add(&peer, "Без имени", now());
+        drop(store);
+        spawn_connect(core.messenger.clone(), peer);
+        true
     }
 }
 
-#[tauri::command]
-fn list_contacts(state: State<AppState>) -> Vec<ContactView> {
-    let store = state.contacts.lock().unwrap();
-    let mut v: Vec<ContactView> = store.list().iter().map(|c| view_of(c, &state.messenger)).collect();
-    v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    v
-}
-
-#[tauri::command]
-fn contact_info(state: State<AppState>, key_hex: String) -> Result<ContactView, String> {
-    let key = parse_key(&key_hex).ok_or("неверный ключ")?;
-    let store = state.contacts.lock().unwrap();
-    store
-        .get(&key)
-        .map(|c| view_of(c, &state.messenger))
-        .ok_or_else(|| "контакт не найден".into())
-}
-
-#[tauri::command]
-fn add_contact(state: State<AppState>, key_hex: String, name: String) -> Result<String, String> {
-    let key = parse_key(&key_hex).ok_or("неверный ключ (нужно 64 hex-символа)")?;
-    if key == state.me_pub {
-        return Err("это ваш собственный ключ".into());
-    }
-    let name = if name.trim().is_empty() { "Без имени".into() } else { name.trim().to_string() };
-    state
-        .contacts
-        .lock()
-        .unwrap()
-        .add(&key, &name, now())
-        .map_err(|e| e.to_string())?;
-    spawn_connect(state.messenger.clone(), key);
-    Ok(hex::encode(key))
-}
-
-#[tauri::command]
-fn rename_contact(state: State<AppState>, key_hex: String, name: String) -> Result<(), String> {
-    let key = parse_key(&key_hex).ok_or("неверный ключ")?;
-    if name.trim().is_empty() {
-        return Err("имя не может быть пустым".into());
-    }
-    state
-        .contacts
-        .lock()
-        .unwrap()
-        .rename(&key, name.trim())
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-fn delete_contact(state: State<AppState>, key_hex: String) -> Result<(), String> {
-    let key = parse_key(&key_hex).ok_or("неверный ключ")?;
-    state.contacts.lock().unwrap().remove(&key).map_err(|e| e.to_string())?;
-    state.messages.lock().unwrap().clear(&key).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-fn get_history(state: State<AppState>, key_hex: String) -> Result<Vec<StoredMessage>, String> {
-    let key = parse_key(&key_hex).ok_or("неверный ключ")?;
-    Ok(state.messages.lock().unwrap().history(&key).to_vec())
-}
-
-#[tauri::command]
-fn send_text(state: State<AppState>, key_hex: String, text: String) -> Result<u64, String> {
-    let key = parse_key(&key_hex).ok_or("неверный ключ")?;
-    let text = text.trim().to_string();
-    if text.is_empty() {
-        return Err("пустое сообщение".into());
-    }
-    let id = state.messenger.send_text(&key, &text).map_err(|e| e.to_string())?;
-    let _ = state.messages.lock().unwrap().append(
-        &key,
-        StoredMessage { id, text, mine: true, time: now(), status: "sent".into() },
-    );
-    Ok(id)
-}
-
-fn main() {
-    tauri::Builder::default()
-        .setup(|app| {
-            let dir = match std::env::var_os("P2P_DATA_DIR") {
-                Some(d) => std::path::PathBuf::from(d),
-                None => app
-                    .path()
-                    .app_data_dir()
-                    .unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            };
-            std::fs::create_dir_all(&dir).ok();
-
-            let profile = Profile::load_or_create(&dir.join("profile.json"))
-                .expect("не удалось загрузить профиль");
-            let identity = profile.identity;
-            let me_pub = identity.public_key_bytes();
-            let me_fingerprint = identity
-                .fingerprint_words()
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>();
-
-            let node = Node::start(&identity.seed()).expect("не удалось запустить узел");
-            let me_address = node.address();
-            for uri in PUBLIC_PEERS
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            {
-                let _ = node.add_peer(uri);
+fn rebuild_contacts(ui: &AppWindow, core: &Arc<Core>) {
+    let term = core.search.lock().unwrap().to_lowercase();
+    let unread = core.unread.lock().unwrap();
+    let store = core.contacts.lock().unwrap();
+    let mut items: Vec<ContactItem> = store
+        .list()
+        .iter()
+        .filter(|c| term.is_empty() || c.name.to_lowercase().contains(&term))
+        .map(|c| {
+            let key = parse_key(&c.key).unwrap_or([0u8; 32]);
+            let short_fp = c.fingerprint.split_whitespace().take(3).collect::<Vec<_>>().join(" ") + "…";
+            ContactItem {
+                key: c.key.clone().into(),
+                name: c.name.clone().into(),
+                fingerprint: short_fp.into(),
+                online: core.messenger.is_online(&key),
+                unread: *unread.get(&key).unwrap_or(&0),
             }
+        })
+        .collect();
+    items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    ui.set_contacts(ModelRc::new(VecModel::from(items)));
+}
 
-            let contacts: Contacts = Arc::new(Mutex::new(
-                ContactStore::load(&dir.join("contacts.json")).expect("контакты"),
-            ));
-            let messages: Messages = Arc::new(Mutex::new(
-                MessageStore::load(&dir.join("messages.json")).expect("сообщения"),
-            ));
-            let contact_keys: Vec<[u8; 32]> = contacts
-                .lock()
-                .unwrap()
-                .list()
-                .iter()
-                .filter_map(|c| parse_key(&c.key))
-                .collect();
+fn rebuild_messages(ui: &AppWindow, core: &Arc<Core>) {
+    let Some(key) = *core.current_chat.lock().unwrap() else { return };
+    let store = core.messages.lock().unwrap();
+    let items: Vec<MsgItem> = store
+        .history(&key)
+        .iter()
+        .map(|m| MsgItem {
+            text: m.text.clone().into(),
+            mine: m.mine,
+            time: fmt_time(m.time).into(),
+            status: status_mark(&m.status).into(),
+        })
+        .collect();
+    ui.set_messages(ModelRc::new(VecModel::from(items)));
+}
 
-            let (messenger, rx) = Messenger::start(identity, node);
-            let messenger = Arc::new(messenger);
+fn fmt_time(t: i64) -> String {
+    // Локальное HH:MM без внешних зависимостей.
+    let secs = t.rem_euclid(86400);
+    let h = (secs / 3600) as u32;
+    let m = (secs % 3600 / 60) as u32;
+    format!("{h:02}:{m:02}")
+}
 
-            // Проброс событий движка во фронтенд + персистентность.
-            let handle = app.handle().clone();
-            let ev_contacts = contacts.clone();
-            let ev_messages = messages.clone();
-            let ev_messenger = messenger.clone();
-            std::thread::spawn(move || {
-                for ev in rx.iter() {
-                    match ev {
-                        Event::Presence { peer, online } => {
-                            ensure_contact(&ev_contacts, &ev_messenger, &handle, peer);
-                            let _ = handle.emit(
-                                "presence",
-                                serde_json::json!({ "peer": hex::encode(peer), "online": online }),
-                            );
-                        }
-                        Event::Text { peer, id, text } => {
-                            ensure_contact(&ev_contacts, &ev_messenger, &handle, peer);
-                            let _ = ev_messages.lock().unwrap().append(
-                                &peer,
-                                StoredMessage {
-                                    id,
-                                    text: text.clone(),
-                                    mine: false,
-                                    time: now(),
-                                    status: String::new(),
-                                },
-                            );
-                            let _ = handle.emit(
-                                "message",
-                                serde_json::json!({ "peer": hex::encode(peer), "id": id, "text": text }),
-                            );
-                        }
-                        Event::Ack { peer, id } => {
-                            let _ = ev_messages.lock().unwrap().set_status(&peer, id, "delivered");
-                            let _ = handle.emit(
-                                "ack",
-                                serde_json::json!({ "peer": hex::encode(peer), "id": id }),
-                            );
-                        }
-                        Event::Undelivered { peer, id } => {
-                            let _ = ev_messages.lock().unwrap().set_status(&peer, id, "failed");
-                            let _ = handle.emit(
-                                "undelivered",
-                                serde_json::json!({ "peer": hex::encode(peer), "id": id }),
-                            );
-                        }
+fn update_net(ui: &AppWindow, core: &Arc<Core>) {
+    let peers = core.messenger.net_peers();
+    let tree = core.messenger.net_tree();
+    let online = peers >= 1 && tree > 2;
+    ui.set_net_online(online);
+    ui.set_net_status(if online { format!("в сети · пиров {peers}") } else { format!("подключение… ({peers})") }.into());
+}
+
+fn main() -> Result<(), slint::PlatformError> {
+    // --- движок ---
+    let dir = match std::env::var_os("P2P_DATA_DIR") {
+        Some(d) => std::path::PathBuf::from(d),
+        None => directories_data_dir(),
+    };
+    std::fs::create_dir_all(&dir).ok();
+
+    let identity = Profile::load_or_create(&dir.join("profile.json")).expect("профиль").identity;
+    let me_pub = identity.public_key_bytes();
+    let me_words: Vec<SharedString> = identity.fingerprint_words().iter().map(|s| (*s).into()).collect();
+
+    let node = Node::start(&identity.seed()).expect("узел");
+    let address = node.address();
+    for uri in PUBLIC_PEERS.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let _ = node.add_peer(uri);
+    }
+
+    let contacts = ContactStore::load(&dir.join("contacts.json")).expect("контакты");
+    let messages = MessageStore::load(&dir.join("messages.json")).expect("сообщения");
+    let contact_keys: Vec<[u8; 32]> = contacts.list().iter().filter_map(|c| parse_key(&c.key)).collect();
+
+    let (messenger, rx) = Messenger::start(identity, node);
+    let messenger = Arc::new(messenger);
+    for k in &contact_keys {
+        spawn_connect(messenger.clone(), *k);
+    }
+
+    let core = Arc::new(Core {
+        messenger,
+        contacts: Mutex::new(contacts),
+        messages: Mutex::new(messages),
+        me_pub,
+        current_chat: Mutex::new(None),
+        unread: Mutex::new(HashMap::new()),
+        search: Mutex::new(String::new()),
+    });
+
+    // --- UI ---
+    let ui = AppWindow::new()?;
+    ui.set_my_address(address.into());
+    ui.set_my_pubkey(hex::encode(me_pub).into());
+    ui.set_my_words(ModelRc::new(VecModel::from(me_words)));
+    rebuild_contacts(&ui, &core);
+    update_net(&ui, &core);
+
+    // колбэки
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_search_changed(move |t| {
+            *c.search.lock().unwrap() = t.to_string();
+            rebuild_contacts(&w.unwrap(), &c);
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_open_chat(move |key_str| {
+            let ui = w.unwrap();
+            let Some(key) = parse_key(&key_str) else { return };
+            *c.current_chat.lock().unwrap() = Some(key);
+            c.unread.lock().unwrap().insert(key, 0);
+            let (name, online) = {
+                let store = c.contacts.lock().unwrap();
+                let name = store.get(&key).map(|x| x.name.clone()).unwrap_or_default();
+                (name, c.messenger.is_online(&key))
+            };
+            ui.set_chat_name(name.into());
+            ui.set_chat_online(online);
+            rebuild_messages(&ui, &c);
+            rebuild_contacts(&ui, &c);
+            ui.set_screen(3);
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_send_message(move |text| {
+            let text = text.trim().to_string();
+            if text.is_empty() { return; }
+            let Some(key) = *c.current_chat.lock().unwrap() else { return };
+            if let Ok(id) = c.messenger.send_text(&key, &text) {
+                let _ = c.messages.lock().unwrap().append(&key, StoredMessage {
+                    id, text, mine: true, time: now(), status: "sent".into(),
+                });
+                rebuild_messages(&w.unwrap(), &c);
+            }
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_add_contact(move |key_str, name| {
+            let ui = w.unwrap();
+            let Some(key) = parse_key(&key_str) else {
+                ui.set_add_error("неверный ключ (нужно 64 hex-символа)".into());
+                return;
+            };
+            if key == c.me_pub {
+                ui.set_add_error("это ваш собственный ключ".into());
+                return;
+            }
+            let name = if name.trim().is_empty() { "Без имени".to_string() } else { name.trim().to_string() };
+            if let Err(e) = c.contacts.lock().unwrap().add(&key, &name, now()) {
+                ui.set_add_error(format!("{e}").into());
+                return;
+            }
+            spawn_connect(c.messenger.clone(), key);
+            ui.set_add_error("".into());
+            rebuild_contacts(&ui, &c);
+            ui.set_screen(0);
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_open_info(move || {
+            let ui = w.unwrap();
+            let Some(key) = *c.current_chat.lock().unwrap() else { return };
+            let store = c.contacts.lock().unwrap();
+            if let Some(ct) = store.get(&key) {
+                ui.set_info_name(ct.name.clone().into());
+                ui.set_info_key(ct.key.clone().into());
+                let words: Vec<SharedString> = ct.fingerprint.split_whitespace().map(|w| w.into()).collect();
+                ui.set_info_words(ModelRc::new(VecModel::from(words)));
+                ui.set_info_online(c.messenger.is_online(&key));
+                ui.set_info_error("".into());
+                ui.set_screen(4);
+            }
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_rename_contact(move |name| {
+            let ui = w.unwrap();
+            let Some(key) = *c.current_chat.lock().unwrap() else { return };
+            if name.trim().is_empty() {
+                ui.set_info_error("имя не может быть пустым".into());
+                return;
+            }
+            let _ = c.contacts.lock().unwrap().rename(&key, name.trim());
+            ui.set_chat_name(name.trim().into());
+            rebuild_contacts(&ui, &c);
+            ui.set_screen(3);
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_delete_contact(move || {
+            let ui = w.unwrap();
+            let Some(key) = *c.current_chat.lock().unwrap() else { return };
+            let _ = c.contacts.lock().unwrap().remove(&key);
+            let _ = c.messages.lock().unwrap().clear(&key);
+            *c.current_chat.lock().unwrap() = None;
+            rebuild_contacts(&ui, &c);
+            ui.set_screen(0);
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_copy_pubkey(move || {
+            let ui = w.unwrap();
+            let key = ui.get_my_pubkey().to_string();
+            let ok = arboard::Clipboard::new().and_then(|mut c| c.set_text(key)).is_ok();
+            ui.set_copy_label(if ok { "Скопировано ✓".into() } else { "Не удалось скопировать".into() });
+        });
+    }
+
+    // --- поток событий движка → UI ---
+    {
+        let core_ev = core.clone();
+        let weak = ui.as_weak();
+        std::thread::spawn(move || {
+            for ev in rx.iter() {
+                let core = core_ev.clone();
+                let _ = weak.upgrade_in_event_loop(move |ui| handle_event(&ui, &core, ev));
+            }
+        });
+    }
+
+    // --- периодическое обновление сети/статусов ---
+    let timer = slint::Timer::default();
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        timer.start(slint::TimerMode::Repeated, Duration::from_secs(3), move || {
+            if let Some(ui) = w.upgrade() {
+                update_net(&ui, &c);
+                rebuild_contacts(&ui, &c);
+                if ui.get_screen() == 3 {
+                    if let Some(key) = *c.current_chat.lock().unwrap() {
+                        ui.set_chat_online(c.messenger.is_online(&key));
                     }
                 }
-            });
-
-            for key in contact_keys {
-                spawn_connect(messenger.clone(), key);
             }
+        });
+    }
 
-            app.manage(AppState {
-                messenger,
-                contacts,
-                messages,
-                me_pub,
-                me_address,
-                me_fingerprint,
-            });
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            my_identity,
-            net_status,
-            list_contacts,
-            contact_info,
-            add_contact,
-            rename_contact,
-            delete_contact,
-            get_history,
-            send_text
-        ])
-        .run(tauri::generate_context!())
-        .expect("ошибка запуска Tauri-приложения");
+    ui.run()
 }
 
-/// TOFU: если пир ещё не в контактах — добавить с именем-заглушкой,
-/// начать поддерживать сессию и уведомить фронтенд об изменении списка.
-fn ensure_contact(
-    contacts: &Contacts,
-    messenger: &Arc<Messenger>,
-    handle: &tauri::AppHandle,
-    peer: [u8; 32],
-) {
-    let is_new = {
-        let mut store = contacts.lock().unwrap();
-        if store.contains(&peer) {
-            false
-        } else {
-            let _ = store.add(&peer, "Без имени", now());
-            true
+fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
+    match ev {
+        Event::Presence { peer, online } => {
+            ensure_contact(core, peer);
+            rebuild_contacts(ui, core);
+            if *core.current_chat.lock().unwrap() == Some(peer) {
+                ui.set_chat_online(online);
+            }
         }
-    };
-    if is_new {
-        spawn_connect(messenger.clone(), peer);
-        let _ = handle.emit("contacts-changed", serde_json::json!({}));
+        Event::Text { peer, id, text } => {
+            ensure_contact(core, peer);
+            let _ = core.messages.lock().unwrap().append(&peer, StoredMessage {
+                id, text, mine: false, time: now(), status: String::new(),
+            });
+            let is_current = *core.current_chat.lock().unwrap() == Some(peer);
+            if is_current {
+                rebuild_messages(ui, core);
+            } else {
+                let mut u = core.unread.lock().unwrap();
+                *u.entry(peer).or_insert(0) += 1;
+            }
+            rebuild_contacts(ui, core);
+        }
+        Event::Ack { peer, id } => {
+            let _ = core.messages.lock().unwrap().set_status(&peer, id, "delivered");
+            if *core.current_chat.lock().unwrap() == Some(peer) {
+                rebuild_messages(ui, core);
+            }
+        }
+        Event::Undelivered { peer, id } => {
+            let _ = core.messages.lock().unwrap().set_status(&peer, id, "failed");
+            if *core.current_chat.lock().unwrap() == Some(peer) {
+                rebuild_messages(ui, core);
+            }
+        }
     }
+}
+
+/// Каталог данных по умолчанию: $XDG_DATA_HOME/p2p-messenger или ~/.local/share/...
+fn directories_data_dir() -> std::path::PathBuf {
+    if let Some(x) = std::env::var_os("XDG_DATA_HOME") {
+        return std::path::PathBuf::from(x).join("p2p-messenger");
+    }
+    if let Some(h) = std::env::var_os("HOME") {
+        return std::path::PathBuf::from(h).join(".local/share/p2p-messenger");
+    }
+    std::path::PathBuf::from("./p2p-data")
 }

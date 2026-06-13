@@ -6,12 +6,11 @@ license.workspace = true
 authors.workspace = true
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+slint-build = "1"
 
 [dependencies]
-tauri = { version = "2", features = [] }
-serde.workspace = true
-serde_json.workspace = true
+slint = "1"
+arboard = "3"
 hex.workspace = true
 p2p-core = { path = "../core" }
 p2p-ygg = { path = "../transport" }

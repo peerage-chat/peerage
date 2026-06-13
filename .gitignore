@@ -8,9 +8,6 @@ Cargo.lock.bak
 *.conf.local
 /run
 
-# Tauri (генерируется при сборке)
-desktop/gen/schemas/
-
 # Go
 /ygg/**/*.a
 /ygg/**/*.h
