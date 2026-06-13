@@ -212,6 +212,16 @@ impl Messenger {
         self.shared.is_online(peer)
     }
 
+    /// Число прямых пиров транспорта (для индикатора сети).
+    pub fn net_peers(&self) -> i32 {
+        self.shared.node.peer_count()
+    }
+
+    /// Число узлов в дереве маршрутизации транспорта.
+    pub fn net_tree(&self) -> i32 {
+        self.shared.node.tree_count()
+    }
+
     /// Остановить мессенджер: останавливает транспортный узел и фоновые потоки.
     pub fn shutdown(&self) {
         self.shared.running.store(false, Ordering::Relaxed);

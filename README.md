@@ -33,6 +33,10 @@ messenger/            Rust: слой сессии (транспорт + прот
   examples/chat_loopback.rs  E2E текст-чат между двумя узлами (localhost)
   examples/chat.rs    настраиваемый узел чата для реальной сети
   examples/reliability.rs    демо персистентности + presence/Ack/offline/TTL
+desktop/              Tauri v2 десктоп-приложение (Holo UI)
+  src/main.rs         бэкенд: команды + проброс событий движка в UI
+  tauri.conf.json     конфиг (статический фронт, без npm)
+  ui/                 фронтенд: index.html / style.css / app.js (Holo тема)
 ygg/                  Go: c-shared обёртка вокруг yggdrasil-go
   libygg/ygg.go       экспорт датаграммного API (ygg_start/write/read/...)
   cmd/yggaddr/        валидатор адреса средствами самого yggdrasil-go
@@ -45,6 +49,8 @@ scripts/
   run-netjoin.sh        проба входа в глобальную сеть (WSL)
   run-realnet-chat.sh   E2E чат двух процессов через реальную сеть (WSL)
   run-reliability.sh    демо персистентности и надёжности сессии (WSL)
+  run-desktop.sh        сборка и запуск десктоп-приложения (WSL+WSLg)
+  setup-desktop-deps.sh установка зависимостей Tauri (WSL, apt)
   validate-ygg-addr.sh  кросс-проверка Go vs Rust вывода адреса
 ```
 
@@ -93,8 +99,11 @@ scripts/
 - [x] Надёжность сессии: keepalive-ping, статус онлайн/офлайн (presence),
       очередь исходящих с повтором до Ack и сдачей по TTL, чистая остановка
       (`scripts/run-reliability.sh`)
-- [ ] Добавление контакта по коду/QR (TOFU-обмен ключами вне канала)
-- [ ] Desktop UI (Tauri) / Android (JNI-мост к ядру)
+- [x] Desktop UI (Tauri v2, Holo тема): мой код (адрес/ключ/fingerprint),
+      контакты с онлайн-статусом, чат с ✓✓, добавление контакта по ключу.
+      Бэкенд встраивает движок; запуск в WSL через WSLg (`scripts/run-desktop.sh`)
+- [ ] Добавление контакта по QR-коду (сейчас — по hex-ключу)
+- [ ] Android (JNI-мост к ядру)
 - [ ] E2E-шифрование сообщений (NaCl Box)
 - [ ] Добавление контакта по коду/QR (TOFU)
 - [ ] Desktop UI (Tauri)
@@ -116,6 +125,28 @@ bash scripts/run-reliability.sh          # (WSL) персистентность 
 
 Публичные пиры в `peers/public-peers.txt` со временем устаревают — актуальный
 список: <https://publicpeers.neilalexander.dev/>.
+
+### Десктоп-приложение (Tauri)
+
+Собирается и запускается в WSL; окно отображается на Windows через **WSLg**
+(нужен Windows 11 либо Windows 10 с WSLg). Сборка не требует Node/npm —
+фронтенд статический.
+
+```sh
+bash scripts/setup-desktop-deps.sh   # один раз: WebKitGTK и пр. (apt)
+bash scripts/run-desktop.sh          # собрать и запустить приложение
+```
+
+Данные (профиль, контакты) хранятся в `app_data_dir`. Чтобы запустить **две
+копии локально** для проверки чата, задайте разные каталоги:
+
+```sh
+P2P_DATA_DIR=/tmp/u1 bash scripts/run-desktop.sh   # окно 1
+P2P_DATA_DIR=/tmp/u2 bash scripts/run-desktop.sh   # окно 2
+```
+
+В каждом окне «Мой код» даёт публичный ключ; добавьте его в другом окне через
+«+», и можно переписываться через глобальную сеть Yggdrasil.
 
 ### Тулчейн
 

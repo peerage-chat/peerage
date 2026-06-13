@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P2P Messenger</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Главный экран -->
+    <section id="screen-main" class="screen active">
+      <header class="topbar">
+        <span class="title">P2P Messenger</span>
+        <span id="net-status" class="net-status">подключение…</span>
+      </header>
+      <div class="content">
+        <div class="row action" id="open-mycode">
+          <span class="icon">▣</span>
+          <span class="grow">Мой код</span>
+          <span class="chevron">›</span>
+        </div>
+        <div class="section-label">КОНТАКТЫ</div>
+        <ul id="contact-list" class="list"></ul>
+        <p id="no-contacts" class="empty">Контактов нет. Нажмите + чтобы добавить.</p>
+      </div>
+      <button id="fab-add" class="fab" title="Добавить контакт">+</button>
+    </section>
+
+    <!-- Мой код -->
+    <section id="screen-mycode" class="screen">
+      <header class="topbar">
+        <span class="back" data-back>‹</span>
+        <span class="title">Мой код</span>
+        <span></span>
+      </header>
+      <div class="content pad">
+        <div class="label">Адрес Yggdrasil</div>
+        <div id="my-address" class="mono dim selectable"></div>
+
+        <div class="label">Публичный ключ (поделитесь им с другом)</div>
+        <div id="my-pubkey" class="mono selectable codebox"></div>
+        <button id="copy-pubkey" class="btn">Скопировать ключ</button>
+
+        <div class="label">Fingerprint (сверьте голосом для верификации)</div>
+        <div id="my-words" class="words"></div>
+      </div>
+    </section>
+
+    <!-- Добавить контакт -->
+    <section id="screen-add" class="screen">
+      <header class="topbar">
+        <span class="back" data-back>‹</span>
+        <span class="title">Добавить контакт</span>
+        <span></span>
+      </header>
+      <div class="content pad">
+        <div class="label">Публичный ключ друга (64 hex-символа)</div>
+        <textarea id="add-key" class="input mono" rows="3" placeholder="например 8a88e3dd…"></textarea>
+        <div class="label">Имя</div>
+        <input id="add-name" class="input" placeholder="Имя контакта" />
+        <button id="do-add" class="btn primary">Подключиться</button>
+        <p id="add-error" class="error"></p>
+      </div>
+    </section>
+
+    <!-- Чат -->
+    <section id="screen-chat" class="screen">
+      <header class="topbar">
+        <span class="back" data-back>‹</span>
+        <span class="grow">
+          <span id="chat-name" class="title"></span>
+          <span id="chat-status" class="status-dot">⚫</span>
+        </span>
+      </header>
+      <div id="chat-messages" class="content messages"></div>
+      <div class="composer">
+        <input id="chat-input" class="input" placeholder="Сообщение…" />
+        <button id="chat-send" class="send">➤</button>
+      </div>
+    </section>
+
+    <script src="app.js"></script>
+  </body>
+</html>
