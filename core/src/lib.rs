@@ -3,6 +3,8 @@
 //! Содержит платформо-независимую логику: идентичность, криптографию,
 //! сетевой протокол. Используется и Desktop (Tauri), и Android (через JNI).
 
+pub mod crypto;
 pub mod identity;
+pub mod protocol;
 
 pub use identity::{Identity, IdentityError};

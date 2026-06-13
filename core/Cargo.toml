@@ -18,6 +18,8 @@ rand_core.workspace = true
 thiserror.workspace = true
 hex.workspace = true
 bip39.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 hex = "0.4"

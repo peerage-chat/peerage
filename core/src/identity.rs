@@ -13,7 +13,7 @@ use std::net::Ipv6Addr;
 
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand_core::OsRng;
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 
 /// Размер seed-а ed25519 (он же приватный материал, который храним на диске).
 pub const SEED_LEN: usize = 32;
@@ -74,6 +74,18 @@ impl Identity {
     /// Публичный ключ Curve25519 (для шифрования NaCl Box).
     pub fn curve25519_public(&self) -> Result<[u8; 32], IdentityError> {
         ed25519_pub_to_curve25519(&self.public_key_bytes()).ok_or(IdentityError::KeyConversion)
+    }
+
+    /// Секретный ключ Curve25519 (X25519) для NaCl Box.
+    ///
+    /// Эквивалент `crypto_sign_ed25519_sk_to_curve25519`: первые 32 байта
+    /// SHA-512(seed). Клэмпинг X25519 применяет при умножении (идемпотентно),
+    /// поэтому возвращаем «сырое» значение — как libsodium.
+    pub fn x25519_secret(&self) -> [u8; 32] {
+        let hash = Sha512::digest(self.signing.to_bytes());
+        let mut sk = [0u8; 32];
+        sk.copy_from_slice(&hash[..32]);
+        sk
     }
 
     /// Fingerprint — 8 слов BIP39 из SHA-256(публичный ключ).

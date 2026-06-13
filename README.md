@@ -18,20 +18,24 @@ IPv6). Yggdrasil поднимает TUN-интерфейс в ОС, а ядро 
 ### Структура
 
 ```
-core/                 общее Rust-ядро
+core/                 общее Rust-ядро (кросс-платформенное, чистый Rust)
   src/identity.rs     идентичность: ed25519 → Yggdrasil IPv6, Curve25519, BIP39
+  src/crypto.rs       E2E NaCl Box (seal/open) поверх идентичности
+  src/protocol.rs     Payload (шифр.) + Envelope (конверт), encode/decode
   examples/whoami.rs  демо: печатает новую идентичность
-  examples/addr.rs    адрес Yggdrasil для заданного hex-pubkey (для сверки)
 transport/            Rust: безопасная обёртка над libygg (FFI к yggdrasil-go)
   src/lib.rs          Node: start/listen/add_peer/write/read по ed25519-ключу
-  build.rs            линковка libygg.so + rpath
   examples/loopback.rs  два узла в процессе, обмен через настоящий Yggdrasil
+messenger/            Rust: слой сессии (транспорт + протокол + крипто)
+  src/lib.rs          Messenger: handshake, приём/диспетчер, send_text, авто-Ack
+  examples/chat_loopback.rs  сквозной E2E текст-чат между двумя узлами
 ygg/                  Go: c-shared обёртка вокруг yggdrasil-go
   libygg/ygg.go       экспорт датаграммного API (ygg_start/write/read/...)
   cmd/yggaddr/        валидатор адреса средствами самого yggdrasil-go
 scripts/
   build-ygg.sh          сборка libygg.so (WSL)
-  run-loopback.sh       сборка + запуск loopback-теста (WSL)
+  run-loopback.sh       транспортный loopback-тест (WSL)
+  run-chat.sh           сквозной E2E чат-тест (WSL)
   validate-ygg-addr.sh  кросс-проверка Go vs Rust вывода адреса
 ```
 
@@ -67,9 +71,14 @@ scripts/
 - [x] FFI-обёртка Yggdrasil: libygg.so (c-shared) ← crate `p2p-ygg`. Узел без
       TUN/root, датаграммы по ed25519-ключу. Loopback-тест: два узла в процессе
       обмениваются через настоящий Yggdrasil-mesh (`scripts/run-loopback.sh`)
+- [x] E2E-крипто (NaCl Box) + формат сообщений (Payload/Envelope) в ядре,
+      покрыто юнит-тестами (roundtrip, симметрия, чужой получатель, подделка)
+- [x] Слой сессии `p2p-messenger`: handshake, приём/диспетчер, текст + авто-Ack,
+      анти-спуфинг. Сквозной E2E текст-чат между узлами (`scripts/run-chat.sh`)
 - [ ] Управление узлом: пиринг с публичной инфраструктурой Yggdrasil, сохранение
-      идентичности, переподключения
-- [ ] Протокол сообщений поверх транспорта + E2E (NaCl Box)
+      идентичности на диск, переподключения, keepalive-ping
+- [ ] Добавление контакта по коду/QR (TOFU), хранилище контактов
+- [ ] Desktop UI (Tauri) / Android (JNI-мост к ядру)
 - [ ] E2E-шифрование сообщений (NaCl Box)
 - [ ] Добавление контакта по коду/QR (TOFU)
 - [ ] Desktop UI (Tauri)

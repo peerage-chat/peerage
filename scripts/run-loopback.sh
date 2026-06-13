@@ -6,6 +6,7 @@ export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$PATH"
 export CARGO_TARGET_DIR=target-wsl   # отдельно от Windows-сборки
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+export LD_LIBRARY_PATH="$ROOT/ygg/libygg:${LD_LIBRARY_PATH:-}"
 
 bash scripts/build-ygg.sh
 cargo run -p p2p-ygg --example loopback
