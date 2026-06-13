@@ -2,7 +2,12 @@
 resolver = "2"
 members = [
     "core",
+    "transport",
 ]
+# transport линкует Go-библиотеку libygg.so и собирается только под Linux (WSL).
+# Дефолтная сборка (cargo build/test без -p) ограничена кросс-платформенными
+# крейтами, чтобы не ломать Windows. transport собираем явно: cargo build -p p2p-ygg.
+default-members = ["core"]
 
 [workspace.package]
 edition = "2021"

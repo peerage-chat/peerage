@@ -1,6 +1,7 @@
 # Rust
 /target
 **/target
+/target-wsl
 Cargo.lock.bak
 
 # Yggdrasil runtime
