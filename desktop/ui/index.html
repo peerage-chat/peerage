@@ -19,7 +19,9 @@
           <span class="grow">Мой код</span>
           <span class="chevron">›</span>
         </div>
-        <div class="section-label">КОНТАКТЫ</div>
+        <div class="searchbar">
+          <input id="search" class="input" placeholder="🔍 Поиск контактов" />
+        </div>
         <ul id="contact-list" class="list"></ul>
         <p id="no-contacts" class="empty">Контактов нет. Нажмите + чтобы добавить.</p>
       </div>
@@ -36,11 +38,9 @@
       <div class="content pad">
         <div class="label">Адрес Yggdrasil</div>
         <div id="my-address" class="mono dim selectable"></div>
-
         <div class="label">Публичный ключ (поделитесь им с другом)</div>
         <div id="my-pubkey" class="mono selectable codebox"></div>
         <button id="copy-pubkey" class="btn">Скопировать ключ</button>
-
         <div class="label">Fingerprint (сверьте голосом для верификации)</div>
         <div id="my-words" class="words"></div>
       </div>
@@ -67,15 +67,40 @@
     <section id="screen-chat" class="screen">
       <header class="topbar">
         <span class="back" data-back>‹</span>
-        <span class="grow">
+        <span class="grow chat-head" id="open-info">
           <span id="chat-name" class="title"></span>
           <span id="chat-status" class="status-dot">⚫</span>
         </span>
+        <span class="info-btn" id="open-info-2">ⓘ</span>
       </header>
       <div id="chat-messages" class="content messages"></div>
       <div class="composer">
         <input id="chat-input" class="input" placeholder="Сообщение…" />
         <button id="chat-send" class="send">➤</button>
+      </div>
+    </section>
+
+    <!-- Инфо о контакте -->
+    <section id="screen-info" class="screen">
+      <header class="topbar">
+        <span class="back" data-back-chat>‹</span>
+        <span class="title">Контакт</span>
+        <span></span>
+      </header>
+      <div class="content pad">
+        <div class="label">Имя</div>
+        <div class="rename-row">
+          <input id="info-name" class="input" />
+          <button id="info-rename" class="btn">Сохранить</button>
+        </div>
+        <div class="label">Статус</div>
+        <div id="info-status" class="mono dim"></div>
+        <div class="label">Fingerprint</div>
+        <div id="info-words" class="words"></div>
+        <div class="label">Публичный ключ</div>
+        <div id="info-key" class="mono selectable codebox"></div>
+        <button id="info-delete" class="btn danger">Удалить контакт</button>
+        <p id="info-error" class="error"></p>
       </div>
     </section>
 

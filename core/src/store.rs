@@ -169,6 +169,27 @@ impl ContactStore {
         self.by_key.contains_key(key)
     }
 
+    /// Переименовать контакт. Возвращает false, если контакта нет.
+    pub fn rename(&mut self, key: &[u8; 32], name: &str) -> Result<bool, StoreError> {
+        match self.by_key.get_mut(key) {
+            Some(c) => {
+                c.name = name.to_string();
+                self.save()?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Удалить контакт. Возвращает false, если контакта не было.
+    pub fn remove(&mut self, key: &[u8; 32]) -> Result<bool, StoreError> {
+        let removed = self.by_key.remove(key).is_some();
+        if removed {
+            self.save()?;
+        }
+        Ok(removed)
+    }
+
     /// Записать хранилище на диск.
     pub fn save(&self) -> Result<(), StoreError> {
         if let Some(parent) = self.path.parent() {
@@ -182,6 +203,111 @@ impl ContactStore {
         };
         let json = serde_json::to_vec_pretty(&cf)?;
         std::fs::write(&self.path, &json)?;
+        Ok(())
+    }
+}
+
+// ---- История сообщений ----
+
+/// Одно сохранённое сообщение чата.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoredMessage {
+    /// Идентификатор сообщения (от отправителя).
+    pub id: u64,
+    /// Текст.
+    pub text: String,
+    /// true — исходящее (наше), false — входящее.
+    pub mine: bool,
+    /// Unix-время (секунды).
+    pub time: i64,
+    /// Статус: "sent" | "delivered" | "failed" | "" (для входящих).
+    pub status: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct MessagesFile {
+    version: u8,
+    /// peer (hex ключа) → лог сообщений.
+    log: std::collections::BTreeMap<String, Vec<StoredMessage>>,
+}
+
+/// Персистентная история сообщений по контактам.
+pub struct MessageStore {
+    path: PathBuf,
+    log: HashMap<[u8; 32], Vec<StoredMessage>>,
+}
+
+impl MessageStore {
+    /// Загрузить (или создать пустую, если файла нет).
+    pub fn load(path: &Path) -> Result<MessageStore, StoreError> {
+        let mut log = HashMap::new();
+        if path.exists() {
+            let data = std::fs::read(path)?;
+            let mf: MessagesFile = serde_json::from_slice(&data)?;
+            for (k, msgs) in mf.log {
+                let key = decode_key(&k)?;
+                log.insert(key, msgs);
+            }
+        }
+        Ok(MessageStore {
+            path: path.to_path_buf(),
+            log,
+        })
+    }
+
+    /// Добавить сообщение в лог пира и сохранить.
+    pub fn append(&mut self, peer: &[u8; 32], msg: StoredMessage) -> Result<(), StoreError> {
+        self.log.entry(*peer).or_default().push(msg);
+        self.save()
+    }
+
+    /// Обновить статус исходящего сообщения с данным id. Возвращает true, если найдено.
+    pub fn set_status(
+        &mut self,
+        peer: &[u8; 32],
+        id: u64,
+        status: &str,
+    ) -> Result<bool, StoreError> {
+        let found = self
+            .log
+            .get_mut(peer)
+            .and_then(|msgs| msgs.iter_mut().find(|m| m.id == id && m.mine))
+            .map(|m| m.status = status.to_string())
+            .is_some();
+        if found {
+            self.save()?;
+        }
+        Ok(found)
+    }
+
+    /// История сообщений с пиром (пустой срез, если нет).
+    pub fn history(&self, peer: &[u8; 32]) -> &[StoredMessage] {
+        self.log.get(peer).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Удалить весь лог с пиром (например, при удалении контакта).
+    pub fn clear(&mut self, peer: &[u8; 32]) -> Result<(), StoreError> {
+        if self.log.remove(peer).is_some() {
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    fn save(&self) -> Result<(), StoreError> {
+        if let Some(parent) = self.path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        let mf = MessagesFile {
+            version: 1,
+            log: self
+                .log
+                .iter()
+                .map(|(k, v)| (hex::encode(k), v.clone()))
+                .collect(),
+        };
+        std::fs::write(&self.path, serde_json::to_vec_pretty(&mf)?)?;
         Ok(())
     }
 }
@@ -264,6 +390,49 @@ mod tests {
         let dir = tmp_dir();
         let store = ContactStore::load(&dir.join("nope.json")).unwrap();
         assert_eq!(store.list().len(), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn contacts_rename_and_remove() {
+        let dir = tmp_dir();
+        let path = dir.join("contacts.json");
+        let k = Identity::generate().public_key_bytes();
+
+        let mut store = ContactStore::load(&path).unwrap();
+        store.add(&k, "Old", 0).unwrap();
+        assert!(store.rename(&k, "New").unwrap());
+        assert_eq!(store.get(&k).unwrap().name, "New");
+        assert!(store.remove(&k).unwrap());
+        assert!(!store.contains(&k));
+
+        // Перезагрузка отражает изменения.
+        let store2 = ContactStore::load(&path).unwrap();
+        assert!(!store2.contains(&k));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn messages_append_status_persist() {
+        let dir = tmp_dir();
+        let path = dir.join("messages.json");
+        let peer = Identity::generate().public_key_bytes();
+
+        let mut store = MessageStore::load(&path).unwrap();
+        store
+            .append(&peer, StoredMessage { id: 1, text: "hi".into(), mine: true, time: 10, status: "sent".into() })
+            .unwrap();
+        store
+            .append(&peer, StoredMessage { id: 5, text: "yo".into(), mine: false, time: 11, status: "".into() })
+            .unwrap();
+        assert!(store.set_status(&peer, 1, "delivered").unwrap());
+
+        let store2 = MessageStore::load(&path).unwrap();
+        let h = store2.history(&peer);
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].status, "delivered");
+        assert_eq!(h[1].text, "yo");
+        assert!(!h[1].mine);
         std::fs::remove_dir_all(&dir).ok();
     }
 }
