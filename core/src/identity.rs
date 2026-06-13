@@ -224,4 +224,15 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(a.octets()[0], 0x02);
     }
+
+    /// Эталонный вектор, сверенный с yggdrasil-go v0.5.13 (`address.AddrForKey`).
+    /// Гарантирует бит-в-бит совместимость нашего вывода адреса с реальным узлом.
+    #[test]
+    fn addr_matches_yggdrasil_go_reference() {
+        let pub_hex = "73e311c3c79391f3fb4322913487ff50d7040e0f1228b116a9f71861097ed279";
+        let bytes = hex::decode(pub_hex).unwrap();
+        let key: [u8; 32] = bytes.as_slice().try_into().unwrap();
+        let addr = addr_for_key(&key);
+        assert_eq!(addr.to_string(), "201:3073:b8f0:e1b1:b830:12f3:75bb:2de0");
+    }
 }

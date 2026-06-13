@@ -21,6 +21,11 @@ IPv6). Yggdrasil поднимает TUN-интерфейс в ОС, а ядро 
 core/                 общее Rust-ядро
   src/identity.rs     идентичность: ed25519 → Yggdrasil IPv6, Curve25519, BIP39
   examples/whoami.rs  демо: печатает новую идентичность
+  examples/addr.rs    адрес Yggdrasil для заданного hex-pubkey (для сверки)
+ygg/                  Go: обёртка вокруг yggdrasil-go (будущий FFI)
+  cmd/yggaddr/        валидатор адреса средствами самого yggdrasil-go
+scripts/
+  validate-ygg-addr.sh  кросс-проверка Go vs Rust вывода адреса
 ```
 
 ## Решения, отклоняющиеся от ТЗ
@@ -38,7 +43,10 @@ core/                 общее Rust-ядро
 - [x] Workspace + core-крейт
 - [x] Идентичность: keygen ed25519, вывод адреса Yggdrasil, конвертация в
       Curve25519, BIP39-fingerprint (8 слов)
-- [] Управление узлом Yggdrasil (жизненный цикл, валидация вывода адреса)
+- [x] Вывод адреса сверен бит-в-бит с yggdrasil-go v0.5.13 (регрессионный тест +
+      `scripts/validate-ygg-addr.sh`)
+- [ ] FFI-обёртка Yggdrasil (Go c-shared/c-archive ← Rust), embedding ядра
+- [ ] Управление узлом Yggdrasil (жизненный цикл)
 - [ ] P2P TCP-транспорт + протокол сообщений
 - [ ] E2E-шифрование сообщений (NaCl Box)
 - [ ] Добавление контакта по коду/QR (TOFU)
@@ -50,9 +58,18 @@ core/                 общее Rust-ядро
 ## Разработка
 
 ```sh
-cargo test -p p2p-core              # тесты ядра
+cargo test -p p2p-core                   # тесты ядра
 cargo run -p p2p-core --example whoami   # сгенерировать идентичность
+bash scripts/validate-ygg-addr.sh        # (WSL) сверить адрес с yggdrasil-go
 ```
+
+### Тулчейн
+
+- **Rust** 1.95+ (`cargo`) — ядро, примеры, тесты.
+- **Go** 1.24+ — сборка Yggdrasil-обёртки. Ставится в WSL/Linux
+  (`yggdrasil-go` + cgo собираются на Linux без возни с mingw/wintun).
+  Сейчас Yggdrasil-часть разрабатывается под Linux-таргет; Windows-упаковка —
+  отдельная задача на этапе релиза.
 
 ## TODO / валидация
 

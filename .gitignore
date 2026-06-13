@@ -7,6 +7,13 @@ Cargo.lock.bak
 *.conf.local
 /run
 
+# Go
+/ygg/**/*.a
+/ygg/**/*.h
+/ygg/**/*.so
+/ygg/**/*.dll
+ygg/bin/
+
 # IDE / OS
 .idea/
 .vscode/
