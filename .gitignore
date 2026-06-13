@@ -1,0 +1,18 @@
+# Rust
+/target
+**/target
+Cargo.lock.bak
+
+# Yggdrasil runtime
+*.conf.local
+/run
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Secrets — никогда не коммитим приватные ключи
+*.seed
+identity.key

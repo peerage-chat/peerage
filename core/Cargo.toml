@@ -1,0 +1,23 @@
+[package]
+name = "p2p-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "p2p_core"
+crate-type = ["lib"]
+
+[dependencies]
+ed25519-dalek = { workspace = true, features = ["rand_core"] }
+curve25519-dalek.workspace = true
+crypto_box.workspace = true
+sha2.workspace = true
+rand_core.workspace = true
+thiserror.workspace = true
+hex.workspace = true
+bip39.workspace = true
+
+[dev-dependencies]
+hex = "0.4"
