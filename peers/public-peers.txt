@@ -1,0 +1,13 @@
+# Публичные пиры Yggdrasil для входа в глобальный mesh.
+# Формат: один URI на строку (tls/tcp/quic). # — комментарий.
+# Источник: https://publicpeers.neilalexander.dev/ (актуализировать периодически).
+# Узел подключается к нескольким — этого достаточно, чтобы попасть в сеть.
+
+tls://ygg1.mk16.de:1338
+tls://ygg7.mk16.de:1338
+tls://ygg-hel-1.wgos.org:45171
+tls://62.210.85.80:39575
+tls://145.239.92.251:51811
+tls://ygg-msk-1.averyan.ru:8362
+tcp://sto01.yggdrasil.hosted-by.skhron.eu:8883
+tcp://146.103.107.222:65535

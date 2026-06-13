@@ -26,16 +26,22 @@ core/                 общее Rust-ядро (кросс-платформен�
 transport/            Rust: безопасная обёртка над libygg (FFI к yggdrasil-go)
   src/lib.rs          Node: start/listen/add_peer/write/read по ed25519-ключу
   examples/loopback.rs  два узла в процессе, обмен через настоящий Yggdrasil
+  examples/netjoin.rs   проба входа в глобальную сеть через публичные пиры
 messenger/            Rust: слой сессии (транспорт + протокол + крипто)
   src/lib.rs          Messenger: handshake, приём/диспетчер, send_text, авто-Ack
-  examples/chat_loopback.rs  сквозной E2E текст-чат между двумя узлами
+  examples/chat_loopback.rs  E2E текст-чат между двумя узлами (localhost)
+  examples/chat.rs    настраиваемый узел чата для реальной сети
 ygg/                  Go: c-shared обёртка вокруг yggdrasil-go
   libygg/ygg.go       экспорт датаграммного API (ygg_start/write/read/...)
   cmd/yggaddr/        валидатор адреса средствами самого yggdrasil-go
+peers/
+  public-peers.txt    список публичных пиров Yggdrasil для входа в сеть
 scripts/
   build-ygg.sh          сборка libygg.so (WSL)
   run-loopback.sh       транспортный loopback-тест (WSL)
-  run-chat.sh           сквозной E2E чат-тест (WSL)
+  run-chat.sh           E2E чат-тест по localhost (WSL)
+  run-netjoin.sh        проба входа в глобальную сеть (WSL)
+  run-realnet-chat.sh   E2E чат двух процессов через реальную сеть (WSL)
   validate-ygg-addr.sh  кросс-проверка Go vs Rust вывода адреса
 ```
 
@@ -75,8 +81,11 @@ scripts/
       покрыто юнит-тестами (roundtrip, симметрия, чужой получатель, подделка)
 - [x] Слой сессии `p2p-messenger`: handshake, приём/диспетчер, текст + авто-Ack,
       анти-спуфинг. Сквозной E2E текст-чат между узлами (`scripts/run-chat.sh`)
-- [ ] Управление узлом: пиринг с публичной инфраструктурой Yggdrasil, сохранение
-      идентичности на диск, переподключения, keepalive-ping
+- [x] Выход в реальную сеть: пиринг с публичной инфраструктурой Yggdrasil
+      (`peers/public-peers.txt`). Два независимых процесса, подключённых ТОЛЬКО
+      к публичным пирам, обмениваются E2E-сообщениями через глобальный mesh
+      (`scripts/run-realnet-chat.sh`) — путь, идентичный связи двух устройств
+- [ ] Сохранение идентичности/контактов на диск, переподключения, keepalive-ping
 - [ ] Добавление контакта по коду/QR (TOFU), хранилище контактов
 - [ ] Desktop UI (Tauri) / Android (JNI-мост к ядру)
 - [ ] E2E-шифрование сообщений (NaCl Box)
@@ -89,10 +98,16 @@ scripts/
 ## Разработка
 
 ```sh
-cargo test -p p2p-core                   # тесты ядра
+cargo test -p p2p-core                   # тесты ядра (Windows/любая платформа)
 cargo run -p p2p-core --example whoami   # сгенерировать идентичность
 bash scripts/validate-ygg-addr.sh        # (WSL) сверить адрес с yggdrasil-go
+bash scripts/run-chat.sh                 # (WSL) E2E чат по localhost
+bash scripts/run-netjoin.sh              # (WSL) проверить вход в глобальную сеть
+bash scripts/run-realnet-chat.sh         # (WSL) E2E чат двух узлов через интернет
 ```
+
+Публичные пиры в `peers/public-peers.txt` со временем устаревают — актуальный
+список: <https://publicpeers.neilalexander.dev/>.
 
 ### Тулчейн
 
