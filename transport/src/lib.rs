@@ -137,6 +137,12 @@ impl Node {
         Ok(n as usize)
     }
 
+    /// Остановить узел Yggdrasil. После этого блокирующий [`read`](Self::read)
+    /// разблокируется ошибкой. Идемпотентно ([`Drop`] тоже вызывает stop).
+    pub fn stop(&self) {
+        unsafe { ffi::ygg_stop(self.handle) };
+    }
+
     /// Блокирующе прочитать одну датаграмму в `buf`.
     /// Возвращает `(число_байт, публичный_ключ_отправителя)`.
     pub fn read(&self, buf: &mut [u8]) -> Result<(usize, [u8; 32]), YggError> {

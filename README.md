@@ -22,15 +22,17 @@ core/                 общее Rust-ядро (кросс-платформен�
   src/identity.rs     идентичность: ed25519 → Yggdrasil IPv6, Curve25519, BIP39
   src/crypto.rs       E2E NaCl Box (seal/open) поверх идентичности
   src/protocol.rs     Payload (шифр.) + Envelope (конверт), encode/decode
+  src/store.rs        персистентность: Profile (идентичность) + ContactStore (TOFU)
   examples/whoami.rs  демо: печатает новую идентичность
 transport/            Rust: безопасная обёртка над libygg (FFI к yggdrasil-go)
   src/lib.rs          Node: start/listen/add_peer/write/read по ed25519-ключу
   examples/loopback.rs  два узла в процессе, обмен через настоящий Yggdrasil
   examples/netjoin.rs   проба входа в глобальную сеть через публичные пиры
 messenger/            Rust: слой сессии (транспорт + протокол + крипто)
-  src/lib.rs          Messenger: handshake, приём/диспетчер, send_text, авто-Ack
+  src/lib.rs          Messenger: handshake, presence, keepalive, очередь повторов
   examples/chat_loopback.rs  E2E текст-чат между двумя узлами (localhost)
   examples/chat.rs    настраиваемый узел чата для реальной сети
+  examples/reliability.rs    демо персистентности + presence/Ack/offline/TTL
 ygg/                  Go: c-shared обёртка вокруг yggdrasil-go
   libygg/ygg.go       экспорт датаграммного API (ygg_start/write/read/...)
   cmd/yggaddr/        валидатор адреса средствами самого yggdrasil-go
@@ -42,6 +44,7 @@ scripts/
   run-chat.sh           E2E чат-тест по localhost (WSL)
   run-netjoin.sh        проба входа в глобальную сеть (WSL)
   run-realnet-chat.sh   E2E чат двух процессов через реальную сеть (WSL)
+  run-reliability.sh    демо персистентности и надёжности сессии (WSL)
   validate-ygg-addr.sh  кросс-проверка Go vs Rust вывода адреса
 ```
 
@@ -85,8 +88,12 @@ scripts/
       (`peers/public-peers.txt`). Два независимых процесса, подключённых ТОЛЬКО
       к публичным пирам, обмениваются E2E-сообщениями через глобальный mesh
       (`scripts/run-realnet-chat.sh`) — путь, идентичный связи двух устройств
-- [ ] Сохранение идентичности/контактов на диск, переподключения, keepalive-ping
-- [ ] Добавление контакта по коду/QR (TOFU), хранилище контактов
+- [x] Персистентность: профиль (идентичность) и контакты (TOFU) на диске
+      (`core::store`, юнит-тесты)
+- [x] Надёжность сессии: keepalive-ping, статус онлайн/офлайн (presence),
+      очередь исходящих с повтором до Ack и сдачей по TTL, чистая остановка
+      (`scripts/run-reliability.sh`)
+- [ ] Добавление контакта по коду/QR (TOFU-обмен ключами вне канала)
 - [ ] Desktop UI (Tauri) / Android (JNI-мост к ядру)
 - [ ] E2E-шифрование сообщений (NaCl Box)
 - [ ] Добавление контакта по коду/QR (TOFU)
@@ -104,6 +111,7 @@ bash scripts/validate-ygg-addr.sh        # (WSL) сверить адрес с yg
 bash scripts/run-chat.sh                 # (WSL) E2E чат по localhost
 bash scripts/run-netjoin.sh              # (WSL) проверить вход в глобальную сеть
 bash scripts/run-realnet-chat.sh         # (WSL) E2E чат двух узлов через интернет
+bash scripts/run-reliability.sh          # (WSL) персистентность + presence/offline/TTL
 ```
 
 Публичные пиры в `peers/public-peers.txt` со временем устаревают — актуальный

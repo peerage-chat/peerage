@@ -89,19 +89,17 @@ fn main() {
             last_send = Instant::now();
         }
         match rx.recv_timeout(Duration::from_millis(500)) {
-            Ok(Event::Connected { .. }) => {}
             Ok(Event::Text { peer: p, id, text }) if p == peer => {
                 println!("[{label}] 📥 от контакта [#{id}]: {text:?}");
                 got_peer_text = true;
             }
-            Ok(Event::Text { .. }) => {}
             Ok(Event::Ack { id, .. }) if id == msg_id => {
                 if !acked {
                     println!("[{label}] ✓✓ наше сообщение доставлено (Ack)");
                 }
                 acked = true;
             }
-            Ok(Event::Ack { .. }) => {}
+            Ok(_) => {}
             Err(_) => {}
         }
         if got_peer_text && acked {

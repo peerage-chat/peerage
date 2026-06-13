@@ -1,16 +1,18 @@
 //! p2p-messenger — слой сессии: связывает транспорт Yggdrasil ([`p2p_ygg`]) и
-//! протокол/крипто ядра ([`p2p_core`]) в рабочий зашифрованный канал сообщений.
+//! протокол/крипто ядра ([`p2p_core`]) в надёжный зашифрованный канал сообщений.
 //!
 //! Обязанности:
 //!   * приёмный цикл: читает датаграммы, расшифровывает, диспетчеризует;
 //!   * анти-спуфинг: ключ отправителя в конверте обязан совпадать с источником
 //!     транспорта (Yggdrasil src key);
 //!   * рукопожатие `Hello` в обе стороны (нужно для шифр-сессии ironwood);
-//!   * авто-`Ack` на входящий текст (статус «доставлено» ✓✓);
-//!   * ответ `Pong` на `Ping`.
+//!   * keepalive-ping и статус онлайн/офлайн пиров (presence);
+//!   * очередь исходящих с повтором до подтверждения (`Ack`);
+//!   * переподключение: keepalive продолжает слать ping офлайн-пирам, и при их
+//!     возвращении сессия восстанавливается, а недоставленные сообщения уходят.
 
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -23,15 +25,41 @@ use p2p_ygg::{Node, YggError};
 /// Публичный ключ ed25519 пира — он же его идентификатор.
 pub type PeerKey = [u8; 32];
 
-/// События, доставляемые приложению из приёмного цикла.
-#[derive(Debug, Clone)]
+/// События, доставляемые приложению из фоновых потоков.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    /// С пиром установлена сессия (получен его `Hello`).
-    Connected { peer: PeerKey },
+    /// Изменение онлайн-статуса пира (первый контакт — `online: true`).
+    Presence { peer: PeerKey, online: bool },
     /// Входящее текстовое сообщение.
     Text { peer: PeerKey, id: u64, text: String },
-    /// Пир подтвердил доставку нашего сообщения с данным id.
+    /// Пир подтвердил доставку нашего сообщения с данным id (✓✓).
     Ack { peer: PeerKey, id: u64 },
+    /// Не удалось доставить наше сообщение за отведённое время (TTL).
+    Undelivered { peer: PeerKey, id: u64 },
+}
+
+/// Параметры надёжности.
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Период keepalive-ping к отслеживаемым пирам.
+    pub ping_interval: Duration,
+    /// Нет трафика от пира дольше этого — считаем офлайн.
+    pub offline_after: Duration,
+    /// Период повторной отправки неподтверждённых сообщений.
+    pub retry_interval: Duration,
+    /// После этого времени бросаем попытки доставить сообщение.
+    pub message_ttl: Duration,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            ping_interval: Duration::from_secs(15),
+            offline_after: Duration::from_secs(45),
+            retry_interval: Duration::from_secs(3),
+            message_ttl: Duration::from_secs(300),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -44,58 +72,126 @@ pub enum MessengerError {
     HandshakeTimeout,
 }
 
-/// Разделяемое между API и приёмным потоком состояние.
+struct PeerState {
+    online: bool,
+    last_seen: Instant,
+    last_ping: Instant,
+}
+
+struct Pending {
+    peer: PeerKey,
+    payload: Payload,
+    created: Instant,
+    last_sent: Instant,
+}
+
 struct Shared {
     identity: Identity,
     node: Node,
-    connected: Mutex<HashSet<PeerKey>>,
+    cfg: Config,
+    peers: Mutex<HashMap<PeerKey, PeerState>>,
+    pending: Mutex<HashMap<u64, Pending>>,
     next_id: AtomicU64,
+    running: AtomicBool,
+    tx: Sender<Event>,
 }
 
 impl Shared {
-    fn now() -> i64 {
+    fn now_unix() -> i64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0)
     }
 
+    fn emit(&self, ev: Event) {
+        let _ = self.tx.send(ev);
+    }
+
     fn send(&self, peer: &PeerKey, payload: &Payload) -> Result<(), MessengerError> {
-        let datagram = encode(&self.identity, peer, payload, Self::now())?;
+        let datagram = encode(&self.identity, peer, payload, Self::now_unix())?;
         self.node.write(peer, &datagram)?;
         Ok(())
     }
+
+    /// Зарегистрировать пир как отслеживаемый (для keepalive), если ещё нет.
+    fn track(&self, peer: &PeerKey) {
+        let now = Instant::now();
+        self.peers.lock().unwrap().entry(*peer).or_insert(PeerState {
+            online: false,
+            last_seen: now,
+            last_ping: now,
+        });
+    }
+
+    fn is_online(&self, peer: &PeerKey) -> bool {
+        self.peers
+            .lock()
+            .unwrap()
+            .get(peer)
+            .map(|s| s.online)
+            .unwrap_or(false)
+    }
+
+    /// Отметить приход трафика от пира; вернуть true, если пир ПЕРЕШЁЛ в онлайн.
+    fn mark_seen(&self, peer: &PeerKey) -> bool {
+        let now = Instant::now();
+        let mut peers = self.peers.lock().unwrap();
+        let st = peers.entry(*peer).or_insert(PeerState {
+            online: false,
+            last_seen: now,
+            last_ping: now,
+        });
+        st.last_seen = now;
+        if !st.online {
+            st.online = true;
+            true
+        } else {
+            false
+        }
+    }
 }
 
-/// Мессенджер: владеет транспортным узлом и идентичностью, ведёт приёмный цикл.
-///
-/// Сам по себе `Send + Sync` (поток событий отдаётся отдельно как `Receiver`),
-/// поэтому `&Messenger` можно использовать из нескольких потоков.
+/// Мессенджер. `Send + Sync`; поток событий отдаётся отдельным `Receiver`.
 pub struct Messenger {
     shared: Arc<Shared>,
-    // TODO: грациозное завершение — сейчас приёмный поток живёт до остановки
-    // узла (read() разблокируется ошибкой); процесс завершается — поток уходит.
+    // TODO: грациозное завершение фоновых потоков (сейчас живут до выхода процесса).
     _rx_thread: thread::JoinHandle<()>,
+    _maint_thread: thread::JoinHandle<()>,
 }
 
 impl Messenger {
-    /// Запустить мессенджер поверх уже поднятого транспортного узла.
-    /// Узел должен быть сконфигурирован (listen/add_peer) до передачи сюда.
-    /// Возвращает мессенджер и канал входящих [`Event`].
+    /// Запустить с параметрами надёжности по умолчанию.
     pub fn start(identity: Identity, node: Node) -> (Messenger, Receiver<Event>) {
+        Self::start_with_config(identity, node, Config::default())
+    }
+
+    /// Запустить с заданной конфигурацией.
+    pub fn start_with_config(
+        identity: Identity,
+        node: Node,
+        cfg: Config,
+    ) -> (Messenger, Receiver<Event>) {
+        let (tx, rx) = mpsc::channel();
         let shared = Arc::new(Shared {
             identity,
             node,
-            connected: Mutex::new(HashSet::new()),
+            cfg,
+            peers: Mutex::new(HashMap::new()),
+            pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
+            running: AtomicBool::new(true),
+            tx,
         });
-        let (tx, rx) = mpsc::channel();
-        let s = shared.clone();
-        let rx_thread = thread::spawn(move || receive_loop(s, tx));
+        let s1 = shared.clone();
+        let rx_thread = thread::spawn(move || receive_loop(s1));
+        let s2 = shared.clone();
+        let maint_thread = thread::spawn(move || maintenance_loop(s2));
         (
             Messenger {
                 shared,
                 _rx_thread: rx_thread,
+                _maint_thread: maint_thread,
             },
             rx,
         )
@@ -111,13 +207,25 @@ impl Messenger {
         self.shared.node.address()
     }
 
-    /// Установить сессию с пиром: шлём `Hello`, пока не получим его `Hello`
-    /// (двунаправленный обмен поднимает шифр-сессию ironwood).
+    /// Онлайн ли пир (по последнему трафику / keepalive).
+    pub fn is_online(&self, peer: &PeerKey) -> bool {
+        self.shared.is_online(peer)
+    }
+
+    /// Остановить мессенджер: останавливает транспортный узел и фоновые потоки.
+    pub fn shutdown(&self) {
+        self.shared.running.store(false, Ordering::Relaxed);
+        self.shared.node.stop();
+    }
+
+    /// Установить сессию: шлём `Hello`, пока пир не станет онлайн (двунаправленный
+    /// обмен поднимает шифр-сессию ironwood). После — пир под keepalive.
     pub fn connect(&self, peer: &PeerKey, timeout: Duration) -> Result<(), MessengerError> {
+        self.shared.track(peer);
         let start = Instant::now();
         loop {
             self.shared.send(peer, &Payload::Hello)?;
-            if self.shared.connected.lock().unwrap().contains(peer) {
+            if self.shared.is_online(peer) {
                 return Ok(());
             }
             if start.elapsed() > timeout {
@@ -127,17 +235,31 @@ impl Messenger {
         }
     }
 
-    /// Отправить текстовое сообщение пиру. Возвращает id сообщения (для
-    /// сопоставления с будущим [`Event::Ack`]).
+    /// Отправить текст пиру. Возвращает id; доставка повторяется до `Ack` или TTL
+    /// (см. [`Event::Ack`] / [`Event::Undelivered`]).
     pub fn send_text(&self, peer: &PeerKey, text: &str) -> Result<u64, MessengerError> {
         let id = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
-        self.shared
-            .send(peer, &Payload::Text { id, text: text.to_string() })?;
+        let payload = Payload::Text {
+            id,
+            text: text.to_string(),
+        };
+        self.shared.track(peer);
+        self.shared.send(peer, &payload)?;
+        let now = Instant::now();
+        self.shared.pending.lock().unwrap().insert(
+            id,
+            Pending {
+                peer: *peer,
+                payload,
+                created: now,
+                last_sent: now,
+            },
+        );
         Ok(id)
     }
 }
 
-fn receive_loop(shared: Arc<Shared>, tx: Sender<Event>) {
+fn receive_loop(shared: Arc<Shared>) {
     let mut buf = vec![0u8; 65535];
     loop {
         let (n, src) = match shared.node.read(&mut buf) {
@@ -153,24 +275,85 @@ fn receive_loop(shared: Arc<Shared>, tx: Sender<Event>) {
             continue;
         }
 
+        // Любой трафик от пира = он онлайн.
+        if shared.mark_seen(&src) {
+            shared.emit(Event::Presence { peer: src, online: true });
+        }
+
         match payload {
-            Payload::Hello => {
-                let first = shared.connected.lock().unwrap().insert(src);
-                if first {
-                    let _ = tx.send(Event::Connected { peer: src });
-                }
-            }
+            Payload::Hello => {}
             Payload::Text { id, text } => {
-                let _ = tx.send(Event::Text { peer: src, id, text });
+                shared.emit(Event::Text { peer: src, id, text });
                 let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
             }
             Payload::Ack { id } => {
-                let _ = tx.send(Event::Ack { peer: src, id });
+                let removed = shared.pending.lock().unwrap().remove(&id).is_some();
+                if removed {
+                    shared.emit(Event::Ack { peer: src, id });
+                }
             }
             Payload::Ping => {
                 let _ = shared.send(&src, &Payload::Pong);
             }
             Payload::Pong => {}
+        }
+    }
+}
+
+fn maintenance_loop(shared: Arc<Shared>) {
+    let tick = Duration::from_millis(500);
+    loop {
+        thread::sleep(tick);
+        if !shared.running.load(Ordering::Relaxed) {
+            return;
+        }
+        let now = Instant::now();
+
+        // Presence-таймауты + расписание keepalive-ping.
+        let mut went_offline = Vec::new();
+        let mut to_ping = Vec::new();
+        {
+            let mut peers = shared.peers.lock().unwrap();
+            for (key, st) in peers.iter_mut() {
+                if st.online && now.duration_since(st.last_seen) > shared.cfg.offline_after {
+                    st.online = false;
+                    went_offline.push(*key);
+                }
+                if now.duration_since(st.last_ping) >= shared.cfg.ping_interval {
+                    st.last_ping = now;
+                    to_ping.push(*key);
+                }
+            }
+        }
+        for key in went_offline {
+            shared.emit(Event::Presence { peer: key, online: false });
+        }
+        for key in to_ping {
+            let _ = shared.send(&key, &Payload::Ping);
+        }
+
+        // Повтор недоставленных сообщений; отсев по TTL.
+        let mut to_retry = Vec::new();
+        let mut expired = Vec::new();
+        {
+            let mut pending = shared.pending.lock().unwrap();
+            pending.retain(|id, p| {
+                if now.duration_since(p.created) > shared.cfg.message_ttl {
+                    expired.push((*id, p.peer));
+                    return false;
+                }
+                if now.duration_since(p.last_sent) >= shared.cfg.retry_interval {
+                    p.last_sent = now;
+                    to_retry.push((p.peer, p.payload.clone()));
+                }
+                true
+            });
+        }
+        for (id, peer) in expired {
+            shared.emit(Event::Undelivered { peer, id });
+        }
+        for (peer, payload) in to_retry {
+            let _ = shared.send(&peer, &payload);
         }
     }
 }

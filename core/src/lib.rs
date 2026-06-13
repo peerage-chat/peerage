@@ -6,5 +6,6 @@
 pub mod crypto;
 pub mod identity;
 pub mod protocol;
+pub mod store;
 
 pub use identity::{Identity, IdentityError};
