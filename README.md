@@ -51,6 +51,7 @@ scripts/
   run-reliability.sh    демо персистентности и надёжности сессии (WSL)
   run-desktop.sh        сборка и запуск десктоп-приложения (WSL+WSLg)
   setup-desktop-deps.sh установка зависимостей Tauri (WSL, apt)
+  verify-persist.sh     две копии через реальную сеть + проверка истории на диске
   validate-ygg-addr.sh  кросс-проверка Go vs Rust вывода адреса
 ```
 
