@@ -96,13 +96,14 @@ impl Member {
                 std::fs::create_dir_all(parent).map_err(mls)?;
             }
         }
-        std::fs::write(path, out).map_err(mls)?;
+        std::fs::write(path, p2p_core::vault::seal(&out)).map_err(mls)?;
         Ok(())
     }
 
     /// Загрузить состояние группы с диска.
     pub fn load(path: &Path, identity: &Identity) -> Result<Self, GroupError> {
-        let data = std::fs::read(path).map_err(mls)?;
+        let raw = std::fs::read(path).map_err(mls)?;
+        let data = p2p_core::vault::open(&raw).map_err(mls)?;
         if data.len() < 4 {
             return Err(GroupError::Mls("повреждённый файл группы".into()));
         }

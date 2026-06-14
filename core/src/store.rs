@@ -20,6 +20,8 @@ pub enum StoreError {
     Hex(#[from] hex::FromHexError),
     #[error("неверная длина ключа/seed")]
     BadLength,
+    #[error("at-rest: {0}")]
+    Vault(#[from] crate::vault::VaultError),
 }
 
 // ---- Профиль (идентичность) ----
@@ -53,7 +55,7 @@ impl Profile {
 
     /// Загрузить профиль из файла.
     pub fn load(path: &Path) -> Result<Profile, StoreError> {
-        let data = std::fs::read(path)?;
+        let data = crate::vault::open(&std::fs::read(path)?)?;
         let pf: ProfileFile = serde_json::from_slice(&data)?;
         let seed = hex::decode(&pf.seed)?;
         let identity = Identity::from_seed(&seed).map_err(|_| StoreError::BadLength)?;
@@ -72,7 +74,7 @@ impl Profile {
             seed: hex::encode(self.identity.seed()),
         };
         let json = serde_json::to_vec_pretty(&pf)?;
-        write_secret(path, &json)?;
+        write_secret(path, &crate::vault::seal(&json))?;
         Ok(())
     }
 }
@@ -138,7 +140,7 @@ impl ContactStore {
     pub fn load(path: &Path) -> Result<ContactStore, StoreError> {
         let mut by_key = HashMap::new();
         if path.exists() {
-            let data = std::fs::read(path)?;
+            let data = crate::vault::open(&std::fs::read(path)?)?;
             let cf: ContactsFile = serde_json::from_slice(&data)?;
             for c in cf.contacts {
                 let key = decode_key(&c.key)?;
@@ -221,7 +223,7 @@ impl ContactStore {
             contacts: self.by_key.values().cloned().collect(),
         };
         let json = serde_json::to_vec_pretty(&cf)?;
-        std::fs::write(&self.path, &json)?;
+        std::fs::write(&self.path, crate::vault::seal(&json))?;
         Ok(())
     }
 }
@@ -261,7 +263,7 @@ impl MessageStore {
     pub fn load(path: &Path) -> Result<MessageStore, StoreError> {
         let mut log = HashMap::new();
         if path.exists() {
-            let data = std::fs::read(path)?;
+            let data = crate::vault::open(&std::fs::read(path)?)?;
             let mf: MessagesFile = serde_json::from_slice(&data)?;
             for (k, msgs) in mf.log {
                 let key = decode_key(&k)?;
@@ -326,7 +328,7 @@ impl MessageStore {
                 .map(|(k, v)| (hex::encode(k), v.clone()))
                 .collect(),
         };
-        std::fs::write(&self.path, serde_json::to_vec_pretty(&mf)?)?;
+        std::fs::write(&self.path, crate::vault::seal(&serde_json::to_vec_pretty(&mf)?))?;
         Ok(())
     }
 }

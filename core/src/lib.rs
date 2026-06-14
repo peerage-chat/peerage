@@ -9,5 +9,6 @@ pub mod media;
 pub mod protocol;
 pub mod settings;
 pub mod store;
+pub mod vault;
 
 pub use identity::{Identity, IdentityError};

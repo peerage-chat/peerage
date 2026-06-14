@@ -371,12 +371,13 @@ fn save_group_msgs(core: &Arc<Core>, id: &[u8]) {
     });
     let _ = std::fs::create_dir_all(core.data_dir.join("groups"));
     if let Ok(j) = serde_json::to_vec(&arr) {
-        let _ = std::fs::write(group_msgs_path(core, id), j);
+        let _ = std::fs::write(group_msgs_path(core, id), p2p_core::vault::seal(&j));
     }
 }
 
 fn load_group_msgs(core: &Arc<Core>, id: &[u8]) -> Vec<GMsg> {
-    let Ok(bytes) = std::fs::read(group_msgs_path(core, id)) else { return Vec::new() };
+    let Ok(raw) = std::fs::read(group_msgs_path(core, id)) else { return Vec::new() };
+    let Ok(bytes) = p2p_core::vault::open(&raw) else { return Vec::new() };
     let Ok(arr) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) else { return Vec::new() };
     arr.iter()
         .filter_map(|v| {
@@ -454,6 +455,11 @@ fn main() -> Result<(), slint::PlatformError> {
         None => directories_data_dir(),
     };
     std::fs::create_dir_all(&dir).ok();
+
+    // Шифрование данных на диске (ключ — в системном keyring ОС).
+    if let Err(e) = p2p_core::vault::init() {
+        eprintln!("[security] at-rest шифрование недоступно ({e}); данные пишутся открытым текстом");
+    }
 
     let identity = Profile::load_or_create(&dir.join("profile.json")).expect("профиль").identity;
     let me_pub = identity.public_key_bytes();
