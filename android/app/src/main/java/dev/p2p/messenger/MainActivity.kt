@@ -21,7 +21,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -438,7 +437,7 @@ private fun CallOverlay(model: AppModel, call: CallState) {
     Box(Modifier.fillMaxSize().background(Color(0xF2000000)), contentAlignment = Alignment.Center) {
         // Входящее видео (если видео-звонок активен) — на фоне.
         if (call.withVideo && call.status == "active") {
-            VideoFrame(Modifier.fillMaxSize())
+            VideoSurface(Modifier.fillMaxSize())
         }
         Column(
             Modifier.fillMaxSize().padding(bottom = 48.dp),
@@ -466,37 +465,29 @@ private fun CallOverlay(model: AppModel, call: CallState) {
     }
 }
 
-/** Отрисовка входящих видео-кадров: поллит [Native.callPullVideo] и рисует Bitmap. */
+/** Входящее видео: SurfaceView, в который аппаратный декодер ([VideoReceiver])
+ *  рендерит напрямую (zero-copy). Декодер живёт по жизненному циклу surface. */
 @Composable
-private fun VideoFrame(modifier: Modifier = Modifier) {
-    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            val data = Native.callPullVideo() // [w:4][h:4][RGBA…]
-            if (data.size > 8) {
-                val w = (data[0].toInt() and 0xff) or ((data[1].toInt() and 0xff) shl 8) or
-                    ((data[2].toInt() and 0xff) shl 16) or ((data[3].toInt() and 0xff) shl 24)
-                val h = (data[4].toInt() and 0xff) or ((data[5].toInt() and 0xff) shl 8) or
-                    ((data[6].toInt() and 0xff) shl 16) or ((data[7].toInt() and 0xff) shl 24)
-                if (w in 1..4096 && h in 1..4096 && data.size >= 8 + w * h * 4) {
-                    // ARGB_8888 в нативном порядке = RGBA: грузим буфер напрямую,
-                    // без пер-пиксельного цикла в Kotlin.
-                    val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
-                    bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(data, 8, w * h * 4))
-                    bitmap = bmp
-                }
+private fun VideoSurface(modifier: Modifier = Modifier) {
+    androidx.compose.ui.viewinterop.AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            android.view.SurfaceView(ctx).apply {
+                holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                    private var receiver: VideoReceiver? = null
+                    override fun surfaceCreated(h: android.view.SurfaceHolder) {
+                        receiver = VideoReceiver(h.surface, VIDEO_W, VIDEO_H).also { it.start() }
+                    }
+                    override fun surfaceChanged(h: android.view.SurfaceHolder, f: Int, w: Int, ht: Int) {}
+                    override fun surfaceDestroyed(h: android.view.SurfaceHolder) {
+                        val r = receiver; receiver = null
+                        // MediaCodec.release блокирует — не на UI-потоке.
+                        Thread { r?.stop() }.start()
+                    }
+                })
             }
-            delay(40)
-        }
-    }
-    bitmap?.let {
-        androidx.compose.foundation.Image(
-            bitmap = it.asImageBitmap(),
-            contentDescription = null,
-            modifier = modifier,
-            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-        )
-    }
+        },
+    )
 }
 
 @Composable

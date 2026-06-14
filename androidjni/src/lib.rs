@@ -22,7 +22,7 @@ use jni::objects::{JByteArray, JClass, JShortArray, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jlong, jsize, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
-use p2p_core::settings::{AudioSettings, VideoSettings};
+use p2p_core::settings::AudioSettings;
 use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
 use p2p_core::Identity;
 use p2p_messenger::{Event, Messenger};
@@ -487,11 +487,6 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_stop<'local>(
 
 // ── Звонки (1:1) ───────────────────────────────────────────────────────────
 
-fn video_settings(w: jint, h: jint) -> VideoSettings {
-    // fps 20 — баланс плавности и нагрузки софт-энкодера/канала на мобиле.
-    VideoSettings { width: w.max(0) as u32, height: h.max(0) as u32, fps: 20, bitrate: 2_000_000 }
-}
-
 /// JSON-параметры для настройки аудио на стороне Kotlin (AudioRecord/Track).
 fn call_params(call_id: u64, audio: &AudioSettings) -> String {
     serde_json::json!({
@@ -503,11 +498,12 @@ fn call_params(call_id: u64, audio: &AudioSettings) -> String {
     .to_string()
 }
 
-fn begin_call(peer: [u8; 32], video: bool, w: jint, h: jint) -> Option<AudioSettings> {
+fn begin_call(peer: [u8; 32]) -> Option<AudioSettings> {
     let app = app()?;
     let audio = AudioSettings::default();
-    let vcfg = if video { Some(video_settings(w, h)) } else { None };
-    let engine = CallEngine::start(app.messenger.clone(), peer, audio, vcfg);
+    // Видео-кодек теперь аппаратный (MediaCodec/Kotlin); движок только
+    // фрагментирует/собирает H.264 — параметры видео в Rust не нужны.
+    let engine = CallEngine::start(app.messenger.clone(), peer, audio);
     *CALL.lock().unwrap() = Some(engine);
     Some(audio)
 }
@@ -527,7 +523,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callStart<'local>(
     let video = video != JNI_FALSE;
     let call_id = CALL_ID.fetch_add(1, Ordering::Relaxed);
     let _ = app.messenger.send_call_invite(&peer, call_id, true, video);
-    let Some(audio) = begin_call(peer, video, vw, vh) else { return ret(&env, "{}") };
+    let _ = (vw, vh); // видео-разрешение теперь задаёт Kotlin/MediaCodec
+    let Some(audio) = begin_call(peer) else { return ret(&env, "{}") };
     ret(&env, &call_params(call_id, &audio))
 }
 
@@ -545,7 +542,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callAccept<'local>(
     let Some(app) = app() else { return ret(&env, "{}") };
     let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
     let _ = app.messenger.send_call_accept(&peer, call_id as u64);
-    let Some(audio) = begin_call(peer, video != JNI_FALSE, vw, vh) else { return ret(&env, "{}") };
+    let _ = (video, vw, vh); // видео задаёт Kotlin/MediaCodec
+    let Some(audio) = begin_call(peer) else { return ret(&env, "{}") };
     ret(&env, &call_params(call_id as u64, &audio))
 }
 
@@ -603,88 +601,41 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPullAudio<'local>(
     n as jint
 }
 
-/// RGB8-кадр с камеры/экрана → движку (для отправки видео).
+/// H.264 access-unit от аппаратного энкодера (Kotlin/MediaCodec) → фрагментация
+/// и отправка по сети.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_callPushVideo<'local>(
+pub extern "system" fn Java_dev_p2p_messenger_Native_callSendVideo<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
-    rgb: JByteArray<'local>,
+    nal: JByteArray<'local>,
+    keyframe: jboolean,
 ) {
-    let len = env.get_array_length(&rgb).unwrap_or(0).max(0) as usize;
+    let len = env.get_array_length(&nal).unwrap_or(0).max(0) as usize;
     if len == 0 {
         return;
     }
     let mut buf = vec![0i8; len];
-    if env.get_byte_array_region(&rgb, 0, &mut buf).is_err() {
+    if env.get_byte_array_region(&nal, 0, &mut buf).is_err() {
         return;
     }
     let bytes: Vec<u8> = buf.into_iter().map(|b| b as u8).collect();
     if let Some(engine) = CALL.lock().unwrap().as_ref() {
-        engine.push_video(bytes);
+        engine.send_video(&bytes, keyframe != JNI_FALSE);
     }
 }
 
-/// Кадр камеры YUV_420_888 (планы Y/U/V + strides) → нативная конвертация в RGB
-/// и отправка. Перенос конвертации из Kotlin сюда устраняет CPU-хог видеозвонка.
+/// Забрать собранный входящий H.264 access-unit для аппаратного декодера
+/// (Kotlin/MediaCodec). Пустой массив — кадра нет.
 #[no_mangle]
-#[allow(clippy::too_many_arguments)]
-pub extern "system" fn Java_dev_p2p_messenger_Native_callPushVideoYuv<'local>(
-    env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    y: JByteArray<'local>,
-    u: JByteArray<'local>,
-    v: JByteArray<'local>,
-    w: jint,
-    h: jint,
-    y_row: jint,
-    uv_row: jint,
-    uv_pix: jint,
-) {
-    fn read_bytes(env: &JNIEnv, arr: &JByteArray) -> Option<Vec<u8>> {
-        let len = env.get_array_length(arr).ok()?.max(0) as usize;
-        let mut buf = vec![0i8; len];
-        env.get_byte_array_region(arr, 0, &mut buf).ok()?;
-        Some(buf.into_iter().map(|b| b as u8).collect())
-    }
-    let (Some(yb), Some(ub), Some(vb)) =
-        (read_bytes(&env, &y), read_bytes(&env, &u), read_bytes(&env, &v))
-    else {
-        return;
-    };
-    if let Some(engine) = CALL.lock().unwrap().as_ref() {
-        engine.push_video_yuv(
-            &yb, &ub, &vb,
-            w.max(0) as usize, h.max(0) as usize,
-            y_row.max(0) as usize, uv_row.max(0) as usize, uv_pix.max(0) as usize,
-        );
-    }
-}
-
-/// Забрать декодированный входящий видео-кадр. Формат: [w:4 LE][h:4 LE][rgb…];
-/// пустой массив — кадра нет.
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_callPullVideo<'local>(
+pub extern "system" fn Java_dev_p2p_messenger_Native_callPullVideoPacket<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jbyteArray {
-    let frame = CALL.lock().unwrap().as_ref().and_then(|e| e.pull_frame());
-    let Some(f) = frame else {
+    let pkt = CALL.lock().unwrap().as_ref().and_then(|e| e.pull_video_packet());
+    let Some(data) = pkt else {
         return env.new_byte_array(0).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut());
     };
-    // Формат: [w:4 LE][h:4 LE][RGBA…]. RGBA (а не RGB) — чтобы Kotlin рисовал через
-    // Bitmap.copyPixelsFromBuffer (ARGB_8888 = RGBA в нативном порядке) без
-    // пер-пиксельного цикла. Альфа = 255.
-    let px = f.rgb.len() / 3;
-    let mut out = Vec::with_capacity(8 + px * 4);
-    out.extend_from_slice(&f.width.to_le_bytes());
-    out.extend_from_slice(&f.height.to_le_bytes());
-    for c in f.rgb.chunks_exact(3) {
-        out.push(c[0]);
-        out.push(c[1]);
-        out.push(c[2]);
-        out.push(255);
-    }
-    let signed: Vec<i8> = out.into_iter().map(|b| b as i8).collect();
+    let signed: Vec<i8> = data.into_iter().map(|b| b as i8).collect();
     match env.new_byte_array(signed.len() as jsize) {
         Ok(arr) => {
             let _ = env.set_byte_array_region(&arr, 0, &signed);

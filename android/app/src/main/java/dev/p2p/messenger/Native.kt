@@ -53,15 +53,10 @@ object Native {
     external fun callPushAudio(data: ShortArray, n: Int)
     /** Заполнить буфер PCM для воспроизведения. Возвращает число реальных сэмплов. */
     external fun callPullAudio(out: ShortArray): Int
-    /** RGB8-кадр с камеры/экрана → отправка видео. */
-    external fun callPushVideo(rgb: ByteArray)
-    /** Кадр YUV_420_888 (планы Y/U/V + strides) → нативная конвертация и отправка. */
-    external fun callPushVideoYuv(
-        y: ByteArray, u: ByteArray, v: ByteArray,
-        w: Int, h: Int, yRow: Int, uvRow: Int, uvPix: Int,
-    )
-    /** Входящий видео-кадр: [w:4 LE][h:4 LE][rgb…] или пусто. */
-    external fun callPullVideo(): ByteArray
+    /** H.264 access-unit от MediaCodec-энкодера → фрагментация и отправка. */
+    external fun callSendVideo(nal: ByteArray, keyframe: Boolean)
+    /** Собранный входящий H.264 access-unit для MediaCodec-декодера (или пусто). */
+    external fun callPullVideoPacket(): ByteArray
     external fun callSetMuted(muted: Boolean)
 
     // ── Группы (MLS) ──────────────────────────────────────────────────────

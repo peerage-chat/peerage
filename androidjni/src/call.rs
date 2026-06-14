@@ -1,26 +1,22 @@
-//! Движок 1:1 звонка для Android. В отличие от десктопного `p2p-call` (cpal),
-//! здесь аудио ввод/вывод и захват видео приходят ИЗВНЕ — из Kotlin:
-//! `AudioRecord` → [`CallEngine::push_audio`], [`CallEngine::pull_audio`] →
-//! `AudioTrack`; камера/экран → [`CallEngine::push_video`]. Так движок не зависит
-//! от платформенных устройств и `Send` (cpal-поток был бы `!Send`).
+//! Движок 1:1 звонка для Android. Аудио ввод/вывод приходят ИЗВНЕ из Kotlin
+//! (`AudioRecord`/`AudioTrack`), кодек аудио — Opus в Rust. Видео — **без кодека
+//! в Rust**: H.264 кодируется/декодируется аппаратно через MediaCodec на стороне
+//! Kotlin, а Rust лишь фрагментирует исходящие access-unit'ы и собирает входящие
+//! (тот же формат фрагментации, что у десктопа — совместимость по сети).
 //!
-//! Сетевой путь и кодеки — те же примитивы, что у десктопа (`p2p-media` +
-//! `p2p-core::media`): Opus + джиттер для аудио, H.264 + фрагментация для видео.
+//! Движок `Send` (нет cpal/!Send-объектов), живёт в Arc, доступен из JNI-потоков.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use p2p_core::media::{
     fragment_video, parse_video_frag, VideoReassembler, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO,
 };
-use p2p_core::settings::{AudioSettings, VideoSettings};
-use p2p_media::{
-    push_source, AudioDecoder, AudioEncoder, DecodedFrame, FrameFeeder, JitterBuffer, JitterOut,
-    VideoDecoder, VideoEncoder,
-};
+use p2p_core::settings::AudioSettings;
+use p2p_media::{AudioDecoder, AudioEncoder, JitterBuffer, JitterOut};
 use p2p_messenger::Messenger;
 
 type PeerKey = [u8; 32];
@@ -34,6 +30,12 @@ fn push_capped(ring: &Ring, samples: &[i16], cap: usize) {
     }
 }
 
+/// Счётчики фрагментации исходящего видео.
+struct VideoTx {
+    frame_id: u32,
+    seq: u16,
+}
+
 /// Активный звонок. Останавливается при [`stop`](CallEngine::stop)/`drop`.
 pub struct CallEngine {
     running: Arc<AtomicBool>,
@@ -41,24 +43,21 @@ pub struct CallEngine {
     in_ring: Ring,
     out_ring: Ring,
     in_cap: usize,
-    feeder: Option<FrameFeeder>,
-    frames: Arc<Mutex<VecDeque<DecodedFrame>>>,
+    messenger: Arc<Messenger>,
+    peer: PeerKey,
+    video_tx: Mutex<VideoTx>,
+    /// Входящие собранные H.264 access-unit'ы (для MediaCodec-декодера в Kotlin).
+    video_in: Arc<Mutex<VecDeque<Vec<u8>>>>,
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl CallEngine {
-    /// Запустить движок. `video` + (`vw`,`vh`) — если шлём видео (камера/экран).
-    pub fn start(
-        messenger: Arc<Messenger>,
-        peer: PeerKey,
-        audio: AudioSettings,
-        video: Option<VideoSettings>,
-    ) -> Arc<CallEngine> {
+    pub fn start(messenger: Arc<Messenger>, peer: PeerKey, audio: AudioSettings) -> Arc<CallEngine> {
         let running = Arc::new(AtomicBool::new(true));
         let muted = Arc::new(AtomicBool::new(false));
         let in_ring: Ring = Arc::new(Mutex::new(VecDeque::new()));
         let out_ring: Ring = Arc::new(Mutex::new(VecDeque::new()));
-        let frames = Arc::new(Mutex::new(VecDeque::new()));
+        let video_in = Arc::new(Mutex::new(VecDeque::new()));
         let cap = audio.interleaved_len() * 50;
         let mut threads = Vec::new();
 
@@ -68,13 +67,12 @@ impl CallEngine {
         {
             let running = running.clone();
             let out_ring = out_ring.clone();
-            let frames = frames.clone();
+            let video_in = video_in.clone();
             let call_peer = peer;
             threads.push(thread::spawn(move || {
                 let mut dec = AudioDecoder::new(audio).ok();
                 let mut jitter = JitterBuffer::new(audio.jitter_depth);
                 let mut reasm = VideoReassembler::new();
-                let mut video_dec = VideoDecoder::new().ok();
                 while running.load(Ordering::Relaxed) {
                     let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else { continue };
                     if p.src != call_peer {
@@ -96,16 +94,14 @@ impl CallEngine {
                             }
                         }
                         TRACK_VIDEO | TRACK_SCREEN => {
+                            // Собираем фрагменты в полный H.264 access-unit и кладём
+                            // в очередь для аппаратного декодера (MediaCodec/Kotlin).
                             if let Some(frag) = parse_video_frag(&p.payload) {
                                 if let Some(cf) = reasm.push(frag) {
-                                    if let Some(d) = video_dec.as_mut() {
-                                        if let Ok(Some(frame)) = d.decode(&cf.data) {
-                                            let mut q = frames.lock().unwrap();
-                                            q.push_back(frame);
-                                            while q.len() > 3 {
-                                                q.pop_front(); // держим только свежие кадры
-                                            }
-                                        }
+                                    let mut q = video_in.lock().unwrap();
+                                    q.push_back(cf.data);
+                                    while q.len() > 5 {
+                                        q.pop_front(); // реалтайм — держим свежие
                                     }
                                 }
                             }
@@ -159,49 +155,16 @@ impl CallEngine {
             }));
         }
 
-        // --- Видео-отправка: RGB-кадры из Kotlin → H.264 → фрагменты → send_media ---
-        let feeder = if let Some(vcfg) = video {
-            let (feeder, mut src) = push_source(vcfg.width, vcfg.height);
-            let running = running.clone();
-            let msgr = messenger.clone();
-            let interval = Duration::from_millis((1000 / vcfg.fps.max(1)) as u64);
-            threads.push(thread::spawn(move || {
-                use p2p_media::VideoSource;
-                let mut encoder = match VideoEncoder::new(vcfg) {
-                    Ok(e) => e,
-                    Err(_) => return,
-                };
-                let mut frame_id = 0u32;
-                let mut seq = 0u16;
-                while running.load(Ordering::Relaxed) {
-                    let t0 = Instant::now();
-                    if let Some(rgb) = src.next_frame() {
-                        if let Ok((bs, key)) = encoder.encode_rgb(&rgb) {
-                            for chunk in fragment_video(&bs, frame_id, key) {
-                                let _ = msgr.send_media(&peer, TRACK_VIDEO, seq, frame_id, &chunk);
-                                seq = seq.wrapping_add(1);
-                            }
-                            frame_id = frame_id.wrapping_add(1);
-                        }
-                    }
-                    if let Some(rem) = interval.checked_sub(t0.elapsed()) {
-                        thread::sleep(rem);
-                    }
-                }
-            }));
-            Some(feeder)
-        } else {
-            None
-        };
-
         Arc::new(CallEngine {
             running,
             muted,
             in_ring,
             out_ring,
             in_cap: cap,
-            feeder,
-            frames,
+            messenger,
+            peer,
+            video_tx: Mutex::new(VideoTx { frame_id: 0, seq: 0 }),
+            video_in,
             threads: Mutex::new(threads),
         })
     }
@@ -228,59 +191,21 @@ impl CallEngine {
         n
     }
 
-    /// Свежий RGB8-кадр с камеры/экрана → в очередь видео-отправки.
-    pub fn push_video(&self, rgb: Vec<u8>) {
-        if let Some(f) = &self.feeder {
-            f.push(rgb);
+    /// H.264 access-unit от аппаратного энкодера (Kotlin/MediaCodec) →
+    /// фрагментация → отправка по сети (TRACK_VIDEO).
+    pub fn send_video(&self, nal: &[u8], keyframe: bool) {
+        let mut tx = self.video_tx.lock().unwrap();
+        let frame_id = tx.frame_id;
+        for chunk in fragment_video(nal, frame_id, keyframe) {
+            let _ = self.messenger.send_media(&self.peer, TRACK_VIDEO, tx.seq, frame_id, &chunk);
+            tx.seq = tx.seq.wrapping_add(1);
         }
+        tx.frame_id = tx.frame_id.wrapping_add(1);
     }
 
-    /// Кадр камеры в YUV_420_888 → конвертация в RGB8 НАТИВНО (целочисленная
-    /// математика, без аллокаций на стороне Kotlin) → в очередь видео-отправки.
-    /// Перенос конвертации из Kotlin сюда убирает CPU-хог (~66% в Kotlin-JIT).
-    #[allow(clippy::too_many_arguments)]
-    pub fn push_video_yuv(
-        &self,
-        y: &[u8],
-        u: &[u8],
-        v: &[u8],
-        w: usize,
-        h: usize,
-        y_row: usize,
-        uv_row: usize,
-        uv_pix: usize,
-    ) {
-        let Some(f) = &self.feeder else { return };
-        // Защита от выхода за границы планов.
-        if y.len() < y_row * h || u.len() < uv_row * ((h + 1) / 2) || v.len() < uv_row * ((h + 1) / 2) {
-            return;
-        }
-        let mut rgb = vec![0u8; w * h * 3];
-        let mut o = 0;
-        for j in 0..h {
-            let yr = j * y_row;
-            let uvr = (j >> 1) * uv_row;
-            for i in 0..w {
-                let yv = y[yr + i] as i32;
-                let uvc = (i >> 1) * uv_pix;
-                let uu = u[uvr + uvc] as i32 - 128;
-                let vv = v[uvr + uvc] as i32 - 128;
-                // Фикс-поинт BT.601 (множители × 1024).
-                let r = yv + ((vv * 1436) >> 10);
-                let g = yv - ((uu * 352) >> 10) - ((vv * 731) >> 10);
-                let b = yv + ((uu * 1814) >> 10);
-                rgb[o] = r.clamp(0, 255) as u8;
-                rgb[o + 1] = g.clamp(0, 255) as u8;
-                rgb[o + 2] = b.clamp(0, 255) as u8;
-                o += 3;
-            }
-        }
-        f.push(rgb);
-    }
-
-    /// Забрать декодированный входящий видео-кадр (RGB8) для отрисовки.
-    pub fn pull_frame(&self) -> Option<DecodedFrame> {
-        self.frames.lock().unwrap().pop_front()
+    /// Забрать собранный входящий H.264 access-unit (для MediaCodec-декодера).
+    pub fn pull_video_packet(&self) -> Option<Vec<u8>> {
+        self.video_in.lock().unwrap().pop_front()
     }
 
     pub fn set_muted(&self, muted: bool) {

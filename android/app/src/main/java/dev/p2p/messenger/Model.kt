@@ -10,9 +10,11 @@ import androidx.compose.runtime.toMutableStateList
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Разрешение видео-звонка (камера и видео-движок должны совпадать). */
+/** Параметры видео-звонка (аппаратный H.264 через MediaCodec). */
 const val VIDEO_W = 640
 const val VIDEO_H = 480
+const val VIDEO_FPS = 24
+const val VIDEO_BITRATE = 2_000_000
 
 data class Contact(
     val key: String,
@@ -70,7 +72,7 @@ class AppModel {
     var call by mutableStateOf<CallState?>(null)
     var audio: CallAudio? = null
     var appContext: android.content.Context? = null
-    private var camera: CameraCapture? = null
+    @Volatile private var videoSender: VideoSender? = null
 
     /** Инициализация ядра (блокирующая — звать с IO-потока). */
     fun start(dataDir: String) {
@@ -220,9 +222,9 @@ class AppModel {
         val vh = if (video) VIDEO_H else 0
         val params = JSONObject(Native.callStart(peer, video, vw, vh))
         if (!params.has("call_id")) return
-        audio?.start(params.getInt("sample_rate"), params.getInt("channels"))
-        if (video) startCamera()
         call = CallState(peer, params.getLong("call_id"), incoming = false, withVideo = video, status = "ringing")
+        // Старт медиа (MediaCodec/AudioRecord) — НЕ на UI-потоке (блокирующие операции).
+        startMedia(params.getInt("sample_rate"), params.getInt("channels"), video)
     }
 
     /** Принять входящий звонок. */
@@ -232,14 +234,21 @@ class AppModel {
         val vw = if (c.withVideo) VIDEO_W else 0
         val vh = if (c.withVideo) VIDEO_H else 0
         val params = JSONObject(Native.callAccept(c.peer, c.callId, c.withVideo, vw, vh))
-        audio?.start(params.optInt("sample_rate", 48000), params.optInt("channels", 1))
-        if (c.withVideo) startCamera()
         call = c.copy(status = "active")
+        startMedia(params.optInt("sample_rate", 48000), params.optInt("channels", 1), c.withVideo)
     }
 
-    private fun startCamera() {
-        val ctx = appContext ?: return
-        camera = CameraCapture(ctx, VIDEO_W, VIDEO_H).also { it.start() }
+    /** Запуск аудио/видео в фоне — инициализация MediaCodec/AudioRecord блокирует. */
+    private fun startMedia(sampleRate: Int, channels: Int, video: Boolean) {
+        val ctx = appContext
+        Thread {
+            runCatching { audio?.start(sampleRate, channels) }
+            if (video && ctx != null) {
+                runCatching {
+                    videoSender = VideoSender(ctx, VIDEO_W, VIDEO_H, VIDEO_FPS, VIDEO_BITRATE).also { it.start() }
+                }
+            }
+        }.start()
     }
 
     /** Завершить/отклонить звонок (шлёт end собеседнику и глушит аудио). */
@@ -251,10 +260,16 @@ class AppModel {
 
     /** Локально завершить звонок (без отправки end — например, по событию call_end). */
     private fun endCall() {
-        audio?.stop()
-        camera?.stop()
-        camera = null
-        call = null
+        val a = audio
+        val vs = videoSender
+        videoSender = null
+        call = null // UI: убрать оверлей сразу (на главном потоке)
+        // Остановка медиа (MediaCodec.release/AudioTrack — блокирующие) — в фоне,
+        // иначе UI-поток виснет → ANR.
+        Thread {
+            runCatching { a?.stop() }
+            runCatching { vs?.stop() }
+        }.start()
     }
 
     fun toggleMute() {
