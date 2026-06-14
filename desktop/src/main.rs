@@ -736,6 +736,8 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
                 reset_call(ui, core);
             }
         }
+        // Групповые сообщения — UI групп в десктопе пока не подключён.
+        Event::Group { .. } => {}
     }
 }
 

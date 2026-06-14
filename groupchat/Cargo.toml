@@ -1,0 +1,18 @@
+[package]
+name = "p2p-groupchat"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "p2p_groupchat"
+
+[dependencies]
+p2p-core = { path = "../core" }
+p2p-group = { path = "../group" }
+p2p-messenger = { path = "../messenger" }
+thiserror.workspace = true
+
+[dev-dependencies]
+p2p-ygg = { path = "../transport" }

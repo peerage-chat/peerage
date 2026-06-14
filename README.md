@@ -41,6 +41,9 @@ media/                Rust: медиа-цепочка (кодеки, джитт�
   examples/audio_loopback.rs  синтетика → энкод → сеть → джиттер → декод
 group/                Rust: групповое E2E на MLS (RFC 9420, openmls)
   src/lib.rs          Member: create/add/join/encrypt/process (TreeKEM, FS/PCS)
+groupchat/            Rust: групповой чат поверх Yggdrasil (MLS+транспорт, serverless)
+  src/lib.rs          GroupChat: create/pending/add_member/send_text/handle
+  examples/group_chat.rs  3 узла: создание группы, add, обмен — через mesh
 ntfy/                 Rust: опциональный клиент ntfy (publish/subscribe) —
                       бэкенд для фонового пробуждения на Android (Фаза G), не обяз.
 call/                 Rust: движок звонка (аудио+видео) поверх media+messenger
@@ -152,11 +155,11 @@ scripts/
       и 🖥 экран. Камера (nokhwa, `!Send`) идёт через push-источник в отдельном
       потоке. **Фаза B завершена** (1:1 видео: камера/экран). Реальный захват — на железе
 - [ ] Добавление контакта по QR-коду (сейчас — по hex-ключу)
-- [~] **Фаза E — группы (MLS)**: крипто-слой `p2p-group` (openmls) — создание
-      группы, add/Commit/Welcome, encrypt/process, TreeKEM + Forward Secrecy.
-      Тесты на 2 и 3 участников ✓. Осталось: распространение по сети +
-      упорядочивание Commit (нужен delivery service — ntfy, Фаза D), персистентность
-      состояния группы, групповые звонки (mesh, переиспользует A/B)
+- [x] **Фаза E (чат) — группы (MLS), serverless**: крипто-слой `p2p-group`
+      (openmls, TreeKEM, FS/PCS) + `p2p-groupchat` — раздача MLS-сообщений по
+      Yggdrasil, порядок Commit через админ-секвенсора, БЕЗ сервера. Сквозной
+      тест на 3 узлах через mesh (`scripts/run-group.sh`) ✓
+- [ ] Группы: персистентность состояния на диск; групповые звонки (mesh A/B)
 - [ ] Android (JNI-мост к ядру) — в т.ч. телефонный шаринг экрана и пробуждение
       в фоне (serverless foreground service / опц. self-hosted ntfy — выбор юзера)
 - [ ] Торрент-стриминг

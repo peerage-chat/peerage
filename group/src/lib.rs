@@ -149,6 +149,23 @@ impl Member {
     pub fn member_count(&self) -> usize {
         self.group.as_ref().map(|g| g.members().count()).unwrap_or(0)
     }
+
+    /// Идентичности всех участников (publicKey ed25519 = credential identity).
+    pub fn member_identities(&self) -> Vec<Vec<u8>> {
+        self.group
+            .as_ref()
+            .map(|g| {
+                g.members()
+                    .map(|m| m.credential.serialized_content().to_vec())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// В группе ли мы (создана/присоединена).
+    pub fn is_joined(&self) -> bool {
+        self.group.is_some()
+    }
 }
 
 #[cfg(test)]

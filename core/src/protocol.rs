@@ -38,6 +38,9 @@ pub enum Payload {
     CallAccept { call_id: u64 },
     /// Завершение/отклонение звонка.
     CallEnd { call_id: u64 },
+    /// Групповое MLS-сообщение (Commit/Welcome/прикладное) — для пересылки
+    /// участникам группы. Содержимое уже зашифровано MLS.
+    Group { data: Vec<u8> },
 }
 
 /// Внешний конверт, передаваемый по транспорту.
@@ -140,6 +143,7 @@ mod tests {
             Payload::CallInvite { call_id: 99, audio: true, video: false },
             Payload::CallAccept { call_id: 99 },
             Payload::CallEnd { call_id: 99 },
+            Payload::Group { data: vec![1, 2, 3, 9, 9] },
         ] {
             let d = encode(&a, &b.public_key_bytes(), &p, 0).unwrap();
             let (_, got) = decode(&b, &d).unwrap();

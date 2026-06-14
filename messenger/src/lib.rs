@@ -45,6 +45,8 @@ pub enum Event {
     CallAccept { peer: PeerKey, call_id: u64 },
     /// Пир завершил/отклонил звонок.
     CallEnd { peer: PeerKey, call_id: u64 },
+    /// Входящее групповое MLS-сообщение (переслать в групповой слой).
+    Group { peer: PeerKey, data: Vec<u8> },
 }
 
 /// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
@@ -338,6 +340,11 @@ impl Messenger {
         self.shared.send(peer, &Payload::CallEnd { call_id })
     }
 
+    /// Переслать групповое MLS-сообщение конкретному участнику.
+    pub fn send_group(&self, peer: &PeerKey, data: &[u8]) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::Group { data: data.to_vec() })
+    }
+
     /// Включить приём медиа: возвращает bounded-канал. При переполнении новые
     /// пакеты отбрасываются (для реалтайма ронять опоздавшие лучше, чем копить).
     pub fn media_channel(&self, capacity: usize) -> Receiver<MediaPacket> {
@@ -413,6 +420,9 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::CallEnd { call_id } => {
                 shared.emit(Event::CallEnd { peer: src, call_id });
+            }
+            Payload::Group { data } => {
+                shared.emit(Event::Group { peer: src, data });
             }
         }
     }
