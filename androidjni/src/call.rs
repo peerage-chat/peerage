@@ -235,6 +235,49 @@ impl CallEngine {
         }
     }
 
+    /// Кадр камеры в YUV_420_888 → конвертация в RGB8 НАТИВНО (целочисленная
+    /// математика, без аллокаций на стороне Kotlin) → в очередь видео-отправки.
+    /// Перенос конвертации из Kotlin сюда убирает CPU-хог (~66% в Kotlin-JIT).
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_video_yuv(
+        &self,
+        y: &[u8],
+        u: &[u8],
+        v: &[u8],
+        w: usize,
+        h: usize,
+        y_row: usize,
+        uv_row: usize,
+        uv_pix: usize,
+    ) {
+        let Some(f) = &self.feeder else { return };
+        // Защита от выхода за границы планов.
+        if y.len() < y_row * h || u.len() < uv_row * ((h + 1) / 2) || v.len() < uv_row * ((h + 1) / 2) {
+            return;
+        }
+        let mut rgb = vec![0u8; w * h * 3];
+        let mut o = 0;
+        for j in 0..h {
+            let yr = j * y_row;
+            let uvr = (j >> 1) * uv_row;
+            for i in 0..w {
+                let yv = y[yr + i] as i32;
+                let uvc = (i >> 1) * uv_pix;
+                let uu = u[uvr + uvc] as i32 - 128;
+                let vv = v[uvr + uvc] as i32 - 128;
+                // Фикс-поинт BT.601 (множители × 1024).
+                let r = yv + ((vv * 1436) >> 10);
+                let g = yv - ((uu * 352) >> 10) - ((vv * 731) >> 10);
+                let b = yv + ((uu * 1814) >> 10);
+                rgb[o] = r.clamp(0, 255) as u8;
+                rgb[o + 1] = g.clamp(0, 255) as u8;
+                rgb[o + 2] = b.clamp(0, 255) as u8;
+                o += 3;
+            }
+        }
+        f.push(rgb);
+    }
+
     /// Забрать декодированный входящий видео-кадр (RGB8) для отрисовки.
     pub fn pull_frame(&self) -> Option<DecodedFrame> {
         self.frames.lock().unwrap().pop_front()

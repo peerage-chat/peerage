@@ -472,22 +472,18 @@ private fun VideoFrame(modifier: Modifier = Modifier) {
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(Unit) {
         while (true) {
-            val data = Native.callPullVideo()
+            val data = Native.callPullVideo() // [w:4][h:4][RGBA…]
             if (data.size > 8) {
                 val w = (data[0].toInt() and 0xff) or ((data[1].toInt() and 0xff) shl 8) or
                     ((data[2].toInt() and 0xff) shl 16) or ((data[3].toInt() and 0xff) shl 24)
                 val h = (data[4].toInt() and 0xff) or ((data[5].toInt() and 0xff) shl 8) or
                     ((data[6].toInt() and 0xff) shl 16) or ((data[7].toInt() and 0xff) shl 24)
-                if (w in 1..4096 && h in 1..4096 && data.size >= 8 + w * h * 3) {
-                    val px = IntArray(w * h)
-                    var o = 8
-                    for (i in 0 until w * h) {
-                        val r = data[o++].toInt() and 0xff
-                        val g = data[o++].toInt() and 0xff
-                        val b = data[o++].toInt() and 0xff
-                        px[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-                    }
-                    bitmap = android.graphics.Bitmap.createBitmap(px, w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                if (w in 1..4096 && h in 1..4096 && data.size >= 8 + w * h * 4) {
+                    // ARGB_8888 в нативном порядке = RGBA: грузим буфер напрямую,
+                    // без пер-пиксельного цикла в Kotlin.
+                    val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                    bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(data, 8, w * h * 4))
+                    bitmap = bmp
                 }
             }
             delay(40)

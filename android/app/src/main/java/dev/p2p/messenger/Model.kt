@@ -239,7 +239,7 @@ class AppModel {
 
     private fun startCamera() {
         val ctx = appContext ?: return
-        camera = CameraCapture(ctx, VIDEO_W, VIDEO_H) { Native.callPushVideo(it) }.also { it.start() }
+        camera = CameraCapture(ctx, VIDEO_W, VIDEO_H).also { it.start() }
     }
 
     /** Завершить/отклонить звонок (шлёт end собеседнику и глушит аудио). */

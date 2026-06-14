@@ -488,7 +488,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_stop<'local>(
 // ── Звонки (1:1) ───────────────────────────────────────────────────────────
 
 fn video_settings(w: jint, h: jint) -> VideoSettings {
-    VideoSettings { width: w.max(0) as u32, height: h.max(0) as u32, fps: 30, bitrate: 2_000_000 }
+    // fps 20 — баланс плавности и нагрузки софт-энкодера/канала на мобиле.
+    VideoSettings { width: w.max(0) as u32, height: h.max(0) as u32, fps: 20, bitrate: 2_000_000 }
 }
 
 /// JSON-параметры для настройки аудио на стороне Kotlin (AudioRecord/Track).
@@ -623,6 +624,42 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPushVideo<'local>(
     }
 }
 
+/// Кадр камеры YUV_420_888 (планы Y/U/V + strides) → нативная конвертация в RGB
+/// и отправка. Перенос конвертации из Kotlin сюда устраняет CPU-хог видеозвонка.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callPushVideoYuv<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    y: JByteArray<'local>,
+    u: JByteArray<'local>,
+    v: JByteArray<'local>,
+    w: jint,
+    h: jint,
+    y_row: jint,
+    uv_row: jint,
+    uv_pix: jint,
+) {
+    fn read_bytes(env: &JNIEnv, arr: &JByteArray) -> Option<Vec<u8>> {
+        let len = env.get_array_length(arr).ok()?.max(0) as usize;
+        let mut buf = vec![0i8; len];
+        env.get_byte_array_region(arr, 0, &mut buf).ok()?;
+        Some(buf.into_iter().map(|b| b as u8).collect())
+    }
+    let (Some(yb), Some(ub), Some(vb)) =
+        (read_bytes(&env, &y), read_bytes(&env, &u), read_bytes(&env, &v))
+    else {
+        return;
+    };
+    if let Some(engine) = CALL.lock().unwrap().as_ref() {
+        engine.push_video_yuv(
+            &yb, &ub, &vb,
+            w.max(0) as usize, h.max(0) as usize,
+            y_row.max(0) as usize, uv_row.max(0) as usize, uv_pix.max(0) as usize,
+        );
+    }
+}
+
 /// Забрать декодированный входящий видео-кадр. Формат: [w:4 LE][h:4 LE][rgb…];
 /// пустой массив — кадра нет.
 #[no_mangle]
@@ -634,10 +671,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPullVideo<'local>(
     let Some(f) = frame else {
         return env.new_byte_array(0).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut());
     };
-    let mut out = Vec::with_capacity(8 + f.rgb.len());
+    // Формат: [w:4 LE][h:4 LE][RGBA…]. RGBA (а не RGB) — чтобы Kotlin рисовал через
+    // Bitmap.copyPixelsFromBuffer (ARGB_8888 = RGBA в нативном порядке) без
+    // пер-пиксельного цикла. Альфа = 255.
+    let px = f.rgb.len() / 3;
+    let mut out = Vec::with_capacity(8 + px * 4);
     out.extend_from_slice(&f.width.to_le_bytes());
     out.extend_from_slice(&f.height.to_le_bytes());
-    out.extend_from_slice(&f.rgb);
+    for c in f.rgb.chunks_exact(3) {
+        out.push(c[0]);
+        out.push(c[1]);
+        out.push(c[2]);
+        out.push(255);
+    }
     let signed: Vec<i8> = out.into_iter().map(|b| b as i8).collect();
     match env.new_byte_array(signed.len() as jsize) {
         Ok(arr) => {

@@ -15,22 +15,25 @@ import android.os.HandlerThread
 import android.view.Surface
 
 /**
- * Захват кадров с камеры (Camera2) в RGB8 для видео-звонка. Каждый кадр
- * конвертируется из YUV_420_888 в плотный RGB (w×h×3) и отдаётся в [onFrame]
- * (обычно → [Native.callPushVideo]). Разрешение фиксировано под видео-движок.
+ * Захват кадров с камеры (Camera2) для видео-звонка. Планы YUV_420_888 отдаются
+ * НАПРЯМУЮ в нативный код ([Native.callPushVideoYuv]) — конвертация YUV→RGB и
+ * кодирование идут в Rust. В Kotlin остаётся только дешёвое копирование планов
+ * в переиспользуемые буферы (без пер-пиксельной математики и аллокаций на кадр).
  */
 class CameraCapture(
     private val context: Context,
     private val width: Int,
     private val height: Int,
-    private val onFrame: (ByteArray) -> Unit,
 ) {
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var reader: ImageReader? = null
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
-    private val rgb = ByteArray(width * height * 3)
+    // Переиспользуемые буферы планов (размеры постоянны в рамках сессии).
+    private var yBuf: ByteArray? = null
+    private var uBuf: ByteArray? = null
+    private var vBuf: ByteArray? = null
 
     @SuppressLint("MissingPermission") // CAMERA запрашивается до старта видео-звонка
     fun start() {
@@ -44,8 +47,13 @@ class CameraCapture(
         r.setOnImageAvailableListener({ ir ->
             val img = ir.acquireLatestImage() ?: return@setOnImageAvailableListener
             try {
-                yuv420ToRgb(img, rgb)
-                onFrame(rgb.copyOf())
+                val yP = img.planes[0]; val uP = img.planes[1]; val vP = img.planes[2]
+                val yb = yP.buffer; val ub = uP.buffer; val vb = vP.buffer
+                val y = yBuf?.takeIf { it.size == yb.remaining() } ?: ByteArray(yb.remaining()).also { yBuf = it }
+                val u = uBuf?.takeIf { it.size == ub.remaining() } ?: ByteArray(ub.remaining()).also { uBuf = it }
+                val v = vBuf?.takeIf { it.size == vb.remaining() } ?: ByteArray(vb.remaining()).also { vBuf = it }
+                yb.get(y); ub.get(u); vb.get(v)
+                Native.callPushVideoYuv(y, u, v, img.width, img.height, yP.rowStride, uP.rowStride, uP.pixelStride)
             } finally {
                 img.close()
             }
@@ -89,33 +97,5 @@ class CameraCapture(
             if (facing == CameraCharacteristics.LENS_FACING_FRONT) return id
         }
         return fallback
-    }
-
-    /** YUV_420_888 → плотный RGB8 (учитывает row/pixel stride планов). */
-    private fun yuv420ToRgb(image: Image, out: ByteArray) {
-        val w = minOf(image.width, width)
-        val h = minOf(image.height, height)
-        val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
-        val yB = yP.buffer; val uB = uP.buffer; val vB = vP.buffer
-        val yRow = yP.rowStride
-        val uRow = uP.rowStride; val uPix = uP.pixelStride
-        val vRow = vP.rowStride; val vPix = vP.pixelStride
-        var o = 0
-        for (j in 0 until h) {
-            val yr = j * yRow
-            val uvRow = j shr 1
-            for (i in 0 until w) {
-                val yv = (yB.get(yr + i).toInt() and 0xff)
-                val uvCol = i shr 1
-                val u = (uB.get(uvRow * uRow + uvCol * uPix).toInt() and 0xff) - 128
-                val v = (vB.get(uvRow * vRow + uvCol * vPix).toInt() and 0xff) - 128
-                val r = yv + ((1.370705f * v).toInt())
-                val g = yv - ((0.337633f * u).toInt()) - ((0.698001f * v).toInt())
-                val b = yv + ((1.732446f * u).toInt())
-                out[o++] = r.coerceIn(0, 255).toByte()
-                out[o++] = g.coerceIn(0, 255).toByte()
-                out[o++] = b.coerceIn(0, 255).toByte()
-            }
-        }
     }
 }
