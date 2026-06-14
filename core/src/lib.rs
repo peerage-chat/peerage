@@ -7,6 +7,7 @@ pub mod crypto;
 pub mod identity;
 pub mod media;
 pub mod protocol;
+pub mod settings;
 pub mod store;
 
 pub use identity::{Identity, IdentityError};

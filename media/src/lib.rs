@@ -9,5 +9,7 @@
 pub mod codec;
 pub mod jitter;
 
-pub use codec::{AudioConfig, AudioDecoder, AudioEncoder, CodecError};
+pub use codec::{AudioDecoder, AudioEncoder, CodecError};
 pub use jitter::{JitterBuffer, JitterOut};
+// Параметры кодека живут в ядре (настраиваются пользователем, сохраняются).
+pub use p2p_core::settings::{AudioSettings, OpusMode};

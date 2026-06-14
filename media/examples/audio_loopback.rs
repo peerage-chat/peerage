@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use p2p_core::media::TRACK_AUDIO;
 use p2p_core::Identity;
-use p2p_media::{AudioConfig, AudioDecoder, AudioEncoder, JitterBuffer, JitterOut};
+use p2p_media::{AudioDecoder, AudioEncoder, AudioSettings, JitterBuffer, JitterOut};
 use p2p_messenger::{MediaPacket, Messenger};
 use p2p_ygg::Node;
 
@@ -26,7 +26,7 @@ fn rms(s: &[i16]) -> f64 {
 }
 
 fn main() {
-    let cfg = AudioConfig::default();
+    let cfg = AudioSettings::default();
     println!(
         "конфиг: {} Гц, {} кан., {} кбит/с, кадр {}мс ({} сэмплов/кан.)",
         cfg.sample_rate, cfg.channels, cfg.bitrate / 1000, cfg.frame_ms, cfg.frame_samples()
@@ -129,7 +129,7 @@ fn main() {
     let frames_ok = received >= (FRAMES as usize * 95 / 100);
     let energy_ok = ratio > 0.6 && ratio < 1.4;
     if frames_ok && energy_ok {
-        println!("\n✓✓ Аудио-пайплайн работает сквозь Yggdrasil (Opus 128к + джиттер, полное качество)");
+        println!("\n✓✓ Аудио-пайплайн работает сквозь Yggdrasil (Opus {}к + джиттер)", cfg.bitrate / 1000);
     } else {
         eprintln!("\n✗ проверка не пройдена (frames_ok={frames_ok}, energy_ok={energy_ok})");
         std::process::exit(1);

@@ -1,0 +1,16 @@
+[package]
+name = "p2p-call"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "p2p_call"
+
+[dependencies]
+cpal = "0.15"
+thiserror.workspace = true
+p2p-core = { path = "../core" }
+p2p-messenger = { path = "../messenger" }
+p2p-media = { path = "../media" }
