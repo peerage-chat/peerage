@@ -15,4 +15,4 @@ hex.workspace = true
 p2p-core = { path = "../core" }
 p2p-ygg = { path = "../transport" }
 p2p-messenger = { path = "../messenger" }
-p2p-call = { path = "../call" }
+p2p-call = { path = "../call", features = ["capture"] }

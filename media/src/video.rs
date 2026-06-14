@@ -22,8 +22,60 @@ pub enum VideoError {
 /// Источник видео-кадров (камера, экран, …). Кадр — RGB8, ширина×высота×3 байт.
 pub trait VideoSource {
     fn dimensions(&self) -> (u32, u32);
-    /// Следующий кадр (RGB8) или None, если поток закончился.
+    /// Следующий кадр (RGB8) или None, если нового кадра пока нет / поток закончился.
     fn next_frame(&mut self) -> Option<Vec<u8>>;
+}
+
+use std::sync::{Arc, Mutex};
+
+/// «Почтовый ящик» последнего кадра — связывает push-сторону (внешний захват)
+/// с pull-стороной ([`VideoSource`]). Один слот: новый кадр вытесняет старый
+/// (реалтайм — держим только свежий).
+type Slot = Arc<Mutex<Option<Vec<u8>>>>;
+
+/// Куда внешний захват кладёт кадры. На Android сюда из Kotlin через JNI
+/// поступают кадры MediaProjection/Camera2; на десктопе — любой источник.
+#[derive(Clone)]
+pub struct FrameFeeder {
+    slot: Slot,
+    w: u32,
+    h: u32,
+}
+
+impl FrameFeeder {
+    /// Положить свежий RGB8-кадр (вытесняет непрочитанный предыдущий).
+    pub fn push(&self, rgb: Vec<u8>) {
+        *self.slot.lock().unwrap() = Some(rgb);
+    }
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.w, self.h)
+    }
+}
+
+/// Pull-источник, питаемый извне через [`FrameFeeder`]. Позволяет гонять
+/// push-захват (Android MediaProjection и т.п.) через тот же видео-конвейер.
+pub struct PushSource {
+    slot: Slot,
+    w: u32,
+    h: u32,
+}
+
+impl VideoSource for PushSource {
+    fn dimensions(&self) -> (u32, u32) {
+        (self.w, self.h)
+    }
+    fn next_frame(&mut self) -> Option<Vec<u8>> {
+        self.slot.lock().unwrap().take()
+    }
+}
+
+/// Создать пару «кормилец + источник» для push-захвата заданного размера.
+pub fn push_source(width: u32, height: u32) -> (FrameFeeder, PushSource) {
+    let slot: Slot = Arc::new(Mutex::new(None));
+    (
+        FrameFeeder { slot: slot.clone(), w: width, h: height },
+        PushSource { slot, w: width, h: height },
+    )
 }
 
 /// Энкодер H.264. Ключевые кадры форсируются периодически (интервал из fps).
@@ -131,6 +183,17 @@ mod tests {
         let decoded = dec.decode(&bitstream).unwrap().expect("кадр декодирован");
         assert_eq!((decoded.width, decoded.height), (320, 240));
         assert_eq!(decoded.rgb.len(), 320 * 240 * 3);
+    }
+
+    #[test]
+    fn push_source_delivers_latest_frame() {
+        let (feeder, mut src) = push_source(4, 4);
+        assert_eq!(src.dimensions(), (4, 4));
+        assert!(src.next_frame().is_none()); // пока пусто
+        feeder.push(vec![1u8; 48]);
+        feeder.push(vec![2u8; 48]); // вытесняет первый — держим свежий
+        assert_eq!(src.next_frame().unwrap()[0], 2);
+        assert!(src.next_frame().is_none()); // забрали — снова пусто
     }
 
     #[test]

@@ -12,6 +12,9 @@ pub mod video;
 
 pub use codec::{AudioDecoder, AudioEncoder, CodecError};
 pub use jitter::{JitterBuffer, JitterOut};
-pub use video::{DecodedFrame, VideoDecoder, VideoEncoder, VideoError, VideoSource};
+pub use video::{
+    push_source, DecodedFrame, FrameFeeder, PushSource, VideoDecoder, VideoEncoder, VideoError,
+    VideoSource,
+};
 // Параметры кодека живут в ядре (настраиваются пользователем, сохраняются).
 pub use p2p_core::settings::{AudioSettings, OpusMode, VideoSettings};
