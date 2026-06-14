@@ -4021,6 +4021,7 @@ dependencies = [
  "hex",
  "p2p-call",
  "p2p-core",
+ "p2p-media",
  "p2p-messenger",
  "p2p-ygg",
  "slint",

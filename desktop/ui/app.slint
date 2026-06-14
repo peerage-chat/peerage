@@ -142,9 +142,11 @@ export component AppWindow inherits Window {
     in property <bool> call-active;    // идёт разговор (таймер/mute)
     in property <string> call-timer;
     in property <bool> call-muted;
+    in property <image> remote-video;
 
     callback save-settings();
     callback start-call();
+    callback start-screen();
     callback accept-call();
     callback hangup-call();
     callback toggle-mute();
@@ -297,6 +299,11 @@ export component AppWindow inherits Window {
                 width: 30px;
                 clicked => { root.start-call(); }
                 Text { text: "📞"; font-size: 16px; vertical-alignment: center; horizontal-alignment: center; }
+            }
+            TouchArea {
+                width: 30px;
+                clicked => { root.start-screen(); }
+                Text { text: "🖥"; font-size: 16px; vertical-alignment: center; horizontal-alignment: center; }
             }
             TouchArea {
                 width: 28px;
@@ -478,6 +485,12 @@ export component AppWindow inherits Window {
                 color: #33b5e5;
                 font-size: 15px;
                 horizontal-alignment: center;
+            }
+            // Входящее видео (если есть).
+            if root.call-active: Image {
+                source: root.remote-video;
+                preferred-height: 280px;
+                image-fit: contain;
             }
             Rectangle { height: 30px; }
             // Входящий: принять/отклонить.
