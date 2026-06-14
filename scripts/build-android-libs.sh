@@ -47,5 +47,14 @@ dst="android/app/src/main/jniLibs/$ABI"
 mkdir -p "$dst"
 cp "ygg/libygg/android/$ABI/libygg.so" "$dst/"
 cp "/tmp/p2p-jnilibs/$ABI/libp2p_android.so" "$dst/"
+# libc++_shared.so из NDK — нужна libp2p_android.so (C++ openh264).
+TRIPLE_DIR="aarch64-linux-android"
+case "$ABI" in
+    armeabi-v7a) TRIPLE_DIR="arm-linux-androideabi" ;;
+    x86_64) TRIPLE_DIR="x86_64-linux-android" ;;
+    x86) TRIPLE_DIR="i686-linux-android" ;;
+esac
+SYSROOT_LIB="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/$TRIPLE_DIR"
+cp "$SYSROOT_LIB/libc++_shared.so" "$dst/"
 ls -la "$dst"
 echo "готово."

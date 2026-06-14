@@ -8,6 +8,7 @@ package dev.p2p.messenger
  */
 object Native {
     init {
+        System.loadLibrary("c++_shared") // нужна libp2p_android.so (C++ openh264)
         System.loadLibrary("ygg")
         System.loadLibrary("p2p_android")
     }
