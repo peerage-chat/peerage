@@ -3,14 +3,15 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use slint::{ComponentHandle, Image, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
-use p2p_call::capture::ScreenSource;
+use p2p_call::capture::{CameraSource, ScreenSource};
 use p2p_call::Call;
-use p2p_media::{DecodedFrame, VideoSource};
+use p2p_media::{push_source, DecodedFrame, VideoSource};
 use p2p_core::settings::{AudioSettings, OpusMode, Settings, VideoSettings};
 use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
 use p2p_messenger::{Event, Messenger};
@@ -156,7 +157,16 @@ fn update_net(ui: &AppWindow, core: &Arc<Core>) {
     ui.set_net_status(if online { format!("в сети · пиров {peers}") } else { format!("подключение… ({peers})") }.into());
 }
 
-// Состояние звонка живёт на UI-потоке (AudioCall !Send). Все обращения — с UI.
+/// Какое видео мы отдаём в звонке.
+#[derive(Clone, Copy, Default, PartialEq)]
+enum VideoMode {
+    #[default]
+    None,
+    Camera,
+    Screen,
+}
+
+// Состояние звонка живёт на UI-потоке (Call !Send). Все обращения — с UI.
 #[derive(Default)]
 struct CallCtx {
     call_id: Option<u64>,
@@ -166,8 +176,9 @@ struct CallCtx {
     muted: bool,
     started: Option<Instant>,
     call: Option<Call>,
-    want_screen: bool,
+    video_mode: VideoMode,
     frames: Option<std::sync::mpsc::Receiver<DecodedFrame>>,
+    capture_running: Option<Arc<AtomicBool>>,
 }
 
 thread_local! {
@@ -207,42 +218,64 @@ fn refresh_call_ui(ui: &AppWindow, core: &Arc<Core>) {
     });
 }
 
-/// Создать Call: аудио всегда, видео (захват экрана) если `screen`.
-fn make_call(core: &Arc<Core>, peer: [u8; 32], screen: bool) -> Option<Call> {
-    let (audio, video, source): (
-        Option<AudioSettings>,
-        Option<VideoSettings>,
-        Option<Box<dyn VideoSource + Send>>,
-    ) = {
-        let s = core.settings.lock().unwrap();
-        let audio = Some(s.audio);
-        if screen {
-            let v = s.video;
-            match ScreenSource::primary(v.width, v.height) {
-                Ok(src) => (audio, Some(v), Some(Box::new(src))),
-                Err(e) => {
-                    eprintln!("[call] захват экрана недоступен: {e}");
-                    (audio, None, None)
-                }
+/// Камера (`!Send`) живёт в своём потоке и пушит кадры в FrameFeeder; Call
+/// получает Send-совместимый PushSource. Возвращает источник и флаг остановки.
+fn spawn_camera(v: VideoSettings) -> (Box<dyn VideoSource + Send>, Arc<AtomicBool>) {
+    let (feeder, push) = push_source(v.width & !1, v.height & !1);
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    std::thread::spawn(move || {
+        let mut cam = match CameraSource::default_camera(v.width, v.height) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[call] камера недоступна: {e}");
+                return;
             }
-        } else {
-            (audio, None, None)
+        };
+        let interval = Duration::from_millis((1000 / v.fps.max(1)) as u64);
+        while r.load(Ordering::Relaxed) {
+            if let Some(rgb) = cam.next_frame() {
+                feeder.push(rgb);
+            }
+            std::thread::sleep(interval);
         }
-    };
-    match Call::start(core.messenger.clone(), peer, audio, video, source) {
-        Ok(c) => Some(c),
-        Err(e) => {
-            eprintln!("[call] не удалось начать медиа: {e}");
-            None
-        }
-    }
+    });
+    (Box::new(push), running)
 }
 
-/// Перейти в активное состояние: поднять медиа (с захватом экрана если `screen`).
-fn begin_call_media(ui: &AppWindow, core: &Arc<Core>, peer: [u8; 32], screen: bool) {
-    let mut call = match make_call(core, peer, screen) {
-        Some(c) => c,
-        None => return,
+/// Перейти в активное состояние: поднять медиа в заданном видео-режиме.
+fn begin_call_media(ui: &AppWindow, core: &Arc<Core>, peer: [u8; 32], mode: VideoMode) {
+    let (audio, v) = {
+        let s = core.settings.lock().unwrap();
+        (Some(s.audio), s.video)
+    };
+    let (video, source, cap_flag): (
+        Option<VideoSettings>,
+        Option<Box<dyn VideoSource + Send>>,
+        Option<Arc<AtomicBool>>,
+    ) = match mode {
+        VideoMode::None => (None, None, None),
+        VideoMode::Screen => match ScreenSource::primary(v.width, v.height) {
+            Ok(src) => (Some(v), Some(Box::new(src)), None),
+            Err(e) => {
+                eprintln!("[call] захват экрана недоступен: {e}");
+                (None, None, None)
+            }
+        },
+        VideoMode::Camera => {
+            let (src, flag) = spawn_camera(v);
+            (Some(v), Some(src), Some(flag))
+        }
+    };
+    let mut call = match Call::start(core.messenger.clone(), peer, audio, video, source) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[call] не удалось начать медиа: {e}");
+            if let Some(f) = cap_flag {
+                f.store(false, Ordering::Relaxed);
+            }
+            return;
+        }
     };
     let frames = call.take_frames();
     CALL.with(|cell| {
@@ -252,12 +285,18 @@ fn begin_call_media(ui: &AppWindow, core: &Arc<Core>, peer: [u8; 32], screen: bo
         c.started = Some(Instant::now());
         c.call = Some(call);
         c.frames = frames;
+        c.capture_running = cap_flag;
     });
     refresh_call_ui(ui, core);
 }
 
 fn reset_call(ui: &AppWindow, core: &Arc<Core>) {
-    CALL.with(|c| *c.borrow_mut() = CallCtx::default());
+    CALL.with(|c| {
+        if let Some(flag) = &c.borrow().capture_running {
+            flag.store(false, Ordering::Relaxed); // остановить поток камеры
+        }
+        *c.borrow_mut() = CallCtx::default();
+    });
     let back = if core.current_chat.lock().unwrap().is_some() { 3 } else { 0 };
     ui.set_screen(back);
 }
@@ -505,8 +544,32 @@ fn main() -> Result<(), slint::PlatformError> {
             let id = gen_call_id();
             let _ = c.messenger.send_call_invite(&peer, id, true, true); // video=true: шарим экран
             CALL.with(|cell| {
-                *cell.borrow_mut() =
-                    CallCtx { call_id: Some(id), peer: Some(peer), want_screen: true, ..Default::default() }
+                *cell.borrow_mut() = CallCtx {
+                    call_id: Some(id),
+                    peer: Some(peer),
+                    video_mode: VideoMode::Screen,
+                    ..Default::default()
+                }
+            });
+            refresh_call_ui(&ui, &c);
+            ui.set_screen(6);
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_start_camera(move || {
+            let ui = w.unwrap();
+            let Some(peer) = *c.current_chat.lock().unwrap() else { return };
+            let id = gen_call_id();
+            let _ = c.messenger.send_call_invite(&peer, id, true, true); // video=true: камера
+            CALL.with(|cell| {
+                *cell.borrow_mut() = CallCtx {
+                    call_id: Some(id),
+                    peer: Some(peer),
+                    video_mode: VideoMode::Camera,
+                    ..Default::default()
+                }
             });
             refresh_call_ui(&ui, &c);
             ui.set_screen(6);
@@ -521,7 +584,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let (Some(id), Some(peer)) = info {
                 let _ = c.messenger.send_call_accept(&peer, id);
                 // Принимающая сторона шлёт аудио и принимает видео (без своего захвата).
-                begin_call_media(&ui, &c, peer, false);
+                begin_call_media(&ui, &c, peer, VideoMode::None);
             }
         });
     }
@@ -656,15 +719,15 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
             }
         }
         Event::CallAccept { peer, call_id } => {
-            let (ours, want_screen) = CALL.with(|c| {
+            let (ours, mode) = CALL.with(|c| {
                 let c = c.borrow();
                 (
                     c.call_id == Some(call_id) && c.peer == Some(peer) && !c.active && !c.incoming,
-                    c.want_screen,
+                    c.video_mode,
                 )
             });
             if ours {
-                begin_call_media(ui, core, peer, want_screen);
+                begin_call_media(ui, core, peer, mode);
             }
         }
         Event::CallEnd { call_id, .. } => {

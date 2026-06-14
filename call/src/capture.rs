@@ -11,6 +11,8 @@ pub enum CaptureError {
     Screen(#[from] xcap::XCapError),
     #[error("монитор не найден")]
     NoMonitor,
+    #[error("камера: {0}")]
+    Camera(#[from] nokhwa::NokhwaError),
 }
 
 /// Захват экрана (первый монитор), масштабирование под заданный размер.
@@ -46,5 +48,37 @@ impl VideoSource for ScreenSource {
             rgb.push(px[2]);
         }
         Some(rgb)
+    }
+}
+
+/// Захват камеры (устройство по умолчанию), масштабирование под заданный размер.
+pub struct CameraSource {
+    cam: nokhwa::Camera,
+    w: u32,
+    h: u32,
+}
+
+impl CameraSource {
+    pub fn default_camera(width: u32, height: u32) -> Result<Self, CaptureError> {
+        use nokhwa::pixel_format::RgbFormat;
+        use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
+        let format = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+        let mut cam = nokhwa::Camera::new(CameraIndex::Index(0), format)?;
+        cam.open_stream()?;
+        Ok(Self { cam, w: width & !1, h: height & !1 })
+    }
+}
+
+impl VideoSource for CameraSource {
+    fn dimensions(&self) -> (u32, u32) {
+        (self.w, self.h)
+    }
+
+    fn next_frame(&mut self) -> Option<Vec<u8>> {
+        use nokhwa::pixel_format::RgbFormat;
+        let frame = self.cam.frame().ok()?;
+        let img = frame.decode_image::<RgbFormat>().ok()?; // RgbImage
+        let resized = image::imageops::resize(&img, self.w, self.h, FilterType::Triangle);
+        Some(resized.into_raw())
     }
 }

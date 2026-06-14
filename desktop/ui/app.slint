@@ -146,6 +146,7 @@ export component AppWindow inherits Window {
 
     callback save-settings();
     callback start-call();
+    callback start-camera();
     callback start-screen();
     callback accept-call();
     callback hangup-call();
@@ -299,6 +300,11 @@ export component AppWindow inherits Window {
                 width: 30px;
                 clicked => { root.start-call(); }
                 Text { text: "📞"; font-size: 16px; vertical-alignment: center; horizontal-alignment: center; }
+            }
+            TouchArea {
+                width: 30px;
+                clicked => { root.start-camera(); }
+                Text { text: "📹"; font-size: 16px; vertical-alignment: center; horizontal-alignment: center; }
             }
             TouchArea {
                 width: 30px;
