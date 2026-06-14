@@ -32,7 +32,7 @@ pub struct GroupChat {
 impl GroupChat {
     /// Создать новую группу (мы — администратор/секвенсор).
     pub fn create(identity: &Identity, messenger: Arc<Messenger>) -> Result<Self, GroupChatError> {
-        let mut member = Member::new(&identity.public_key_bytes())?;
+        let mut member = Member::new(identity)?;
         member.create_group()?;
         Ok(Self { member, messenger, self_pub: identity.public_key_bytes() })
     }
@@ -43,7 +43,7 @@ impl GroupChat {
         identity: &Identity,
         messenger: Arc<Messenger>,
     ) -> Result<(Self, Vec<u8>), GroupChatError> {
-        let member = Member::new(&identity.public_key_bytes())?;
+        let member = Member::new(identity)?;
         let kp = member.key_package()?;
         Ok((Self { member, messenger, self_pub: identity.public_key_bytes() }, kp))
     }

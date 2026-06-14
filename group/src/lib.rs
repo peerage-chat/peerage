@@ -10,9 +10,12 @@
 //! УПОРЯДОЧИВАНИЕ Commit (при одновременных изменениях состава) — отдельная
 //! задача (нужен delivery service, напр. ntfy из Фазы D).
 
+use std::path::Path;
+
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
-use openmls_rust_crypto::OpenMlsRustCrypto;
+use openmls_rust_crypto::{MemoryStorage, OpenMlsRustCrypto};
+use p2p_core::Identity;
 use tls_codec::{Deserialize as _, Serialize as _};
 
 /// Шифрсьют MLS на X25519/AES128-GCM/SHA256/Ed25519.
@@ -51,16 +54,70 @@ pub struct Member {
 }
 
 impl Member {
-    /// Создать участника с идентичностью = публичный ключ ed25519 (32 байта).
-    pub fn new(identity: &[u8; 32]) -> Result<Self, GroupError> {
+    /// Создать участника. MLS-ключ подписи = наша идентичность ed25519
+    /// (детерминированно из seed), credential = публичный ключ. Один и тот же
+    /// идентификатор, что в контактах/звонках.
+    pub fn new(identity: &Identity) -> Result<Self, GroupError> {
         let provider = OpenMlsRustCrypto::default();
-        let signer = SignatureKeyPair::new(SignatureScheme::ED25519).map_err(mls)?;
+        let signer = Self::signer_from(identity);
         signer.store(provider.storage()).map_err(mls)?;
-        let credential = CredentialWithKey {
-            credential: BasicCredential::new(identity.to_vec()).into(),
-            signature_key: signer.public().into(),
-        };
+        let credential = Self::credential(identity, &signer);
         Ok(Self { provider, signer, credential, group: None })
+    }
+
+    fn signer_from(identity: &Identity) -> SignatureKeyPair {
+        SignatureKeyPair::from_raw(
+            SignatureScheme::ED25519,
+            identity.seed().to_vec(),
+            identity.public_key_bytes().to_vec(),
+        )
+    }
+    fn credential(identity: &Identity, signer: &SignatureKeyPair) -> CredentialWithKey {
+        CredentialWithKey {
+            credential: BasicCredential::new(identity.public_key_bytes().to_vec()).into(),
+            signature_key: signer.public().into(),
+        }
+    }
+
+    /// Сохранить состояние группы на диск (MLS-хранилище + group_id).
+    pub fn save(&self, path: &Path) -> Result<(), GroupError> {
+        let group = self.group.as_ref().ok_or(GroupError::NoGroup)?;
+        let gid = group.group_id().as_slice().to_vec();
+        let mut storage = Vec::new();
+        self.provider.storage().serialize(&mut storage).map_err(mls)?;
+        let mut out = Vec::with_capacity(4 + gid.len() + storage.len());
+        out.extend_from_slice(&(gid.len() as u32).to_be_bytes());
+        out.extend_from_slice(&gid);
+        out.extend_from_slice(&storage);
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(mls)?;
+            }
+        }
+        std::fs::write(path, out).map_err(mls)?;
+        Ok(())
+    }
+
+    /// Загрузить состояние группы с диска.
+    pub fn load(path: &Path, identity: &Identity) -> Result<Self, GroupError> {
+        let data = std::fs::read(path).map_err(mls)?;
+        if data.len() < 4 {
+            return Err(GroupError::Mls("повреждённый файл группы".into()));
+        }
+        let glen = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        let gid = &data[4..4 + glen];
+        let storage_bytes = &data[4 + glen..];
+
+        let restored = MemoryStorage::deserialize(&mut &storage_bytes[..]).map_err(mls)?;
+        let provider = OpenMlsRustCrypto::default();
+        *provider.storage().values.write().unwrap() = restored.values.into_inner().unwrap();
+
+        let signer = Self::signer_from(identity);
+        let credential = Self::credential(identity, &signer);
+        let group = MlsGroup::load(provider.storage(), &GroupId::from_slice(gid))
+            .map_err(mls)?
+            .ok_or(GroupError::NoGroup)?;
+        Ok(Self { provider, signer, credential, group: Some(group) })
     }
 
     /// Сериализованный KeyPackage — отдаётся тому, кто будет нас добавлять.
@@ -172,10 +229,14 @@ impl Member {
 mod tests {
     use super::*;
 
+    fn id(n: u8) -> Identity {
+        Identity::from_seed(&[n; 32]).unwrap()
+    }
+
     #[test]
     fn two_members_exchange_encrypted_messages() {
-        let mut alice = Member::new(&[1u8; 32]).unwrap();
-        let mut bob = Member::new(&[2u8; 32]).unwrap();
+        let mut alice = Member::new(&id(1)).unwrap();
+        let mut bob = Member::new(&id(2)).unwrap();
 
         alice.create_group().unwrap();
         let bob_kp = bob.key_package().unwrap();
@@ -202,9 +263,9 @@ mod tests {
 
     #[test]
     fn third_member_added_via_commit() {
-        let mut a = Member::new(&[1u8; 32]).unwrap();
-        let mut b = Member::new(&[2u8; 32]).unwrap();
-        let mut c = Member::new(&[3u8; 32]).unwrap();
+        let mut a = Member::new(&id(1)).unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        let mut c = Member::new(&id(3)).unwrap();
         a.create_group().unwrap();
         let (_, w) = a.add(&b.key_package().unwrap()).unwrap();
         b.join(&w).unwrap();
@@ -222,5 +283,30 @@ mod tests {
         let ct = c.encrypt(b"hey all").unwrap();
         assert!(matches!(a.process(&ct).unwrap(), Incoming::Message(m) if m == b"hey all"));
         assert!(matches!(b.process(&ct).unwrap(), Incoming::Message(m) if m == b"hey all"));
+    }
+
+    #[test]
+    fn group_state_survives_save_load() {
+        let dir = std::env::temp_dir().join(format!("p2p-grp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.group");
+
+        let a_id = id(1);
+        let mut a = Member::new(&a_id).unwrap();
+        a.create_group().unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        let (_c, w) = a.add(&b.key_package().unwrap()).unwrap();
+        b.join(&w).unwrap();
+
+        a.save(&path).unwrap();
+        drop(a);
+
+        // Перезагрузка с диска — группа жива.
+        let mut a2 = Member::load(&path, &a_id).unwrap();
+        assert_eq!(a2.member_count(), 2);
+        let ct = a2.encrypt(b"after reload").unwrap();
+        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message(m) if m == b"after reload"));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -2466,6 +2466,9 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "hex-conservative"
@@ -4504,6 +4507,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea9cc9eb04ed97262fa96382d7dbf0adfebd5ecde7dbafc7070f9231dd9cf08b"
 dependencies = [
+ "hex",
  "log",
  "openmls_traits",
  "serde",
@@ -4648,6 +4652,7 @@ version = "0.1.0"
 dependencies = [
  "openmls",
  "openmls_basic_credential",
+ "openmls_memory_storage",
  "openmls_rust_crypto",
  "openmls_traits",
  "p2p-core",

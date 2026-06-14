@@ -13,5 +13,8 @@ openmls = "0.6"
 openmls_rust_crypto = "0.3"
 openmls_basic_credential = "0.3"
 openmls_traits = "0.3"
+# Прямая зависимость с feature test-utils включает serialize/deserialize у
+# MemoryStorage (нужно для сохранения/загрузки группы; свой StorageProvider избегаем).
+openmls_memory_storage = { version = "0.3", features = ["test-utils"] }
 thiserror.workspace = true
 p2p-core = { path = "../core" }
