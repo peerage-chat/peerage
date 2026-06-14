@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
+use p2p_core::settings::{AudioSettings, OpusMode, Settings, VideoSettings};
 use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
 use p2p_messenger::{Event, Messenger};
 use p2p_ygg::Node;
@@ -24,6 +25,41 @@ struct Core {
     current_chat: Mutex<Option<[u8; 32]>>,
     unread: Mutex<HashMap<[u8; 32], i32>>,
     search: Mutex<String>,
+    settings: Mutex<Settings>,
+    settings_path: std::path::PathBuf,
+}
+
+fn mode_str(m: OpusMode) -> &'static str {
+    match m {
+        OpusMode::Voip => "voip",
+        OpusMode::Audio => "audio",
+        OpusMode::LowDelay => "low_delay",
+    }
+}
+fn parse_mode(s: &str) -> OpusMode {
+    match s {
+        "voip" => OpusMode::Voip,
+        "low_delay" => OpusMode::LowDelay,
+        _ => OpusMode::Audio,
+    }
+}
+fn one_of<T: PartialEq + Copy>(v: T, allowed: &[T], default: T) -> T {
+    if allowed.contains(&v) { v } else { default }
+}
+
+/// Заполнить поля экрана настроек из Settings.
+fn populate_settings(ui: &AppWindow, s: &Settings) {
+    ui.set_cfg_sample_rate(s.audio.sample_rate.to_string().into());
+    ui.set_cfg_channels(s.audio.channels.to_string().into());
+    ui.set_cfg_bitrate(s.audio.bitrate.to_string().into());
+    ui.set_cfg_frame_ms(s.audio.frame_ms.to_string().into());
+    ui.set_cfg_jitter(s.audio.jitter_depth.to_string().into());
+    ui.set_cfg_mode(mode_str(s.audio.mode).into());
+    ui.set_cfg_fec(s.audio.fec);
+    ui.set_cfg_vwidth(s.video.width.to_string().into());
+    ui.set_cfg_vheight(s.video.height.to_string().into());
+    ui.set_cfg_vfps(s.video.fps.to_string().into());
+    ui.set_cfg_vbitrate(s.video.bitrate.to_string().into());
 }
 
 fn now() -> i64 {
@@ -144,6 +180,9 @@ fn main() -> Result<(), slint::PlatformError> {
         spawn_connect(messenger.clone(), *k);
     }
 
+    let settings_path = dir.join("settings.json");
+    let settings = Settings::load_or_create(&settings_path).unwrap_or_default();
+
     let core = Arc::new(Core {
         messenger,
         contacts: Mutex::new(contacts),
@@ -152,6 +191,8 @@ fn main() -> Result<(), slint::PlatformError> {
         current_chat: Mutex::new(None),
         unread: Mutex::new(HashMap::new()),
         search: Mutex::new(String::new()),
+        settings: Mutex::new(settings),
+        settings_path,
     });
 
     // --- UI ---
@@ -159,6 +200,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_my_address(address.into());
     ui.set_my_pubkey(hex::encode(me_pub).into());
     ui.set_my_words(ModelRc::new(VecModel::from(me_words)));
+    populate_settings(&ui, &core.settings.lock().unwrap());
     rebuild_contacts(&ui, &core);
     update_net(&ui, &core);
 
@@ -284,6 +326,48 @@ fn main() -> Result<(), slint::PlatformError> {
             let key = ui.get_my_pubkey().to_string();
             let ok = arboard::Clipboard::new().and_then(|mut c| c.set_text(key)).is_ok();
             ui.set_copy_label(if ok { "Скопировано ✓".into() } else { "Не удалось скопировать".into() });
+        });
+    }
+
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_save_settings(move || {
+            let ui = w.unwrap();
+            let pi = |s: slint::SharedString, d: i64| s.to_string().trim().parse::<i64>().unwrap_or(d);
+
+            let sample_rate = one_of(
+                pi(ui.get_cfg_sample_rate(), 48000) as u32,
+                &[8000, 12000, 16000, 24000, 48000],
+                48000,
+            );
+            let channels = one_of(pi(ui.get_cfg_channels(), 1) as u16, &[1, 2], 1);
+            let bitrate = (pi(ui.get_cfg_bitrate(), 96000) as i32).clamp(6000, 510000);
+            let frame_ms = one_of(pi(ui.get_cfg_frame_ms(), 20) as u32, &[10, 20, 40, 60], 20);
+            let jitter_depth = (pi(ui.get_cfg_jitter(), 3) as usize).clamp(1, 20);
+            let audio = AudioSettings {
+                sample_rate,
+                channels,
+                bitrate,
+                frame_ms,
+                mode: parse_mode(&ui.get_cfg_mode()),
+                fec: ui.get_cfg_fec(),
+                jitter_depth,
+            };
+            let video = VideoSettings {
+                width: (pi(ui.get_cfg_vwidth(), 1920) as u32).clamp(160, 7680),
+                height: (pi(ui.get_cfg_vheight(), 1080) as u32).clamp(120, 4320),
+                fps: (pi(ui.get_cfg_vfps(), 60) as u32).clamp(1, 120),
+                bitrate: (pi(ui.get_cfg_vbitrate(), 8_000_000) as i32).clamp(100_000, 100_000_000),
+            };
+            let new = Settings { audio, video };
+
+            *c.settings.lock().unwrap() = new;
+            match new.save(&c.settings_path) {
+                Ok(()) => ui.set_settings_status("Сохранено ✓ (применится к следующему звонку)".into()),
+                Err(e) => ui.set_settings_status(format!("Ошибка: {e}").into()),
+            }
+            populate_settings(&ui, &new); // показать нормализованные значения
         });
     }
 

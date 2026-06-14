@@ -121,6 +121,21 @@ export component AppWindow inherits Window {
     in property <string> info-error;
     in property <string> copy-label: "Скопировать ключ";
 
+    // Настройки (редактируемые пользователем, сохраняются на диск).
+    in-out property <string> cfg-sample-rate;
+    in-out property <string> cfg-channels;
+    in-out property <string> cfg-bitrate;
+    in-out property <string> cfg-frame-ms;
+    in-out property <string> cfg-jitter;
+    in-out property <string> cfg-mode;        // "voip" | "audio" | "low_delay"
+    in-out property <bool> cfg-fec;
+    in-out property <string> cfg-vwidth;
+    in-out property <string> cfg-vheight;
+    in-out property <string> cfg-vfps;
+    in-out property <string> cfg-vbitrate;
+    in property <string> settings-status;
+
+    callback save-settings();
     callback open-chat(string);
     callback open-info();
     callback send-message(string);
@@ -147,6 +162,18 @@ export component AppWindow inherits Window {
                 padding: 16px; spacing: 12px;
                 Text { text: "▣"; color: #33b5e5; vertical-alignment: center; }
                 Text { text: "Мой код"; color: white; vertical-alignment: center; }
+                Rectangle {}
+                Text { text: "›"; color: #888888; vertical-alignment: center; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: #333333; }
+        }
+        Rectangle {
+            height: 50px;
+            TouchArea { clicked => { root.screen = 5; } }
+            HorizontalLayout {
+                padding: 16px; spacing: 12px;
+                Text { text: "⚙"; color: #33b5e5; vertical-alignment: center; }
+                Text { text: "Настройки"; color: white; vertical-alignment: center; }
                 Rectangle {}
                 Text { text: "›"; color: #888888; vertical-alignment: center; }
             }
@@ -340,6 +367,80 @@ export component AppWindow inherits Window {
             HoloButton { text: "Удалить контакт"; accent: #e53935;
                 clicked => { root.delete-contact(); } }
             Text { text: root.info-error; color: #e53935; wrap: word-wrap; }
+        }
+    }
+
+    // ===== Настройки =====
+    if root.screen == 5: VerticalLayout {
+        TopBar { title: "Настройки"; show-back: true; back => { root.screen = 0; } }
+        VerticalLayout {
+            padding: 14px;
+            spacing: 7px;
+            alignment: start;
+
+            Text { text: "АУДИО"; color: #888888; font-size: 11px; }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "Частота, Гц"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                HoloInput { text <=> root.cfg-sample-rate; }
+            }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "Каналы (1/2)"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                HoloInput { text <=> root.cfg-channels; }
+            }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "Битрейт, бит/с"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                HoloInput { text <=> root.cfg-bitrate; }
+            }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "Кадр, мс"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                HoloInput { text <=> root.cfg-frame-ms; }
+            }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "Джиттер, кадров"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                HoloInput { text <=> root.cfg-jitter; }
+            }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "Режим Opus"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                Rectangle {
+                    background: #222222; border-width: 1px; border-color: #333333; height: 40px;
+                    TouchArea { clicked => {
+                        root.cfg-mode = root.cfg-mode == "voip" ? "audio"
+                                      : root.cfg-mode == "audio" ? "low_delay" : "voip";
+                    } }
+                    Text { text: root.cfg-mode; color: #33b5e5;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "FEC"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                Rectangle {
+                    background: #222222; border-width: 1px; border-color: #333333; height: 40px;
+                    TouchArea { clicked => { root.cfg-fec = !root.cfg-fec; } }
+                    Text { text: root.cfg-fec ? "вкл" : "выкл"; color: root.cfg-fec ? #8bc34a : #888888;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+
+            Text { text: "ВИДЕО (для видеозвонка)"; color: #888888; font-size: 11px; }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "Ширина"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                HoloInput { text <=> root.cfg-vwidth; }
+            }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "Высота"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                HoloInput { text <=> root.cfg-vheight; }
+            }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "FPS"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                HoloInput { text <=> root.cfg-vfps; }
+            }
+            HorizontalLayout { spacing: 8px;
+                Text { text: "Битрейт, бит/с"; color: #cccccc; width: 150px; vertical-alignment: center; }
+                HoloInput { text <=> root.cfg-vbitrate; }
+            }
+
+            HoloButton { text: "Сохранить"; filled: true; clicked => { root.save-settings(); } }
+            Text { text: root.settings-status; color: #8bc34a; }
         }
     }
 }
