@@ -10,6 +10,7 @@ name = "p2p_media"
 
 [dependencies]
 opus = "0.3"
+openh264 = "0.6"
 thiserror.workspace = true
 p2p-core = { path = "../core" }
 p2p-messenger = { path = "../messenger" }
