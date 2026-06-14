@@ -46,6 +46,43 @@ pub fn init_with_key(key: [u8; 32]) {
     let _ = KEY.set(key);
 }
 
+/// Инициализировать ключом из файла (Android и прочие платформы без надёжного
+/// keyring). Ключ — 32 случайных байта в приватном каталоге приложения (sandbox).
+/// При первом запуске создаётся и пишется с правами 0600; далее читается.
+///
+/// Слабее аппаратного хранилища (Android Keystore — дальнейшее усиление), но
+/// детерминирован между перезапусками, в отличие от `keyring` на Android.
+pub fn init_with_keyfile(path: &std::path::Path) -> Result<(), VaultError> {
+    if KEY.get().is_some() {
+        return Ok(());
+    }
+    let key: [u8; 32] = match std::fs::read(path) {
+        Ok(bytes) => bytes.as_slice().try_into().map_err(|_| VaultError::BadKey)?,
+        Err(_) => {
+            let mut k = [0u8; 32];
+            OsRng.fill_bytes(&mut k);
+            write_keyfile(path, &k)?;
+            k
+        }
+    };
+    let _ = KEY.set(key);
+    Ok(())
+}
+
+/// Записать ключ атомарно с ограничением прав (0600 на unix).
+fn write_keyfile(path: &std::path::Path, key: &[u8; 32]) -> Result<(), VaultError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| VaultError::Keyring(e.to_string()))?;
+    }
+    std::fs::write(path, key).map_err(|e| VaultError::Keyring(e.to_string()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 /// Включено ли шифрование at-rest.
 pub fn enabled() -> bool {
     KEY.get().is_some()

@@ -13,8 +13,8 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
-        // Пока только arm64 (реальные устройства). Добавьте x86_64 для эмулятора.
-        ndk { abiFilters += listOf("arm64-v8a") }
+        // arm64 — реальные устройства; x86_64 — эмулятор.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     buildTypes {

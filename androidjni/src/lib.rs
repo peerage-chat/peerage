@@ -238,8 +238,9 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
         return ret(&env, &serde_json::json!({"error": e.to_string()}).to_string());
     }
 
-    // At-rest: ключ из Android Keystore придёт позже (G4); пока — graceful fallback.
-    if let Err(e) = p2p_core::vault::init() {
+    // At-rest: ключ в файле приватного каталога (keyring на Android ненадёжен —
+    // разные ключи между перезапусками). Android Keystore — дальнейшее усиление.
+    if let Err(e) = p2p_core::vault::init_with_keyfile(&dir.join("vault.key")) {
         log::warn!("at-rest шифрование недоступно ({e}); данные открытым текстом");
     }
 
