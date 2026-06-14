@@ -223,6 +223,19 @@ impl Member {
     pub fn is_joined(&self) -> bool {
         self.group.is_some()
     }
+
+    /// Идентификатор группы (если в группе).
+    pub fn group_id(&self) -> Option<Vec<u8>> {
+        self.group.as_ref().map(|g| g.group_id().as_slice().to_vec())
+    }
+}
+
+/// Узнать group_id входящего MLS-сообщения (для маршрутизации между группами).
+/// Возвращает None для Welcome и нечитаемых сообщений.
+pub fn peek_group_id(message: &[u8]) -> Option<Vec<u8>> {
+    let msg = MlsMessageIn::tls_deserialize_exact(message).ok()?;
+    let protocol = msg.try_into_protocol_message().ok()?;
+    Some(protocol.group_id().as_slice().to_vec())
 }
 
 #[cfg(test)]

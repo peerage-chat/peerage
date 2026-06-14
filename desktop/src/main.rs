@@ -10,10 +10,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use slint::{ComponentHandle, Image, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 use p2p_call::capture::{CameraSource, ScreenSource};
-use p2p_call::Call;
-use p2p_media::{push_source, DecodedFrame, VideoSource};
+use p2p_call::{Call, GroupCall};
 use p2p_core::settings::{AudioSettings, OpusMode, Settings, VideoSettings};
 use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
+use p2p_core::Identity;
+use p2p_group::peek_group_id;
+use p2p_groupchat::GroupChat;
+use p2p_media::{push_source, DecodedFrame, VideoSource};
 use p2p_messenger::{Event, Messenger};
 use p2p_ygg::Node;
 
@@ -32,6 +35,8 @@ struct Core {
     search: Mutex<String>,
     settings: Mutex<Settings>,
     settings_path: std::path::PathBuf,
+    identity: Identity,
+    data_dir: std::path::PathBuf,
 }
 
 fn mode_str(m: OpusMode) -> &'static str {
@@ -301,6 +306,109 @@ fn reset_call(ui: &AppWindow, core: &Arc<Core>) {
     ui.set_screen(back);
 }
 
+// ----- Группы (состояние на UI-потоке) -----
+
+struct GMsg {
+    mine: bool,
+    text: String,
+    time: i64,
+}
+struct GroupEntry {
+    chat: GroupChat,
+    name: String,
+    messages: Vec<GMsg>,
+}
+#[derive(Default)]
+struct GroupsState {
+    groups: HashMap<Vec<u8>, GroupEntry>,
+    pending: Option<GroupChat>,         // ожидание Welcome (нас пригласили)
+    invites: HashMap<[u8; 32], Vec<u8>>, // peer → group_id (мы пригласили, ждём KP)
+    active: Option<Vec<u8>>,
+    gcall: Option<GroupCall>,
+}
+thread_local! {
+    static GROUPS: RefCell<GroupsState> = RefCell::new(GroupsState::default());
+}
+
+fn group_path(core: &Arc<Core>, id: &[u8]) -> std::path::PathBuf {
+    core.data_dir.join("groups").join(format!("{}.group", hex::encode(id)))
+}
+
+fn save_group_index(core: &Arc<Core>) {
+    let idx: HashMap<String, String> =
+        GROUPS.with(|g| g.borrow().groups.iter().map(|(id, e)| (hex::encode(id), e.name.clone())).collect());
+    let _ = std::fs::create_dir_all(core.data_dir.join("groups"));
+    if let Ok(j) = serde_json::to_vec_pretty(&idx) {
+        let _ = std::fs::write(core.data_dir.join("groups").join("index.json"), j);
+    }
+}
+
+fn save_group(core: &Arc<Core>, id: &[u8]) {
+    GROUPS.with(|g| {
+        if let Some(e) = g.borrow().groups.get(id) {
+            let _ = e.chat.save(&group_path(core, id));
+        }
+    });
+    save_group_index(core);
+}
+
+fn load_groups(core: &Arc<Core>) {
+    let Ok(bytes) = std::fs::read(core.data_dir.join("groups").join("index.json")) else { return };
+    let Ok(idx) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else { return };
+    for (hexid, name) in idx {
+        let Ok(raw) = hex::decode(&hexid) else { continue };
+        let path = core.data_dir.join("groups").join(format!("{hexid}.group"));
+        if let Ok(chat) = GroupChat::load(&path, &core.identity, core.messenger.clone()) {
+            for m in chat.members() {
+                spawn_connect(core.messenger.clone(), m);
+            }
+            GROUPS.with(|g| {
+                g.borrow_mut().groups.insert(raw.clone(), GroupEntry { chat, name, messages: Vec::new() });
+            });
+        }
+    }
+}
+
+fn refresh_groups_ui(ui: &AppWindow) {
+    let items: Vec<GroupItem> = GROUPS.with(|g| {
+        g.borrow()
+            .groups
+            .iter()
+            .map(|(id, e)| GroupItem { id: hex::encode(id).into(), name: e.name.clone().into() })
+            .collect()
+    });
+    ui.set_groups(ModelRc::new(VecModel::from(items)));
+}
+
+fn refresh_group_chat_ui(ui: &AppWindow) {
+    GROUPS.with(|g| {
+        let g = g.borrow();
+        let Some(active) = g.active.as_ref() else { return };
+        let Some(e) = g.groups.get(active) else { return };
+        ui.set_group_name(format!("{} ({})", e.name, e.chat.member_count()).into());
+        let msgs: Vec<MsgItem> = e
+            .messages
+            .iter()
+            .map(|m| MsgItem {
+                text: m.text.clone().into(),
+                mine: m.mine,
+                time: fmt_time(m.time).into(),
+                status: SharedString::new(),
+            })
+            .collect();
+        ui.set_group_messages(ModelRc::new(VecModel::from(msgs)));
+        ui.set_group_call_active(g.gcall.is_some());
+    });
+}
+
+fn group_push(id: &[u8], mine: bool, text: String) {
+    GROUPS.with(|g| {
+        if let Some(e) = g.borrow_mut().groups.get_mut(id) {
+            e.messages.push(GMsg { mine, text, time: now() });
+        }
+    });
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     // --- движок ---
     let dir = match std::env::var_os("P2P_DATA_DIR") {
@@ -323,6 +431,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let messages = MessageStore::load(&dir.join("messages.json")).expect("сообщения");
     let contact_keys: Vec<[u8; 32]> = contacts.list().iter().filter_map(|c| parse_key(&c.key)).collect();
 
+    let identity_for_core = identity.clone();
     let (messenger, rx) = Messenger::start(identity, node);
     let messenger = Arc::new(messenger);
     for k in &contact_keys {
@@ -342,6 +451,8 @@ fn main() -> Result<(), slint::PlatformError> {
         search: Mutex::new(String::new()),
         settings: Mutex::new(settings),
         settings_path,
+        identity: identity_for_core,
+        data_dir: dir.clone(),
     });
 
     // --- UI ---
@@ -616,6 +727,94 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // --- группы ---
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_create_group(move |name| {
+            let ui = w.unwrap();
+            let name = name.trim();
+            let name = if name.is_empty() { "Группа".to_string() } else { name.to_string() };
+            if let Ok(chat) = GroupChat::create(&c.identity, c.messenger.clone()) {
+                if let Some(id) = chat.group_id() {
+                    GROUPS.with(|g| {
+                        g.borrow_mut().groups.insert(id.clone(), GroupEntry { chat, name, messages: Vec::new() });
+                    });
+                    save_group(&c, &id);
+                    refresh_groups_ui(&ui);
+                    ui.set_screen(0);
+                }
+            }
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_open_group(move |idh| {
+            let ui = w.unwrap();
+            if let Ok(id) = hex::decode(idh.as_str()) {
+                GROUPS.with(|g| g.borrow_mut().active = Some(id));
+                refresh_group_chat_ui(&ui);
+                ui.set_screen(7);
+            }
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_group_send(move |text| {
+            let ui = w.unwrap();
+            let text = text.trim().to_string();
+            if text.is_empty() {
+                return;
+            }
+            let Some(id) = GROUPS.with(|g| g.borrow().active.clone()) else { return };
+            GROUPS.with(|g| {
+                if let Some(e) = g.borrow_mut().groups.get_mut(&id) {
+                    let _ = e.chat.send_text(&text);
+                }
+            });
+            group_push(&id, true, text);
+            save_group(&c, &id);
+            refresh_group_chat_ui(&ui);
+        });
+    }
+    {
+        let w = ui.as_weak();
+        ui.on_group_add(move |keyh| {
+            let ui = w.unwrap();
+            let Some(peer) = parse_key(&keyh) else { return };
+            let Some(id) = GROUPS.with(|g| g.borrow().active.clone()) else { return };
+            GROUPS.with(|g| {
+                let mut gg = g.borrow_mut();
+                if let Some(e) = gg.groups.get(&id) {
+                    e.chat.invite(peer);
+                }
+                gg.invites.insert(peer, id.clone());
+            });
+            ui.set_screen(7);
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_group_call_toggle(move || {
+            let ui = w.unwrap();
+            let Some(id) = GROUPS.with(|g| g.borrow().active.clone()) else { return };
+            let already = GROUPS.with(|g| g.borrow().gcall.is_some());
+            if already {
+                GROUPS.with(|g| g.borrow_mut().gcall = None);
+            } else {
+                let members =
+                    GROUPS.with(|g| g.borrow().groups.get(&id).map(|e| e.chat.members()).unwrap_or_default());
+                let audio = c.settings.lock().unwrap().audio;
+                if let Ok(call) = GroupCall::start(c.messenger.clone(), members, Some(audio), None, None) {
+                    GROUPS.with(|g| g.borrow_mut().gcall = Some(call));
+                }
+            }
+            refresh_group_chat_ui(&ui);
+        });
+    }
+
     // --- поток событий движка → UI ---
     {
         let core_ev = core.clone();
@@ -666,6 +865,10 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
+
+    // Загрузить сохранённые группы и подключиться к их участникам.
+    load_groups(&core);
+    refresh_groups_ui(&ui);
 
     ui.run()
 }
@@ -736,8 +939,66 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
                 reset_call(ui, core);
             }
         }
-        // Групповые сообщения — UI групп в десктопе пока не подключён.
-        Event::Group { .. } | Event::GroupKeyRequest { .. } | Event::GroupKeyReply { .. } => {}
+        Event::GroupKeyRequest { peer } => {
+            let need = GROUPS.with(|g| g.borrow().pending.is_none());
+            if need {
+                if let Ok((pending, kp)) = GroupChat::pending(&core.identity, core.messenger.clone()) {
+                    let _ = core.messenger.send_group_key_reply(&peer, &kp);
+                    GROUPS.with(|g| g.borrow_mut().pending = Some(pending));
+                }
+            }
+        }
+        Event::GroupKeyReply { peer, key_package } => {
+            let gid = GROUPS.with(|g| g.borrow_mut().invites.remove(&peer));
+            if let Some(id) = gid {
+                GROUPS.with(|g| {
+                    if let Some(e) = g.borrow_mut().groups.get_mut(&id) {
+                        let _ = e.chat.add_member(peer, &key_package);
+                    }
+                });
+                save_group(core, &id);
+                refresh_group_chat_ui(ui);
+            }
+        }
+        Event::Group { data, .. } => {
+            // Существующая группа? (Commit/прикладное)
+            let known_gid = peek_group_id(&data)
+                .filter(|gid| GROUPS.with(|g| g.borrow().groups.contains_key(gid)));
+            if let Some(gid) = known_gid {
+                let text = GROUPS.with(|g| {
+                    g.borrow_mut().groups.get_mut(&gid).and_then(|e| e.chat.handle(&data).ok().flatten())
+                });
+                if let Some(t) = text {
+                    group_push(&gid, false, t);
+                }
+                save_group(core, &gid);
+                if GROUPS.with(|g| g.borrow().active.as_deref() == Some(&gid[..])) {
+                    refresh_group_chat_ui(ui);
+                }
+                return;
+            }
+            // Иначе — возможно Welcome для ожидающего вступления.
+            let joined = GROUPS.with(|g| {
+                let mut g = g.borrow_mut();
+                if let Some(p) = g.pending.as_mut() {
+                    let _ = p.handle(&data);
+                    p.group_id()
+                } else {
+                    None
+                }
+            });
+            if let Some(id) = joined {
+                if let Some(chat) = GROUPS.with(|g| g.borrow_mut().pending.take()) {
+                    GROUPS.with(|g| {
+                        g.borrow_mut()
+                            .groups
+                            .insert(id.clone(), GroupEntry { chat, name: "Группа".into(), messages: Vec::new() });
+                    });
+                    save_group(core, &id);
+                    refresh_groups_ui(ui);
+                }
+            }
+        }
     }
 }
 

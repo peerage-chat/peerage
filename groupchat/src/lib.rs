@@ -8,6 +8,7 @@
 //! удаляет участников один (создатель группы), что исключает одновременные
 //! Commit. Прикладные сообщения шлёт любой (MLS упорядочивает по эпохам).
 
+use std::path::Path;
 use std::sync::Arc;
 
 use p2p_core::Identity;
@@ -100,5 +101,31 @@ impl GroupChat {
 
     pub fn member_count(&self) -> usize {
         self.member.member_count()
+    }
+
+    /// Идентификатор группы (hex-able байты), если в группе.
+    pub fn group_id(&self) -> Option<Vec<u8>> {
+        self.member.group_id()
+    }
+
+    /// Ключи других участников (для группового звонка).
+    pub fn members(&self) -> Vec<PeerKey> {
+        self.others()
+    }
+
+    /// Сохранить состояние группы на диск.
+    pub fn save(&self, path: &Path) -> Result<(), GroupChatError> {
+        self.member.save(path)?;
+        Ok(())
+    }
+
+    /// Загрузить группу с диска.
+    pub fn load(
+        path: &Path,
+        identity: &Identity,
+        messenger: Arc<Messenger>,
+    ) -> Result<Self, GroupChatError> {
+        let member = Member::load(path, identity)?;
+        Ok(Self { member, messenger, self_pub: identity.public_key_bytes() })
     }
 }

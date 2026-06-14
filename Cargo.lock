@@ -4639,9 +4639,12 @@ dependencies = [
  "hex",
  "p2p-call",
  "p2p-core",
+ "p2p-group",
+ "p2p-groupchat",
  "p2p-media",
  "p2p-messenger",
  "p2p-ygg",
+ "serde_json",
  "slint",
  "slint-build",
 ]

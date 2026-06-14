@@ -14,6 +14,10 @@ export struct MsgItem {
     time: string,
     status: string,
 }
+export struct GroupItem {
+    id: string,
+    name: string,
+}
 
 // --- переиспользуемые элементы Holo ---
 
@@ -144,7 +148,19 @@ export component AppWindow inherits Window {
     in property <bool> call-muted;
     in property <image> remote-video;
 
+    // Группы.
+    in property <[GroupItem]> groups;
+    in property <string> group-name;
+    in property <[MsgItem]> group-messages;
+    in property <bool> group-call-active;
+    in-out property <string> new-group-name;
+
     callback save-settings();
+    callback create-group(string);
+    callback open-group(string);
+    callback group-send(string);
+    callback group-add(string);
+    callback group-call-toggle();
     callback start-call();
     callback start-camera();
     callback start-screen();
@@ -191,6 +207,28 @@ export component AppWindow inherits Window {
                 Text { text: "Настройки"; color: white; vertical-alignment: center; }
                 Rectangle {}
                 Text { text: "›"; color: #888888; vertical-alignment: center; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: #333333; }
+        }
+        Rectangle {
+            height: 50px;
+            TouchArea { clicked => { root.new-group-name = ""; root.screen = 8; } }
+            HorizontalLayout {
+                padding: 16px; spacing: 12px;
+                Text { text: "👥"; color: #33b5e5; vertical-alignment: center; }
+                Text { text: "Создать группу"; color: white; vertical-alignment: center; }
+                Rectangle {}
+                Text { text: "+"; color: #888888; vertical-alignment: center; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: #333333; }
+        }
+        for grp in root.groups: Rectangle {
+            height: 48px;
+            TouchArea { clicked => { root.open-group(grp.id); } }
+            HorizontalLayout {
+                padding-left: 16px; padding-right: 16px; spacing: 12px;
+                Text { text: "#"; color: #33b5e5; vertical-alignment: center; }
+                Text { text: grp.name; color: white; vertical-alignment: center; }
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: #333333; }
         }
@@ -519,6 +557,91 @@ export component AppWindow inherits Window {
                 }
                 HoloButton { text: "Завершить"; accent: #e53935; width: 130px;
                     clicked => { root.hangup-call(); } }
+            }
+        }
+    }
+
+    // ===== Групповой чат =====
+    if root.screen == 7: VerticalLayout {
+        TopBar { title: root.group-name; show-back: true; back => { root.screen = 0; }
+            TouchArea {
+                width: 30px;
+                clicked => { root.group-call-toggle(); }
+                Text {
+                    text: "📞";
+                    font-size: 16px;
+                    color: root.group-call-active ? #8bc34a : #ffffff;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+            TouchArea {
+                width: 30px;
+                clicked => { root.screen = 9; }
+                Text { text: "👤+"; font-size: 14px; color: #33b5e5; vertical-alignment: center; }
+            }
+        }
+        ListView {
+            for m in root.group-messages: HorizontalLayout {
+                padding: 6px;
+                alignment: m.mine ? end : start;
+                Rectangle {
+                    max-width: 320px;
+                    background: m.mine ? #0c3b4d : #222222;
+                    border-width: m.mine ? 0px : 1px;
+                    border-color: #333333;
+                    border-radius: 3px;
+                    VerticalLayout {
+                        padding: 8px; spacing: 2px;
+                        Text { text: m.text; color: white; wrap: word-wrap; }
+                        Text { text: m.time; color: #889; font-size: 10px; horizontal-alignment: right; }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            height: 56px; background: #222222;
+            Rectangle { height: 1px; background: #333333; }
+            HorizontalLayout {
+                padding: 8px; spacing: 8px;
+                gmsg := HoloInput {
+                    placeholder: "Сообщение в группу…";
+                    accepted => { root.group-send(self.text); self.text = ""; }
+                }
+                Rectangle {
+                    width: 44px; background: #33b5e5;
+                    TouchArea { clicked => { root.group-send(gmsg.text); gmsg.text = ""; } }
+                    Text { text: "➤"; color: #04222e; font-size: 18px;
+                        horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    // ===== Создать группу =====
+    if root.screen == 8: VerticalLayout {
+        TopBar { title: "Новая группа"; show-back: true; back => { root.screen = 0; } }
+        VerticalLayout {
+            padding: 16px; spacing: 10px; alignment: start;
+            Text { text: "НАЗВАНИЕ ГРУППЫ"; color: #888888; font-size: 11px; }
+            ng := HoloInput { placeholder: "Например: Друзья"; text <=> root.new-group-name; }
+            HoloButton { text: "Создать"; filled: true; clicked => { root.create-group(ng.text); } }
+        }
+    }
+
+    // ===== Добавить участника (выбор контакта) =====
+    if root.screen == 9: VerticalLayout {
+        TopBar { title: "Добавить участника"; show-back: true; back => { root.screen = 7; } }
+        ListView {
+            for c in root.contacts: Rectangle {
+                height: 52px;
+                TouchArea { clicked => { root.group-add(c.key); } }
+                HorizontalLayout {
+                    padding-left: 16px; padding-right: 16px; spacing: 12px;
+                    Text { text: "●"; color: c.online ? #8bc34a : #666666; font-size: 11px; vertical-alignment: center; }
+                    Text { text: c.name; color: white; vertical-alignment: center; }
+                }
+                Rectangle { y: parent.height - 1px; height: 1px; background: #333333; }
             }
         }
     }
