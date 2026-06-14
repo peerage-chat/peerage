@@ -7,6 +7,7 @@ export struct ContactItem {
     fingerprint: string,
     online: bool,
     unread: int,
+    verified: bool,
 }
 export struct MsgItem {
     text: string,
@@ -122,6 +123,7 @@ export component AppWindow inherits Window {
     in property <string> info-key;
     in property <[string]> info-words;
     in property <bool> info-online;
+    in property <bool> info-verified;
     in property <string> info-error;
     in property <string> copy-label: "Скопировать ключ";
 
@@ -173,6 +175,7 @@ export component AppWindow inherits Window {
     callback add-contact(string, string);
     callback rename-contact(string);
     callback delete-contact();
+    callback verify-contact();
     callback search-changed(string);
     callback copy-pubkey();
 
@@ -256,6 +259,7 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                     }
                     Text { text: c.name; color: white; vertical-alignment: center; }
+                    if c.verified: Text { text: "✓"; color: #4caf50; font-size: 12px; vertical-alignment: center; }
                     Rectangle {}
                     if c.unread > 0: Rectangle {
                         width: 22px; height: 20px; border-radius: 10px; background: #33b5e5;
@@ -429,6 +433,13 @@ export component AppWindow inherits Window {
                         Text { text: w; color: #33b5e5; vertical-alignment: center; } }
                 }
             } }
+            Text { text: "Сверьте эти слова с собеседником по другому каналу (звонок, личная встреча) — защита от подмены ключа."; color: #888888; font-size: 11px; wrap: word-wrap; }
+            HorizontalLayout { spacing: 8px;
+                Text { text: root.info-verified ? "✓ Проверен" : "Не проверен";
+                    color: root.info-verified ? #4caf50 : #e6a23c; vertical-alignment: center; }
+                HoloButton { text: root.info-verified ? "Снять отметку" : "Пометить проверенным";
+                    width: 220px; clicked => { root.verify-contact(); } }
+            }
             Text { text: "ПУБЛИЧНЫЙ КЛЮЧ"; color: #888888; font-size: 11px; }
             Text { text: root.info-key; color: white; font-size: 12px;
                 font-family: "monospace"; wrap: word-wrap; }

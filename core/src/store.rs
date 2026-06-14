@@ -112,6 +112,9 @@ pub struct Contact {
     pub fingerprint: String,
     /// Когда добавлен (unix-секунды).
     pub added: i64,
+    /// Подтверждён ли fingerprint вне канала (защита от MITM при обмене ключом).
+    #[serde(default)]
+    pub verified: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -169,6 +172,7 @@ impl ContactStore {
             name: name.to_string(),
             fingerprint: crate::identity::fingerprint_words(key).join(" "),
             added,
+            verified: false,
         };
         self.by_key.insert(*key, contact);
         self.save()?;
@@ -188,6 +192,18 @@ impl ContactStore {
     /// Знаем ли мы этот ключ.
     pub fn contains(&self, key: &[u8; 32]) -> bool {
         self.by_key.contains_key(key)
+    }
+
+    /// Отметить контакт как проверенный/непроверенный (после сверки fingerprint).
+    pub fn set_verified(&mut self, key: &[u8; 32], verified: bool) -> Result<bool, StoreError> {
+        match self.by_key.get_mut(key) {
+            Some(c) => {
+                c.verified = verified;
+                self.save()?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
     }
 
     /// Переименовать контакт. Возвращает false, если контакта нет.
@@ -419,6 +435,29 @@ mod tests {
         // Перезагрузка отражает изменения.
         let store2 = ContactStore::load(&path).unwrap();
         assert!(!store2.contains(&k));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn contacts_verified_flag_persists() {
+        let dir = tmp_dir();
+        let path = dir.join("contacts.json");
+        let k = Identity::generate().public_key_bytes();
+
+        let mut store = ContactStore::load(&path).unwrap();
+        store.add(&k, "Eve", 0).unwrap();
+        assert!(!store.get(&k).unwrap().verified, "новый контакт не проверен");
+        assert!(store.set_verified(&k, true).unwrap());
+        assert!(store.get(&k).unwrap().verified);
+
+        // Флаг переживает перезагрузку.
+        let store2 = ContactStore::load(&path).unwrap();
+        assert!(store2.get(&k).unwrap().verified);
+
+        // Снятие отметки.
+        let mut store3 = ContactStore::load(&path).unwrap();
+        assert!(store3.set_verified(&k, false).unwrap());
+        assert!(!store3.get(&k).unwrap().verified);
         std::fs::remove_dir_all(&dir).ok();
     }
 

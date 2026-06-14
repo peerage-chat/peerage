@@ -123,6 +123,7 @@ fn rebuild_contacts(ui: &AppWindow, core: &Arc<Core>) {
                 fingerprint: short_fp.into(),
                 online: core.messenger.is_online(&key),
                 unread: *unread.get(&key).unwrap_or(&0),
+                verified: c.verified,
             }
         })
         .collect();
@@ -589,9 +590,26 @@ fn main() -> Result<(), slint::PlatformError> {
                 let words: Vec<SharedString> = ct.fingerprint.split_whitespace().map(|w| w.into()).collect();
                 ui.set_info_words(ModelRc::new(VecModel::from(words)));
                 ui.set_info_online(c.messenger.is_online(&key));
+                ui.set_info_verified(ct.verified);
                 ui.set_info_error("".into());
                 ui.set_screen(4);
             }
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_verify_contact(move || {
+            let ui = w.unwrap();
+            let Some(key) = *c.current_chat.lock().unwrap() else { return };
+            let now_verified = {
+                let mut store = c.contacts.lock().unwrap();
+                let cur = store.get(&key).map(|x| x.verified).unwrap_or(false);
+                let _ = store.set_verified(&key, !cur);
+                !cur
+            };
+            ui.set_info_verified(now_verified);
+            rebuild_contacts(&ui, &c);
         });
     }
     {
