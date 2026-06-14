@@ -4,6 +4,7 @@ members = [
     "core",
     "transport",
     "messenger",
+    "media",
     "desktop",
 ]
 # transport линкует Go-библиотеку libygg.so и собирается только под Linux (WSL).
