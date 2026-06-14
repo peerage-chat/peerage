@@ -10,6 +10,10 @@ import androidx.compose.runtime.toMutableStateList
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Разрешение видео-звонка (камера и видео-движок должны совпадать). */
+const val VIDEO_W = 640
+const val VIDEO_H = 480
+
 data class Contact(
     val key: String,
     val name: String,
@@ -54,9 +58,11 @@ class AppModel {
     var currentChat by mutableStateOf<String?>(null)
     var netPeers by mutableStateOf(0)
 
-    // Звонок (1:1). audio задаётся из Activity (нужен Context для AudioRecord/Track).
+    // Звонок (1:1). audio/appContext задаются из Activity (нужен Context).
     var call by mutableStateOf<CallState?>(null)
     var audio: CallAudio? = null
+    var appContext: android.content.Context? = null
+    private var camera: CameraCapture? = null
 
     /** Инициализация ядра (блокирующая — звать с IO-потока). */
     fun start(dataDir: String) {
@@ -191,12 +197,15 @@ class AppModel {
 
     // ── Звонки ──────────────────────────────────────────────────────────────
 
-    /** Начать исходящий звонок (пока только аудио). */
+    /** Начать исходящий звонок (аудио или видео). */
     fun startOutgoing(peer: String, video: Boolean = false) {
         if (call != null) return
-        val params = JSONObject(Native.callStart(peer, video, if (video) 640 else 0, if (video) 480 else 0))
+        val vw = if (video) VIDEO_W else 0
+        val vh = if (video) VIDEO_H else 0
+        val params = JSONObject(Native.callStart(peer, video, vw, vh))
         if (!params.has("call_id")) return
         audio?.start(params.getInt("sample_rate"), params.getInt("channels"))
+        if (video) startCamera()
         call = CallState(peer, params.getLong("call_id"), incoming = false, withVideo = video, status = "ringing")
     }
 
@@ -204,9 +213,17 @@ class AppModel {
     fun acceptCall() {
         val c = call ?: return
         if (!c.incoming) return
-        val params = JSONObject(Native.callAccept(c.peer, c.callId, c.withVideo, if (c.withVideo) 640 else 0, if (c.withVideo) 480 else 0))
+        val vw = if (c.withVideo) VIDEO_W else 0
+        val vh = if (c.withVideo) VIDEO_H else 0
+        val params = JSONObject(Native.callAccept(c.peer, c.callId, c.withVideo, vw, vh))
         audio?.start(params.optInt("sample_rate", 48000), params.optInt("channels", 1))
+        if (c.withVideo) startCamera()
         call = c.copy(status = "active")
+    }
+
+    private fun startCamera() {
+        val ctx = appContext ?: return
+        camera = CameraCapture(ctx, VIDEO_W, VIDEO_H) { Native.callPushVideo(it) }.also { it.start() }
     }
 
     /** Завершить/отклонить звонок (шлёт end собеседнику и глушит аудио). */
@@ -219,6 +236,8 @@ class AppModel {
     /** Локально завершить звонок (без отправки end — например, по событию call_end). */
     private fun endCall() {
         audio?.stop()
+        camera?.stop()
+        camera = null
         call = null
     }
 

@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,15 +33,16 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val model = AppModel()
-    private val micPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    private val perms =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         model.audio = CallAudio(applicationContext)
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            micPermission.launch(Manifest.permission.RECORD_AUDIO)
-        }
+        model.appContext = applicationContext
+        val need = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+            .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (need.isNotEmpty()) perms.launch(need.toTypedArray())
         val dataDir = filesDir.absolutePath
         setContent { P2PTheme { App(model, dataDir) } }
     }
@@ -105,7 +107,7 @@ private fun Root(model: AppModel) {
                 Screen.Chat -> ChatScreen(model,
                     onBack = { screen = Screen.Contacts },
                     onInfo = { screen = Screen.Info },
-                    onCall = { model.startOutgoing(it) })
+                    onCall = { key, video -> model.startOutgoing(key, video) })
                 Screen.Add -> AddScreen(model, onDone = { screen = Screen.Contacts })
                 Screen.Me -> MeScreen(model, onBack = { screen = Screen.Contacts })
                 Screen.Info -> InfoScreen(model,
@@ -178,7 +180,7 @@ private fun ContactRow(c: Contact, online: Boolean, unread: Int, onClick: () -> 
 }
 
 @Composable
-private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, onCall: (String) -> Unit) {
+private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, onCall: (String, Boolean) -> Unit) {
     val key = model.currentChat ?: return
     val contact = model.contacts.firstOrNull { it.key == key }
     val msgs = model.messages[key]
@@ -186,7 +188,8 @@ private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, 
 
     Column(Modifier.fillMaxSize()) {
         TopBar(contact?.name ?: "Чат", onBack = onBack) {
-            Text("📞", fontSize = 18.sp, modifier = Modifier.clickable { onCall(key) }.padding(8.dp))
+            Text("📞", fontSize = 18.sp, modifier = Modifier.clickable { onCall(key, false) }.padding(8.dp))
+            Text("📹", fontSize = 18.sp, modifier = Modifier.clickable { onCall(key, true) }.padding(8.dp))
             Text("ⓘ", color = HoloAccent, fontSize = 20.sp, modifier = Modifier.clickable { onInfo() }.padding(8.dp))
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp), reverseLayout = false) {
@@ -320,10 +323,21 @@ private fun CallOverlay(model: AppModel, call: CallState) {
         else -> "Идёт звонок"
     }
     Box(Modifier.fillMaxSize().background(Color(0xF2000000)), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
-            Text(statusText, color = HoloSecondary, fontSize = 15.sp)
-            Spacer(Modifier.height(40.dp))
+        // Входящее видео (если видео-звонок активен) — на фоне.
+        if (call.withVideo && call.status == "active") {
+            VideoFrame(Modifier.fillMaxSize())
+        }
+        Column(
+            Modifier.fillMaxSize().padding(bottom = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Bottom,
+        ) {
+            if (!(call.withVideo && call.status == "active")) {
+                Spacer(Modifier.weight(1f))
+                Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+                Text(statusText, color = HoloSecondary, fontSize = 15.sp)
+                Spacer(Modifier.weight(1f))
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (call.status == "incoming") {
                     RoundButton("✓", HoloOnline) { model.acceptCall() }
@@ -336,6 +350,43 @@ private fun CallOverlay(model: AppModel, call: CallState) {
                 }
             }
         }
+    }
+}
+
+/** Отрисовка входящих видео-кадров: поллит [Native.callPullVideo] и рисует Bitmap. */
+@Composable
+private fun VideoFrame(modifier: Modifier = Modifier) {
+    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val data = Native.callPullVideo()
+            if (data.size > 8) {
+                val w = (data[0].toInt() and 0xff) or ((data[1].toInt() and 0xff) shl 8) or
+                    ((data[2].toInt() and 0xff) shl 16) or ((data[3].toInt() and 0xff) shl 24)
+                val h = (data[4].toInt() and 0xff) or ((data[5].toInt() and 0xff) shl 8) or
+                    ((data[6].toInt() and 0xff) shl 16) or ((data[7].toInt() and 0xff) shl 24)
+                if (w in 1..4096 && h in 1..4096 && data.size >= 8 + w * h * 3) {
+                    val px = IntArray(w * h)
+                    var o = 8
+                    for (i in 0 until w * h) {
+                        val r = data[o++].toInt() and 0xff
+                        val g = data[o++].toInt() and 0xff
+                        val b = data[o++].toInt() and 0xff
+                        px[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                    }
+                    bitmap = android.graphics.Bitmap.createBitmap(px, w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                }
+            }
+            delay(40)
+        }
+    }
+    bitmap?.let {
+        androidx.compose.foundation.Image(
+            bitmap = it.asImageBitmap(),
+            contentDescription = null,
+            modifier = modifier,
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        )
     }
 }
 

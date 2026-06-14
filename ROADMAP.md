@@ -115,9 +115,10 @@
   (AudioRecord+AudioTrack+AEC), UI (оверлей звонка, входящие/исходящие, mute).
   opus+openh264 кросс-компилируются под Android (cmake builtin Android + Ninja).
   APK собирается. Сигнализация — через те же события (CallInvite/Accept/End).
-- [ ] G3 видео: движок и JNI (push/pull кадров) готовы; осталась Kotlin-сторона —
-  захват Camera2/MediaProjection (YUV→RGB → `callPushVideo`) и отрисовка входящих
-  кадров (`callPullVideo`). MediaCodec/Vulkan из ТЗ — последующая оптимизация.
+- [x] G3 видео: `CameraCapture` (Camera2, YUV_420_888→RGB) → `callPushVideo`;
+  отрисовка входящих кадров (`callPullVideo`→Bitmap) в оверлее звонка; кнопка
+  видеозвонка. Захват экрана (MediaProjection) и MediaCodec/Vulkan из ТЗ —
+  последующая оптимизация. APK собирается.
 - [ ] **G4 — группы + UnifiedPush + Android Keystore (vault-ключ) + полировка.**
 - **DoD:** паритет с десктопом по чату и 1:1 звонкам.
 
