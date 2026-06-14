@@ -91,7 +91,7 @@ private fun CenterMessage(text: String) {
     }
 }
 
-private enum class Screen { Contacts, Chat, Add, Me, Info }
+private enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember }
 
 @Composable
 private fun Root(model: AppModel) {
@@ -103,7 +103,8 @@ private fun Root(model: AppModel) {
                 Screen.Contacts -> ContactsScreen(model,
                     onOpen = { model.openChat(it); screen = Screen.Chat },
                     onAdd = { screen = Screen.Add },
-                    onMe = { screen = Screen.Me })
+                    onMe = { screen = Screen.Me },
+                    onGroups = { model.refreshGroups(); screen = Screen.Groups })
                 Screen.Chat -> ChatScreen(model,
                     onBack = { screen = Screen.Contacts },
                     onInfo = { screen = Screen.Info },
@@ -113,6 +114,16 @@ private fun Root(model: AppModel) {
                 Screen.Info -> InfoScreen(model,
                     onBack = { screen = Screen.Chat },
                     onDeleted = { screen = Screen.Contacts })
+                Screen.Groups -> GroupsScreen(model,
+                    onBack = { screen = Screen.Contacts },
+                    onOpen = { model.openGroup(it); screen = Screen.GroupChat },
+                    onCreate = { screen = Screen.CreateGroup })
+                Screen.GroupChat -> GroupChatScreen(model,
+                    onBack = { screen = Screen.Groups },
+                    onAddMember = { screen = Screen.AddMember })
+                Screen.CreateGroup -> CreateGroupScreen(model,
+                    onDone = { gid -> if (gid.isNotEmpty()) { model.openGroup(gid); screen = Screen.GroupChat } else screen = Screen.Groups })
+                Screen.AddMember -> AddMemberScreen(model, onDone = { screen = Screen.GroupChat })
             }
         }
         // Звонок — поверх всего.
@@ -137,9 +148,10 @@ private fun TopBar(title: String, onBack: (() -> Unit)? = null, actions: @Compos
 }
 
 @Composable
-private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () -> Unit, onMe: () -> Unit) {
+private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () -> Unit, onMe: () -> Unit, onGroups: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         TopBar("p2p messenger") {
+            Text("👥", fontSize = 18.sp, modifier = Modifier.clickable { onGroups() }.padding(8.dp))
             Text("⊕", color = HoloAccent, fontSize = 22.sp, modifier = Modifier.clickable { onAdd() }.padding(8.dp))
             Text("⚿", color = HoloAccent, fontSize = 20.sp, modifier = Modifier.clickable { onMe() }.padding(8.dp))
         }
@@ -309,6 +321,107 @@ private fun InfoScreen(model: AppModel, onBack: () -> Unit, onDeleted: () -> Uni
             Button(onClick = { model.remove(key); onDeleted() },
                 colors = ButtonDefaults.buttonColors(containerColor = HoloError)) {
                 Text("Удалить контакт", color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupsScreen(model: AppModel, onBack: () -> Unit, onOpen: (String) -> Unit, onCreate: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        TopBar("Группы", onBack = onBack) {
+            Text("⊕", color = HoloAccent, fontSize = 22.sp, modifier = Modifier.clickable { onCreate() }.padding(8.dp))
+        }
+        if (model.groups.isEmpty()) {
+            CenterMessage("Нет групп. Создайте (⊕).")
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(model.groups, key = { it.gid }) { g ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onOpen(g.gid) }.padding(horizontal = 16.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(g.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                        Text("${g.members} уч.", color = HoloSecondary, fontSize = 12.sp)
+                    }
+                    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupChatScreen(model: AppModel, onBack: () -> Unit, onAddMember: () -> Unit) {
+    val gid = model.currentGroup ?: return
+    val group = model.groups.firstOrNull { it.gid == gid }
+    val msgs = model.groupMessages[gid]
+    var input by remember(gid) { mutableStateOf("") }
+
+    Column(Modifier.fillMaxSize()) {
+        TopBar(group?.name ?: "Группа", onBack = onBack) {
+            Text("＋", color = HoloAccent, fontSize = 22.sp, modifier = Modifier.clickable { onAddMember() }.padding(8.dp))
+        }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
+            items(msgs ?: emptyList()) { m ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
+                    Box(Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(10.dp))
+                        .background(if (m.mine) HoloAccent else HoloSurface).padding(10.dp)) {
+                        Text(m.text, color = if (m.mine) HoloAccentDark else Color.White, fontSize = 15.sp)
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().background(HoloSurface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextField(input, { input = it }, Modifier.weight(1f),
+                placeholder = { Text("Сообщение…", color = HoloSecondary) }, colors = inputColors(), maxLines = 4)
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.clip(CircleShape).background(HoloAccent).size(44.dp)
+                .clickable { model.sendGroupText(gid, input); input = "" }, contentAlignment = Alignment.Center) {
+                Text("➤", color = HoloAccentDark, fontSize = 18.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CreateGroupScreen(model: AppModel, onDone: (String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize()) {
+        TopBar("Новая группа", onBack = { onDone("") })
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("НАЗВАНИЕ", color = HoloSecondary, fontSize = 11.sp)
+            TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
+            Button(onClick = { onDone(model.createGroup(name)) },
+                colors = ButtonDefaults.buttonColors(containerColor = HoloAccent)) {
+                Text("Создать", color = HoloAccentDark)
+            }
+            Text("Вы станете администратором. Добавляйте участников из контактов внутри группы.",
+                color = HoloSecondary, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+private fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
+    val gid = model.currentGroup ?: return
+    Column(Modifier.fillMaxSize()) {
+        TopBar("Добавить участника", onBack = onDone)
+        if (model.contacts.isEmpty()) {
+            CenterMessage("Нет контактов для приглашения.")
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(model.contacts, key = { it.key }) { c ->
+                    Row(Modifier.fillMaxWidth().clickable {
+                        model.inviteToGroup(gid, c.key); onDone()
+                    }.padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("●", color = if (model.online[c.key] == true) HoloOnline else Color(0xFF666666), fontSize = 11.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(c.name, color = Color.White, fontSize = 16.sp)
+                    }
+                    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
+                }
             }
         }
     }

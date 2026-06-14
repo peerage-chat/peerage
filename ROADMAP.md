@@ -119,7 +119,14 @@
   отрисовка входящих кадров (`callPullVideo`→Bitmap) в оверлее звонка; кнопка
   видеозвонка. Захват экрана (MediaProjection) и MediaCodec/Vulkan из ТЗ —
   последующая оптимизация. APK собирается.
-- [ ] **G4 — группы + UnifiedPush + Android Keystore (vault-ключ) + полировка.**
+- [x] **G4 — групповой чат (MLS)**: групповой актор `androidjni/groups.rs` (живёт в
+  потоке event_pump, т.к. GroupChat !Send) — зеркалит десктоп (админ-секвенсор,
+  маршрутизация по group_id, персистентность data_dir/groups). JNI: create/invite/
+  sendText/list/history/members (через канал команд). Kotlin: список групп,
+  групповой чат, создание, добавление участника (сетевой онбординг KeyPackage).
+  APK собирается, 6 групповых JNI-символов проверены.
+- [ ] G4 остаток: групповые звонки (mesh-аудио, по образцу десктопного `GroupCall`),
+  UnifiedPush (фоновое пробуждение), Android Keystore для vault-ключа.
 - **DoD:** паритет с десктопом по чату и 1:1 звонкам.
 
 ---

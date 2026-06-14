@@ -32,6 +32,9 @@ data class Message(
 /** Идентичность пользователя (своя «визитка»). */
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
+data class Group(val gid: String, val name: String, val members: Int)
+data class GroupMsg(val text: String, val mine: Boolean, val time: Long)
+
 /** Состояние звонка. status: "incoming" | "ringing" | "active". */
 data class CallState(
     val peer: String,
@@ -58,6 +61,11 @@ class AppModel {
     var currentChat by mutableStateOf<String?>(null)
     var netPeers by mutableStateOf(0)
 
+    // Группы (MLS).
+    val groups = mutableStateListOf<Group>()
+    val groupMessages = mutableStateMapOf<String, SnapshotStateList<GroupMsg>>()
+    var currentGroup by mutableStateOf<String?>(null)
+
     // Звонок (1:1). audio/appContext задаются из Activity (нужен Context).
     var call by mutableStateOf<CallState?>(null)
     var audio: CallAudio? = null
@@ -77,6 +85,7 @@ class AppModel {
             fingerprint = json.getString("fingerprint"),
         )
         refreshContacts()
+        refreshGroups()
     }
 
     fun refreshContacts() {
@@ -185,7 +194,14 @@ class AppModel {
             "call_end" -> call?.let { c ->
                 if (o.getString("peer") == c.peer) endCall()
             }
-            // group_* — фаза G4.
+            "groups_changed" -> {
+                refreshGroups()
+                currentGroup?.let { loadGroupHistory(it) }
+            }
+            "group_msg" -> {
+                val gid = o.getString("gid")
+                groupLog(gid).add(GroupMsg(o.getString("text"), mine = false, time = System.currentTimeMillis() / 1000))
+            }
         }
     }
 
@@ -246,5 +262,51 @@ class AppModel {
         val m = !c.muted
         audio?.setMuted(m)
         call = c.copy(muted = m)
+    }
+
+    // ── Группы ──────────────────────────────────────────────────────────────
+
+    fun refreshGroups() {
+        val arr = JSONArray(Native.groupList())
+        val list = (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            Group(o.getString("gid"), o.getString("name"), o.optInt("members", 1))
+        }
+        groups.clear()
+        groups.addAll(list)
+    }
+
+    fun createGroup(name: String): String {
+        val gid = Native.groupCreate(name.ifBlank { "Группа" })
+        if (gid.isNotEmpty()) refreshGroups()
+        return gid
+    }
+
+    fun openGroup(gid: String) {
+        currentGroup = gid
+        loadGroupHistory(gid)
+    }
+
+    private fun loadGroupHistory(gid: String) {
+        val arr = JSONArray(Native.groupHistory(gid))
+        val list = (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            GroupMsg(o.getString("text"), o.getBoolean("mine"), o.optLong("time", 0))
+        }
+        groupMessages[gid] = list.toMutableStateList()
+    }
+
+    private fun groupLog(gid: String): SnapshotStateList<GroupMsg> =
+        groupMessages.getOrPut(gid) { mutableListOf<GroupMsg>().toMutableStateList() }
+
+    fun inviteToGroup(gid: String, peerHex: String) {
+        Native.groupInvite(gid, peerHex)
+    }
+
+    fun sendGroupText(gid: String, text: String) {
+        if (text.isBlank()) return
+        if (Native.groupSendText(gid, text)) {
+            groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000))
+        }
     }
 }

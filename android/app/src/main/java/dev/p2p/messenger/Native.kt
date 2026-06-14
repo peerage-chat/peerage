@@ -57,4 +57,18 @@ object Native {
     /** Входящий видео-кадр: [w:4 LE][h:4 LE][rgb…] или пусто. */
     external fun callPullVideo(): ByteArray
     external fun callSetMuted(muted: Boolean)
+
+    // ── Группы (MLS) ──────────────────────────────────────────────────────
+    /** Создать группу. Возвращает group_id (hex) или "". */
+    external fun groupCreate(name: String): String
+    /** Пригласить контакт в группу (по hex-ключу). */
+    external fun groupInvite(gid: String, peerHex: String)
+    /** Отправить текст в группу. */
+    external fun groupSendText(gid: String, text: String): Boolean
+    /** Список групп: JSON [{gid, name, members}]. */
+    external fun groupList(): String
+    /** История группы: JSON [{text, mine, time}]. */
+    external fun groupHistory(gid: String): String
+    /** Ключи участников группы (hex): JSON-массив. */
+    external fun groupMembers(gid: String): String
 }

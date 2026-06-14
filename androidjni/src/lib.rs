@@ -9,10 +9,12 @@
 //! состояние и история живут в Rust (как на десктопе), UI — отражение.
 
 mod call;
+mod groups;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -22,10 +24,28 @@ use jni::JNIEnv;
 
 use p2p_core::settings::{AudioSettings, VideoSettings};
 use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
+use p2p_core::Identity;
 use p2p_messenger::{Event, Messenger};
 use p2p_ygg::Node;
 
 use call::CallEngine;
+use groups::GroupManager;
+
+/// Команда группового актора (исполняется в потоке event_pump, т.к. GroupChat !Send).
+enum GroupCmd {
+    Create { name: String, resp: Sender<String> },
+    Invite { gid: Vec<u8>, peer: [u8; 32] },
+    SendText { gid: Vec<u8>, text: String, resp: Sender<bool> },
+    List { resp: Sender<String> },
+    History { gid: Vec<u8>, resp: Sender<String> },
+    Members { gid: Vec<u8>, resp: Sender<String> },
+}
+
+/// Работа для потока event_pump: событие мессенджера либо групповая команда.
+enum Job {
+    Ev(Event),
+    Cmd(GroupCmd),
+}
 
 /// Текущий активный звонок (1:1 на процесс).
 static CALL: Mutex<Option<Arc<CallEngine>>> = Mutex::new(None);
@@ -41,6 +61,8 @@ struct App {
     messages: Mutex<MessageStore>,
     me_pub: [u8; 32],
     events: Mutex<VecDeque<String>>,
+    /// Канал к групповому актору (потоку event_pump).
+    jobs: Sender<Job>,
 }
 
 static APP: OnceLock<Arc<App>> = OnceLock::new();
@@ -54,7 +76,7 @@ fn parse_key(s: &str) -> Option<[u8; 32]> {
 }
 
 /// Фоновый коннект к пиру (как на десктопе): держим попытки, пока процесс жив.
-fn spawn_connect(m: Arc<Messenger>, key: [u8; 32]) {
+pub(crate) fn spawn_connect(m: Arc<Messenger>, key: [u8; 32]) {
     std::thread::spawn(move || loop {
         let _ = m.connect(&key, Duration::from_secs(20));
         std::thread::sleep(Duration::from_secs(5));
@@ -75,60 +97,107 @@ fn push_event(app: &App, json: serde_json::Value) {
     app.events.lock().unwrap().push_back(json.to_string());
 }
 
-/// Поток-насос событий мессенджера: персистит входящее/статусы и кладёт JSON в очередь.
-fn event_pump(app: Arc<App>, rx: std::sync::mpsc::Receiver<Event>) {
-    while let Ok(ev) = rx.recv() {
-        match ev {
-            Event::Presence { peer, online } => {
-                if online {
-                    ensure_contact(&app, peer);
-                }
-                push_event(&app, serde_json::json!({
-                    "type": "presence", "peer": hex::encode(peer), "online": online,
+/// Поток event_pump = групповой актор: владеет [`GroupManager`] (GroupChat !Send),
+/// обрабатывает события мессенджера и групповые команды из JNI — всё в одном потоке.
+fn event_pump(
+    app: Arc<App>,
+    job_rx: Receiver<Job>,
+    identity: Identity,
+    messenger: Arc<Messenger>,
+    data_dir: PathBuf,
+) {
+    let mut groups = GroupManager::new(identity, messenger, data_dir);
+    while let Ok(job) = job_rx.recv() {
+        match job {
+            Job::Ev(ev) => handle_event(&app, &mut groups, ev),
+            Job::Cmd(cmd) => handle_cmd(&app, &mut groups, cmd),
+        }
+    }
+}
+
+/// Обработать одно событие мессенджера: персист + JSON в очередь поллинга +
+/// маршрутизация групповых событий в [`GroupManager`].
+fn handle_event(app: &Arc<App>, groups: &mut GroupManager, ev: Event) {
+    match ev {
+        Event::Presence { peer, online } => {
+            if online {
+                ensure_contact(app, peer);
+            }
+            push_event(app, serde_json::json!({
+                "type": "presence", "peer": hex::encode(peer), "online": online,
+            }));
+        }
+        Event::Text { peer, id, text } => {
+            ensure_contact(app, peer);
+            let t = now();
+            let _ = app.messages.lock().unwrap().append(&peer, StoredMessage {
+                id, text: text.clone(), mine: false, time: t, status: String::new(),
+            });
+            push_event(app, serde_json::json!({
+                "type": "text", "peer": hex::encode(peer), "id": id, "text": text, "time": t,
+            }));
+        }
+        Event::Ack { peer, id } => {
+            let _ = app.messages.lock().unwrap().set_status(&peer, id, "delivered");
+            push_event(app, serde_json::json!({"type": "ack", "peer": hex::encode(peer), "id": id}));
+        }
+        Event::Undelivered { peer, id } => {
+            let _ = app.messages.lock().unwrap().set_status(&peer, id, "failed");
+            push_event(app, serde_json::json!({"type": "undelivered", "peer": hex::encode(peer), "id": id}));
+        }
+        Event::CallInvite { peer, call_id, audio, video } => push_event(app, serde_json::json!({
+            "type": "call_invite", "peer": hex::encode(peer), "call_id": call_id,
+            "audio": audio, "video": video,
+        })),
+        Event::CallAccept { peer, call_id } => push_event(app, serde_json::json!({
+            "type": "call_accept", "peer": hex::encode(peer), "call_id": call_id,
+        })),
+        Event::CallEnd { peer, call_id } => push_event(app, serde_json::json!({
+            "type": "call_end", "peer": hex::encode(peer), "call_id": call_id,
+        })),
+        Event::Group { data, .. } => {
+            let out = groups.on_group(&data);
+            if let (Some(gid), Some(text)) = (&out.gid, &out.text) {
+                push_event(app, serde_json::json!({
+                    "type": "group_msg", "gid": hex::encode(gid), "text": text,
                 }));
             }
-            Event::Text { peer, id, text } => {
-                ensure_contact(&app, peer);
-                let t = now();
-                let _ = app.messages.lock().unwrap().append(&peer, StoredMessage {
-                    id, text: text.clone(), mine: false, time: t, status: String::new(),
-                });
-                push_event(&app, serde_json::json!({
-                    "type": "text", "peer": hex::encode(peer), "id": id, "text": text, "time": t,
-                }));
+            if out.joined {
+                push_event(app, serde_json::json!({"type": "groups_changed"}));
             }
-            Event::Ack { peer, id } => {
-                let _ = app.messages.lock().unwrap().set_status(&peer, id, "delivered");
-                push_event(&app, serde_json::json!({
-                    "type": "ack", "peer": hex::encode(peer), "id": id,
-                }));
+        }
+        Event::GroupKeyRequest { peer } => groups.on_key_request(peer),
+        Event::GroupKeyReply { peer, key_package } => {
+            if groups.on_key_reply(peer, &key_package) {
+                push_event(app, serde_json::json!({"type": "groups_changed"}));
             }
-            Event::Undelivered { peer, id } => {
-                let _ = app.messages.lock().unwrap().set_status(&peer, id, "failed");
-                push_event(&app, serde_json::json!({
-                    "type": "undelivered", "peer": hex::encode(peer), "id": id,
-                }));
+        }
+    }
+}
+
+/// Исполнить групповую команду из JNI (в потоке актора) и вернуть результат.
+fn handle_cmd(app: &Arc<App>, groups: &mut GroupManager, cmd: GroupCmd) {
+    match cmd {
+        GroupCmd::Create { name, resp } => {
+            let gid = groups.create(&name).map(|g| hex::encode(g)).unwrap_or_default();
+            if !gid.is_empty() {
+                push_event(app, serde_json::json!({"type": "groups_changed"}));
             }
-            Event::CallInvite { peer, call_id, audio, video } => push_event(&app, serde_json::json!({
-                "type": "call_invite", "peer": hex::encode(peer), "call_id": call_id,
-                "audio": audio, "video": video,
-            })),
-            Event::CallAccept { peer, call_id } => push_event(&app, serde_json::json!({
-                "type": "call_accept", "peer": hex::encode(peer), "call_id": call_id,
-            })),
-            Event::CallEnd { peer, call_id } => push_event(&app, serde_json::json!({
-                "type": "call_end", "peer": hex::encode(peer), "call_id": call_id,
-            })),
-            Event::Group { peer, data } => push_event(&app, serde_json::json!({
-                "type": "group", "peer": hex::encode(peer), "data": hex::encode(data),
-            })),
-            Event::GroupKeyRequest { peer } => push_event(&app, serde_json::json!({
-                "type": "group_key_request", "peer": hex::encode(peer),
-            })),
-            Event::GroupKeyReply { peer, key_package } => push_event(&app, serde_json::json!({
-                "type": "group_key_reply", "peer": hex::encode(peer),
-                "key_package": hex::encode(key_package),
-            })),
+            let _ = resp.send(gid);
+        }
+        GroupCmd::Invite { gid, peer } => groups.invite(&gid, peer),
+        GroupCmd::SendText { gid, text, resp } => {
+            let ok = groups.send_text(&gid, &text);
+            let _ = resp.send(ok);
+        }
+        GroupCmd::List { resp } => {
+            let _ = resp.send(groups.list_json());
+        }
+        GroupCmd::History { gid, resp } => {
+            let _ = resp.send(groups.history_json(&gid));
+        }
+        GroupCmd::Members { gid, resp } => {
+            let _ = resp.send(groups.members_json(&gid));
         }
     }
 }
@@ -198,21 +267,39 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
     let contact_keys: Vec<[u8; 32]> =
         contacts.list().iter().filter_map(|c| parse_key(&c.key)).collect();
 
+    let identity_for_groups = identity.clone(); // для GroupManager (нужна та же identity)
     let (messenger, rx) = Messenger::start(identity, node);
     let messenger = Arc::new(messenger);
     for k in &contact_keys {
         spawn_connect(messenger.clone(), *k);
     }
 
+    // Актор-канал: события мессенджера и групповые команды JNI идут в один поток.
+    let (job_tx, job_rx) = std::sync::mpsc::channel::<Job>();
+    {
+        let job_tx = job_tx.clone();
+        std::thread::spawn(move || {
+            while let Ok(ev) = rx.recv() {
+                if job_tx.send(Job::Ev(ev)).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
     let app = Arc::new(App {
-        messenger,
+        messenger: messenger.clone(),
         contacts: Mutex::new(contacts),
         messages: Mutex::new(messages),
         me_pub,
         events: Mutex::new(VecDeque::new()),
+        jobs: job_tx,
     });
     let _ = APP.set(app.clone());
-    std::thread::spawn(move || event_pump(app, rx));
+    let groups_dir = dir.clone();
+    std::thread::spawn(move || {
+        event_pump(app, job_rx, identity_for_groups, messenger, groups_dir)
+    });
 
     ret(&env, &identity_json(&me_pub, &address).to_string())
 }
@@ -569,4 +656,93 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callSetMuted<'local>(
     if let Some(engine) = CALL.lock().unwrap().as_ref() {
         engine.set_muted(muted != JNI_FALSE);
     }
+}
+
+// ── Группы (MLS) ───────────────────────────────────────────────────────────
+// Команды уходят групповому актору (поток event_pump) и, для запросов, блокируют
+// до ответа — JNI-вызовы могут блокировать.
+
+fn group_query<T>(make: impl FnOnce(Sender<T>) -> GroupCmd) -> Option<T> {
+    let app = app()?;
+    let (tx, rx) = std::sync::mpsc::channel::<T>();
+    app.jobs.send(Job::Cmd(make(tx))).ok()?;
+    rx.recv().ok()
+}
+
+/// Создать группу. Возвращает group_id (hex) или "".
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupCreate<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    name: JString<'local>,
+) -> jstring {
+    let name = jstr(&mut env, &name);
+    let gid = group_query(|resp| GroupCmd::Create { name, resp }).unwrap_or_default();
+    ret(&env, &gid)
+}
+
+/// Пригласить контакт в группу (просим его KeyPackage).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    gid_hex: JString<'local>,
+    peer_hex: JString<'local>,
+) {
+    let (Some(app), Some(gid), Some(peer)) = (
+        app(),
+        hex::decode(jstr(&mut env, &gid_hex)).ok(),
+        parse_key(&jstr(&mut env, &peer_hex)),
+    ) else {
+        return;
+    };
+    let _ = app.jobs.send(Job::Cmd(GroupCmd::Invite { gid, peer }));
+}
+
+/// Отправить текст в группу. Возвращает true при успехе.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    gid_hex: JString<'local>,
+    text: JString<'local>,
+) -> jboolean {
+    let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return JNI_FALSE };
+    let text = jstr(&mut env, &text);
+    let ok = group_query(|resp| GroupCmd::SendText { gid, text, resp }).unwrap_or(false);
+    if ok { JNI_TRUE } else { JNI_FALSE }
+}
+
+/// Список групп как JSON-массив [{gid, name, members}].
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jstring {
+    let json = group_query(|resp| GroupCmd::List { resp }).unwrap_or_else(|| "[]".into());
+    ret(&env, &json)
+}
+
+/// История группового чата как JSON-массив [{text, mine, time}].
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistory<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    gid_hex: JString<'local>,
+) -> jstring {
+    let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return ret(&env, "[]") };
+    let json = group_query(|resp| GroupCmd::History { gid, resp }).unwrap_or_else(|| "[]".into());
+    ret(&env, &json)
+}
+
+/// Ключи участников группы (hex) как JSON-массив — для группового звонка.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    gid_hex: JString<'local>,
+) -> jstring {
+    let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return ret(&env, "[]") };
+    let json = group_query(|resp| GroupCmd::Members { gid, resp }).unwrap_or_else(|| "[]".into());
+    ret(&env, &json)
 }
