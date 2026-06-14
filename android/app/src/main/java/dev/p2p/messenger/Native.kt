@@ -40,4 +40,21 @@ object Native {
     external fun netPeers(): Int
     external fun netTree(): Int
     external fun stop()
+
+    // ── Звонки (1:1) ──────────────────────────────────────────────────────
+    /** Начать исходящий звонок. Возвращает JSON {call_id, sample_rate, channels, frame_len}. */
+    external fun callStart(keyHex: String, video: Boolean, vw: Int, vh: Int): String
+    /** Принять входящий звонок. Возвращает тот же JSON с аудио-параметрами. */
+    external fun callAccept(keyHex: String, callId: Long, video: Boolean, vw: Int, vh: Int): String
+    /** Завершить звонок. */
+    external fun callEnd(keyHex: String, callId: Long)
+    /** Захваченный PCM (первые n сэмплов) → отправка. */
+    external fun callPushAudio(data: ShortArray, n: Int)
+    /** Заполнить буфер PCM для воспроизведения. Возвращает число реальных сэмплов. */
+    external fun callPullAudio(out: ShortArray): Int
+    /** RGB8-кадр с камеры/экрана → отправка видео. */
+    external fun callPushVideo(rgb: ByteArray)
+    /** Входящий видео-кадр: [w:4 LE][h:4 LE][rgb…] или пусто. */
+    external fun callPullVideo(): ByteArray
+    external fun callSetMuted(muted: Boolean)
 }

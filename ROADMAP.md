@@ -110,9 +110,14 @@
   линковка и 14 JNI-символов проверены) + `gradle assembleDebug` → `app-debug.apk`
   (~16 МБ, обе .so внутри). Тулчейн: Linux-NDK r28c в WSL, cargo-ndk, Gradle 8.9 +
   JBR (JDK 21). На реальном устройстве ещё не запускалось.
-- [ ] **G3 — 1:1 звонки**: аудио (cpal/AAudio) + Camera2/MediaProjection →
-  `FrameFeeder` в Rust-конвейер (переиспользуем openh264/opus). MediaCodec/Vulkan
-  из ТЗ — последующая оптимизация, не блокер паритета.
+- [x] **G3 — 1:1 аудио-звонки**: call-движок `androidjni/call.rs` (без cpal — PCM
+  из Kotlin), JNI (start/accept/end/push-pull audio/video/mute), `CallAudio`
+  (AudioRecord+AudioTrack+AEC), UI (оверлей звонка, входящие/исходящие, mute).
+  opus+openh264 кросс-компилируются под Android (cmake builtin Android + Ninja).
+  APK собирается. Сигнализация — через те же события (CallInvite/Accept/End).
+- [ ] G3 видео: движок и JNI (push/pull кадров) готовы; осталась Kotlin-сторона —
+  захват Camera2/MediaProjection (YUV→RGB → `callPushVideo`) и отрисовка входящих
+  кадров (`callPullVideo`). MediaCodec/Vulkan из ТЗ — последующая оптимизация.
 - [ ] **G4 — группы + UnifiedPush + Android Keystore (vault-ключ) + полировка.**
 - **DoD:** паритет с десктопом по чату и 1:1 звонкам.
 

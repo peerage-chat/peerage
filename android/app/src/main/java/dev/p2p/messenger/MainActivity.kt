@@ -1,8 +1,11 @@
 package dev.p2p.messenger
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -28,16 +31,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    private val model = AppModel()
+    private val micPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        model.audio = CallAudio(applicationContext)
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
         val dataDir = filesDir.absolutePath
-        setContent { P2PTheme { App(dataDir) } }
+        setContent { P2PTheme { App(model, dataDir) } }
     }
 }
 
 @Composable
-fun App(dataDir: String) {
-    val model = remember { AppModel() }
+fun App(model: AppModel, dataDir: String) {
     var booted by remember { mutableStateOf(false) }
 
     // Старт ядра (сеть) на IO; затем — насос событий и медленный тикер статуса.
@@ -85,21 +95,26 @@ private enum class Screen { Contacts, Chat, Add, Me, Info }
 private fun Root(model: AppModel) {
     var screen by remember { mutableStateOf(Screen.Contacts) }
 
-    Surface(Modifier.fillMaxSize(), color = HoloBg) {
-        when (screen) {
-            Screen.Contacts -> ContactsScreen(model,
-                onOpen = { model.openChat(it); screen = Screen.Chat },
-                onAdd = { screen = Screen.Add },
-                onMe = { screen = Screen.Me })
-            Screen.Chat -> ChatScreen(model,
-                onBack = { screen = Screen.Contacts },
-                onInfo = { screen = Screen.Info })
-            Screen.Add -> AddScreen(model, onDone = { screen = Screen.Contacts })
-            Screen.Me -> MeScreen(model, onBack = { screen = Screen.Contacts })
-            Screen.Info -> InfoScreen(model,
-                onBack = { screen = Screen.Chat },
-                onDeleted = { screen = Screen.Contacts })
+    Box(Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize(), color = HoloBg) {
+            when (screen) {
+                Screen.Contacts -> ContactsScreen(model,
+                    onOpen = { model.openChat(it); screen = Screen.Chat },
+                    onAdd = { screen = Screen.Add },
+                    onMe = { screen = Screen.Me })
+                Screen.Chat -> ChatScreen(model,
+                    onBack = { screen = Screen.Contacts },
+                    onInfo = { screen = Screen.Info },
+                    onCall = { model.startOutgoing(it) })
+                Screen.Add -> AddScreen(model, onDone = { screen = Screen.Contacts })
+                Screen.Me -> MeScreen(model, onBack = { screen = Screen.Contacts })
+                Screen.Info -> InfoScreen(model,
+                    onBack = { screen = Screen.Chat },
+                    onDeleted = { screen = Screen.Contacts })
+            }
         }
+        // Звонок — поверх всего.
+        model.call?.let { CallOverlay(model, it) }
     }
 }
 
@@ -163,7 +178,7 @@ private fun ContactRow(c: Contact, online: Boolean, unread: Int, onClick: () -> 
 }
 
 @Composable
-private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit) {
+private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, onCall: (String) -> Unit) {
     val key = model.currentChat ?: return
     val contact = model.contacts.firstOrNull { it.key == key }
     val msgs = model.messages[key]
@@ -171,6 +186,7 @@ private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit) 
 
     Column(Modifier.fillMaxSize()) {
         TopBar(contact?.name ?: "Чат", onBack = onBack) {
+            Text("📞", fontSize = 18.sp, modifier = Modifier.clickable { onCall(key) }.padding(8.dp))
             Text("ⓘ", color = HoloAccent, fontSize = 20.sp, modifier = Modifier.clickable { onInfo() }.padding(8.dp))
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp), reverseLayout = false) {
@@ -293,6 +309,42 @@ private fun InfoScreen(model: AppModel, onBack: () -> Unit, onDeleted: () -> Uni
             }
         }
     }
+}
+
+@Composable
+private fun CallOverlay(model: AppModel, call: CallState) {
+    val name = model.contacts.firstOrNull { it.key == call.peer }?.name ?: "Контакт"
+    val statusText = when (call.status) {
+        "incoming" -> "Входящий звонок"
+        "ringing" -> "Звоним…"
+        else -> "Идёт звонок"
+    }
+    Box(Modifier.fillMaxSize().background(Color(0xF2000000)), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+            Text(statusText, color = HoloSecondary, fontSize = 15.sp)
+            Spacer(Modifier.height(40.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (call.status == "incoming") {
+                    RoundButton("✓", HoloOnline) { model.acceptCall() }
+                    RoundButton("✕", HoloError) { model.hangUp() }
+                } else {
+                    if (call.status == "active") {
+                        RoundButton(if (call.muted) "🔇" else "🎤", HoloSurface) { model.toggleMute() }
+                    }
+                    RoundButton("✕", HoloError) { model.hangUp() }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoundButton(label: String, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(CircleShape).background(color).size(64.dp).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { Text(label, fontSize = 24.sp, color = Color.White) }
 }
 
 @Composable

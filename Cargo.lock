@@ -4993,6 +4993,7 @@ dependencies = [
  "jni 0.21.1",
  "log",
  "p2p-core",
+ "p2p-media",
  "p2p-messenger",
  "p2p-ygg",
  "serde",

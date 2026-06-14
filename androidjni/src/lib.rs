@@ -8,18 +8,29 @@
 //! JSON следующего события (или пустую строку). Просто и устойчиво через JNI;
 //! состояние и история живут в Rust (как на десктопе), UI — отражение.
 
+mod call;
+
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
+use jni::objects::{JByteArray, JClass, JShortArray, JString};
+use jni::sys::{jboolean, jbyteArray, jint, jlong, jsize, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
+use p2p_core::settings::{AudioSettings, VideoSettings};
 use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
 use p2p_messenger::{Event, Messenger};
 use p2p_ygg::Node;
+
+use call::CallEngine;
+
+/// Текущий активный звонок (1:1 на процесс).
+static CALL: Mutex<Option<Arc<CallEngine>>> = Mutex::new(None);
+/// Счётчик id звонков (для исходящих приглашений).
+static CALL_ID: AtomicU64 = AtomicU64::new(1);
 
 const PUBLIC_PEERS: &str = include_str!("../../peers/public-peers.txt");
 
@@ -383,5 +394,179 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_stop<'local>(
 ) {
     if let Some(app) = app() {
         app.messenger.shutdown();
+    }
+}
+
+// ── Звонки (1:1) ───────────────────────────────────────────────────────────
+
+fn video_settings(w: jint, h: jint) -> VideoSettings {
+    VideoSettings { width: w.max(0) as u32, height: h.max(0) as u32, fps: 30, bitrate: 2_000_000 }
+}
+
+/// JSON-параметры для настройки аудио на стороне Kotlin (AudioRecord/Track).
+fn call_params(call_id: u64, audio: &AudioSettings) -> String {
+    serde_json::json!({
+        "call_id": call_id,
+        "sample_rate": audio.sample_rate,
+        "channels": audio.channels,
+        "frame_len": audio.interleaved_len(),
+    })
+    .to_string()
+}
+
+fn begin_call(peer: [u8; 32], video: bool, w: jint, h: jint) -> Option<AudioSettings> {
+    let app = app()?;
+    let audio = AudioSettings::default();
+    let vcfg = if video { Some(video_settings(w, h)) } else { None };
+    let engine = CallEngine::start(app.messenger.clone(), peer, audio, vcfg);
+    *CALL.lock().unwrap() = Some(engine);
+    Some(audio)
+}
+
+/// Начать исходящий звонок: шлём invite и запускаем движок.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callStart<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    key_hex: JString<'local>,
+    video: jboolean,
+    vw: jint,
+    vh: jint,
+) -> jstring {
+    let Some(app) = app() else { return ret(&env, "{}") };
+    let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
+    let video = video != JNI_FALSE;
+    let call_id = CALL_ID.fetch_add(1, Ordering::Relaxed);
+    let _ = app.messenger.send_call_invite(&peer, call_id, true, video);
+    let Some(audio) = begin_call(peer, video, vw, vh) else { return ret(&env, "{}") };
+    ret(&env, &call_params(call_id, &audio))
+}
+
+/// Принять входящий звонок: шлём accept и запускаем движок.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callAccept<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    key_hex: JString<'local>,
+    call_id: jlong,
+    video: jboolean,
+    vw: jint,
+    vh: jint,
+) -> jstring {
+    let Some(app) = app() else { return ret(&env, "{}") };
+    let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
+    let _ = app.messenger.send_call_accept(&peer, call_id as u64);
+    let Some(audio) = begin_call(peer, video != JNI_FALSE, vw, vh) else { return ret(&env, "{}") };
+    ret(&env, &call_params(call_id as u64, &audio))
+}
+
+/// Завершить звонок: шлём end и останавливаем движок.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callEnd<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    key_hex: JString<'local>,
+    call_id: jlong,
+) {
+    if let (Some(app), Some(peer)) = (app(), parse_key(&jstr(&mut env, &key_hex))) {
+        let _ = app.messenger.send_call_end(&peer, call_id as u64);
+    }
+    if let Some(engine) = CALL.lock().unwrap().take() {
+        engine.stop();
+    }
+}
+
+/// Захваченный PCM с микрофона (первые `n` сэмплов массива) → движку.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callPushAudio<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    data: JShortArray<'local>,
+    n: jint,
+) {
+    let n = n.max(0) as usize;
+    if n == 0 {
+        return;
+    }
+    let mut buf = vec![0i16; n];
+    if env.get_short_array_region(&data, 0, &mut buf).is_err() {
+        return;
+    }
+    if let Some(engine) = CALL.lock().unwrap().as_ref() {
+        engine.push_audio(&buf);
+    }
+}
+
+/// Заполнить массив PCM для воспроизведения. Возвращает число реальных сэмплов.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callPullAudio<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    out: JShortArray<'local>,
+) -> jint {
+    let len = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
+    if len == 0 {
+        return 0;
+    }
+    let mut buf = vec![0i16; len];
+    let n = CALL.lock().unwrap().as_ref().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
+    let _ = env.set_short_array_region(&out, 0, &buf);
+    n as jint
+}
+
+/// RGB8-кадр с камеры/экрана → движку (для отправки видео).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callPushVideo<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    rgb: JByteArray<'local>,
+) {
+    let len = env.get_array_length(&rgb).unwrap_or(0).max(0) as usize;
+    if len == 0 {
+        return;
+    }
+    let mut buf = vec![0i8; len];
+    if env.get_byte_array_region(&rgb, 0, &mut buf).is_err() {
+        return;
+    }
+    let bytes: Vec<u8> = buf.into_iter().map(|b| b as u8).collect();
+    if let Some(engine) = CALL.lock().unwrap().as_ref() {
+        engine.push_video(bytes);
+    }
+}
+
+/// Забрать декодированный входящий видео-кадр. Формат: [w:4 LE][h:4 LE][rgb…];
+/// пустой массив — кадра нет.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callPullVideo<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jbyteArray {
+    let frame = CALL.lock().unwrap().as_ref().and_then(|e| e.pull_frame());
+    let Some(f) = frame else {
+        return env.new_byte_array(0).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut());
+    };
+    let mut out = Vec::with_capacity(8 + f.rgb.len());
+    out.extend_from_slice(&f.width.to_le_bytes());
+    out.extend_from_slice(&f.height.to_le_bytes());
+    out.extend_from_slice(&f.rgb);
+    let signed: Vec<i8> = out.into_iter().map(|b| b as i8).collect();
+    match env.new_byte_array(signed.len() as jsize) {
+        Ok(arr) => {
+            let _ = env.set_byte_array_region(&arr, 0, &signed);
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callSetMuted<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    muted: jboolean,
+) {
+    if let Some(engine) = CALL.lock().unwrap().as_ref() {
+        engine.set_muted(muted != JNI_FALSE);
     }
 }

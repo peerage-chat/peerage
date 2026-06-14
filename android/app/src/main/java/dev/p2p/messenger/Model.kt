@@ -28,6 +28,16 @@ data class Message(
 /** Идентичность пользователя (своя «визитка»). */
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
+/** Состояние звонка. status: "incoming" | "ringing" | "active". */
+data class CallState(
+    val peer: String,
+    val callId: Long,
+    val incoming: Boolean,
+    val withVideo: Boolean,
+    val status: String,
+    val muted: Boolean = false,
+)
+
 /**
  * Состояние приложения поверх [Native]. Держит контакты/историю/онлайн в
  * Compose-наблюдаемых структурах; источник истины — Rust-ядро, это его зеркало.
@@ -43,6 +53,10 @@ class AppModel {
 
     var currentChat by mutableStateOf<String?>(null)
     var netPeers by mutableStateOf(0)
+
+    // Звонок (1:1). audio задаётся из Activity (нужен Context для AudioRecord/Track).
+    var call by mutableStateOf<CallState?>(null)
+    var audio: CallAudio? = null
 
     /** Инициализация ядра (блокирующая — звать с IO-потока). */
     fun start(dataDir: String) {
@@ -150,7 +164,22 @@ class AppModel {
             }
             "ack" -> updateStatus(o.getString("peer"), o.getLong("id"), "delivered")
             "undelivered" -> updateStatus(o.getString("peer"), o.getLong("id"), "failed")
-            // call_*/group_* — обработка в фазах G3/G4.
+            "call_invite" -> if (call == null) {
+                call = CallState(
+                    peer = o.getString("peer"),
+                    callId = o.getLong("call_id"),
+                    incoming = true,
+                    withVideo = o.optBoolean("video", false),
+                    status = "incoming",
+                )
+            }
+            "call_accept" -> call?.let { c ->
+                if (o.getString("peer") == c.peer) call = c.copy(status = "active")
+            }
+            "call_end" -> call?.let { c ->
+                if (o.getString("peer") == c.peer) endCall()
+            }
+            // group_* — фаза G4.
         }
     }
 
@@ -158,5 +187,45 @@ class AppModel {
         val l = messages[peer] ?: return
         val idx = l.indexOfFirst { it.id == id && it.mine }
         if (idx >= 0) l[idx] = l[idx].copy(status = status)
+    }
+
+    // ── Звонки ──────────────────────────────────────────────────────────────
+
+    /** Начать исходящий звонок (пока только аудио). */
+    fun startOutgoing(peer: String, video: Boolean = false) {
+        if (call != null) return
+        val params = JSONObject(Native.callStart(peer, video, if (video) 640 else 0, if (video) 480 else 0))
+        if (!params.has("call_id")) return
+        audio?.start(params.getInt("sample_rate"), params.getInt("channels"))
+        call = CallState(peer, params.getLong("call_id"), incoming = false, withVideo = video, status = "ringing")
+    }
+
+    /** Принять входящий звонок. */
+    fun acceptCall() {
+        val c = call ?: return
+        if (!c.incoming) return
+        val params = JSONObject(Native.callAccept(c.peer, c.callId, c.withVideo, if (c.withVideo) 640 else 0, if (c.withVideo) 480 else 0))
+        audio?.start(params.optInt("sample_rate", 48000), params.optInt("channels", 1))
+        call = c.copy(status = "active")
+    }
+
+    /** Завершить/отклонить звонок (шлёт end собеседнику и глушит аудио). */
+    fun hangUp() {
+        val c = call ?: return
+        Native.callEnd(c.peer, c.callId)
+        endCall()
+    }
+
+    /** Локально завершить звонок (без отправки end — например, по событию call_end). */
+    private fun endCall() {
+        audio?.stop()
+        call = null
+    }
+
+    fun toggleMute() {
+        val c = call ?: return
+        val m = !c.muted
+        audio?.setMuted(m)
+        call = c.copy(muted = m)
     }
 }
