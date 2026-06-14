@@ -3782,6 +3782,7 @@ dependencies = [
  "p2p-core",
  "p2p-media",
  "p2p-messenger",
+ "p2p-ygg",
  "thiserror 2.0.18",
 ]
 

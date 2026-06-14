@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
-use p2p_call::AudioCall;
+use p2p_call::Call;
 use p2p_core::settings::{AudioSettings, OpusMode, Settings, VideoSettings};
 use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
 use p2p_messenger::{Event, Messenger};
@@ -163,7 +163,7 @@ struct CallCtx {
     active: bool,
     muted: bool,
     started: Option<Instant>,
-    call: Option<AudioCall>,
+    call: Option<Call>,
 }
 
 thread_local! {
@@ -203,9 +203,9 @@ fn refresh_call_ui(ui: &AppWindow, core: &Arc<Core>) {
     });
 }
 
-fn start_audio(core: &Arc<Core>, peer: [u8; 32]) -> Option<AudioCall> {
+fn start_audio(core: &Arc<Core>, peer: [u8; 32]) -> Option<Call> {
     let settings = core.settings.lock().unwrap().audio;
-    match AudioCall::start(core.messenger.clone(), peer, settings) {
+    match Call::start(core.messenger.clone(), peer, Some(settings), None, None) {
         Ok(c) => Some(c),
         Err(e) => {
             eprintln!("[call] не удалось начать звук: {e}");

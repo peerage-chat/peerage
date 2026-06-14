@@ -14,3 +14,6 @@ thiserror.workspace = true
 p2p-core = { path = "../core" }
 p2p-messenger = { path = "../messenger" }
 p2p-media = { path = "../media" }
+
+[dev-dependencies]
+p2p-ygg = { path = "../transport" }
