@@ -504,7 +504,10 @@ fn begin_call(peer: [u8; 32]) -> Option<AudioSettings> {
     // Видео-кодек теперь аппаратный (MediaCodec/Kotlin); движок только
     // фрагментирует/собирает H.264 — параметры видео в Rust не нужны.
     let engine = CallEngine::start(app.messenger.clone(), peer, audio);
-    *CALL.lock().unwrap() = Some(engine);
+    let old = CALL.lock().unwrap().replace(engine); // лок освобождается сразу
+    if let Some(old) = old {
+        std::thread::spawn(move || old.stop()); // не джойнить под локом/на UI
+    }
     Some(audio)
 }
 
@@ -558,8 +561,11 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callEnd<'local>(
     if let (Some(app), Some(peer)) = (app(), parse_key(&jstr(&mut env, &key_hex))) {
         let _ = app.messenger.send_call_end(&peer, call_id as u64);
     }
-    if let Some(engine) = CALL.lock().unwrap().take() {
-        engine.stop();
+    // Забираем движок (мьютекс освобождается сразу) и останавливаем его в ФОНЕ —
+    // stop() джойнит потоки, нельзя блокировать вызывающий (часто UI) поток.
+    let engine = CALL.lock().unwrap().take();
+    if let Some(engine) = engine {
+        std::thread::spawn(move || engine.stop());
     }
 }
 

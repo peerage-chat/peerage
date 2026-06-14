@@ -531,9 +531,12 @@ private fun VideoSurface(modifier: Modifier = Modifier) {
         factory = { ctx ->
             android.view.SurfaceView(ctx).apply {
                 holder.addCallback(object : android.view.SurfaceHolder.Callback {
-                    private var receiver: VideoReceiver? = null
+                    @Volatile private var receiver: VideoReceiver? = null
                     override fun surfaceCreated(h: android.view.SurfaceHolder) {
-                        receiver = VideoReceiver(h.surface, VIDEO_W, VIDEO_H).also { it.start() }
+                        // Создание/старт MediaCodec-декодера блокирует — не на UI-потоке.
+                        Thread {
+                            receiver = VideoReceiver(h.surface, VIDEO_W, VIDEO_H).also { it.start() }
+                        }.start()
                     }
                     override fun surfaceChanged(h: android.view.SurfaceHolder, f: Int, w: Int, ht: Int) {}
                     override fun surfaceDestroyed(h: android.view.SurfaceHolder) {

@@ -110,6 +110,10 @@ class VideoSender(
 
     fun stop() {
         running = false
+        // Сначала ОСТАНОВИТЬ камеру (иначе HAL виснет «waiting for requests» и
+        // течёт память), потом закрыть сессию/устройство, затем энкодер.
+        runCatching { session?.stopRepeating() }
+        runCatching { session?.abortCaptures() }
         runCatching { drainThread?.join(500) }
         runCatching { session?.close() }
         runCatching { device?.close() }
