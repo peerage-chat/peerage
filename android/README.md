@@ -59,6 +59,15 @@ cd android && ./gradlew assembleDebug
 Gradle берёт готовые `.so` из `jniLibs` (см. `app/build.gradle.kts`). Нативные
 библиотеки нужно собрать ДО Gradle (шаг выше).
 
+## Статус сборки
+
+Проверено end-to-end: нативные .so кросс-компилируются (libygg.so + libp2p_android.so,
+AArch64; libp2p_android корректно линкуется с libygg, все 14 JNI-символов
+экспортированы) и `gradle assembleDebug` собирает установочный `app-debug.apk`
+(~16 МБ, обе .so внутри `lib/arm64-v8a/`). На реальном устройстве ещё не запускалось.
+
+Сборка APK проверена с Gradle 8.9 + JBR от Android Studio (JDK 21).
+
 ## Версии тулчейна
 
 AGP 8.5.2 · Kotlin 1.9.25 · Compose compiler 1.5.15 · compileSdk 34 · minSdk 24.

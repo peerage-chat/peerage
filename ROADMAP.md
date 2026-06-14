@@ -106,8 +106,10 @@
 - [x] **G2 — Gradle + Compose** (`android/`, Holo-тема): экраны контактов, чата,
   добавления, «мой код», инфо; поллинг событий; паритет с десктоп-чатом.
   Версии: AGP 8.5.2 / Kotlin 1.9.25 / Compose 1.5.15 / SDK 34.
-- [ ] Сборка нативных .so требует Linux-NDK в WSL (см. `android/README.md`) —
-  затем APK через Android Studio (JDK 17). На устройстве пока не прогонялось.
+- [x] **Сборка проверена end-to-end:** libygg.so + libp2p_android.so (AArch64,
+  линковка и 14 JNI-символов проверены) + `gradle assembleDebug` → `app-debug.apk`
+  (~16 МБ, обе .so внутри). Тулчейн: Linux-NDK r28c в WSL, cargo-ndk, Gradle 8.9 +
+  JBR (JDK 21). На реальном устройстве ещё не запускалось.
 - [ ] **G3 — 1:1 звонки**: аудио (cpal/AAudio) + Camera2/MediaProjection →
   `FrameFeeder` в Rust-конвейер (переиспользуем openh264/opus). MediaCodec/Vulkan
   из ТЗ — последующая оптимизация, не блокер паритета.

@@ -134,7 +134,7 @@ private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () 
             LazyColumn(Modifier.fillMaxSize()) {
                 items(model.contacts, key = { it.key }) { c ->
                     ContactRow(c, model.online[c.key] == true, model.unread[c.key] ?: 0) { onOpen(c.key) }
-                    Divider(color = HoloBorder, thickness = 1.dp)
+                    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
                 }
             }
         }
