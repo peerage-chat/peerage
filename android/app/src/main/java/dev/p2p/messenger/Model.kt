@@ -9,6 +9,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.Executors
 
 /** Параметры видео-звонка (аппаратный H.264 через MediaCodec). */
 const val VIDEO_W = 640
@@ -48,8 +49,19 @@ data class CallState(
 )
 
 /**
- * Состояние приложения поверх [Native]. Держит контакты/историю/онлайн в
- * Compose-наблюдаемых структурах; источник истины — Rust-ядро, это его зеркало.
+ * Состояние приложения поверх [Native].
+ *
+ * АРХИТЕКТУРА ПОТОКОВ (важно для отзывчивости): UI (главный поток Compose)
+ * НИКОГДА не вызывает `Native.*` напрямую — любой JNI-вызов может заблокировать
+ * (сеть/Go-FFI/диск/мьютексы ядра). Всё взаимодействие с ядром — на выделенных
+ * фоновых потоках:
+ *   • [pollThread]   — опрос событий ядра;
+ *   • [tickerThread] — периодический статус (пиры/онлайн);
+ *   • [ops]          — single-thread executor для разовых операций (отправка,
+ *                      контакты, звонки, группы), сериализует JNI.
+ * Состояние — Compose snapshot-state (mutableStateOf/List/Map), его БЕЗОПАСНО
+ * писать из фоновых потоков: рекомпозиция планируется на главный поток сама.
+ * Так главный поток не блокируется ничем → нет ANR.
  */
 class AppModel {
     var me by mutableStateOf<Me?>(null)
@@ -62,6 +74,8 @@ class AppModel {
 
     var currentChat by mutableStateOf<String?>(null)
     var netPeers by mutableStateOf(0)
+    /** Результат последней попытки добавить контакт ("" | added | known | error). */
+    var addStatus by mutableStateOf("")
 
     // Группы (MLS).
     val groups = mutableStateListOf<Group>()
@@ -74,7 +88,13 @@ class AppModel {
     var appContext: android.content.Context? = null
     @Volatile private var videoSender: VideoSender? = null
 
-    /** Инициализация ядра (блокирующая — звать с IO-потока). */
+    // Фоновое взаимодействие с ядром (никогда не на главном потоке).
+    private val ops = Executors.newSingleThreadExecutor { Thread(it, "native-ops").apply { isDaemon = true } }
+    @Volatile private var running = false
+    private var pollThread: Thread? = null
+    private var tickerThread: Thread? = null
+
+    /** Инициализация ядра. Звать с фонового потока (см. MainActivity). */
     fun start(dataDir: String) {
         val json = JSONObject(Native.start(dataDir))
         if (json.has("error")) {
@@ -86,20 +106,44 @@ class AppModel {
             address = json.getString("address"),
             fingerprint = json.getString("fingerprint"),
         )
-        refreshContacts()
-        refreshGroups()
+        refreshContactsNow()
+        refreshGroupsNow()
+        startLoops()
     }
 
-    fun refreshContacts() {
+    private fun startLoops() {
+        if (running) return
+        running = true
+        pollThread = Thread {
+            while (running) {
+                var e = Native.pollEvent()
+                while (e.isNotEmpty()) {
+                    runCatching { applyEvent(e) }
+                    e = Native.pollEvent()
+                }
+                Thread.sleep(80)
+            }
+        }.apply { isDaemon = true; name = "native-poll"; start() }
+        tickerThread = Thread {
+            while (running) {
+                runCatching {
+                    netPeers = Native.netPeers()
+                    contacts.map { it.key }.forEach { online[it] = Native.isOnline(it) }
+                }
+                Thread.sleep(3000)
+            }
+        }.apply { isDaemon = true; name = "native-ticker"; start() }
+    }
+
+    // ── Контакты / чат ────────────────────────────────────────────────────────
+
+    fun refreshContacts() = ops.execute { refreshContactsNow() }
+
+    private fun refreshContactsNow() {
         val arr = JSONArray(Native.listContacts())
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
-            Contact(
-                key = o.getString("key"),
-                name = o.getString("name"),
-                fingerprint = o.optString("fingerprint"),
-                verified = o.optBoolean("verified", false),
-            )
+            Contact(o.getString("key"), o.getString("name"), o.optString("fingerprint"), o.optBoolean("verified", false))
         }
         contacts.clear()
         contacts.addAll(list)
@@ -109,20 +153,14 @@ class AppModel {
     fun openChat(key: String) {
         currentChat = key
         unread[key] = 0
-        loadHistory(key)
+        ops.execute { loadHistory(key) }
     }
 
     private fun loadHistory(key: String) {
         val arr = JSONArray(Native.history(key))
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
-            Message(
-                id = o.getLong("id"),
-                text = o.getString("text"),
-                mine = o.getBoolean("mine"),
-                time = o.getLong("time"),
-                status = o.optString("status"),
-            )
+            Message(o.getLong("id"), o.getString("text"), o.getBoolean("mine"), o.getLong("time"), o.optString("status"))
         }
         messages[key] = list.toMutableStateList()
     }
@@ -132,72 +170,63 @@ class AppModel {
 
     fun send(key: String, text: String) {
         if (text.isBlank()) return
-        val id = Native.sendText(key, text)
-        if (id >= 0) {
-            log(key).add(Message(id, text, mine = true, time = System.currentTimeMillis() / 1000, status = "sent"))
+        ops.execute {
+            val id = Native.sendText(key, text)
+            if (id >= 0) {
+                log(key).add(Message(id, text, mine = true, time = System.currentTimeMillis() / 1000, status = "sent"))
+            }
         }
     }
 
-    fun addContact(key: String, name: String): String {
+    fun addContact(key: String, name: String) = ops.execute {
         val r = Native.addContact(key, name)
-        if (r == "added") refreshContacts()
-        return r
+        if (r == "added") refreshContactsNow()
+        addStatus = r
     }
 
-    fun toggleVerified(key: String) {
-        val c = contacts.firstOrNull { it.key == key } ?: return
+    fun toggleVerified(key: String) = ops.execute {
+        val c = contacts.firstOrNull { it.key == key } ?: return@execute
         Native.setVerified(key, !c.verified)
-        refreshContacts()
+        refreshContactsNow()
     }
 
-    fun rename(key: String, name: String) {
+    fun rename(key: String, name: String) = ops.execute {
         Native.renameContact(key, name)
-        refreshContacts()
+        refreshContactsNow()
     }
 
-    fun remove(key: String) {
+    fun remove(key: String) = ops.execute {
         Native.removeContact(key)
         if (currentChat == key) currentChat = null
-        refreshContacts()
+        refreshContactsNow()
     }
 
-    /** Применить одно событие из ядра (звать на главном потоке). */
-    fun applyEvent(json: String) {
+    /** Применить одно событие из ядра. Вызывается из [pollThread] (фон). */
+    private fun applyEvent(json: String) {
         if (json.isEmpty()) return
         val o = JSONObject(json)
         when (o.getString("type")) {
             "presence" -> {
                 val peer = o.getString("peer")
                 online[peer] = o.getBoolean("online")
-                if (contacts.none { it.key == peer }) refreshContacts()
+                if (contacts.none { it.key == peer }) refreshContactsNow()
             }
             "text" -> {
                 val peer = o.getString("peer")
-                if (contacts.none { it.key == peer }) refreshContacts()
-                log(peer).add(
-                    Message(o.getLong("id"), o.getString("text"), mine = false, time = o.getLong("time"), status = "")
-                )
+                if (contacts.none { it.key == peer }) refreshContactsNow()
+                log(peer).add(Message(o.getLong("id"), o.getString("text"), mine = false, time = o.getLong("time"), status = ""))
                 if (currentChat != peer) unread[peer] = (unread[peer] ?: 0) + 1
             }
             "ack" -> updateStatus(o.getString("peer"), o.getLong("id"), "delivered")
             "undelivered" -> updateStatus(o.getString("peer"), o.getLong("id"), "failed")
             "call_invite" -> if (call == null) {
-                call = CallState(
-                    peer = o.getString("peer"),
-                    callId = o.getLong("call_id"),
-                    incoming = true,
-                    withVideo = o.optBoolean("video", false),
-                    status = "incoming",
-                )
+                call = CallState(o.getString("peer"), o.getLong("call_id"), incoming = true,
+                    withVideo = o.optBoolean("video", false), status = "incoming")
             }
-            "call_accept" -> call?.let { c ->
-                if (o.getString("peer") == c.peer) call = c.copy(status = "active")
-            }
-            "call_end" -> call?.let { c ->
-                if (o.getString("peer") == c.peer) endCall()
-            }
+            "call_accept" -> call?.let { c -> if (o.getString("peer") == c.peer) call = c.copy(status = "active") }
+            "call_end" -> call?.let { c -> if (o.getString("peer") == c.peer) endCall() }
             "groups_changed" -> {
-                refreshGroups()
+                refreshGroupsNow()
                 currentGroup?.let { loadGroupHistory(it) }
             }
             "group_msg" -> {
@@ -215,73 +244,71 @@ class AppModel {
 
     // ── Звонки ──────────────────────────────────────────────────────────────
 
-    /** Начать исходящий звонок (аудио или видео). */
     fun startOutgoing(peer: String, video: Boolean = false) {
         if (call != null) return
-        val vw = if (video) VIDEO_W else 0
-        val vh = if (video) VIDEO_H else 0
-        val params = JSONObject(Native.callStart(peer, video, vw, vh))
-        if (!params.has("call_id")) return
-        call = CallState(peer, params.getLong("call_id"), incoming = false, withVideo = video, status = "ringing")
-        // Старт медиа (MediaCodec/AudioRecord) — НЕ на UI-потоке (блокирующие операции).
-        startMedia(params.getInt("sample_rate"), params.getInt("channels"), video)
+        // Оптимистично показываем оверлей сразу; параметры/старт медиа — в фоне.
+        call = CallState(peer, 0, incoming = false, withVideo = video, status = "ringing")
+        ops.execute {
+            val vw = if (video) VIDEO_W else 0
+            val vh = if (video) VIDEO_H else 0
+            val params = JSONObject(Native.callStart(peer, video, vw, vh))
+            if (!params.has("call_id")) { call = null; return@execute }
+            call = call?.copy(callId = params.getLong("call_id"))
+            startMedia(params.getInt("sample_rate"), params.getInt("channels"), video)
+        }
     }
 
-    /** Принять входящий звонок. */
     fun acceptCall() {
         val c = call ?: return
         if (!c.incoming) return
-        val vw = if (c.withVideo) VIDEO_W else 0
-        val vh = if (c.withVideo) VIDEO_H else 0
-        val params = JSONObject(Native.callAccept(c.peer, c.callId, c.withVideo, vw, vh))
         call = c.copy(status = "active")
-        startMedia(params.optInt("sample_rate", 48000), params.optInt("channels", 1), c.withVideo)
+        ops.execute {
+            val vw = if (c.withVideo) VIDEO_W else 0
+            val vh = if (c.withVideo) VIDEO_H else 0
+            val params = JSONObject(Native.callAccept(c.peer, c.callId, c.withVideo, vw, vh))
+            startMedia(params.optInt("sample_rate", 48000), params.optInt("channels", 1), c.withVideo)
+        }
     }
 
-    /** Запуск аудио/видео в фоне — инициализация MediaCodec/AudioRecord блокирует. */
+    /** Запуск медиа (вызывается уже из фонового [ops]). */
     private fun startMedia(sampleRate: Int, channels: Int, video: Boolean) {
+        runCatching { audio?.start(sampleRate, channels) }
         val ctx = appContext
-        Thread {
-            runCatching { audio?.start(sampleRate, channels) }
-            if (video && ctx != null) {
-                runCatching {
-                    videoSender = VideoSender(ctx, VIDEO_W, VIDEO_H, VIDEO_FPS, VIDEO_BITRATE).also { it.start() }
-                }
-            }
-        }.start()
+        if (video && ctx != null) {
+            runCatching { videoSender = VideoSender(ctx, VIDEO_W, VIDEO_H, VIDEO_FPS, VIDEO_BITRATE).also { it.start() } }
+        }
     }
 
-    /** Завершить/отклонить звонок (шлёт end собеседнику и глушит аудио). */
     fun hangUp() {
         val c = call ?: return
-        Native.callEnd(c.peer, c.callId)
         endCall()
+        ops.execute { Native.callEnd(c.peer, c.callId) }
     }
 
-    /** Локально завершить звонок (без отправки end — например, по событию call_end). */
+    /** Локально завершить звонок: убрать оверлей (главный поток) + стоп медиа (фон). */
     private fun endCall() {
         val a = audio
         val vs = videoSender
         videoSender = null
-        call = null // UI: убрать оверлей сразу (на главном потоке)
-        // Остановка медиа (MediaCodec.release/AudioTrack — блокирующие) — в фоне,
-        // иначе UI-поток виснет → ANR.
+        call = null
         Thread {
             runCatching { a?.stop() }
             runCatching { vs?.stop() }
-        }.start()
+        }.apply { isDaemon = true }.start()
     }
 
     fun toggleMute() {
         val c = call ?: return
         val m = !c.muted
-        audio?.setMuted(m)
         call = c.copy(muted = m)
+        ops.execute { audio?.setMuted(m) }
     }
 
     // ── Группы ──────────────────────────────────────────────────────────────
 
-    fun refreshGroups() {
+    fun refreshGroups() = ops.execute { refreshGroupsNow() }
+
+    private fun refreshGroupsNow() {
         val arr = JSONArray(Native.groupList())
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
@@ -291,15 +318,15 @@ class AppModel {
         groups.addAll(list)
     }
 
-    fun createGroup(name: String): String {
+    /** Создать группу (асинхронно). Появится в списке по готовности. */
+    fun createGroup(name: String) = ops.execute {
         val gid = Native.groupCreate(name.ifBlank { "Группа" })
-        if (gid.isNotEmpty()) refreshGroups()
-        return gid
+        if (gid.isNotEmpty()) refreshGroupsNow()
     }
 
     fun openGroup(gid: String) {
         currentGroup = gid
-        loadGroupHistory(gid)
+        ops.execute { loadGroupHistory(gid) }
     }
 
     private fun loadGroupHistory(gid: String) {
@@ -314,14 +341,14 @@ class AppModel {
     private fun groupLog(gid: String): SnapshotStateList<GroupMsg> =
         groupMessages.getOrPut(gid) { mutableListOf<GroupMsg>().toMutableStateList() }
 
-    fun inviteToGroup(gid: String, peerHex: String) {
-        Native.groupInvite(gid, peerHex)
-    }
+    fun inviteToGroup(gid: String, peerHex: String) = ops.execute { Native.groupInvite(gid, peerHex) }
 
     fun sendGroupText(gid: String, text: String) {
         if (text.isBlank()) return
-        if (Native.groupSendText(gid, text)) {
-            groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000))
+        ops.execute {
+            if (Native.groupSendText(gid, text)) {
+                groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000))
+            }
         }
     }
 }

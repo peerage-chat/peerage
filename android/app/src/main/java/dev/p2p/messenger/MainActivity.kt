@@ -47,7 +47,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 // ── Единая сетка размеров/отступов ──────────────────────────────────────────
@@ -76,35 +75,15 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun App(model: AppModel, dataDir: String) {
-    var booted by remember { mutableStateOf(false) }
-
+    // Инициализация ядра на фоне; опрос событий/тикер статуса model запускает сам
+    // на выделенных потоках (см. AppModel — UI ничего нативного не вызывает напрямую).
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { model.start(dataDir) }
-        booted = true
-    }
-    LaunchedEffect(booted) {
-        if (!booted) return@LaunchedEffect
-        while (true) {
-            var e = Native.pollEvent()
-            while (e.isNotEmpty()) {
-                model.applyEvent(e)
-                e = Native.pollEvent()
-            }
-            delay(120)
-        }
-    }
-    LaunchedEffect(booted) {
-        if (!booted) return@LaunchedEffect
-        while (true) {
-            model.netPeers = Native.netPeers()
-            model.contacts.forEach { model.online[it.key] = Native.isOnline(it.key) }
-            delay(3000)
-        }
     }
 
     when {
         model.error != null -> CenterMessage("Ошибка: ${model.error}")
-        !booted || model.me == null -> CenterMessage("Подключение к сети…")
+        model.me == null -> CenterMessage("Подключение к сети…")
         else -> Root(model)
     }
 }
@@ -146,8 +125,7 @@ private fun Root(model: AppModel) {
                 Screen.GroupChat -> GroupChatScreen(model,
                     onBack = { screen = Screen.Groups },
                     onAddMember = { screen = Screen.AddMember })
-                Screen.CreateGroup -> CreateGroupScreen(model,
-                    onDone = { gid -> if (gid.isNotEmpty()) { model.openGroup(gid); screen = Screen.GroupChat } else screen = Screen.Groups })
+                Screen.CreateGroup -> CreateGroupScreen(model, onDone = { screen = Screen.Groups })
                 Screen.AddMember -> AddMemberScreen(model, onDone = { screen = Screen.GroupChat })
             }
         }
@@ -315,7 +293,10 @@ private fun MessageBubble(m: Message) {
 private fun AddScreen(model: AppModel, onDone: () -> Unit) {
     var keyHex by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf("") }
+    // Операция асинхронна; результат приходит в model.addStatus.
+    LaunchedEffect(Unit) { model.addStatus = "" }
+    val st = model.addStatus
+    LaunchedEffect(st) { if (st == "added") { model.addStatus = ""; onDone() } }
     Column(Modifier.fillMaxSize()) {
         TopBar("Добавить контакт", onBack = onDone)
         Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
@@ -324,14 +305,9 @@ private fun AddScreen(model: AppModel, onDone: () -> Unit) {
                 placeholder = { Text("64 hex-символа", color = HoloSecondary) })
             FieldLabel("ИМЯ")
             TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-            AccentButton("Добавить") {
-                status = when (model.addContact(keyHex.trim(), name.trim())) {
-                    "added" -> { onDone(); "" }
-                    "known" -> "Контакт уже есть"
-                    else -> "Неверный ключ"
-                }
-            }
-            if (status.isNotEmpty()) Text(status, color = HoloError, fontSize = 13.sp)
+            AccentButton("Добавить") { model.addContact(keyHex.trim(), name.trim()) }
+            val msg = when (st) { "known" -> "Контакт уже есть"; "error" -> "Неверный ключ"; else -> "" }
+            if (msg.isNotEmpty()) Text(msg, color = HoloError, fontSize = 13.sp)
         }
     }
 }
@@ -441,14 +417,14 @@ private fun GroupChatScreen(model: AppModel, onBack: () -> Unit, onAddMember: ()
 }
 
 @Composable
-private fun CreateGroupScreen(model: AppModel, onDone: (String) -> Unit) {
+private fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
     var name by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize()) {
-        TopBar("Новая группа", onBack = { onDone("") })
+        TopBar("Новая группа", onBack = onDone)
         Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
             FieldLabel("НАЗВАНИЕ")
             TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-            AccentButton("Создать") { onDone(model.createGroup(name)) }
+            AccentButton("Создать") { model.createGroup(name); onDone() }
             Text("Вы станете администратором. Добавляйте участников из контактов внутри группы.",
                 color = HoloSecondary, fontSize = 11.sp)
         }
