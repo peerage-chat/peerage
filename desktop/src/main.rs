@@ -352,6 +352,43 @@ fn save_group(core: &Arc<Core>, id: &[u8]) {
     save_group_index(core);
 }
 
+fn group_msgs_path(core: &Arc<Core>, id: &[u8]) -> std::path::PathBuf {
+    core.data_dir.join("groups").join(format!("{}.msgs.json", hex::encode(id)))
+}
+
+fn save_group_msgs(core: &Arc<Core>, id: &[u8]) {
+    let arr: Vec<serde_json::Value> = GROUPS.with(|g| {
+        g.borrow()
+            .groups
+            .get(id)
+            .map(|e| {
+                e.messages
+                    .iter()
+                    .map(|m| serde_json::json!({"mine": m.mine, "text": m.text, "time": m.time}))
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+    let _ = std::fs::create_dir_all(core.data_dir.join("groups"));
+    if let Ok(j) = serde_json::to_vec(&arr) {
+        let _ = std::fs::write(group_msgs_path(core, id), j);
+    }
+}
+
+fn load_group_msgs(core: &Arc<Core>, id: &[u8]) -> Vec<GMsg> {
+    let Ok(bytes) = std::fs::read(group_msgs_path(core, id)) else { return Vec::new() };
+    let Ok(arr) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) else { return Vec::new() };
+    arr.iter()
+        .filter_map(|v| {
+            Some(GMsg {
+                mine: v["mine"].as_bool()?,
+                text: v["text"].as_str()?.to_string(),
+                time: v["time"].as_i64().unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
 fn load_groups(core: &Arc<Core>) {
     let Ok(bytes) = std::fs::read(core.data_dir.join("groups").join("index.json")) else { return };
     let Ok(idx) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else { return };
@@ -362,8 +399,9 @@ fn load_groups(core: &Arc<Core>) {
             for m in chat.members() {
                 spawn_connect(core.messenger.clone(), m);
             }
+            let messages = load_group_msgs(core, &raw);
             GROUPS.with(|g| {
-                g.borrow_mut().groups.insert(raw.clone(), GroupEntry { chat, name, messages: Vec::new() });
+                g.borrow_mut().groups.insert(raw.clone(), GroupEntry { chat, name, messages });
             });
         }
     }
@@ -775,6 +813,7 @@ fn main() -> Result<(), slint::PlatformError> {
             });
             group_push(&id, true, text);
             save_group(&c, &id);
+            save_group_msgs(&c, &id);
             refresh_group_chat_ui(&ui);
         });
     }
@@ -970,6 +1009,7 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
                 });
                 if let Some(t) = text {
                     group_push(&gid, false, t);
+                    save_group_msgs(core, &gid);
                 }
                 save_group(core, &gid);
                 if GROUPS.with(|g| g.borrow().active.as_deref() == Some(&gid[..])) {
