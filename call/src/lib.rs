@@ -15,6 +15,9 @@ use std::time::{Duration, Instant};
 
 #[cfg(feature = "capture")]
 pub mod capture;
+pub mod group_call;
+
+pub use group_call::GroupCall;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, Stream, StreamConfig};
