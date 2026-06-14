@@ -13,11 +13,14 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use p2p_core::media::{
+    parse_media, write_media_header, CHAN_CHAT, CHAN_MEDIA, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN,
+};
 use p2p_core::protocol::{decode, encode, Payload, ProtocolError};
 use p2p_core::Identity;
 use p2p_ygg::{Node, YggError};
@@ -36,6 +39,16 @@ pub enum Event {
     Ack { peer: PeerKey, id: u64 },
     /// Не удалось доставить наше сообщение за отведённое время (TTL).
     Undelivered { peer: PeerKey, id: u64 },
+}
+
+/// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
+#[derive(Debug, Clone)]
+pub struct MediaPacket {
+    pub src: PeerKey,
+    pub track: u8,
+    pub seq: u16,
+    pub ts: u32,
+    pub payload: Vec<u8>,
 }
 
 /// Параметры надёжности.
@@ -70,6 +83,8 @@ pub enum MessengerError {
     Transport(#[from] YggError),
     #[error("рукопожатие с пиром не завершилось за отведённое время")]
     HandshakeTimeout,
+    #[error("медиа-пакет больше лимита датаграммы")]
+    MediaTooLarge,
 }
 
 struct PeerState {
@@ -94,6 +109,7 @@ struct Shared {
     next_id: AtomicU64,
     running: AtomicBool,
     tx: Sender<Event>,
+    media_tx: Mutex<Option<SyncSender<MediaPacket>>>,
 }
 
 impl Shared {
@@ -109,8 +125,12 @@ impl Shared {
     }
 
     fn send(&self, peer: &PeerKey, payload: &Payload) -> Result<(), MessengerError> {
-        let datagram = encode(&self.identity, peer, payload, Self::now_unix())?;
-        self.node.write(peer, &datagram)?;
+        let body = encode(&self.identity, peer, payload, Self::now_unix())?;
+        // Префикс канала чата (демукс с медиа на приёме).
+        let mut dg = Vec::with_capacity(1 + body.len());
+        dg.push(CHAN_CHAT);
+        dg.extend_from_slice(&body);
+        self.node.write(peer, &dg)?;
         Ok(())
     }
 
@@ -182,6 +202,7 @@ impl Messenger {
             next_id: AtomicU64::new(1),
             running: AtomicBool::new(true),
             tx,
+            media_tx: Mutex::new(None),
         });
         let s1 = shared.clone();
         let rx_thread = thread::spawn(move || receive_loop(s1));
@@ -267,6 +288,36 @@ impl Messenger {
         );
         Ok(id)
     }
+
+    /// Отправить медиа-датаграмму (реалтайм-канал): без Ack/повторов/шифрования
+    /// приложения — конфиденциальность даёт E2E-шифрование транспорта Yggdrasil.
+    /// Собирается в стековый буфер без аллокаций кучи.
+    pub fn send_media(
+        &self,
+        peer: &PeerKey,
+        track: u8,
+        seq: u16,
+        ts: u32,
+        payload: &[u8],
+    ) -> Result<(), MessengerError> {
+        if payload.len() > MAX_MEDIA_PAYLOAD {
+            return Err(MessengerError::MediaTooLarge);
+        }
+        let total = MEDIA_HEADER_LEN + payload.len();
+        let mut buf = [0u8; MEDIA_HEADER_LEN + MAX_MEDIA_PAYLOAD];
+        write_media_header(&mut buf, track, seq, ts);
+        buf[MEDIA_HEADER_LEN..total].copy_from_slice(payload);
+        self.shared.node.write(peer, &buf[..total])?;
+        Ok(())
+    }
+
+    /// Включить приём медиа: возвращает bounded-канал. При переполнении новые
+    /// пакеты отбрасываются (для реалтайма ронять опоздавшие лучше, чем копить).
+    pub fn media_channel(&self, capacity: usize) -> Receiver<MediaPacket> {
+        let (tx, rx) = mpsc::sync_channel(capacity);
+        *self.shared.media_tx.lock().unwrap() = Some(tx);
+        rx
+    }
 }
 
 fn receive_loop(shared: Arc<Shared>) {
@@ -276,7 +327,28 @@ fn receive_loop(shared: Arc<Shared>) {
             Ok(v) => v,
             Err(_) => return, // узел остановлен
         };
-        let (from, payload) = match decode(&shared.identity, &buf[..n]) {
+        if n == 0 {
+            continue;
+        }
+        // Демукс по байту канала: медиа — лёгкий путь без крипто/Ack.
+        if buf[0] == CHAN_MEDIA {
+            if let Some(f) = parse_media(&buf[..n]) {
+                if let Some(tx) = shared.media_tx.lock().unwrap().as_ref() {
+                    let _ = tx.try_send(MediaPacket {
+                        src,
+                        track: f.track,
+                        seq: f.seq,
+                        ts: f.ts,
+                        payload: f.payload.to_vec(),
+                    });
+                }
+            }
+            continue;
+        }
+        if buf[0] != CHAN_CHAT {
+            continue;
+        }
+        let (from, payload) = match decode(&shared.identity, &buf[1..n]) {
             Ok(v) => v,
             Err(_) => continue, // не наш конверт / не расшифровать
         };
