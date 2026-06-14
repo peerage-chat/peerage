@@ -15,12 +15,32 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,6 +49,13 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+
+// ── Единая сетка размеров/отступов ──────────────────────────────────────────
+private val ScreenPad = 16.dp        // отступ контента экрана
+private val FormGap = 12.dp          // вертикальный зазор в формах
+private val RowPadV = 14.dp          // вертикальный паддинг ряда списка
+private val OfflineDot = Color(0xFF555555)
+private val WarnColor = Color(0xFFE6A23C)
 
 class MainActivity : ComponentActivity() {
     private val model = AppModel()
@@ -51,7 +78,6 @@ class MainActivity : ComponentActivity() {
 fun App(model: AppModel, dataDir: String) {
     var booted by remember { mutableStateOf(false) }
 
-    // Старт ядра (сеть) на IO; затем — насос событий и медленный тикер статуса.
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { model.start(dataDir) }
         booted = true
@@ -86,7 +112,7 @@ fun App(model: AppModel, dataDir: String) {
 @Composable
 private fun CenterMessage(text: String) {
     Box(Modifier.fillMaxSize().background(HoloBg), contentAlignment = Alignment.Center) {
-        Text(text, color = HoloSecondary)
+        Text(text, color = HoloSecondary, fontSize = 14.sp)
     }
 }
 
@@ -125,66 +151,108 @@ private fun Root(model: AppModel) {
                 Screen.AddMember -> AddMemberScreen(model, onDone = { screen = Screen.GroupChat })
             }
         }
-        // Звонок — поверх всего.
         model.call?.let { CallOverlay(model, it) }
+    }
+}
+
+// ── Общие элементы ──────────────────────────────────────────────────────────
+
+/** Иконка-кнопка топ-бара: единый размер (48dp касание / 24dp иконка). */
+@Composable
+private fun BarIcon(icon: ImageVector, desc: String, onClick: () -> Unit, tint: Color = HoloAccent) {
+    IconButton(onClick = onClick) {
+        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(24.dp))
     }
 }
 
 @Composable
 private fun TopBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) {
     Row(
-        Modifier.fillMaxWidth().background(HoloAccentDark).padding(horizontal = 12.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
-            Text("‹", color = HoloAccent, fontSize = 26.sp, modifier = Modifier
-                .clickable { onBack() }.padding(end = 12.dp))
+            BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onBack)
+        } else {
+            Spacer(Modifier.width(12.dp))
         }
-        Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium,
+        Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         actions()
     }
 }
 
+/** Индикатор присутствия: маленький кружок (онлайн/офлайн). */
 @Composable
-private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () -> Unit, onMe: () -> Unit, onGroups: () -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        TopBar("p2p messenger") {
-            Text("👥", fontSize = 18.sp, modifier = Modifier.clickable { onGroups() }.padding(8.dp))
-            Text("⊕", color = HoloAccent, fontSize = 22.sp, modifier = Modifier.clickable { onAdd() }.padding(8.dp))
-            Text("⚿", color = HoloAccent, fontSize = 20.sp, modifier = Modifier.clickable { onMe() }.padding(8.dp))
-        }
-        Text("Пиров в сети: ${model.netPeers}", color = HoloSecondary, fontSize = 11.sp,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-        if (model.contacts.isEmpty()) {
-            CenterMessage("Нет контактов. Добавьте по ключу (⊕).")
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(model.contacts, key = { it.key }) { c ->
-                    ContactRow(c, model.online[c.key] == true, model.unread[c.key] ?: 0) { onOpen(c.key) }
-                    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
-                }
-            }
-        }
+private fun StatusDot(online: Boolean) {
+    Box(Modifier.size(10.dp).clip(CircleShape).background(if (online) HoloOnline else OfflineDot))
+}
+
+@Composable
+private fun ListRow(onClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = ScreenPad, vertical = RowPadV),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
+}
+
+@Composable
+private fun FieldLabel(text: String) {
+    Text(text, color = HoloSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+}
+
+@Composable
+private fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Button(onClick = onClick, modifier = modifier,
+        colors = ButtonDefaults.buttonColors(containerColor = HoloAccent)) {
+        Text(text, color = HoloAccentDark, fontWeight = FontWeight.Medium)
     }
 }
 
 @Composable
-private fun ContactRow(c: Contact, online: Boolean, unread: Int, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("●", color = if (online) HoloOnline else Color(0xFF666666), fontSize = 11.sp)
-        Spacer(Modifier.width(12.dp))
-        Text(c.name, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (c.verified) {
-            Spacer(Modifier.width(6.dp)); Text("✓", color = HoloVerified, fontSize = 13.sp)
+private fun SendButton(onClick: () -> Unit) {
+    Box(
+        Modifier.clip(CircleShape).background(HoloAccent).size(44.dp).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { Icon(Icons.AutoMirrored.Filled.Send, "Отправить", tint = HoloAccentDark, modifier = Modifier.size(20.dp)) }
+}
+
+// ── Экраны ──────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () -> Unit, onMe: () -> Unit, onGroups: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        TopBar("p2p messenger") {
+            BarIcon(Icons.Filled.Group, "Группы", onGroups)
+            BarIcon(Icons.Filled.PersonAdd, "Добавить контакт", onAdd)
+            BarIcon(Icons.Filled.QrCode2, "Мой код", onMe)
         }
-        Spacer(Modifier.weight(1f))
-        if (unread > 0) {
-            Box(Modifier.clip(CircleShape).background(HoloAccent).padding(horizontal = 7.dp, vertical = 2.dp)) {
-                Text("$unread", color = HoloAccentDark, fontSize = 11.sp)
+        Text("Пиров в сети: ${model.netPeers}", color = HoloSecondary, fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = ScreenPad, vertical = 6.dp))
+        if (model.contacts.isEmpty()) {
+            CenterMessage("Нет контактов. Добавьте по ключу.")
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(model.contacts, key = { it.key }) { c ->
+                    ListRow(onClick = { onOpen(c.key) }) {
+                        StatusDot(model.online[c.key] == true)
+                        Spacer(Modifier.width(12.dp))
+                        Text(c.name, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (c.verified) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(Icons.Filled.Verified, "Проверен", tint = HoloVerified, modifier = Modifier.size(15.dp))
+                        }
+                        Spacer(Modifier.weight(1f))
+                        val unread = model.unread[c.key] ?: 0
+                        if (unread > 0) {
+                            Box(Modifier.clip(CircleShape).background(HoloAccent).padding(horizontal = 7.dp, vertical = 2.dp)) {
+                                Text("$unread", color = HoloAccentDark, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -199,26 +267,24 @@ private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, 
 
     Column(Modifier.fillMaxSize()) {
         TopBar(contact?.name ?: "Чат", onBack = onBack) {
-            Text("📞", fontSize = 18.sp, modifier = Modifier.clickable { onCall(key, false) }.padding(8.dp))
-            Text("📹", fontSize = 18.sp, modifier = Modifier.clickable { onCall(key, true) }.padding(8.dp))
-            Text("ⓘ", color = HoloAccent, fontSize = 20.sp, modifier = Modifier.clickable { onInfo() }.padding(8.dp))
+            BarIcon(Icons.Filled.Call, "Аудио-звонок", { onCall(key, false) })
+            BarIcon(Icons.Filled.Videocam, "Видео-звонок", { onCall(key, true) })
+            BarIcon(Icons.Filled.Info, "О контакте", onInfo)
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp), reverseLayout = false) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
             items(msgs ?: emptyList()) { m -> MessageBubble(m) }
         }
-        Row(Modifier.fillMaxWidth().background(HoloSurface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextField(
-                value = input, onValueChange = { input = it },
-                modifier = Modifier.weight(1f), placeholder = { Text("Сообщение…", color = HoloSecondary) },
-                colors = inputColors(), maxLines = 4,
-            )
-            Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier.clip(CircleShape).background(HoloAccent).size(44.dp)
-                    .clickable { model.send(key, input); input = "" },
-                contentAlignment = Alignment.Center,
-            ) { Text("➤", color = HoloAccentDark, fontSize = 18.sp) }
-        }
+        MessageInput(input, { input = it }) { model.send(key, input); input = "" }
+    }
+}
+
+@Composable
+private fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () -> Unit) {
+    Row(Modifier.fillMaxWidth().background(HoloSurface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        TextField(value, onChange, Modifier.weight(1f),
+            placeholder = { Text("Сообщение…", color = HoloSecondary) }, colors = inputColors(), maxLines = 4)
+        Spacer(Modifier.width(8.dp))
+        SendButton(onSend)
     }
 }
 
@@ -228,15 +294,18 @@ private fun MessageBubble(m: Message) {
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
         Column(
             Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(10.dp))
-                .background(if (m.mine) HoloAccent else HoloSurface).padding(10.dp),
+                .background(if (m.mine) HoloAccent else HoloSurface).padding(horizontal = 10.dp, vertical = 7.dp),
         ) {
             Text(m.text, color = if (m.mine) HoloAccentDark else Color.White, fontSize = 15.sp)
             if (m.mine) {
-                val mark = when (m.status) {
-                    "delivered" -> "✓✓"; "failed" -> "не доставлено"; "sent" -> "✓"; else -> ""
+                val tint = HoloAccentDark.copy(alpha = 0.7f)
+                Row(Modifier.align(Alignment.End).padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    when (m.status) {
+                        "delivered" -> Icon(Icons.Filled.DoneAll, "доставлено", tint = tint, modifier = Modifier.size(13.dp))
+                        "sent" -> Icon(Icons.Filled.Done, "отправлено", tint = tint, modifier = Modifier.size(13.dp))
+                        "failed" -> Text("не доставлено", color = HoloAccentDark.copy(alpha = 0.8f), fontSize = 10.sp)
+                    }
                 }
-                if (mark.isNotEmpty()) Text(mark, color = HoloAccentDark.copy(alpha = 0.7f), fontSize = 10.sp,
-                    modifier = Modifier.align(Alignment.End))
             }
         }
     }
@@ -249,22 +318,20 @@ private fun AddScreen(model: AppModel, onDone: () -> Unit) {
     var status by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize()) {
         TopBar("Добавить контакт", onBack = onDone)
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("ПУБЛИЧНЫЙ КЛЮЧ (hex)", color = HoloSecondary, fontSize = 11.sp)
+        Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
+            FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ (hex)")
             TextField(keyHex, { keyHex = it }, Modifier.fillMaxWidth(), colors = inputColors(),
                 placeholder = { Text("64 hex-символа", color = HoloSecondary) })
-            Text("ИМЯ", color = HoloSecondary, fontSize = 11.sp)
+            FieldLabel("ИМЯ")
             TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-            Button(onClick = {
+            AccentButton("Добавить") {
                 status = when (model.addContact(keyHex.trim(), name.trim())) {
                     "added" -> { onDone(); "" }
                     "known" -> "Контакт уже есть"
                     else -> "Неверный ключ"
                 }
-            }, colors = ButtonDefaults.buttonColors(containerColor = HoloAccent)) {
-                Text("Добавить", color = HoloAccentDark)
             }
-            if (status.isNotEmpty()) Text(status, color = HoloError)
+            if (status.isNotEmpty()) Text(status, color = HoloError, fontSize = 13.sp)
         }
     }
 }
@@ -274,12 +341,12 @@ private fun MeScreen(model: AppModel, onBack: () -> Unit) {
     val me = model.me ?: return
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopBar("Мой код", onBack = onBack)
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("FINGERPRINT (сверьте при встрече)", color = HoloSecondary, fontSize = 11.sp)
+        Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
+            FieldLabel("FINGERPRINT (сверьте при встрече)")
             Text(me.fingerprint, color = HoloAccent, fontSize = 16.sp)
-            Text("АДРЕС YGGDRASIL", color = HoloSecondary, fontSize = 11.sp)
+            FieldLabel("АДРЕС YGGDRASIL")
             Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-            Text("ПУБЛИЧНЫЙ КЛЮЧ", color = HoloSecondary, fontSize = 11.sp)
+            FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ")
             Text(me.pubkey, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
         }
     }
@@ -292,33 +359,32 @@ private fun InfoScreen(model: AppModel, onBack: () -> Unit, onDeleted: () -> Uni
     var name by remember(key) { mutableStateOf(c.name) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopBar("Контакт", onBack = onBack)
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("ИМЯ", color = HoloSecondary, fontSize = 11.sp)
+        Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
+            FieldLabel("ИМЯ")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextField(name, { name = it }, Modifier.weight(1f), colors = inputColors())
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = { model.rename(key, name) },
-                    colors = ButtonDefaults.buttonColors(containerColor = HoloAccent)) {
-                    Text("OK", color = HoloAccentDark)
-                }
+                AccentButton("OK") { model.rename(key, name) }
             }
-            Text("FINGERPRINT", color = HoloSecondary, fontSize = 11.sp)
+            FieldLabel("FINGERPRINT")
             Text(c.fingerprint, color = HoloAccent, fontSize = 15.sp)
             Text("Сверьте слова с собеседником по другому каналу — защита от подмены ключа.",
                 color = HoloSecondary, fontSize = 11.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (c.verified) "✓ Проверен" else "Не проверен",
-                    color = if (c.verified) HoloVerified else Color(0xFFE6A23C),
-                    modifier = Modifier.weight(1f))
-                Button(onClick = { model.toggleVerified(key) },
-                    colors = ButtonDefaults.buttonColors(containerColor = HoloAccent)) {
-                    Text(if (c.verified) "Снять" else "Пометить проверенным", color = HoloAccentDark)
+                if (c.verified) {
+                    Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
                 }
+                Text(if (c.verified) "Проверен" else "Не проверен",
+                    color = if (c.verified) HoloVerified else WarnColor, modifier = Modifier.weight(1f))
+                AccentButton(if (c.verified) "Снять" else "Пометить") { model.toggleVerified(key) }
             }
-            Text("ПУБЛИЧНЫЙ КЛЮЧ", color = HoloSecondary, fontSize = 11.sp)
+            FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ")
             Text(c.key, color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-            Button(onClick = { model.remove(key); onDeleted() },
+            Button(onClick = { model.remove(key); onDeleted() }, modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = HoloError)) {
+                Icon(Icons.Filled.Delete, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
                 Text("Удалить контакт", color = Color.White)
             }
         }
@@ -329,21 +395,19 @@ private fun InfoScreen(model: AppModel, onBack: () -> Unit, onDeleted: () -> Uni
 private fun GroupsScreen(model: AppModel, onBack: () -> Unit, onOpen: (String) -> Unit, onCreate: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         TopBar("Группы", onBack = onBack) {
-            Text("⊕", color = HoloAccent, fontSize = 22.sp, modifier = Modifier.clickable { onCreate() }.padding(8.dp))
+            BarIcon(Icons.Filled.Add, "Новая группа", onCreate)
         }
         if (model.groups.isEmpty()) {
-            CenterMessage("Нет групп. Создайте (⊕).")
+            CenterMessage("Нет групп. Создайте новую.")
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(model.groups, key = { it.gid }) { g ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { onOpen(g.gid) }.padding(horizontal = 16.dp, vertical = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                    ListRow(onClick = { onOpen(g.gid) }) {
+                        Icon(Icons.Filled.Group, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(12.dp))
                         Text(g.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
                         Text("${g.members} уч.", color = HoloSecondary, fontSize = 12.sp)
                     }
-                    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
                 }
             }
         }
@@ -359,28 +423,20 @@ private fun GroupChatScreen(model: AppModel, onBack: () -> Unit, onAddMember: ()
 
     Column(Modifier.fillMaxSize()) {
         TopBar(group?.name ?: "Группа", onBack = onBack) {
-            Text("＋", color = HoloAccent, fontSize = 22.sp, modifier = Modifier.clickable { onAddMember() }.padding(8.dp))
+            BarIcon(Icons.Filled.GroupAdd, "Добавить участника", onAddMember)
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
             items(msgs ?: emptyList()) { m ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
                     horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
                     Box(Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(10.dp))
-                        .background(if (m.mine) HoloAccent else HoloSurface).padding(10.dp)) {
+                        .background(if (m.mine) HoloAccent else HoloSurface).padding(horizontal = 10.dp, vertical = 7.dp)) {
                         Text(m.text, color = if (m.mine) HoloAccentDark else Color.White, fontSize = 15.sp)
                     }
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().background(HoloSurface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextField(input, { input = it }, Modifier.weight(1f),
-                placeholder = { Text("Сообщение…", color = HoloSecondary) }, colors = inputColors(), maxLines = 4)
-            Spacer(Modifier.width(8.dp))
-            Box(Modifier.clip(CircleShape).background(HoloAccent).size(44.dp)
-                .clickable { model.sendGroupText(gid, input); input = "" }, contentAlignment = Alignment.Center) {
-                Text("➤", color = HoloAccentDark, fontSize = 18.sp)
-            }
-        }
+        MessageInput(input, { input = it }) { model.sendGroupText(gid, input); input = "" }
     }
 }
 
@@ -389,13 +445,10 @@ private fun CreateGroupScreen(model: AppModel, onDone: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize()) {
         TopBar("Новая группа", onBack = { onDone("") })
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("НАЗВАНИЕ", color = HoloSecondary, fontSize = 11.sp)
+        Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
+            FieldLabel("НАЗВАНИЕ")
             TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-            Button(onClick = { onDone(model.createGroup(name)) },
-                colors = ButtonDefaults.buttonColors(containerColor = HoloAccent)) {
-                Text("Создать", color = HoloAccentDark)
-            }
+            AccentButton("Создать") { onDone(model.createGroup(name)) }
             Text("Вы станете администратором. Добавляйте участников из контактов внутри группы.",
                 color = HoloSecondary, fontSize = 11.sp)
         }
@@ -412,19 +465,18 @@ private fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(model.contacts, key = { it.key }) { c ->
-                    Row(Modifier.fillMaxWidth().clickable {
-                        model.inviteToGroup(gid, c.key); onDone()
-                    }.padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("●", color = if (model.online[c.key] == true) HoloOnline else Color(0xFF666666), fontSize = 11.sp)
+                    ListRow(onClick = { model.inviteToGroup(gid, c.key); onDone() }) {
+                        StatusDot(model.online[c.key] == true)
                         Spacer(Modifier.width(12.dp))
                         Text(c.name, color = Color.White, fontSize = 16.sp)
                     }
-                    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
                 }
             }
         }
     }
 }
+
+// ── Оверлей звонка ──────────────────────────────────────────────────────────
 
 @Composable
 private fun CallOverlay(model: AppModel, call: CallState) {
@@ -434,39 +486,44 @@ private fun CallOverlay(model: AppModel, call: CallState) {
         "ringing" -> "Звоним…"
         else -> "Идёт звонок"
     }
-    Box(Modifier.fillMaxSize().background(Color(0xF2000000)), contentAlignment = Alignment.Center) {
-        // Входящее видео (если видео-звонок активен) — на фоне.
-        if (call.withVideo && call.status == "active") {
-            VideoSurface(Modifier.fillMaxSize())
-        }
+    val showVideo = call.withVideo && call.status == "active"
+    Box(Modifier.fillMaxSize().background(Color(0xF2000000))) {
+        if (showVideo) VideoSurface(Modifier.fillMaxSize())
         Column(
             Modifier.fillMaxSize().padding(bottom = 48.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Bottom,
         ) {
-            if (!(call.withVideo && call.status == "active")) {
+            if (!showVideo) {
                 Spacer(Modifier.weight(1f))
                 Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
-                Text(statusText, color = HoloSecondary, fontSize = 15.sp)
+                Text(statusText, color = HoloSecondary, fontSize = 15.sp, modifier = Modifier.padding(top = 6.dp))
                 Spacer(Modifier.weight(1f))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (call.status == "incoming") {
-                    RoundButton("✓", HoloOnline) { model.acceptCall() }
-                    RoundButton("✕", HoloError) { model.hangUp() }
+                    CallButton(Icons.Filled.Call, "Принять", HoloOnline) { model.acceptCall() }
+                    CallButton(Icons.Filled.CallEnd, "Отклонить", HoloError) { model.hangUp() }
                 } else {
                     if (call.status == "active") {
-                        RoundButton(if (call.muted) "🔇" else "🎤", HoloSurface) { model.toggleMute() }
+                        CallButton(if (call.muted) Icons.Filled.MicOff else Icons.Filled.Mic, "Микрофон", HoloSurface) { model.toggleMute() }
                     }
-                    RoundButton("✕", HoloError) { model.hangUp() }
+                    CallButton(Icons.Filled.CallEnd, "Завершить", HoloError) { model.hangUp() }
                 }
             }
         }
     }
 }
 
-/** Входящее видео: SurfaceView, в который аппаратный декодер ([VideoReceiver])
- *  рендерит напрямую (zero-copy). Декодер живёт по жизненному циклу surface. */
+@Composable
+private fun CallButton(icon: ImageVector, desc: String, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(CircleShape).background(color).size(64.dp).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(28.dp)) }
+}
+
+/** Входящее видео: SurfaceView, в который аппаратный декодер рендерит напрямую. */
 @Composable
 private fun VideoSurface(modifier: Modifier = Modifier) {
     androidx.compose.ui.viewinterop.AndroidView(
@@ -481,21 +538,12 @@ private fun VideoSurface(modifier: Modifier = Modifier) {
                     override fun surfaceChanged(h: android.view.SurfaceHolder, f: Int, w: Int, ht: Int) {}
                     override fun surfaceDestroyed(h: android.view.SurfaceHolder) {
                         val r = receiver; receiver = null
-                        // MediaCodec.release блокирует — не на UI-потоке.
-                        Thread { r?.stop() }.start()
+                        Thread { r?.stop() }.start() // MediaCodec.release блокирует
                     }
                 })
             }
         },
     )
-}
-
-@Composable
-private fun RoundButton(label: String, color: Color, onClick: () -> Unit) {
-    Box(
-        Modifier.clip(CircleShape).background(color).size(64.dp).clickable { onClick() },
-        contentAlignment = Alignment.Center,
-    ) { Text(label, fontSize = 24.sp, color = Color.White) }
 }
 
 @Composable
