@@ -50,6 +50,7 @@ fn push_capped(ring: &Ring, samples: &[i16], cap: usize) {
 /// Активный аудио-звонок. Останавливается при `stop()` или `drop`.
 pub struct AudioCall {
     running: Arc<AtomicBool>,
+    muted: Arc<AtomicBool>,
     _in_stream: Stream,
     _out_stream: Stream,
     encode_thread: Option<JoinHandle<()>>,
@@ -74,6 +75,7 @@ impl AudioCall {
         };
 
         let running = Arc::new(AtomicBool::new(true));
+        let muted = Arc::new(AtomicBool::new(false));
         let frame_len = settings.interleaved_len();
         // ~1с буфера-предохранителя.
         let cap = settings.interleaved_len() * 50;
@@ -122,6 +124,7 @@ impl AudioCall {
         // --- ЗАХВАТ/ЭНКОД: input_ring → Opus → send_media ---
         let mut encoder = AudioEncoder::new(settings)?;
         let enc_running = running.clone();
+        let enc_muted = muted.clone();
         let enc_msgr = messenger.clone();
         let encode_thread = thread::spawn(move || {
             let mut seq: u16 = 0;
@@ -143,8 +146,10 @@ impl AudioCall {
                     thread::sleep(Duration::from_millis(2));
                     continue;
                 }
-                if let Ok(pkt) = encoder.encode(&frame) {
-                    let _ = enc_msgr.send_media(&peer, TRACK_AUDIO, seq, ts, &pkt);
+                if !enc_muted.load(Ordering::Relaxed) {
+                    if let Ok(pkt) = encoder.encode(&frame) {
+                        let _ = enc_msgr.send_media(&peer, TRACK_AUDIO, seq, ts, &pkt);
+                    }
                 }
                 seq = seq.wrapping_add(1);
                 ts = ts.wrapping_add(settings.frame_samples() as u32);
@@ -177,11 +182,17 @@ impl AudioCall {
 
         Ok(AudioCall {
             running,
+            muted,
             _in_stream: in_stream,
             _out_stream: out_stream,
             encode_thread: Some(encode_thread),
             decode_thread: Some(decode_thread),
         })
+    }
+
+    /// Включить/выключить микрофон (при mute мы не шлём пакеты — пир слышит тишину).
+    pub fn set_muted(&self, muted: bool) {
+        self.muted.store(muted, Ordering::Relaxed);
     }
 
     /// Остановить звонок (останавливает потоки и аудио-устройства).

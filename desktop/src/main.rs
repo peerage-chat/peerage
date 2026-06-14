@@ -1,12 +1,14 @@
 //! Десктоп-приложение: Holo-интерфейс на Slint (нативная отрисовка) поверх
 //! движка p2p-messenger. Ядро/транспорт/мессенджер не зависят от UI.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
+use p2p_call::AudioCall;
 use p2p_core::settings::{AudioSettings, OpusMode, Settings, VideoSettings};
 use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
 use p2p_messenger::{Event, Messenger};
@@ -150,6 +152,72 @@ fn update_net(ui: &AppWindow, core: &Arc<Core>) {
     let online = peers >= 1 && tree > 2;
     ui.set_net_online(online);
     ui.set_net_status(if online { format!("в сети · пиров {peers}") } else { format!("подключение… ({peers})") }.into());
+}
+
+// Состояние звонка живёт на UI-потоке (AudioCall !Send). Все обращения — с UI.
+#[derive(Default)]
+struct CallCtx {
+    call_id: Option<u64>,
+    peer: Option<[u8; 32]>,
+    incoming: bool,
+    active: bool,
+    muted: bool,
+    started: Option<Instant>,
+    call: Option<AudioCall>,
+}
+
+thread_local! {
+    static CALL: RefCell<CallCtx> = RefCell::new(CallCtx::default());
+}
+
+fn gen_call_id() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)
+}
+
+fn name_of(core: &Arc<Core>, peer: &[u8; 32]) -> String {
+    let hexk = hex::encode(peer);
+    core.contacts
+        .lock()
+        .unwrap()
+        .get(peer)
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| hexk[..8].to_string())
+}
+
+fn refresh_call_ui(ui: &AppWindow, core: &Arc<Core>) {
+    CALL.with(|c| {
+        let c = c.borrow();
+        let peer_name = c.peer.map(|p| name_of(core, &p)).unwrap_or_default();
+        ui.set_call_peer(peer_name.into());
+        ui.set_call_incoming(c.incoming);
+        ui.set_call_active(c.active);
+        ui.set_call_muted(c.muted);
+        let state = if c.incoming {
+            "Входящий звонок"
+        } else if c.active {
+            "Идёт звонок"
+        } else {
+            "Звоним…"
+        };
+        ui.set_call_state(state.into());
+    });
+}
+
+fn start_audio(core: &Arc<Core>, peer: [u8; 32]) -> Option<AudioCall> {
+    let settings = core.settings.lock().unwrap().audio;
+    match AudioCall::start(core.messenger.clone(), peer, settings) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            eprintln!("[call] не удалось начать звук: {e}");
+            None
+        }
+    }
+}
+
+fn reset_call(ui: &AppWindow, core: &Arc<Core>) {
+    CALL.with(|c| *c.borrow_mut() = CallCtx::default());
+    let back = if core.current_chat.lock().unwrap().is_some() { 3 } else { 0 };
+    ui.set_screen(back);
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -371,6 +439,69 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_start_call(move || {
+            let ui = w.unwrap();
+            let Some(peer) = *c.current_chat.lock().unwrap() else { return };
+            let id = gen_call_id();
+            let _ = c.messenger.send_call_invite(&peer, id, true, false);
+            CALL.with(|cell| {
+                *cell.borrow_mut() = CallCtx { call_id: Some(id), peer: Some(peer), ..Default::default() }
+            });
+            refresh_call_ui(&ui, &c);
+            ui.set_screen(6);
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_accept_call(move || {
+            let ui = w.unwrap();
+            let info = CALL.with(|cell| { let cell = cell.borrow(); (cell.call_id, cell.peer) });
+            if let (Some(id), Some(peer)) = info {
+                let _ = c.messenger.send_call_accept(&peer, id);
+                let ac = start_audio(&c, peer);
+                CALL.with(|cell| {
+                    let mut cell = cell.borrow_mut();
+                    cell.active = ac.is_some();
+                    cell.incoming = false;
+                    cell.started = Some(Instant::now());
+                    cell.call = ac;
+                });
+                refresh_call_ui(&ui, &c);
+            }
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_hangup_call(move || {
+            let ui = w.unwrap();
+            let info = CALL.with(|cell| { let cell = cell.borrow(); (cell.call_id, cell.peer) });
+            if let (Some(id), Some(peer)) = info {
+                let _ = c.messenger.send_call_end(&peer, id);
+            }
+            reset_call(&ui, &c);
+        });
+    }
+    {
+        let c = core.clone();
+        let w = ui.as_weak();
+        ui.on_toggle_mute(move || {
+            let ui = w.unwrap();
+            CALL.with(|cell| {
+                let mut cell = cell.borrow_mut();
+                cell.muted = !cell.muted;
+                if let Some(call) = &cell.call {
+                    call.set_muted(cell.muted);
+                }
+            });
+            refresh_call_ui(&ui, &c);
+        });
+    }
+
     // --- поток событий движка → UI ---
     {
         let core_ev = core.clone();
@@ -388,7 +519,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let c = core.clone();
         let w = ui.as_weak();
-        timer.start(slint::TimerMode::Repeated, Duration::from_secs(3), move || {
+        timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), move || {
             if let Some(ui) = w.upgrade() {
                 update_net(&ui, &c);
                 rebuild_contacts(&ui, &c);
@@ -396,6 +527,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Some(key) = *c.current_chat.lock().unwrap() {
                         ui.set_chat_online(c.messenger.is_online(&key));
                     }
+                }
+                // Длительность активного звонка.
+                if let Some(secs) = CALL.with(|cell| {
+                    let cell = cell.borrow();
+                    if cell.active { cell.started.map(|s| s.elapsed().as_secs()) } else { None }
+                }) {
+                    ui.set_call_timer(format!("{:02}:{:02}", secs / 60, secs % 60).into());
                 }
             }
         });
@@ -439,8 +577,41 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
                 rebuild_messages(ui, core);
             }
         }
-        // Сигнализация звонка — UI будет добавлен в шаге A3.
-        Event::CallInvite { .. } | Event::CallAccept { .. } | Event::CallEnd { .. } => {}
+        Event::CallInvite { peer, call_id, .. } => {
+            let busy = CALL.with(|c| c.borrow().call_id.is_some());
+            if busy {
+                let _ = core.messenger.send_call_end(&peer, call_id); // занято — отклоняем
+            } else {
+                CALL.with(|c| {
+                    *c.borrow_mut() =
+                        CallCtx { call_id: Some(call_id), peer: Some(peer), incoming: true, ..Default::default() }
+                });
+                refresh_call_ui(ui, core);
+                ui.set_screen(6);
+            }
+        }
+        Event::CallAccept { peer, call_id } => {
+            let ours = CALL.with(|c| {
+                let c = c.borrow();
+                c.call_id == Some(call_id) && c.peer == Some(peer) && !c.active && !c.incoming
+            });
+            if ours {
+                let ac = start_audio(core, peer);
+                CALL.with(|c| {
+                    let mut c = c.borrow_mut();
+                    c.active = ac.is_some();
+                    c.started = Some(Instant::now());
+                    c.call = ac;
+                });
+                refresh_call_ui(ui, core);
+            }
+        }
+        Event::CallEnd { call_id, .. } => {
+            let ours = CALL.with(|c| c.borrow().call_id == Some(call_id));
+            if ours {
+                reset_call(ui, core);
+            }
+        }
     }
 }
 

@@ -3777,6 +3777,7 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "hex",
+ "p2p-call",
  "p2p-core",
  "p2p-messenger",
  "p2p-ygg",

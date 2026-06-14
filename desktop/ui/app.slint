@@ -135,7 +135,19 @@ export component AppWindow inherits Window {
     in-out property <string> cfg-vbitrate;
     in property <string> settings-status;
 
+    // Звонок.
+    in property <string> call-peer;
+    in property <string> call-state;   // "Звоним…" | "Входящий звонок" | "Идёт звонок"
+    in property <bool> call-incoming;  // показать принять/отклонить
+    in property <bool> call-active;    // идёт разговор (таймер/mute)
+    in property <string> call-timer;
+    in property <bool> call-muted;
+
     callback save-settings();
+    callback start-call();
+    callback accept-call();
+    callback hangup-call();
+    callback toggle-mute();
     callback open-chat(string);
     callback open-info();
     callback send-message(string);
@@ -281,6 +293,11 @@ export component AppWindow inherits Window {
     // ===== Чат =====
     if root.screen == 3: VerticalLayout {
         TopBar { title: root.chat-name; show-back: true; back => { root.screen = 0; }
+            TouchArea {
+                width: 30px;
+                clicked => { root.start-call(); }
+                Text { text: "📞"; font-size: 16px; vertical-alignment: center; horizontal-alignment: center; }
+            }
             TouchArea {
                 width: 28px;
                 clicked => { root.open-info(); }
@@ -441,6 +458,49 @@ export component AppWindow inherits Window {
 
             HoloButton { text: "Сохранить"; filled: true; clicked => { root.save-settings(); } }
             Text { text: root.settings-status; color: #8bc34a; }
+        }
+    }
+
+    // ===== Экран звонка =====
+    if root.screen == 6: Rectangle {
+        background: #1a1a1a;
+        VerticalLayout {
+            alignment: center;
+            spacing: 18px;
+            Text {
+                text: root.call-peer;
+                color: white;
+                font-size: 26px;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: root.call-active ? root.call-timer : root.call-state;
+                color: #33b5e5;
+                font-size: 15px;
+                horizontal-alignment: center;
+            }
+            Rectangle { height: 30px; }
+            // Входящий: принять/отклонить.
+            if root.call-incoming: HorizontalLayout {
+                alignment: center;
+                spacing: 30px;
+                HoloButton { text: "Принять"; filled: true; accent: #8bc34a; width: 130px;
+                    clicked => { root.accept-call(); } }
+                HoloButton { text: "Отклонить"; accent: #e53935; width: 130px;
+                    clicked => { root.hangup-call(); } }
+            }
+            // Исходящий/активный: mute (если активен) + завершить.
+            if !root.call-incoming: HorizontalLayout {
+                alignment: center;
+                spacing: 30px;
+                if root.call-active: HoloButton {
+                    text: root.call-muted ? "Вкл. микрофон" : "Выкл. микрофон";
+                    width: 150px;
+                    clicked => { root.toggle-mute(); }
+                }
+                HoloButton { text: "Завершить"; accent: #e53935; width: 130px;
+                    clicked => { root.hangup-call(); } }
+            }
         }
     }
 }
