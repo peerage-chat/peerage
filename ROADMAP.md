@@ -98,10 +98,21 @@
 - **DoD:** трансляция файла/потока на группу. Независимая, крупная.
 
 ### Фаза G — Android (по ТЗ — основная платформа)
-- Kotlin + Compose UI; JNI-мост к тому же `core`; `libygg` через gomobile/.aar (или c-shared).
-- Платформенное медиа: MediaCodec (H.264), Camera2, Opus, Vulkan-пайплайн; UnifiedPush.
+- [x] **G1 — JNI-мост** (`androidjni`, cdylib `libp2p_android.so`): обёртка над
+  `p2p-core`/`p2p-messenger` — идентичность, контакты (TOFU/верификация), 1:1
+  текст-чат, статусы, присутствие, история. Type-check на хосте ✓. Транспорт
+  (`build.rs`) и libygg сделаны target-aware (ABI-папки, без rpath); скрипты
+  `build-ygg-android.sh` / `build-android-libs.sh`.
+- [x] **G2 — Gradle + Compose** (`android/`, Holo-тема): экраны контактов, чата,
+  добавления, «мой код», инфо; поллинг событий; паритет с десктоп-чатом.
+  Версии: AGP 8.5.2 / Kotlin 1.9.25 / Compose 1.5.15 / SDK 34.
+- [ ] Сборка нативных .so требует Linux-NDK в WSL (см. `android/README.md`) —
+  затем APK через Android Studio (JDK 17). На устройстве пока не прогонялось.
+- [ ] **G3 — 1:1 звонки**: аудио (cpal/AAudio) + Camera2/MediaProjection →
+  `FrameFeeder` в Rust-конвейер (переиспользуем openh264/opus). MediaCodec/Vulkan
+  из ТЗ — последующая оптимизация, не блокер паритета.
+- [ ] **G4 — группы + UnifiedPush + Android Keystore (vault-ключ) + полировка.**
 - **DoD:** паритет с десктопом по чату и 1:1 звонкам.
-- Зависит от: стабильных контрактов ядра (после Фаз A/B). Самый большой пласт.
 
 ---
 

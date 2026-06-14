@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Holo-тема (Android 4.x): тёмный фон, синий акцент. Compose задаёт цвета
+         контента сам; этот XML-тема нужна Activity (фон/статус-бар, без ActionBar). -->
+    <style name="Theme.P2P" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#04222e</item>
+        <item name="android:windowBackground">#1a1a1a</item>
+        <item name="android:navigationBarColor">#1a1a1a</item>
+    </style>
+</resources>

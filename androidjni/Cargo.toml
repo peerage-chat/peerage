@@ -1,0 +1,22 @@
+[package]
+name = "p2p-android"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# JNI-мост: cdylib грузится из Kotlin через System.loadLibrary("p2p_android").
+[lib]
+name = "p2p_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21"
+log = "0.4"
+android_logger = "0.14"
+serde = { workspace = true }
+serde_json = "1"
+hex.workspace = true
+p2p-core = { path = "../core" }
+p2p-messenger = { path = "../messenger" }
+p2p-ygg = { path = "../transport" }

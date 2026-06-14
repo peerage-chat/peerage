@@ -10,6 +10,7 @@ members = [
     "groupchat",
     "ntfy",
     "desktop",
+    "androidjni",
 ]
 # transport линкует Go-библиотеку libygg.so и собирается только под Linux (WSL).
 # Дефолтная сборка (cargo build/test без -p) ограничена кросс-платформенными
