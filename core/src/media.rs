@@ -64,6 +64,154 @@ pub fn parse_media(dg: &[u8]) -> Option<MediaFrame<'_>> {
     })
 }
 
+// ---- Видео: фрагментация кадров (кадр > MTU) ----
+//
+// Видео-кадр (H.264) обычно больше одной датаграммы, поэтому режется на чанки.
+// Каждый чанк передаётся как медиа-payload (track = VIDEO/SCREEN) со своим
+// суб-заголовком, описывающим принадлежность к кадру и порядок:
+// ```text
+// байты 0..4 : frame_id (u32 BE) — номер кадра (группирует фрагменты)
+// байты 4..6 : frag_idx (u16 BE) — индекс фрагмента в кадре
+// байты 6..8 : frag_count (u16 BE) — всего фрагментов в кадре
+// байт  8    : flags (бит 0 — ключевой кадр)
+// байты 9..  : кусок данных кадра
+// ```
+
+use std::collections::HashMap;
+
+/// Длина видео-суб-заголовка.
+pub const VIDEO_HDR: usize = 9;
+/// Флаг ключевого кадра.
+pub const VIDEO_KEYFRAME: u8 = 0x01;
+
+/// Максимум данных кадра в одном фрагменте.
+pub const MAX_VIDEO_CHUNK: usize = MAX_MEDIA_PAYLOAD - VIDEO_HDR;
+
+/// Разбить кадр на медиа-payload-ы (суб-заголовок + кусок), готовые к отправке
+/// как медиа-датаграммы (track = VIDEO/SCREEN). Пустой кадр → один пустой фрагмент.
+pub fn fragment_video(frame: &[u8], frame_id: u32, keyframe: bool) -> Vec<Vec<u8>> {
+    let flags = if keyframe { VIDEO_KEYFRAME } else { 0 };
+    let chunks: Vec<&[u8]> = if frame.is_empty() {
+        vec![&[]]
+    } else {
+        frame.chunks(MAX_VIDEO_CHUNK).collect()
+    };
+    let count = chunks.len() as u16;
+    chunks
+        .into_iter()
+        .enumerate()
+        .map(|(i, chunk)| {
+            let mut out = Vec::with_capacity(VIDEO_HDR + chunk.len());
+            out.extend_from_slice(&frame_id.to_be_bytes());
+            out.extend_from_slice(&(i as u16).to_be_bytes());
+            out.extend_from_slice(&count.to_be_bytes());
+            out.push(flags);
+            out.extend_from_slice(chunk);
+            out
+        })
+        .collect()
+}
+
+/// Разобранный видео-фрагмент (из медиа-payload).
+#[derive(Debug)]
+pub struct VideoFrag<'a> {
+    pub frame_id: u32,
+    pub frag_idx: u16,
+    pub frag_count: u16,
+    pub keyframe: bool,
+    pub data: &'a [u8],
+}
+
+/// Разобрать видео-фрагмент из медиа-payload (то, что вернул [`parse_media`] как payload).
+pub fn parse_video_frag(payload: &[u8]) -> Option<VideoFrag<'_>> {
+    if payload.len() < VIDEO_HDR {
+        return None;
+    }
+    let frame_id = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let frag_idx = u16::from_be_bytes([payload[4], payload[5]]);
+    let frag_count = u16::from_be_bytes([payload[6], payload[7]]);
+    let keyframe = payload[8] & VIDEO_KEYFRAME != 0;
+    Some(VideoFrag {
+        frame_id,
+        frag_idx,
+        frag_count,
+        keyframe,
+        data: &payload[VIDEO_HDR..],
+    })
+}
+
+/// Собранный целый видео-кадр.
+pub struct CompleteFrame {
+    pub frame_id: u32,
+    pub keyframe: bool,
+    pub data: Vec<u8>,
+}
+
+struct FrameAcc {
+    count: u16,
+    keyframe: bool,
+    parts: Vec<Option<Vec<u8>>>,
+    received: u16,
+}
+
+/// Собирает целые кадры из фрагментов: переупорядочивает, отбрасывает поздние и
+/// неполные (когда приходит более новый кадр). Без фоновых потоков.
+#[derive(Default)]
+pub struct VideoReassembler {
+    last_delivered: Option<u32>,
+    frames: HashMap<u32, FrameAcc>,
+}
+
+impl VideoReassembler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Принять фрагмент. Возвращает кадр, когда он полностью собран.
+    pub fn push(&mut self, frag: VideoFrag<'_>) -> Option<CompleteFrame> {
+        // Уже доставленные/устаревшие кадры игнорируем.
+        if let Some(last) = self.last_delivered {
+            if frag.frame_id <= last {
+                return None;
+            }
+        }
+        if frag.frag_count == 0 || frag.frag_idx >= frag.frag_count {
+            return None;
+        }
+
+        let acc = self.frames.entry(frag.frame_id).or_insert_with(|| FrameAcc {
+            count: frag.frag_count,
+            keyframe: frag.keyframe,
+            parts: vec![None; frag.frag_count as usize],
+            received: 0,
+        });
+        let slot = &mut acc.parts[frag.frag_idx as usize];
+        if slot.is_none() {
+            *slot = Some(frag.data.to_vec());
+            acc.received += 1;
+        }
+
+        if acc.received == acc.count {
+            let acc = self.frames.remove(&frag.frame_id).unwrap();
+            let mut data = Vec::new();
+            for part in acc.parts {
+                data.extend_from_slice(&part.unwrap());
+            }
+            self.last_delivered = Some(frag.frame_id);
+            // Чистим всё, что старше доставленного (неполные кадры до него — потеряны).
+            self.frames.retain(|&id, _| id > frag.frame_id);
+            return Some(CompleteFrame { frame_id: frag.frame_id, keyframe: acc.keyframe, data });
+        }
+        // Предохранитель от роста при больших потерях.
+        if self.frames.len() > 16 {
+            if let Some(&oldest) = self.frames.keys().min() {
+                self.frames.remove(&oldest);
+            }
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +243,74 @@ mod tests {
         let f = parse_media(&buf).unwrap();
         assert_eq!(f.seq, u16::MAX);
         assert_eq!(f.payload.len(), 0);
+    }
+
+    fn make_frame(n: usize, fill: u8) -> Vec<u8> {
+        vec![fill; n]
+    }
+
+    #[test]
+    fn video_fragment_reassemble_in_order() {
+        let frame = make_frame(5000, 0xAB);
+        let frags = fragment_video(&frame, 1, true);
+        assert!(frags.len() > 1, "большой кадр должен разрезаться");
+
+        let mut r = VideoReassembler::new();
+        let mut got = None;
+        for f in &frags {
+            got = r.push(parse_video_frag(f).unwrap());
+        }
+        let cf = got.expect("кадр должен собраться");
+        assert_eq!(cf.data, frame);
+        assert!(cf.keyframe);
+        assert_eq!(cf.frame_id, 1);
+    }
+
+    #[test]
+    fn video_reassemble_out_of_order() {
+        let frame = make_frame(4096, 7);
+        let mut frags: Vec<Vec<u8>> = fragment_video(&frame, 10, false);
+        frags.reverse(); // обратный порядок прихода
+
+        let mut r = VideoReassembler::new();
+        let mut got = None;
+        for f in &frags {
+            if let Some(c) = r.push(parse_video_frag(f).unwrap()) {
+                got = Some(c);
+            }
+        }
+        assert_eq!(got.unwrap().data, frame);
+    }
+
+    #[test]
+    fn incomplete_frame_dropped_when_newer_completes() {
+        let f1 = fragment_video(&make_frame(5000, 1), 1, false); // потеряем один фрагмент
+        let f2 = fragment_video(&make_frame(500, 2), 2, true);
+
+        let mut r = VideoReassembler::new();
+        // кадр 1 — пропускаем первый фрагмент (потеря) → не соберётся
+        for f in f1.iter().skip(1) {
+            assert!(r.push(parse_video_frag(f).unwrap()).is_none());
+        }
+        // кадр 2 — полный → собирается; кадр 1 отбрасывается
+        let mut got = None;
+        for f in &f2 {
+            if let Some(c) = r.push(parse_video_frag(f).unwrap()) {
+                got = Some(c);
+            }
+        }
+        let cf = got.expect("кадр 2 собран");
+        assert_eq!(cf.frame_id, 2);
+        // запоздавший фрагмент кадра 1 теперь игнорируется
+        assert!(r.push(parse_video_frag(&f1[0]).unwrap()).is_none());
+    }
+
+    #[test]
+    fn empty_frame_one_fragment() {
+        let frags = fragment_video(&[], 5, false);
+        assert_eq!(frags.len(), 1);
+        let f = parse_video_frag(&frags[0]).unwrap();
+        assert_eq!(f.frag_count, 1);
+        assert_eq!(f.data.len(), 0);
     }
 }
