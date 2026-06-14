@@ -74,12 +74,16 @@ impl GroupCall {
             let running = running.clone();
             let mix = mix.clone();
             let acfg = audio;
+            let allowed = members.clone(); // M2: медиа только от участников группы
             threads.push(thread::spawn(move || {
                 let mut a_src: HashMap<PeerKey, (JitterBuffer, AudioDecoder)> = HashMap::new();
                 let mut v_src: HashMap<PeerKey, (VideoReassembler, VideoDecoder)> = HashMap::new();
                 let cap = acfg.map(|c| c.interleaved_len() * 50).unwrap_or(0);
                 while running.load(Ordering::Relaxed) {
                     let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else { continue };
+                    if !allowed.contains(&p.src) {
+                        continue; // источник не из группы — игнорируем
+                    }
                     match p.track {
                         TRACK_AUDIO => {
                             let (Some(cfg), Some(mix)) = (acfg, mix.as_ref()) else { continue };

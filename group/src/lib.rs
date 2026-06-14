@@ -29,6 +29,8 @@ pub enum GroupError {
     NoGroup,
     #[error("ожидалось welcome-сообщение")]
     NotWelcome,
+    #[error("идентичность KeyPackage не совпадает с ожидаемой (попытка подмены)")]
+    IdentityMismatch,
 }
 
 fn mls<E: std::fmt::Display>(e: E) -> GroupError {
@@ -105,6 +107,9 @@ impl Member {
             return Err(GroupError::Mls("повреждённый файл группы".into()));
         }
         let glen = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        if 4 + glen > data.len() {
+            return Err(GroupError::Mls("повреждённый файл группы".into()));
+        }
         let gid = &data[4..4 + glen];
         let storage_bytes = &data[4 + glen..];
 
@@ -140,13 +145,28 @@ impl Member {
         Ok(())
     }
 
-    /// Добавить участника по его KeyPackage. Возвращает (commit, welcome) —
-    /// commit рассылается существующим участникам, welcome — новому.
-    pub fn add(&mut self, key_package: &[u8]) -> Result<(Vec<u8>, Vec<u8>), GroupError> {
+    /// Добавить участника по его KeyPackage. `expected_identity` — публичный ключ
+    /// пира, которого мы РЕАЛЬНО приглашали (аутентифицированный транспортом).
+    /// Возвращает (commit, welcome): commit — существующим, welcome — новому.
+    ///
+    /// H1: привязываем KeyPackage к аутентифицированной идентичности — иначе пир
+    /// мог бы вступить под чужим публичным ключом (подмена в группе).
+    pub fn add(
+        &mut self,
+        key_package: &[u8],
+        expected_identity: &[u8; 32],
+    ) -> Result<(Vec<u8>, Vec<u8>), GroupError> {
         let kp_in = KeyPackageIn::tls_deserialize_exact(key_package).map_err(mls)?;
         let kp = kp_in
             .validate(self.provider.crypto(), ProtocolVersion::Mls10)
             .map_err(mls)?;
+        // Идентичность credential, ключ подписи и ожидаемый пир обязаны совпадать.
+        let leaf = kp.leaf_node();
+        let identity = leaf.credential().serialized_content();
+        let sig_key = leaf.signature_key().as_slice();
+        if identity != expected_identity || sig_key != expected_identity {
+            return Err(GroupError::IdentityMismatch);
+        }
         let group = self.group.as_mut().ok_or(GroupError::NoGroup)?;
         let (commit, welcome, _info) = group
             .add_members(&self.provider, &self.signer, &[kp])
@@ -253,7 +273,7 @@ mod tests {
 
         alice.create_group().unwrap();
         let bob_kp = bob.key_package().unwrap();
-        let (_commit, welcome) = alice.add(&bob_kp).unwrap();
+        let (_commit, welcome) = alice.add(&bob_kp, &id(2).public_key_bytes()).unwrap();
         bob.join(&welcome).unwrap();
 
         assert_eq!(alice.member_count(), 2);
@@ -280,11 +300,11 @@ mod tests {
         let mut b = Member::new(&id(2)).unwrap();
         let mut c = Member::new(&id(3)).unwrap();
         a.create_group().unwrap();
-        let (_, w) = a.add(&b.key_package().unwrap()).unwrap();
+        let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
         b.join(&w).unwrap();
 
         // A добавляет C: commit идёт B, welcome — C.
-        let (commit, welcome) = a.add(&c.key_package().unwrap()).unwrap();
+        let (commit, welcome) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
         b.process(&commit).unwrap(); // B применяет изменение состава
         c.join(&welcome).unwrap();
 
@@ -299,6 +319,22 @@ mod tests {
     }
 
     #[test]
+    fn add_rejects_identity_mismatch() {
+        // H1: KeyPackage с идентичностью, не равной ожидаемому пиру, отвергается.
+        let mut a = Member::new(&id(1)).unwrap();
+        a.create_group().unwrap();
+        let b = Member::new(&id(2)).unwrap();
+        let kp = b.key_package().unwrap();
+        // Ожидаем «не того» (id(3)) — должно быть отклонено.
+        assert!(matches!(
+            a.add(&kp, &id(3).public_key_bytes()),
+            Err(GroupError::IdentityMismatch)
+        ));
+        // С правильной идентичностью — ок.
+        assert!(a.add(&kp, &id(2).public_key_bytes()).is_ok());
+    }
+
+    #[test]
     fn group_state_survives_save_load() {
         let dir = std::env::temp_dir().join(format!("p2p-grp-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -308,7 +344,7 @@ mod tests {
         let mut a = Member::new(&a_id).unwrap();
         a.create_group().unwrap();
         let mut b = Member::new(&id(2)).unwrap();
-        let (_c, w) = a.add(&b.key_package().unwrap()).unwrap();
+        let (_c, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
         b.join(&w).unwrap();
 
         a.save(&path).unwrap();

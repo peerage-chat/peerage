@@ -92,6 +92,7 @@ impl Call {
             let running = running.clone();
             let out_ring = out_ring.clone();
             let audio_cfg = audio;
+            let call_peer = peer; // M2: принимаем медиа только от собеседника
             threads.push(thread::spawn(move || {
                 let mut audio_dec = audio_cfg.and_then(|c| AudioDecoder::new(c).ok());
                 let mut jitter = audio_cfg.map(|c| JitterBuffer::new(c.jitter_depth));
@@ -101,6 +102,9 @@ impl Call {
 
                 while running.load(Ordering::Relaxed) {
                     let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else { continue };
+                    if p.src != call_peer {
+                        continue; // чужой источник — игнорируем
+                    }
                     match p.track {
                         TRACK_AUDIO => {
                             if let (Some(j), Some(dec), Some(ring)) =

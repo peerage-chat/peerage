@@ -68,7 +68,8 @@ impl GroupChat {
     /// существующим участникам и Welcome — новому.
     pub fn add_member(&mut self, new_peer: PeerKey, key_package: &[u8]) -> Result<(), GroupChatError> {
         let existing = self.others(); // до добавления
-        let (commit, welcome) = self.member.add(key_package)?;
+        // H1: KeyPackage привязывается к аутентифицированному пиру (new_peer).
+        let (commit, welcome) = self.member.add(key_package, &new_peer)?;
         for pk in existing {
             let _ = self.messenger.send_group(&pk, &commit);
         }

@@ -371,6 +371,12 @@ impl Messenger {
 
 fn receive_loop(shared: Arc<Shared>) {
     let mut buf = vec![0u8; 65535];
+    // M3: анти-replay для надёжного канала — отпечатки недавних датаграмм.
+    // Каждое легитимное сообщение содержит случайный nonce, поэтому повтор = точная
+    // копия байт → совпадение отпечатка. Кольцо ограничено.
+    let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    let mut seen_order: std::collections::VecDeque<u64> = std::collections::VecDeque::new();
+    const SEEN_CAP: usize = 4096;
     loop {
         let (n, src) = match shared.node.read(&mut buf) {
             Ok(v) => v,
@@ -396,6 +402,22 @@ fn receive_loop(shared: Arc<Shared>) {
         }
         if buf[0] != CHAN_CHAT {
             continue;
+        }
+        // Анти-replay: отбрасываем точные повторы датаграмм надёжного канала.
+        {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            buf[1..n].hash(&mut h);
+            let fp = h.finish();
+            if !seen.insert(fp) {
+                continue; // уже видели — повтор
+            }
+            seen_order.push_back(fp);
+            if seen_order.len() > SEEN_CAP {
+                if let Some(old) = seen_order.pop_front() {
+                    seen.remove(&old);
+                }
+            }
         }
         let (from, payload) = match decode(&shared.identity, &buf[1..n]) {
             Ok(v) => v,

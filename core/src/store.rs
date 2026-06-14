@@ -72,10 +72,29 @@ impl Profile {
             seed: hex::encode(self.identity.seed()),
         };
         let json = serde_json::to_vec_pretty(&pf)?;
-        std::fs::write(path, &json)?;
-        restrict_permissions(path)?;
+        write_secret(path, &json)?;
         Ok(())
     }
+}
+
+/// Записать секретный файл сразу с ограниченными правами (без окна TOCTOU).
+#[cfg(unix)]
+fn write_secret(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    f.write_all(data)
+}
+
+#[cfg(not(unix))]
+fn write_secret(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    // На не-Unix защита прав — задача ОС/хранилища; см. M1 (шифрование at-rest).
+    std::fs::write(path, data)
 }
 
 // ---- Контакты (TOFU) ----
@@ -315,17 +334,6 @@ impl MessageStore {
 fn decode_key(hex_str: &str) -> Result<[u8; 32], StoreError> {
     let bytes = hex::decode(hex_str)?;
     bytes.as_slice().try_into().map_err(|_| StoreError::BadLength)
-}
-
-#[cfg(unix)]
-fn restrict_permissions(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-}
-
-#[cfg(not(unix))]
-fn restrict_permissions(_path: &Path) -> std::io::Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]
