@@ -32,6 +32,12 @@ pub enum Payload {
     Ping,
     /// Ответ на ping.
     Pong,
+    /// Приглашение в звонок (сигнализация по надёжному каналу).
+    CallInvite { call_id: u64, audio: bool, video: bool },
+    /// Принятие звонка.
+    CallAccept { call_id: u64 },
+    /// Завершение/отклонение звонка.
+    CallEnd { call_id: u64 },
 }
 
 /// Внешний конверт, передаваемый по транспорту.
@@ -131,6 +137,9 @@ mod tests {
             Payload::Pong,
             Payload::Ack { id: 7 },
             Payload::Text { id: 1, text: "hi".into() },
+            Payload::CallInvite { call_id: 99, audio: true, video: false },
+            Payload::CallAccept { call_id: 99 },
+            Payload::CallEnd { call_id: 99 },
         ] {
             let d = encode(&a, &b.public_key_bytes(), &p, 0).unwrap();
             let (_, got) = decode(&b, &d).unwrap();

@@ -39,6 +39,12 @@ pub enum Event {
     Ack { peer: PeerKey, id: u64 },
     /// Не удалось доставить наше сообщение за отведённое время (TTL).
     Undelivered { peer: PeerKey, id: u64 },
+    /// Входящее приглашение в звонок.
+    CallInvite { peer: PeerKey, call_id: u64, audio: bool, video: bool },
+    /// Пир принял звонок.
+    CallAccept { peer: PeerKey, call_id: u64 },
+    /// Пир завершил/отклонил звонок.
+    CallEnd { peer: PeerKey, call_id: u64 },
 }
 
 /// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
@@ -311,6 +317,27 @@ impl Messenger {
         Ok(())
     }
 
+    /// Пригласить пира в звонок (сигнализация по надёжному каналу).
+    pub fn send_call_invite(
+        &self,
+        peer: &PeerKey,
+        call_id: u64,
+        audio: bool,
+        video: bool,
+    ) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::CallInvite { call_id, audio, video })
+    }
+
+    /// Принять звонок.
+    pub fn send_call_accept(&self, peer: &PeerKey, call_id: u64) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::CallAccept { call_id })
+    }
+
+    /// Завершить/отклонить звонок.
+    pub fn send_call_end(&self, peer: &PeerKey, call_id: u64) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::CallEnd { call_id })
+    }
+
     /// Включить приём медиа: возвращает bounded-канал. При переполнении новые
     /// пакеты отбрасываются (для реалтайма ронять опоздавшие лучше, чем копить).
     pub fn media_channel(&self, capacity: usize) -> Receiver<MediaPacket> {
@@ -378,6 +405,15 @@ fn receive_loop(shared: Arc<Shared>) {
                 let _ = shared.send(&src, &Payload::Pong);
             }
             Payload::Pong => {}
+            Payload::CallInvite { call_id, audio, video } => {
+                shared.emit(Event::CallInvite { peer: src, call_id, audio, video });
+            }
+            Payload::CallAccept { call_id } => {
+                shared.emit(Event::CallAccept { peer: src, call_id });
+            }
+            Payload::CallEnd { call_id } => {
+                shared.emit(Event::CallEnd { peer: src, call_id });
+            }
         }
     }
 }

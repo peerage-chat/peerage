@@ -355,6 +355,8 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
                 rebuild_messages(ui, core);
             }
         }
+        // Сигнализация звонка — UI будет добавлен в шаге A3.
+        Event::CallInvite { .. } | Event::CallAccept { .. } | Event::CallEnd { .. } => {}
     }
 }
 
