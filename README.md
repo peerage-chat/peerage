@@ -39,6 +39,8 @@ media/                Rust: медиа-цепочка (кодеки, джитт�
   src/codec.rs        Opus энкодер/декодер (параметры из AudioSettings)
   src/jitter.rs       джиттер-буфер (reorder по seq, префетч, PLC при потере)
   examples/audio_loopback.rs  синтетика → энкод → сеть → джиттер → декод
+group/                Rust: групповое E2E на MLS (RFC 9420, openmls)
+  src/lib.rs          Member: create/add/join/encrypt/process (TreeKEM, FS/PCS)
 call/                 Rust: движок звонка (аудио+видео) поверх media+messenger
   src/lib.rs          Call: демукс по track; аудио (cpal/Opus); видео (H.264);
                       приём→рендер-кадры. Аудио/видео опциональны.
@@ -148,8 +150,14 @@ scripts/
       и 🖥 экран. Камера (nokhwa, `!Send`) идёт через push-источник в отдельном
       потоке. **Фаза B завершена** (1:1 видео: камера/экран). Реальный захват — на железе
 - [ ] Добавление контакта по QR-коду (сейчас — по hex-ключу)
-- [ ] Android (JNI-мост к ядру)
-- [ ] Группы (MLS) / торрент-стриминг
+- [~] **Фаза E — группы (MLS)**: крипто-слой `p2p-group` (openmls) — создание
+      группы, add/Commit/Welcome, encrypt/process, TreeKEM + Forward Secrecy.
+      Тесты на 2 и 3 участников ✓. Осталось: распространение по сети +
+      упорядочивание Commit (нужен delivery service — ntfy, Фаза D), персистентность
+      состояния группы, групповые звонки (mesh, переиспользует A/B)
+- [ ] Фаза D — push-пробуждение (ntfy/UnifiedPush)
+- [ ] Android (JNI-мост к ядру) — в т.ч. телефонный шаринг экрана
+- [ ] Торрент-стриминг
 
 ## Разработка
 
