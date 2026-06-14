@@ -1,6 +1,6 @@
-//! Сквозной тест группового чата (3 узла) поверх реального Yggdrasil, БЕЗ сервера:
-//! A создаёт группу и добавляет B и C (MLS Commit/Welcome рассылаются по mesh),
-//! затем все обмениваются E2E-сообщениями группы.
+//! Сквозной тест группового чата (3 узла) поверх Yggdrasil, БЕЗ сервера, с ПОЛНЫМ
+//! сетевым онбордингом: админ A приглашает B и C → они присылают KeyPackage по
+//! сети → A добавляет (Commit/Welcome по mesh) → все обмениваются E2E-сообщениями.
 //!
 //! Запуск (WSL): cargo run -p p2p-groupchat --example group_chat
 
@@ -14,19 +14,56 @@ use p2p_groupchat::GroupChat;
 use p2p_messenger::{Event, Messenger};
 use p2p_ygg::Node;
 
-/// Обработать входящие групповые события в течение `secs`, вернуть тексты.
-fn pump(rx: &Receiver<Event>, chat: &mut GroupChat, secs: u64) -> Vec<String> {
+/// Прокрутить события админа `secs` секунд: на KeyReply — добавить участника,
+/// на Group — обработать (Commit/app). Вернуть прикладные тексты.
+fn pump_admin(rx: &Receiver<Event>, a: &mut GroupChat, secs: u64) -> Vec<String> {
     let deadline = Instant::now() + Duration::from_secs(secs);
     let mut texts = Vec::new();
     while Instant::now() < deadline {
         match rx.recv_timeout(Duration::from_millis(300)) {
+            Ok(Event::GroupKeyReply { peer, key_package }) => {
+                let _ = a.add_member(peer, &key_package);
+            }
             Ok(Event::Group { data, .. }) => {
-                if let Ok(Some(t)) = chat.handle(&data) {
+                if let Ok(Some(t)) = a.handle(&data) {
                     texts.push(t);
                 }
             }
-            Ok(_) => {}
-            Err(_) => {}
+            _ => {}
+        }
+    }
+    texts
+}
+
+/// Прокрутить события участника: на KeyRequest — создать pending и отправить KP;
+/// на Group — обработать (Welcome → вступление, либо прикладное сообщение).
+fn pump_member(
+    rx: &Receiver<Event>,
+    chat: &mut Option<GroupChat>,
+    id: &Identity,
+    m: &Arc<Messenger>,
+    secs: u64,
+) -> Vec<String> {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    let mut texts = Vec::new();
+    while Instant::now() < deadline {
+        match rx.recv_timeout(Duration::from_millis(300)) {
+            Ok(Event::GroupKeyRequest { peer }) => {
+                if chat.is_none() {
+                    if let Ok((pending, kp)) = GroupChat::pending(id, m.clone()) {
+                        let _ = m.send_group_key_reply(&peer, &kp);
+                        *chat = Some(pending);
+                    }
+                }
+            }
+            Ok(Event::Group { data, .. }) => {
+                if let Some(c) = chat.as_mut() {
+                    if let Ok(Some(t)) = c.handle(&data) {
+                        texts.push(t);
+                    }
+                }
+            }
+            _ => {}
         }
     }
     texts
@@ -35,8 +72,6 @@ fn pump(rx: &Receiver<Event>, chat: &mut GroupChat, secs: u64) -> Vec<String> {
 fn main() {
     let ids: Vec<Identity> = (1u8..=3).map(|i| Identity::from_seed(&[i; 32]).unwrap()).collect();
     let pks: Vec<[u8; 32]> = ids.iter().map(|i| i.public_key_bytes()).collect();
-
-    // Узел A слушает; B и C подключаются к нему (B↔C маршрутизируются через mesh).
     let nodes: Vec<Node> = ids.iter().map(|i| Node::start(&i.seed()).unwrap()).collect();
     let uri = nodes[0].listen("tls://127.0.0.1:0").unwrap();
     nodes[1].add_peer(&uri).unwrap();
@@ -51,13 +86,12 @@ fn main() {
     }
     thread::sleep(Duration::from_secs(3));
 
-    let mut nodes = nodes.into_iter();
-    let (ma, rxa) = Messenger::start(ids[0].clone(), nodes.next().unwrap());
-    let (mb, rxb) = Messenger::start(ids[1].clone(), nodes.next().unwrap());
-    let (mc, rxc) = Messenger::start(ids[2].clone(), nodes.next().unwrap());
+    let mut it = nodes.into_iter();
+    let (ma, rxa) = Messenger::start(ids[0].clone(), it.next().unwrap());
+    let (mb, rxb) = Messenger::start(ids[1].clone(), it.next().unwrap());
+    let (mc, rxc) = Messenger::start(ids[2].clone(), it.next().unwrap());
     let (ma, mb, mc) = (Arc::new(ma), Arc::new(mb), Arc::new(mc));
 
-    // Поднимаем шифр-сессии между всеми парами (двунаправленный Hello).
     let (ka, kb, kc) = (pks[0], pks[1], pks[2]);
     thread::scope(|s| {
         let to = Duration::from_secs(25);
@@ -73,47 +107,48 @@ fn main() {
     });
     println!("✓ все пары соединены");
 
-    // A — админ; B и C готовят KeyPackage.
     let mut a = GroupChat::create(&ids[0], ma.clone()).unwrap();
-    let (mut b, kpb) = GroupChat::pending(&ids[1], mb.clone()).unwrap();
-    let (mut c, kpc) = GroupChat::pending(&ids[2], mc.clone()).unwrap();
+    let mut b: Option<GroupChat> = None;
+    let mut c: Option<GroupChat> = None;
 
-    // A добавляет B.
-    a.add_member(pks[1], &kpb).unwrap();
-    pump(&rxb, &mut b, 5); // B получает Welcome → вступает
+    // Добавляем B по сети: invite → KP → add → welcome → join.
+    a.invite(kb);
+    pump_member(&rxb, &mut b, &ids[1], &mb, 5); // B отвечает KeyPackage
+    pump_admin(&rxa, &mut a, 5); // A получает KP и добавляет B (welcome)
+    pump_member(&rxb, &mut b, &ids[1], &mb, 5); // B вступает
 
-    // A добавляет C (Commit → B, Welcome → C).
-    a.add_member(pks[2], &kpc).unwrap();
-    pump(&rxb, &mut b, 5); // B применяет Commit
-    pump(&rxc, &mut c, 5); // C вступает
+    // Добавляем C аналогично.
+    a.invite(kc);
+    pump_member(&rxc, &mut c, &ids[2], &mc, 5);
+    pump_admin(&rxa, &mut a, 5); // add C: commit → B, welcome → C
+    pump_member(&rxb, &mut b, &ids[1], &mb, 5); // B применяет commit
+    pump_member(&rxc, &mut c, &ids[2], &mc, 5); // C вступает
 
-    println!("участников: A={} B={} C={}", a.member_count(), b.member_count(), c.member_count());
+    let bc = b.as_ref().map(|g| g.member_count()).unwrap_or(0);
+    let cc = c.as_ref().map(|g| g.member_count()).unwrap_or(0);
+    println!("участников: A={} B={bc} C={cc}", a.member_count());
 
     // A → группа.
     a.send_text("привет, группа").unwrap();
-    let tb = pump(&rxb, &mut b, 5);
-    let tc = pump(&rxc, &mut c, 5);
+    let tb = pump_member(&rxb, &mut b, &ids[1], &mb, 5);
+    let tc = pump_member(&rxc, &mut c, &ids[2], &mc, 5);
 
     // C → группа.
-    c.send_text("ответ от C").unwrap();
-    let ta = pump(&rxa, &mut a, 5);
-    let tb2 = pump(&rxb, &mut b, 5);
+    c.as_mut().unwrap().send_text("ответ от C").unwrap();
+    let ta = pump_admin(&rxa, &mut a, 5);
+    let tb2 = pump_member(&rxb, &mut b, &ids[1], &mb, 5);
 
     let ok = a.member_count() == 3
-        && b.member_count() == 3
-        && c.member_count() == 3
+        && bc == 3
+        && cc == 3
         && tb.iter().any(|t| t == "привет, группа")
         && tc.iter().any(|t| t == "привет, группа")
         && ta.iter().any(|t| t == "ответ от C")
         && tb2.iter().any(|t| t == "ответ от C");
 
-    println!("B от A: {tb:?}");
-    println!("C от A: {tc:?}");
-    println!("A от C: {ta:?}");
-    println!("B от C: {tb2:?}");
-
+    println!("B от A: {tb:?}\nC от A: {tc:?}\nA от C: {ta:?}\nB от C: {tb2:?}");
     if ok {
-        println!("\n✓✓ Групповой E2E-чат (MLS) работает поверх Yggdrasil БЕЗ сервера");
+        println!("\n✓✓ Групповой E2E-чат с сетевым онбордингом (MLS) — БЕЗ сервера");
     } else {
         eprintln!("\n✗ проверка не пройдена");
         std::process::exit(1);

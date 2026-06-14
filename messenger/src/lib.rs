@@ -47,6 +47,10 @@ pub enum Event {
     CallEnd { peer: PeerKey, call_id: u64 },
     /// Входящее групповое MLS-сообщение (переслать в групповой слой).
     Group { peer: PeerKey, data: Vec<u8> },
+    /// Контакт просит наш KeyPackage (хочет добавить в группу).
+    GroupKeyRequest { peer: PeerKey },
+    /// Контакт прислал свой KeyPackage (для добавления в группу).
+    GroupKeyReply { peer: PeerKey, key_package: Vec<u8> },
 }
 
 /// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
@@ -345,6 +349,17 @@ impl Messenger {
         self.shared.send(peer, &Payload::Group { data: data.to_vec() })
     }
 
+    /// Попросить у контакта KeyPackage (для добавления в группу).
+    pub fn send_group_key_request(&self, peer: &PeerKey) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::GroupKeyRequest)
+    }
+
+    /// Прислать контакту свой KeyPackage.
+    pub fn send_group_key_reply(&self, peer: &PeerKey, key_package: &[u8]) -> Result<(), MessengerError> {
+        self.shared
+            .send(peer, &Payload::GroupKeyReply { key_package: key_package.to_vec() })
+    }
+
     /// Включить приём медиа: возвращает bounded-канал. При переполнении новые
     /// пакеты отбрасываются (для реалтайма ронять опоздавшие лучше, чем копить).
     pub fn media_channel(&self, capacity: usize) -> Receiver<MediaPacket> {
@@ -423,6 +438,12 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::Group { data } => {
                 shared.emit(Event::Group { peer: src, data });
+            }
+            Payload::GroupKeyRequest => {
+                shared.emit(Event::GroupKeyRequest { peer: src });
+            }
+            Payload::GroupKeyReply { key_package } => {
+                shared.emit(Event::GroupKeyReply { peer: src, key_package });
             }
         }
     }

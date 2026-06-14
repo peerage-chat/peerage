@@ -41,6 +41,10 @@ pub enum Payload {
     /// Групповое MLS-сообщение (Commit/Welcome/прикладное) — для пересылки
     /// участникам группы. Содержимое уже зашифровано MLS.
     Group { data: Vec<u8> },
+    /// Запрос KeyPackage у контакта (чтобы добавить его в группу).
+    GroupKeyRequest,
+    /// Ответ с KeyPackage (MLS) для добавления в группу.
+    GroupKeyReply { key_package: Vec<u8> },
 }
 
 /// Внешний конверт, передаваемый по транспорту.
@@ -144,6 +148,8 @@ mod tests {
             Payload::CallAccept { call_id: 99 },
             Payload::CallEnd { call_id: 99 },
             Payload::Group { data: vec![1, 2, 3, 9, 9] },
+            Payload::GroupKeyRequest,
+            Payload::GroupKeyReply { key_package: vec![7, 7, 7] },
         ] {
             let d = encode(&a, &b.public_key_bytes(), &p, 0).unwrap();
             let (_, got) = decode(&b, &d).unwrap();
