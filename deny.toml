@@ -7,20 +7,26 @@
 version = 2
 yanked = "deny"
 ignore = [
-    # Сюда добавляйте RUSTSEC-идентификаторы с обоснованием, если уязвимость
-    # неприменима к нашему сценарию. Пример:
-    # "RUSTSEC-0000-0000", # причина
+    # Ниже — НЕ уязвимости, а статус «unmaintained» у глубоких транзитивных
+    # зависимостей, которые мы не контролируем напрямую и для которых нет
+    # безопасного апгрейда. Все реальные vulnerability-адвизори закрыты апгрейдами
+    # (openmls 0.8 → hpke-rs 0.6.1; openh264 0.9 → openh264-sys2 0.9). См. SECURITY.md.
+    "RUSTSEC-2026-0150", # audiopus_sys unmaintained — через opus; апгрейда нет.
+    "RUSTSEC-2024-0436", # paste unmaintained — через nokhwa/rav1e/image/slint (proc-macro).
+    "RUSTSEC-2026-0173", # proc-macro-error2 unmaintained — через openmls-зависимости (build-time).
 ]
 
 [licenses]
 version = 2
 # Разрешённые лицензии (permissive + типичные для крипто/Rust-экосистемы).
 allow = [
+    "GPL-3.0-only", # лицензия самого проекта; покрывает GPL-вариант Slint.
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0", # Boost Software License — пермиссивная.
     "ISC",
     "Unicode-3.0",
     "Unicode-DFS-2016",
@@ -28,6 +34,9 @@ allow = [
     "MPL-2.0",
     "CC0-1.0",
     "OpenSSL",
+    "NCSA", # University of Illinois/NCSA — пермиссивная (через openh264-sys).
+    "IJG", # Independent JPEG Group — пермиссивная (через jpeg-кодек в image).
+    "CDLA-Permissive-2.0", # Community Data License Agreement — пермиссивная.
 ]
 confidence-threshold = 0.9
 

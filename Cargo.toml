@@ -18,7 +18,9 @@ default-members = ["core"]
 
 [workspace.package]
 edition = "2021"
-license = "MIT"
+# GPL-3.0: используем Slint под GPL-вариантом его три-лицензии, поэтому всё
+# приложение копилефтное — исходники остаются открытыми и проверяемыми.
+license = "GPL-3.0-only"
 authors = ["p2p messenger"]
 
 [workspace.dependencies]

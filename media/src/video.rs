@@ -5,7 +5,7 @@
 //! RGB8-кадры и проходят один и тот же конвейер энкодинга.
 
 use openh264::decoder::Decoder;
-use openh264::encoder::{Encoder, EncoderConfig};
+use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate};
 use openh264::formats::{RgbSliceU8, YUVBuffer, YUVSource};
 use openh264::OpenH264API;
 
@@ -90,8 +90,8 @@ pub struct VideoEncoder {
 impl VideoEncoder {
     pub fn new(settings: VideoSettings) -> Result<Self, VideoError> {
         let config = EncoderConfig::new()
-            .set_bitrate_bps(settings.bitrate.max(0) as u32)
-            .max_frame_rate(settings.fps as f32);
+            .bitrate(BitRate::from_bps(settings.bitrate.max(0) as u32))
+            .max_frame_rate(FrameRate::from_hz(settings.fps as f32));
         let enc = Encoder::with_api_config(OpenH264API::from_source(), config)?;
         Ok(Self {
             enc,
