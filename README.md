@@ -41,6 +41,8 @@ media/                Rust: медиа-цепочка (кодеки, джитт�
   examples/audio_loopback.rs  синтетика → энкод → сеть → джиттер → декод
 group/                Rust: групповое E2E на MLS (RFC 9420, openmls)
   src/lib.rs          Member: create/add/join/encrypt/process (TreeKEM, FS/PCS)
+ntfy/                 Rust: опциональный клиент ntfy (publish/subscribe) —
+                      бэкенд для фонового пробуждения на Android (Фаза G), не обяз.
 call/                 Rust: движок звонка (аудио+видео) поверх media+messenger
   src/lib.rs          Call: демукс по track; аудио (cpal/Opus); видео (H.264);
                       приём→рендер-кадры. Аудио/видео опциональны.
@@ -155,8 +157,8 @@ scripts/
       Тесты на 2 и 3 участников ✓. Осталось: распространение по сети +
       упорядочивание Commit (нужен delivery service — ntfy, Фаза D), персистентность
       состояния группы, групповые звонки (mesh, переиспользует A/B)
-- [ ] Фаза D — push-пробуждение (ntfy/UnifiedPush)
-- [ ] Android (JNI-мост к ядру) — в т.ч. телефонный шаринг экрана
+- [ ] Android (JNI-мост к ядру) — в т.ч. телефонный шаринг экрана и пробуждение
+      в фоне (serverless foreground service / опц. self-hosted ntfy — выбор юзера)
 - [ ] Торрент-стриминг
 
 ## Разработка

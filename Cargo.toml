@@ -7,6 +7,7 @@ members = [
     "media",
     "call",
     "group",
+    "ntfy",
     "desktop",
 ]
 # transport линкует Go-библиотеку libygg.so и собирается только под Linux (WSL).

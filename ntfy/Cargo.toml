@@ -1,0 +1,15 @@
+[package]
+name = "p2p-ntfy"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "p2p_ntfy"
+
+[dependencies]
+ureq = "2"
+serde_json = "1"
+base64 = "0.22"
+thiserror.workspace = true
