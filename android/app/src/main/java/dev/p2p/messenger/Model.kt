@@ -77,6 +77,11 @@ class AppModel {
     /** Результат последней попытки добавить контакт ("" | added | known | error). */
     var addStatus by mutableStateOf("")
 
+    // Диагностика: тест пропускной способности меша.
+    var benchRecv by mutableStateOf(false)   // режим приёмника включён
+    var benchRecvMbps by mutableStateOf(0.0) // живая скорость приёма
+    var benchResult by mutableStateOf("")    // результат отправки (для blast)
+
     // Группы (MLS).
     val groups = mutableStateListOf<Group>()
     val groupMessages = mutableStateMapOf<String, SnapshotStateList<GroupMsg>>()
@@ -129,8 +134,11 @@ class AppModel {
                 runCatching {
                     netPeers = Native.netPeers()
                     contacts.map { it.key }.forEach { online[it] = Native.isOnline(it) }
+                    if (benchRecv) {
+                        benchRecvMbps = JSONObject(Native.benchRecvStats()).optDouble("mbps", 0.0)
+                    }
                 }
-                Thread.sleep(3000)
+                Thread.sleep(if (benchRecv) 1000 else 3000)
             }
         }.apply { isDaemon = true; name = "native-ticker"; start() }
     }
@@ -349,6 +357,25 @@ class AppModel {
             if (Native.groupSendText(gid, text)) {
                 groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000))
             }
+        }
+    }
+
+    // ── Диагностика: тест пропускной способности ─────────────────────────────
+
+    /** Включить режим приёмника бенча (живая скорость в [benchRecvMbps]). */
+    fun startBenchRecv() {
+        benchRecv = true
+        ops.execute { Native.benchRecvStart() }
+    }
+
+    /** Блб ~30 МБ на пира; результат отправки в [benchResult]. */
+    fun blastBench(peerHex: String) {
+        benchResult = "отправка…"
+        ops.execute {
+            val r = JSONObject(Native.benchBlast(peerHex, 30_000))
+            benchResult = "отправлено %.1f Мбит/с (%.1f МБ)".format(
+                r.optDouble("mbps", 0.0), r.optDouble("sent_bytes", 0.0) / 1e6,
+            )
         }
     }
 }

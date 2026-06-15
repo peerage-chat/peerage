@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -41,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -207,8 +209,12 @@ private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () 
             BarIcon(Icons.Filled.PersonAdd, "Добавить контакт", onAdd)
             BarIcon(Icons.Filled.QrCode2, "Мой код", onMe)
         }
-        Text("Пиров в сети: ${model.netPeers}", color = HoloSecondary, fontSize = 11.sp,
-            modifier = Modifier.padding(horizontal = ScreenPad, vertical = 6.dp))
+        // Долгий тап → режим приёмника теста скорости (живой Мбит/с).
+        val statusLabel = if (model.benchRecv) "⏱ приём: %.1f Мбит/с".format(model.benchRecvMbps)
+        else "Пиров в сети: ${model.netPeers}"
+        Text(statusLabel, color = HoloSecondary, fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = ScreenPad, vertical = 6.dp)
+                .pointerInput(Unit) { detectTapGestures(onLongPress = { model.startBenchRecv() }) })
         if (model.contacts.isEmpty()) {
             CenterMessage("Нет контактов. Добавьте по ключу.")
         } else {
@@ -362,6 +368,12 @@ private fun InfoScreen(model: AppModel, onBack: () -> Unit, onDeleted: () -> Uni
                 Icon(Icons.Filled.Delete, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Удалить контакт", color = Color.White)
+            }
+            // Диагностика: замер скорости меша до этого контакта (~30 МБ блба).
+            FieldLabel("ДИАГНОСТИКА")
+            AccentButton("Тест скорости") { model.blastBench(key) }
+            if (model.benchResult.isNotEmpty()) {
+                Text(model.benchResult, color = HoloSecondary, fontSize = 12.sp)
             }
         }
     }

@@ -72,4 +72,12 @@ object Native {
     external fun groupHistory(gid: String): String
     /** Ключи участников группы (hex): JSON-массив. */
     external fun groupMembers(gid: String): String
+
+    // ── Диагностика: тест пропускной способности меша ─────────────────────
+    /** Включить приём бенча (считать входящие bench-датаграммы). */
+    external fun benchRecvStart()
+    /** Статистика приёмника: JSON {pkts, bytes, secs, mbps}. */
+    external fun benchRecvStats(): String
+    /** Бластить total_kb КБ на пира. Возвращает JSON {sent_pkts, sent_bytes, secs, mbps}. */
+    external fun benchBlast(peerHex: String, totalKb: Int): String
 }

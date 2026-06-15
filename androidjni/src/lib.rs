@@ -13,10 +13,10 @@ mod groups;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use jni::objects::{JByteArray, JClass, JShortArray, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jlong, jsize, jstring, JNI_FALSE, JNI_TRUE};
@@ -760,4 +760,106 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
     let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return ret(&env, "[]") };
     let json = group_query(|resp| GroupCmd::Members { gid, resp }).unwrap_or_else(|| "[]".into());
     ret(&env, &json)
+}
+
+// ── Диагностика: тест пропускной способности меша ──────────────────────────
+// Реальный замер throughput между двумя устройствами по живой сети Yggdrasil.
+// Один зовёт benchRecvStart() (приёмник считает), другой benchBlast() (бластит).
+
+/// Трек-маркер бенч-датаграмм (не пересекается с медиа-треками звонка).
+const BENCH_TRACK: u8 = 200;
+
+struct BenchRecv {
+    bytes: AtomicU64,
+    pkts: AtomicU64,
+    running: AtomicBool,
+    start: Instant,
+}
+
+static BENCH: Mutex<Option<Arc<BenchRecv>>> = Mutex::new(None);
+
+/// Включить приём бенча: считаем входящие BENCH_TRACK-датаграммы.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStart<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) {
+    let Some(app) = app() else { return };
+    let rx = app.messenger.media_channel(8192);
+    let st = Arc::new(BenchRecv {
+        bytes: AtomicU64::new(0),
+        pkts: AtomicU64::new(0),
+        running: AtomicBool::new(true),
+        start: Instant::now(),
+    });
+    *BENCH.lock().unwrap() = Some(st.clone());
+    std::thread::spawn(move || {
+        while st.running.load(Ordering::Relaxed) {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(p) if p.track == BENCH_TRACK => {
+                    st.bytes.fetch_add(p.payload.len() as u64, Ordering::Relaxed);
+                    st.pkts.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(_) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(_) => return,
+            }
+        }
+    });
+}
+
+/// Статистика приёмника: JSON {pkts, bytes, secs, mbps}.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStats<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jstring {
+    let json = {
+        let g = BENCH.lock().unwrap();
+        match g.as_ref() {
+            Some(st) => {
+                let bytes = st.bytes.load(Ordering::Relaxed);
+                let pkts = st.pkts.load(Ordering::Relaxed);
+                let secs = st.start.elapsed().as_secs_f64().max(0.001);
+                serde_json::json!({
+                    "pkts": pkts, "bytes": bytes, "secs": secs,
+                    "mbps": bytes as f64 * 8.0 / 1e6 / secs,
+                })
+                .to_string()
+            }
+            None => "{}".into(),
+        }
+    };
+    ret(&env, &json)
+}
+
+/// Бластить `total_kb` КБ датаграммами по 1200Б на пира `key_hex` (макс 10с).
+/// Возвращает JSON {sent_pkts, sent_bytes, secs, mbps} — скорость ОТПРАВКИ.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_benchBlast<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    key_hex: JString<'local>,
+    total_kb: jint,
+) -> jstring {
+    let Some(app) = app() else { return ret(&env, "{}") };
+    let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
+    let payload = vec![0u8; 1200];
+    let target = (total_kb.max(0) as u64) * 1024;
+    let mut sent_bytes = 0u64;
+    let mut sent_pkts = 0u64;
+    let mut seq = 0u16;
+    let t0 = Instant::now();
+    while sent_bytes < target && t0.elapsed() < Duration::from_secs(10) {
+        if app.messenger.send_media(&peer, BENCH_TRACK, seq, 0, &payload).is_ok() {
+            sent_bytes += payload.len() as u64;
+            sent_pkts += 1;
+            seq = seq.wrapping_add(1);
+        }
+    }
+    let secs = t0.elapsed().as_secs_f64().max(0.001);
+    ret(&env, &serde_json::json!({
+        "sent_pkts": sent_pkts, "sent_bytes": sent_bytes, "secs": secs,
+        "mbps": sent_bytes as f64 * 8.0 / 1e6 / secs,
+    }).to_string())
 }
