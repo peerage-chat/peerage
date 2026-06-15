@@ -2,6 +2,7 @@ package dev.p2p.messenger
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -67,9 +68,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         model.audio = CallAudio(applicationContext)
         model.appContext = applicationContext
-        val need = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
-            .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        val wanted = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            wanted += Manifest.permission.POST_NOTIFICATIONS // иначе уведомление сервиса не покажется
+        }
+        val need = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (need.isNotEmpty()) perms.launch(need.toTypedArray())
+        // Постоянный mesh-узел: держим процесс/сеть живыми при погасшем экране.
+        ConnService.start(applicationContext)
         val dataDir = filesDir.absolutePath
         setContent { P2PTheme { App(model, dataDir) } }
     }
