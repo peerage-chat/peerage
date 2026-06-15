@@ -31,13 +31,30 @@ fn push_capped(ring: &Ring, samples: &[i16], cap: usize) {
     }
 }
 
+/// Состояние воспроизведения аудио. Приёмный поток только КЛАДЁТ пакеты в
+/// `jitter`; декодирование, PLC и выдача PCM происходят в [`pull_audio`] —
+/// ровным темпом потребителя (`AudioTrack`). Это даёт реальное сглаживание
+/// джиттера и не даёт видео-нагрузке сбить аудио-конвейер.
+struct Playout {
+    dec: Option<AudioDecoder>,
+    jitter: JitterBuffer,
+    /// Декодированные, но ещё не отданные сэмплы (хвост кадра между вызовами).
+    carry: VecDeque<i16>,
+    /// Подряд идущих PLC-кадров. Opus PLC хорош на 1-2 кадра; дольше — уходит в
+    /// шум, поэтому после [`MAX_PLC`] выдаём тишину.
+    plc_run: u32,
+}
+
 /// Активный звонок. Останавливается при [`stop`](CallEngine::stop)/`drop`.
 pub struct CallEngine {
     running: Arc<AtomicBool>,
     muted: Arc<AtomicBool>,
     in_ring: Ring,
-    out_ring: Ring,
     in_cap: usize,
+    /// Длина interleaved-кадра (сэмплов) — для тишины/PLC при потерях.
+    frame_len: usize,
+    /// Аудио-воспроизведение (джиттер + декодер), под общим замком.
+    playout: Arc<Mutex<Playout>>,
     /// Исходящие H.264 access-unit'ы (nal, keyframe). Bounded — при заторе сети
     /// (блокирующий WriteTo) новые кадры ДРОПАЮТСЯ, чтобы не застопорить дренаж
     /// энкодера/камеру. Фрагментация и отправка — в выделенном потоке.
@@ -52,9 +69,15 @@ impl CallEngine {
         let running = Arc::new(AtomicBool::new(true));
         let muted = Arc::new(AtomicBool::new(false));
         let in_ring: Ring = Arc::new(Mutex::new(VecDeque::new()));
-        let out_ring: Ring = Arc::new(Mutex::new(VecDeque::new()));
         let video_in = Arc::new(Mutex::new(VecDeque::new()));
         let cap = audio.interleaved_len() * 50;
+        let frame_len = audio.interleaved_len();
+        let playout = Arc::new(Mutex::new(Playout {
+            dec: AudioDecoder::new(audio).ok(),
+            jitter: JitterBuffer::new(audio.jitter_depth),
+            carry: VecDeque::new(),
+            plc_run: 0,
+        }));
         let mut threads = Vec::new();
 
         let media_rx = messenger.media_channel(1024);
@@ -62,12 +85,10 @@ impl CallEngine {
         // --- Приём: демукс по track ---
         {
             let running = running.clone();
-            let out_ring = out_ring.clone();
+            let playout = playout.clone();
             let video_in = video_in.clone();
             let call_peer = peer;
             threads.push(thread::spawn(move || {
-                let mut dec = AudioDecoder::new(audio).ok();
-                let mut jitter = JitterBuffer::new(audio.jitter_depth);
                 let mut reasm = VideoReassembler::new();
                 while running.load(Ordering::Relaxed) {
                     let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else { continue };
@@ -76,18 +97,9 @@ impl CallEngine {
                     }
                     match p.track {
                         TRACK_AUDIO => {
-                            if let Some(d) = dec.as_mut() {
-                                jitter.push(p.seq, p.payload);
-                                while let Some(out) = jitter.pop() {
-                                    let pcm = match out {
-                                        JitterOut::Frame(pkt) => d.decode(Some(&pkt)),
-                                        JitterOut::Lost => d.decode(None),
-                                    };
-                                    if let Ok(pcm) = pcm {
-                                        push_capped(&out_ring, &pcm, cap);
-                                    }
-                                }
-                            }
+                            // Только в джиттер — декод/PLC делает pull_audio ровным
+                            // темпом AudioTrack (видео-нагрузка не сбивает аудио).
+                            playout.lock().unwrap().jitter.push(p.seq, p.payload);
                         }
                         TRACK_VIDEO | TRACK_SCREEN => {
                             // Собираем фрагменты в полный H.264 access-unit и кладём
@@ -182,8 +194,9 @@ impl CallEngine {
             running,
             muted,
             in_ring,
-            out_ring,
             in_cap: cap,
+            frame_len,
+            playout,
             video_out,
             video_in,
             threads: Mutex::new(threads),
@@ -196,20 +209,55 @@ impl CallEngine {
     }
 
     /// Заполнить буфер декодированным PCM для воспроизведения. Возвращает число
-    /// записанных сэмплов (хвост — тишина, если данных нет).
+    /// реальных сэмплов (хвост — тишина, если данных нет).
+    ///
+    /// Декод и PLC происходят ЗДЕСЬ, ровным темпом потребителя (`AudioTrack`),
+    /// а не в приёмном потоке. Это даёт настоящее джиттер-сглаживание (глубина
+    /// учитывается) и устойчивость к видео-нагрузке. При длительной потере
+    /// выдаём тишину, а не растущий PLC (который у Opus уходит в шум).
     pub fn pull_audio(&self, out: &mut [i16]) -> usize {
-        let mut q = self.out_ring.lock().unwrap();
-        let mut n = 0;
+        const MAX_PLC: u32 = 3; // ~60мс маскировки, дальше — тишина
+        let mut p = self.playout.lock().unwrap();
+        let mut produced = 0usize;
+        let mut starved = false;
         for o in out.iter_mut() {
-            match q.pop_front() {
+            if p.carry.is_empty() && !starved {
+                match p.jitter.pop() {
+                    Some(JitterOut::Frame(pkt)) => {
+                        p.plc_run = 0;
+                        if let Some(d) = p.dec.as_mut() {
+                            if let Ok(pcm) = d.decode(Some(&pkt)) {
+                                p.carry.extend(pcm);
+                            }
+                        }
+                    }
+                    Some(JitterOut::Lost) => {
+                        if p.plc_run < MAX_PLC {
+                            p.plc_run += 1;
+                            if let Some(d) = p.dec.as_mut() {
+                                if let Ok(pcm) = d.decode(None) {
+                                    p.carry.extend(pcm);
+                                }
+                            }
+                        } else {
+                            // длительная потеря — тишина вместо PLC-шума
+                            for _ in 0..self.frame_len {
+                                p.carry.push_back(0);
+                            }
+                        }
+                    }
+                    None => starved = true, // буфер набирается/пуст — добиваем тишиной
+                }
+            }
+            match p.carry.pop_front() {
                 Some(s) => {
                     *o = s;
-                    n += 1;
+                    produced += 1;
                 }
                 None => *o = 0,
             }
         }
-        n
+        produced
     }
 
     /// H.264 access-unit от аппаратного энкодера (Kotlin/MediaCodec) → в очередь

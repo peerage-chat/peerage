@@ -14,8 +14,8 @@ import java.util.concurrent.Executors
 /** Параметры видео-звонка (аппаратный H.264 через MediaCodec). */
 const val VIDEO_W = 640
 const val VIDEO_H = 480
-const val VIDEO_FPS = 24
-const val VIDEO_BITRATE = 1_000_000 // 1 Мбит/с для 640x480 — устойчивее на mesh
+const val VIDEO_FPS = 30 // ровно столько же темпирует приёмник; камера пинится на фикс. fps
+const val VIDEO_BITRATE = 1_500_000 // 1.5 Мбит/с для 640x480@30 — устойчиво на mesh
 
 data class Contact(
     val key: String,

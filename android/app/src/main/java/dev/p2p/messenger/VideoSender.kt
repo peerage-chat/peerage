@@ -131,13 +131,17 @@ class VideoSender(
         session = null; device = null; encoder = null; inputSurface = null; camThread = null
     }
 
-    /** Поддерживаемый FPS-диапазон с верхом ≤ целевого fps (предпочитая
-     *  фиксированный lower==upper); null — оставить авто. */
+    /** FPS-диапазон, максимально близкий к ФИКСИРОВАННОМУ целевому fps. Фикс.
+     *  диапазон (lower==upper) важен: тогда камера не «плавает» по частоте (в т.ч.
+     *  не падает до 15 в темноте) — иначе приёмник, темпирующий ровно на fps,
+     *  ловит дрифт и периодические рывки. null — оставить авто. */
     private fun pickFpsRange(mgr: CameraManager, camId: String): Range<Int>? = runCatching {
         val ranges = mgr.getCameraCharacteristics(camId)
             .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return null
-        ranges.filter { it.upper <= fps }.maxByOrNull { it.lower.toLong() * 100 + it.upper }
-            ?: ranges.minByOrNull { it.upper }
+        ranges.firstOrNull { it.lower == fps && it.upper == fps }                       // точный фикс [fps,fps]
+            ?: ranges.filter { it.lower == it.upper && it.upper <= fps }.maxByOrNull { it.upper } // любой фикс ≤ fps
+            ?: ranges.filter { it.upper <= fps }.maxByOrNull { it.lower.toLong() * 1000 + it.upper } // наименее «плавающий»
+            ?: ranges.minByOrNull { it.upper }                                          // запас: наименьший верх
     }.getOrNull()
 
     private fun pickFront(mgr: CameraManager): String? {

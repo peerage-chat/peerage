@@ -22,6 +22,9 @@ fn seq_lt(a: u16, b: u16) -> bool {
 
 pub struct JitterBuffer {
     depth: usize,
+    /// Потолок бэклога: если накопилось больше — отбрасываем самые старые кадры
+    /// и ресинхронизируемся (иначе задержка растёт и не возвращается).
+    max: usize,
     next: Option<u16>,
     buf: BTreeMap<u16, Vec<u8>>,
 }
@@ -30,7 +33,8 @@ impl JitterBuffer {
     /// `depth` — сколько кадров префетчить перед началом воспроизведения
     /// (компромисс задержка/устойчивость; напр. 3 кадра по 20мс = 60мс).
     pub fn new(depth: usize) -> Self {
-        JitterBuffer { depth: depth.max(1), next: None, buf: BTreeMap::new() }
+        let depth = depth.max(1);
+        JitterBuffer { depth, max: depth * 3 + 4, next: None, buf: BTreeMap::new() }
     }
 
     /// Принять пакет. Слишком старые (уже воспроизведённые) отбрасываются.
@@ -46,6 +50,16 @@ impl JitterBuffer {
     /// Извлечь следующий кадр для воспроизведения.
     /// `None` — буфер ещё набирается/пуст (играть тишину).
     pub fn pop(&mut self) -> Option<JitterOut> {
+        // Анти-латентность: бэклог сверх потолка (отправитель слал быстрее, чем мы
+        // воспроизводим, либо был всплеск после паузы) — отбрасываем старьё,
+        // оставляя ~depth свежих кадров, и ресинхронизируемся.
+        if self.next.is_some() && self.buf.len() > self.max {
+            while self.buf.len() > self.depth {
+                let oldest = *self.buf.keys().next().unwrap();
+                self.buf.remove(&oldest);
+            }
+            self.next = self.buf.keys().next().copied();
+        }
         // Префетч: ждём заполнения до глубины перед стартом.
         if self.next.is_none() {
             if self.buf.len() < self.depth {
@@ -116,6 +130,23 @@ mod tests {
         assert_eq!(j.pop(), Some(JitterOut::Lost));
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(2))));
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(3))));
+    }
+
+    #[test]
+    fn caps_backlog_to_bound_latency() {
+        let mut j = JitterBuffer::new(1); // depth=1 → max=7
+        j.push(0, f(0));
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(0)))); // playout начат, next=1
+        // Отправитель обогнал воспроизведение: огромный бэклог.
+        for s in 1..=20u16 {
+            j.push(s, vec![s as u8]);
+        }
+        // len=20 > max(7) → отбрасываем старьё, ресинк на свежие кадры.
+        match j.pop() {
+            Some(JitterOut::Frame(d)) => assert!(d[0] >= 19, "ожидали свежий кадр, был {}", d[0]),
+            other => panic!("ожидали свежий Frame, получили {other:?}"),
+        }
+        assert!(j.len() <= 7, "бэклог не ограничен: {}", j.len());
     }
 
     #[test]
