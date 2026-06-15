@@ -247,9 +247,18 @@ class AppModel private constructor() {
             }
             "ack" -> updateStatus(o.getString("peer"), o.getLong("id"), "delivered")
             "undelivered" -> updateStatus(o.getString("peer"), o.getLong("id"), "failed")
-            "call_invite" -> if (call == null) {
-                call = CallState(o.getString("peer"), o.getLong("call_id"), incoming = true,
-                    withVideo = o.optBoolean("video", false), status = "incoming")
+            "call_invite" -> {
+                val peer = o.getString("peer")
+                val c = call
+                // Свободны — обычный входящий. Тот же собеседник перезвонил —
+                // переприглашение: гасим протухший звонок и показываем новый
+                // входящий (так можно вернуться в звонок). От ДРУГОГО пира во
+                // время звонка — игнор (заняты).
+                if (c == null || c.peer == peer) {
+                    if (c != null) endCall() // снять старое медиа/оверлей перед новым
+                    call = CallState(peer, o.getLong("call_id"), incoming = true,
+                        withVideo = o.optBoolean("video", false), status = "incoming")
+                }
             }
             "call_accept" -> call?.let { c -> if (o.getString("peer") == c.peer) call = c.copy(status = "active") }
             "call_end" -> call?.let { c -> if (o.getString("peer") == c.peer) endCall() }
