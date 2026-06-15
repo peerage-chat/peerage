@@ -60,7 +60,9 @@ private val OfflineDot = Color(0xFF555555)
 private val WarnColor = Color(0xFFE6A23C)
 
 class MainActivity : ComponentActivity() {
-    private val model = AppModel()
+    // Синглтон на процесс: переживает пересоздание Activity (фон/возврат), иначе
+    // утекают второй нативный узел и дублирующие poll/ticker-циклы.
+    private val model = AppModel.instance
     private val perms =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 

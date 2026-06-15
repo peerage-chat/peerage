@@ -63,7 +63,14 @@ data class CallState(
  * писать из фоновых потоков: рекомпозиция планируется на главный поток сама.
  * Так главный поток не блокируется ничем → нет ANR.
  */
-class AppModel {
+class AppModel private constructor() {
+    companion object {
+        /** Единственный экземпляр на процесс. Нативный узел/потоки тоже одни на
+         *  процесс, поэтому модель должна переживать пересоздание Activity (иначе
+         *  утекают второй узел и дублирующие poll/ticker-циклы → потеря событий). */
+        val instance: AppModel by lazy { AppModel() }
+    }
+
     var me by mutableStateOf<Me?>(null)
     var error by mutableStateOf<String?>(null)
 
@@ -99,8 +106,13 @@ class AppModel {
     private var pollThread: Thread? = null
     private var tickerThread: Thread? = null
 
-    /** Инициализация ядра. Звать с фонового потока (см. MainActivity). */
+    @Volatile private var started = false
+
+    /** Инициализация ядра. Звать с фонового потока (см. MainActivity).
+     *  Идемпотентно: при пересоздании Activity повторно НЕ инициализирует. */
     fun start(dataDir: String) {
+        if (started) return
+        started = true
         val json = JSONObject(Native.start(dataDir))
         if (json.has("error")) {
             error = json.getString("error")
@@ -130,14 +142,22 @@ class AppModel {
             }
         }.apply { isDaemon = true; name = "native-poll"; start() }
         tickerThread = Thread {
+            var tick = 0L
             while (running) {
                 runCatching {
-                    netPeers = Native.netPeers()
+                    val p = Native.netPeers()
+                    val t = Native.netTree()
+                    netPeers = p
                     contacts.map { it.key }.forEach { online[it] = Native.isOnline(it) }
                     if (benchRecv) {
                         benchRecvMbps = JSONObject(Native.benchRecvStats()).optDouble("mbps", 0.0)
                     }
+                    // Диагностика устойчивости сети: heartbeat + пиры/дерево. Если
+                    // tick перестаёт расти при погасшем экране — потоки заморожены;
+                    // если peers=0 и не возвращается — отвал пиринга (не reconnect).
+                    android.util.Log.i("p2pnet", "tick=$tick peers=$p tree=$t inCall=${call != null}")
                 }
+                tick++
                 Thread.sleep(if (benchRecv) 1000 else 3000)
             }
         }.apply { isDaemon = true; name = "native-ticker"; start() }
