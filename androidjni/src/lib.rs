@@ -34,13 +34,15 @@ use groups::GroupManager;
 use room_call::RoomCallEngine;
 
 /// Команда группового актора (исполняется в потоке event_pump, т.к. GroupChat !Send).
+/// Все команды — fire-and-forget: результат не ждётся на вызывающем потоке (раньше
+/// `group_query` блокировал `ops` до ответа event_pump → serialization stall).
+/// Read-данные (список/история/участники) UI читает из кэша [`App::group_cache`],
+/// который event_pump поддерживает актуальным после каждой мутации. Структурные
+/// изменения (create/join) уведомляют UI событием `groups_changed`.
 enum GroupCmd {
-    Create { name: String, resp: Sender<String> },
+    Create { name: String },
     Invite { gid: Vec<u8>, peer: [u8; 32] },
-    SendText { gid: Vec<u8>, text: String, resp: Sender<bool> },
-    List { resp: Sender<String> },
-    History { gid: Vec<u8>, resp: Sender<String> },
-    Members { gid: Vec<u8>, resp: Sender<String> },
+    SendText { gid: Vec<u8>, text: String },
 }
 
 /// Работа для потока event_pump: событие мессенджера, групповая команда либо
@@ -122,6 +124,19 @@ fn sync_room_members() {
 
 const PUBLIC_PEERS: &str = include_str!("../../peers/public-peers.txt");
 
+/// Кэш групповых read-данных для UI. event_pump (единственный поток, владеющий
+/// `GroupManager`) поддерживает его актуальным после каждой мутации (create/
+/// send/join/key_reply/on_group) — см. [`refresh_group_cache`]. JNI-функции
+/// `groupList/groupHistory/groupMembers` отдают кэш мгновенно под `Mutex`, без
+/// блокировки event_pump (раньше `group_query` блокировал вызывающий поток до
+/// ответа актора → сериализовался весь `ops`).
+#[derive(Default)]
+struct GroupCache {
+    list: String,                                 // JSON-массив групп
+    history: HashMap<Vec<u8>, String>,            // gid → JSON-массив сообщений
+    members: HashMap<Vec<u8>, String>,            // gid → JSON-массив ключей
+}
+
 /// Глобальное состояние приложения (один мессенджер на процесс).
 struct App {
     messenger: Arc<Messenger>,
@@ -129,6 +144,8 @@ struct App {
     messages: Mutex<MessageStore>,
     me_pub: [u8; 32],
     events: Mutex<VecDeque<String>>,
+    /// Кэш групповых read-данных (см. [`GroupCache`]).
+    group_cache: Mutex<GroupCache>,
     /// Канал к групповому актору (потоку event_pump).
     jobs: Sender<Job>,
 }
