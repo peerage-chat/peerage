@@ -11,7 +11,7 @@
 mod call;
 mod groups;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -51,6 +51,26 @@ enum Job {
 static CALL: Mutex<Option<Arc<CallEngine>>> = Mutex::new(None);
 /// Счётчик id звонков (для исходящих приглашений).
 static CALL_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Период рассылки маячка присутствия в комнатах.
+const BEACON_INTERVAL: Duration = Duration::from_secs(3);
+/// Не видели маячок дольше — участник считается вышедшим из комнаты.
+const PRESENCE_TTL: Duration = Duration::from_secs(10);
+
+/// Присутствие в комнатах-звонках (Discord-style). Глобально: дёргается из JNI
+/// (join/leave/participants) и из event_pump (приём маячков + рассылка).
+#[derive(Default)]
+struct RoomState {
+    /// Комнаты, в которых МЫ сейчас находимся: gid → наши A/V-флаги.
+    joined: HashMap<Vec<u8>, u8>,
+    /// Присутствие других: gid → (peer → (время последнего маячка, флаги)).
+    remote: HashMap<Vec<u8>, HashMap<[u8; 32], (Instant, u8)>>,
+}
+
+fn rooms() -> &'static Mutex<RoomState> {
+    static ROOMS: OnceLock<Mutex<RoomState>> = OnceLock::new();
+    ROOMS.get_or_init(|| Mutex::new(RoomState::default()))
+}
 
 const PUBLIC_PEERS: &str = include_str!("../../peers/public-peers.txt");
 
@@ -106,12 +126,43 @@ fn event_pump(
     messenger: Arc<Messenger>,
     data_dir: PathBuf,
 ) {
-    let mut groups = GroupManager::new(identity, messenger, data_dir);
-    while let Ok(job) = job_rx.recv() {
-        match job {
-            Job::Ev(ev) => handle_event(&app, &mut groups, ev),
-            Job::Cmd(cmd) => handle_cmd(&app, &mut groups, cmd),
+    let mut groups = GroupManager::new(identity, messenger.clone(), data_dir);
+    let mut last_beacon = Instant::now();
+    loop {
+        match job_rx.recv_timeout(Duration::from_millis(1000)) {
+            Ok(Job::Ev(ev)) => handle_event(&app, &mut groups, ev),
+            Ok(Job::Cmd(cmd)) => handle_cmd(&app, &mut groups, cmd),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
+        // Маячок присутствия ~раз в BEACON_INTERVAL (проверяем после каждой работы,
+        // чтобы под нагрузкой событий он не голодал).
+        if last_beacon.elapsed() >= BEACON_INTERVAL {
+            last_beacon = Instant::now();
+            beacon_tick(&app, &groups, &messenger);
+        }
+    }
+}
+
+/// Разослать маячок присутствия членам всех комнат, где мы сейчас находимся,
+/// и подчистить протухшее присутствие других.
+fn beacon_tick(app: &Arc<App>, groups: &GroupManager, messenger: &Messenger) {
+    let joined: Vec<(Vec<u8>, u8)> = {
+        let rs = rooms().lock().unwrap();
+        rs.joined.iter().map(|(g, f)| (g.clone(), *f)).collect()
+    };
+    for (gid, flags) in joined {
+        for m in groups.members(&gid) {
+            if m == app.me_pub {
+                continue; // себе слать не нужно
+            }
+            let _ = messenger.send_room_presence(&m, &gid, flags);
+        }
+    }
+    let now = Instant::now();
+    let mut rs = rooms().lock().unwrap();
+    for peers in rs.remote.values_mut() {
+        peers.retain(|_, (t, _)| now.duration_since(*t) < PRESENCE_TTL);
     }
 }
 
@@ -171,6 +222,19 @@ fn handle_event(app: &Arc<App>, groups: &mut GroupManager, ev: Event) {
             if groups.on_key_reply(peer, &key_package) {
                 push_event(app, serde_json::json!({"type": "groups_changed"}));
             }
+        }
+        Event::RoomPresence { peer, gid, flags } => {
+            rooms()
+                .lock()
+                .unwrap()
+                .remote
+                .entry(gid.clone())
+                .or_default()
+                .insert(peer, (Instant::now(), flags));
+            push_event(app, serde_json::json!({
+                "type": "room_presence", "gid": hex::encode(&gid),
+                "peer": hex::encode(peer), "flags": flags,
+            }));
         }
     }
 }
@@ -578,6 +642,72 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callEnd<'local>(
     if let Some(engine) = engine {
         std::thread::spawn(move || engine.stop());
     }
+}
+
+// ── Комнаты-звонки (присутствие, Discord-style) ──────────────────────────────
+
+/// Войти в комнату `gid` (начать слать маячок присутствия). `audio`/`video` —
+/// наши текущие A/V-флаги (для H1.0 медиа ещё нет, флаги информативны).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoin<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    gid_hex: JString<'local>,
+    audio: jboolean,
+    video: jboolean,
+) {
+    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+    let mut flags = 0u8;
+    if audio != JNI_FALSE {
+        flags |= 0b01;
+    }
+    if video != JNI_FALSE {
+        flags |= 0b10;
+    }
+    rooms().lock().unwrap().joined.insert(gid, flags);
+}
+
+/// Выйти из комнаты `gid` (перестать слать маячок, забыть её присутствие).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomLeave<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    gid_hex: JString<'local>,
+) {
+    if let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) {
+        let mut rs = rooms().lock().unwrap();
+        rs.joined.remove(&gid);
+        rs.remote.remove(&gid);
+    }
+}
+
+/// Текущие участники комнаты `gid` (чей маячок свежий): JSON
+/// `[{peer, audio, video}]`. Себя сюда не включаем — UI добавит сам.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    gid_hex: JString<'local>,
+) -> jstring {
+    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
+    let now = Instant::now();
+    let rs = rooms().lock().unwrap();
+    let arr: Vec<serde_json::Value> = rs
+        .remote
+        .get(&gid)
+        .map(|peers| {
+            peers
+                .iter()
+                .filter(|(_, (t, _))| now.duration_since(*t) < PRESENCE_TTL)
+                .map(|(p, (_, f))| serde_json::json!({
+                    "peer": hex::encode(p),
+                    "audio": f & 0b01 != 0,
+                    "video": f & 0b10 != 0,
+                }))
+                .collect()
+        })
+        .unwrap_or_default();
+    ret(&env, &serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into()))
 }
 
 /// Захваченный PCM с микрофона (первые `n` сэмплов массива) → движку.

@@ -48,6 +48,9 @@ data class CallState(
     val muted: Boolean = false,
 )
 
+/** Участник комнаты-звонка (присутствие). */
+data class RoomMember(val peer: String, val audio: Boolean, val video: Boolean)
+
 /**
  * Состояние приложения поверх [Native].
  *
@@ -93,6 +96,10 @@ class AppModel private constructor() {
     val groups = mutableStateListOf<Group>()
     val groupMessages = mutableStateMapOf<String, SnapshotStateList<GroupMsg>>()
     var currentGroup by mutableStateOf<String?>(null)
+
+    // Комната-звонок (Discord-style присутствие). gid комнаты, где мы сейчас.
+    var currentRoom by mutableStateOf<String?>(null)
+    val roomMembers = mutableStateListOf<RoomMember>()
 
     // Звонок (1:1). audio/appContext задаются из Activity (нужен Context).
     var call by mutableStateOf<CallState?>(null)
@@ -152,13 +159,22 @@ class AppModel private constructor() {
                     if (benchRecv) {
                         benchRecvMbps = JSONObject(Native.benchRecvStats()).optDouble("mbps", 0.0)
                     }
+                    // Присутствие в комнате: кто сейчас внутри (по свежим маячкам).
+                    currentRoom?.let { gid ->
+                        val arr = JSONArray(Native.roomParticipants(gid))
+                        val list = (0 until arr.length()).map {
+                            val o = arr.getJSONObject(it)
+                            RoomMember(o.getString("peer"), o.optBoolean("audio"), o.optBoolean("video"))
+                        }
+                        roomMembers.clear(); roomMembers.addAll(list)
+                    }
                     // Диагностика устойчивости сети: heartbeat + пиры/дерево. Если
                     // tick перестаёт расти при погасшем экране — потоки заморожены;
                     // если peers=0 и не возвращается — отвал пиринга (не reconnect).
-                    android.util.Log.i("p2pnet", "tick=$tick peers=$p tree=$t inCall=${call != null}")
+                    android.util.Log.i("p2pnet", "tick=$tick peers=$p tree=$t inCall=${call != null} room=${currentRoom != null}")
                 }
                 tick++
-                Thread.sleep(if (benchRecv) 1000 else 3000)
+                Thread.sleep(if (benchRecv) 1000 else if (currentRoom != null) 2000 else 3000)
             }
         }.apply { isDaemon = true; name = "native-ticker"; start() }
     }
@@ -339,6 +355,23 @@ class AppModel private constructor() {
         val m = !c.muted
         call = c.copy(muted = m)
         ops.execute { audio?.setMuted(m) }
+    }
+
+    // ── Комната-звонок (присутствие, Discord-style) ───────────────────────────
+
+    /** Войти в комнату группы: начинаем слать маячок, тикер тянет участников. */
+    fun joinRoom(gid: String, audio: Boolean = true, video: Boolean = false) {
+        currentRoom = gid
+        roomMembers.clear()
+        ops.execute { Native.roomJoin(gid, audio, video) }
+    }
+
+    /** Выйти из комнаты. */
+    fun leaveRoom() {
+        val gid = currentRoom ?: return
+        currentRoom = null
+        roomMembers.clear()
+        ops.execute { Native.roomLeave(gid) }
     }
 
     // ── Группы ──────────────────────────────────────────────────────────────

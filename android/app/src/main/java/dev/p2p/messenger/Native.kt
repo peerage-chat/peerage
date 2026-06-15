@@ -73,6 +73,14 @@ object Native {
     /** Ключи участников группы (hex): JSON-массив. */
     external fun groupMembers(gid: String): String
 
+    // ── Комнаты-звонки (присутствие, Discord-style) ───────────────────────
+    /** Войти в комнату gid: слать маячок присутствия с A/V-флагами. */
+    external fun roomJoin(gid: String, audio: Boolean, video: Boolean)
+    /** Выйти из комнаты gid. */
+    external fun roomLeave(gid: String)
+    /** Участники комнаты сейчас: JSON [{peer, audio, video}]. */
+    external fun roomParticipants(gid: String): String
+
     // ── Диагностика: тест пропускной способности меша ─────────────────────
     /** Включить приём бенча (считать входящие bench-датаграммы). */
     external fun benchRecvStart()

@@ -187,6 +187,11 @@ impl GroupManager {
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
+    /// Ключи участников группы (для маячка присутствия комнаты).
+    pub fn members(&self, gid: &[u8]) -> Vec<[u8; 32]> {
+        self.groups.get(gid).map(|e| e.chat.members()).unwrap_or_default()
+    }
+
     // ── События мессенджера ───────────────────────────────────────────────
 
     /// Контакт просит наш KeyPackage (нас приглашают) — отвечаем и ждём Welcome.

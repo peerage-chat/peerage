@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -417,10 +418,18 @@ private fun GroupChatScreen(model: AppModel, onBack: () -> Unit, onAddMember: ()
     val msgs = model.groupMessages[gid]
     var input by remember(gid) { mutableStateOf("") }
 
+    val inRoom = model.currentRoom == gid
+
     Column(Modifier.fillMaxSize()) {
         TopBar(group?.name ?: "Группа", onBack = onBack) {
+            if (inRoom) {
+                BarIcon(Icons.Filled.CallEnd, "Выйти из звонка", { model.leaveRoom() })
+            } else {
+                BarIcon(Icons.Filled.Call, "Войти в звонок", { model.joinRoom(gid) })
+            }
             BarIcon(Icons.Filled.GroupAdd, "Добавить участника", onAddMember)
         }
+        if (inRoom) RoomBar(model)
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
             items(msgs ?: emptyList()) { m ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
@@ -433,6 +442,46 @@ private fun GroupChatScreen(model: AppModel, onBack: () -> Unit, onAddMember: ()
             }
         }
         MessageInput(input, { input = it }) { model.sendGroupText(gid, input); input = "" }
+    }
+}
+
+/** Полоса «кто в звонке» (зачаток сетки участников H1.2). */
+@Composable
+private fun RoomBar(model: AppModel) {
+    val members = model.roomMembers
+    Surface(color = HoloSurface, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text("В ЗВОНКЕ · ${members.size + 1}", color = HoloSecondary, fontSize = 11.sp)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                RoomTile("вы", audio = true, video = false, me = true)
+                members.forEach { m ->
+                    val name = model.contacts.firstOrNull { it.key == m.peer }?.name ?: (m.peer.take(6) + "…")
+                    RoomTile(name, m.audio, m.video, me = false)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoomTile(name: String, audio: Boolean, video: Boolean, me: Boolean) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp)) {
+        Box(
+            Modifier.size(52.dp).clip(CircleShape)
+                .background(if (me) HoloAccent else Color(0xFF3A3F45)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(name.take(1).uppercase(), color = if (me) HoloAccentDark else Color.White,
+                fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        }
+        Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (!audio) Icon(Icons.Filled.MicOff, "микрофон выкл", tint = WarnColor, modifier = Modifier.size(12.dp))
+            if (video) Icon(Icons.Filled.Videocam, "видео", tint = HoloSecondary, modifier = Modifier.size(12.dp))
+        }
+        Text(name, fontSize = 10.sp, color = HoloSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

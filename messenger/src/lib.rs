@@ -51,6 +51,8 @@ pub enum Event {
     GroupKeyRequest { peer: PeerKey },
     /// Контакт прислал свой KeyPackage (для добавления в группу).
     GroupKeyReply { peer: PeerKey, key_package: Vec<u8> },
+    /// Маячок присутствия участника в комнате-звонке (Discord-style).
+    RoomPresence { peer: PeerKey, gid: Vec<u8>, flags: u8 },
 }
 
 /// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
@@ -360,6 +362,12 @@ impl Messenger {
             .send(peer, &Payload::GroupKeyReply { key_package: key_package.to_vec() })
     }
 
+    /// Маячок присутствия в комнате-звонке участнику группы (один выстрел,
+    /// без очереди повтора — следующий маячок придёт сам через интервал).
+    pub fn send_room_presence(&self, peer: &PeerKey, gid: &[u8], flags: u8) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::RoomPresence { gid: gid.to_vec(), flags })
+    }
+
     /// Включить приём медиа: возвращает bounded-канал. При переполнении новые
     /// пакеты отбрасываются (для реалтайма ронять опоздавшие лучше, чем копить).
     pub fn media_channel(&self, capacity: usize) -> Receiver<MediaPacket> {
@@ -466,6 +474,9 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::GroupKeyReply { key_package } => {
                 shared.emit(Event::GroupKeyReply { peer: src, key_package });
+            }
+            Payload::RoomPresence { gid, flags } => {
+                shared.emit(Event::RoomPresence { peer: src, gid, flags });
             }
         }
     }

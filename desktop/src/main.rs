@@ -1063,6 +1063,8 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
                 }
             }
         }
+        // Комнаты-звонки реализуются на Android; десктоп пока игнорирует маячок.
+        Event::RoomPresence { .. } => {}
     }
 }
 
