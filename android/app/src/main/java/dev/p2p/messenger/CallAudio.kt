@@ -9,18 +9,25 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
+import android.os.Process
 import kotlin.concurrent.thread
 
 /**
  * Платформенный аудио ввод/вывод звонка. Микрофон (`AudioRecord`) → [Native.callPushAudio];
  * [Native.callPullAudio] → динамик (`AudioTrack`). Кодеки/сеть — в Rust-движке.
  *
- * Эхоподавление (AEC) — через `AcousticEchoCanceler` (ТЗ: AudioEffect API).
+ * Чистота речи: эхоподавление (AEC) + шумоподавление (NS) + автоусиление (AGC),
+ * все через AudioEffect API на сессии записи. Потоки захвата/воспроизведения —
+ * с приоритетом URGENT_AUDIO, чтобы видео-нагрузка не вызывала underrun/шум.
  */
 class CallAudio(private val context: Context) {
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
     private var aec: AcousticEchoCanceler? = null
+    private var ns: NoiseSuppressor? = null
+    private var agc: AutomaticGainControl? = null
     @Volatile private var running = false
     private val threads = mutableListOf<Thread>()
 
@@ -33,13 +40,21 @@ class CallAudio(private val context: Context) {
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_IN_COMMUNICATION
 
+        // Буферы с запасом (×4) — меньше риск underrun под нагрузкой видео.
         val inMin = AudioRecord.getMinBufferSize(sampleRate, inMask, fmt).coerceAtLeast(2048)
         val rec = AudioRecord(
             MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            sampleRate, inMask, fmt, inMin * 2,
+            sampleRate, inMask, fmt, inMin * 4,
         )
+        val sid = rec.audioSessionId
         if (AcousticEchoCanceler.isAvailable()) {
-            aec = AcousticEchoCanceler.create(rec.audioSessionId)?.apply { enabled = true }
+            aec = AcousticEchoCanceler.create(sid)?.apply { enabled = true }
+        }
+        if (NoiseSuppressor.isAvailable()) {
+            ns = NoiseSuppressor.create(sid)?.apply { enabled = true }
+        }
+        if (AutomaticGainControl.isAvailable()) {
+            agc = AutomaticGainControl.create(sid)?.apply { enabled = true }
         }
 
         val outMin = AudioTrack.getMinBufferSize(sampleRate, outMask, fmt).coerceAtLeast(2048)
@@ -53,7 +68,7 @@ class CallAudio(private val context: Context) {
             .setAudioFormat(
                 AudioFormat.Builder().setSampleRate(sampleRate).setEncoding(fmt).setChannelMask(outMask).build()
             )
-            .setBufferSizeInBytes(outMin * 2)
+            .setBufferSizeInBytes(outMin * 4)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
@@ -63,9 +78,10 @@ class CallAudio(private val context: Context) {
         rec.startRecording()
         trk.play()
 
-        // Захват микрофона → Rust.
+        // Захват микрофона → Rust. Приоритет URGENT_AUDIO — чтобы видео не голодало.
         val chunk = sampleRate / 50 * (if (channels >= 2) 2 else 1) // ~20мс
         threads += thread(name = "call-capture") {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
             while (running) {
                 val n = rec.read(buf, 0, buf.size)
@@ -74,6 +90,7 @@ class CallAudio(private val context: Context) {
         }
         // Воспроизведение: Rust → динамик.
         threads += thread(name = "call-playback") {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
             while (running) {
                 Native.callPullAudio(buf) // заполняет тишиной, если данных нет
@@ -90,8 +107,8 @@ class CallAudio(private val context: Context) {
         threads.clear()
         runCatching { record?.stop() }; runCatching { record?.release() }
         runCatching { track?.stop() }; runCatching { track?.release() }
-        runCatching { aec?.release() }
-        record = null; track = null; aec = null
+        runCatching { aec?.release() }; runCatching { ns?.release() }; runCatching { agc?.release() }
+        record = null; track = null; aec = null; ns = null; agc = null
         runCatching {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             am.mode = AudioManager.MODE_NORMAL

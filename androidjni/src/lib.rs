@@ -500,7 +500,10 @@ fn call_params(call_id: u64, audio: &AudioSettings) -> String {
 
 fn begin_call(peer: [u8; 32]) -> Option<AudioSettings> {
     let app = app()?;
-    let audio = AudioSettings::default();
+    let mut audio = AudioSettings::default();
+    // Чуть глубже джиттер-буфер на мобиле: сглаживает сетевой джиттер (чёткость
+    // речи ценой ~+40мс задержки). 5 кадров × 20мс = 100мс.
+    audio.jitter_depth = 5;
     // Видео-кодек теперь аппаратный (MediaCodec/Kotlin); движок только
     // фрагментирует/собирает H.264 — параметры видео в Rust не нужны.
     let engine = CallEngine::start(app.messenger.clone(), peer, audio);
