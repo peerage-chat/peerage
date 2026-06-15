@@ -47,6 +47,8 @@ enum Job {
     Ev(Event),
     Cmd(GroupCmd),
     Beacon,
+    /// Рассылка «я вышел» членам комнаты `gid` (мгновенное исчезновение).
+    Leave(Vec<u8>),
 }
 
 /// Текущий активный звонок (1:1 на процесс).
@@ -56,8 +58,11 @@ static CALL_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
-/// Не видели маячок дольше — участник считается вышедшим из комнаты.
-const PRESENCE_TTL: Duration = Duration::from_secs(7);
+/// Не видели маячок дольше — участник считается вышедшим из комнаты (страховка
+/// на случай вылета/потери связи; явный выход шлёт мгновенный сигнал ниже).
+const PRESENCE_TTL: Duration = Duration::from_secs(5);
+/// Бит в `flags`: «я выхожу из комнаты» — получатель убирает участника сразу.
+const PRESENCE_LEFT: u8 = 0x80;
 
 /// Присутствие в комнатах-звонках (Discord-style). Глобально: дёргается из JNI
 /// (join/leave/participants) и из event_pump (приём маячков + рассылка).
@@ -138,6 +143,15 @@ fn event_pump(
                 // Вход в комнату: сразу шлём маячок, не ждём интервала.
                 last_beacon = Instant::now();
                 beacon_tick(&app, &groups, &messenger);
+            }
+            Ok(Job::Leave(gid)) => {
+                // Явный выход: шлём членам маячок с флагом LEFT (мгновенно убрать).
+                for m in groups.members(&gid) {
+                    if m == app.me_pub {
+                        continue;
+                    }
+                    let _ = messenger.send_room_presence(&m, &gid, PRESENCE_LEFT);
+                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
@@ -231,16 +245,20 @@ fn handle_event(app: &Arc<App>, groups: &mut GroupManager, ev: Event) {
             }
         }
         Event::RoomPresence { peer, gid, flags } => {
-            rooms()
-                .lock()
-                .unwrap()
-                .remote
-                .entry(gid.clone())
-                .or_default()
-                .insert(peer, (Instant::now(), flags));
+            let left = flags & PRESENCE_LEFT != 0;
+            {
+                let mut rs = rooms().lock().unwrap();
+                if left {
+                    if let Some(m) = rs.remote.get_mut(&gid) {
+                        m.remove(&peer);
+                    }
+                } else {
+                    rs.remote.entry(gid.clone()).or_default().insert(peer, (Instant::now(), flags));
+                }
+            }
             push_event(app, serde_json::json!({
                 "type": "room_presence", "gid": hex::encode(&gid),
-                "peer": hex::encode(peer), "flags": flags,
+                "peer": hex::encode(peer), "flags": flags, "left": left,
             }));
         }
     }
@@ -686,9 +704,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomLeave<'local>(
     gid_hex: JString<'local>,
 ) {
     if let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) {
-        let mut rs = rooms().lock().unwrap();
-        rs.joined.remove(&gid);
-        rs.remote.remove(&gid);
+        {
+            let mut rs = rooms().lock().unwrap();
+            rs.joined.remove(&gid);
+            rs.remote.remove(&gid);
+        }
+        // Сообщаем членам комнаты, что вышли — чтобы убрали нас мгновенно.
+        if let Some(a) = app() {
+            let _ = a.jobs.send(Job::Leave(gid));
+        }
     }
 }
 

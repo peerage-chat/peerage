@@ -281,10 +281,14 @@ class AppModel private constructor() {
             "room_presence" -> if (o.getString("gid") == currentRoom) {
                 // Мгновенно отражаем участника, не дожидаясь опроса тикером.
                 val peer = o.getString("peer")
-                val flags = o.optInt("flags", 0)
-                val rm = RoomMember(peer, flags and 0b01 != 0, flags and 0b10 != 0)
-                val idx = roomMembers.indexOfFirst { it.peer == peer }
-                if (idx >= 0) roomMembers[idx] = rm else roomMembers.add(rm)
+                if (o.optBoolean("left", false)) {
+                    roomMembers.removeAll { it.peer == peer } // явный выход — убрать сразу
+                } else {
+                    val flags = o.optInt("flags", 0)
+                    val rm = RoomMember(peer, flags and 0b01 != 0, flags and 0b10 != 0)
+                    val idx = roomMembers.indexOfFirst { it.peer == peer }
+                    if (idx >= 0) roomMembers[idx] = rm else roomMembers.add(rm)
+                }
             }
             "groups_changed" -> {
                 refreshGroupsNow()
