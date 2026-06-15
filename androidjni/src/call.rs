@@ -8,6 +8,7 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -30,12 +31,6 @@ fn push_capped(ring: &Ring, samples: &[i16], cap: usize) {
     }
 }
 
-/// Счётчики фрагментации исходящего видео.
-struct VideoTx {
-    frame_id: u32,
-    seq: u16,
-}
-
 /// Активный звонок. Останавливается при [`stop`](CallEngine::stop)/`drop`.
 pub struct CallEngine {
     running: Arc<AtomicBool>,
@@ -43,9 +38,10 @@ pub struct CallEngine {
     in_ring: Ring,
     out_ring: Ring,
     in_cap: usize,
-    messenger: Arc<Messenger>,
-    peer: PeerKey,
-    video_tx: Mutex<VideoTx>,
+    /// Исходящие H.264 access-unit'ы (nal, keyframe). Bounded — при заторе сети
+    /// (блокирующий WriteTo) новые кадры ДРОПАЮТСЯ, чтобы не застопорить дренаж
+    /// энкодера/камеру. Фрагментация и отправка — в выделенном потоке.
+    video_out: SyncSender<(Vec<u8>, bool)>,
     /// Входящие собранные H.264 access-unit'ы (для MediaCodec-декодера в Kotlin).
     video_in: Arc<Mutex<VecDeque<Vec<u8>>>>,
     threads: Mutex<Vec<JoinHandle<()>>>,
@@ -155,15 +151,40 @@ impl CallEngine {
             }));
         }
 
+        // --- Видео-отправка: bounded-очередь → фрагментация → send_media ---
+        // Выделенный поток: блокирующий WriteTo (backpressure Yggdrasil) тормозит
+        // ТОЛЬКО его, а bounded-канал (cap 4) дропает лишние кадры. Так дренаж
+        // энкодера в Kotlin (callSendVideo→try_send) никогда не блокируется →
+        // энкодер дренится → камера не таймаутит.
+        let (video_out, video_rx) = sync_channel::<(Vec<u8>, bool)>(4);
+        {
+            let running = running.clone();
+            let msgr = messenger.clone();
+            threads.push(thread::spawn(move || {
+                let mut frame_id = 0u32;
+                let mut seq = 0u16;
+                while running.load(Ordering::Relaxed) {
+                    let (nal, key) = match video_rx.recv_timeout(Duration::from_millis(200)) {
+                        Ok(v) => v,
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(_) => break,
+                    };
+                    for chunk in fragment_video(&nal, frame_id, key) {
+                        let _ = msgr.send_media(&peer, TRACK_VIDEO, seq, frame_id, &chunk);
+                        seq = seq.wrapping_add(1);
+                    }
+                    frame_id = frame_id.wrapping_add(1);
+                }
+            }));
+        }
+
         Arc::new(CallEngine {
             running,
             muted,
             in_ring,
             out_ring,
             in_cap: cap,
-            messenger,
-            peer,
-            video_tx: Mutex::new(VideoTx { frame_id: 0, seq: 0 }),
+            video_out,
             video_in,
             threads: Mutex::new(threads),
         })
@@ -191,16 +212,10 @@ impl CallEngine {
         n
     }
 
-    /// H.264 access-unit от аппаратного энкодера (Kotlin/MediaCodec) →
-    /// фрагментация → отправка по сети (TRACK_VIDEO).
+    /// H.264 access-unit от аппаратного энкодера (Kotlin/MediaCodec) → в очередь
+    /// отправки. НЕ блокирует: при заторе сети кадр дропается (реалтайм).
     pub fn send_video(&self, nal: &[u8], keyframe: bool) {
-        let mut tx = self.video_tx.lock().unwrap();
-        let frame_id = tx.frame_id;
-        for chunk in fragment_video(nal, frame_id, keyframe) {
-            let _ = self.messenger.send_media(&self.peer, TRACK_VIDEO, tx.seq, frame_id, &chunk);
-            tx.seq = tx.seq.wrapping_add(1);
-        }
-        tx.frame_id = tx.frame_id.wrapping_add(1);
+        let _ = self.video_out.try_send((nal.to_vec(), keyframe));
     }
 
     /// Забрать собранный входящий H.264 access-unit (для MediaCodec-декодера).

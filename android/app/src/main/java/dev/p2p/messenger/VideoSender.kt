@@ -6,11 +6,13 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Handler
 import android.os.HandlerThread
+import android.util.Range
 import android.view.Surface
 import kotlin.concurrent.thread
 
@@ -72,6 +74,11 @@ class VideoSender(
                         session = s
                         val req = cam.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
                             addTarget(target)
+                            // Ограничиваем частоту камеры под целевой fps (меньше
+                            // перепроизводства кадров → меньше рывков/трафика).
+                            pickFpsRange(mgr, camId)?.let {
+                                set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+                            }
                         }
                         runCatching { s.setRepeatingRequest(req.build(), null, camHandler) }
                     }
@@ -123,6 +130,15 @@ class VideoSender(
         runCatching { camThread?.quitSafely() }
         session = null; device = null; encoder = null; inputSurface = null; camThread = null
     }
+
+    /** Поддерживаемый FPS-диапазон с верхом ≤ целевого fps (предпочитая
+     *  фиксированный lower==upper); null — оставить авто. */
+    private fun pickFpsRange(mgr: CameraManager, camId: String): Range<Int>? = runCatching {
+        val ranges = mgr.getCameraCharacteristics(camId)
+            .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return null
+        ranges.filter { it.upper <= fps }.maxByOrNull { it.lower.toLong() * 100 + it.upper }
+            ?: ranges.minByOrNull { it.upper }
+    }.getOrNull()
 
     private fun pickFront(mgr: CameraManager): String? {
         var fallback: String? = null

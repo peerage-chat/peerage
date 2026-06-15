@@ -15,7 +15,7 @@ import java.util.concurrent.Executors
 const val VIDEO_W = 640
 const val VIDEO_H = 480
 const val VIDEO_FPS = 24
-const val VIDEO_BITRATE = 2_000_000
+const val VIDEO_BITRATE = 1_000_000 // 1 Мбит/с для 640x480 — устойчивее на mesh
 
 data class Contact(
     val key: String,

@@ -498,6 +498,14 @@ fn call_params(call_id: u64, audio: &AudioSettings) -> String {
     .to_string()
 }
 
+/// Текущий движок звонка как Arc-клон. Глобальный мьютекс [`CALL`] держим ТОЛЬКО
+/// на время клонирования Arc — НИКОГДА во время работы движка (сеть/кольца),
+/// иначе блокирующий `send_media`/`ygg_write` (backpressure Yggdrasil) удержит
+/// мьютекс и заморозит весь медиа-конвейер (видео+аудио).
+fn current_call() -> Option<Arc<CallEngine>> {
+    CALL.lock().unwrap().clone()
+}
+
 fn begin_call(peer: [u8; 32]) -> Option<AudioSettings> {
     let app = app()?;
     let mut audio = AudioSettings::default();
@@ -588,7 +596,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPushAudio<'local>(
     if env.get_short_array_region(&data, 0, &mut buf).is_err() {
         return;
     }
-    if let Some(engine) = CALL.lock().unwrap().as_ref() {
+    if let Some(engine) = current_call() {
         engine.push_audio(&buf);
     }
 }
@@ -605,7 +613,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPullAudio<'local>(
         return 0;
     }
     let mut buf = vec![0i16; len];
-    let n = CALL.lock().unwrap().as_ref().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
+    let n = current_call().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
     let _ = env.set_short_array_region(&out, 0, &buf);
     n as jint
 }
@@ -628,7 +636,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callSendVideo<'local>(
         return;
     }
     let bytes: Vec<u8> = buf.into_iter().map(|b| b as u8).collect();
-    if let Some(engine) = CALL.lock().unwrap().as_ref() {
+    if let Some(engine) = current_call() {
         engine.send_video(&bytes, keyframe != JNI_FALSE);
     }
 }
@@ -640,7 +648,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPullVideoPacket<'local>
     env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jbyteArray {
-    let pkt = CALL.lock().unwrap().as_ref().and_then(|e| e.pull_video_packet());
+    let pkt = current_call().and_then(|e| e.pull_video_packet());
     let Some(data) = pkt else {
         return env.new_byte_array(0).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut());
     };
@@ -660,7 +668,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callSetMuted<'local>(
     _class: JClass<'local>,
     muted: jboolean,
 ) {
-    if let Some(engine) = CALL.lock().unwrap().as_ref() {
+    if let Some(engine) = current_call() {
         engine.set_muted(muted != JNI_FALSE);
     }
 }
