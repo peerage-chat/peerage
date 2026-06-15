@@ -41,10 +41,12 @@ enum GroupCmd {
     Members { gid: Vec<u8>, resp: Sender<String> },
 }
 
-/// Работа для потока event_pump: событие мессенджера либо групповая команда.
+/// Работа для потока event_pump: событие мессенджера, групповая команда либо
+/// немедленная рассылка маячка присутствия (при входе в комнату).
 enum Job {
     Ev(Event),
     Cmd(GroupCmd),
+    Beacon,
 }
 
 /// Текущий активный звонок (1:1 на процесс).
@@ -52,10 +54,10 @@ static CALL: Mutex<Option<Arc<CallEngine>>> = Mutex::new(None);
 /// Счётчик id звонков (для исходящих приглашений).
 static CALL_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Период рассылки маячка присутствия в комнатах.
-const BEACON_INTERVAL: Duration = Duration::from_secs(3);
+/// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
+const BEACON_INTERVAL: Duration = Duration::from_secs(2);
 /// Не видели маячок дольше — участник считается вышедшим из комнаты.
-const PRESENCE_TTL: Duration = Duration::from_secs(10);
+const PRESENCE_TTL: Duration = Duration::from_secs(7);
 
 /// Присутствие в комнатах-звонках (Discord-style). Глобально: дёргается из JNI
 /// (join/leave/participants) и из event_pump (приём маячков + рассылка).
@@ -129,9 +131,14 @@ fn event_pump(
     let mut groups = GroupManager::new(identity, messenger.clone(), data_dir);
     let mut last_beacon = Instant::now();
     loop {
-        match job_rx.recv_timeout(Duration::from_millis(1000)) {
+        match job_rx.recv_timeout(Duration::from_millis(500)) {
             Ok(Job::Ev(ev)) => handle_event(&app, &mut groups, ev),
             Ok(Job::Cmd(cmd)) => handle_cmd(&app, &mut groups, cmd),
+            Ok(Job::Beacon) => {
+                // Вход в комнату: сразу шлём маячок, не ждём интервала.
+                last_beacon = Instant::now();
+                beacon_tick(&app, &groups, &messenger);
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
@@ -665,6 +672,10 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoin<'local>(
         flags |= 0b10;
     }
     rooms().lock().unwrap().joined.insert(gid, flags);
+    // Сразу разослать маячок (не ждать интервала) — участники увидят нас быстро.
+    if let Some(a) = app() {
+        let _ = a.jobs.send(Job::Beacon);
+    }
 }
 
 /// Выйти из комнаты `gid` (перестать слать маячок, забыть её присутствие).
