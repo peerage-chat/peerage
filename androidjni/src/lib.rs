@@ -10,6 +10,7 @@
 
 mod call;
 mod groups;
+mod room_call;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -30,6 +31,7 @@ use p2p_ygg::Node;
 
 use call::CallEngine;
 use groups::GroupManager;
+use room_call::RoomCallEngine;
 
 /// Команда группового актора (исполняется в потоке event_pump, т.к. GroupChat !Send).
 enum GroupCmd {
@@ -77,6 +79,45 @@ struct RoomState {
 fn rooms() -> &'static Mutex<RoomState> {
     static ROOMS: OnceLock<Mutex<RoomState>> = OnceLock::new();
     ROOMS.get_or_init(|| Mutex::new(RoomState::default()))
+}
+
+/// Активный мультипати аудио-звонок комнаты (один на процесс).
+struct RoomCall {
+    gid: Vec<u8>,
+    engine: Arc<RoomCallEngine>,
+    /// Цели мультикаста — синхронизируется с живыми участниками (см. sync).
+    members: Arc<Mutex<Vec<[u8; 32]>>>,
+}
+static ROOM_CALL: Mutex<Option<RoomCall>> = Mutex::new(None);
+
+fn room_engine() -> Option<Arc<RoomCallEngine>> {
+    ROOM_CALL.lock().unwrap().as_ref().map(|r| r.engine.clone())
+}
+
+/// Живые участники комнаты `gid` (свежий маячок).
+fn live_participants(gid: &[u8]) -> Vec<[u8; 32]> {
+    let now = Instant::now();
+    rooms()
+        .lock()
+        .unwrap()
+        .remote
+        .get(gid)
+        .map(|m| {
+            m.iter()
+                .filter(|(_, (t, _))| now.duration_since(*t) < PRESENCE_TTL)
+                .map(|(p, _)| *p)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Привести цели мультикаста активного звонка к текущим живым участникам.
+fn sync_room_members() {
+    let guard = ROOM_CALL.lock().unwrap();
+    if let Some(rc) = guard.as_ref() {
+        let live = live_participants(&rc.gid);
+        *rc.members.lock().unwrap() = live;
+    }
 }
 
 const PUBLIC_PEERS: &str = include_str!("../../peers/public-peers.txt");
@@ -180,11 +221,14 @@ fn beacon_tick(app: &Arc<App>, groups: &GroupManager, messenger: &Messenger) {
             let _ = messenger.send_room_presence(&m, &gid, flags);
         }
     }
-    let now = Instant::now();
-    let mut rs = rooms().lock().unwrap();
-    for peers in rs.remote.values_mut() {
-        peers.retain(|_, (t, _)| now.duration_since(*t) < PRESENCE_TTL);
+    {
+        let now = Instant::now();
+        let mut rs = rooms().lock().unwrap();
+        for peers in rs.remote.values_mut() {
+            peers.retain(|_, (t, _)| now.duration_since(*t) < PRESENCE_TTL);
+        }
     }
+    sync_room_members(); // цели мультикаста = живые участники
 }
 
 /// Обработать одно событие мессенджера: персист + JSON в очередь поллинга +
@@ -260,6 +304,7 @@ fn handle_event(app: &Arc<App>, groups: &mut GroupManager, ev: Event) {
                 "type": "room_presence", "gid": hex::encode(&gid),
                 "peer": hex::encode(peer), "flags": flags, "left": left,
             }));
+            sync_room_members(); // обновить цели мультикаста активного звонка
         }
     }
 }
@@ -743,6 +788,88 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(
         })
         .unwrap_or_default();
     ret(&env, &serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into()))
+}
+
+/// Запустить мультипати аудио комнаты `gid` (мультикаст всем участникам + микс
+/// приёма). Возвращает JSON-параметры аудио (sample_rate/channels/frame_len).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStart<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    gid_hex: JString<'local>,
+) -> jstring {
+    let Some(app) = app() else { return ret(&env, "{}") };
+    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "{}") };
+    let mut audio = AudioSettings::default();
+    audio.jitter_depth = 5; // как в 1:1 — сглаживание сети
+    let members = Arc::new(Mutex::new(live_participants(&gid)));
+    let engine = RoomCallEngine::start(app.messenger.clone(), audio, members.clone());
+    let old = ROOM_CALL.lock().unwrap().replace(RoomCall { gid, engine, members });
+    if let Some(old) = old {
+        std::thread::spawn(move || old.engine.stop());
+    }
+    ret(&env, &call_params(0, &audio))
+}
+
+/// Остановить мультипати аудио комнаты.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStop<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) {
+    let rc = ROOM_CALL.lock().unwrap().take();
+    if let Some(rc) = rc {
+        std::thread::spawn(move || rc.engine.stop());
+    }
+}
+
+/// Захваченный PCM с микрофона → мультикаст-движку комнаты.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushAudio<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    data: JShortArray<'local>,
+    n: jint,
+) {
+    let n = n.max(0) as usize;
+    if n == 0 {
+        return;
+    }
+    let mut buf = vec![0i16; n];
+    if env.get_short_array_region(&data, 0, &mut buf).is_err() {
+        return;
+    }
+    if let Some(engine) = room_engine() {
+        engine.push_audio(&buf);
+    }
+}
+
+/// Заполнить массив смешанным PCM комнаты. Возвращает число реальных сэмплов.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullAudio<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    out: JShortArray<'local>,
+) -> jint {
+    let len = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
+    if len == 0 {
+        return 0;
+    }
+    let mut buf = vec![0i16; len];
+    let n = room_engine().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
+    let _ = env.set_short_array_region(&out, 0, &buf);
+    n as jint
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetMuted<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    muted: jboolean,
+) {
+    if let Some(engine) = room_engine() {
+        engine.set_muted(muted != JNI_FALSE);
+    }
 }
 
 /// Захваченный PCM с микрофона (первые `n` сэмплов массива) → движку.

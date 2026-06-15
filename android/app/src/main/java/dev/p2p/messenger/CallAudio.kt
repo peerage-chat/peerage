@@ -22,7 +22,13 @@ import kotlin.concurrent.thread
  * все через AudioEffect API на сессии записи. Потоки захвата/воспроизведения —
  * с приоритетом URGENT_AUDIO, чтобы видео-нагрузка не вызывала underrun/шум.
  */
-class CallAudio(private val context: Context) {
+class CallAudio(
+    private val context: Context,
+    // Мост к ядру — по умолчанию 1:1-звонок; для комнаты передаём room-варианты.
+    private val push: (ShortArray, Int) -> Unit = Native::callPushAudio,
+    private val pull: (ShortArray) -> Int = Native::callPullAudio,
+    private val mute: (Boolean) -> Unit = Native::callSetMuted,
+) {
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
     private var aec: AcousticEchoCanceler? = null
@@ -85,7 +91,7 @@ class CallAudio(private val context: Context) {
             val buf = ShortArray(chunk)
             while (running) {
                 val n = rec.read(buf, 0, buf.size)
-                if (n > 0) Native.callPushAudio(buf, n)
+                if (n > 0) push(buf, n)
             }
         }
         // Воспроизведение: Rust → динамик.
@@ -93,13 +99,13 @@ class CallAudio(private val context: Context) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
             while (running) {
-                Native.callPullAudio(buf) // заполняет тишиной, если данных нет
+                pull(buf) // заполняет тишиной, если данных нет
                 trk.write(buf, 0, buf.size)
             }
         }
     }
 
-    fun setMuted(muted: Boolean) = Native.callSetMuted(muted)
+    fun setMuted(muted: Boolean) = mute(muted)
 
     fun stop() {
         running = false

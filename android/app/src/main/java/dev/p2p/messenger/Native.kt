@@ -80,6 +80,15 @@ object Native {
     external fun roomLeave(gid: String)
     /** Участники комнаты сейчас: JSON [{peer, audio, video}]. */
     external fun roomParticipants(gid: String): String
+    /** Запустить мультипати аудио комнаты. JSON {sample_rate, channels, frame_len}. */
+    external fun roomAudioStart(gid: String): String
+    /** Остановить мультипати аудио комнаты. */
+    external fun roomAudioStop()
+    /** Захваченный PCM с микрофона → мультикаст всем в комнате. */
+    external fun roomPushAudio(data: ShortArray, n: Int)
+    /** Смешанный PCM комнаты для воспроизведения. Возвращает число сэмплов. */
+    external fun roomPullAudio(out: ShortArray): Int
+    external fun roomSetMuted(muted: Boolean)
 
     // ── Диагностика: тест пропускной способности меша ─────────────────────
     /** Включить приём бенча (считать входящие bench-датаграммы). */

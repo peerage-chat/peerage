@@ -106,6 +106,7 @@ class AppModel private constructor() {
     var audio: CallAudio? = null
     var appContext: android.content.Context? = null
     @Volatile private var videoSender: VideoSender? = null
+    @Volatile private var roomAudio: CallAudio? = null
 
     // Фоновое взаимодействие с ядром (никогда не на главном потоке).
     private val ops = Executors.newSingleThreadExecutor { Thread(it, "native-ops").apply { isDaemon = true } }
@@ -371,19 +372,32 @@ class AppModel private constructor() {
 
     // ── Комната-звонок (присутствие, Discord-style) ───────────────────────────
 
-    /** Войти в комнату группы: начинаем слать маячок, тикер тянет участников. */
+    /** Войти в комнату группы: маячок присутствия + мультипати аудио (микрофон
+     *  всем участникам, приём от каждого с миксом). */
     fun joinRoom(gid: String, audio: Boolean = true, video: Boolean = false) {
         currentRoom = gid
         roomMembers.clear()
-        ops.execute { Native.roomJoin(gid, audio, video) }
+        val ctx = appContext
+        ops.execute {
+            Native.roomJoin(gid, audio, video)
+            val p = JSONObject(Native.roomAudioStart(gid))
+            val sr = p.optInt("sample_rate", 48000)
+            val ch = p.optInt("channels", 1)
+            if (ctx != null) {
+                roomAudio = CallAudio(ctx, Native::roomPushAudio, Native::roomPullAudio, Native::roomSetMuted)
+                    .also { it.start(sr, ch) }
+            }
+        }
     }
 
-    /** Выйти из комнаты. */
+    /** Выйти из комнаты: стоп аудио + маячок «вышел». */
     fun leaveRoom() {
         val gid = currentRoom ?: return
         currentRoom = null
         roomMembers.clear()
-        ops.execute { Native.roomLeave(gid) }
+        val a = roomAudio; roomAudio = null
+        ops.execute { Native.roomLeave(gid); Native.roomAudioStop() }
+        Thread { runCatching { a?.stop() } }.apply { isDaemon = true }.start()
     }
 
     // ── Группы ──────────────────────────────────────────────────────────────
