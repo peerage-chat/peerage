@@ -76,6 +76,7 @@ class AppModel private constructor() {
 
     var me by mutableStateOf<Me?>(null)
     var error by mutableStateOf<String?>(null)
+    var sessionPtr: Long = 0L
 
     val contacts = mutableStateListOf<Contact>()
     val online = mutableStateMapOf<String, Boolean>()
@@ -126,6 +127,7 @@ class AppModel private constructor() {
             error = json.getString("error")
             return
         }
+        sessionPtr = json.getLong("session_ptr")
         me = Me(
             pubkey = json.getString("pubkey"),
             address = json.getString("address"),
@@ -141,10 +143,10 @@ class AppModel private constructor() {
         running = true
         pollThread = Thread {
             while (running) {
-                var e = Native.pollEvent()
+                var e = Native.pollEvent(sessionPtr)
                 while (e.isNotEmpty()) {
                     runCatching { applyEvent(e) }
-                    e = Native.pollEvent()
+                    e = Native.pollEvent(sessionPtr)
                 }
                 Thread.sleep(80)
             }
@@ -153,16 +155,16 @@ class AppModel private constructor() {
             var tick = 0L
             while (running) {
                 runCatching {
-                    val p = Native.netPeers()
-                    val t = Native.netTree()
+                    val p = Native.netPeers(sessionPtr)
+                    val t = Native.netTree(sessionPtr)
                     netPeers = p
-                    contacts.map { it.key }.forEach { online[it] = Native.isOnline(it) }
+                    contacts.map { it.key }.forEach { online[it] = Native.isOnline(sessionPtr, it) }
                     if (benchRecv) {
-                        benchRecvMbps = JSONObject(Native.benchRecvStats()).optDouble("mbps", 0.0)
+                        benchRecvMbps = JSONObject(Native.benchRecvStats(sessionPtr)).optDouble("mbps", 0.0)
                     }
                     // Присутствие в комнате: кто сейчас внутри (по свежим маячкам).
                     currentRoom?.let { gid ->
-                        val arr = JSONArray(Native.roomParticipants(gid))
+                        val arr = JSONArray(Native.roomParticipants(sessionPtr, gid))
                         val list = (0 until arr.length()).map {
                             val o = arr.getJSONObject(it)
                             RoomMember(o.getString("peer"), o.optBoolean("audio"), o.optBoolean("video"))
@@ -185,14 +187,14 @@ class AppModel private constructor() {
     fun refreshContacts() = ops.execute { refreshContactsNow() }
 
     private fun refreshContactsNow() {
-        val arr = JSONArray(Native.listContacts())
+        val arr = JSONArray(Native.listContacts(sessionPtr))
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             Contact(o.getString("key"), o.getString("name"), o.optString("fingerprint"), o.optBoolean("verified", false))
         }
         contacts.clear()
         contacts.addAll(list)
-        list.forEach { online.putIfAbsent(it.key, Native.isOnline(it.key)) }
+        list.forEach { online.putIfAbsent(it.key, Native.isOnline(sessionPtr, it.key)) }
     }
 
     fun openChat(key: String) {
@@ -202,7 +204,7 @@ class AppModel private constructor() {
     }
 
     private fun loadHistory(key: String) {
-        val arr = JSONArray(Native.history(key))
+        val arr = JSONArray(Native.history(sessionPtr, key))
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             Message(o.getLong("id"), o.getString("text"), o.getBoolean("mine"), o.getLong("time"), o.optString("status"))
@@ -216,7 +218,7 @@ class AppModel private constructor() {
     fun send(key: String, text: String) {
         if (text.isBlank()) return
         ops.execute {
-            val id = Native.sendText(key, text)
+            val id = Native.sendText(sessionPtr, key, text)
             if (id >= 0) {
                 log(key).add(Message(id, text, mine = true, time = System.currentTimeMillis() / 1000, status = "sent"))
             }
@@ -224,24 +226,24 @@ class AppModel private constructor() {
     }
 
     fun addContact(key: String, name: String) = ops.execute {
-        val r = Native.addContact(key, name)
+        val r = Native.addContact(sessionPtr, key, name)
         if (r == "added") refreshContactsNow()
         addStatus = r
     }
 
     fun toggleVerified(key: String) = ops.execute {
         val c = contacts.firstOrNull { it.key == key } ?: return@execute
-        Native.setVerified(key, !c.verified)
+        Native.setVerified(sessionPtr, key, !c.verified)
         refreshContactsNow()
     }
 
     fun rename(key: String, name: String) = ops.execute {
-        Native.renameContact(key, name)
+        Native.renameContact(sessionPtr, key, name)
         refreshContactsNow()
     }
 
     fun remove(key: String) = ops.execute {
-        Native.removeContact(key)
+        Native.removeContact(sessionPtr, key)
         if (currentChat == key) currentChat = null
         refreshContactsNow()
     }
@@ -317,7 +319,7 @@ class AppModel private constructor() {
         ops.execute {
             val vw = if (video) VIDEO_W else 0
             val vh = if (video) VIDEO_H else 0
-            val params = JSONObject(Native.callStart(peer, video, vw, vh))
+            val params = JSONObject(Native.callStart(sessionPtr, peer, video, vw, vh))
             if (!params.has("call_id")) { call = null; return@execute }
             call = call?.copy(callId = params.getLong("call_id"))
             startMedia(params.getInt("sample_rate"), params.getInt("channels"), video)
@@ -331,7 +333,7 @@ class AppModel private constructor() {
         ops.execute {
             val vw = if (c.withVideo) VIDEO_W else 0
             val vh = if (c.withVideo) VIDEO_H else 0
-            val params = JSONObject(Native.callAccept(c.peer, c.callId, c.withVideo, vw, vh))
+            val params = JSONObject(Native.callAccept(sessionPtr, c.peer, c.callId, c.withVideo, vw, vh))
             startMedia(params.optInt("sample_rate", 48000), params.optInt("channels", 1), c.withVideo)
         }
     }
@@ -341,14 +343,18 @@ class AppModel private constructor() {
         runCatching { audio?.start(sampleRate, channels) }
         val ctx = appContext
         if (video && ctx != null) {
-            runCatching { videoSender = VideoSender(ctx, VIDEO_W, VIDEO_H, VIDEO_FPS, VIDEO_BITRATE).also { it.start() } }
+            runCatching {
+                videoSender = VideoSender(ctx, VIDEO_W, VIDEO_H, VIDEO_FPS, VIDEO_BITRATE) { nal, keyframe ->
+                    Native.callSendVideo(sessionPtr, nal, keyframe)
+                }.also { it.start() }
+            }
         }
     }
 
     fun hangUp() {
         val c = call ?: return
         endCall()
-        ops.execute { Native.callEnd(c.peer, c.callId) }
+        ops.execute { Native.callEnd(sessionPtr, c.peer, c.callId) }
     }
 
     /** Локально завершить звонок: убрать оверлей (главный поток) + стоп медиа (фон). */
@@ -379,13 +385,17 @@ class AppModel private constructor() {
         roomMembers.clear()
         val ctx = appContext
         ops.execute {
-            Native.roomJoin(gid, audio, video)
-            val p = JSONObject(Native.roomAudioStart(gid))
+            Native.roomJoin(sessionPtr, gid, audio, video)
+            val p = JSONObject(Native.roomAudioStart(sessionPtr, gid))
             val sr = p.optInt("sample_rate", 48000)
             val ch = p.optInt("channels", 1)
             if (ctx != null) {
-                roomAudio = CallAudio(ctx, Native::roomPushAudio, Native::roomPullAudio, Native::roomSetMuted)
-                    .also { it.start(sr, ch) }
+                roomAudio = CallAudio(
+                    ctx,
+                    { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
+                    { out -> Native.roomPullAudio(sessionPtr, out) },
+                    { m -> Native.roomSetMuted(sessionPtr, m) }
+                ).also { it.start(sr, ch) }
             }
         }
     }
@@ -396,7 +406,7 @@ class AppModel private constructor() {
         currentRoom = null
         roomMembers.clear()
         val a = roomAudio; roomAudio = null
-        ops.execute { Native.roomLeave(gid); Native.roomAudioStop() }
+        ops.execute { Native.roomLeave(sessionPtr, gid); Native.roomAudioStop(sessionPtr) }
         Thread { runCatching { a?.stop() } }.apply { isDaemon = true }.start()
     }
 
@@ -405,7 +415,7 @@ class AppModel private constructor() {
     fun refreshGroups() = ops.execute { refreshGroupsNow() }
 
     private fun refreshGroupsNow() {
-        val arr = JSONArray(Native.groupList())
+        val arr = JSONArray(Native.groupList(sessionPtr))
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             Group(o.getString("gid"), o.getString("name"), o.optInt("members", 1))
@@ -416,7 +426,7 @@ class AppModel private constructor() {
 
     /** Создать группу (асинхронно). Появится в списке по готовности. */
     fun createGroup(name: String) = ops.execute {
-        val gid = Native.groupCreate(name.ifBlank { "Группа" })
+        val gid = Native.groupCreate(sessionPtr, name.ifBlank { "Группа" })
         if (gid.isNotEmpty()) refreshGroupsNow()
     }
 
@@ -426,7 +436,7 @@ class AppModel private constructor() {
     }
 
     private fun loadGroupHistory(gid: String) {
-        val arr = JSONArray(Native.groupHistory(gid))
+        val arr = JSONArray(Native.groupHistory(sessionPtr, gid))
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             GroupMsg(o.getString("text"), o.getBoolean("mine"), o.optLong("time", 0))
@@ -437,12 +447,12 @@ class AppModel private constructor() {
     private fun groupLog(gid: String): SnapshotStateList<GroupMsg> =
         groupMessages.getOrPut(gid) { mutableListOf<GroupMsg>().toMutableStateList() }
 
-    fun inviteToGroup(gid: String, peerHex: String) = ops.execute { Native.groupInvite(gid, peerHex) }
+    fun inviteToGroup(gid: String, peerHex: String) = ops.execute { Native.groupInvite(sessionPtr, gid, peerHex) }
 
     fun sendGroupText(gid: String, text: String) {
         if (text.isBlank()) return
         ops.execute {
-            if (Native.groupSendText(gid, text)) {
+            if (Native.groupSendText(sessionPtr, gid, text)) {
                 groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000))
             }
         }
@@ -453,14 +463,14 @@ class AppModel private constructor() {
     /** Включить режим приёмника бенча (живая скорость в [benchRecvMbps]). */
     fun startBenchRecv() {
         benchRecv = true
-        ops.execute { Native.benchRecvStart() }
+        ops.execute { Native.benchRecvStart(sessionPtr) }
     }
 
     /** Блб ~30 МБ на пира; результат отправки в [benchResult]. */
     fun blastBench(peerHex: String) {
         benchResult = "отправка…"
         ops.execute {
-            val r = JSONObject(Native.benchBlast(peerHex, 30_000))
+            val r = JSONObject(Native.benchBlast(sessionPtr, peerHex, 30_000))
             benchResult = "отправлено %.1f Мбит/с (%.1f МБ)".format(
                 r.optDouble("mbps", 0.0), r.optDouble("sent_bytes", 0.0) / 1e6,
             )

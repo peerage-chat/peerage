@@ -69,7 +69,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        model.audio = CallAudio(applicationContext)
+        model.audio = CallAudio(
+            applicationContext,
+            { data, n -> Native.callPushAudio(model.sessionPtr, data, n) },
+            { out -> Native.callPullAudio(model.sessionPtr, out) },
+            { m -> Native.callSetMuted(model.sessionPtr, m) }
+        )
         model.appContext = applicationContext
         val wanted = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -580,7 +585,9 @@ private fun VideoSurface(modifier: Modifier = Modifier) {
                     override fun surfaceCreated(h: android.view.SurfaceHolder) {
                         // Создание/старт MediaCodec-декодера блокирует — не на UI-потоке.
                         Thread {
-                            receiver = VideoReceiver(h.surface, VIDEO_W, VIDEO_H).also { it.start() }
+                            receiver = VideoReceiver(h.surface, VIDEO_W, VIDEO_H) {
+                                Native.callPullVideoPacket(AppModel.instance.sessionPtr)
+                            }.also { it.start() }
                         }.start()
                     }
                     override fun surfaceChanged(h: android.view.SurfaceHolder, f: Int, w: Int, ht: Int) {}

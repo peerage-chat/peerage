@@ -53,11 +53,6 @@ enum Job {
     Leave(Vec<u8>),
 }
 
-/// Текущий активный звонок (1:1 на процесс).
-static CALL: Mutex<Option<Arc<CallEngine>>> = Mutex::new(None);
-/// Счётчик id звонков (для исходящих приглашений).
-static CALL_ID: AtomicU64 = AtomicU64::new(1);
-
 /// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
 /// Не видели маячок дольше — участник считается вышедшим из комнаты (страховка
@@ -66,19 +61,15 @@ const PRESENCE_TTL: Duration = Duration::from_secs(5);
 /// Бит в `flags`: «я выхожу из комнаты» — получатель убирает участника сразу.
 const PRESENCE_LEFT: u8 = 0x80;
 
-/// Присутствие в комнатах-звонках (Discord-style). Глобально: дёргается из JNI
-/// (join/leave/participants) и из event_pump (приём маячков + рассылка).
+const BENCH_TRACK: u8 = 200;
+
+/// Присутствие в комнатах-звонках (Discord-style).
 #[derive(Default)]
 struct RoomState {
     /// Комнаты, в которых МЫ сейчас находимся: gid → наши A/V-флаги.
     joined: HashMap<Vec<u8>, u8>,
     /// Присутствие других: gid → (peer → (время последнего маячка, флаги)).
     remote: HashMap<Vec<u8>, HashMap<[u8; 32], (Instant, u8)>>,
-}
-
-fn rooms() -> &'static Mutex<RoomState> {
-    static ROOMS: OnceLock<Mutex<RoomState>> = OnceLock::new();
-    ROOMS.get_or_init(|| Mutex::new(RoomState::default()))
 }
 
 /// Активный мультипати аудио-звонок комнаты (один на процесс).
@@ -88,42 +79,18 @@ struct RoomCall {
     /// Цели мультикаста — синхронизируется с живыми участниками (см. sync).
     members: Arc<Mutex<Vec<[u8; 32]>>>,
 }
-static ROOM_CALL: Mutex<Option<RoomCall>> = Mutex::new(None);
-
-fn room_engine() -> Option<Arc<RoomCallEngine>> {
-    ROOM_CALL.lock().unwrap().as_ref().map(|r| r.engine.clone())
-}
-
-/// Живые участники комнаты `gid` (свежий маячок).
-fn live_participants(gid: &[u8]) -> Vec<[u8; 32]> {
-    let now = Instant::now();
-    rooms()
-        .lock()
-        .unwrap()
-        .remote
-        .get(gid)
-        .map(|m| {
-            m.iter()
-                .filter(|(_, (t, _))| now.duration_since(*t) < PRESENCE_TTL)
-                .map(|(p, _)| *p)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Привести цели мультикаста активного звонка к текущим живым участникам.
-fn sync_room_members() {
-    let guard = ROOM_CALL.lock().unwrap();
-    if let Some(rc) = guard.as_ref() {
-        let live = live_participants(&rc.gid);
-        *rc.members.lock().unwrap() = live;
-    }
-}
 
 const PUBLIC_PEERS: &str = include_str!("../../peers/public-peers.txt");
 
-/// Глобальное состояние приложения (один мессенджер на процесс).
-struct App {
+struct BenchRecv {
+    bytes: AtomicU64,
+    pkts: AtomicU64,
+    running: AtomicBool,
+    start: Instant,
+}
+
+/// Состояние сессии приложения.
+pub struct Session {
     messenger: Arc<Messenger>,
     contacts: Mutex<ContactStore>,
     messages: Mutex<MessageStore>,
@@ -131,9 +98,57 @@ struct App {
     events: Mutex<VecDeque<String>>,
     /// Канал к групповому актору (потоку event_pump).
     jobs: Sender<Job>,
+    call: Mutex<Option<Arc<CallEngine>>>,
+    call_id: AtomicU64,
+    room_call: Mutex<Option<RoomCall>>,
+    rooms: Mutex<RoomState>,
+    bench: Mutex<Option<Arc<BenchRecv>>>,
 }
 
-static APP: OnceLock<Arc<App>> = OnceLock::new();
+impl Session {
+    fn room_engine(&self) -> Option<Arc<RoomCallEngine>> {
+        self.room_call.lock().unwrap().as_ref().map(|r| r.engine.clone())
+    }
+
+    fn live_participants(&self, gid: &[u8]) -> Vec<[u8; 32]> {
+        let now = Instant::now();
+        self.rooms
+            .lock()
+            .unwrap()
+            .remote
+            .get(gid)
+            .map(|m| {
+                m.iter()
+                    .filter(|(_, (t, _))| now.duration_since(*t) < PRESENCE_TTL)
+                    .map(|(p, _)| *p)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn sync_room_members(&self) {
+        let guard = self.room_call.lock().unwrap();
+        if let Some(rc) = guard.as_ref() {
+            let live = self.live_participants(&rc.gid);
+            *rc.members.lock().unwrap() = live;
+        }
+    }
+
+    fn current_call(&self) -> Option<Arc<CallEngine>> {
+        self.call.lock().unwrap().clone()
+    }
+
+    fn begin_call(&self, peer: [u8; 32]) -> Option<AudioSettings> {
+        let mut audio = AudioSettings::default();
+        audio.jitter_depth = 5;
+        let engine = CallEngine::start(self.messenger.clone(), peer, audio);
+        let old = self.call.lock().unwrap().replace(engine);
+        if let Some(old) = old {
+            std::thread::spawn(move || old.stop());
+        }
+        Some(audio)
+    }
+}
 
 fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -152,8 +167,8 @@ pub(crate) fn spawn_connect(m: Arc<Messenger>, key: [u8; 32]) {
 }
 
 /// TOFU: добавить неизвестного пира в контакты (имя по умолчанию — префикс ключа).
-fn ensure_contact(app: &App, peer: [u8; 32]) {
-    let mut store = app.contacts.lock().unwrap();
+fn ensure_contact(session: &Session, peer: [u8; 32]) {
+    let mut store = session.contacts.lock().unwrap();
     if !store.contains(&peer) {
         let hex = hex::encode(peer);
         let name = format!("{}…", &hex[..8]);
@@ -161,14 +176,14 @@ fn ensure_contact(app: &App, peer: [u8; 32]) {
     }
 }
 
-fn push_event(app: &App, json: serde_json::Value) {
-    app.events.lock().unwrap().push_back(json.to_string());
+fn push_event(session: &Session, json: serde_json::Value) {
+    session.events.lock().unwrap().push_back(json.to_string());
 }
 
 /// Поток event_pump = групповой актор: владеет [`GroupManager`] (GroupChat !Send),
 /// обрабатывает события мессенджера и групповые команды из JNI — всё в одном потоке.
 fn event_pump(
-    app: Arc<App>,
+    session: Arc<Session>,
     job_rx: Receiver<Job>,
     identity: Identity,
     messenger: Arc<Messenger>,
@@ -178,17 +193,17 @@ fn event_pump(
     let mut last_beacon = Instant::now();
     loop {
         match job_rx.recv_timeout(Duration::from_millis(500)) {
-            Ok(Job::Ev(ev)) => handle_event(&app, &mut groups, ev),
-            Ok(Job::Cmd(cmd)) => handle_cmd(&app, &mut groups, cmd),
+            Ok(Job::Ev(ev)) => handle_event(&session, &mut groups, ev),
+            Ok(Job::Cmd(cmd)) => handle_cmd(&session, &mut groups, cmd),
             Ok(Job::Beacon) => {
                 // Вход в комнату: сразу шлём маячок, не ждём интервала.
                 last_beacon = Instant::now();
-                beacon_tick(&app, &groups, &messenger);
+                beacon_tick(&session, &groups, &messenger);
             }
             Ok(Job::Leave(gid)) => {
                 // Явный выход: шлём членам маячок с флагом LEFT (мгновенно убрать).
                 for m in groups.members(&gid) {
-                    if m == app.me_pub {
+                    if m == session.me_pub {
                         continue;
                     }
                     let _ = messenger.send_room_presence(&m, &gid, PRESENCE_LEFT);
@@ -201,21 +216,21 @@ fn event_pump(
         // чтобы под нагрузкой событий он не голодал).
         if last_beacon.elapsed() >= BEACON_INTERVAL {
             last_beacon = Instant::now();
-            beacon_tick(&app, &groups, &messenger);
+            beacon_tick(&session, &groups, &messenger);
         }
     }
 }
 
 /// Разослать маячок присутствия членам всех комнат, где мы сейчас находимся,
 /// и подчистить протухшее присутствие других.
-fn beacon_tick(app: &Arc<App>, groups: &GroupManager, messenger: &Messenger) {
+fn beacon_tick(session: &Arc<Session>, groups: &GroupManager, messenger: &Messenger) {
     let joined: Vec<(Vec<u8>, u8)> = {
-        let rs = rooms().lock().unwrap();
+        let rs = session.rooms.lock().unwrap();
         rs.joined.iter().map(|(g, f)| (g.clone(), *f)).collect()
     };
     for (gid, flags) in joined {
         for m in groups.members(&gid) {
-            if m == app.me_pub {
+            if m == session.me_pub {
                 continue; // себе слать не нужно
             }
             let _ = messenger.send_room_presence(&m, &gid, flags);
@@ -223,75 +238,75 @@ fn beacon_tick(app: &Arc<App>, groups: &GroupManager, messenger: &Messenger) {
     }
     {
         let now = Instant::now();
-        let mut rs = rooms().lock().unwrap();
+        let mut rs = session.rooms.lock().unwrap();
         for peers in rs.remote.values_mut() {
             peers.retain(|_, (t, _)| now.duration_since(*t) < PRESENCE_TTL);
         }
     }
-    sync_room_members(); // цели мультикаста = живые участники
+    session.sync_room_members(); // цели мультикаста = живые участники
 }
 
 /// Обработать одно событие мессенджера: персист + JSON в очередь поллинга +
 /// маршрутизация групповых событий в [`GroupManager`].
-fn handle_event(app: &Arc<App>, groups: &mut GroupManager, ev: Event) {
+fn handle_event(session: &Arc<Session>, groups: &mut GroupManager, ev: Event) {
     match ev {
         Event::Presence { peer, online } => {
             if online {
-                ensure_contact(app, peer);
+                ensure_contact(session, peer);
             }
-            push_event(app, serde_json::json!({
+            push_event(session, serde_json::json!({
                 "type": "presence", "peer": hex::encode(peer), "online": online,
             }));
         }
         Event::Text { peer, id, text } => {
-            ensure_contact(app, peer);
+            ensure_contact(session, peer);
             let t = now();
-            let _ = app.messages.lock().unwrap().append(&peer, StoredMessage {
+            let _ = session.messages.lock().unwrap().append(&peer, StoredMessage {
                 id, text: text.clone(), mine: false, time: t, status: String::new(),
             });
-            push_event(app, serde_json::json!({
+            push_event(session, serde_json::json!({
                 "type": "text", "peer": hex::encode(peer), "id": id, "text": text, "time": t,
             }));
         }
         Event::Ack { peer, id } => {
-            let _ = app.messages.lock().unwrap().set_status(&peer, id, "delivered");
-            push_event(app, serde_json::json!({"type": "ack", "peer": hex::encode(peer), "id": id}));
+            let _ = session.messages.lock().unwrap().set_status(&peer, id, "delivered");
+            push_event(session, serde_json::json!({"type": "ack", "peer": hex::encode(peer), "id": id}));
         }
         Event::Undelivered { peer, id } => {
-            let _ = app.messages.lock().unwrap().set_status(&peer, id, "failed");
-            push_event(app, serde_json::json!({"type": "undelivered", "peer": hex::encode(peer), "id": id}));
+            let _ = session.messages.lock().unwrap().set_status(&peer, id, "failed");
+            push_event(session, serde_json::json!({"type": "undelivered", "peer": hex::encode(peer), "id": id}));
         }
-        Event::CallInvite { peer, call_id, audio, video } => push_event(app, serde_json::json!({
+        Event::CallInvite { peer, call_id, audio, video } => push_event(session, serde_json::json!({
             "type": "call_invite", "peer": hex::encode(peer), "call_id": call_id,
             "audio": audio, "video": video,
         })),
-        Event::CallAccept { peer, call_id } => push_event(app, serde_json::json!({
+        Event::CallAccept { peer, call_id } => push_event(session, serde_json::json!({
             "type": "call_accept", "peer": hex::encode(peer), "call_id": call_id,
         })),
-        Event::CallEnd { peer, call_id } => push_event(app, serde_json::json!({
+        Event::CallEnd { peer, call_id } => push_event(session, serde_json::json!({
             "type": "call_end", "peer": hex::encode(peer), "call_id": call_id,
         })),
         Event::Group { data, .. } => {
             let out = groups.on_group(&data);
             if let (Some(gid), Some(text)) = (&out.gid, &out.text) {
-                push_event(app, serde_json::json!({
+                push_event(session, serde_json::json!({
                     "type": "group_msg", "gid": hex::encode(gid), "text": text,
                 }));
             }
             if out.joined {
-                push_event(app, serde_json::json!({"type": "groups_changed"}));
+                push_event(session, serde_json::json!({"type": "groups_changed"}));
             }
         }
         Event::GroupKeyRequest { peer } => groups.on_key_request(peer),
         Event::GroupKeyReply { peer, key_package } => {
             if groups.on_key_reply(peer, &key_package) {
-                push_event(app, serde_json::json!({"type": "groups_changed"}));
+                push_event(session, serde_json::json!({"type": "groups_changed"}));
             }
         }
         Event::RoomPresence { peer, gid, flags } => {
             let left = flags & PRESENCE_LEFT != 0;
             {
-                let mut rs = rooms().lock().unwrap();
+                let mut rs = session.rooms.lock().unwrap();
                 if left {
                     if let Some(m) = rs.remote.get_mut(&gid) {
                         m.remove(&peer);
@@ -300,22 +315,22 @@ fn handle_event(app: &Arc<App>, groups: &mut GroupManager, ev: Event) {
                     rs.remote.entry(gid.clone()).or_default().insert(peer, (Instant::now(), flags));
                 }
             }
-            push_event(app, serde_json::json!({
+            push_event(session, serde_json::json!({
                 "type": "room_presence", "gid": hex::encode(&gid),
                 "peer": hex::encode(peer), "flags": flags, "left": left,
             }));
-            sync_room_members(); // обновить цели мультикаста активного звонка
+            session.sync_room_members(); // обновить цели мультикаста активного звонка
         }
     }
 }
 
 /// Исполнить групповую команду из JNI (в потоке актора) и вернуть результат.
-fn handle_cmd(app: &Arc<App>, groups: &mut GroupManager, cmd: GroupCmd) {
+fn handle_cmd(session: &Arc<Session>, groups: &mut GroupManager, cmd: GroupCmd) {
     match cmd {
         GroupCmd::Create { name, resp } => {
             let gid = groups.create(&name).map(|g| hex::encode(g)).unwrap_or_default();
             if !gid.is_empty() {
-                push_event(app, serde_json::json!({"type": "groups_changed"}));
+                push_event(session, serde_json::json!({"type": "groups_changed"}));
             }
             let _ = resp.send(gid);
         }
@@ -336,10 +351,6 @@ fn handle_cmd(app: &Arc<App>, groups: &mut GroupManager, cmd: GroupCmd) {
     }
 }
 
-fn app() -> Option<&'static Arc<App>> {
-    APP.get()
-}
-
 // ── JNI-обвязка ────────────────────────────────────────────────────────────
 // Хелперы строк: читаем JString в Rust String, отдаём Rust String как jstring.
 
@@ -350,8 +361,17 @@ fn ret(env: &JNIEnv, s: &str) -> jstring {
     env.new_string(s).map(|v| v.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
+fn identity_json(session_ptr: jlong, me_pub: &[u8; 32], address: &str) -> serde_json::Value {
+    serde_json::json!({
+        "session_ptr": session_ptr,
+        "pubkey": hex::encode(me_pub),
+        "address": address,
+        "fingerprint": p2p_core::identity::fingerprint_words(me_pub).join(" "),
+    })
+}
+
 /// Инициализация. dataDir — приватный каталог приложения (filesDir).
-/// Возвращает JSON `{pubkey, address, fingerprint}` или `{"error": "..."}`.
+/// Возвращает JSON `{session_ptr, pubkey, address, fingerprint}` или `{"error": "..."}`.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
     mut env: JNIEnv<'local>,
@@ -361,11 +381,6 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
     let _ = android_logger::init_once(
         android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("p2p"),
     );
-
-    if let Some(app) = APP.get() {
-        let id = identity_json(&app.me_pub, &app.messenger.address());
-        return ret(&env, &id.to_string());
-    }
 
     let dir = PathBuf::from(jstr(&mut env, &data_dir));
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -422,29 +437,41 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
         });
     }
 
-    let app = Arc::new(App {
+    let session = Arc::new(Session {
         messenger: messenger.clone(),
         contacts: Mutex::new(contacts),
         messages: Mutex::new(messages),
         me_pub,
         events: Mutex::new(VecDeque::new()),
         jobs: job_tx,
+        call: Mutex::new(None),
+        call_id: AtomicU64::new(1),
+        room_call: Mutex::new(None),
+        rooms: Mutex::new(RoomState::default()),
+        bench: Mutex::new(None),
     });
-    let _ = APP.set(app.clone());
+    
+    let session_ptr = Box::into_raw(Box::new(session.clone())) as jlong;
+
     let groups_dir = dir.clone();
     std::thread::spawn(move || {
-        event_pump(app, job_rx, identity_for_groups, messenger, groups_dir)
+        event_pump(session, job_rx, identity_for_groups, messenger, groups_dir)
     });
 
-    ret(&env, &identity_json(&me_pub, &address).to_string())
+    ret(&env, &identity_json(session_ptr, &me_pub, &address).to_string())
 }
 
-fn identity_json(me_pub: &[u8; 32], address: &str) -> serde_json::Value {
-    serde_json::json!({
-        "pubkey": hex::encode(me_pub),
-        "address": address,
-        "fingerprint": p2p_core::identity::fingerprint_words(me_pub).join(" "),
-    })
+/// Добавить деструктор сессии.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_destroySession<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) {
+    if session_ptr != 0 {
+        let _boxed = unsafe { Box::from_raw(session_ptr as *mut Arc<Session>) };
+        // Выгрузит Arc и освободит память.
+    }
 }
 
 /// Следующее событие как JSON-строка, либо "" если очередь пуста.
@@ -452,10 +479,11 @@ fn identity_json(me_pub: &[u8; 32], address: &str) -> serde_json::Value {
 pub extern "system" fn Java_dev_p2p_messenger_Native_pollEvent<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) -> jstring {
-    let s = app()
-        .and_then(|a| a.events.lock().unwrap().pop_front())
-        .unwrap_or_default();
+    if session_ptr == 0 { return ret(&env, ""); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    let s = session.events.lock().unwrap().pop_front().unwrap_or_default();
     ret(&env, &s)
 }
 
@@ -464,16 +492,18 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_pollEvent<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_sendText<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
     text: JString<'local>,
 ) -> jlong {
-    let Some(app) = app() else { return -1 };
+    if session_ptr == 0 { return -1; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return -1 };
     let text = jstr(&mut env, &text);
-    match app.messenger.send_text(&key, &text) {
+    match session.messenger.send_text(&key, &text) {
         Ok(id) => {
-            let _ = app.messages.lock().unwrap().append(&key, StoredMessage {
-                id, text, mine: true, time: now(), status: "sent".into(),
+            let _ = session.messages.lock().unwrap().append(&key, StoredMessage {
+                id, text: text.clone(), mine: true, time: now(), status: "sent".into(),
             });
             id as jlong
         }
@@ -486,10 +516,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendText<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_connect<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
 ) {
-    if let (Some(app), Some(key)) = (app(), parse_key(&jstr(&mut env, &key_hex))) {
-        spawn_connect(app.messenger.clone(), key);
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
+        spawn_connect(session.messenger.clone(), key);
     }
 }
 
@@ -498,17 +531,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_connect<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_addContact<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
     name: JString<'local>,
 ) -> jstring {
-    let Some(app) = app() else { return ret(&env, "error") };
+    if session_ptr == 0 { return ret(&env, "error"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "error") };
     let name = jstr(&mut env, &name);
     let name = if name.trim().is_empty() { format!("{}…", &hex::encode(key)[..8]) } else { name };
-    let outcome = app.contacts.lock().unwrap().add(&key, &name, now());
+    let outcome = session.contacts.lock().unwrap().add(&key, &name, now());
     match outcome {
         Ok(p2p_core::store::AddOutcome::Added) => {
-            spawn_connect(app.messenger.clone(), key);
+            spawn_connect(session.messenger.clone(), key);
             ret(&env, "added")
         }
         Ok(p2p_core::store::AddOutcome::AlreadyKnown) => ret(&env, "known"),
@@ -521,10 +556,11 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_addContact<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_listContacts<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) -> jstring {
-    let json = app()
-        .map(|a| serde_json::to_string(&a.contacts.lock().unwrap().list()).unwrap_or_default())
-        .unwrap_or_else(|| "[]".into());
+    if session_ptr == 0 { return ret(&env, "[]"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    let json = serde_json::to_string(&session.contacts.lock().unwrap().list()).unwrap_or_default();
     ret(&env, &json)
 }
 
@@ -533,11 +569,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_listContacts<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_history<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
 ) -> jstring {
-    let Some(app) = app() else { return ret(&env, "[]") };
+    if session_ptr == 0 { return ret(&env, "[]"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "[]") };
-    let json = serde_json::to_string(app.messages.lock().unwrap().history(&key)).unwrap_or_default();
+    let json = serde_json::to_string(session.messages.lock().unwrap().history(&key)).unwrap_or_default();
     ret(&env, &json)
 }
 
@@ -546,11 +584,14 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_history<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_setVerified<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
     verified: jboolean,
 ) {
-    if let (Some(app), Some(key)) = (app(), parse_key(&jstr(&mut env, &key_hex))) {
-        let _ = app.contacts.lock().unwrap().set_verified(&key, verified != JNI_FALSE);
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
+        let _ = session.contacts.lock().unwrap().set_verified(&key, verified != JNI_FALSE);
     }
 }
 
@@ -559,12 +600,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_setVerified<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_renameContact<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
     name: JString<'local>,
 ) {
-    if let (Some(app), Some(key)) = (app(), parse_key(&jstr(&mut env, &key_hex))) {
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
         let name = jstr(&mut env, &name);
-        let _ = app.contacts.lock().unwrap().rename(&key, &name);
+        let _ = session.contacts.lock().unwrap().rename(&key, &name);
     }
 }
 
@@ -573,10 +617,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_renameContact<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_removeContact<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
 ) {
-    if let (Some(app), Some(key)) = (app(), parse_key(&jstr(&mut env, &key_hex))) {
-        let _ = app.contacts.lock().unwrap().remove(&key);
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
+        let _ = session.contacts.lock().unwrap().remove(&key);
     }
 }
 
@@ -584,11 +631,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_removeContact<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_isOnline<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
 ) -> jboolean {
-    let online = app()
-        .zip(parse_key(&jstr(&mut env, &key_hex)))
-        .map(|(a, k)| a.messenger.is_online(&k))
+    if session_ptr == 0 { return JNI_FALSE; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    let online = parse_key(&jstr(&mut env, &key_hex))
+        .map(|k| session.messenger.is_online(&k))
         .unwrap_or(false);
     if online { JNI_TRUE } else { JNI_FALSE }
 }
@@ -597,26 +646,33 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_isOnline<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_netPeers<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) -> jint {
-    app().map(|a| a.messenger.net_peers()).unwrap_or(0)
+    if session_ptr == 0 { return 0; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    session.messenger.net_peers() as jint
 }
 
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_netTree<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) -> jint {
-    app().map(|a| a.messenger.net_tree()).unwrap_or(0)
+    if session_ptr == 0 { return 0; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    session.messenger.net_tree() as jint
 }
 
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_stop<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) {
-    if let Some(app) = app() {
-        app.messenger.shutdown();
-    }
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    session.messenger.shutdown();
 }
 
 // ── Звонки (1:1) ───────────────────────────────────────────────────────────
@@ -632,47 +688,25 @@ fn call_params(call_id: u64, audio: &AudioSettings) -> String {
     .to_string()
 }
 
-/// Текущий движок звонка как Arc-клон. Глобальный мьютекс [`CALL`] держим ТОЛЬКО
-/// на время клонирования Arc — НИКОГДА во время работы движка (сеть/кольца),
-/// иначе блокирующий `send_media`/`ygg_write` (backpressure Yggdrasil) удержит
-/// мьютекс и заморозит весь медиа-конвейер (видео+аудио).
-fn current_call() -> Option<Arc<CallEngine>> {
-    CALL.lock().unwrap().clone()
-}
-
-fn begin_call(peer: [u8; 32]) -> Option<AudioSettings> {
-    let app = app()?;
-    let mut audio = AudioSettings::default();
-    // Чуть глубже джиттер-буфер на мобиле: сглаживает сетевой джиттер (чёткость
-    // речи ценой ~+40мс задержки). 5 кадров × 20мс = 100мс.
-    audio.jitter_depth = 5;
-    // Видео-кодек теперь аппаратный (MediaCodec/Kotlin); движок только
-    // фрагментирует/собирает H.264 — параметры видео в Rust не нужны.
-    let engine = CallEngine::start(app.messenger.clone(), peer, audio);
-    let old = CALL.lock().unwrap().replace(engine); // лок освобождается сразу
-    if let Some(old) = old {
-        std::thread::spawn(move || old.stop()); // не джойнить под локом/на UI
-    }
-    Some(audio)
-}
-
 /// Начать исходящий звонок: шлём invite и запускаем движок.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_callStart<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
     video: jboolean,
     vw: jint,
     vh: jint,
 ) -> jstring {
-    let Some(app) = app() else { return ret(&env, "{}") };
+    if session_ptr == 0 { return ret(&env, "{}"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
     let video = video != JNI_FALSE;
-    let call_id = CALL_ID.fetch_add(1, Ordering::Relaxed);
-    let _ = app.messenger.send_call_invite(&peer, call_id, true, video);
+    let call_id = session.call_id.fetch_add(1, Ordering::Relaxed);
+    let _ = session.messenger.send_call_invite(&peer, call_id, true, video);
     let _ = (vw, vh); // видео-разрешение теперь задаёт Kotlin/MediaCodec
-    let Some(audio) = begin_call(peer) else { return ret(&env, "{}") };
+    let Some(audio) = session.begin_call(peer) else { return ret(&env, "{}") };
     ret(&env, &call_params(call_id, &audio))
 }
 
@@ -681,17 +715,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callStart<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_callAccept<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
     call_id: jlong,
     video: jboolean,
     vw: jint,
     vh: jint,
 ) -> jstring {
-    let Some(app) = app() else { return ret(&env, "{}") };
+    if session_ptr == 0 { return ret(&env, "{}"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
-    let _ = app.messenger.send_call_accept(&peer, call_id as u64);
+    let _ = session.messenger.send_call_accept(&peer, call_id as u64);
     let _ = (video, vw, vh); // видео задаёт Kotlin/MediaCodec
-    let Some(audio) = begin_call(peer) else { return ret(&env, "{}") };
+    let Some(audio) = session.begin_call(peer) else { return ret(&env, "{}") };
     ret(&env, &call_params(call_id as u64, &audio))
 }
 
@@ -700,15 +736,18 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callAccept<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_callEnd<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
     call_id: jlong,
 ) {
-    if let (Some(app), Some(peer)) = (app(), parse_key(&jstr(&mut env, &key_hex))) {
-        let _ = app.messenger.send_call_end(&peer, call_id as u64);
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    if let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) {
+        let _ = session.messenger.send_call_end(&peer, call_id as u64);
     }
     // Забираем движок (мьютекс освобождается сразу) и останавливаем его в ФОНЕ —
     // stop() джойнит потоки, нельзя блокировать вызывающий (часто UI) поток.
-    let engine = CALL.lock().unwrap().take();
+    let engine = session.call.lock().unwrap().take();
     if let Some(engine) = engine {
         std::thread::spawn(move || engine.stop());
     }
@@ -722,10 +761,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callEnd<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoin<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     gid_hex: JString<'local>,
     audio: jboolean,
     video: jboolean,
 ) {
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
     let mut flags = 0u8;
     if audio != JNI_FALSE {
@@ -734,11 +776,9 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoin<'local>(
     if video != JNI_FALSE {
         flags |= 0b10;
     }
-    rooms().lock().unwrap().joined.insert(gid, flags);
+    session.rooms.lock().unwrap().joined.insert(gid, flags);
     // Сразу разослать маячок (не ждать интервала) — участники увидят нас быстро.
-    if let Some(a) = app() {
-        let _ = a.jobs.send(Job::Beacon);
-    }
+    let _ = session.jobs.send(Job::Beacon);
 }
 
 /// Выйти из комнаты `gid` (перестать слать маячок, забыть её присутствие).
@@ -746,18 +786,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoin<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomLeave<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     gid_hex: JString<'local>,
 ) {
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     if let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) {
         {
-            let mut rs = rooms().lock().unwrap();
+            let mut rs = session.rooms.lock().unwrap();
             rs.joined.remove(&gid);
             rs.remote.remove(&gid);
         }
         // Сообщаем членам комнаты, что вышли — чтобы убрали нас мгновенно.
-        if let Some(a) = app() {
-            let _ = a.jobs.send(Job::Leave(gid));
-        }
+        let _ = session.jobs.send(Job::Leave(gid));
     }
 }
 
@@ -767,11 +808,14 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomLeave<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     gid_hex: JString<'local>,
 ) -> jstring {
+    if session_ptr == 0 { return ret(&env, "[]"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
     let now = Instant::now();
-    let rs = rooms().lock().unwrap();
+    let rs = session.rooms.lock().unwrap();
     let arr: Vec<serde_json::Value> = rs
         .remote
         .get(&gid)
@@ -796,15 +840,17 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStart<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     gid_hex: JString<'local>,
 ) -> jstring {
-    let Some(app) = app() else { return ret(&env, "{}") };
+    if session_ptr == 0 { return ret(&env, "{}"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "{}") };
     let mut audio = AudioSettings::default();
     audio.jitter_depth = 5; // как в 1:1 — сглаживание сети
-    let members = Arc::new(Mutex::new(live_participants(&gid)));
-    let engine = RoomCallEngine::start(app.messenger.clone(), audio, members.clone());
-    let old = ROOM_CALL.lock().unwrap().replace(RoomCall { gid, engine, members });
+    let members = Arc::new(Mutex::new(session.live_participants(&gid)));
+    let engine = RoomCallEngine::start(session.messenger.clone(), audio, members.clone());
+    let old = session.room_call.lock().unwrap().replace(RoomCall { gid, engine, members });
     if let Some(old) = old {
         std::thread::spawn(move || old.engine.stop());
     }
@@ -816,8 +862,11 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStart<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStop<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) {
-    let rc = ROOM_CALL.lock().unwrap().take();
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    let rc = session.room_call.lock().unwrap().take();
     if let Some(rc) = rc {
         std::thread::spawn(move || rc.engine.stop());
     }
@@ -828,9 +877,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStop<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushAudio<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     data: JShortArray<'local>,
     n: jint,
 ) {
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let n = n.max(0) as usize;
     if n == 0 {
         return;
@@ -839,7 +891,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushAudio<'local>(
     if env.get_short_array_region(&data, 0, &mut buf).is_err() {
         return;
     }
-    if let Some(engine) = room_engine() {
+    if let Some(engine) = session.room_engine() {
         engine.push_audio(&buf);
     }
 }
@@ -849,14 +901,17 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushAudio<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullAudio<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     out: JShortArray<'local>,
 ) -> jint {
+    if session_ptr == 0 { return 0; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let len = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
     if len == 0 {
         return 0;
     }
     let mut buf = vec![0i16; len];
-    let n = room_engine().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
+    let n = session.room_engine().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
     let _ = env.set_short_array_region(&out, 0, &buf);
     n as jint
 }
@@ -865,9 +920,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullAudio<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetMuted<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     muted: jboolean,
 ) {
-    if let Some(engine) = room_engine() {
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    if let Some(engine) = session.room_engine() {
         engine.set_muted(muted != JNI_FALSE);
     }
 }
@@ -877,9 +935,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetMuted<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_callPushAudio<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     data: JShortArray<'local>,
     n: jint,
 ) {
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let n = n.max(0) as usize;
     if n == 0 {
         return;
@@ -888,7 +949,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPushAudio<'local>(
     if env.get_short_array_region(&data, 0, &mut buf).is_err() {
         return;
     }
-    if let Some(engine) = current_call() {
+    if let Some(engine) = session.current_call() {
         engine.push_audio(&buf);
     }
 }
@@ -898,14 +959,17 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPushAudio<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_callPullAudio<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     out: JShortArray<'local>,
 ) -> jint {
+    if session_ptr == 0 { return 0; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let len = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
     if len == 0 {
         return 0;
     }
     let mut buf = vec![0i16; len];
-    let n = current_call().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
+    let n = session.current_call().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
     let _ = env.set_short_array_region(&out, 0, &buf);
     n as jint
 }
@@ -916,9 +980,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPullAudio<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_callSendVideo<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     nal: JByteArray<'local>,
     keyframe: jboolean,
 ) {
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let len = env.get_array_length(&nal).unwrap_or(0).max(0) as usize;
     if len == 0 {
         return;
@@ -928,7 +995,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callSendVideo<'local>(
         return;
     }
     let bytes: Vec<u8> = buf.into_iter().map(|b| b as u8).collect();
-    if let Some(engine) = current_call() {
+    if let Some(engine) = session.current_call() {
         engine.send_video(&bytes, keyframe != JNI_FALSE);
     }
 }
@@ -939,8 +1006,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callSendVideo<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_callPullVideoPacket<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) -> jbyteArray {
-    let pkt = current_call().and_then(|e| e.pull_video_packet());
+    if session_ptr == 0 {
+        return env.new_byte_array(0).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut());
+    }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    let pkt = session.current_call().and_then(|e| e.pull_video_packet());
     let Some(data) = pkt else {
         return env.new_byte_array(0).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut());
     };
@@ -958,21 +1030,21 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPullVideoPacket<'local>
 pub extern "system" fn Java_dev_p2p_messenger_Native_callSetMuted<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     muted: jboolean,
 ) {
-    if let Some(engine) = current_call() {
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    if let Some(engine) = session.current_call() {
         engine.set_muted(muted != JNI_FALSE);
     }
 }
 
 // ── Группы (MLS) ───────────────────────────────────────────────────────────
-// Команды уходят групповому актору (поток event_pump) и, для запросов, блокируют
-// до ответа — JNI-вызовы могут блокировать.
 
-fn group_query<T>(make: impl FnOnce(Sender<T>) -> GroupCmd) -> Option<T> {
-    let app = app()?;
+fn group_query<T>(session: &Session, make: impl FnOnce(Sender<T>) -> GroupCmd) -> Option<T> {
     let (tx, rx) = std::sync::mpsc::channel::<T>();
-    app.jobs.send(Job::Cmd(make(tx))).ok()?;
+    session.jobs.send(Job::Cmd(make(tx))).ok()?;
     rx.recv().ok()
 }
 
@@ -981,10 +1053,13 @@ fn group_query<T>(make: impl FnOnce(Sender<T>) -> GroupCmd) -> Option<T> {
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupCreate<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     name: JString<'local>,
 ) -> jstring {
+    if session_ptr == 0 { return ret(&env, ""); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let name = jstr(&mut env, &name);
-    let gid = group_query(|resp| GroupCmd::Create { name, resp }).unwrap_or_default();
+    let gid = group_query(session, |resp| GroupCmd::Create { name, resp }).unwrap_or_default();
     ret(&env, &gid)
 }
 
@@ -993,17 +1068,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupCreate<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     gid_hex: JString<'local>,
     peer_hex: JString<'local>,
 ) {
-    let (Some(app), Some(gid), Some(peer)) = (
-        app(),
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    let (Some(gid), Some(peer)) = (
         hex::decode(jstr(&mut env, &gid_hex)).ok(),
         parse_key(&jstr(&mut env, &peer_hex)),
     ) else {
         return;
     };
-    let _ = app.jobs.send(Job::Cmd(GroupCmd::Invite { gid, peer }));
+    let _ = session.jobs.send(Job::Cmd(GroupCmd::Invite { gid, peer }));
 }
 
 /// Отправить текст в группу. Возвращает true при успехе.
@@ -1011,12 +1088,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     gid_hex: JString<'local>,
     text: JString<'local>,
 ) -> jboolean {
+    if session_ptr == 0 { return JNI_FALSE; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return JNI_FALSE };
     let text = jstr(&mut env, &text);
-    let ok = group_query(|resp| GroupCmd::SendText { gid, text, resp }).unwrap_or(false);
+    let ok = group_query(session, |resp| GroupCmd::SendText { gid, text, resp }).unwrap_or(false);
     if ok { JNI_TRUE } else { JNI_FALSE }
 }
 
@@ -1025,8 +1105,11 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) -> jstring {
-    let json = group_query(|resp| GroupCmd::List { resp }).unwrap_or_else(|| "[]".into());
+    if session_ptr == 0 { return ret(&env, "[]"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    let json = group_query(session, |resp| GroupCmd::List { resp }).unwrap_or_else(|| "[]".into());
     ret(&env, &json)
 }
 
@@ -1035,10 +1118,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistory<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     gid_hex: JString<'local>,
 ) -> jstring {
+    if session_ptr == 0 { return ret(&env, "[]"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return ret(&env, "[]") };
-    let json = group_query(|resp| GroupCmd::History { gid, resp }).unwrap_or_else(|| "[]".into());
+    let json = group_query(session, |resp| GroupCmd::History { gid, resp }).unwrap_or_else(|| "[]".into());
     ret(&env, &json)
 }
 
@@ -1047,44 +1133,35 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistory<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     gid_hex: JString<'local>,
 ) -> jstring {
+    if session_ptr == 0 { return ret(&env, "[]"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return ret(&env, "[]") };
-    let json = group_query(|resp| GroupCmd::Members { gid, resp }).unwrap_or_else(|| "[]".into());
+    let json = group_query(session, |resp| GroupCmd::Members { gid, resp }).unwrap_or_else(|| "[]".into());
     ret(&env, &json)
 }
 
 // ── Диагностика: тест пропускной способности меша ──────────────────────────
-// Реальный замер throughput между двумя устройствами по живой сети Yggdrasil.
-// Один зовёт benchRecvStart() (приёмник считает), другой benchBlast() (бластит).
-
-/// Трек-маркер бенч-датаграмм (не пересекается с медиа-треками звонка).
-const BENCH_TRACK: u8 = 200;
-
-struct BenchRecv {
-    bytes: AtomicU64,
-    pkts: AtomicU64,
-    running: AtomicBool,
-    start: Instant,
-}
-
-static BENCH: Mutex<Option<Arc<BenchRecv>>> = Mutex::new(None);
 
 /// Включить приём бенча: считаем входящие BENCH_TRACK-датаграммы.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStart<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) {
-    let Some(app) = app() else { return };
-    let rx = app.messenger.media_channel(8192);
+    if session_ptr == 0 { return; }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    let rx = session.messenger.media_channel(8192);
     let st = Arc::new(BenchRecv {
         bytes: AtomicU64::new(0),
         pkts: AtomicU64::new(0),
         running: AtomicBool::new(true),
         start: Instant::now(),
     });
-    *BENCH.lock().unwrap() = Some(st.clone());
+    *session.bench.lock().unwrap() = Some(st.clone());
     std::thread::spawn(move || {
         while st.running.load(Ordering::Relaxed) {
             match rx.recv_timeout(Duration::from_millis(200)) {
@@ -1105,9 +1182,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStart<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStats<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
 ) -> jstring {
+    if session_ptr == 0 { return ret(&env, "{}"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let json = {
-        let g = BENCH.lock().unwrap();
+        let g = session.bench.lock().unwrap();
         match g.as_ref() {
             Some(st) => {
                 let bytes = st.bytes.load(Ordering::Relaxed);
@@ -1131,10 +1211,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStats<'local>(
 pub extern "system" fn Java_dev_p2p_messenger_Native_benchBlast<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
+    session_ptr: jlong,
     key_hex: JString<'local>,
     total_kb: jint,
 ) -> jstring {
-    let Some(app) = app() else { return ret(&env, "{}") };
+    if session_ptr == 0 { return ret(&env, "{}"); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
     let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
     let payload = vec![0u8; 1200];
     let target = (total_kb.max(0) as u64) * 1024;
@@ -1143,7 +1225,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_benchBlast<'local>(
     let mut seq = 0u16;
     let t0 = Instant::now();
     while sent_bytes < target && t0.elapsed() < Duration::from_secs(10) {
-        if app.messenger.send_media(&peer, BENCH_TRACK, seq, 0, &payload).is_ok() {
+        if session.messenger.send_media(&peer, BENCH_TRACK, seq, 0, &payload).is_ok() {
             sent_bytes += payload.len() as u64;
             sent_pkts += 1;
             seq = seq.wrapping_add(1);

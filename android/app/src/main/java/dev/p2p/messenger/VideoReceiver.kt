@@ -15,6 +15,7 @@ class VideoReceiver(
     private val surface: Surface,
     private val width: Int,
     private val height: Int,
+    private val pullVideoPacket: () -> ByteArray
 ) {
     private var decoder: MediaCodec? = null
     private var loopThread: Thread? = null
@@ -39,7 +40,7 @@ class VideoReceiver(
         var renderClock = 0L         // системное время следующего показа кадра
         while (running) {
             // Подача входных пакетов (по мере прихода из сети).
-            val pkt = Native.callPullVideoPacket()
+            val pkt = pullVideoPacket()
             if (pkt.isNotEmpty()) {
                 val inIdx = try { dec.dequeueInputBuffer(10000) } catch (e: Exception) { break }
                 if (inIdx >= 0) {

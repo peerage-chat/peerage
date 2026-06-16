@@ -29,6 +29,7 @@ class VideoSender(
     private val height: Int,
     private val fps: Int,
     private val bitrate: Int,
+    private val sendVideo: (ByteArray, Boolean) -> Unit
 ) {
     private var encoder: MediaCodec? = null
     private var inputSurface: Surface? = null
@@ -108,7 +109,7 @@ class VideoSender(
                     val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
                     val cfg = config
                     val out = if (key && cfg != null) cfg + data else data
-                    Native.callSendVideo(out, key)
+                    sendVideo(out, key)
                 }
             }
             runCatching { enc.releaseOutputBuffer(idx, false) }

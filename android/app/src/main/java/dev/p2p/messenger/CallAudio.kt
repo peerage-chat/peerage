@@ -25,9 +25,9 @@ import kotlin.concurrent.thread
 class CallAudio(
     private val context: Context,
     // Мост к ядру — по умолчанию 1:1-звонок; для комнаты передаём room-варианты.
-    private val push: (ShortArray, Int) -> Unit = Native::callPushAudio,
-    private val pull: (ShortArray) -> Int = Native::callPullAudio,
-    private val mute: (Boolean) -> Unit = Native::callSetMuted,
+    private val push: (ShortArray, Int) -> Unit,
+    private val pull: (ShortArray) -> Int,
+    private val mute: (Boolean) -> Unit,
 ) {
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
