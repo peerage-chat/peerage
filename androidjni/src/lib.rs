@@ -192,6 +192,10 @@ fn event_pump(
     data_dir: PathBuf,
 ) {
     let mut groups = GroupManager::new(identity, messenger.clone(), data_dir);
+    refresh_group_cache(&app, &groups); // прайм кэша
+    // start() в Kotlin читает groupList до прайминга (гонка) → шлём событие, чтобы
+    // UI перечитал группы с диска, когда кэш готов.
+    push_event(&app, serde_json::json!({"type": "groups_changed"}));
     let mut last_beacon = Instant::now();
     loop {
         match job_rx.recv_timeout(Duration::from_millis(500)) {
@@ -296,12 +300,14 @@ fn handle_event(app: &Arc<App>, groups: &mut GroupManager, ev: Event) {
                 }));
             }
             if out.joined {
+                refresh_group_cache(app, groups);
                 push_event(app, serde_json::json!({"type": "groups_changed"}));
             }
         }
         Event::GroupKeyRequest { peer } => groups.on_key_request(peer),
         Event::GroupKeyReply { peer, key_package } => {
             if groups.on_key_reply(peer, &key_package) {
+                refresh_group_cache(app, groups);
                 push_event(app, serde_json::json!({"type": "groups_changed"}));
             }
         }
@@ -326,29 +332,34 @@ fn handle_event(app: &Arc<App>, groups: &mut GroupManager, ev: Event) {
     }
 }
 
-/// Исполнить групповую команду из JNI (в потоке актора) и вернуть результат.
+/// Пересчитать и записать кэш групповых read-данных. Зовётся event_pump'ом
+/// после каждой мутации (create/send/join/key_reply/on_group) — кэш всегда свежий.
+fn refresh_group_cache(app: &Arc<App>, groups: &GroupManager) {
+    let mut cache = app.group_cache.lock().unwrap();
+    cache.list = groups.list_json();
+    for gid in groups.group_ids() {
+        cache.history.insert(gid.clone(), groups.history_json(&gid));
+        cache.members.insert(gid.clone(), groups.members_json(&gid));
+    }
+}
+
+/// Исполнить групповую команду из JNI (в потоке актора). Результат — через
+/// событие `groups_changed` (refresh в UI), а не через синхронный resp-канал.
 fn handle_cmd(app: &Arc<App>, groups: &mut GroupManager, cmd: GroupCmd) {
     match cmd {
-        GroupCmd::Create { name, resp } => {
-            let gid = groups.create(&name).map(|g| hex::encode(g)).unwrap_or_default();
-            if !gid.is_empty() {
+        GroupCmd::Create { name } => {
+            if groups.create(&name).is_some() {
+                refresh_group_cache(app, groups);
                 push_event(app, serde_json::json!({"type": "groups_changed"}));
             }
-            let _ = resp.send(gid);
         }
         GroupCmd::Invite { gid, peer } => groups.invite(&gid, peer),
-        GroupCmd::SendText { gid, text, resp } => {
-            let ok = groups.send_text(&gid, &text);
-            let _ = resp.send(ok);
-        }
-        GroupCmd::List { resp } => {
-            let _ = resp.send(groups.list_json());
-        }
-        GroupCmd::History { gid, resp } => {
-            let _ = resp.send(groups.history_json(&gid));
-        }
-        GroupCmd::Members { gid, resp } => {
-            let _ = resp.send(groups.members_json(&gid));
+        GroupCmd::SendText { gid, text } => {
+            if groups.send_text(&gid, &text) {
+                // Обновляем кэш истории (содержимое изменилось); событие не нужно —
+                // UI уже добавил сообщение оптимистично (при добавлении текста).
+                refresh_group_cache(app, groups);
+            }
         }
     }
 }
@@ -445,6 +456,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
         messages: Mutex::new(messages),
         me_pub,
         events: Mutex::new(VecDeque::new()),
+        group_cache: Mutex::new(GroupCache::default()),
         jobs: job_tx,
     });
     let _ = APP.set(app.clone());
@@ -983,29 +995,26 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callSetMuted<'local>(
 }
 
 // ── Группы (MLS) ───────────────────────────────────────────────────────────
-// Команды уходят групповому актору (поток event_pump) и, для запросов, блокируют
-// до ответа — JNI-вызовы могут блокировать.
+// Команды уходят групповому актору (поток event_pump) fire-and-forget — результат
+// приходит в UI через событие `groups_changed` + обновлённый кэш. Read-запросы
+// (list/history/members) отдают кэш мгновенно, без блокировки event_pump.
 
-fn group_query<T>(make: impl FnOnce(Sender<T>) -> GroupCmd) -> Option<T> {
-    let app = app()?;
-    let (tx, rx) = std::sync::mpsc::channel::<T>();
-    app.jobs.send(Job::Cmd(make(tx))).ok()?;
-    rx.recv().ok()
-}
-
-/// Создать группу. Возвращает group_id (hex) или "".
+/// Создать группу. Fire-and-forget: результат — через событие `groups_changed`.
+/// Возвращает true (запрос принят), а не gid — UI получит обновлённый список.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupCreate<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     name: JString<'local>,
-) -> jstring {
+) -> jboolean {
     let name = jstr(&mut env, &name);
-    let gid = group_query(|resp| GroupCmd::Create { name, resp }).unwrap_or_default();
-    ret(&env, &gid)
+    let sent = app()
+        .map(|a| a.jobs.send(Job::Cmd(GroupCmd::Create { name })).is_ok())
+        .unwrap_or(false);
+    if sent { JNI_TRUE } else { JNI_FALSE }
 }
 
-/// Пригласить контакт в группу (просим его KeyPackage).
+/// Пригласить контакт в группу (просим его KeyPackage). Fire-and-forget.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
     mut env: JNIEnv<'local>,
@@ -1023,51 +1032,64 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
     let _ = app.jobs.send(Job::Cmd(GroupCmd::Invite { gid, peer }));
 }
 
-/// Отправить текст в группу. Возвращает true при успехе.
+/// Отправить текст в группу. Fire-and-forget: UI добавляет сообщение оптимистично,
+/// event_pump обновляет кэш истории после отправки.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     gid_hex: JString<'local>,
     text: JString<'local>,
-) -> jboolean {
-    let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return JNI_FALSE };
+) {
+    let Some(app) = app() else { return };
+    let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return };
     let text = jstr(&mut env, &text);
-    let ok = group_query(|resp| GroupCmd::SendText { gid, text, resp }).unwrap_or(false);
-    if ok { JNI_TRUE } else { JNI_FALSE }
+    let _ = app.jobs.send(Job::Cmd(GroupCmd::SendText { gid, text }));
 }
 
-/// Список групп как JSON-массив [{gid, name, members}].
+/// Список групп как JSON-массив [{gid, name, members}]. Читает кэш — мгновенно.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jstring {
-    let json = group_query(|resp| GroupCmd::List { resp }).unwrap_or_else(|| "[]".into());
+    // До прайминга кэша list пуст (String::default) — отдаём валидный "[]",
+    // иначе JSONArray("") в Kotlin падает (гонка старта).
+    let json = app()
+        .and_then(|a| a.group_cache.lock().ok())
+        .map(|c| c.list.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "[]".into());
     ret(&env, &json)
 }
 
-/// История группового чата как JSON-массив [{text, mine, time}].
+/// История группового чата как JSON-массив [{text, mine, time}]. Читает кэш.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistory<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     gid_hex: JString<'local>,
 ) -> jstring {
-    let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return ret(&env, "[]") };
-    let json = group_query(|resp| GroupCmd::History { gid, resp }).unwrap_or_else(|| "[]".into());
+    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
+    let json = app()
+        .and_then(|a| a.group_cache.lock().ok())
+        .and_then(|c| c.history.get(&gid).cloned())
+        .unwrap_or_else(|| "[]".into());
     ret(&env, &json)
 }
 
-/// Ключи участников группы (hex) как JSON-массив — для группового звонка.
+/// Ключи участников группы (hex) как JSON-массив — для группового звонка. Кэш.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     gid_hex: JString<'local>,
 ) -> jstring {
-    let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return ret(&env, "[]") };
-    let json = group_query(|resp| GroupCmd::Members { gid, resp }).unwrap_or_else(|| "[]".into());
+    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
+    let json = app()
+        .and_then(|a| a.group_cache.lock().ok())
+        .and_then(|c| c.members.get(&gid).cloned())
+        .unwrap_or_else(|| "[]".into());
     ret(&env, &json)
 }
 
