@@ -88,8 +88,12 @@ impl CallEngine {
             let playout = playout.clone();
             let video_in = video_in.clone();
             let call_peer = peer;
+            let sample_rate = audio.sample_rate as f64;
             threads.push(thread::spawn(move || {
                 let mut reasm = VideoReassembler::new();
+                let mut last_ts: Option<u32> = None;
+                let mut last_arrival: Option<std::time::Instant> = None;
+                let mut jitter_estimate_ms: f64 = 30.0;
                 while running.load(Ordering::Relaxed) {
                     let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else { continue };
                     if p.src != call_peer {
@@ -97,8 +101,21 @@ impl CallEngine {
                     }
                     match p.track {
                         TRACK_AUDIO => {
-                            // Только в джиттер — декод/PLC делает pull_audio ровным
-                            // темпом AudioTrack (видео-нагрузка не сбивает аудио).
+                            let now = std::time::Instant::now();
+                            if let (Some(l_ts), Some(l_arr)) = (last_ts, last_arrival) {
+                                let send_diff_samples = p.ts.wrapping_sub(l_ts) as i32;
+                                let send_diff_ms = (send_diff_samples as f64) / (sample_rate / 1000.0);
+                                let recv_diff_ms = now.duration_since(l_arr).as_secs_f64() * 1000.0;
+                                let d = (recv_diff_ms - send_diff_ms).abs();
+                                jitter_estimate_ms += (d - jitter_estimate_ms) / 16.0;
+                                
+                                // Каждый кадр равен 20мс. Целевая глубина: сглаженный джиттер / 20.0 + 2 кадра запаса.
+                                let target_depth = ((jitter_estimate_ms / 20.0).round() as usize + 2).clamp(2, 8);
+                                playout.lock().unwrap().jitter.set_depth(target_depth);
+                            }
+                            last_ts = Some(p.ts);
+                            last_arrival = Some(now);
+
                             playout.lock().unwrap().jitter.push(p.seq, p.payload);
                         }
                         TRACK_VIDEO | TRACK_SCREEN => {

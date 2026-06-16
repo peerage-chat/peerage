@@ -26,11 +26,14 @@ type Ring = Arc<Mutex<VecDeque<i16>>>;
 /// Подряд идущих PLC-кадров на источник; дальше — тишина (Opus PLC иначе шумит).
 const MAX_PLC: u32 = 3;
 
-/// Состояние приёма одного участника: джиттер + декодер + счётчик PLC.
+/// Состояние приёма одного участника: джиттер + декодер + счётчик PLC + расчет джиттера.
 struct Source {
     dec: AudioDecoder,
     jitter: JitterBuffer,
     plc_run: u32,
+    last_ts: Option<u32>,
+    last_arrival: Option<std::time::Instant>,
+    jitter_estimate_ms: f64,
 }
 
 impl Source {
@@ -39,7 +42,27 @@ impl Source {
             dec: AudioDecoder::new(audio).ok()?,
             jitter: JitterBuffer::new(audio.jitter_depth),
             plc_run: 0,
+            last_ts: None,
+            last_arrival: None,
+            jitter_estimate_ms: 30.0,
         })
+    }
+
+    fn push(&mut self, seq: u16, ts: u32, payload: Vec<u8>, sample_rate: f64) {
+        let now = std::time::Instant::now();
+        if let (Some(l_ts), Some(l_arr)) = (self.last_ts, self.last_arrival) {
+            let send_diff_samples = ts.wrapping_sub(l_ts) as i32;
+            let send_diff_ms = (send_diff_samples as f64) / (sample_rate / 1000.0);
+            let recv_diff_ms = now.duration_since(l_arr).as_secs_f64() * 1000.0;
+            let d = (recv_diff_ms - send_diff_ms).abs();
+            self.jitter_estimate_ms += (d - self.jitter_estimate_ms) / 16.0;
+            
+            let target_depth = ((self.jitter_estimate_ms / 20.0).round() as usize + 2).clamp(2, 8);
+            self.jitter.set_depth(target_depth);
+        }
+        self.last_ts = Some(ts);
+        self.last_arrival = Some(now);
+        self.jitter.push(seq, payload);
     }
 
     /// Один кадр PCM этого источника на текущий тик микса (или `None`, если в
@@ -97,6 +120,7 @@ impl RoomCallEngine {
             let running = running.clone();
             let sources = sources.clone();
             let members = members.clone();
+            let sample_rate = audio.sample_rate as f64;
             threads.push(thread::spawn(move || {
                 while running.load(Ordering::Relaxed) {
                     let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else { continue };
@@ -111,8 +135,7 @@ impl RoomCallEngine {
                         .unwrap()
                         .entry(p.src)
                         .or_insert_with(|| Source::new(audio).expect("opus decoder"))
-                        .jitter
-                        .push(p.seq, p.payload);
+                        .push(p.seq, p.ts, p.payload, sample_rate);
                 }
             }));
         }

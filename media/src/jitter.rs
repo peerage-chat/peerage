@@ -37,6 +37,12 @@ impl JitterBuffer {
         JitterBuffer { depth, max: depth * 3 + 4, next: None, buf: BTreeMap::new() }
     }
 
+    /// Изменить целевую глубину префетча на лету.
+    pub fn set_depth(&mut self, depth: usize) {
+        self.depth = depth.max(1);
+        self.max = self.depth * 3 + 4;
+    }
+
     /// Принять пакет. Слишком старые (уже воспроизведённые) отбрасываются.
     pub fn push(&mut self, seq: u16, data: Vec<u8>) {
         if let Some(next) = self.next {
