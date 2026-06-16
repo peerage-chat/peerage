@@ -46,50 +46,44 @@ class VideoReceiver(
                     decoder = dec // сохраняем ссылку для stop()
                 }
 
+                val currentDec = dec!!
+
                 val pkt = pullVideoPacket()
                 if (pkt.isNotEmpty()) {
-                    val inIdx = dec.dequeueInputBuffer(10000)
+                    val inIdx = currentDec.dequeueInputBuffer(10000)
                     if (inIdx >= 0) {
-                        val ib = dec.getInputBuffer(inIdx)
+                        val ib = currentDec.getInputBuffer(inIdx)
                         if (ib != null && ib.capacity() >= pkt.size) {
                             ib.clear(); ib.put(pkt)
-                            dec.queueInputBuffer(inIdx, 0, pkt.size, pts, 0)
+                            currentDec.queueInputBuffer(inIdx, 0, pkt.size, pts, 0)
                             pts += frameNs / 1000
                         } else {
-                            dec.queueInputBuffer(inIdx, 0, 0, pts, 0)
+                            currentDec.queueInputBuffer(inIdx, 0, 0, pts, 0)
                         }
                     }
                 } else {
                     Thread.sleep(2)
                 }
 
-                var outIdx = dec.dequeueOutputBuffer(info, 0)
+                var outIdx = try { currentDec.dequeueOutputBuffer(info, 0) } catch (e: Exception) { -1 }
                 while (outIdx >= 0) {
                     val now = System.nanoTime()
                     if (renderClock < now || renderClock > now + maxAheadNs) {
-                        renderClock = now + bufferNs
+                        renderClock = now + bufferNs // старт/догон/сброс лишней задержки
                     }
-
-                    // Если кадр слишком старый (отстает от renderClock больше чем на буфер сглаживания),
-                    // рендерим его немедленно (true), чтобы не копить задержку.
-                    val isLate = (now - renderClock) > bufferNs
-                    if (isLate) {
-                        dec.releaseOutputBuffer(outIdx, true)
-                        renderClock = now
-                    } else {
-                        dec.releaseOutputBuffer(outIdx, renderClock)
-                    }
-
+                    runCatching { currentDec.releaseOutputBuffer(outIdx, renderClock) }
                     renderClock += frameNs
-                    outIdx = dec.dequeueOutputBuffer(info, 0)
+                    outIdx = try { currentDec.dequeueOutputBuffer(info, 0) } catch (e: Exception) { -1 }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("VideoReceiver", "Decoder error, restarting...", e)
-                runCatching { dec?.stop() }
-                runCatching { dec?.release() }
-                dec = null
-                decoder = null
-                Thread.sleep(100) // пауза перед перезапуском
+                if (running) {
+                    android.util.Log.e("VideoReceiver", "Decoder error, restarting...", e)
+                    runCatching { dec?.stop() }
+                    runCatching { dec?.release() }
+                    dec = null
+                    decoder = null
+                    Thread.sleep(100) // пауза перед перезапуском
+                }
             }
         }
 
