@@ -53,7 +53,7 @@ impl Source {
         if let (Some(l_ts), Some(l_arr)) = (self.last_ts, self.last_arrival) {
             let send_diff_samples = ts.wrapping_sub(l_ts) as i32;
             let send_diff_ms = (send_diff_samples as f64) / (sample_rate / 1000.0);
-            let recv_diff_ms = now.duration_since(l_arr).as_secs_f64() * 1000.0;
+            let recv_diff_ms = now.saturating_duration_since(l_arr).as_secs_f64() * 1000.0;
             let d = (recv_diff_ms - send_diff_ms).abs();
             self.jitter_estimate_ms += (d - self.jitter_estimate_ms) / 16.0;
             

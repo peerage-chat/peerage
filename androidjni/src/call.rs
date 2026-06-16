@@ -105,7 +105,7 @@ impl CallEngine {
                             if let (Some(l_ts), Some(l_arr)) = (last_ts, last_arrival) {
                                 let send_diff_samples = p.ts.wrapping_sub(l_ts) as i32;
                                 let send_diff_ms = (send_diff_samples as f64) / (sample_rate / 1000.0);
-                                let recv_diff_ms = now.duration_since(l_arr).as_secs_f64() * 1000.0;
+                                let recv_diff_ms = now.saturating_duration_since(l_arr).as_secs_f64() * 1000.0;
                                 let d = (recv_diff_ms - send_diff_ms).abs();
                                 jitter_estimate_ms += (d - jitter_estimate_ms) / 16.0;
                                 

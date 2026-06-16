@@ -119,7 +119,7 @@ impl Session {
             .get(gid)
             .map(|m| {
                 m.iter()
-                    .filter(|(_, (t, _))| now.duration_since(*t) < PRESENCE_TTL)
+                    .filter(|(_, (t, _))| now.saturating_duration_since(*t) < PRESENCE_TTL)
                     .map(|(p, _)| *p)
                     .collect()
             })
@@ -240,7 +240,7 @@ fn beacon_tick(session: &Arc<Session>, groups: &GroupManager, messenger: &Messen
         let now = Instant::now();
         let mut rs = session.rooms.lock().unwrap();
         for peers in rs.remote.values_mut() {
-            peers.retain(|_, (t, _)| now.duration_since(*t) < PRESENCE_TTL);
+            peers.retain(|_, (t, _)| now.saturating_duration_since(*t) < PRESENCE_TTL);
         }
     }
     session.sync_room_members(); // цели мультикаста = живые участники
@@ -822,7 +822,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(
         .map(|peers| {
             peers
                 .iter()
-                .filter(|(_, (t, _))| now.duration_since(*t) < PRESENCE_TTL)
+                .filter(|(_, (t, _))| now.saturating_duration_since(*t) < PRESENCE_TTL)
                 .map(|(p, (_, f))| serde_json::json!({
                     "peer": hex::encode(p),
                     "audio": f & 0b01 != 0,
