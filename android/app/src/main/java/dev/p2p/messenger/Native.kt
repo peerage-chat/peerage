@@ -63,12 +63,12 @@ object Native {
     external fun callSetMuted(sessionPtr: Long, muted: Boolean)
 
     // ── Группы (MLS) ──────────────────────────────────────────────────────
-    /** Создать группу. Возвращает group_id (hex) или "". */
-    external fun groupCreate(sessionPtr: Long, name: String): String
+    /** Создать группу (fire-and-forget). Результат — через событие `groups_changed`. */
+    external fun groupCreate(sessionPtr: Long, name: String): Boolean
     /** Пригласить контакт в группу (по hex-ключу). */
     external fun groupInvite(sessionPtr: Long, gid: String, peerHex: String)
-    /** Отправить текст в группу. */
-    external fun groupSendText(sessionPtr: Long, gid: String, text: String): Boolean
+    /** Отправить текст в группу (fire-and-forget). UI добавляет оптимистично. */
+    external fun groupSendText(sessionPtr: Long, gid: String, text: String)
     /** Список групп: JSON [{gid, name, members}]. */
     external fun groupList(sessionPtr: Long): String
     /** История группы: JSON [{text, mine, time}]. */

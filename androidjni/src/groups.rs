@@ -157,6 +157,11 @@ impl GroupManager {
         true
     }
 
+    /// Все id групп (для обновления кэша истории/участников разом).
+    pub fn group_ids(&self) -> Vec<Vec<u8>> {
+        self.groups.keys().cloned().collect()
+    }
+
     pub fn list_json(&self) -> String {
         let arr: Vec<serde_json::Value> = self
             .groups

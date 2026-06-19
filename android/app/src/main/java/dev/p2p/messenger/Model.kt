@@ -424,10 +424,10 @@ class AppModel private constructor() {
         groups.addAll(list)
     }
 
-    /** Создать группу (асинхронно). Появится в списке по готовности. */
+    /** Создать группу (fire-and-forget). Появится в списке по событию
+     *  `groups_changed` (см. applyEvent → refreshGroupsNow). */
     fun createGroup(name: String) = ops.execute {
-        val gid = Native.groupCreate(sessionPtr, name.ifBlank { "Группа" })
-        if (gid.isNotEmpty()) refreshGroupsNow()
+        Native.groupCreate(sessionPtr, name.ifBlank { "Группа" })
     }
 
     fun openGroup(gid: String) {
@@ -451,11 +451,9 @@ class AppModel private constructor() {
 
     fun sendGroupText(gid: String, text: String) {
         if (text.isBlank()) return
-        ops.execute {
-            if (Native.groupSendText(sessionPtr, gid, text)) {
-                groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000))
-            }
-        }
+        // Оптимистично показываем своё сообщение сразу; отправка — fire-and-forget.
+        groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000))
+        ops.execute { Native.groupSendText(sessionPtr, gid, text) }
     }
 
     // ── Диагностика: тест пропускной способности ─────────────────────────────
