@@ -39,6 +39,7 @@ class CallAudio(
 
     @SuppressLint("MissingPermission") // RECORD_AUDIO запрашивается до старта звонка
     fun start(sampleRate: Int, channels: Int) {
+        android.util.Log.i("CallAudio", "start() called: sampleRate=$sampleRate, channels=$channels")
         val inMask = if (channels >= 2) AudioFormat.CHANNEL_IN_STEREO else AudioFormat.CHANNEL_IN_MONO
         val outMask = if (channels >= 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
         val fmt = AudioFormat.ENCODING_PCM_16BIT
@@ -46,11 +47,11 @@ class CallAudio(
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_IN_COMMUNICATION
 
-        // Буферы с запасом (×4) — меньше риск underrun под нагрузкой видео.
+        // Уменьшаем буфер до ×2 для сокращения задержки при сохранении стабильности
         val inMin = AudioRecord.getMinBufferSize(sampleRate, inMask, fmt).coerceAtLeast(2048)
         val rec = AudioRecord(
             MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            sampleRate, inMask, fmt, inMin * 4,
+            sampleRate, inMask, fmt, inMin * 2,
         )
         val sid = rec.audioSessionId
         if (AcousticEchoCanceler.isAvailable()) {
@@ -74,7 +75,7 @@ class CallAudio(
             .setAudioFormat(
                 AudioFormat.Builder().setSampleRate(sampleRate).setEncoding(fmt).setChannelMask(outMask).build()
             )
-            .setBufferSizeInBytes(outMin * 4)
+            .setBufferSizeInBytes(outMin * 2)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
@@ -83,6 +84,7 @@ class CallAudio(
         running = true
         rec.startRecording()
         trk.play()
+        android.util.Log.i("CallAudio", "AudioRecord and AudioTrack initialized and started")
 
         // Захват микрофона → Rust. Приоритет URGENT_AUDIO — чтобы видео не голодало.
         val chunk = sampleRate / 50 * (if (channels >= 2) 2 else 1) // ~20мс

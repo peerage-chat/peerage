@@ -22,9 +22,10 @@ pub const CHAN_MEDIA: u8 = 0x02;
 /// Длина медиа-заголовка (включая байт канала).
 pub const MEDIA_HEADER_LEN: usize = 8;
 
-/// Консервативный лимит payload-а медиа-датаграммы, чтобы избегать IP-фрагментации
-/// на худшем хопе (IPv6 min MTU 1280 − заголовок).
-pub const MAX_MEDIA_PAYLOAD: usize = 1280 - MEDIA_HEADER_LEN;
+/// Лимит payload-а медиа-датаграммы. Yggdrasil сам фрагментирует на IP-уровне,
+/// поэтому мы можем отдавать крупные куски и снижать cgo-оверхед на пакет.
+/// 60000 байт = ~15-25 фрагментов на FHD-кадр вместо ~150+ при старом MTU.
+pub const MAX_MEDIA_PAYLOAD: usize = 60_000;
 
 /// Идентификаторы потоков (track).
 pub const TRACK_AUDIO: u8 = 0;
@@ -84,8 +85,9 @@ pub const VIDEO_HDR: usize = 9;
 /// Флаг ключевого кадра.
 pub const VIDEO_KEYFRAME: u8 = 0x01;
 
-/// Максимум данных кадра в одном фрагменте.
-pub const MAX_VIDEO_CHUNK: usize = MAX_MEDIA_PAYLOAD - VIDEO_HDR;
+/// Максимум данных кадра в одном фрагменте. Yggdrasil сам фрагментирует на IP-уровне,
+/// поэтому берём крупные куски для снижения cgo-оверхеда. 8000 байт ≈ 6-7 IP-пакетов.
+pub const MAX_VIDEO_CHUNK: usize = 8_000;
 
 /// Разбить кадр на медиа-payload-ы (суб-заголовок + кусок), готовые к отправке
 /// как медиа-датаграммы (track = VIDEO/SCREEN). Пустой кадр → один пустой фрагмент.

@@ -9,6 +9,7 @@ authors.workspace = true
 name = "p2p_messenger"
 
 [dependencies]
+log = "0.4"
 p2p-core = { path = "../core" }
 p2p-ygg = { path = "../transport" }
 thiserror.workspace = true

@@ -318,10 +318,13 @@ impl Messenger {
             return Err(MessengerError::MediaTooLarge);
         }
         let total = MEDIA_HEADER_LEN + payload.len();
-        let mut buf = [0u8; MEDIA_HEADER_LEN + MAX_MEDIA_PAYLOAD];
+        let mut buf = vec![0u8; total];
         write_media_header(&mut buf, track, seq, ts);
         buf[MEDIA_HEADER_LEN..total].copy_from_slice(payload);
-        self.shared.node.write(peer, &buf[..total])?;
+        if let Err(e) = self.shared.node.write(peer, &buf) {
+            log::warn!("p2p-media: node.write failed for track={} len={}: {:?}", track, total, e);
+            return Err(MessengerError::Transport(e));
+        }
         Ok(())
     }
 
@@ -397,14 +400,21 @@ fn receive_loop(shared: Arc<Shared>) {
         if buf[0] == CHAN_MEDIA {
             if let Some(f) = parse_media(&buf[..n]) {
                 if let Some(tx) = shared.media_tx.lock().unwrap().as_ref() {
-                    let _ = tx.try_send(MediaPacket {
+                    let err = tx.try_send(MediaPacket {
                         src,
                         track: f.track,
                         seq: f.seq,
                         ts: f.ts,
                         payload: f.payload.to_vec(),
                     });
+                    if err.is_err() {
+                        log::error!("p2p-media: channel full, dropped packet track={}", f.track);
+                    }
+                } else {
+                    log::warn!("p2p-media: received packet but media_tx is None (track={})", f.track);
                 }
+            } else {
+                log::warn!("p2p-media: parse_media failed for n={}", n);
             }
             continue;
         }

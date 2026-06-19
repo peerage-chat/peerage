@@ -38,8 +38,54 @@ func newLogger() *log.Logger {
 	return logger
 }
 
+// writeReq — запрос на отправку датаграммы.
+type writeReq struct {
+	dst  iwt.Addr
+	data []byte
+}
+
 type node struct {
 	core *core.Core
+	// Надёжная очередь: аудио-медиа + чат + всё прочее. Всегда дренируется перед
+	// видео. Размер 128 — ~2.5с аудио; блокирует только при аномальном заторе.
+	reliableCh chan writeReq
+	// Дроппабельная очередь: только видео/скрин-медиа (реалтайм, старый кадр не нужен).
+	// При переполнении пакет молча дропается — видео запрашивает keyframe само.
+	videoCh chan writeReq
+	stopCh  chan struct{}
+}
+
+// isVideoMedia определяет, является ли пакет видео/скрин медиа по первым байтам:
+// data[0] == 0x02 (CHAN_MEDIA) && data[1] == 0x01 или 0x02 (TRACK_VIDEO/TRACK_SCREEN).
+// Только эти пакеты дропаются при заторе. Чат (0x01) и аудио (0x02/0x00) — нет.
+func isVideoMedia(data []byte) bool {
+	return len(data) >= 2 && data[0] == 0x02 && (data[1] == 0x01 || data[1] == 0x02)
+}
+
+// writerLoop — единственная долгоживущая горутина записи на узел.
+// Приоритет: всегда сначала дренирует весь reliableCh, потом одно из videoCh.
+func writerLoop(n *node) {
+	for {
+		// Сначала всегда надёжные пакеты (аудио + чат).
+		drained := true
+		for drained {
+			select {
+			case req := <-n.reliableCh:
+				n.core.WriteTo(req.data, req.dst) //nolint:errcheck
+			default:
+				drained = false
+			}
+		}
+		// Потом одно видео или ждём новые данные.
+		select {
+		case <-n.stopCh:
+			return
+		case req := <-n.reliableCh:
+			n.core.WriteTo(req.data, req.dst) //nolint:errcheck
+		case req := <-n.videoCh:
+			n.core.WriteTo(req.data, req.dst) //nolint:errcheck
+		}
+	}
 }
 
 var (
@@ -94,7 +140,14 @@ func ygg_start(seedPtr *C.uint8_t, seedLen C.int) C.uint64_t {
 	if err != nil {
 		return 0
 	}
-	return C.uint64_t(register(&node{core: c}))
+	n := &node{
+		core:       c,
+		reliableCh: make(chan writeReq, 128),
+		videoCh:    make(chan writeReq, 64),
+		stopCh:     make(chan struct{}),
+	}
+	go writerLoop(n)
+	return C.uint64_t(register(n))
 }
 
 //export ygg_address
@@ -176,7 +229,15 @@ func ygg_add_peer(h C.uint64_t, uri *C.char) C.int {
 
 //export ygg_write
 // Отправляет датаграмму data узлу с публичным ключом dstPub (32 байта).
-// Возвращает число записанных байт или -1.
+// Возвращает dataLen при успехе или -1 если узел не найден.
+//
+// Пакеты маршрутизируются в две очереди единственной writer-горутины:
+//   - CHAN_MEDIA + TRACK_VIDEO/SCREEN (data[0]==0x02, data[1]==1 или 2) → videoCh
+//     (cap 64, try-send — видео-пакет дропается при заторе, декодер запросит keyframe)
+//   - всё остальное (аудио-медиа + CHAN_CHAT + control) → reliableCh (cap 128,
+//     блокирует — терять чат и аудио нельзя)
+//
+// Writer-горутина всегда дренирует reliableCh перед videoCh → аудио/чат вне голода.
 func ygg_write(h C.uint64_t, dstPub *C.uint8_t, data *C.uint8_t, dataLen C.int) C.int {
 	n := get(h)
 	if n == nil {
@@ -184,11 +245,26 @@ func ygg_write(h C.uint64_t, dstPub *C.uint8_t, data *C.uint8_t, dataLen C.int) 
 	}
 	pub := C.GoBytes(unsafe.Pointer(dstPub), 32)
 	buf := C.GoBytes(unsafe.Pointer(data), dataLen)
-	w, err := n.core.WriteTo(buf, iwt.Addr(ed25519.PublicKey(pub)))
-	if err != nil {
-		return -1
+	dst := iwt.Addr(ed25519.PublicKey(pub))
+	req := writeReq{dst: dst, data: buf}
+
+	if isVideoMedia(buf) {
+		// Видео/скрин-медиа — неблокирующий send. При переполнении дропаем.
+		select {
+		case n.videoCh <- req:
+		default:
+			// videoCh полон — дропаем пакет (реалтайм, старый кадр не нужен)
+		}
+	} else {
+		// Аудио + чат + всё прочее — блокирующий send (терять нельзя).
+		// Буфер 128 пакетов = ~2.5с аудио; блокировка только при аномалии.
+		select {
+		case n.reliableCh <- req:
+		case <-n.stopCh:
+			return -1
+		}
 	}
-	return C.int(w)
+	return dataLen
 }
 
 //export ygg_read
@@ -218,6 +294,7 @@ func ygg_stop(h C.uint64_t) {
 	delete(nodes, uint64(h))
 	mu.Unlock()
 	if n != nil {
+		close(n.stopCh) // останавливает writerLoop
 		n.core.Stop()
 	}
 }

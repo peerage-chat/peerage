@@ -41,15 +41,16 @@ pub struct AudioSettings {
 
 impl Default for AudioSettings {
     fn default() -> Self {
-        // Чёткая речь без экономии: fullband моно 48кГц, 96 кбит/с, 20мс, FEC.
+        // Voip-режим: оптимизирован под речь, DTX (тишина не шлётся), FEC.
+        // 64кбит/с достаточно для чёткой речи; экономим канал для видео.
         AudioSettings {
             sample_rate: 48_000,
             channels: 1,
-            bitrate: 96_000,
+            bitrate: 64_000,
             frame_ms: 20,
-            mode: OpusMode::Audio,
+            mode: OpusMode::Voip,
             fec: true,
-            jitter_depth: 3,
+            jitter_depth: 4,
         }
     }
 }

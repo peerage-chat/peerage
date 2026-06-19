@@ -34,13 +34,20 @@ impl JitterBuffer {
     /// (компромисс задержка/устойчивость; напр. 3 кадра по 20мс = 60мс).
     pub fn new(depth: usize) -> Self {
         let depth = depth.max(1);
-        JitterBuffer { depth, max: depth * 3 + 4, next: None, buf: BTreeMap::new() }
+        JitterBuffer { depth, max: depth + 2, next: None, buf: BTreeMap::new() }
     }
 
     /// Изменить целевую глубину префетча на лету.
     pub fn set_depth(&mut self, depth: usize) {
         self.depth = depth.max(1);
-        self.max = self.depth * 3 + 4;
+        self.max = self.depth + 2;
+        if self.next.is_some() && self.buf.len() > self.max {
+            while self.buf.len() > self.depth {
+                let oldest = *self.buf.keys().next().unwrap();
+                self.buf.remove(&oldest);
+            }
+            self.next = self.buf.keys().next().copied();
+        }
     }
 
     /// Принять пакет. Слишком старые (уже воспроизведённые) отбрасываются.
@@ -140,19 +147,19 @@ mod tests {
 
     #[test]
     fn caps_backlog_to_bound_latency() {
-        let mut j = JitterBuffer::new(1); // depth=1 → max=7
+        let mut j = JitterBuffer::new(1); // depth=1 → max=3
         j.push(0, f(0));
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(0)))); // playout начат, next=1
         // Отправитель обогнал воспроизведение: огромный бэклог.
         for s in 1..=20u16 {
             j.push(s, vec![s as u8]);
         }
-        // len=20 > max(7) → отбрасываем старьё, ресинк на свежие кадры.
+        // len=20 > max(3) → отбрасываем старьё, ресинк на свежие кадры.
         match j.pop() {
             Some(JitterOut::Frame(d)) => assert!(d[0] >= 19, "ожидали свежий кадр, был {}", d[0]),
             other => panic!("ожидали свежий Frame, получили {other:?}"),
         }
-        assert!(j.len() <= 7, "бэклог не ограничен: {}", j.len());
+        assert!(j.len() <= 3, "бэклог не ограничен: {}", j.len());
     }
 
     #[test]

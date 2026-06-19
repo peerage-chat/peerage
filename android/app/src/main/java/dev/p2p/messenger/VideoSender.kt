@@ -42,6 +42,7 @@ class VideoSender(
 
     @SuppressLint("MissingPermission") // CAMERA запрашивается до видео-звонка
     fun start() {
+        android.util.Log.i("VideoSender", "start() called: width=$width, height=$height, fps=$fps, bitrate=$bitrate")
         val fmt = MediaFormat.createVideoFormat("video/avc", width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
@@ -62,40 +63,62 @@ class VideoSender(
     @SuppressLint("MissingPermission")
     private fun openCamera(target: Surface) {
         val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val camId = pickFront(mgr) ?: return
+        val camId = pickFront(mgr)
+        if (camId == null) {
+            android.util.Log.e("VideoSender", "No camera found (facing front or fallback)!")
+            return
+        }
+        android.util.Log.i("VideoSender", "Opening camera: $camId")
         val t = HandlerThread("venc-cam").apply { start() }
         camThread = t
         camHandler = Handler(t.looper)
         mgr.openCamera(camId, object : CameraDevice.StateCallback() {
             override fun onOpened(cam: CameraDevice) {
+                android.util.Log.i("VideoSender", "Camera $camId opened successfully")
                 device = cam
                 @Suppress("DEPRECATION")
                 cam.createCaptureSession(listOf(target), object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(s: CameraCaptureSession) {
+                        android.util.Log.i("VideoSender", "Camera capture session configured")
                         session = s
                         val req = cam.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
                             addTarget(target)
                             // Ограничиваем частоту камеры под целевой fps (меньше
                             // перепроизводства кадров → меньше рывков/трафика).
-                            pickFpsRange(mgr, camId)?.let {
+                            val range = pickFpsRange(mgr, camId)
+                            android.util.Log.i("VideoSender", "AE Target FPS Range selected: $range")
+                            range?.let {
                                 set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
                             }
                         }
                         runCatching { s.setRepeatingRequest(req.build(), null, camHandler) }
                     }
-                    override fun onConfigureFailed(s: CameraCaptureSession) {}
+                    override fun onConfigureFailed(s: CameraCaptureSession) {
+                        android.util.Log.e("VideoSender", "Camera capture session configuration failed")
+                    }
                 }, camHandler)
             }
-            override fun onDisconnected(cam: CameraDevice) { cam.close() }
-            override fun onError(cam: CameraDevice, error: Int) { cam.close() }
+            override fun onDisconnected(cam: CameraDevice) {
+                android.util.Log.w("VideoSender", "Camera $camId disconnected")
+                cam.close()
+            }
+            override fun onError(cam: CameraDevice, error: Int) {
+                android.util.Log.e("VideoSender", "Camera $camId error: $error")
+                cam.close()
+            }
         }, camHandler)
     }
 
     private fun drain(enc: MediaCodec) {
         val info = MediaCodec.BufferInfo()
         var config: ByteArray? = null // SPS+PPS
+        var encodedCount = 0
+        android.util.Log.i("VideoSender", "venc-drain thread started")
         while (running) {
-            val idx = try { enc.dequeueOutputBuffer(info, 10000) } catch (e: Exception) { break }
+            val idx = try { enc.dequeueOutputBuffer(info, 10000) } catch (e: Exception) {
+                android.util.Log.e("VideoSender", "Encoder dequeueOutputBuffer exception", e)
+                break
+            }
             if (idx < 0) continue
             val buf = enc.getOutputBuffer(idx)
             if (buf != null && info.size > 0) {
@@ -104,11 +127,16 @@ class VideoSender(
                 buf.limit(info.offset + info.size)
                 buf.get(data)
                 if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                    android.util.Log.i("VideoSender", "Received CODEC_CONFIG SPS/PPS size = ${data.size} bytes")
                     config = data
                 } else {
                     val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
                     val cfg = config
                     val out = if (key && cfg != null) cfg + data else data
+                    encodedCount++
+                    if (encodedCount % 30 == 0) {
+                        android.util.Log.i("VideoSender", "Encoded and sent 30 frames, last size = ${out.size} bytes (key=$key)")
+                    }
                     sendVideo(out, key)
                 }
             }
@@ -139,9 +167,11 @@ class VideoSender(
     private fun pickFpsRange(mgr: CameraManager, camId: String): Range<Int>? = runCatching {
         val ranges = mgr.getCameraCharacteristics(camId)
             .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return null
-        ranges.firstOrNull { it.lower == fps && it.upper == fps }                       // точный фикс [fps,fps]
-            ?: ranges.filter { it.lower == it.upper && it.upper <= fps }.maxByOrNull { it.upper } // любой фикс ≤ fps
-            ?: ranges.filter { it.upper <= fps }.maxByOrNull { it.lower.toLong() * 1000 + it.upper } // наименее «плавающий»
+        val needsScale = ranges.any { it.upper > 1000 }
+        val targetFps = if (needsScale) fps * 1000 else fps
+        ranges.firstOrNull { it.lower == targetFps && it.upper == targetFps }                       // точный фикс [fps,fps]
+            ?: ranges.filter { it.lower == it.upper && it.upper <= targetFps }.maxByOrNull { it.upper } // любой фикс ≤ fps
+            ?: ranges.filter { it.upper <= targetFps }.maxByOrNull { it.lower.toLong() * 1000 + it.upper } // наименее «плавающий»
             ?: ranges.minByOrNull { it.upper }                                          // запас: наименьший верх
     }.getOrNull()
 

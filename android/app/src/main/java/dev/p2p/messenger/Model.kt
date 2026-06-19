@@ -12,10 +12,10 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 
 /** Параметры видео-звонка (аппаратный H.264 через MediaCodec). */
-const val VIDEO_W = 640
-const val VIDEO_H = 480
-const val VIDEO_FPS = 30 // ровно столько же темпирует приёмник; камера пинится на фикс. fps
-const val VIDEO_BITRATE = 1_500_000 // 1.5 Мбит/с для 640x480@30 — устойчиво на mesh
+const val VIDEO_W = 1280
+const val VIDEO_H = 720
+const val VIDEO_FPS = 30
+const val VIDEO_BITRATE = 2_000_000 // 2 Мбит/с — хорошее качество для 720p30
 
 data class Contact(
     val key: String,

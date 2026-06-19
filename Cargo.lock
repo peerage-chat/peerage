@@ -5094,6 +5094,7 @@ name = "p2p-messenger"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "log",
  "p2p-core",
  "p2p-ygg",
  "thiserror 2.0.18",

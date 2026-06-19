@@ -94,13 +94,35 @@ impl CallEngine {
                 let mut last_ts: Option<u32> = None;
                 let mut last_arrival: Option<std::time::Instant> = None;
                 let mut jitter_estimate_ms: f64 = 30.0;
+                let mut total_pkts = 0u64;
+                let mut peer_mismatch = 0u64;
+                let mut audio_pkts = 0u64;
+                let mut video_pkts = 0u64;
+                let mut video_frames = 0u64;
+                let diag_start = std::time::Instant::now();
+                log::info!("call-rx: started, expecting peer={}", hex::encode(&call_peer[..8]));
                 while running.load(Ordering::Relaxed) {
-                    let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else { continue };
+                    let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else {
+                        // Log every 5s even when idle
+                        if diag_start.elapsed().as_secs() % 5 == 0 && total_pkts == 0 && diag_start.elapsed().as_secs() > 0 {
+                            log::info!("call-rx: idle {}s, no media packets received yet", diag_start.elapsed().as_secs());
+                        }
+                        continue;
+                    };
+                    total_pkts += 1;
                     if p.src != call_peer {
+                        peer_mismatch += 1;
+                        if peer_mismatch <= 5 {
+                            log::info!("call-rx: peer mismatch #{}: got={} want={}", peer_mismatch, hex::encode(&p.src[..8]), hex::encode(&call_peer[..8]));
+                        }
                         continue; // принимаем медиа только от собеседника
                     }
                     match p.track {
                         TRACK_AUDIO => {
+                            audio_pkts += 1;
+                            if audio_pkts % 50 == 1 {
+                                log::info!("call-rx: audio pkt #{}, total={}, video={}, vframes={}", audio_pkts, total_pkts, video_pkts, video_frames);
+                            }
                             let now = std::time::Instant::now();
                             if let (Some(l_ts), Some(l_arr)) = (last_ts, last_arrival) {
                                 let send_diff_samples = p.ts.wrapping_sub(l_ts) as i32;
@@ -119,10 +141,15 @@ impl CallEngine {
                             playout.lock().unwrap().jitter.push(p.seq, p.payload);
                         }
                         TRACK_VIDEO | TRACK_SCREEN => {
+                            video_pkts += 1;
                             // Собираем фрагменты в полный H.264 access-unit и кладём
                             // в очередь для аппаратного декодера (MediaCodec/Kotlin).
                             if let Some(frag) = parse_video_frag(&p.payload) {
                                 if let Some(cf) = reasm.push(frag) {
+                                    video_frames += 1;
+                                    if video_frames % 30 == 1 {
+                                        log::info!("call-rx: reassembled video frame #{}, size={}", video_frames, cf.data.len());
+                                    }
                                     let mut q = video_in.lock().unwrap();
                                     q.push_back(cf.data);
                                     while q.len() > 5 {
