@@ -257,6 +257,12 @@ impl Messenger {
         self.shared.node.tree_count()
     }
 
+    /// Повторно добавить пир по URI: обходит внутренний backoff Yggdrasil и
+    /// форсирует немедленную попытку реконнекта (например, после флика WiFi).
+    pub fn add_peer(&self, uri: &str) {
+        let _ = self.shared.node.add_peer(uri);
+    }
+
     /// Остановить мессенджер: останавливает транспортный узел и фоновые потоки.
     pub fn shutdown(&self) {
         self.shared.running.store(false, Ordering::Relaxed);

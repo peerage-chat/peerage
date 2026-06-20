@@ -140,7 +140,7 @@ mod tests {
         let dir = tmp();
         let path = dir.join("settings.json");
         let mut s = Settings::load_or_create(&path).unwrap();
-        assert_eq!(s.audio.bitrate, 96_000);
+        assert_eq!(s.audio.bitrate, 64_000);
 
         s.audio.bitrate = 160_000;
         s.video.fps = 30;

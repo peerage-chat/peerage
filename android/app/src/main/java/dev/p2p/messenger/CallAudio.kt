@@ -14,17 +14,8 @@ import android.media.audiofx.NoiseSuppressor
 import android.os.Process
 import kotlin.concurrent.thread
 
-/**
- * Платформенный аудио ввод/вывод звонка. Микрофон (`AudioRecord`) → [Native.callPushAudio];
- * [Native.callPullAudio] → динамик (`AudioTrack`). Кодеки/сеть — в Rust-движке.
- *
- * Чистота речи: эхоподавление (AEC) + шумоподавление (NS) + автоусиление (AGC),
- * все через AudioEffect API на сессии записи. Потоки захвата/воспроизведения —
- * с приоритетом URGENT_AUDIO, чтобы видео-нагрузка не вызывала underrun/шум.
- */
 class CallAudio(
     private val context: Context,
-    // Мост к ядру — по умолчанию 1:1-звонок; для комнаты передаём room-варианты.
     private val push: (ShortArray, Int) -> Unit,
     private val pull: (ShortArray) -> Int,
     private val mute: (Boolean) -> Unit,
@@ -37,9 +28,8 @@ class CallAudio(
     @Volatile private var running = false
     private val threads = mutableListOf<Thread>()
 
-    @SuppressLint("MissingPermission") // RECORD_AUDIO запрашивается до старта звонка
+    @SuppressLint("MissingPermission")
     fun start(sampleRate: Int, channels: Int) {
-        android.util.Log.i("CallAudio", "start() called: sampleRate=$sampleRate, channels=$channels")
         val inMask = if (channels >= 2) AudioFormat.CHANNEL_IN_STEREO else AudioFormat.CHANNEL_IN_MONO
         val outMask = if (channels >= 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
         val fmt = AudioFormat.ENCODING_PCM_16BIT
@@ -47,22 +37,12 @@ class CallAudio(
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_IN_COMMUNICATION
 
-        // Уменьшаем буфер до ×2 для сокращения задержки при сохранении стабильности
         val inMin = AudioRecord.getMinBufferSize(sampleRate, inMask, fmt).coerceAtLeast(2048)
-        val rec = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            sampleRate, inMask, fmt, inMin * 2,
-        )
+        val rec = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sampleRate, inMask, fmt, inMin * 2)
         val sid = rec.audioSessionId
-        if (AcousticEchoCanceler.isAvailable()) {
-            aec = AcousticEchoCanceler.create(sid)?.apply { enabled = true }
-        }
-        if (NoiseSuppressor.isAvailable()) {
-            ns = NoiseSuppressor.create(sid)?.apply { enabled = true }
-        }
-        if (AutomaticGainControl.isAvailable()) {
-            agc = AutomaticGainControl.create(sid)?.apply { enabled = true }
-        }
+        if (AcousticEchoCanceler.isAvailable()) aec = AcousticEchoCanceler.create(sid)?.apply { enabled = true }
+        if (NoiseSuppressor.isAvailable()) ns = NoiseSuppressor.create(sid)?.apply { enabled = true }
+        if (AutomaticGainControl.isAvailable()) agc = AutomaticGainControl.create(sid)?.apply { enabled = true }
 
         val outMin = AudioTrack.getMinBufferSize(sampleRate, outMask, fmt).coerceAtLeast(2048)
         val trk = AudioTrack.Builder()
@@ -75,34 +55,48 @@ class CallAudio(
             .setAudioFormat(
                 AudioFormat.Builder().setSampleRate(sampleRate).setEncoding(fmt).setChannelMask(outMask).build()
             )
-            .setBufferSizeInBytes(outMin * 2)
+            .setBufferSizeInBytes(outMin * 4)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
-        record = rec
-        track = trk
-        running = true
-        rec.startRecording()
-        trk.play()
-        android.util.Log.i("CallAudio", "AudioRecord and AudioTrack initialized and started")
+        record = rec; track = trk; running = true
+        rec.startRecording(); trk.play()
 
-        // Захват микрофона → Rust. Приоритет URGENT_AUDIO — чтобы видео не голодало.
-        val chunk = sampleRate / 50 * (if (channels >= 2) 2 else 1) // ~20мс
+        val chunk = sampleRate / 50 * (if (channels >= 2) 2 else 1) // 20ms frame
+        val frameNs = chunk * 1_000_000_000L / sampleRate
+
         threads += thread(name = "call-capture") {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
             while (running) {
-                val n = rec.read(buf, 0, buf.size)
-                if (n > 0) push(buf, n)
+                val n = rec.read(buf, 0, buf.size, AudioRecord.READ_NON_BLOCKING)
+                when {
+                    n > 0  -> push(buf, n)
+                    n == 0 -> Thread.sleep(4)
+                    else   -> { android.util.Log.e("CallAudio", "capture error $n"); Thread.sleep(10) }
+                }
             }
         }
-        // Воспроизведение: Rust → динамик.
+
+        // Real-time pacing: consume exactly one frame per 20ms regardless of trk.write() timing.
         threads += thread(name = "call-playback") {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
+            var nextFrameNs = System.nanoTime() + frameNs
+            var starvations = 0
+            var lastLogMs = System.currentTimeMillis()
             while (running) {
-                pull(buf) // заполняет тишиной, если данных нет
+                if (pull(buf) == 0) starvations++
                 trk.write(buf, 0, buf.size)
+                val sleepNs = nextFrameNs - System.nanoTime()
+                nextFrameNs += frameNs
+                if (sleepNs > 1_000_000L)
+                    Thread.sleep(sleepNs / 1_000_000L, (sleepNs % 1_000_000L).toInt())
+                val nowMs = System.currentTimeMillis()
+                if (nowMs - lastLogMs >= 5000) {
+                    android.util.Log.i("CallAudio", "playback: $starvations starvations in last 5s")
+                    starvations = 0; lastLogMs = nowMs
+                }
             }
         }
     }
@@ -111,15 +105,19 @@ class CallAudio(
 
     fun stop() {
         running = false
-        threads.forEach { runCatching { it.join(500) } }
+        runCatching { record?.stop() }
+        threads.forEach { runCatching { it.join(300) } }
         threads.clear()
-        runCatching { record?.stop() }; runCatching { record?.release() }
-        runCatching { track?.stop() }; runCatching { track?.release() }
+        runCatching { record?.release() }
+        runCatching { track?.pause() }
+        runCatching { track?.flush() }
+        runCatching { track?.stop() }
+        runCatching { track?.release() }
         runCatching { aec?.release() }; runCatching { ns?.release() }; runCatching { agc?.release() }
         record = null; track = null; aec = null; ns = null; agc = null
         runCatching {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            am.mode = AudioManager.MODE_NORMAL
+            if (am.mode != AudioManager.MODE_NORMAL) am.mode = AudioManager.MODE_NORMAL
         }
     }
 }

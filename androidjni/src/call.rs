@@ -94,6 +94,7 @@ impl CallEngine {
                 let mut last_ts: Option<u32> = None;
                 let mut last_arrival: Option<std::time::Instant> = None;
                 let mut jitter_estimate_ms: f64 = 30.0;
+                let mut depth_target = audio.jitter_depth; // текущая применённая глубина
                 let mut total_pkts = 0u64;
                 let mut peer_mismatch = 0u64;
                 let mut audio_pkts = 0u64;
@@ -131,9 +132,20 @@ impl CallEngine {
                                 let d = (recv_diff_ms - send_diff_ms).abs();
                                 jitter_estimate_ms += (d - jitter_estimate_ms) / 16.0;
                                 
-                                // Каждый кадр равен 20мс. Целевая глубина: сглаженный джиттер / 20.0 + 2 кадра запаса.
-                                let target_depth = ((jitter_estimate_ms / 20.0).round() as usize + 2).clamp(2, 8);
-                                playout.lock().unwrap().jitter.set_depth(target_depth);
+                                // Адаптируем глубину буфера. Минимум 4 кадра (80мс) — меньше
+                                // слишком уязвимо к всплескам на LAN. Увеличиваем сразу, но
+                                // уменьшаем медленно (раз в 4с / 200 пакетов), чтобы не было
+                                // resync-дёрганья при кратковременно низком jitter_estimate.
+                                if audio_pkts % 50 == 0 {
+                                    let new_target = ((jitter_estimate_ms / 20.0).round() as usize + 2).clamp(4, 8);
+                                    if new_target != depth_target {
+                                        let can_decrease = new_target < depth_target && audio_pkts % 200 == 0;
+                                        if new_target > depth_target || can_decrease {
+                                            playout.lock().unwrap().jitter.set_depth(new_target);
+                                            depth_target = new_target;
+                                        }
+                                    }
+                                }
                             }
                             last_ts = Some(p.ts);
                             last_arrival = Some(now);
@@ -305,9 +317,14 @@ impl CallEngine {
     }
 
     /// H.264 access-unit от аппаратного энкодера (Kotlin/MediaCodec) → в очередь
-    /// отправки. НЕ блокирует: при заторе сети кадр дропается (реалтайм).
+    /// отправки. I-кадры никогда не дропаются (блокирующая отправка): потеря
+    /// I-кадра означает заморозку видео до следующего (~1с). P-кадры — try_send.
     pub fn send_video(&self, nal: &[u8], keyframe: bool) {
-        let _ = self.video_out.try_send((nal.to_vec(), keyframe));
+        if keyframe {
+            let _ = self.video_out.send((nal.to_vec(), keyframe));
+        } else {
+            let _ = self.video_out.try_send((nal.to_vec(), keyframe));
+        }
     }
 
     /// Забрать собранный входящий H.264 access-unit (для MediaCodec-декодера).

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -111,7 +112,7 @@ private fun CenterMessage(text: String) {
     }
 }
 
-private enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember }
+private enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings }
 
 @Composable
 private fun Root(model: AppModel) {
@@ -124,7 +125,8 @@ private fun Root(model: AppModel) {
                     onOpen = { model.openChat(it); screen = Screen.Chat },
                     onAdd = { screen = Screen.Add },
                     onMe = { screen = Screen.Me },
-                    onGroups = { model.refreshGroups(); screen = Screen.Groups })
+                    onGroups = { model.refreshGroups(); screen = Screen.Groups },
+                    onSettings = { screen = Screen.Settings })
                 Screen.Chat -> ChatScreen(model,
                     onBack = { screen = Screen.Contacts },
                     onInfo = { screen = Screen.Info },
@@ -143,6 +145,7 @@ private fun Root(model: AppModel) {
                     onAddMember = { screen = Screen.AddMember })
                 Screen.CreateGroup -> CreateGroupScreen(model, onDone = { screen = Screen.Groups })
                 Screen.AddMember -> AddMemberScreen(model, onDone = { screen = Screen.GroupChat })
+                Screen.Settings -> SettingsScreen(model, onBack = { screen = Screen.Contacts })
             }
         }
         model.call?.let { CallOverlay(model, it) }
@@ -216,12 +219,13 @@ private fun SendButton(onClick: () -> Unit) {
 // ── Экраны ──────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () -> Unit, onMe: () -> Unit, onGroups: () -> Unit) {
+private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () -> Unit, onMe: () -> Unit, onGroups: () -> Unit, onSettings: () -> Unit = {}) {
     Column(Modifier.fillMaxSize()) {
         TopBar("p2p messenger") {
             BarIcon(Icons.Filled.Group, "Группы", onGroups)
             BarIcon(Icons.Filled.PersonAdd, "Добавить контакт", onAdd)
             BarIcon(Icons.Filled.QrCode2, "Мой код", onMe)
+            BarIcon(Icons.Filled.Settings, "Настройки", onSettings)
         }
         // Долгий тап → режим приёмника теста скорости (живой Мбит/с).
         val statusLabel = if (model.benchRecv) "⏱ приём: %.1f Мбит/с".format(model.benchRecvMbps)
@@ -585,7 +589,8 @@ private fun VideoSurface(modifier: Modifier = Modifier) {
                     override fun surfaceCreated(h: android.view.SurfaceHolder) {
                         // Создание/старт MediaCodec-декодера блокирует — не на UI-потоке.
                         Thread {
-                            receiver = VideoReceiver(h.surface, VIDEO_W, VIDEO_H) {
+                            val q = AppModel.instance.videoQuality
+                            receiver = VideoReceiver(h.surface, q.width, q.height, q.fps) {
                                 Native.callPullVideoPacket(AppModel.instance.sessionPtr)
                             }.also { it.start() }
                         }.start()
@@ -599,6 +604,64 @@ private fun VideoSurface(modifier: Modifier = Modifier) {
             }
         },
     )
+}
+
+@Composable
+private fun SettingsScreen(model: AppModel, onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        TopBar("Настройки", onBack = onBack)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(ScreenPad),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            FieldLabel("КАЧЕСТВО ВИДЕО-ЗВОНКА")
+            Spacer(Modifier.height(4.dp))
+            VideoQuality.presets.forEach { preset ->
+                val selected = model.videoQuality == preset
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { model.changeVideoQuality(preset) }
+                        .background(if (selected) HoloAccentDark else HoloBg)
+                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    RadioButton(
+                        selected = selected,
+                        onClick = { model.changeVideoQuality(preset) },
+                        colors = androidx.compose.material3.RadioButtonDefaults.colors(
+                            selectedColor = HoloAccent,
+                            unselectedColor = HoloSecondary,
+                        )
+                    )
+                    Column {
+                        Text(
+                            preset.label,
+                            color = if (selected) HoloAccent else Color.White,
+                            fontSize = 15.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        )
+                        Text(
+                            "%.0f Мбит/с".format(preset.bitrate / 1_000_000.0),
+                            color = HoloSecondary,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+                Divider(color = HoloBorder, thickness = 0.5.dp)
+            }
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Изменение применяется к следующему звонку.",
+                color = HoloSecondary,
+                fontSize = 11.sp,
+            )
+        }
+    }
 }
 
 @Composable

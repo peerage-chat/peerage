@@ -92,6 +92,10 @@ class VideoSender(
                             }
                         }
                         runCatching { s.setRepeatingRequest(req.build(), null, camHandler) }
+                        // Камера только начала подавать кадры — гарантируем I-frame немедленно.
+                        // requestKeyframe() на call_accept срабатывает до открытия камеры
+                        // и теряется; здесь момент всегда правильный.
+                        requestKeyframe()
                     }
                     override fun onConfigureFailed(s: CameraCaptureSession) {
                         android.util.Log.e("VideoSender", "Camera capture session configuration failed")
@@ -142,6 +146,13 @@ class VideoSender(
             }
             runCatching { enc.releaseOutputBuffer(idx, false) }
         }
+    }
+
+    fun requestKeyframe() {
+        val enc = encoder ?: return
+        val p = android.os.Bundle()
+        p.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+        runCatching { enc.setParameters(p) }
     }
 
     fun stop() {

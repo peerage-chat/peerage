@@ -15,6 +15,7 @@ class VideoReceiver(
     private val surface: Surface,
     private val width: Int,
     private val height: Int,
+    private val fps: Int = 30,
     private val pullVideoPacket: () -> ByteArray
 ) {
     private var decoder: MediaCodec? = null
@@ -30,12 +31,15 @@ class VideoReceiver(
     private fun loop() {
         android.util.Log.i("VideoReceiver", "loop() started")
         var dec: MediaCodec? = null
-        var pts = 0L
-        val frameNs = 1_000_000_000L / VIDEO_FPS
+        var pts = 0L                  // microseconds, для queueInputBuffer
+        val frameUs = 1_000_000L / fps
+        val frameNs = 1_000_000_000L / fps
         val info = MediaCodec.BufferInfo()
         var pulledCount = 0
         var renderedCount = 0
         var pendingPacket: ByteArray? = null
+        var renderBaseNs = 0L         // wall-clock момент первого output-кадра
+        var firstPtsUs = 0L           // PTS первого output-кадра
 
         while (running) {
             try {
@@ -46,17 +50,19 @@ class VideoReceiver(
                         configure(fmt, surface, null, 0)
                         start()
                     }
-                    decoder = dec // сохраняем ссылку для stop()
+                    decoder = dec
+                    renderBaseNs = 0L  // сброс clock при перезапуске декодера
                     android.util.Log.i("VideoReceiver", "Decoder started successfully")
                 }
 
-                val currentDec = dec
+                val currentDec = dec!!
 
+                // ── Подать входной пакет ──────────────────────────────────────
                 val pkt = pendingPacket ?: pullVideoPacket()
                 if (pkt.isNotEmpty()) {
-                    val inIdx = currentDec.dequeueInputBuffer(10000)
+                    val inIdx = currentDec.dequeueInputBuffer(5_000)
                     if (inIdx >= 0) {
-                        pendingPacket = null // successfully processed
+                        pendingPacket = null
                         pulledCount++
                         if (pulledCount % 30 == 0) {
                             android.util.Log.i("VideoReceiver", "Pulled 30 frames from JNI, last size = ${pkt.size} bytes")
@@ -65,7 +71,7 @@ class VideoReceiver(
                         if (ib != null && ib.capacity() >= pkt.size) {
                             ib.clear(); ib.put(pkt)
                             currentDec.queueInputBuffer(inIdx, 0, pkt.size, pts, 0)
-                            pts += frameNs / 1000
+                            pts += frameUs
                         } else {
                             if (ib == null) {
                                 android.util.Log.w("VideoReceiver", "getInputBuffer($inIdx) returned null")
@@ -75,24 +81,38 @@ class VideoReceiver(
                             currentDec.queueInputBuffer(inIdx, 0, 0, pts, 0)
                         }
                     } else {
-                        // Dequeue input buffer timed out. Keep the packet for the next loop.
                         pendingPacket = pkt
-                        Thread.sleep(2)
                     }
-                } else {
-                    pendingPacket = null
-                    Thread.sleep(2)
                 }
 
-                var outIdx = try { currentDec.dequeueOutputBuffer(info, 0) } catch (e: Exception) { -1 }
-                while (outIdx >= 0) {
-                    runCatching { currentDec.releaseOutputBuffer(outIdx, true) }
+                // ── Получить один output-кадр (блокируем до ~8мс) ─────────────
+                // Ранее: while (dequeue(0) >= 0) render(true) — рендерил пачками
+                // без пейсинга. Теперь: один кадр за итерацию + timestamp-рендер.
+                val outIdx = try { currentDec.dequeueOutputBuffer(info, 8_000) } catch (e: Exception) { -1 }
+                if (outIdx >= 0) {
+                    val nowNs = System.nanoTime()
+                    if (renderBaseNs == 0L) {
+                        renderBaseNs = nowNs + frameNs
+                        firstPtsUs = info.presentationTimeUs
+                    }
+                    val renderNs = renderBaseNs + (info.presentationTimeUs - firstPtsUs) * 1_000L
+                    val renderAt = if (renderNs < nowNs - 3 * frameNs) {
+                        // Отстаём на 3+ кадра (после стала/заморозки) — ресинк clock,
+                        // иначе burst-рендер ускоряет видео вместо плавного восстановления.
+                        renderBaseNs = nowNs + frameNs
+                        firstPtsUs = info.presentationTimeUs
+                        renderBaseNs
+                    } else {
+                        renderNs.coerceAtLeast(nowNs)
+                    }
+                    runCatching { currentDec.releaseOutputBuffer(outIdx, renderAt) }
                     renderedCount++
                     if (renderedCount % 30 == 0) {
                         android.util.Log.i("VideoReceiver", "Rendered 30 frames to surface")
                     }
-                    outIdx = try { currentDec.dequeueOutputBuffer(info, 0) } catch (e: Exception) { -1 }
                 }
+                // INFO_OUTPUT_FORMAT_CHANGED (-2) и INFO_OUTPUT_BUFFERS_CHANGED (-3) игнорируем
+
             } catch (e: Exception) {
                 if (running) {
                     android.util.Log.e("VideoReceiver", "Decoder error, restarting...", e)
@@ -100,8 +120,9 @@ class VideoReceiver(
                     runCatching { dec?.release() }
                     dec = null
                     decoder = null
-                    pendingPacket = null // Clear pending packet on decoder reset
-                    Thread.sleep(100) // пауза перед перезапуском
+                    pendingPacket = null
+                    renderBaseNs = 0L
+                    Thread.sleep(100)
                 }
             }
         }

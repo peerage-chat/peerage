@@ -33,6 +33,35 @@ use call::CallEngine;
 use groups::GroupManager;
 use room_call::RoomCallEngine;
 
+// Ловим Rust-паники на JNI-границе: паника сквозь FFI = UB (на Android — SIGABRT
+// без стека). catch_unwind превращает её в ошибку с логом и безопасным дефолтом.
+macro_rules! jni_safe {
+    ($default:expr, $body:block) => {
+        match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| $body)) {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = e.downcast_ref::<&str>().copied()
+                    .or_else(|| e.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("unknown panic");
+                ::log::error!("JNI panic: {msg}");
+                $default
+            }
+        }
+    };
+}
+
+// Отказоустойчивый захват мьютекса: если другой поток паниковал держа его,
+// стандартный .unwrap() тоже паникует → cascade crash. Забираем внутреннее
+// значение, игнорируя poison — данные остаются консистентными.
+trait LockRecover<T> {
+    fn lock_safe(&self) -> ::std::sync::MutexGuard<'_, T>;
+}
+impl<T> LockRecover<T> for Mutex<T> {
+    fn lock_safe(&self) -> ::std::sync::MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
 /// Команда группового актора (исполняется в потоке event_pump, т.к. GroupChat !Send).
 /// Все команды — fire-and-forget: результат не ждётся на вызывающем потоке (раньше
 /// `group_query` блокировал `ops` до ответа event_pump → serialization stall).
@@ -121,7 +150,7 @@ pub struct Session {
 
 impl Session {
     fn room_engine(&self) -> Option<Arc<RoomCallEngine>> {
-        self.room_call.lock().unwrap().as_ref().map(|r| r.engine.clone())
+        self.room_call.lock_safe().as_ref().map(|r| r.engine.clone())
     }
 
     fn live_participants(&self, gid: &[u8]) -> Vec<[u8; 32]> {
@@ -141,22 +170,22 @@ impl Session {
     }
 
     fn sync_room_members(&self) {
-        let guard = self.room_call.lock().unwrap();
+        let guard = self.room_call.lock_safe();
         if let Some(rc) = guard.as_ref() {
             let live = self.live_participants(&rc.gid);
-            *rc.members.lock().unwrap() = live;
+            *rc.members.lock_safe() = live;
         }
     }
 
     fn current_call(&self) -> Option<Arc<CallEngine>> {
-        self.call.lock().unwrap().clone()
+        self.call.lock_safe().clone()
     }
 
     fn begin_call(&self, peer: [u8; 32]) -> Option<AudioSettings> {
         let mut audio = AudioSettings::default();
         audio.jitter_depth = 5;
         let engine = CallEngine::start(self.messenger.clone(), peer, audio);
-        let old = self.call.lock().unwrap().replace(engine);
+        let old = self.call.lock_safe().replace(engine);
         if let Some(old) = old {
             std::thread::spawn(move || old.stop());
         }
@@ -182,7 +211,7 @@ pub(crate) fn spawn_connect(m: Arc<Messenger>, key: [u8; 32]) {
 
 /// TOFU: добавить неизвестного пира в контакты (имя по умолчанию — префикс ключа).
 fn ensure_contact(session: &Session, peer: [u8; 32]) {
-    let mut store = session.contacts.lock().unwrap();
+    let mut store = session.contacts.lock_safe();
     if !store.contains(&peer) {
         let hex = hex::encode(peer);
         let name = format!("{}…", &hex[..8]);
@@ -191,7 +220,7 @@ fn ensure_contact(session: &Session, peer: [u8; 32]) {
 }
 
 fn push_event(session: &Session, json: serde_json::Value) {
-    session.events.lock().unwrap().push_back(json.to_string());
+    session.events.lock_safe().push_back(json.to_string());
 }
 
 /// Поток event_pump = групповой актор: владеет [`GroupManager`] (GroupChat !Send),
@@ -243,7 +272,7 @@ fn event_pump(
 /// и подчистить протухшее присутствие других.
 fn beacon_tick(session: &Arc<Session>, groups: &GroupManager, messenger: &Messenger) {
     let joined: Vec<(Vec<u8>, u8)> = {
-        let rs = session.rooms.lock().unwrap();
+        let rs = session.rooms.lock_safe();
         rs.joined.iter().map(|(g, f)| (g.clone(), *f)).collect()
     };
     for (gid, flags) in joined {
@@ -256,7 +285,7 @@ fn beacon_tick(session: &Arc<Session>, groups: &GroupManager, messenger: &Messen
     }
     {
         let now = Instant::now();
-        let mut rs = session.rooms.lock().unwrap();
+        let mut rs = session.rooms.lock_safe();
         for peers in rs.remote.values_mut() {
             peers.retain(|_, (t, _)| now.saturating_duration_since(*t) < PRESENCE_TTL);
         }
@@ -279,7 +308,7 @@ fn handle_event(session: &Arc<Session>, groups: &mut GroupManager, ev: Event) {
         Event::Text { peer, id, text } => {
             ensure_contact(session, peer);
             let t = now();
-            let _ = session.messages.lock().unwrap().append(&peer, StoredMessage {
+            let _ = session.messages.lock_safe().append(&peer, StoredMessage {
                 id, text: text.clone(), mine: false, time: t, status: String::new(),
             });
             push_event(session, serde_json::json!({
@@ -287,11 +316,11 @@ fn handle_event(session: &Arc<Session>, groups: &mut GroupManager, ev: Event) {
             }));
         }
         Event::Ack { peer, id } => {
-            let _ = session.messages.lock().unwrap().set_status(&peer, id, "delivered");
+            let _ = session.messages.lock_safe().set_status(&peer, id, "delivered");
             push_event(session, serde_json::json!({"type": "ack", "peer": hex::encode(peer), "id": id}));
         }
         Event::Undelivered { peer, id } => {
-            let _ = session.messages.lock().unwrap().set_status(&peer, id, "failed");
+            let _ = session.messages.lock_safe().set_status(&peer, id, "failed");
             push_event(session, serde_json::json!({"type": "undelivered", "peer": hex::encode(peer), "id": id}));
         }
         Event::CallInvite { peer, call_id, audio, video } => push_event(session, serde_json::json!({
@@ -326,7 +355,7 @@ fn handle_event(session: &Arc<Session>, groups: &mut GroupManager, ev: Event) {
         Event::RoomPresence { peer, gid, flags } => {
             let left = flags & PRESENCE_LEFT != 0;
             {
-                let mut rs = session.rooms.lock().unwrap();
+                let mut rs = session.rooms.lock_safe();
                 if left {
                     if let Some(m) = rs.remote.get_mut(&gid) {
                         m.remove(&peer);
@@ -347,7 +376,7 @@ fn handle_event(session: &Arc<Session>, groups: &mut GroupManager, ev: Event) {
 /// Пересчитать кэш групповых read-данных. Зовётся event_pump'ом после каждой
 /// мутации (create/send/join/key_reply/on_group) — кэш всегда свежий.
 fn refresh_group_cache(session: &Arc<Session>, groups: &GroupManager) {
-    let mut cache = session.group_cache.lock().unwrap();
+    let mut cache = session.group_cache.lock_safe();
     cache.list = groups.list_json();
     for gid in groups.group_ids() {
         cache.history.insert(gid.clone(), groups.history_json(&gid));
@@ -377,6 +406,18 @@ fn handle_cmd(session: &Arc<Session>, groups: &mut GroupManager, cmd: GroupCmd) 
 // ── JNI-обвязка ────────────────────────────────────────────────────────────
 // Хелперы строк: читаем JString в Rust String, отдаём Rust String как jstring.
 
+/// Удалить зашифрованные пользовательские данные при потере vault-ключа.
+/// vault.key.enc оставляем: ключ в Android Keystore жив, его можно использовать снова.
+fn wipe_user_data(dir: &std::path::Path) {
+    for name in &["profile.json", "contacts.json", "messages.json", "messenger.db",
+                  "messenger.db-shm", "messenger.db-wal"] {
+        let _ = std::fs::remove_file(dir.join(name));
+    }
+    if let Ok(entries) = std::fs::read_dir(dir.join("groups")) {
+        for e in entries.flatten() { let _ = std::fs::remove_file(e.path()); }
+    }
+}
+
 fn jstr(env: &mut JNIEnv, s: &JString) -> String {
     env.get_string(s).map(|v| v.into()).unwrap_or_default()
 }
@@ -400,6 +441,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     data_dir: JString<'local>,
+    vault_key: JByteArray<'local>,
 ) -> jstring {
     let _ = android_logger::init_once(
         android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("p2p"),
@@ -410,14 +452,30 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
         return ret(&env, &serde_json::json!({"error": e.to_string()}).to_string());
     }
 
-    // At-rest: ключ в файле приватного каталога (keyring на Android ненадёжен —
-    // разные ключи между перезапусками). Android Keystore — дальнейшее усиление.
-    if let Err(e) = p2p_core::vault::init_with_keyfile(&dir.join("vault.key")) {
-        log::warn!("at-rest шифрование недоступно ({e}); данные открытым текстом");
+    // Ключ получен из Android Keystore через VaultKeyManager (Kotlin).
+    // Keystore держит AES-256-GCM ключ в hardware-backed хранилище; Kotlin
+    // разворачивает им 32-байтовый vault key и передаёт сюда уже plaintext.
+    match env.convert_byte_array(&vault_key) {
+        Ok(raw) if raw.len() == 32 => {
+            let key: [u8; 32] = std::array::from_fn(|i| raw[i] as u8);
+            p2p_core::vault::init_with_key(key);
+        }
+        Ok(raw) => log::warn!("vault key: неверный размер {} (ожидается 32); at-rest отключено", raw.len()),
+        Err(e) => log::warn!("vault key: ошибка чтения JByteArray ({e}); at-rest отключено"),
     }
 
     let identity = match Profile::load_or_create(&dir.join("profile.json")) {
         Ok(p) => p.identity,
+        Err(p2p_core::store::StoreError::Vault(p2p_core::vault::VaultError::Decrypt)) => {
+            // Vault key lost (factory reset, new install over old data).
+            // Wipe user data and start fresh — unrecoverable without the key.
+            log::warn!("vault key mismatch: wiping user data and regenerating identity");
+            wipe_user_data(&dir);
+            match Profile::load_or_create(&dir.join("profile.json")) {
+                Ok(p) => p.identity,
+                Err(e) => return ret(&env, &serde_json::json!({"error": e.to_string()}).to_string()),
+            }
+        }
         Err(e) => return ret(&env, &serde_json::json!({"error": e.to_string()}).to_string()),
     };
     let me_pub = identity.public_key_bytes();
@@ -435,8 +493,14 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
         let _ = node.add_peer(uri);
     }
 
-    let contacts = ContactStore::load(&dir.join("contacts.json")).expect("contacts");
-    let messages = MessageStore::load(&dir.join("messages.json")).expect("messages");
+    let db = match p2p_core::db::open(&dir) {
+        Ok(db) => db,
+        Err(e) => return ret(&env, &serde_json::json!({"error": format!("db: {e}")}).to_string()),
+    };
+    let contacts = ContactStore::open(db.clone(), Some(&dir.join("contacts.json")))
+        .expect("contacts store");
+    let messages = MessageStore::open(db.clone(), Some(&dir.join("messages.json")))
+        .expect("messages store");
     let contact_keys: Vec<[u8; 32]> =
         contacts.list().iter().filter_map(|c| parse_key(&c.key)).collect();
 
@@ -505,10 +569,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_pollEvent<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, ""); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let s = session.events.lock().unwrap().pop_front().unwrap_or_default();
-    ret(&env, &s)
+    jni_safe!(ret(&env, ""), {
+        if session_ptr == 0 { return ret(&env, ""); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let s = session.events.lock_safe().pop_front().unwrap_or_default();
+        ret(&env, &s)
+    })
 }
 
 /// Отправить текст. Возвращает id сообщения (>=0) либо -1 при ошибке.
@@ -520,19 +586,21 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendText<'local>(
     key_hex: JString<'local>,
     text: JString<'local>,
 ) -> jlong {
-    if session_ptr == 0 { return -1; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return -1 };
-    let text = jstr(&mut env, &text);
-    match session.messenger.send_text(&key, &text) {
-        Ok(id) => {
-            let _ = session.messages.lock().unwrap().append(&key, StoredMessage {
-                id, text: text.clone(), mine: true, time: now(), status: "sent".into(),
-            });
-            id as jlong
+    jni_safe!(-1, {
+        if session_ptr == 0 { return -1; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return -1 };
+        let text = jstr(&mut env, &text);
+        match session.messenger.send_text(&key, &text) {
+            Ok(id) => {
+                let _ = session.messages.lock_safe().append(&key, StoredMessage {
+                    id, text: text.clone(), mine: true, time: now(), status: "sent".into(),
+                });
+                id as jlong
+            }
+            Err(_) => -1,
         }
-        Err(_) => -1,
-    }
+    })
 }
 
 /// Инициировать/держать соединение с пиром (фоновый коннект).
@@ -543,11 +611,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_connect<'local>(
     session_ptr: jlong,
     key_hex: JString<'local>,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
-        spawn_connect(session.messenger.clone(), key);
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
+            spawn_connect(session.messenger.clone(), key);
+        }
+    });
 }
 
 /// Добавить контакт (TOFU). Возвращает "added" | "known" | "error".
@@ -559,20 +629,18 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_addContact<'local>(
     key_hex: JString<'local>,
     name: JString<'local>,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "error"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "error") };
-    let name = jstr(&mut env, &name);
-    let name = if name.trim().is_empty() { format!("{}…", &hex::encode(key)[..8]) } else { name };
-    let outcome = session.contacts.lock().unwrap().add(&key, &name, now());
-    match outcome {
-        Ok(p2p_core::store::AddOutcome::Added) => {
-            spawn_connect(session.messenger.clone(), key);
-            ret(&env, "added")
+    jni_safe!(ret(&env, "error"), {
+        if session_ptr == 0 { return ret(&env, "error"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "error") };
+        let name = jstr(&mut env, &name);
+        let name = if name.trim().is_empty() { format!("{}…", &hex::encode(key)[..8]) } else { name };
+        match session.contacts.lock_safe().add(&key, &name, now()) {
+            Ok(p2p_core::store::AddOutcome::Added) => { spawn_connect(session.messenger.clone(), key); ret(&env, "added") }
+            Ok(p2p_core::store::AddOutcome::AlreadyKnown) => ret(&env, "known"),
+            Err(_) => ret(&env, "error"),
         }
-        Ok(p2p_core::store::AddOutcome::AlreadyKnown) => ret(&env, "known"),
-        Err(_) => ret(&env, "error"),
-    }
+    })
 }
 
 /// Список контактов как JSON-массив.
@@ -582,10 +650,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_listContacts<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "[]"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let json = serde_json::to_string(&session.contacts.lock().unwrap().list()).unwrap_or_default();
-    ret(&env, &json)
+    jni_safe!(ret(&env, "[]"), {
+        if session_ptr == 0 { return ret(&env, "[]"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let json = serde_json::to_string(&session.contacts.lock_safe().list()).unwrap_or_default();
+        ret(&env, &json)
+    })
 }
 
 /// История переписки с пиром как JSON-массив.
@@ -596,11 +666,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_history<'local>(
     session_ptr: jlong,
     key_hex: JString<'local>,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "[]"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "[]") };
-    let json = serde_json::to_string(session.messages.lock().unwrap().history(&key)).unwrap_or_default();
-    ret(&env, &json)
+    jni_safe!(ret(&env, "[]"), {
+        if session_ptr == 0 { return ret(&env, "[]"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "[]") };
+        let json = serde_json::to_string(&session.messages.lock_safe().history(&key)).unwrap_or_default();
+        ret(&env, &json)
+    })
 }
 
 /// Пометить контакт проверенным/непроверенным.
@@ -612,11 +684,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_setVerified<'local>(
     key_hex: JString<'local>,
     verified: jboolean,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
-        let _ = session.contacts.lock().unwrap().set_verified(&key, verified != JNI_FALSE);
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
+            let _ = session.contacts.lock_safe().set_verified(&key, verified != JNI_FALSE);
+        }
+    });
 }
 
 /// Переименовать контакт.
@@ -628,12 +702,14 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_renameContact<'local>(
     key_hex: JString<'local>,
     name: JString<'local>,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
-        let name = jstr(&mut env, &name);
-        let _ = session.contacts.lock().unwrap().rename(&key, &name);
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
+            let name = jstr(&mut env, &name);
+            let _ = session.contacts.lock_safe().rename(&key, &name);
+        }
+    });
 }
 
 /// Удалить контакт.
@@ -644,11 +720,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_removeContact<'local>(
     session_ptr: jlong,
     key_hex: JString<'local>,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
-        let _ = session.contacts.lock().unwrap().remove(&key);
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
+            let _ = session.contacts.lock_safe().remove(&key);
+        }
+    });
 }
 
 #[no_mangle]
@@ -658,12 +736,14 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_isOnline<'local>(
     session_ptr: jlong,
     key_hex: JString<'local>,
 ) -> jboolean {
-    if session_ptr == 0 { return JNI_FALSE; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let online = parse_key(&jstr(&mut env, &key_hex))
-        .map(|k| session.messenger.is_online(&k))
-        .unwrap_or(false);
-    if online { JNI_TRUE } else { JNI_FALSE }
+    jni_safe!(JNI_FALSE, {
+        if session_ptr == 0 { return JNI_FALSE; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let online = parse_key(&jstr(&mut env, &key_hex))
+            .map(|k| session.messenger.is_online(&k))
+            .unwrap_or(false);
+        if online { JNI_TRUE } else { JNI_FALSE }
+    })
 }
 
 #[no_mangle]
@@ -672,9 +752,11 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_netPeers<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
 ) -> jint {
-    if session_ptr == 0 { return 0; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    session.messenger.net_peers() as jint
+    jni_safe!(0, {
+        if session_ptr == 0 { return 0; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        session.messenger.net_peers() as jint
+    })
 }
 
 #[no_mangle]
@@ -683,9 +765,31 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_netTree<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
 ) -> jint {
-    if session_ptr == 0 { return 0; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    session.messenger.net_tree() as jint
+    jni_safe!(0, {
+        if session_ptr == 0 { return 0; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        session.messenger.net_tree() as jint
+    })
+}
+
+/// Принудительно переподключить всех публичных Yggdrasil-пиров:
+/// обходит внутренний exponential backoff и форсирует немедленную попытку.
+/// Вызывается при смене сети или обнаружении peers=0 из Kotlin-тикера.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_reconnectPeers<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) {
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        for uri in PUBLIC_PEERS.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            session.messenger.add_peer(uri);
+        }
+        log::info!("reconnectPeers: re-added {} public peers",
+            PUBLIC_PEERS.lines().filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#')).count());
+    });
 }
 
 #[no_mangle]
@@ -694,9 +798,11 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_stop<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    session.messenger.shutdown();
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        session.messenger.shutdown();
+    });
 }
 
 // ── Звонки (1:1) ───────────────────────────────────────────────────────────
@@ -723,15 +829,17 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callStart<'local>(
     vw: jint,
     vh: jint,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "{}"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
-    let video = video != JNI_FALSE;
-    let call_id = session.call_id.fetch_add(1, Ordering::Relaxed);
-    let _ = session.messenger.send_call_invite(&peer, call_id, true, video);
-    let _ = (vw, vh); // видео-разрешение теперь задаёт Kotlin/MediaCodec
-    let Some(audio) = session.begin_call(peer) else { return ret(&env, "{}") };
-    ret(&env, &call_params(call_id, &audio))
+    jni_safe!(ret(&env, "{}"), {
+        if session_ptr == 0 { return ret(&env, "{}"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
+        let video = video != JNI_FALSE;
+        let call_id = session.call_id.fetch_add(1, Ordering::Relaxed);
+        let _ = session.messenger.send_call_invite(&peer, call_id, true, video);
+        let _ = (vw, vh);
+        let Some(audio) = session.begin_call(peer) else { return ret(&env, "{}") };
+        ret(&env, &call_params(call_id, &audio))
+    })
 }
 
 /// Принять входящий звонок: шлём accept и запускаем движок.
@@ -746,13 +854,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callAccept<'local>(
     vw: jint,
     vh: jint,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "{}"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
-    let _ = session.messenger.send_call_accept(&peer, call_id as u64);
-    let _ = (video, vw, vh); // видео задаёт Kotlin/MediaCodec
-    let Some(audio) = session.begin_call(peer) else { return ret(&env, "{}") };
-    ret(&env, &call_params(call_id as u64, &audio))
+    jni_safe!(ret(&env, "{}"), {
+        if session_ptr == 0 { return ret(&env, "{}"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
+        let _ = session.messenger.send_call_accept(&peer, call_id as u64);
+        let _ = (video, vw, vh);
+        let Some(audio) = session.begin_call(peer) else { return ret(&env, "{}") };
+        ret(&env, &call_params(call_id as u64, &audio))
+    })
 }
 
 /// Завершить звонок: шлём end и останавливаем движок.
@@ -764,17 +874,18 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callEnd<'local>(
     key_hex: JString<'local>,
     call_id: jlong,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    if let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) {
-        let _ = session.messenger.send_call_end(&peer, call_id as u64);
-    }
-    // Забираем движок (мьютекс освобождается сразу) и останавливаем его в ФОНЕ —
-    // stop() джойнит потоки, нельзя блокировать вызывающий (часто UI) поток.
-    let engine = session.call.lock().unwrap().take();
-    if let Some(engine) = engine {
-        std::thread::spawn(move || engine.stop());
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        if let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) {
+            let _ = session.messenger.send_call_end(&peer, call_id as u64);
+        }
+        // stop() джойнит потоки — запускаем в фоне, чтобы не блокировать UI.
+        let engine = session.call.lock_safe().take();
+        if let Some(engine) = engine {
+            std::thread::spawn(move || engine.stop());
+        }
+    });
 }
 
 // ── Комнаты-звонки (присутствие, Discord-style) ──────────────────────────────
@@ -790,19 +901,16 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoin<'local>(
     audio: jboolean,
     video: jboolean,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
-    let mut flags = 0u8;
-    if audio != JNI_FALSE {
-        flags |= 0b01;
-    }
-    if video != JNI_FALSE {
-        flags |= 0b10;
-    }
-    session.rooms.lock().unwrap().joined.insert(gid, flags);
-    // Сразу разослать маячок (не ждать интервала) — участники увидят нас быстро.
-    let _ = session.jobs.send(Job::Beacon);
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        let mut flags = 0u8;
+        if audio != JNI_FALSE { flags |= 0b01; }
+        if video != JNI_FALSE { flags |= 0b10; }
+        session.rooms.lock_safe().joined.insert(gid, flags);
+        let _ = session.jobs.send(Job::Beacon);
+    });
 }
 
 /// Выйти из комнаты `gid` (перестать слать маячок, забыть её присутствие).
@@ -813,21 +921,17 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomLeave<'local>(
     session_ptr: jlong,
     gid_hex: JString<'local>,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    if let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) {
-        {
-            let mut rs = session.rooms.lock().unwrap();
-            rs.joined.remove(&gid);
-            rs.remote.remove(&gid);
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        if let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) {
+            { let mut rs = session.rooms.lock_safe(); rs.joined.remove(&gid); rs.remote.remove(&gid); }
+            let _ = session.jobs.send(Job::Leave(gid));
         }
-        // Сообщаем членам комнаты, что вышли — чтобы убрали нас мгновенно.
-        let _ = session.jobs.send(Job::Leave(gid));
-    }
+    });
 }
 
-/// Текущие участники комнаты `gid` (чей маячок свежий): JSON
-/// `[{peer, audio, video}]`. Себя сюда не включаем — UI добавит сам.
+/// Текущие участники комнаты `gid` (чей маячок свежий): JSON `[{peer,audio,video}]`.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(
     mut env: JNIEnv<'local>,
@@ -835,31 +939,25 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(
     session_ptr: jlong,
     gid_hex: JString<'local>,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "[]"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
-    let now = Instant::now();
-    let rs = session.rooms.lock().unwrap();
-    let arr: Vec<serde_json::Value> = rs
-        .remote
-        .get(&gid)
-        .map(|peers| {
-            peers
-                .iter()
+    jni_safe!(ret(&env, "[]"), {
+        if session_ptr == 0 { return ret(&env, "[]"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
+        let now = Instant::now();
+        let rs = session.rooms.lock_safe();
+        let arr: Vec<serde_json::Value> = rs.remote.get(&gid).map(|peers| {
+            peers.iter()
                 .filter(|(_, (t, _))| now.saturating_duration_since(*t) < PRESENCE_TTL)
                 .map(|(p, (_, f))| serde_json::json!({
-                    "peer": hex::encode(p),
-                    "audio": f & 0b01 != 0,
-                    "video": f & 0b10 != 0,
+                    "peer": hex::encode(p), "audio": f & 0b01 != 0, "video": f & 0b10 != 0,
                 }))
                 .collect()
-        })
-        .unwrap_or_default();
-    ret(&env, &serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into()))
+        }).unwrap_or_default();
+        ret(&env, &serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into()))
+    })
 }
 
-/// Запустить мультипати аудио комнаты `gid` (мультикаст всем участникам + микс
-/// приёма). Возвращает JSON-параметры аудио (sample_rate/channels/frame_len).
+/// Запустить мультипати аудио комнаты `gid`.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStart<'local>(
     mut env: JNIEnv<'local>,
@@ -867,18 +965,18 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStart<'local>(
     session_ptr: jlong,
     gid_hex: JString<'local>,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "{}"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "{}") };
-    let mut audio = AudioSettings::default();
-    audio.jitter_depth = 5; // как в 1:1 — сглаживание сети
-    let members = Arc::new(Mutex::new(session.live_participants(&gid)));
-    let engine = RoomCallEngine::start(session.messenger.clone(), audio, members.clone());
-    let old = session.room_call.lock().unwrap().replace(RoomCall { gid, engine, members });
-    if let Some(old) = old {
-        std::thread::spawn(move || old.engine.stop());
-    }
-    ret(&env, &call_params(0, &audio))
+    jni_safe!(ret(&env, "{}"), {
+        if session_ptr == 0 { return ret(&env, "{}"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "{}") };
+        let mut audio = AudioSettings::default();
+        audio.jitter_depth = 5;
+        let members = Arc::new(Mutex::new(session.live_participants(&gid)));
+        let engine = RoomCallEngine::start(session.messenger.clone(), audio, members.clone());
+        let old = session.room_call.lock_safe().replace(RoomCall { gid, engine, members });
+        if let Some(old) = old { std::thread::spawn(move || old.engine.stop()); }
+        ret(&env, &call_params(0, &audio))
+    })
 }
 
 /// Остановить мультипати аудио комнаты.
@@ -888,12 +986,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStop<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let rc = session.room_call.lock().unwrap().take();
-    if let Some(rc) = rc {
-        std::thread::spawn(move || rc.engine.stop());
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let rc = session.room_call.lock_safe().take();
+        if let Some(rc) = rc { std::thread::spawn(move || rc.engine.stop()); }
+    });
 }
 
 /// Захваченный PCM с микрофона → мультикаст-движку комнаты.
@@ -905,19 +1003,17 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushAudio<'local>(
     data: JShortArray<'local>,
     n: jint,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let n = n.max(0) as usize;
-    if n == 0 {
-        return;
-    }
-    let mut buf = vec![0i16; n];
-    if env.get_short_array_region(&data, 0, &mut buf).is_err() {
-        return;
-    }
-    if let Some(engine) = session.room_engine() {
-        engine.push_audio(&buf);
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let n = n.max(0) as usize;
+        if n == 0 { return; }
+        let mut buf = vec![0i16; n];
+        if env.get_short_array_region(&data, 0, &mut buf).is_err() { return; }
+        if let Some(engine) = session.room_engine() {
+            engine.push_audio(&buf);
+        }
+    });
 }
 
 /// Заполнить массив смешанным PCM комнаты. Возвращает число реальных сэмплов.
@@ -928,16 +1024,16 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullAudio<'local>(
     session_ptr: jlong,
     out: JShortArray<'local>,
 ) -> jint {
-    if session_ptr == 0 { return 0; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let len = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
-    if len == 0 {
-        return 0;
-    }
-    let mut buf = vec![0i16; len];
-    let n = session.room_engine().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
-    let _ = env.set_short_array_region(&out, 0, &buf);
-    n as jint
+    jni_safe!(0, {
+        if session_ptr == 0 { return 0; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let len = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
+        if len == 0 { return 0; }
+        let mut buf = vec![0i16; len];
+        let n = session.room_engine().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
+        let _ = env.set_short_array_region(&out, 0, &buf);
+        n as jint
+    })
 }
 
 #[no_mangle]
@@ -963,19 +1059,17 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPushAudio<'local>(
     data: JShortArray<'local>,
     n: jint,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let n = n.max(0) as usize;
-    if n == 0 {
-        return;
-    }
-    let mut buf = vec![0i16; n];
-    if env.get_short_array_region(&data, 0, &mut buf).is_err() {
-        return;
-    }
-    if let Some(engine) = session.current_call() {
-        engine.push_audio(&buf);
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let n = n.max(0) as usize;
+        if n == 0 { return; }
+        let mut buf = vec![0i16; n];
+        if env.get_short_array_region(&data, 0, &mut buf).is_err() { return; }
+        if let Some(engine) = session.current_call() {
+            engine.push_audio(&buf);
+        }
+    });
 }
 
 /// Заполнить массив PCM для воспроизведения. Возвращает число реальных сэмплов.
@@ -986,16 +1080,16 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPullAudio<'local>(
     session_ptr: jlong,
     out: JShortArray<'local>,
 ) -> jint {
-    if session_ptr == 0 { return 0; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let len = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
-    if len == 0 {
-        return 0;
-    }
-    let mut buf = vec![0i16; len];
-    let n = session.current_call().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
-    let _ = env.set_short_array_region(&out, 0, &buf);
-    n as jint
+    jni_safe!(0, {
+        if session_ptr == 0 { return 0; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let len = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
+        if len == 0 { return 0; }
+        let mut buf = vec![0i16; len];
+        let n = session.current_call().map(|e| e.pull_audio(&mut buf)).unwrap_or(0);
+        let _ = env.set_short_array_region(&out, 0, &buf);
+        n as jint
+    })
 }
 
 /// H.264 access-unit от аппаратного энкодера (Kotlin/MediaCodec) → фрагментация
@@ -1008,20 +1102,18 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callSendVideo<'local>(
     nal: JByteArray<'local>,
     keyframe: jboolean,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let len = env.get_array_length(&nal).unwrap_or(0).max(0) as usize;
-    if len == 0 {
-        return;
-    }
-    let mut buf = vec![0i8; len];
-    if env.get_byte_array_region(&nal, 0, &mut buf).is_err() {
-        return;
-    }
-    let bytes: Vec<u8> = buf.into_iter().map(|b| b as u8).collect();
-    if let Some(engine) = session.current_call() {
-        engine.send_video(&bytes, keyframe != JNI_FALSE);
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let len = env.get_array_length(&nal).unwrap_or(0).max(0) as usize;
+        if len == 0 { return; }
+        let mut buf = vec![0i8; len];
+        if env.get_byte_array_region(&nal, 0, &mut buf).is_err() { return; }
+        let bytes: Vec<u8> = buf.into_iter().map(|b| b as u8).collect();
+        if let Some(engine) = session.current_call() {
+            engine.send_video(&bytes, keyframe != JNI_FALSE);
+        }
+    });
 }
 
 /// Забрать собранный входящий H.264 access-unit для аппаратного декодера
@@ -1032,22 +1124,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callPullVideoPacket<'local>
     _class: JClass<'local>,
     session_ptr: jlong,
 ) -> jbyteArray {
-    if session_ptr == 0 {
-        return env.new_byte_array(0).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut());
-    }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let pkt = session.current_call().and_then(|e| e.pull_video_packet());
-    let Some(data) = pkt else {
-        return env.new_byte_array(0).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut());
-    };
-    let signed: Vec<i8> = data.into_iter().map(|b| b as i8).collect();
-    match env.new_byte_array(signed.len() as jsize) {
-        Ok(arr) => {
-            let _ = env.set_byte_array_region(&arr, 0, &signed);
-            arr.into_raw()
+    let empty = || env.new_byte_array(0).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut());
+    jni_safe!(empty(), {
+        if session_ptr == 0 { return empty(); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Some(data) = session.current_call().and_then(|e| e.pull_video_packet()) else {
+            return empty();
+        };
+        let signed: Vec<i8> = data.into_iter().map(|b| b as i8).collect();
+        match env.new_byte_array(signed.len() as jsize) {
+            Ok(arr) => { let _ = env.set_byte_array_region(&arr, 0, &signed); arr.into_raw() }
+            Err(_) => std::ptr::null_mut(),
         }
-        Err(_) => std::ptr::null_mut(),
-    }
+    })
 }
 
 #[no_mangle]
@@ -1057,11 +1146,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callSetMuted<'local>(
     session_ptr: jlong,
     muted: jboolean,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    if let Some(engine) = session.current_call() {
-        engine.set_muted(muted != JNI_FALSE);
-    }
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        if let Some(engine) = session.current_call() {
+            engine.set_muted(muted != JNI_FALSE);
+        }
+    });
 }
 
 // ── Группы (MLS) ───────────────────────────────────────────────────────────
@@ -1080,14 +1171,16 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupCreate<'local>(
     session_ptr: jlong,
     name: JString<'local>,
 ) -> jboolean {
-    if session_ptr == 0 { return JNI_FALSE; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let name = jstr(&mut env, &name);
-    let sent = session.jobs.send(Job::Cmd(GroupCmd::Create { name })).is_ok();
-    if sent { JNI_TRUE } else { JNI_FALSE }
+    jni_safe!(JNI_FALSE, {
+        if session_ptr == 0 { return JNI_FALSE; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let name = jstr(&mut env, &name);
+        let sent = session.jobs.send(Job::Cmd(GroupCmd::Create { name })).is_ok();
+        if sent { JNI_TRUE } else { JNI_FALSE }
+    })
 }
 
-/// Пригласить контакт в группу (просим его KeyPackage). Fire-and-forget.
+/// Пригласить контакт в группу. Fire-and-forget.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
     mut env: JNIEnv<'local>,
@@ -1096,19 +1189,18 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
     gid_hex: JString<'local>,
     peer_hex: JString<'local>,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let (Some(gid), Some(peer)) = (
-        hex::decode(jstr(&mut env, &gid_hex)).ok(),
-        parse_key(&jstr(&mut env, &peer_hex)),
-    ) else {
-        return;
-    };
-    let _ = session.jobs.send(Job::Cmd(GroupCmd::Invite { gid, peer }));
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let (Some(gid), Some(peer)) = (
+            hex::decode(jstr(&mut env, &gid_hex)).ok(),
+            parse_key(&jstr(&mut env, &peer_hex)),
+        ) else { return };
+        let _ = session.jobs.send(Job::Cmd(GroupCmd::Invite { gid, peer }));
+    });
 }
 
-/// Отправить текст в группу. Fire-and-forget: UI добавляет сообщение оптимистично,
-/// event_pump обновляет кэш истории после отправки.
+/// Отправить текст в группу. Fire-and-forget.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
     mut env: JNIEnv<'local>,
@@ -1117,11 +1209,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
     gid_hex: JString<'local>,
     text: JString<'local>,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return };
-    let text = jstr(&mut env, &text);
-    let _ = session.jobs.send(Job::Cmd(GroupCmd::SendText { gid, text }));
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return };
+        let text = jstr(&mut env, &text);
+        let _ = session.jobs.send(Job::Cmd(GroupCmd::SendText { gid, text }));
+    });
 }
 
 /// Список групп как JSON-массив [{gid, name, members}]. Читает кэш — мгновенно.
@@ -1131,14 +1225,12 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
 ) -> jstring {
-    // До прайминга кэша list пуст — отдаём "[]", иначе JSONArray("") в Kotlin крашнется.
-    if session_ptr == 0 { return ret(&env, "[]"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let json = session.group_cache.lock().ok()
-        .map(|c| c.list.clone())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "[]".into());
-    ret(&env, &json)
+    jni_safe!(ret(&env, "[]"), {
+        if session_ptr == 0 { return ret(&env, "[]"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let json = session.group_cache.lock_safe().list.clone();
+        ret(&env, if json.is_empty() { "[]" } else { &json })
+    })
 }
 
 /// История группового чата как JSON-массив [{text, mine, time}]. Читает кэш.
@@ -1149,16 +1241,16 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistory<'local>(
     session_ptr: jlong,
     gid_hex: JString<'local>,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "[]"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
-    let json = session.group_cache.lock().ok()
-        .and_then(|c| c.history.get(&gid).cloned())
-        .unwrap_or_else(|| "[]".into());
-    ret(&env, &json)
+    jni_safe!(ret(&env, "[]"), {
+        if session_ptr == 0 { return ret(&env, "[]"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
+        let json = session.group_cache.lock_safe().history.get(&gid).cloned().unwrap_or_else(|| "[]".into());
+        ret(&env, &json)
+    })
 }
 
-/// Ключи участников группы (hex) как JSON-массив — для группового звонка. Кэш.
+/// Ключи участников группы как JSON-массив. Читает кэш.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
     mut env: JNIEnv<'local>,
@@ -1166,79 +1258,70 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
     session_ptr: jlong,
     gid_hex: JString<'local>,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "[]"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
-    let json = session.group_cache.lock().ok()
-        .and_then(|c| c.members.get(&gid).cloned())
-        .unwrap_or_else(|| "[]".into());
-    ret(&env, &json)
+    jni_safe!(ret(&env, "[]"), {
+        if session_ptr == 0 { return ret(&env, "[]"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
+        let json = session.group_cache.lock_safe().members.get(&gid).cloned().unwrap_or_else(|| "[]".into());
+        ret(&env, &json)
+    })
 }
 
 // ── Диагностика: тест пропускной способности меша ──────────────────────────
 
-/// Включить приём бенча: считаем входящие BENCH_TRACK-датаграммы.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStart<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
 ) {
-    if session_ptr == 0 { return; }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let rx = session.messenger.media_channel(8192);
-    let st = Arc::new(BenchRecv {
-        bytes: AtomicU64::new(0),
-        pkts: AtomicU64::new(0),
-        running: AtomicBool::new(true),
-        start: Instant::now(),
-    });
-    *session.bench.lock().unwrap() = Some(st.clone());
-    std::thread::spawn(move || {
-        while st.running.load(Ordering::Relaxed) {
-            match rx.recv_timeout(Duration::from_millis(200)) {
-                Ok(p) if p.track == BENCH_TRACK => {
-                    st.bytes.fetch_add(p.payload.len() as u64, Ordering::Relaxed);
-                    st.pkts.fetch_add(1, Ordering::Relaxed);
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let rx = session.messenger.media_channel(8192);
+        let st = Arc::new(BenchRecv {
+            bytes: AtomicU64::new(0), pkts: AtomicU64::new(0),
+            running: AtomicBool::new(true), start: Instant::now(),
+        });
+        *session.bench.lock_safe() = Some(st.clone());
+        std::thread::spawn(move || {
+            while st.running.load(Ordering::Relaxed) {
+                match rx.recv_timeout(Duration::from_millis(200)) {
+                    Ok(p) if p.track == BENCH_TRACK => {
+                        st.bytes.fetch_add(p.payload.len() as u64, Ordering::Relaxed);
+                        st.pkts.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(_) => return,
                 }
-                Ok(_) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(_) => return,
             }
-        }
+        });
     });
 }
 
-/// Статистика приёмника: JSON {pkts, bytes, secs, mbps}.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStats<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "{}"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let json = {
-        let g = session.bench.lock().unwrap();
-        match g.as_ref() {
+    jni_safe!(ret(&env, "{}"), {
+        if session_ptr == 0 { return ret(&env, "{}"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let g = session.bench.lock_safe();
+        let json = match g.as_ref() {
             Some(st) => {
                 let bytes = st.bytes.load(Ordering::Relaxed);
                 let pkts = st.pkts.load(Ordering::Relaxed);
                 let secs = st.start.elapsed().as_secs_f64().max(0.001);
-                serde_json::json!({
-                    "pkts": pkts, "bytes": bytes, "secs": secs,
-                    "mbps": bytes as f64 * 8.0 / 1e6 / secs,
-                })
-                .to_string()
+                serde_json::json!({"pkts": pkts, "bytes": bytes, "secs": secs, "mbps": bytes as f64 * 8.0 / 1e6 / secs}).to_string()
             }
             None => "{}".into(),
-        }
-    };
-    ret(&env, &json)
+        };
+        ret(&env, &json)
+    })
 }
 
-/// Бластить `total_kb` КБ датаграммами по 1200Б на пира `key_hex` (макс 10с).
-/// Возвращает JSON {sent_pkts, sent_bytes, secs, mbps} — скорость ОТПРАВКИ.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_benchBlast<'local>(
     mut env: JNIEnv<'local>,
@@ -1247,25 +1330,24 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_benchBlast<'local>(
     key_hex: JString<'local>,
     total_kb: jint,
 ) -> jstring {
-    if session_ptr == 0 { return ret(&env, "{}"); }
-    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-    let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
-    let payload = vec![0u8; 1200];
-    let target = (total_kb.max(0) as u64) * 1024;
-    let mut sent_bytes = 0u64;
-    let mut sent_pkts = 0u64;
-    let mut seq = 0u16;
-    let t0 = Instant::now();
-    while sent_bytes < target && t0.elapsed() < Duration::from_secs(10) {
-        if session.messenger.send_media(&peer, BENCH_TRACK, seq, 0, &payload).is_ok() {
-            sent_bytes += payload.len() as u64;
-            sent_pkts += 1;
-            seq = seq.wrapping_add(1);
+    jni_safe!(ret(&env, "{}"), {
+        if session_ptr == 0 { return ret(&env, "{}"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
+        let payload = vec![0u8; 1200];
+        let target = (total_kb.max(0) as u64) * 1024;
+        let mut sent_bytes = 0u64;
+        let mut sent_pkts = 0u64;
+        let mut seq = 0u16;
+        let t0 = Instant::now();
+        while sent_bytes < target && t0.elapsed() < Duration::from_secs(10) {
+            if session.messenger.send_media(&peer, BENCH_TRACK, seq, 0, &payload).is_ok() {
+                sent_bytes += payload.len() as u64;
+                sent_pkts += 1;
+                seq = seq.wrapping_add(1);
+            }
         }
-    }
-    let secs = t0.elapsed().as_secs_f64().max(0.001);
-    ret(&env, &serde_json::json!({
-        "sent_pkts": sent_pkts, "sent_bytes": sent_bytes, "secs": secs,
-        "mbps": sent_bytes as f64 * 8.0 / 1e6 / secs,
-    }).to_string())
+        let secs = t0.elapsed().as_secs_f64().max(0.001);
+        ret(&env, &serde_json::json!({"sent_pkts": sent_pkts, "sent_bytes": sent_bytes, "secs": secs, "mbps": sent_bytes as f64 * 8.0 / 1e6 / secs}).to_string())
+    })
 }
