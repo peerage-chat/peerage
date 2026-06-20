@@ -113,39 +113,69 @@ private fun Root(model: AppModel) {
 
     Box(Modifier.fillMaxSize()) {
         Surface(Modifier.fillMaxSize(), color = HoloBg) {
-            when (screen) {
-                Screen.Contacts -> ContactsScreen(model,
-                    onOpen = { model.openChat(it); screen = Screen.Chat },
-                    onAdd = { screen = Screen.Add },
-                    onMe = { screen = Screen.Me },
-                    onGroups = { model.refreshGroups(); screen = Screen.Groups },
-                    onSettings = { screen = Screen.Settings })
-                Screen.Chat -> ChatScreen(model,
-                    onBack = { screen = Screen.Contacts },
-                    onInfo = { screen = Screen.Info },
-                    onCall = { key, video -> model.callDm(key, video) })
-                Screen.Add -> AddScreen(model, onDone = { screen = Screen.Contacts })
-                Screen.Me -> MeScreen(model, onBack = { screen = Screen.Contacts })
-                Screen.Info -> InfoScreen(model,
-                    onBack = { screen = Screen.Chat },
-                    onDeleted = { screen = Screen.Contacts })
-                Screen.Groups -> GroupsScreen(model,
-                    onBack = { screen = Screen.Contacts },
-                    onOpen = { model.openGroup(it); screen = Screen.GroupChat },
-                    onCreate = { screen = Screen.CreateGroup })
-                Screen.GroupChat -> GroupChatScreen(model,
-                    onBack = { screen = Screen.Groups },
-                    onAddMember = { screen = Screen.AddMember })
-                Screen.CreateGroup -> CreateGroupScreen(model, onDone = { screen = Screen.Groups })
-                Screen.AddMember -> AddMemberScreen(model, onDone = { screen = Screen.GroupChat })
-                Screen.Settings -> SettingsScreen(model, onBack = { screen = Screen.Contacts })
-            }
-        }
-        // DmCallBar: прикреплён под шапкой (56dp) любого экрана, виден независимо от навигации.
-        if (model.incomingCall == null) {
-            model.dmCallPeer?.let { peer ->
-                DmCallBar(model, peer,
-                    Modifier.align(Alignment.TopStart).padding(top = 56.dp))
+            Column(Modifier.fillMaxSize()) {
+                // ── Шапка: конфигурируется по текущему экрану ─────────────────────
+                when (screen) {
+                    Screen.Contacts -> TopBar("p2p messenger") {
+                        BarIcon(Icons.Filled.Group, "Группы") { model.refreshGroups(); screen = Screen.Groups }
+                        BarIcon(Icons.Filled.PersonAdd, "Добавить контакт") { screen = Screen.Add }
+                        BarIcon(Icons.Filled.QrCode2, "Мой код") { screen = Screen.Me }
+                        BarIcon(Icons.Filled.Settings, "Настройки") { screen = Screen.Settings }
+                    }
+                    Screen.Chat -> {
+                        val key = model.currentChat
+                        val name = key?.let { k -> model.contacts.firstOrNull { it.key == k }?.name } ?: "Чат"
+                        TopBar(name, onBack = { screen = Screen.Contacts }) {
+                            if (key != null) {
+                                BarIcon(Icons.Filled.Call, "Аудио-звонок") { model.callDm(key, false) }
+                                BarIcon(Icons.Filled.Videocam, "Видео-звонок") { model.callDm(key, true) }
+                                BarIcon(Icons.Filled.Info, "О контакте") { screen = Screen.Info }
+                            }
+                        }
+                    }
+                    Screen.Add -> TopBar("Добавить контакт", onBack = { screen = Screen.Contacts })
+                    Screen.Me -> TopBar("Мой код", onBack = { screen = Screen.Contacts })
+                    Screen.Info -> TopBar("Контакт", onBack = { screen = Screen.Chat })
+                    Screen.Groups -> TopBar("Группы", onBack = { screen = Screen.Contacts }) {
+                        BarIcon(Icons.Filled.Add, "Новая группа") { screen = Screen.CreateGroup }
+                    }
+                    Screen.GroupChat -> {
+                        val gid = model.currentGroup
+                        val name = gid?.let { g -> model.groups.firstOrNull { it.gid == g }?.name } ?: "Группа"
+                        TopBar(name, onBack = { screen = Screen.Groups }) {
+                            if (gid != null) {
+                                if (model.currentRoom == gid) {
+                                    BarIcon(Icons.Filled.CallEnd, "Выйти из звонка") { model.leaveRoom() }
+                                } else {
+                                    BarIcon(Icons.Filled.Call, "Войти в звонок") { model.joinRoom(gid) }
+                                }
+                                BarIcon(Icons.Filled.GroupAdd, "Добавить участника") { screen = Screen.AddMember }
+                            }
+                        }
+                    }
+                    Screen.CreateGroup -> TopBar("Новая группа", onBack = { screen = Screen.Groups })
+                    Screen.AddMember -> TopBar("Добавить участника", onBack = { screen = Screen.GroupChat })
+                    Screen.Settings -> TopBar("Настройки", onBack = { screen = Screen.Contacts })
+                }
+                // ── DmCallBar: прямо под шапкой, толкает контент вниз ─────────────
+                if (model.incomingCall == null) {
+                    model.dmCallPeer?.let { DmCallBar(model, it) }
+                }
+                // ── Контент экрана (без шапки) ────────────────────────────────────
+                Box(Modifier.weight(1f)) {
+                    when (screen) {
+                        Screen.Contacts -> ContactsScreen(model) { model.openChat(it); screen = Screen.Chat }
+                        Screen.Chat -> ChatScreen(model)
+                        Screen.Add -> AddScreen(model) { screen = Screen.Contacts }
+                        Screen.Me -> MeScreen(model)
+                        Screen.Info -> InfoScreen(model) { screen = Screen.Contacts }
+                        Screen.Groups -> GroupsScreen(model) { model.openGroup(it); screen = Screen.GroupChat }
+                        Screen.GroupChat -> GroupChatScreen(model)
+                        Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Groups }
+                        Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
+                        Screen.Settings -> SettingsScreen(model)
+                    }
+                }
             }
         }
         model.incomingCall?.let { IncomingCallOverlay(model, it) }
@@ -156,7 +186,7 @@ private fun Root(model: AppModel) {
 
 /** Иконка-кнопка топ-бара: единый размер (48dp касание / 24dp иконка). */
 @Composable
-private fun BarIcon(icon: ImageVector, desc: String, onClick: () -> Unit, tint: Color = HoloAccent) {
+private fun BarIcon(icon: ImageVector, desc: String, tint: Color = HoloAccent, onClick: () -> Unit) {
     IconButton(onClick = onClick) {
         Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(24.dp))
     }
@@ -169,7 +199,7 @@ private fun TopBar(title: String, onBack: (() -> Unit)? = null, actions: @Compos
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
-            BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onBack)
+            BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onClick = onBack)
         } else {
             Spacer(Modifier.width(12.dp))
         }
@@ -219,14 +249,8 @@ private fun SendButton(onClick: () -> Unit) {
 // ── Экраны ──────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () -> Unit, onMe: () -> Unit, onGroups: () -> Unit, onSettings: () -> Unit = {}) {
+private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        TopBar("p2p messenger") {
-            BarIcon(Icons.Filled.Group, "Группы", onGroups)
-            BarIcon(Icons.Filled.PersonAdd, "Добавить контакт", onAdd)
-            BarIcon(Icons.Filled.QrCode2, "Мой код", onMe)
-            BarIcon(Icons.Filled.Settings, "Настройки", onSettings)
-        }
         // Долгий тап → режим приёмника теста скорости (живой Мбит/с).
         val statusLabel = if (model.benchRecv) "⏱ приём: %.1f Мбит/с".format(model.benchRecvMbps)
         else "Пиров в сети: ${model.netPeers}"
@@ -261,18 +285,12 @@ private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit, onAdd: () 
 }
 
 @Composable
-private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, onCall: (String, Boolean) -> Unit) {
+private fun ChatScreen(model: AppModel) {
     val key = model.currentChat ?: return
-    val contact = model.contacts.firstOrNull { it.key == key }
     val msgs = model.messages[key]
     var input by remember(key) { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize()) {
-        TopBar(contact?.name ?: "Чат", onBack = onBack) {
-            BarIcon(Icons.Filled.Call, "Аудио-звонок", { onCall(key, false) })
-            BarIcon(Icons.Filled.Videocam, "Видео-звонок", { onCall(key, true) })
-            BarIcon(Icons.Filled.Info, "О контакте", onInfo)
-        }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
             items(msgs ?: emptyList()) { m -> MessageBubble(m) }
         }
@@ -325,45 +343,39 @@ private fun AddScreen(model: AppModel, onDone: () -> Unit) {
     LaunchedEffect(Unit) { model.addStatus = "" }
     val st = model.addStatus
     LaunchedEffect(st) { if (st == "added") { model.addStatus = ""; onDone() } }
-    Column(Modifier.fillMaxSize()) {
-        TopBar("Добавить контакт", onBack = onDone)
-        Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
-            FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ (hex)")
-            TextField(keyHex, { keyHex = it }, Modifier.fillMaxWidth(), colors = inputColors(),
-                placeholder = { Text("64 hex-символа", color = HoloSecondary) })
-            FieldLabel("ИМЯ")
-            TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-            AccentButton("Добавить") { model.addContact(keyHex.trim(), name.trim()) }
-            val msg = when (st) { "known" -> "Контакт уже есть"; "error" -> "Неверный ключ"; else -> "" }
-            if (msg.isNotEmpty()) Text(msg, color = HoloError, fontSize = 13.sp)
-        }
+    Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
+        FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ (hex)")
+        TextField(keyHex, { keyHex = it }, Modifier.fillMaxWidth(), colors = inputColors(),
+            placeholder = { Text("64 hex-символа", color = HoloSecondary) })
+        FieldLabel("ИМЯ")
+        TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
+        AccentButton("Добавить") { model.addContact(keyHex.trim(), name.trim()) }
+        val msg = when (st) { "known" -> "Контакт уже есть"; "error" -> "Неверный ключ"; else -> "" }
+        if (msg.isNotEmpty()) Text(msg, color = HoloError, fontSize = 13.sp)
     }
 }
 
 @Composable
-private fun MeScreen(model: AppModel, onBack: () -> Unit) {
+private fun MeScreen(model: AppModel) {
     val me = model.me ?: return
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        TopBar("Мой код", onBack = onBack)
-        Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
-            FieldLabel("FINGERPRINT (сверьте при встрече)")
-            Text(me.fingerprint, color = HoloAccent, fontSize = 16.sp)
-            FieldLabel("АДРЕС YGGDRASIL")
-            Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-            FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ")
-            Text(me.pubkey, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-        }
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(ScreenPad),
+        verticalArrangement = Arrangement.spacedBy(FormGap)) {
+        FieldLabel("FINGERPRINT (сверьте при встрече)")
+        Text(me.fingerprint, color = HoloAccent, fontSize = 16.sp)
+        FieldLabel("АДРЕС YGGDRASIL")
+        Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+        FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ")
+        Text(me.pubkey, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
     }
 }
 
 @Composable
-private fun InfoScreen(model: AppModel, onBack: () -> Unit, onDeleted: () -> Unit) {
+private fun InfoScreen(model: AppModel, onDeleted: () -> Unit) {
     val key = model.currentChat ?: return
     val c = model.contacts.firstOrNull { it.key == key } ?: return
     var name by remember(key) { mutableStateOf(c.name) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        TopBar("Контакт", onBack = onBack)
-        Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(ScreenPad),
+        verticalArrangement = Arrangement.spacedBy(FormGap)) {
             FieldLabel("ИМЯ")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextField(name, { name = it }, Modifier.weight(1f), colors = inputColors())
@@ -397,27 +409,21 @@ private fun InfoScreen(model: AppModel, onBack: () -> Unit, onDeleted: () -> Uni
             if (model.benchResult.isNotEmpty()) {
                 Text(model.benchResult, color = HoloSecondary, fontSize = 12.sp)
             }
-        }
     }
 }
 
 @Composable
-private fun GroupsScreen(model: AppModel, onBack: () -> Unit, onOpen: (String) -> Unit, onCreate: () -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        TopBar("Группы", onBack = onBack) {
-            BarIcon(Icons.Filled.Add, "Новая группа", onCreate)
-        }
-        if (model.groups.isEmpty()) {
-            CenterMessage("Нет групп. Создайте новую.")
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(model.groups, key = { it.gid }) { g ->
-                    ListRow(onClick = { onOpen(g.gid) }) {
-                        Icon(Icons.Filled.Group, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text(g.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                        Text("${g.members} уч.", color = HoloSecondary, fontSize = 12.sp)
-                    }
+private fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
+    if (model.groups.isEmpty()) {
+        CenterMessage("Нет групп. Создайте новую.")
+    } else {
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(model.groups, key = { it.gid }) { g ->
+                ListRow(onClick = { onOpen(g.gid) }) {
+                    Icon(Icons.Filled.Group, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(g.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Text("${g.members} уч.", color = HoloSecondary, fontSize = 12.sp)
                 }
             }
         }
@@ -425,9 +431,8 @@ private fun GroupsScreen(model: AppModel, onBack: () -> Unit, onOpen: (String) -
 }
 
 @Composable
-private fun GroupChatScreen(model: AppModel, onBack: () -> Unit, onAddMember: () -> Unit) {
+private fun GroupChatScreen(model: AppModel) {
     val gid = model.currentGroup ?: return
-    val group = model.groups.firstOrNull { it.gid == gid }
     val msgs = model.groupMessages[gid]
     var input by remember(gid) { mutableStateOf("") }
     var focusedParticipant by remember { mutableStateOf<String?>(null) }
@@ -438,14 +443,6 @@ private fun GroupChatScreen(model: AppModel, onBack: () -> Unit, onAddMember: ()
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(group?.name ?: "Группа", onBack = onBack) {
-                if (inRoom) {
-                    BarIcon(Icons.Filled.CallEnd, "Выйти из звонка", { model.leaveRoom() })
-                } else {
-                    BarIcon(Icons.Filled.Call, "Войти в звонок", { model.joinRoom(gid) })
-                }
-                BarIcon(Icons.Filled.GroupAdd, "Добавить участника", onAddMember)
-            }
             if (showGrid) RoomGrid(model, inRoom, presenceMembers, onFocus = { focusedParticipant = it })
             LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
                 items(msgs ?: emptyList()) { m ->
@@ -588,33 +585,27 @@ private fun ParticipantFullscreen(
 @Composable
 private fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
     var name by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize()) {
-        TopBar("Новая группа", onBack = onDone)
-        Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
-            FieldLabel("НАЗВАНИЕ")
-            TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-            AccentButton("Создать") { model.createGroup(name); onDone() }
-            Text("Вы станете администратором. Добавляйте участников из контактов внутри группы.",
-                color = HoloSecondary, fontSize = 11.sp)
-        }
+    Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
+        FieldLabel("НАЗВАНИЕ")
+        TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
+        AccentButton("Создать") { model.createGroup(name); onDone() }
+        Text("Вы станете администратором. Добавляйте участников из контактов внутри группы.",
+            color = HoloSecondary, fontSize = 11.sp)
     }
 }
 
 @Composable
 private fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
     val gid = model.currentGroup ?: return
-    Column(Modifier.fillMaxSize()) {
-        TopBar("Добавить участника", onBack = onDone)
-        if (model.contacts.isEmpty()) {
-            CenterMessage("Нет контактов для приглашения.")
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(model.contacts, key = { it.key }) { c ->
-                    ListRow(onClick = { model.inviteToGroup(gid, c.key); onDone() }) {
-                        StatusDot(model.online[c.key] == true)
-                        Spacer(Modifier.width(12.dp))
-                        Text(c.name, color = Color.White, fontSize = 16.sp)
-                    }
+    if (model.contacts.isEmpty()) {
+        CenterMessage("Нет контактов для приглашения.")
+    } else {
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(model.contacts, key = { it.key }) { c ->
+                ListRow(onClick = { model.inviteToGroup(gid, c.key); onDone() }) {
+                    StatusDot(model.online[c.key] == true)
+                    Spacer(Modifier.width(12.dp))
+                    Text(c.name, color = Color.White, fontSize = 16.sp)
                 }
             }
         }
@@ -655,12 +646,12 @@ private fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
     }
 }
 
-/** Мини-полоса активного DM-звонка. modifier задаётся снаружи для позиционирования в Root. */
+/** Мини-полоса активного DM-звонка — встраивается в Column Root между шапкой и контентом. */
 @Composable
-private fun DmCallBar(model: AppModel, peerKey: String, modifier: Modifier = Modifier) {
+private fun DmCallBar(model: AppModel, peerKey: String) {
     val name = model.contacts.firstOrNull { it.key == peerKey }?.name ?: (peerKey.take(6) + "…")
     val ringing = model.roomMembers.isEmpty()
-    Surface(color = Color(0xFF1B2E1B), modifier = modifier.fillMaxWidth()) {
+    Surface(color = Color(0xFF1B2E1B), modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -689,16 +680,14 @@ private fun CallButton(icon: ImageVector, desc: String, color: Color, onClick: (
 }
 
 @Composable
-private fun SettingsScreen(model: AppModel, onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        TopBar("Настройки", onBack = onBack)
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(ScreenPad),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
+private fun SettingsScreen(model: AppModel) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(ScreenPad),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
             FieldLabel("КАЧЕСТВО ВИДЕО-ЗВОНКА")
             Spacer(Modifier.height(4.dp))
             VideoQuality.presets.forEach { preset ->
@@ -742,7 +731,6 @@ private fun SettingsScreen(model: AppModel, onBack: () -> Unit) {
                 color = HoloSecondary,
                 fontSize = 11.sp,
             )
-        }
     }
 }
 
