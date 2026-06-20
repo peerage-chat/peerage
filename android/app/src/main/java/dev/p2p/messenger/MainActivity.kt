@@ -141,6 +141,13 @@ private fun Root(model: AppModel) {
                 Screen.Settings -> SettingsScreen(model, onBack = { screen = Screen.Contacts })
             }
         }
+        // DmCallBar: прикреплён под шапкой (56dp) любого экрана, виден независимо от навигации.
+        if (model.incomingCall == null) {
+            model.dmCallPeer?.let { peer ->
+                DmCallBar(model, peer,
+                    Modifier.align(Alignment.TopStart).padding(top = 56.dp))
+            }
+        }
         model.incomingCall?.let { IncomingCallOverlay(model, it) }
     }
 }
@@ -265,9 +272,6 @@ private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, 
             BarIcon(Icons.Filled.Call, "Аудио-звонок", { onCall(key, false) })
             BarIcon(Icons.Filled.Videocam, "Видео-звонок", { onCall(key, true) })
             BarIcon(Icons.Filled.Info, "О контакте", onInfo)
-        }
-        if (model.incomingCall == null && model.dmCallPeer == key) {
-            DmCallBar(model, key)
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
             items(msgs ?: emptyList()) { m -> MessageBubble(m) }
@@ -651,12 +655,12 @@ private fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
     }
 }
 
-/** Мини-полоса активного DM-звонка — встраивается между топ-баром и чатом. */
+/** Мини-полоса активного DM-звонка. modifier задаётся снаружи для позиционирования в Root. */
 @Composable
-private fun DmCallBar(model: AppModel, peerKey: String) {
+private fun DmCallBar(model: AppModel, peerKey: String, modifier: Modifier = Modifier) {
     val name = model.contacts.firstOrNull { it.key == peerKey }?.name ?: (peerKey.take(6) + "…")
     val ringing = model.roomMembers.isEmpty()
-    Surface(color = Color(0xFF1B2E1B), modifier = Modifier.fillMaxWidth()) {
+    Surface(color = Color(0xFF1B2E1B), modifier = modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
