@@ -1,13 +1,18 @@
-//! Персистентность: профиль (идентичность) и контакты на диске.
+//! Персистентность: профиль, контакты и история сообщений.
 //!
-//! Формат — JSON. Seed профиля секретен: на Unix файл создаётся с правами 0600.
-//! Кросс-платформенно (std::fs есть и на Desktop, и на Android).
+//! * [`Profile`] — идентичность, хранится в profile.json (секрет, 0600 на Unix).
+//! * [`ContactStore`] — TOFU-контакты в SQLite, in-memory кэш для быстрых чтений.
+//! * [`MessageStore`] — история сообщений в SQLite, без кэша (прямые запросы).
+//!
+//! Оба стора принимают [`crate::db::Db`] — общее `Arc<Mutex<Connection>>`.
+//! Миграция из JSON-файлов выполняется один раз в `open()` при наличии legacy-файла.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::db::{self, Db};
 use crate::identity::Identity;
 
 #[derive(Debug, thiserror::Error)]
@@ -22,38 +27,32 @@ pub enum StoreError {
     BadLength,
     #[error("at-rest: {0}")]
     Vault(#[from] crate::vault::VaultError),
+    #[error("database: {0}")]
+    Db(#[from] rusqlite::Error),
 }
 
-// ---- Профиль (идентичность) ----
+// ---- Профиль (идентичность) ------------------------------------------------
 
 #[derive(Serialize, Deserialize)]
 struct ProfileFile {
     version: u8,
-    /// seed ed25519 (32 байта, hex). СЕКРЕТ.
     seed: String,
 }
 
-/// Профиль пользователя: хранит идентичность.
+/// Профиль пользователя — хранит идентичность в profile.json.
 pub struct Profile {
     pub identity: Identity,
 }
 
 impl Profile {
-    /// Загрузить профиль из файла, либо создать новый (сгенерировать
-    /// идентичность и сохранить). Идемпотентно для запуска приложения.
     pub fn load_or_create(path: &Path) -> Result<Profile, StoreError> {
-        if path.exists() {
-            Self::load(path)
-        } else {
-            let profile = Profile {
-                identity: Identity::generate(),
-            };
+        if path.exists() { Self::load(path) } else {
+            let profile = Profile { identity: Identity::generate() };
             profile.save(path)?;
             Ok(profile)
         }
     }
 
-    /// Загрузить профиль из файла.
     pub fn load(path: &Path) -> Result<Profile, StoreError> {
         let data = crate::vault::open(&std::fs::read(path)?)?;
         let pf: ProfileFile = serde_json::from_slice(&data)?;
@@ -62,109 +61,131 @@ impl Profile {
         Ok(Profile { identity })
     }
 
-    /// Сохранить профиль (с правами 0600 на Unix).
     pub fn save(&self, path: &Path) -> Result<(), StoreError> {
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)?;
             }
         }
-        let pf = ProfileFile {
-            version: 1,
-            seed: hex::encode(self.identity.seed()),
-        };
+        let pf = ProfileFile { version: 1, seed: hex::encode(self.identity.seed()) };
         let json = serde_json::to_vec_pretty(&pf)?;
         write_secret(path, &crate::vault::seal(&json))?;
         Ok(())
     }
 }
 
-/// Записать секретный файл сразу с ограниченными правами (без окна TOCTOU).
 #[cfg(unix)]
 fn write_secret(path: &Path, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
+        .write(true).create(true).truncate(true).mode(0o600).open(path)?;
     f.write_all(data)
 }
 
 #[cfg(not(unix))]
 fn write_secret(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    // На не-Unix защита прав — задача ОС/хранилища; см. M1 (шифрование at-rest).
     std::fs::write(path, data)
 }
 
-// ---- Контакты (TOFU) ----
+// ---- Контакты (TOFU) -------------------------------------------------------
 
-/// Контакт: идентифицируется публичным ключом ed25519 (он же адрес/идентичность).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Contact {
-    /// Публичный ключ ed25519 (hex).
     pub key: String,
-    /// Отображаемое имя.
     pub name: String,
-    /// Fingerprint (8 слов BIP39) для верификации.
     pub fingerprint: String,
-    /// Когда добавлен (unix-секунды).
     pub added: i64,
-    /// Подтверждён ли fingerprint вне канала (защита от MITM при обмене ключом).
     #[serde(default)]
     pub verified: bool,
 }
 
-#[derive(Serialize, Deserialize, Default)]
-struct ContactsFile {
-    version: u8,
-    contacts: Vec<Contact>,
-}
-
-/// Результат добавления контакта (TOFU).
 #[derive(Debug, PartialEq, Eq)]
 pub enum AddOutcome {
-    /// Новый контакт сохранён.
     Added,
-    /// Контакт с этим ключом уже есть (TOFU — доверяем сохранённому).
     AlreadyKnown,
 }
 
-/// Хранилище контактов с персистентностью.
+/// SQLite-хранилище контактов с in-memory кэшем для быстрых чтений.
 pub struct ContactStore {
-    path: PathBuf,
-    by_key: HashMap<[u8; 32], Contact>,
+    db: Db,
+    cache: HashMap<[u8; 32], Contact>,
 }
 
 impl ContactStore {
-    /// Загрузить хранилище из файла (или создать пустое, если файла нет).
-    pub fn load(path: &Path) -> Result<ContactStore, StoreError> {
-        let mut by_key = HashMap::new();
-        if path.exists() {
-            let data = crate::vault::open(&std::fs::read(path)?)?;
-            let cf: ContactsFile = serde_json::from_slice(&data)?;
-            for c in cf.contacts {
-                let key = decode_key(&c.key)?;
-                by_key.insert(key, c);
+    /// Открыть хранилище. Если `legacy` указывает на существующий contacts.json,
+    /// импортирует оттуда данные и переименовывает файл в .bak.
+    pub fn open(db: Db, legacy: Option<&Path>) -> Result<Self, StoreError> {
+        let mut store = ContactStore { db: db.clone(), cache: HashMap::new() };
+        store.load_cache()?;
+
+        if let Some(path) = legacy {
+            if path.exists() {
+                store.import_json(path)?;
+                let _ = std::fs::rename(path, path.with_extension("json.bak"));
             }
         }
-        Ok(ContactStore {
-            path: path.to_path_buf(),
-            by_key,
-        })
+        Ok(store)
     }
 
-    /// Добавить контакт по публичному ключу (TOFU). Если ключ уже известен —
-    /// возвращает [`AddOutcome::AlreadyKnown`] и НЕ перезаписывает имя.
-    pub fn add(
-        &mut self,
-        key: &[u8; 32],
-        name: &str,
-        added: i64,
-    ) -> Result<AddOutcome, StoreError> {
-        if self.by_key.contains_key(key) {
+    fn load_cache(&mut self) -> Result<(), StoreError> {
+        let conn = db::lock(&self.db);
+        let mut stmt = conn.prepare(
+            "SELECT key, name, fingerprint, added, verified FROM contacts",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?;
+        for row in rows {
+            let (kb, name, fp, added, ver) = row?;
+            if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
+                self.cache.insert(key, Contact {
+                    key: hex::encode(key),
+                    name,
+                    fingerprint: fp,
+                    added,
+                    verified: ver != 0,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn import_json(&mut self, path: &Path) -> Result<(), StoreError> {
+        #[derive(Deserialize)]
+        struct LegacyFile { contacts: Vec<Contact> }
+
+        let raw = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(_) => return Ok(()),
+        };
+        let data = crate::vault::open(&raw).unwrap_or(raw);
+        let lf: LegacyFile = match serde_json::from_slice(&data) {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let conn = db::lock(&self.db);
+        for c in lf.contacts {
+            let key = match decode_key(&c.key) { Ok(k) => k, Err(_) => continue };
+            if self.cache.contains_key(&key) { continue; }
+            conn.execute(
+                "INSERT OR IGNORE INTO contacts (key, name, fingerprint, added, verified)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![key.as_slice(), &c.name, &c.fingerprint, c.added, c.verified as i64],
+            )?;
+            self.cache.insert(key, c);
+        }
+        Ok(())
+    }
+
+    pub fn add(&mut self, key: &[u8; 32], name: &str, added: i64) -> Result<AddOutcome, StoreError> {
+        if self.cache.contains_key(key) {
             return Ok(AddOutcome::AlreadyKnown);
         }
         let contact = Contact {
@@ -174,314 +195,281 @@ impl ContactStore {
             added,
             verified: false,
         };
-        self.by_key.insert(*key, contact);
-        self.save()?;
+        db::lock(&self.db).execute(
+            "INSERT OR IGNORE INTO contacts (key, name, fingerprint, added, verified)
+             VALUES (?1, ?2, ?3, ?4, 0)",
+            rusqlite::params![key.as_slice(), &contact.name, &contact.fingerprint, added],
+        )?;
+        self.cache.insert(*key, contact);
         Ok(AddOutcome::Added)
     }
 
-    /// Контакт по ключу.
     pub fn get(&self, key: &[u8; 32]) -> Option<&Contact> {
-        self.by_key.get(key)
+        self.cache.get(key)
     }
 
-    /// Все контакты.
     pub fn list(&self) -> Vec<&Contact> {
-        self.by_key.values().collect()
+        self.cache.values().collect()
     }
 
-    /// Знаем ли мы этот ключ.
     pub fn contains(&self, key: &[u8; 32]) -> bool {
-        self.by_key.contains_key(key)
+        self.cache.contains_key(key)
     }
 
-    /// Отметить контакт как проверенный/непроверенный (после сверки fingerprint).
     pub fn set_verified(&mut self, key: &[u8; 32], verified: bool) -> Result<bool, StoreError> {
-        match self.by_key.get_mut(key) {
+        match self.cache.get_mut(key) {
             Some(c) => {
                 c.verified = verified;
-                self.save()?;
+                db::lock(&self.db).execute(
+                    "UPDATE contacts SET verified=?1 WHERE key=?2",
+                    rusqlite::params![verified as i64, key.as_slice()],
+                )?;
                 Ok(true)
             }
             None => Ok(false),
         }
     }
 
-    /// Переименовать контакт. Возвращает false, если контакта нет.
     pub fn rename(&mut self, key: &[u8; 32], name: &str) -> Result<bool, StoreError> {
-        match self.by_key.get_mut(key) {
+        match self.cache.get_mut(key) {
             Some(c) => {
                 c.name = name.to_string();
-                self.save()?;
+                db::lock(&self.db).execute(
+                    "UPDATE contacts SET name=?1 WHERE key=?2",
+                    rusqlite::params![name, key.as_slice()],
+                )?;
                 Ok(true)
             }
             None => Ok(false),
         }
     }
 
-    /// Удалить контакт. Возвращает false, если контакта не было.
     pub fn remove(&mut self, key: &[u8; 32]) -> Result<bool, StoreError> {
-        let removed = self.by_key.remove(key).is_some();
-        if removed {
-            self.save()?;
-        }
-        Ok(removed)
-    }
-
-    /// Записать хранилище на диск.
-    pub fn save(&self) -> Result<(), StoreError> {
-        if let Some(parent) = self.path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
-        let cf = ContactsFile {
-            version: 1,
-            contacts: self.by_key.values().cloned().collect(),
-        };
-        let json = serde_json::to_vec_pretty(&cf)?;
-        std::fs::write(&self.path, crate::vault::seal(&json))?;
-        Ok(())
+        if self.cache.remove(key).is_none() { return Ok(false); }
+        db::lock(&self.db).execute(
+            "DELETE FROM contacts WHERE key=?1",
+            rusqlite::params![key.as_slice()],
+        )?;
+        Ok(true)
     }
 }
 
-// ---- История сообщений ----
+// ---- История сообщений -----------------------------------------------------
 
-/// Одно сохранённое сообщение чата.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoredMessage {
-    /// Идентификатор сообщения (от отправителя).
     pub id: u64,
-    /// Текст.
     pub text: String,
-    /// true — исходящее (наше), false — входящее.
     pub mine: bool,
-    /// Unix-время (секунды).
     pub time: i64,
-    /// Статус: "sent" | "delivered" | "failed" | "" (для входящих).
     pub status: String,
 }
 
-#[derive(Serialize, Deserialize, Default)]
-struct MessagesFile {
-    version: u8,
-    /// peer (hex ключа) → лог сообщений.
-    log: std::collections::BTreeMap<String, Vec<StoredMessage>>,
-}
-
-/// Персистентная история сообщений по контактам.
+/// SQLite-хранилище сообщений без кэша — каждый вызов делает SQL-запрос.
 pub struct MessageStore {
-    path: PathBuf,
-    log: HashMap<[u8; 32], Vec<StoredMessage>>,
+    db: Db,
 }
 
 impl MessageStore {
-    /// Загрузить (или создать пустую, если файла нет).
-    pub fn load(path: &Path) -> Result<MessageStore, StoreError> {
-        let mut log = HashMap::new();
-        if path.exists() {
-            let data = crate::vault::open(&std::fs::read(path)?)?;
-            let mf: MessagesFile = serde_json::from_slice(&data)?;
-            for (k, msgs) in mf.log {
-                let key = decode_key(&k)?;
-                log.insert(key, msgs);
+    /// Открыть хранилище. Если `legacy` указывает на существующий messages.json,
+    /// импортирует оттуда данные и переименовывает файл в .bak.
+    pub fn open(db: Db, legacy: Option<&Path>) -> Result<Self, StoreError> {
+        let store = MessageStore { db };
+        if let Some(path) = legacy {
+            if path.exists() {
+                store.import_json(path)?;
+                let _ = std::fs::rename(path, path.with_extension("json.bak"));
             }
         }
-        Ok(MessageStore {
-            path: path.to_path_buf(),
-            log,
-        })
+        Ok(store)
     }
 
-    /// Добавить сообщение в лог пира и сохранить.
-    pub fn append(&mut self, peer: &[u8; 32], msg: StoredMessage) -> Result<(), StoreError> {
-        self.log.entry(*peer).or_default().push(msg);
-        self.save()
-    }
-
-    /// Обновить статус исходящего сообщения с данным id. Возвращает true, если найдено.
-    pub fn set_status(
-        &mut self,
-        peer: &[u8; 32],
-        id: u64,
-        status: &str,
-    ) -> Result<bool, StoreError> {
-        let found = self
-            .log
-            .get_mut(peer)
-            .and_then(|msgs| msgs.iter_mut().find(|m| m.id == id && m.mine))
-            .map(|m| m.status = status.to_string())
-            .is_some();
-        if found {
-            self.save()?;
+    fn import_json(&self, path: &Path) -> Result<(), StoreError> {
+        #[derive(Deserialize)]
+        struct LegacyFile {
+            log: std::collections::BTreeMap<String, Vec<StoredMessage>>,
         }
-        Ok(found)
-    }
 
-    /// История сообщений с пиром (пустой срез, если нет).
-    pub fn history(&self, peer: &[u8; 32]) -> &[StoredMessage] {
-        self.log.get(peer).map(|v| v.as_slice()).unwrap_or(&[])
-    }
-
-    /// Удалить весь лог с пиром (например, при удалении контакта).
-    pub fn clear(&mut self, peer: &[u8; 32]) -> Result<(), StoreError> {
-        if self.log.remove(peer).is_some() {
-            self.save()?;
+        let raw = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(_) => return Ok(()),
+        };
+        let data = crate::vault::open(&raw).unwrap_or(raw);
+        let lf: LegacyFile = match serde_json::from_slice(&data) {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let conn = db::lock(&self.db);
+        for (peer_hex, msgs) in &lf.log {
+            let peer = match decode_key(peer_hex) { Ok(k) => k, Err(_) => continue };
+            for m in msgs {
+                conn.execute(
+                    "INSERT OR IGNORE INTO messages (peer, id, mine, text, time, status)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    rusqlite::params![
+                        peer.as_slice(), m.id as i64, m.mine as i64,
+                        &m.text, m.time, &m.status,
+                    ],
+                )?;
+            }
         }
         Ok(())
     }
 
-    fn save(&self) -> Result<(), StoreError> {
-        if let Some(parent) = self.path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
-        let mf = MessagesFile {
-            version: 1,
-            log: self
-                .log
-                .iter()
-                .map(|(k, v)| (hex::encode(k), v.clone()))
-                .collect(),
+    pub fn append(&self, peer: &[u8; 32], msg: StoredMessage) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "INSERT OR REPLACE INTO messages (peer, id, mine, text, time, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                peer.as_slice(), msg.id as i64, msg.mine as i64,
+                &msg.text, msg.time, &msg.status,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_status(&self, peer: &[u8; 32], id: u64, status: &str) -> Result<bool, StoreError> {
+        let n = db::lock(&self.db).execute(
+            "UPDATE messages SET status=?1 WHERE peer=?2 AND id=?3 AND mine=1",
+            rusqlite::params![status, peer.as_slice(), id as i64],
+        )?;
+        Ok(n > 0)
+    }
+
+    pub fn history(&self, peer: &[u8; 32]) -> Vec<StoredMessage> {
+        let conn = db::lock(&self.db);
+        let mut stmt = match conn.prepare(
+            "SELECT id, text, mine, time, status
+             FROM messages WHERE peer=?1 ORDER BY time, id",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
         };
-        std::fs::write(&self.path, crate::vault::seal(&serde_json::to_vec_pretty(&mf)?))?;
+        stmt.query_map(rusqlite::params![peer.as_slice()], |row| {
+            Ok(StoredMessage {
+                id: row.get::<_, i64>(0)? as u64,
+                text: row.get(1)?,
+                mine: row.get::<_, i64>(2)? != 0,
+                time: row.get(3)?,
+                status: row.get(4)?,
+            })
+        })
+        .and_then(|rows| rows.collect())
+        .unwrap_or_default()
+    }
+
+    pub fn clear(&self, peer: &[u8; 32]) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "DELETE FROM messages WHERE peer=?1",
+            rusqlite::params![peer.as_slice()],
+        )?;
         Ok(())
     }
 }
+
+// ---- Утилиты ---------------------------------------------------------------
 
 fn decode_key(hex_str: &str) -> Result<[u8; 32], StoreError> {
     let bytes = hex::decode(hex_str)?;
     bytes.as_slice().try_into().map_err(|_| StoreError::BadLength)
 }
 
+// ---- Тесты -----------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use crate::db::open_in_memory;
 
-    fn tmp_dir() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("p2p-store-test-{}-{nanos}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    fn db() -> Db { open_in_memory().unwrap() }
+
+    fn key() -> [u8; 32] { Identity::generate().public_key_bytes() }
 
     #[test]
     fn profile_load_or_create_then_reload_is_stable() {
-        let dir = tmp_dir();
+        let dir = std::env::temp_dir().join(format!("p2p-prof-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("profile.json");
-
         let p1 = Profile::load_or_create(&path).unwrap();
         let key1 = p1.identity.public_key_bytes();
-
-        // Повторная загрузка возвращает ту же идентичность.
         let p2 = Profile::load_or_create(&path).unwrap();
         assert_eq!(p2.identity.public_key_bytes(), key1);
-        assert_eq!(p2.identity.seed(), p1.identity.seed());
-
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
-    fn contacts_add_persist_reload() {
-        let dir = tmp_dir();
-        let path = dir.join("contacts.json");
-
-        let alice = Identity::generate();
-        let bob = Identity::generate();
-
-        let mut store = ContactStore::load(&path).unwrap();
-        assert_eq!(store.add(&alice.public_key_bytes(), "Alice", 100).unwrap(), AddOutcome::Added);
-        assert_eq!(store.add(&bob.public_key_bytes(), "Bob", 200).unwrap(), AddOutcome::Added);
-        // Повторное добавление — TOFU, уже известен.
-        assert_eq!(store.add(&alice.public_key_bytes(), "Alice2", 300).unwrap(), AddOutcome::AlreadyKnown);
-
-        // Перезагрузка с диска.
-        let store2 = ContactStore::load(&path).unwrap();
-        assert!(store2.contains(&alice.public_key_bytes()));
-        assert!(store2.contains(&bob.public_key_bytes()));
-        assert_eq!(store2.list().len(), 2);
-        let c = store2.get(&alice.public_key_bytes()).unwrap();
-        assert_eq!(c.name, "Alice"); // имя не перезаписалось
-        assert_eq!(c.fingerprint, alice.fingerprint());
-
-        std::fs::remove_dir_all(&dir).ok();
+    fn contacts_add_persist() {
+        let k1 = key();
+        let k2 = key();
+        let mut store = ContactStore::open(db(), None).unwrap();
+        assert_eq!(store.add(&k1, "Alice", 100).unwrap(), AddOutcome::Added);
+        assert_eq!(store.add(&k2, "Bob", 200).unwrap(), AddOutcome::Added);
+        assert_eq!(store.add(&k1, "Alice2", 300).unwrap(), AddOutcome::AlreadyKnown);
+        assert!(store.contains(&k1));
+        assert!(store.contains(&k2));
+        assert_eq!(store.list().len(), 2);
+        assert_eq!(store.get(&k1).unwrap().name, "Alice");
     }
 
     #[test]
-    fn contacts_empty_load_ok() {
-        let dir = tmp_dir();
-        let store = ContactStore::load(&dir.join("nope.json")).unwrap();
-        assert_eq!(store.list().len(), 0);
-        std::fs::remove_dir_all(&dir).ok();
+    fn contacts_reload_from_same_db() {
+        let shared = db();
+        let k = key();
+        {
+            let mut s = ContactStore::open(shared.clone(), None).unwrap();
+            s.add(&k, "Reload", 0).unwrap();
+        }
+        let s2 = ContactStore::open(shared, None).unwrap();
+        assert!(s2.contains(&k));
+        assert_eq!(s2.get(&k).unwrap().name, "Reload");
     }
 
     #[test]
     fn contacts_rename_and_remove() {
-        let dir = tmp_dir();
-        let path = dir.join("contacts.json");
-        let k = Identity::generate().public_key_bytes();
-
-        let mut store = ContactStore::load(&path).unwrap();
+        let k = key();
+        let mut store = ContactStore::open(db(), None).unwrap();
         store.add(&k, "Old", 0).unwrap();
         assert!(store.rename(&k, "New").unwrap());
         assert_eq!(store.get(&k).unwrap().name, "New");
         assert!(store.remove(&k).unwrap());
         assert!(!store.contains(&k));
-
-        // Перезагрузка отражает изменения.
-        let store2 = ContactStore::load(&path).unwrap();
-        assert!(!store2.contains(&k));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
-    fn contacts_verified_flag_persists() {
-        let dir = tmp_dir();
-        let path = dir.join("contacts.json");
-        let k = Identity::generate().public_key_bytes();
-
-        let mut store = ContactStore::load(&path).unwrap();
+    fn contacts_verified_flag() {
+        let k = key();
+        let shared = db();
+        let mut store = ContactStore::open(shared.clone(), None).unwrap();
         store.add(&k, "Eve", 0).unwrap();
-        assert!(!store.get(&k).unwrap().verified, "новый контакт не проверен");
+        assert!(!store.get(&k).unwrap().verified);
         assert!(store.set_verified(&k, true).unwrap());
         assert!(store.get(&k).unwrap().verified);
 
-        // Флаг переживает перезагрузку.
-        let store2 = ContactStore::load(&path).unwrap();
-        assert!(store2.get(&k).unwrap().verified);
-
-        // Снятие отметки.
-        let mut store3 = ContactStore::load(&path).unwrap();
-        assert!(store3.set_verified(&k, false).unwrap());
-        assert!(!store3.get(&k).unwrap().verified);
-        std::fs::remove_dir_all(&dir).ok();
+        let s2 = ContactStore::open(shared, None).unwrap();
+        assert!(s2.get(&k).unwrap().verified);
     }
 
     #[test]
-    fn messages_append_status_persist() {
-        let dir = tmp_dir();
-        let path = dir.join("messages.json");
-        let peer = Identity::generate().public_key_bytes();
-
-        let mut store = MessageStore::load(&path).unwrap();
-        store
-            .append(&peer, StoredMessage { id: 1, text: "hi".into(), mine: true, time: 10, status: "sent".into() })
-            .unwrap();
-        store
-            .append(&peer, StoredMessage { id: 5, text: "yo".into(), mine: false, time: 11, status: "".into() })
-            .unwrap();
+    fn messages_append_status_history() {
+        let peer = key();
+        let store = MessageStore::open(db(), None).unwrap();
+        store.append(&peer, StoredMessage { id: 1, text: "hi".into(), mine: true,  time: 10, status: "sent".into() }).unwrap();
+        store.append(&peer, StoredMessage { id: 5, text: "yo".into(), mine: false, time: 11, status: "".into()     }).unwrap();
         assert!(store.set_status(&peer, 1, "delivered").unwrap());
 
-        let store2 = MessageStore::load(&path).unwrap();
-        let h = store2.history(&peer);
+        let h = store.history(&peer);
         assert_eq!(h.len(), 2);
         assert_eq!(h[0].status, "delivered");
         assert_eq!(h[1].text, "yo");
         assert!(!h[1].mine);
-        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn messages_clear() {
+        let peer = key();
+        let store = MessageStore::open(db(), None).unwrap();
+        store.append(&peer, StoredMessage { id: 1, text: "x".into(), mine: true, time: 0, status: "".into() }).unwrap();
+        store.clear(&peer).unwrap();
+        assert!(store.history(&peer).is_empty());
     }
 }

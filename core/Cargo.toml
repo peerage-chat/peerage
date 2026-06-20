@@ -22,6 +22,14 @@ serde.workspace = true
 serde_json.workspace = true
 chacha20poly1305 = "0.10"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+# На хосте (тесты, desktop) — обычный bundled SQLite.
+# На Android — включается feature "sqlcipher" из androidjni/Cargo.toml,
+# который добавляет bundled-sqlcipher-vendored-openssl через Cargo feature merging.
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+[features]
+# Активируется только для Android-таргета через androidjni.
+sqlcipher = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
 
 [dev-dependencies]
 hex = "0.4"

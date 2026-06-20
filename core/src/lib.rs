@@ -4,6 +4,7 @@
 //! сетевой протокол. Используется и Desktop (Tauri), и Android (через JNI).
 
 pub mod crypto;
+pub mod db;
 pub mod identity;
 pub mod media;
 pub mod protocol;
