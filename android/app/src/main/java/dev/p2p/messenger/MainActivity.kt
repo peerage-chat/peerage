@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Info
@@ -299,7 +300,10 @@ private fun MessageBubble(m: Message) {
                 Row(Modifier.align(Alignment.End).padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     when (m.status) {
                         "delivered" -> Icon(Icons.Filled.DoneAll, "доставлено", tint = tint, modifier = Modifier.size(13.dp))
+                        // "sent" остаётся для сообщений из БД (сохранены старым кодом).
                         "sent" -> Icon(Icons.Filled.Done, "отправлено", tint = tint, modifier = Modifier.size(13.dp))
+                        // "pending" — Rust пробует доставить, ACK ещё не пришёл.
+                        "pending" -> Icon(Icons.Filled.Schedule, "отправляется", tint = tint.copy(alpha = 0.5f), modifier = Modifier.size(13.dp))
                         "failed" -> Text("не доставлено", color = HoloAccentDark.copy(alpha = 0.8f), fontSize = 10.sp)
                         "queued" -> Text("ожидание…", color = HoloAccentDark.copy(alpha = 0.7f), fontSize = 10.sp)
                     }

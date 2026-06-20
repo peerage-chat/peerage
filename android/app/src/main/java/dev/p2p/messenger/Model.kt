@@ -317,7 +317,10 @@ class AppModel private constructor() {
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             Message(o.getLong("id"), o.getString("text"), o.getBoolean("mine"), o.getLong("time"), o.optString("status"))
-        }
+        }.toMutableList()
+        // Queued messages (отрицательные localId) не сохраняются в БД — добавляем их обратно.
+        synchronized(queueLock) { offlineQueueMap[key]?.toList() ?: emptyList() }
+            .forEach { (text, ts) -> list.add(Message(--localMsgId, text, mine = true, time = ts, status = "queued")) }
         messages[key] = list.toMutableStateList()
     }
 
@@ -330,7 +333,8 @@ class AppModel private constructor() {
             val now = System.currentTimeMillis() / 1000
             val id = Native.sendText(sessionPtr, key, text)
             if (id >= 0) {
-                log(key).add(Message(id, text, mine = true, time = now, status = "sent"))
+                // "pending" — Rust подтверждение ещё не пришло; сменится на "delivered" по ACK.
+                log(key).add(Message(id, text, mine = true, time = now, status = "pending"))
             } else {
                 // Пир недостижим — кладём в очередь, доставим при появлении онлайн.
                 val localId = --localMsgId
@@ -503,14 +507,15 @@ class AppModel private constructor() {
         }
     }
 
-    /** Сброс очереди для пира, который появился онлайн. Планирует отправку на ops-поток. */
+    /** Сброс очереди для пира, который появился онлайн.
+     *  Всё выполняется на ops-потоке, чтобы не гонять с concurrent send(). */
     private fun flushQueueFor(peer: String) {
-        val msgs = synchronized(queueLock) {
-            val q = offlineQueueMap.remove(peer) ?: return
-            q.toList()
-        }
-        if (msgs.isEmpty()) return
         ops.execute {
+            // remove внутри ops: сериализован с send(), нет гонки «новое сообщение→flush удаляет его из лога».
+            val msgs = synchronized(queueLock) {
+                val q = offlineQueueMap.remove(peer) ?: return@execute
+                q.toList()
+            }
             saveOfflineQueue()
             // Убираем «ожидание»-заглушки из лога — они вернутся с настоящими ID.
             messages[peer]?.removeAll { it.mine && it.status == "queued" }
@@ -518,7 +523,7 @@ class AppModel private constructor() {
                 val now = System.currentTimeMillis() / 1000
                 val id = Native.sendText(sessionPtr, peer, text)
                 if (id >= 0) {
-                    log(peer).add(Message(id, text, mine = true, time = now, status = "sent"))
+                    log(peer).add(Message(id, text, mine = true, time = now, status = "pending"))
                 } else {
                     // Всё равно не достижим — вернём в очередь.
                     enqueueOffline(peer, text, now)
