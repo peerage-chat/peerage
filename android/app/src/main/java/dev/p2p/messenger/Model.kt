@@ -92,6 +92,10 @@ class AppModel private constructor() {
          *  процесс, поэтому модель должна переживать пересоздание Activity (иначе
          *  утекают второй узел и дублирующие poll/ticker-циклы → потеря событий). */
         val instance: AppModel by lazy { AppModel() }
+
+        // TTL офлайн-очереди исходящих сообщений.
+        // TODO: вынести в настройки приложения (v0.3+)
+        private const val OFFLINE_QUEUE_TTL_SECS = 7L * 24 * 3600
     }
 
     var me by mutableStateOf<Me?>(null)
@@ -121,6 +125,9 @@ class AppModel private constructor() {
     // Комната-звонок (Discord-style присутствие). gid комнаты, где мы сейчас.
     var currentRoom by mutableStateOf<String?>(null)
     val roomMembers = mutableStateListOf<RoomMember>()
+    /** Живые участники каждой группы по маячкам — обновляется тикером.
+     *  Заполняется даже когда мы сами не в комнате (peer слал нам RoomPresence). */
+    val groupPresence = mutableStateMapOf<String, List<RoomMember>>()
 
     // Качество видео — загружается из SharedPreferences при start().
     var videoQuality by mutableStateOf(VideoQuality.default)
@@ -152,6 +159,14 @@ class AppModel private constructor() {
 
     @Volatile private var started = false
 
+    // ── Офлайн-очередь сообщений ─────────────────────────────────────────────
+    // peer → [(text, unix-timestamp)]. Сохраняется в offline_queue.json (TTL 7 дней).
+    // Пишется только из ops/pollThread под queueLock; читается оттуда же.
+    private val queueLock = Any()
+    private val offlineQueueMap = HashMap<String, MutableList<Pair<String, Long>>>()
+    private var queueFile: File? = null
+    @Volatile private var localMsgId = -1L  // отрицательные ID для «не отправлено» в логе
+
     /** Инициализация ядра. Звать с фонового потока (см. MainActivity).
      *  Идемпотентно: при пересоздании Activity повторно НЕ инициализирует. */
     fun start(dataDir: String) {
@@ -172,6 +187,9 @@ class AppModel private constructor() {
         )
         refreshContactsNow()
         refreshGroupsNow()
+        queueFile = File(dataDir, "offline_queue.json")
+        loadOfflineQueue()
+        restoreQueuedToLog()
         startLoops()
         registerNetworkCallback()
     }
@@ -223,7 +241,13 @@ class AppModel private constructor() {
                     val p = Native.netPeers(sessionPtr)
                     val t = Native.netTree(sessionPtr)
                     netPeers = p
-                    contacts.map { it.key }.forEach { online[it] = Native.isOnline(sessionPtr, it) }
+                    contacts.map { it.key }.forEach { key ->
+                        val wasOnline = online[key]
+                        val nowOnline = Native.isOnline(sessionPtr, key)
+                        online[key] = nowOnline
+                        // При первом тике (wasOnline=null) или переходе в онлайн — флашим очередь.
+                        if (nowOnline && wasOnline != true) flushQueueFor(key)
+                    }
                     if (benchRecv) {
                         benchRecvMbps = JSONObject(Native.benchRecvStats(sessionPtr)).optDouble("mbps", 0.0)
                     }
@@ -235,6 +259,16 @@ class AppModel private constructor() {
                             RoomMember(o.getString("peer"), o.optBoolean("audio"), o.optBoolean("video"))
                         }
                         roomMembers.clear(); roomMembers.addAll(list)
+                    }
+                    // Присутствие в группах, к которым мы НЕ подключены:
+                    // показывает кто уже в комнате до того как мы вошли.
+                    groups.forEach { g ->
+                        if (g.gid == currentRoom) return@forEach
+                        val arr = JSONArray(Native.roomPresencePeers(sessionPtr, g.gid))
+                        groupPresence[g.gid] = (0 until arr.length()).map {
+                            val o = arr.getJSONObject(it)
+                            RoomMember(o.getString("peer"), o.optBoolean("audio"), o.optBoolean("video"))
+                        }
                     }
                     // Диагностика + авто-реконнект меша.
                     // peers=0 два тика подряд (~6с) → Yggdrasil потерял все пиры.
@@ -293,9 +327,15 @@ class AppModel private constructor() {
     fun send(key: String, text: String) {
         if (text.isBlank()) return
         ops.execute {
+            val now = System.currentTimeMillis() / 1000
             val id = Native.sendText(sessionPtr, key, text)
             if (id >= 0) {
-                log(key).add(Message(id, text, mine = true, time = System.currentTimeMillis() / 1000, status = "sent"))
+                log(key).add(Message(id, text, mine = true, time = now, status = "sent"))
+            } else {
+                // Пир недостижим — кладём в очередь, доставим при появлении онлайн.
+                val localId = --localMsgId
+                log(key).add(Message(localId, text, mine = true, time = now, status = "queued"))
+                enqueueOffline(key, text, now)
             }
         }
     }
@@ -330,7 +370,10 @@ class AppModel private constructor() {
         when (o.getString("type")) {
             "presence" -> {
                 val peer = o.getString("peer")
-                online[peer] = o.getBoolean("online")
+                val wasOnline = online[peer]
+                val nowOnline = o.getBoolean("online")
+                online[peer] = nowOnline
+                if (nowOnline && wasOnline != true) flushQueueFor(peer)
                 if (contacts.none { it.key == peer }) refreshContactsNow()
             }
             "text" -> {
@@ -340,7 +383,19 @@ class AppModel private constructor() {
                 if (currentChat != peer) unread[peer] = (unread[peer] ?: 0) + 1
             }
             "ack" -> updateStatus(o.getString("peer"), o.getLong("id"), "delivered")
-            "undelivered" -> updateStatus(o.getString("peer"), o.getLong("id"), "failed")
+            "undelivered" -> {
+                // Rust ретраил 5 минут и не смог — передаём в Kotlin-очередь.
+                // Пир появится онлайн → flushQueueFor доставит автоматически.
+                val peer = o.getString("peer")
+                val id = o.getLong("id")
+                val l = messages[peer] ?: return
+                val idx = l.indexOfFirst { it.id == id && it.mine }
+                if (idx >= 0) {
+                    val msg = l[idx]
+                    l[idx] = msg.copy(status = "queued")
+                    enqueueOffline(peer, msg.text, msg.time)
+                }
+            }
             "room_invite" -> {
                 val peer = o.getString("peer")
                 val roomId = o.getString("room_id")
@@ -385,6 +440,91 @@ class AppModel private constructor() {
         val l = messages[peer] ?: return
         val idx = l.indexOfFirst { it.id == id && it.mine }
         if (idx >= 0) l[idx] = l[idx].copy(status = status)
+    }
+
+    // ── Офлайн-очередь ────────────────────────────────────────────────────────
+
+    private fun loadOfflineQueue() {
+        val f = queueFile ?: return
+        if (!f.exists()) return
+        val cutoff = System.currentTimeMillis() / 1000 - OFFLINE_QUEUE_TTL_SECS
+        try {
+            val json = JSONObject(f.readText())
+            synchronized(queueLock) {
+                json.keys().forEach { peer ->
+                    val arr = json.getJSONArray(peer)
+                    val msgs = (0 until arr.length()).mapNotNull { i ->
+                        val o = arr.getJSONObject(i)
+                        val ts = o.getLong("ts")
+                        if (ts > cutoff) Pair(o.getString("text"), ts) else null
+                    }
+                    if (msgs.isNotEmpty()) offlineQueueMap[peer] = msgs.toMutableList()
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("p2pqueue", "load failed: $e")
+        }
+    }
+
+    private fun saveOfflineQueue() {
+        try {
+            val json = JSONObject()
+            synchronized(queueLock) {
+                offlineQueueMap.forEach { (peer, msgs) ->
+                    if (msgs.isNotEmpty()) {
+                        val arr = JSONArray()
+                        msgs.forEach { (text, ts) -> arr.put(JSONObject().put("text", text).put("ts", ts)) }
+                        json.put(peer, arr)
+                    }
+                }
+            }
+            queueFile?.writeText(json.toString())
+        } catch (e: Exception) {
+            android.util.Log.w("p2pqueue", "save failed: $e")
+        }
+    }
+
+    private fun enqueueOffline(peer: String, text: String, ts: Long) {
+        synchronized(queueLock) {
+            offlineQueueMap.getOrPut(peer) { mutableListOf() }.add(Pair(text, ts))
+        }
+        saveOfflineQueue()
+    }
+
+    /** Восстановить очередь в лог при старте (пользователь видит «ожидание» после перезапуска). */
+    private fun restoreQueuedToLog() {
+        synchronized(queueLock) {
+            offlineQueueMap.forEach { (peer, msgs) ->
+                val l = log(peer)
+                msgs.forEach { (text, ts) ->
+                    l.add(Message(--localMsgId, text, mine = true, time = ts, status = "queued"))
+                }
+            }
+        }
+    }
+
+    /** Сброс очереди для пира, который появился онлайн. Планирует отправку на ops-поток. */
+    private fun flushQueueFor(peer: String) {
+        val msgs = synchronized(queueLock) {
+            val q = offlineQueueMap.remove(peer) ?: return
+            q.toList()
+        }
+        if (msgs.isEmpty()) return
+        ops.execute {
+            saveOfflineQueue()
+            // Убираем «ожидание»-заглушки из лога — они вернутся с настоящими ID.
+            messages[peer]?.removeAll { it.mine && it.status == "queued" }
+            msgs.forEach { (text, _) ->
+                val now = System.currentTimeMillis() / 1000
+                val id = Native.sendText(sessionPtr, peer, text)
+                if (id >= 0) {
+                    log(peer).add(Message(id, text, mine = true, time = now, status = "sent"))
+                } else {
+                    // Всё равно не достижим — вернём в очередь.
+                    enqueueOffline(peer, text, now)
+                }
+            }
+        }
     }
 
     // ── DM-звонки (через комнату) ─────────────────────────────────────────────

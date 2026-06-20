@@ -10,7 +10,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -302,6 +301,7 @@ private fun MessageBubble(m: Message) {
                         "delivered" -> Icon(Icons.Filled.DoneAll, "доставлено", tint = tint, modifier = Modifier.size(13.dp))
                         "sent" -> Icon(Icons.Filled.Done, "отправлено", tint = tint, modifier = Modifier.size(13.dp))
                         "failed" -> Text("не доставлено", color = HoloAccentDark.copy(alpha = 0.8f), fontSize = 10.sp)
+                        "queued" -> Text("ожидание…", color = HoloAccentDark.copy(alpha = 0.7f), fontSize = 10.sp)
                     }
                 }
             }
@@ -422,49 +422,82 @@ private fun GroupChatScreen(model: AppModel, onBack: () -> Unit, onAddMember: ()
     val group = model.groups.firstOrNull { it.gid == gid }
     val msgs = model.groupMessages[gid]
     var input by remember(gid) { mutableStateOf("") }
+    var focusedParticipant by remember { mutableStateOf<String?>(null) }
 
     val inRoom = model.currentRoom == gid
+    val presenceMembers = if (inRoom) emptyList() else (model.groupPresence[gid] ?: emptyList())
+    val showGrid = inRoom || presenceMembers.isNotEmpty()
 
-    Column(Modifier.fillMaxSize()) {
-        TopBar(group?.name ?: "Группа", onBack = onBack) {
-            if (inRoom) {
-                BarIcon(Icons.Filled.CallEnd, "Выйти из звонка", { model.leaveRoom() })
-            } else {
-                BarIcon(Icons.Filled.Call, "Войти в звонок", { model.joinRoom(gid) })
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            TopBar(group?.name ?: "Группа", onBack = onBack) {
+                if (inRoom) {
+                    BarIcon(Icons.Filled.CallEnd, "Выйти из звонка", { model.leaveRoom() })
+                } else {
+                    BarIcon(Icons.Filled.Call, "Войти в звонок", { model.joinRoom(gid) })
+                }
+                BarIcon(Icons.Filled.GroupAdd, "Добавить участника", onAddMember)
             }
-            BarIcon(Icons.Filled.GroupAdd, "Добавить участника", onAddMember)
-        }
-        if (inRoom) RoomBar(model)
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
-            items(msgs ?: emptyList()) { m ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                    horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
-                    Box(Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(10.dp))
-                        .background(if (m.mine) HoloAccent else HoloSurface).padding(horizontal = 10.dp, vertical = 7.dp)) {
-                        Text(m.text, color = if (m.mine) HoloAccentDark else Color.White, fontSize = 15.sp)
+            if (showGrid) RoomGrid(model, inRoom, presenceMembers, onFocus = { focusedParticipant = it })
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
+                items(msgs ?: emptyList()) { m ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
+                        Box(Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(10.dp))
+                            .background(if (m.mine) HoloAccent else HoloSurface).padding(horizontal = 10.dp, vertical = 7.dp)) {
+                            Text(m.text, color = if (m.mine) HoloAccentDark else Color.White, fontSize = 15.sp)
+                        }
                     }
                 }
             }
+            MessageInput(input, { input = it }) { model.sendGroupText(gid, input); input = "" }
         }
-        MessageInput(input, { input = it }) { model.sendGroupText(gid, input); input = "" }
+        focusedParticipant?.let { key ->
+            val isMe = key == "me"
+            val name = if (isMe) "Вы" else
+                model.contacts.firstOrNull { it.key == key }?.name ?: (key.take(6) + "…")
+            val audio = if (isMe) true else model.roomMembers.firstOrNull { it.peer == key }?.audio ?: true
+            val video = if (isMe) false else model.roomMembers.firstOrNull { it.peer == key }?.video ?: false
+            ParticipantFullscreen(name, audio, video, isMe) { focusedParticipant = null }
+        }
     }
 }
 
-/** Полоса «кто в звонке» (зачаток сетки участников H1.2). */
+/** Сетка участников комнаты (2 колонки). Тап по тайлу → onFocus(key).
+ *  [inRoom] — мы сейчас в комнате (показываем себя + model.roomMembers).
+ *  [presenceMembers] — участники по маячкам когда мы ещё не зашли. */
 @Composable
-private fun RoomBar(model: AppModel) {
-    val members = model.roomMembers
+private fun RoomGrid(
+    model: AppModel,
+    inRoom: Boolean,
+    presenceMembers: List<RoomMember>,
+    onFocus: (String) -> Unit,
+) {
+    val members = if (inRoom) model.roomMembers else presenceMembers
+    val total = if (inRoom) members.size + 1 else members.size
     Surface(color = HoloSurface, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text("В ЗВОНКЕ · ${members.size + 1}", color = HoloSecondary, fontSize = 11.sp)
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                RoomTile("вы", audio = true, video = false, me = true)
-                members.forEach { m ->
-                    val name = model.contacts.firstOrNull { it.key == m.peer }?.name ?: (m.peer.take(6) + "…")
-                    RoomTile(name, m.audio, m.video, me = false)
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+            Text(
+                if (inRoom) "В ЗВОНКЕ · $total" else "В КОМНАТЕ · $total",
+                color = HoloSecondary, fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+            )
+            val all = if (inRoom)
+                listOf(Triple("me", true, false)) + members.map { Triple(it.peer, it.audio, it.video) }
+            else
+                members.map { Triple(it.peer, it.audio, it.video) }
+            all.chunked(2).forEach { row ->
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    row.forEach { (key, audio, video) ->
+                        val isMe = key == "me"
+                        val name = if (isMe) "Вы" else
+                            model.contacts.firstOrNull { it.key == key }?.name ?: (key.take(6) + "…")
+                        GridTile(name, audio, video, isMe, Modifier.weight(1f)) { onFocus(key) }
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -472,21 +505,75 @@ private fun RoomBar(model: AppModel) {
 }
 
 @Composable
-private fun RoomTile(name: String, audio: Boolean, video: Boolean, me: Boolean) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp)) {
+private fun GridTile(
+    name: String, audio: Boolean, video: Boolean, me: Boolean,
+    modifier: Modifier = Modifier, onClick: () -> Unit,
+) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (me) HoloAccentDark else Color(0xFF2A2F35))
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Box(
-            Modifier.size(52.dp).clip(CircleShape)
+            Modifier.size(40.dp).clip(CircleShape)
                 .background(if (me) HoloAccent else Color(0xFF3A3F45)),
             contentAlignment = Alignment.Center,
         ) {
             Text(name.take(1).uppercase(), color = if (me) HoloAccentDark else Color.White,
-                fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
-        Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (!audio) Icon(Icons.Filled.MicOff, "микрофон выкл", tint = WarnColor, modifier = Modifier.size(12.dp))
-            if (video) Icon(Icons.Filled.Videocam, "видео", tint = HoloSecondary, modifier = Modifier.size(12.dp))
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, color = if (me) HoloAccent else Color.White,
+                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (!audio || video) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (!audio) Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(11.dp))
+                    if (video) Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(11.dp))
+                }
+            }
         }
-        Text(name, fontSize = 10.sp, color = HoloSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun ParticipantFullscreen(
+    name: String, audio: Boolean, video: Boolean, me: Boolean, onDismiss: () -> Unit,
+) {
+    Box(
+        Modifier.fillMaxSize().background(Color(0xEE000000)).clickable { onDismiss() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(120.dp).clip(CircleShape)
+                    .background(if (me) HoloAccent else Color(0xFF3A3F45)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(name.take(1).uppercase(), color = if (me) HoloAccentDark else Color.White,
+                    fontWeight = FontWeight.Bold, fontSize = 52.sp)
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!audio) Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(15.dp))
+                    Text("Выкл", color = WarnColor, fontSize = 13.sp)
+                }
+                if (video) Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(15.dp))
+                    Text("Видео", color = HoloSecondary, fontSize = 13.sp)
+                }
+            }
+            Spacer(Modifier.height(36.dp))
+            Text("Нажмите чтобы закрыть", color = HoloSecondary, fontSize = 11.sp)
+        }
     }
 }
 

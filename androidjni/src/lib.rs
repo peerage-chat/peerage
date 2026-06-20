@@ -152,16 +152,18 @@ impl Session {
     }
 
     fn live_participants(&self, gid: &[u8]) -> Vec<[u8; 32]> {
+        self.live_participants_with_flags(gid).into_iter().map(|(p, _)| p).collect()
+    }
+
+    fn live_participants_with_flags(&self, gid: &[u8]) -> Vec<([u8; 32], u8)> {
         let now = Instant::now();
-        self.rooms
-            .lock()
-            .unwrap()
+        self.rooms.lock_safe()
             .remote
             .get(gid)
             .map(|m| {
                 m.iter()
                     .filter(|(_, (t, _))| now.saturating_duration_since(*t) < PRESENCE_TTL)
-                    .map(|(p, _)| *p)
+                    .map(|(p, (_, f))| (*p, *f))
                     .collect()
             })
             .unwrap_or_default()
@@ -882,6 +884,31 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoinDm<'local>(
         }
         let _ = session.jobs.send(Job::Beacon);
         ret(&env, &hex::encode(&room_id))
+    })
+}
+
+/// Живые участники комнаты `gid` по последним маячкам (не старше PRESENCE_TTL).
+/// Возвращает JSON: `[{"peer":"hex","audio":bool,"video":bool},...]`.
+/// Работает для ЛЮБОЙ комнаты, не только для той, в которой мы сами находимся.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomPresencePeers<'local>(
+    mut env: JNIEnv<'local>, _class: JClass<'local>,
+    session_ptr: jlong, gid_hex: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        if session_ptr == 0 { return ret(&env, "[]"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let gid_str = jstr(&mut env, &gid_hex);
+        let Ok(gid) = hex::decode(gid_str.trim()) else { return ret(&env, "[]"); };
+        let arr: Vec<serde_json::Value> = session.live_participants_with_flags(&gid)
+            .into_iter()
+            .map(|(p, f)| serde_json::json!({
+                "peer": hex::encode(p),
+                "audio": f & 0x01 != 0,
+                "video": f & 0x02 != 0,
+            }))
+            .collect();
+        ret(&env, &serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into()))
     })
 }
 

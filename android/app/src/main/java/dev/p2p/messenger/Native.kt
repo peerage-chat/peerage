@@ -75,6 +75,8 @@ object Native {
     external fun roomLeave(sessionPtr: Long, gid: String)
     /** Участники комнаты сейчас: JSON [{peer, audio, video}]. */
     external fun roomParticipants(sessionPtr: Long, gid: String): String
+    /** Живые участники любой комнаты по маячкам (не надо быть в ней самому). JSON [{peer, audio, video}]. */
+    external fun roomPresencePeers(sessionPtr: Long, gidHex: String): String
     /** Запустить мультипати аудио комнаты. JSON {sample_rate, channels, frame_len}. */
     external fun roomAudioStart(sessionPtr: Long, gid: String): String
     /** Остановить мультипати аудио комнаты. */
