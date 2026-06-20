@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCode2
@@ -70,12 +69,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        model.audio = CallAudio(
-            applicationContext,
-            { data, n -> Native.callPushAudio(model.sessionPtr, data, n) },
-            { out -> Native.callPullAudio(model.sessionPtr, out) },
-            { m -> Native.callSetMuted(model.sessionPtr, m) }
-        )
         model.appContext = applicationContext
         val wanted = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -130,7 +123,7 @@ private fun Root(model: AppModel) {
                 Screen.Chat -> ChatScreen(model,
                     onBack = { screen = Screen.Contacts },
                     onInfo = { screen = Screen.Info },
-                    onCall = { key, video -> model.startOutgoing(key, video) })
+                    onCall = { key, video -> model.callDm(key, video) })
                 Screen.Add -> AddScreen(model, onDone = { screen = Screen.Contacts })
                 Screen.Me -> MeScreen(model, onBack = { screen = Screen.Contacts })
                 Screen.Info -> InfoScreen(model,
@@ -148,7 +141,7 @@ private fun Root(model: AppModel) {
                 Screen.Settings -> SettingsScreen(model, onBack = { screen = Screen.Contacts })
             }
         }
-        model.call?.let { CallOverlay(model, it) }
+        model.incomingCall?.let { IncomingCallOverlay(model, it) }
     }
 }
 
@@ -272,6 +265,9 @@ private fun ChatScreen(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, 
             BarIcon(Icons.Filled.Call, "Аудио-звонок", { onCall(key, false) })
             BarIcon(Icons.Filled.Videocam, "Видео-звонок", { onCall(key, true) })
             BarIcon(Icons.Filled.Info, "О контакте", onInfo)
+        }
+        if (model.incomingCall == null && model.dmCallPeer == key) {
+            DmCallBar(model, key)
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
             items(msgs ?: emptyList()) { m -> MessageBubble(m) }
@@ -530,40 +526,60 @@ private fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
     }
 }
 
-// ── Оверлей звонка ──────────────────────────────────────────────────────────
+// ── Входящий звонок (полный экран, Telegram-style) ──────────────────────────
 
 @Composable
-private fun CallOverlay(model: AppModel, call: CallState) {
-    val name = model.contacts.firstOrNull { it.key == call.peer }?.name ?: "Контакт"
-    val statusText = when (call.status) {
-        "incoming" -> "Входящий звонок"
-        "ringing" -> "Звоним…"
-        else -> "Идёт звонок"
-    }
-    val showVideo = call.withVideo && call.status == "active"
+private fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
+    val name = model.contacts.firstOrNull { it.key == ic.peer }?.name ?: "Контакт"
     Box(Modifier.fillMaxSize().background(Color(0xF2000000))) {
-        if (showVideo) VideoSurface(Modifier.fillMaxSize())
         Column(
-            Modifier.fillMaxSize().padding(bottom = 48.dp),
+            Modifier.fillMaxSize().padding(bottom = 64.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Bottom,
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            if (!showVideo) {
-                Spacer(Modifier.weight(1f))
-                Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
-                Text(statusText, color = HoloSecondary, fontSize = 15.sp, modifier = Modifier.padding(top = 6.dp))
-                Spacer(Modifier.weight(1f))
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (call.status == "incoming") {
-                    CallButton(Icons.Filled.Call, "Принять", HoloOnline) { model.acceptCall() }
-                    CallButton(Icons.Filled.CallEnd, "Отклонить", HoloError) { model.hangUp() }
-                } else {
-                    if (call.status == "active") {
-                        CallButton(if (call.muted) Icons.Filled.MicOff else Icons.Filled.Mic, "Микрофон", HoloSurface) { model.toggleMute() }
-                    }
-                    CallButton(Icons.Filled.CallEnd, "Завершить", HoloError) { model.hangUp() }
+            Spacer(Modifier.height(96.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier.size(88.dp).clip(CircleShape).background(HoloAccent),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(name.take(1).uppercase(), color = HoloAccentDark,
+                        fontWeight = FontWeight.Bold, fontSize = 40.sp)
                 }
+                Spacer(Modifier.height(20.dp))
+                Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+                Text("Входящий звонок", color = HoloSecondary, fontSize = 15.sp,
+                    modifier = Modifier.padding(top = 8.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(56.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                CallButton(Icons.Filled.CallEnd, "Отклонить", HoloError) { model.declineDmCall() }
+                CallButton(Icons.Filled.Call, "Принять", HoloOnline) { model.acceptDmCall() }
+            }
+        }
+    }
+}
+
+/** Мини-полоса активного DM-звонка — встраивается между топ-баром и чатом. */
+@Composable
+private fun DmCallBar(model: AppModel, peerKey: String) {
+    val name = model.contacts.firstOrNull { it.key == peerKey }?.name ?: (peerKey.take(6) + "…")
+    val ringing = model.roomMembers.isEmpty()
+    Surface(color = Color(0xFF1B2E1B), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Call, null, tint = HoloOnline, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(name, color = Color.White, fontSize = 14.sp)
+                Text(if (ringing) "Вызов…" else "Идёт звонок",
+                    color = HoloSecondary, fontSize = 11.sp)
+            }
+            IconButton(onClick = { model.leaveRoom() }) {
+                Icon(Icons.Filled.CallEnd, "Завершить", tint = HoloError,
+                    modifier = Modifier.size(22.dp))
             }
         }
     }
@@ -575,35 +591,6 @@ private fun CallButton(icon: ImageVector, desc: String, color: Color, onClick: (
         Modifier.clip(CircleShape).background(color).size(64.dp).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(28.dp)) }
-}
-
-/** Входящее видео: SurfaceView, в который аппаратный декодер рендерит напрямую. */
-@Composable
-private fun VideoSurface(modifier: Modifier = Modifier) {
-    androidx.compose.ui.viewinterop.AndroidView(
-        modifier = modifier,
-        factory = { ctx ->
-            android.view.SurfaceView(ctx).apply {
-                holder.addCallback(object : android.view.SurfaceHolder.Callback {
-                    @Volatile private var receiver: VideoReceiver? = null
-                    override fun surfaceCreated(h: android.view.SurfaceHolder) {
-                        // Создание/старт MediaCodec-декодера блокирует — не на UI-потоке.
-                        Thread {
-                            val q = AppModel.instance.videoQuality
-                            receiver = VideoReceiver(h.surface, q.width, q.height, q.fps) {
-                                Native.callPullVideoPacket(AppModel.instance.sessionPtr)
-                            }.also { it.start() }
-                        }.start()
-                    }
-                    override fun surfaceChanged(h: android.view.SurfaceHolder, f: Int, w: Int, ht: Int) {}
-                    override fun surfaceDestroyed(h: android.view.SurfaceHolder) {
-                        val r = receiver; receiver = null
-                        Thread { r?.stop() }.start() // MediaCodec.release блокирует
-                    }
-                })
-            }
-        },
-    )
 }
 
 @Composable

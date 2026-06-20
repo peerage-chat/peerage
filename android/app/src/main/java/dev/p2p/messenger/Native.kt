@@ -48,23 +48,6 @@ object Native {
     /** Принудительный реконнект к публичным пирам (обход Yggdrasil backoff). */
     external fun reconnectPeers(sessionPtr: Long)
 
-    // ── Звонки (1:1) ──────────────────────────────────────────────────────
-    /** Начать исходящий звонок. Возвращает JSON {call_id, sample_rate, channels, frame_len}. */
-    external fun callStart(sessionPtr: Long, keyHex: String, video: Boolean, vw: Int, vh: Int): String
-    /** Принять входящий звонок. Возвращает тот же JSON с аудио-параметрами. */
-    external fun callAccept(sessionPtr: Long, keyHex: String, callId: Long, video: Boolean, vw: Int, vh: Int): String
-    /** Завершить звонок. */
-    external fun callEnd(sessionPtr: Long, keyHex: String, callId: Long)
-    /** Захваченный PCM (первые n сэмплов) → отправка. */
-    external fun callPushAudio(sessionPtr: Long, data: ShortArray, n: Int)
-    /** Заполнить буфер PCM для воспроизведения. Возвращает число реальных сэмплов. */
-    external fun callPullAudio(sessionPtr: Long, out: ShortArray): Int
-    /** H.264 access-unit от MediaCodec-энкодера → фрагментация и отправка. */
-    external fun callSendVideo(sessionPtr: Long, nal: ByteArray, keyframe: Boolean)
-    /** Собранный входящий H.264 access-unit для MediaCodec-декодера (или пусто). */
-    external fun callPullVideoPacket(sessionPtr: Long): ByteArray
-    external fun callSetMuted(sessionPtr: Long, muted: Boolean)
-
     // ── Группы (MLS) ──────────────────────────────────────────────────────
     /** Создать группу (fire-and-forget). Результат — через событие `groups_changed`. */
     external fun groupCreate(sessionPtr: Long, name: String): Boolean
@@ -80,6 +63,12 @@ object Native {
     external fun groupMembers(sessionPtr: Long, gid: String): String
 
     // ── Комнаты-звонки (присутствие, Discord-style) ───────────────────────
+    /** DM-звонок: создать комнату, отправить RoomInvite пиру. Возвращает room_id hex. */
+    external fun roomInviteDm(sessionPtr: Long, peerHex: String, audio: Boolean, video: Boolean): String
+    /** Отклонить входящий DM-звонок. */
+    external fun roomDeclineDm(sessionPtr: Long, peerHex: String)
+    /** Принять DM-звонок: войти в комнату с регистрацией dm_peer. Возвращает room_id hex. */
+    external fun roomJoinDm(sessionPtr: Long, peerHex: String, audio: Boolean, video: Boolean): String
     /** Войти в комнату gid: слать маячок присутствия с A/V-флагами. */
     external fun roomJoin(sessionPtr: Long, gid: String, audio: Boolean, video: Boolean)
     /** Выйти из комнаты gid. */

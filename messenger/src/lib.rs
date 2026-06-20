@@ -39,12 +39,10 @@ pub enum Event {
     Ack { peer: PeerKey, id: u64 },
     /// Не удалось доставить наше сообщение за отведённое время (TTL).
     Undelivered { peer: PeerKey, id: u64 },
-    /// Входящее приглашение в звонок.
-    CallInvite { peer: PeerKey, call_id: u64, audio: bool, video: bool },
-    /// Пир принял звонок.
-    CallAccept { peer: PeerKey, call_id: u64 },
-    /// Пир завершил/отклонил звонок.
-    CallEnd { peer: PeerKey, call_id: u64 },
+    /// Входящее приглашение в голосовую комнату (DM-звонок).
+    RoomInvite { peer: PeerKey, room_id: Vec<u8>, audio: bool, video: bool },
+    /// Пир отклонил входящий звонок.
+    RoomDecline { peer: PeerKey, room_id: Vec<u8> },
     /// Входящее групповое MLS-сообщение (переслать в групповой слой).
     Group { peer: PeerKey, data: Vec<u8> },
     /// Контакт просит наш KeyPackage (хочет добавить в группу).
@@ -334,25 +332,20 @@ impl Messenger {
         Ok(())
     }
 
-    /// Пригласить пира в звонок (сигнализация по надёжному каналу).
-    pub fn send_call_invite(
+    /// Пригласить пира в голосовую комнату (DM-звонок).
+    pub fn send_room_invite(
         &self,
         peer: &PeerKey,
-        call_id: u64,
+        room_id: &[u8],
         audio: bool,
         video: bool,
     ) -> Result<(), MessengerError> {
-        self.shared.send(peer, &Payload::CallInvite { call_id, audio, video })
+        self.shared.send(peer, &Payload::RoomInvite { room_id: room_id.to_vec(), audio, video })
     }
 
-    /// Принять звонок.
-    pub fn send_call_accept(&self, peer: &PeerKey, call_id: u64) -> Result<(), MessengerError> {
-        self.shared.send(peer, &Payload::CallAccept { call_id })
-    }
-
-    /// Завершить/отклонить звонок.
-    pub fn send_call_end(&self, peer: &PeerKey, call_id: u64) -> Result<(), MessengerError> {
-        self.shared.send(peer, &Payload::CallEnd { call_id })
+    /// Отклонить входящий звонок.
+    pub fn send_room_decline(&self, peer: &PeerKey, room_id: &[u8]) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::RoomDecline { room_id: room_id.to_vec() })
     }
 
     /// Переслать групповое MLS-сообщение конкретному участнику.
@@ -473,14 +466,11 @@ fn receive_loop(shared: Arc<Shared>) {
                 let _ = shared.send(&src, &Payload::Pong);
             }
             Payload::Pong => {}
-            Payload::CallInvite { call_id, audio, video } => {
-                shared.emit(Event::CallInvite { peer: src, call_id, audio, video });
+            Payload::RoomInvite { room_id, audio, video } => {
+                shared.emit(Event::RoomInvite { peer: src, room_id, audio, video });
             }
-            Payload::CallAccept { call_id } => {
-                shared.emit(Event::CallAccept { peer: src, call_id });
-            }
-            Payload::CallEnd { call_id } => {
-                shared.emit(Event::CallEnd { peer: src, call_id });
+            Payload::RoomDecline { room_id } => {
+                shared.emit(Event::RoomDecline { peer: src, room_id });
             }
             Payload::Group { data } => {
                 shared.emit(Event::Group { peer: src, data });

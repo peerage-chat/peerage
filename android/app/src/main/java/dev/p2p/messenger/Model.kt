@@ -60,14 +60,12 @@ data class Me(val pubkey: String, val address: String, val fingerprint: String)
 data class Group(val gid: String, val name: String, val members: Int)
 data class GroupMsg(val text: String, val mine: Boolean, val time: Long)
 
-/** Состояние звонка. status: "incoming" | "ringing" | "active". */
-data class CallState(
+/** Входящий DM-звонок (до того как пользователь ответил или отклонил). */
+data class IncomingRoomCall(
     val peer: String,
-    val callId: Long,
-    val incoming: Boolean,
-    val withVideo: Boolean,
-    val status: String,
-    val muted: Boolean = false,
+    val roomId: String,
+    val audio: Boolean,
+    val video: Boolean,
 )
 
 /** Участник комнаты-звонка (присутствие). */
@@ -140,11 +138,9 @@ class AppModel private constructor() {
         videoQuality = VideoQuality.presets.find { it.key == key } ?: VideoQuality.default
     }
 
-    // Звонок (1:1). audio/appContext задаются из Activity (нужен Context).
-    var call by mutableStateOf<CallState?>(null)
-    var audio: CallAudio? = null
     var appContext: android.content.Context? = null
-    @Volatile private var videoSender: VideoSender? = null
+    var incomingCall by mutableStateOf<IncomingRoomCall?>(null)
+    var dmCallPeer by mutableStateOf<String?>(null)
     @Volatile private var roomAudio: CallAudio? = null
 
     // Фоновое взаимодействие с ядром (никогда не на главном потоке).
@@ -253,7 +249,7 @@ class AppModel private constructor() {
                     } else {
                         zeroPeerTicks = 0
                     }
-                    android.util.Log.i("p2pnet", "tick=$tick peers=$p tree=$t inCall=${call != null} room=${currentRoom != null}")
+                    android.util.Log.i("p2pnet", "tick=$tick peers=$p tree=$t incoming=${incomingCall != null} room=${currentRoom != null}")
                 }
                 tick++
                 Thread.sleep(if (benchRecv) 1000 else if (currentRoom != null) 2000 else 3000)
@@ -345,28 +341,23 @@ class AppModel private constructor() {
             }
             "ack" -> updateStatus(o.getString("peer"), o.getLong("id"), "delivered")
             "undelivered" -> updateStatus(o.getString("peer"), o.getLong("id"), "failed")
-            "call_invite" -> {
+            "room_invite" -> {
                 val peer = o.getString("peer")
-                val c = call
-                // Свободны — обычный входящий. Тот же собеседник перезвонил —
-                // переприглашение: гасим протухший звонок и показываем новый
-                // входящий (так можно вернуться в звонок). От ДРУГОГО пира во
-                // время звонка — игнор (заняты).
-                if (c == null || c.peer == peer) {
-                    if (c != null) endCall() // снять старое медиа/оверлей перед новым
-                    call = CallState(peer, o.getLong("call_id"), incoming = true,
-                        withVideo = o.optBoolean("video", false), status = "incoming")
+                val roomId = o.getString("room_id")
+                val audio = o.optBoolean("audio", true)
+                val video = o.optBoolean("video", false)
+                val existing = incomingCall
+                // Свободны — обычный входящий. Тот же собеседник перезванивает —
+                // показываем новый экран входящего. От другого пира, пока заняты — игнор.
+                if (existing == null || existing.peer == peer) {
+                    if (currentRoom != null && dmCallPeer == peer) leaveRoom()
+                    incomingCall = IncomingRoomCall(peer, roomId, audio, video)
                 }
             }
-            "call_accept" -> call?.let { c ->
-                if (o.getString("peer") == c.peer) {
-                    call = c.copy(status = "active")
-                    // Принудительно запрашиваем I-frame: callee только что создал
-                    // VideoReceiver и ждёт keyframe чтобы начать декодирование.
-                    videoSender?.requestKeyframe()
-                }
+            "room_decline" -> {
+                val peer = o.getString("peer")
+                if (peer == dmCallPeer) leaveRoom()
             }
-            "call_end" -> call?.let { c -> if (o.getString("peer") == c.peer) endCall() }
             "room_presence" -> if (o.getString("gid") == currentRoom) {
                 // Мгновенно отражаем участника, не дожидаясь опроса тикером.
                 val peer = o.getString("peer")
@@ -396,70 +387,58 @@ class AppModel private constructor() {
         if (idx >= 0) l[idx] = l[idx].copy(status = status)
     }
 
-    // ── Звонки ──────────────────────────────────────────────────────────────
+    // ── DM-звонки (через комнату) ─────────────────────────────────────────────
 
-    fun startOutgoing(peer: String, video: Boolean = false) {
-        if (call != null) return
-        // Оптимистично показываем оверлей сразу; параметры/старт медиа — в фоне.
-        call = CallState(peer, 0, incoming = false, withVideo = video, status = "ringing")
+    /** Позвонить пиру: создать DM-комнату, отправить приглашение, начать медиа. */
+    fun callDm(peer: String, audio: Boolean = true, video: Boolean = false) {
+        if (currentRoom != null) return
+        val ctx = appContext ?: return
+        val name = contacts.firstOrNull { it.key == peer }?.name ?: ""
         ops.execute {
-            val vw = if (video) videoQuality.width else 0
-            val vh = if (video) videoQuality.height else 0
-            val params = JSONObject(Native.callStart(sessionPtr, peer, video, vw, vh))
-            if (!params.has("call_id")) { call = null; return@execute }
-            call = call?.copy(callId = params.getLong("call_id"))
-            startMedia(params.getInt("sample_rate"), params.getInt("channels"), video)
+            val roomId = Native.roomInviteDm(sessionPtr, peer, audio, video)
+            if (roomId.isEmpty()) return@execute
+            currentRoom = roomId
+            dmCallPeer = peer
+            roomMembers.clear()
+            CallService.start(ctx, name)
+            startRoomAudio(ctx, roomId)
         }
     }
 
-    fun acceptCall() {
-        val c = call ?: return
-        if (!c.incoming) return
-        call = c.copy(status = "active")
+    /** Принять входящий DM-звонок. */
+    fun acceptDmCall() {
+        val ic = incomingCall ?: return
+        incomingCall = null
+        val ctx = appContext ?: return
+        val name = contacts.firstOrNull { it.key == ic.peer }?.name ?: ""
         ops.execute {
-            val vw = if (c.withVideo) videoQuality.width else 0
-            val vh = if (c.withVideo) videoQuality.height else 0
-            val params = JSONObject(Native.callAccept(sessionPtr, c.peer, c.callId, c.withVideo, vw, vh))
-            startMedia(params.optInt("sample_rate", 48000), params.optInt("channels", 1), c.withVideo)
+            val roomId = Native.roomJoinDm(sessionPtr, ic.peer, ic.audio, ic.video)
+            if (roomId.isEmpty()) return@execute
+            currentRoom = roomId
+            dmCallPeer = ic.peer
+            roomMembers.clear()
+            CallService.start(ctx, name)
+            startRoomAudio(ctx, roomId)
         }
     }
 
-    /** Запуск медиа (вызывается уже из фонового [ops]). */
-    private fun startMedia(sampleRate: Int, channels: Int, video: Boolean) {
-        runCatching { audio?.start(sampleRate, channels) }
-        val ctx = appContext
-        if (video && ctx != null) {
-            runCatching {
-                videoSender = VideoSender(ctx, videoQuality.width, videoQuality.height, videoQuality.fps, videoQuality.bitrate) { nal, keyframe ->
-                    Native.callSendVideo(sessionPtr, nal, keyframe)
-                }.also { it.start() }
-            }
-        }
+    /** Отклонить входящий DM-звонок. */
+    fun declineDmCall() {
+        val ic = incomingCall ?: return
+        incomingCall = null
+        ops.execute { Native.roomDeclineDm(sessionPtr, ic.peer) }
     }
 
-    fun hangUp() {
-        val c = call ?: return
-        endCall()
-        ops.execute { Native.callEnd(sessionPtr, c.peer, c.callId) }
-    }
-
-    /** Локально завершить звонок: убрать оверлей (главный поток) + стоп медиа (фон). */
-    private fun endCall() {
-        val a = audio
-        val vs = videoSender
-        videoSender = null
-        call = null
-        Thread {
-            runCatching { a?.stop() }
-            runCatching { vs?.stop() }
-        }.apply { isDaemon = true }.start()
-    }
-
-    fun toggleMute() {
-        val c = call ?: return
-        val m = !c.muted
-        call = c.copy(muted = m)
-        ops.execute { audio?.setMuted(m) }
+    private fun startRoomAudio(ctx: android.content.Context, gid: String) {
+        val p = JSONObject(Native.roomAudioStart(sessionPtr, gid))
+        val sr = p.optInt("sample_rate", 48000)
+        val ch = p.optInt("channels", 1)
+        roomAudio = CallAudio(
+            ctx,
+            { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
+            { out -> Native.roomPullAudio(sessionPtr, out) },
+            { m -> Native.roomSetMuted(sessionPtr, m) }
+        ).also { it.start(sr, ch) }
     }
 
     // ── Комната-звонок (присутствие, Discord-style) ───────────────────────────
@@ -468,21 +447,14 @@ class AppModel private constructor() {
      *  всем участникам, приём от каждого с миксом). */
     fun joinRoom(gid: String, audio: Boolean = true, video: Boolean = false) {
         currentRoom = gid
+        dmCallPeer = null
         roomMembers.clear()
-        val ctx = appContext
+        val ctx = appContext ?: return
+        val name = groups.firstOrNull { it.gid == gid }?.name ?: ""
         ops.execute {
             Native.roomJoin(sessionPtr, gid, audio, video)
-            val p = JSONObject(Native.roomAudioStart(sessionPtr, gid))
-            val sr = p.optInt("sample_rate", 48000)
-            val ch = p.optInt("channels", 1)
-            if (ctx != null) {
-                roomAudio = CallAudio(
-                    ctx,
-                    { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
-                    { out -> Native.roomPullAudio(sessionPtr, out) },
-                    { m -> Native.roomSetMuted(sessionPtr, m) }
-                ).also { it.start(sr, ch) }
-            }
+            CallService.start(ctx, name)
+            startRoomAudio(ctx, gid)
         }
     }
 
@@ -490,9 +462,15 @@ class AppModel private constructor() {
     fun leaveRoom() {
         val gid = currentRoom ?: return
         currentRoom = null
+        dmCallPeer = null
         roomMembers.clear()
         val a = roomAudio; roomAudio = null
-        ops.execute { Native.roomLeave(sessionPtr, gid); Native.roomAudioStop(sessionPtr) }
+        val ctx = appContext
+        ops.execute {
+            Native.roomLeave(sessionPtr, gid)
+            Native.roomAudioStop(sessionPtr)
+            if (ctx != null) CallService.stop(ctx)
+        }
         Thread { runCatching { a?.stop() } }.apply { isDaemon = true }.start()
     }
 

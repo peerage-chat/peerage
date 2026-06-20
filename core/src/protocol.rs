@@ -32,12 +32,11 @@ pub enum Payload {
     Ping,
     /// Ответ на ping.
     Pong,
-    /// Приглашение в звонок (сигнализация по надёжному каналу).
-    CallInvite { call_id: u64, audio: bool, video: bool },
-    /// Принятие звонка.
-    CallAccept { call_id: u64 },
-    /// Завершение/отклонение звонка.
-    CallEnd { call_id: u64 },
+    /// Приглашение в голосовую комнату (DM-звонок). room_id = первые 16 байт
+    /// SHA-256(min(keyA,keyB) ++ max(keyA,keyB)) — детерминирован для обеих сторон.
+    RoomInvite { room_id: Vec<u8>, audio: bool, video: bool },
+    /// Отклонение входящего звонка (получатель нажал «Отклонить»).
+    RoomDecline { room_id: Vec<u8> },
     /// Групповое MLS-сообщение (Commit/Welcome/прикладное) — для пересылки
     /// участникам группы. Содержимое уже зашифровано MLS.
     Group { data: Vec<u8> },
@@ -148,9 +147,8 @@ mod tests {
             Payload::Pong,
             Payload::Ack { id: 7 },
             Payload::Text { id: 1, text: "hi".into() },
-            Payload::CallInvite { call_id: 99, audio: true, video: false },
-            Payload::CallAccept { call_id: 99 },
-            Payload::CallEnd { call_id: 99 },
+            Payload::RoomInvite { room_id: vec![1u8; 16], audio: true, video: false },
+            Payload::RoomDecline { room_id: vec![2u8; 16] },
             Payload::Group { data: vec![1, 2, 3, 9, 9] },
             Payload::GroupKeyRequest,
             Payload::GroupKeyReply { key_package: vec![7, 7, 7] },
