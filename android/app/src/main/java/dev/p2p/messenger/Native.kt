@@ -13,8 +13,9 @@ object Native {
         System.loadLibrary("p2p_android")
     }
 
-    /** Инициализация. Возвращает JSON {pubkey, address, fingerprint, session_ptr} или {error}. */
-    external fun start(dataDir: String): String
+    /** Инициализация. vaultKey — 32-байтовый ключ из Android Keystore (VaultKeyManager).
+     *  Возвращает JSON {pubkey, address, fingerprint, session_ptr} или {error}. */
+    external fun start(dataDir: String, vaultKey: ByteArray): String
 
     /** Освобождение ресурсов сессии. */
     external fun destroySession(sessionPtr: Long)
@@ -44,6 +45,8 @@ object Native {
     external fun netPeers(sessionPtr: Long): Int
     external fun netTree(sessionPtr: Long): Int
     external fun stop(sessionPtr: Long)
+    /** Принудительный реконнект к публичным пирам (обход Yggdrasil backoff). */
+    external fun reconnectPeers(sessionPtr: Long)
 
     // ── Звонки (1:1) ──────────────────────────────────────────────────────
     /** Начать исходящий звонок. Возвращает JSON {call_id, sample_rate, channels, frame_len}. */

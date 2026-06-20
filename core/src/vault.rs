@@ -88,6 +88,11 @@ pub fn enabled() -> bool {
     KEY.get().is_some()
 }
 
+/// Копия текущего ключа (для SQLCipher PRAGMA key).
+pub fn key_bytes() -> Option<[u8; 32]> {
+    KEY.get().copied()
+}
+
 fn key_from_keyring() -> Result<[u8; 32], VaultError> {
     let entry = keyring::Entry::new(SERVICE, ENTRY).map_err(|e| VaultError::Keyring(e.to_string()))?;
     match entry.get_password() {

@@ -7,15 +7,37 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.Executors
 
-/** Параметры видео-звонка (аппаратный H.264 через MediaCodec). */
-const val VIDEO_W = 1280
-const val VIDEO_H = 720
-const val VIDEO_FPS = 30
-const val VIDEO_BITRATE = 2_000_000 // 2 Мбит/с — хорошее качество для 720p30
+/** Пресет качества видео-звонка. */
+data class VideoQuality(
+    val label: String,
+    val width: Int,
+    val height: Int,
+    val fps: Int,
+    val bitrate: Int,
+) {
+    val key get() = "${width}x${height}@${fps}"
+
+    companion object {
+        val presets = listOf(
+            VideoQuality("480p  30fps",  854,  480, 30, 1_000_000),
+            VideoQuality("720p  30fps", 1280,  720, 30, 2_000_000),
+            VideoQuality("720p  60fps", 1280,  720, 60, 4_000_000),
+            VideoQuality("1080p 30fps", 1920, 1080, 30, 4_000_000),
+            VideoQuality("1080p 60fps", 1920, 1080, 60, 8_000_000),
+        )
+        val default get() = presets[1] // 720p 30fps
+    }
+}
 
 data class Contact(
     val key: String,
@@ -102,6 +124,22 @@ class AppModel private constructor() {
     var currentRoom by mutableStateOf<String?>(null)
     val roomMembers = mutableStateListOf<RoomMember>()
 
+    // Качество видео — загружается из SharedPreferences при start().
+    var videoQuality by mutableStateOf(VideoQuality.default)
+        private set
+
+    fun changeVideoQuality(q: VideoQuality) {
+        videoQuality = q
+        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putString("video_quality", q.key)?.apply()
+    }
+
+    private fun loadSettings() {
+        val prefs = appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE) ?: return
+        val key = prefs.getString("video_quality", null) ?: return
+        videoQuality = VideoQuality.presets.find { it.key == key } ?: VideoQuality.default
+    }
+
     // Звонок (1:1). audio/appContext задаются из Activity (нужен Context).
     var call by mutableStateOf<CallState?>(null)
     var audio: CallAudio? = null
@@ -114,6 +152,7 @@ class AppModel private constructor() {
     @Volatile private var running = false
     private var pollThread: Thread? = null
     private var tickerThread: Thread? = null
+    private var netCallback: ConnectivityManager.NetworkCallback? = null
 
     @Volatile private var started = false
 
@@ -122,7 +161,9 @@ class AppModel private constructor() {
     fun start(dataDir: String) {
         if (started) return
         started = true
-        val json = JSONObject(Native.start(dataDir))
+        loadSettings()
+        val vaultKey = VaultKeyManager.getOrCreate(File(dataDir))
+        val json = JSONObject(Native.start(dataDir, vaultKey))
         if (json.has("error")) {
             error = json.getString("error")
             return
@@ -136,6 +177,33 @@ class AppModel private constructor() {
         refreshContactsNow()
         refreshGroupsNow()
         startLoops()
+        registerNetworkCallback()
+    }
+
+    // Мгновенный реконнект при восстановлении сети (до срабатывания тикера).
+    private fun registerNetworkCallback() {
+        val ctx = appContext ?: return
+        val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val ptr = sessionPtr
+                if (ptr != 0L) {
+                    android.util.Log.i("p2pnet", "Network available — forcing peer reconnect")
+                    runCatching { Native.reconnectPeers(ptr) }
+                }
+            }
+        }
+        netCallback = cb
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                cm.registerDefaultNetworkCallback(cb)
+            } else {
+                val req = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                cm.registerNetworkCallback(req, cb)
+            }
+        }
     }
 
     private fun startLoops() {
@@ -153,6 +221,7 @@ class AppModel private constructor() {
         }.apply { isDaemon = true; name = "native-poll"; start() }
         tickerThread = Thread {
             var tick = 0L
+            var zeroPeerTicks = 0  // счётчик тиков без пиров
             while (running) {
                 runCatching {
                     val p = Native.netPeers(sessionPtr)
@@ -171,9 +240,19 @@ class AppModel private constructor() {
                         }
                         roomMembers.clear(); roomMembers.addAll(list)
                     }
-                    // Диагностика устойчивости сети: heartbeat + пиры/дерево. Если
-                    // tick перестаёт расти при погасшем экране — потоки заморожены;
-                    // если peers=0 и не возвращается — отвал пиринга (не reconnect).
+                    // Диагностика + авто-реконнект меша.
+                    // peers=0 два тика подряд (~6с) → Yggdrasil потерял все пиры.
+                    // Принудительно re-add чтобы обойти внутренний backoff.
+                    if (p == 0) {
+                        zeroPeerTicks++
+                        if (zeroPeerTicks >= 2) {
+                            android.util.Log.w("p2pnet", "peers=0 for $zeroPeerTicks ticks — forcing peer reconnect")
+                            Native.reconnectPeers(sessionPtr)
+                            zeroPeerTicks = 0
+                        }
+                    } else {
+                        zeroPeerTicks = 0
+                    }
                     android.util.Log.i("p2pnet", "tick=$tick peers=$p tree=$t inCall=${call != null} room=${currentRoom != null}")
                 }
                 tick++
@@ -279,7 +358,14 @@ class AppModel private constructor() {
                         withVideo = o.optBoolean("video", false), status = "incoming")
                 }
             }
-            "call_accept" -> call?.let { c -> if (o.getString("peer") == c.peer) call = c.copy(status = "active") }
+            "call_accept" -> call?.let { c ->
+                if (o.getString("peer") == c.peer) {
+                    call = c.copy(status = "active")
+                    // Принудительно запрашиваем I-frame: callee только что создал
+                    // VideoReceiver и ждёт keyframe чтобы начать декодирование.
+                    videoSender?.requestKeyframe()
+                }
+            }
             "call_end" -> call?.let { c -> if (o.getString("peer") == c.peer) endCall() }
             "room_presence" -> if (o.getString("gid") == currentRoom) {
                 // Мгновенно отражаем участника, не дожидаясь опроса тикером.
@@ -317,8 +403,8 @@ class AppModel private constructor() {
         // Оптимистично показываем оверлей сразу; параметры/старт медиа — в фоне.
         call = CallState(peer, 0, incoming = false, withVideo = video, status = "ringing")
         ops.execute {
-            val vw = if (video) VIDEO_W else 0
-            val vh = if (video) VIDEO_H else 0
+            val vw = if (video) videoQuality.width else 0
+            val vh = if (video) videoQuality.height else 0
             val params = JSONObject(Native.callStart(sessionPtr, peer, video, vw, vh))
             if (!params.has("call_id")) { call = null; return@execute }
             call = call?.copy(callId = params.getLong("call_id"))
@@ -331,8 +417,8 @@ class AppModel private constructor() {
         if (!c.incoming) return
         call = c.copy(status = "active")
         ops.execute {
-            val vw = if (c.withVideo) VIDEO_W else 0
-            val vh = if (c.withVideo) VIDEO_H else 0
+            val vw = if (c.withVideo) videoQuality.width else 0
+            val vh = if (c.withVideo) videoQuality.height else 0
             val params = JSONObject(Native.callAccept(sessionPtr, c.peer, c.callId, c.withVideo, vw, vh))
             startMedia(params.optInt("sample_rate", 48000), params.optInt("channels", 1), c.withVideo)
         }
@@ -344,7 +430,7 @@ class AppModel private constructor() {
         val ctx = appContext
         if (video && ctx != null) {
             runCatching {
-                videoSender = VideoSender(ctx, VIDEO_W, VIDEO_H, VIDEO_FPS, VIDEO_BITRATE) { nal, keyframe ->
+                videoSender = VideoSender(ctx, videoQuality.width, videoQuality.height, videoQuality.fps, videoQuality.bitrate) { nal, keyframe ->
                     Native.callSendVideo(sessionPtr, nal, keyframe)
                 }.also { it.start() }
             }
