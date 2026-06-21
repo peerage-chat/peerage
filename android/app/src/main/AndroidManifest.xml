@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Показывать звонок поверх экрана блокировки (fullScreenIntent). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:allowBackup="false"
@@ -49,5 +51,15 @@
             android:name=".CallService"
             android:exported="false"
             android:foregroundServiceType="microphone|dataSync" />
+
+        <!-- Кнопки «Принять»/«Отклонить» в уведомлении о входящем звонке. -->
+        <receiver
+            android:name=".IncomingCallReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.p2p.messenger.ACCEPT_CALL" />
+                <action android:name="dev.p2p.messenger.DECLINE_CALL" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

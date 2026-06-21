@@ -411,11 +411,18 @@ class AppModel private constructor() {
                 if (existing == null || existing.peer == peer) {
                     if (currentRoom != null && dmCallPeer == peer) leaveRoom()
                     incomingCall = IncomingRoomCall(peer, roomId, audio, video)
+                    val callerName = contacts.firstOrNull { it.key == peer }?.name ?: "Контакт"
+                    appContext?.let { IncomingCallReceiver.show(it, callerName) }
                 }
             }
             "room_decline" -> {
                 val peer = o.getString("peer")
                 if (peer == dmCallPeer) leaveRoom()
+                // Звонящий сбросил до того как мы ответили — гасим уведомление.
+                if (incomingCall?.peer == peer) {
+                    incomingCall = null
+                    appContext?.let { IncomingCallReceiver.cancel(it) }
+                }
             }
             "room_presence" -> if (o.getString("gid") == currentRoom) {
                 // Мгновенно отражаем участника, не дожидаясь опроса тикером.
@@ -555,6 +562,7 @@ class AppModel private constructor() {
         val ic = incomingCall ?: return
         incomingCall = null
         val ctx = appContext ?: return
+        IncomingCallReceiver.cancel(ctx)
         val name = contacts.firstOrNull { it.key == ic.peer }?.name ?: ""
         ops.execute {
             val roomId = Native.roomJoinDm(sessionPtr, ic.peer, ic.audio, ic.video)
@@ -571,6 +579,7 @@ class AppModel private constructor() {
     fun declineDmCall() {
         val ic = incomingCall ?: return
         incomingCall = null
+        appContext?.let { IncomingCallReceiver.cancel(it) }
         ops.execute { Native.roomDeclineDm(sessionPtr, ic.peer) }
     }
 
