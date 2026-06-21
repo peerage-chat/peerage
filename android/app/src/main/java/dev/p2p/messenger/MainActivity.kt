@@ -7,9 +7,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -47,15 +55,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -111,11 +121,13 @@ private fun CenterMessage(text: String) {
     }
 }
 
-private enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings }
+private enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner }
 
 @Composable
 private fun Root(model: AppModel) {
     var screen by remember { mutableStateOf(Screen.Contacts) }
+    // Передаёт отсканированный ключ из Scanner → AddScreen без поднятия в Model.
+    var scanResult by remember { mutableStateOf<String?>(null) }
 
     Box(Modifier.fillMaxSize()) {
         Surface(Modifier.fillMaxSize(), color = HoloBg) {
@@ -162,6 +174,7 @@ private fun Root(model: AppModel) {
                     Screen.CreateGroup -> TopBar("Новая группа", onBack = { screen = Screen.Groups })
                     Screen.AddMember -> TopBar("Добавить участника", onBack = { screen = Screen.GroupChat })
                     Screen.Settings -> TopBar("Настройки", onBack = { screen = Screen.Contacts })
+                    Screen.Scanner -> TopBar("Сканировать QR", onBack = { screen = Screen.Add })
                 }
                 // ── DmCallBar: прямо под шапкой, толкает контент вниз ─────────────
                 if (model.incomingCall == null) {
@@ -172,7 +185,15 @@ private fun Root(model: AppModel) {
                     when (screen) {
                         Screen.Contacts -> ContactsScreen(model) { model.openChat(it); screen = Screen.Chat }
                         Screen.Chat -> ChatScreen(model)
-                        Screen.Add -> AddScreen(model) { screen = Screen.Contacts }
+                        Screen.Add -> AddScreen(
+                            model,
+                            scannedKey = scanResult,
+                            onScan = { screen = Screen.Scanner },
+                        ) { screen = Screen.Contacts }
+                        Screen.Scanner -> QrScannerScreen { key ->
+                            scanResult = key
+                            screen = Screen.Add
+                        }
                         Screen.Me -> MeScreen(model)
                         Screen.Info -> InfoScreen(model) { screen = Screen.Contacts }
                         Screen.Groups -> GroupsScreen(model) { model.openGroup(it); screen = Screen.GroupChat }
@@ -342,23 +363,25 @@ private fun MessageBubble(m: Message) {
 }
 
 @Composable
-private fun AddScreen(model: AppModel, onDone: () -> Unit) {
+private fun AddScreen(
+    model: AppModel,
+    scannedKey: String? = null,
+    onScan: () -> Unit = {},
+    onDone: () -> Unit,
+) {
     var keyHex by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     // Операция асинхронна; результат приходит в model.addStatus.
     LaunchedEffect(Unit) { model.addStatus = "" }
     val st = model.addStatus
     LaunchedEffect(st) { if (st == "added") { model.addStatus = ""; onDone() } }
-    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { keyHex = it }
-    }
+    // Получаем ключ из сканера (приходит через Root → scannedKey).
+    LaunchedEffect(scannedKey) { if (scannedKey != null) keyHex = scannedKey }
     Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
         FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ (hex)")
         TextField(keyHex, { keyHex = it }, Modifier.fillMaxWidth(), colors = inputColors(),
             placeholder = { Text("64 hex-символа", color = HoloSecondary) })
-        AccentButton("Сканировать QR", modifier = Modifier.fillMaxWidth()) {
-            scanLauncher.launch(ScanOptions().setBeepEnabled(false).setOrientationLocked(false))
-        }
+        AccentButton("Сканировать QR", modifier = Modifier.fillMaxWidth()) { onScan() }
         FieldLabel("ИМЯ")
         TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
         AccentButton("Добавить") { model.addContact(keyHex.trim(), name.trim()) }
@@ -767,6 +790,103 @@ private fun SettingsScreen(model: AppModel) {
                 color = HoloSecondary,
                 fontSize = 11.sp,
             )
+    }
+}
+
+/** Встроенный Compose-сканер QR-кода на CameraX. Вызывает [onResult] ровно один раз. */
+@Composable
+private fun QrScannerScreen(onResult: (String) -> Unit) {
+    val ctx = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val previewView = remember { PreviewView(ctx) }
+    var cameraProvider: ProcessCameraProvider? = remember { null }
+
+    LaunchedEffect(lifecycleOwner) {
+        cameraProvider = withContext(Dispatchers.IO) {
+            ProcessCameraProvider.getInstance(ctx).get()
+        }
+        val preview = Preview.Builder().build().also {
+            it.setSurfaceProvider(previewView.surfaceProvider)
+        }
+        val analysis = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+        analysis.setAnalyzer(
+            androidx.core.content.ContextCompat.getMainExecutor(ctx),
+            QrAnalyzer(onResult),
+        )
+        cameraProvider?.unbindAll()
+        cameraProvider?.bindToLifecycle(
+            lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis,
+        )
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { cameraProvider?.unbindAll() }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        // Превью камеры
+        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+
+        // Тёмная маска: 4 прямоугольника вокруг прозрачного квадрата-прицела
+        val boxSizePx = with(androidx.compose.ui.platform.LocalDensity.current) { 260.dp.toPx() }
+        Canvas(Modifier.fillMaxSize()) {
+            val l = (size.width - boxSizePx) / 2
+            val t = (size.height - boxSizePx) / 2
+            val r = l + boxSizePx
+            val b = t + boxSizePx
+            val dim = Color(0x99000000)
+            drawRect(dim, topLeft = Offset.Zero, size = Size(size.width, t))          // верх
+            drawRect(dim, topLeft = Offset(0f, t), size = Size(l, boxSizePx))         // лево
+            drawRect(dim, topLeft = Offset(r, t), size = Size(size.width - r, boxSizePx)) // право
+            drawRect(dim, topLeft = Offset(0f, b), size = Size(size.width, size.height - b)) // низ
+        }
+
+        // Рамка прицела
+        Box(
+            Modifier.size(260.dp).align(Alignment.Center)
+                .border(2.dp, HoloAccent, RoundedCornerShape(12.dp)),
+        )
+
+        // Подсказка
+        Text(
+            "Наведите камеру на QR-код",
+            color = Color.White,
+            fontSize = 14.sp,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 56.dp),
+        )
+    }
+}
+
+/** Анализатор кадров: ищет QR-код и вызывает [onResult] один раз при успехе. */
+private class QrAnalyzer(private val onResult: (String) -> Unit) : ImageAnalysis.Analyzer {
+    private val reader = com.google.zxing.qrcode.QRCodeReader()
+    @Volatile private var done = false
+
+    @ExperimentalGetImage
+    override fun analyze(proxy: ImageProxy) {
+        if (done) { proxy.close(); return }
+        val img = proxy.image
+        if (img != null) {
+            try {
+                val plane = img.planes[0]
+                val buf = plane.buffer
+                val data = ByteArray(buf.remaining()).also { buf.get(it) }
+                val src = com.google.zxing.PlanarYUVLuminanceSource(
+                    data, proxy.width, proxy.height, 0, 0, proxy.width, proxy.height, false,
+                )
+                val result = reader.decode(com.google.zxing.BinaryBitmap(
+                    com.google.zxing.common.HybridBinarizer(src),
+                ))
+                done = true
+                onResult(result.text)
+            } catch (_: com.google.zxing.NotFoundException) {
+                // нет QR в этом кадре — норма
+            }
+        }
+        proxy.close()
     }
 }
 
