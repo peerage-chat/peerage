@@ -51,5 +51,8 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+    // QR-генерация (MeScreen) и сканер (AddScreen).
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0") { isTransitive = false }
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

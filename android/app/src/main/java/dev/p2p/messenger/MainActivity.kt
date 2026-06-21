@@ -7,6 +7,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -45,11 +47,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -343,10 +348,16 @@ private fun AddScreen(model: AppModel, onDone: () -> Unit) {
     LaunchedEffect(Unit) { model.addStatus = "" }
     val st = model.addStatus
     LaunchedEffect(st) { if (st == "added") { model.addStatus = ""; onDone() } }
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.let { keyHex = it }
+    }
     Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
         FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ (hex)")
         TextField(keyHex, { keyHex = it }, Modifier.fillMaxWidth(), colors = inputColors(),
             placeholder = { Text("64 hex-символа", color = HoloSecondary) })
+        AccentButton("Сканировать QR", modifier = Modifier.fillMaxWidth()) {
+            scanLauncher.launch(ScanOptions().setBeepEnabled(false).setOrientationLocked(false))
+        }
         FieldLabel("ИМЯ")
         TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
         AccentButton("Добавить") { model.addContact(keyHex.trim(), name.trim()) }
@@ -358,14 +369,28 @@ private fun AddScreen(model: AppModel, onDone: () -> Unit) {
 @Composable
 private fun MeScreen(model: AppModel) {
     val me = model.me ?: return
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(FormGap)) {
-        FieldLabel("FINGERPRINT (сверьте при встрече)")
-        Text(me.fingerprint, color = HoloAccent, fontSize = 16.sp)
-        FieldLabel("АДРЕС YGGDRASIL")
-        Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-        FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ")
-        Text(me.pubkey, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+    val qr = remember(me.pubkey) { generateQrBitmap(me.pubkey) }
+    Column(
+        Modifier.verticalScroll(rememberScrollState()).padding(ScreenPad).fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(FormGap),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (qr != null) {
+            Image(
+                bitmap = qr.asImageBitmap(),
+                contentDescription = "QR код публичного ключа",
+                modifier = Modifier.size(240.dp).clip(RoundedCornerShape(8.dp)),
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(FormGap)) {
+            FieldLabel("FINGERPRINT (сверьте при встрече)")
+            Text(me.fingerprint, color = HoloAccent, fontSize = 16.sp)
+            FieldLabel("АДРЕС YGGDRASIL")
+            Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+            FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ")
+            Text(me.pubkey, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+        }
     }
 }
 
@@ -733,6 +758,18 @@ private fun SettingsScreen(model: AppModel) {
             )
     }
 }
+
+/** Генерирует QR-код для строки [data] размером 512×512. Возвращает null при ошибке. */
+private fun generateQrBitmap(data: String): android.graphics.Bitmap? = runCatching {
+    val size = 512
+    val bits = com.google.zxing.qrcode.QRCodeWriter()
+        .encode(data, com.google.zxing.BarcodeFormat.QR_CODE, size, size)
+    val pixels = IntArray(size * size) { i ->
+        if (bits[i % size, i / size]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+    }
+    android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        .also { it.setPixels(pixels, 0, size, 0, 0, size, size) }
+}.getOrNull()
 
 @Composable
 private fun inputColors() = TextFieldDefaults.colors(
