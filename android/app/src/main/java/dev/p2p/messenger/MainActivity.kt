@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -390,6 +391,16 @@ private fun MeScreen(model: AppModel) {
             Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
             FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ")
             Text(me.pubkey, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+            val ctx = LocalContext.current
+            AccentButton("Скопировать ключ", modifier = Modifier.fillMaxWidth()) {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("p2p pubkey", me.pubkey))
+                // API 33+ сам показывает тост «Скопировано», на старых — делаем вручную.
+                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+                    android.widget.Toast.makeText(ctx, "Скопировано", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 }
