@@ -67,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material.icons.filled.ExpandLess
@@ -628,11 +629,11 @@ private fun RoomGrid(
     val members = if (inRoom) model.roomMembers else presenceMembers
     val total = if (inRoom) members.size + 1 else members.size
     Surface(color = HoloSurface, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
             Text(
                 if (inRoom) "В ЗВОНКЕ · $total" else "В КОМНАТЕ · $total",
                 color = HoloSecondary, fontSize = 11.sp,
-                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+                modifier = Modifier.padding(start = 2.dp, bottom = 8.dp),
             )
             val all = if (inRoom)
                 listOf(Triple("me", true, false)) + members.map { Triple(it.peer, it.audio, it.video) }
@@ -640,8 +641,8 @@ private fun RoomGrid(
                 members.map { Triple(it.peer, it.audio, it.video) }
             all.chunked(2).forEach { row ->
                 Row(
-                    Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     row.forEach { (key, audio, video) ->
                         val isMe = key == "me"
@@ -661,31 +662,43 @@ private fun GridTile(
     name: String, audio: Boolean, video: Boolean, me: Boolean,
     modifier: Modifier = Modifier, onClick: () -> Unit,
 ) {
-    Row(
+    Box(
         modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(if (me) HoloAccentDark else Color(0xFF2A2F35))
             .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .aspectRatio(1f),
     ) {
-        Box(
-            Modifier.size(40.dp).clip(CircleShape)
-                .background(if (me) HoloAccent else Color(0xFF3A3F45)),
-            contentAlignment = Alignment.Center,
+        Column(
+            Modifier.fillMaxSize().padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            Text(name.take(1).uppercase(), color = if (me) HoloAccentDark else Color.White,
-                fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        }
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
+            Box(
+                Modifier.size(64.dp).clip(CircleShape)
+                    .background(if (me) HoloAccent else Color(0xFF3A3F45)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(name.take(1).uppercase(), color = if (me) HoloAccentDark else Color.White,
+                    fontWeight = FontWeight.Bold, fontSize = 26.sp)
+            }
+            Spacer(Modifier.height(10.dp))
             Text(name, color = if (me) HoloAccent else Color.White,
-                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (!audio || video) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (!audio) Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(11.dp))
-                    if (video) Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(11.dp))
-                }
+                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+        // Статус микрофона/видео — правый верхний угол
+        if (!audio || video) {
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(6.dp)
+                    .clip(RoundedCornerShape(6.dp)).background(Color(0xAA000000))
+                    .padding(horizontal = 5.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!audio) Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(13.dp))
+                if (video) Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(13.dp))
             }
         }
     }
@@ -695,14 +708,28 @@ private fun GridTile(
 private fun ParticipantFullscreen(
     name: String, audio: Boolean, video: Boolean, me: Boolean, onDismiss: () -> Unit,
 ) {
-    Box(
-        Modifier.fillMaxSize().background(Color(0xEE000000)).clickable { onDismiss() },
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Box(Modifier.fillMaxSize().background(Color(0xEE000000)).clickable { onDismiss() }) {
+        // Кнопка закрытия — правый верхний угол
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(16.dp).size(36.dp)
+                .clip(CircleShape).background(Color(0x33FFFFFF)).clickable { onDismiss() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Закрыть", tint = Color.White,
+                modifier = Modifier.size(18.dp).then(
+                    Modifier.graphicsLayer { rotationZ = 90f }
+                ))
+        }
+        // Центральный контент
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
             Box(
-                Modifier.size(120.dp).clip(CircleShape)
-                    .background(if (me) HoloAccent else Color(0xFF3A3F45)),
+                Modifier.size(128.dp).clip(CircleShape)
+                    .background(if (me) HoloAccent else Color(0xFF3A3F45))
+                    .border(3.dp, if (me) HoloAccent.copy(alpha = 0.4f) else Color(0xFF4A4F55), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(name.take(1).uppercase(), color = if (me) HoloAccentDark else Color.White,
@@ -711,20 +738,29 @@ private fun ParticipantFullscreen(
             Spacer(Modifier.height(20.dp))
             Text(name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (!audio) Row(verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(15.dp))
-                    Text("Выкл", color = WarnColor, fontSize = 13.sp)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!audio) Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x33E53935))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(14.dp))
+                    Text("Микрофон выкл", color = WarnColor, fontSize = 12.sp)
                 }
-                if (video) Row(verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(15.dp))
-                    Text("Видео", color = HoloSecondary, fontSize = 13.sp)
+                if (video) Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x22FFFFFF))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
+                    Text("Видео", color = HoloSecondary, fontSize = 12.sp)
                 }
             }
-            Spacer(Modifier.height(36.dp))
-            Text("Нажмите чтобы закрыть", color = HoloSecondary, fontSize = 11.sp)
         }
     }
 }
