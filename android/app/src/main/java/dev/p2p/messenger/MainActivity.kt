@@ -66,8 +66,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 // ── Единая сетка размеров/отступов ──────────────────────────────────────────
 private val ScreenPad = 16.dp        // отступ контента экрана
@@ -123,11 +135,14 @@ private fun CenterMessage(text: String) {
 
 private enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Root(model: AppModel) {
     var screen by remember { mutableStateOf(Screen.Contacts) }
-    // Передаёт отсканированный ключ из Scanner → AddScreen без поднятия в Model.
     var scanResult by remember { mutableStateOf<String?>(null) }
+    var showProfileSheet by remember { mutableStateOf(false) }
+    var activityBarExpanded by remember { mutableStateOf(false) }
+    var activeFilter by remember { mutableStateOf("all") }
 
     Box(Modifier.fillMaxSize()) {
         Surface(Modifier.fillMaxSize(), color = HoloBg) {
@@ -135,10 +150,8 @@ private fun Root(model: AppModel) {
                 // ── Шапка: конфигурируется по текущему экрану ─────────────────────
                 when (screen) {
                     Screen.Contacts -> TopBar("p2p messenger") {
-                        BarIcon(Icons.Filled.Group, "Группы") { model.refreshGroups(); screen = Screen.Groups }
                         BarIcon(Icons.Filled.PersonAdd, "Добавить контакт") { screen = Screen.Add }
-                        BarIcon(Icons.Filled.QrCode2, "Мой код") { screen = Screen.Me }
-                        BarIcon(Icons.Filled.Settings, "Настройки") { screen = Screen.Settings }
+                        PfpButton(model) { showProfileSheet = true }
                     }
                     Screen.Chat -> {
                         val key = model.currentChat
@@ -152,7 +165,7 @@ private fun Root(model: AppModel) {
                         }
                     }
                     Screen.Add -> TopBar("Добавить контакт", onBack = { screen = Screen.Contacts })
-                    Screen.Me -> TopBar("Мой код", onBack = { screen = Screen.Contacts })
+                    Screen.Me -> TopBar("Мой ключ", onBack = { screen = Screen.Contacts })
                     Screen.Info -> TopBar("Контакт", onBack = { screen = Screen.Chat })
                     Screen.Groups -> TopBar("Группы", onBack = { screen = Screen.Contacts }) {
                         BarIcon(Icons.Filled.Add, "Новая группа") { screen = Screen.CreateGroup }
@@ -160,7 +173,7 @@ private fun Root(model: AppModel) {
                     Screen.GroupChat -> {
                         val gid = model.currentGroup
                         val name = gid?.let { g -> model.groups.firstOrNull { it.gid == g }?.name } ?: "Группа"
-                        TopBar(name, onBack = { screen = Screen.Groups }) {
+                        TopBar(name, onBack = { screen = Screen.Contacts }) {
                             if (gid != null) {
                                 if (model.currentRoom == gid) {
                                     BarIcon(Icons.Filled.CallEnd, "Выйти из звонка") { model.leaveRoom() }
@@ -180,10 +193,19 @@ private fun Root(model: AppModel) {
                 if (model.incomingCall == null) {
                     model.dmCallPeer?.let { DmCallBar(model, it) }
                 }
+                // ── Activity bar + фильтр-чипы: только на главном экране ─────────
+                if (screen == Screen.Contacts) {
+                    ActivityStrip(model, activityBarExpanded) { activityBarExpanded = !activityBarExpanded }
+                    FilterChipsRow(activeFilter) { activeFilter = it }
+                }
                 // ── Контент экрана (без шапки) ────────────────────────────────────
                 Box(Modifier.weight(1f)) {
                     when (screen) {
-                        Screen.Contacts -> ContactsScreen(model) { model.openChat(it); screen = Screen.Chat }
+                        Screen.Contacts -> ContactsScreen(
+                            model, activeFilter,
+                            onOpenDm = { model.openChat(it); screen = Screen.Chat },
+                            onOpenGroup = { model.openGroup(it); screen = Screen.GroupChat },
+                        )
                         Screen.Chat -> ChatScreen(model)
                         Screen.Add -> AddScreen(
                             model,
@@ -206,6 +228,13 @@ private fun Root(model: AppModel) {
             }
         }
         model.incomingCall?.let { IncomingCallOverlay(model, it) }
+        if (showProfileSheet) {
+            ProfileSheet(model, onDismiss = { showProfileSheet = false }) { dest ->
+                if (dest == Screen.Groups) model.refreshGroups()
+                screen = dest
+                showProfileSheet = false
+            }
+        }
     }
 }
 
@@ -276,32 +305,91 @@ private fun SendButton(onClick: () -> Unit) {
 // ── Экраны ──────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ContactsScreen(model: AppModel, onOpen: (String) -> Unit) {
+private fun ContactsScreen(
+    model: AppModel,
+    activeFilter: String,
+    onOpenDm: (String) -> Unit,
+    onOpenGroup: (String) -> Unit,
+) {
+    val statusLabel = if (model.benchRecv) "⏱ приём: %.1f Мбит/с".format(model.benchRecvMbps)
+    else "Пиров в сети: ${model.netPeers}"
+    val showDm = activeFilter == "all" || activeFilter == "dm"
+    val showRoom = activeFilter == "all" || activeFilter == "room"
+
     Column(Modifier.fillMaxSize()) {
-        // Долгий тап → режим приёмника теста скорости (живой Мбит/с).
-        val statusLabel = if (model.benchRecv) "⏱ приём: %.1f Мбит/с".format(model.benchRecvMbps)
-        else "Пиров в сети: ${model.netPeers}"
         Text(statusLabel, color = HoloSecondary, fontSize = 11.sp,
             modifier = Modifier.padding(horizontal = ScreenPad, vertical = 6.dp)
                 .pointerInput(Unit) { detectTapGestures(onLongPress = { model.startBenchRecv() }) })
-        if (model.contacts.isEmpty()) {
-            CenterMessage("Нет контактов. Добавьте по ключу.")
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(model.contacts, key = { it.key }) { c ->
-                    ListRow(onClick = { onOpen(c.key) }) {
-                        StatusDot(model.online[c.key] == true)
-                        Spacer(Modifier.width(12.dp))
-                        Text(c.name, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (c.verified) {
-                            Spacer(Modifier.width(6.dp))
-                            Icon(Icons.Filled.Verified, "Проверен", tint = HoloVerified, modifier = Modifier.size(15.dp))
+        when {
+            activeFilter == "channel" -> CenterMessage("Каналы — скоро")
+            model.contacts.isEmpty() && model.groups.isEmpty() ->
+                CenterMessage("Нет контактов. Добавьте по ключу.")
+            else -> LazyColumn(Modifier.fillMaxSize()) {
+                // Комнаты — наверху, если фильтр позволяет
+                if (showRoom) {
+                    items(model.groups, key = { "g_${it.gid}" }) { g ->
+                        val presenceCount = model.groupPresence[g.gid]?.size ?: 0
+                        val inRoom = model.currentRoom == g.gid
+                        ListRow(onClick = { onOpenGroup(g.gid) }) {
+                            Box(
+                                Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF0D2A0D)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(g.name, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    if (inRoom) "В эфире"
+                                    else if (presenceCount > 0) "$presenceCount в комнате"
+                                    else "${g.members} уч.",
+                                    color = if (inRoom || presenceCount > 0) HoloOnline else HoloSecondary,
+                                    fontSize = 11.sp,
+                                )
+                            }
                         }
-                        Spacer(Modifier.weight(1f))
-                        val unread = model.unread[c.key] ?: 0
-                        if (unread > 0) {
-                            Box(Modifier.clip(CircleShape).background(HoloAccent).padding(horizontal = 7.dp, vertical = 2.dp)) {
-                                Text("$unread", color = HoloAccentDark, fontSize = 11.sp)
+                    }
+                }
+                // DM-контакты
+                if (showDm) {
+                    items(model.contacts, key = { "c_${it.key}" }) { c ->
+                        val online = model.online[c.key] == true
+                        ListRow(onClick = { onOpenDm(c.key) }) {
+                            Box(Modifier.size(40.dp), contentAlignment = Alignment.BottomEnd) {
+                                Box(
+                                    Modifier.size(40.dp).clip(CircleShape).background(avatarColor(c.name)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(c.name.take(1).uppercase(), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                                }
+                                Box(
+                                    Modifier.size(12.dp).clip(CircleShape)
+                                        .background(if (online) HoloOnline else OfflineDot)
+                                        .border(2.dp, HoloBg, CircleShape),
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(c.name, color = Color.White, fontSize = 15.sp, maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                    if (c.verified) {
+                                        Spacer(Modifier.width(4.dp))
+                                        Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(13.dp))
+                                    }
+                                }
+                                Text(
+                                    if (online) "онлайн" else "не в сети",
+                                    color = if (online) HoloOnline else HoloSecondary,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                            val unread = model.unread[c.key] ?: 0
+                            if (unread > 0) {
+                                Box(Modifier.clip(CircleShape).background(HoloAccent).padding(horizontal = 7.dp, vertical = 2.dp)) {
+                                    Text("$unread", color = HoloAccentDark, fontSize = 11.sp)
+                                }
                             }
                         }
                     }
@@ -888,6 +976,168 @@ private class QrAnalyzer(private val onResult: (String) -> Unit) : ImageAnalysis
         }
         proxy.close()
     }
+}
+
+/** Кружок с первой буквой ключа юзера — нажатие открывает шторку профиля. */
+@Composable
+private fun PfpButton(model: AppModel, onClick: () -> Unit) {
+    val initial = model.me?.pubkey?.take(1)?.uppercase() ?: "?"
+    Box(
+        Modifier.size(36.dp).clip(CircleShape).background(HoloAccentDark)
+            .border(1.5.dp, HoloAccent, CircleShape).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(initial, color = HoloAccent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+    Spacer(Modifier.width(8.dp))
+}
+
+/**
+ * Полоса «сейчас онлайн»: по умолчанию свёрнута в тонкую строку с мини-аватарами,
+ * тап разворачивает в горизонтальный ряд с полными аватарами.
+ * Не показывается если никто не онлайн.
+ */
+@Composable
+private fun ActivityStrip(model: AppModel, expanded: Boolean, onToggle: () -> Unit) {
+    val onlineContacts = model.contacts.filter { model.online[it.key] == true }
+    if (onlineContacts.isEmpty()) return
+    Column {
+        Row(
+            Modifier.fillMaxWidth().clickable { onToggle() }
+                .background(HoloSurface).padding(horizontal = 16.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy((-6).dp)) {
+                onlineContacts.take(3).forEach { c ->
+                    Box(
+                        Modifier.size(20.dp).clip(CircleShape).background(avatarColor(c.name))
+                            .border(1.5.dp, HoloBg, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(c.name.take(1).uppercase(), color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "${onlineContacts.size} сейчас онлайн",
+                color = HoloSecondary, fontSize = 11.sp, modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                null, tint = HoloSecondary, modifier = Modifier.size(16.dp),
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            LazyRow(
+                Modifier.background(HoloSurface).padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                items(onlineContacts, key = { it.key }) { c ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            Modifier.size(52.dp).clip(CircleShape).background(avatarColor(c.name))
+                                .border(2.dp, HoloOnline, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(c.name.take(1).uppercase(), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Text(c.name, color = HoloSecondary, fontSize = 10.sp,
+                            modifier = Modifier.padding(top = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+        HorizontalDivider(thickness = 1.dp, color = HoloBorder)
+    }
+}
+
+/** Горизонтально прокручиваемый ряд фильтр-чипов. */
+@Composable
+private fun FilterChipsRow(activeFilter: String, onFilter: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .background(HoloBg).padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        listOf("all" to "Все", "dm" to "Чаты", "room" to "Комнаты", "channel" to "Каналы").forEach { (key, label) ->
+            val selected = activeFilter == key
+            FilterChip(
+                selected = selected,
+                onClick = { onFilter(key) },
+                label = { Text(label, fontSize = 12.sp) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = HoloAccent,
+                    selectedLabelColor = HoloAccentDark,
+                    containerColor = HoloSurface,
+                    labelColor = HoloSecondary,
+                ),
+            )
+        }
+    }
+    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
+}
+
+/** Шторка профиля: открывается по тапу на PFP в топбаре. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProfileSheet(model: AppModel, onDismiss: () -> Unit, navigate: (Screen) -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val me = model.me
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = HoloSurface,
+        scrimColor = Color(0x88000000),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(56.dp).clip(CircleShape).background(HoloAccentDark)
+                    .border(2.dp, HoloAccent, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(me?.pubkey?.take(1)?.uppercase() ?: "?",
+                    color = HoloAccent, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text("Мой профиль", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                if (me != null) {
+                    Text(me.fingerprint.take(16) + "…", color = HoloSecondary, fontSize = 11.sp)
+                }
+            }
+        }
+        HorizontalDivider(color = HoloBorder)
+        listOf(
+            Triple(Icons.Filled.QrCode2, "Мой ключ и QR", Screen.Me),
+            Triple(Icons.Filled.PersonAdd, "Добавить контакт", Screen.Add),
+            Triple(Icons.Filled.Group, "Группы и комнаты", Screen.Groups),
+            Triple(Icons.Filled.Settings, "Настройки", Screen.Settings),
+        ).forEach { (icon, label, dest) ->
+            Row(
+                Modifier.fillMaxWidth().clickable { navigate(dest) }
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(16.dp))
+                Text(label, color = Color.White, fontSize = 15.sp)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+/** Детерминированный цвет аватара по имени контакта. */
+private fun avatarColor(name: String): Color {
+    val palette = listOf(
+        Color(0xFF1E3A5A), Color(0xFF2A1A3A), Color(0xFF1A2A1A),
+        Color(0xFF2A2A1A), Color(0xFF3A1A1A), Color(0xFF1A3A3A),
+    )
+    return palette[abs(name.hashCode()) % palette.size]
 }
 
 /** Генерирует QR-код для строки [data] размером 512×512. Возвращает null при ошибке. */
