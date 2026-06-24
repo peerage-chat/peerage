@@ -159,8 +159,8 @@ private fun Root(model: AppModel) {
                         val name = key?.let { k -> model.contacts.firstOrNull { it.key == k }?.name } ?: "Чат"
                         TopBar(name, onBack = { screen = Screen.Contacts }) {
                             if (key != null) {
-                                BarIcon(Icons.Filled.Call, "Аудио-звонок") { model.callDm(key, false) }
-                                BarIcon(Icons.Filled.Videocam, "Видео-звонок") { model.callDm(key, true) }
+                                BarIcon(Icons.Filled.Call, "Аудио-звонок") { model.callDm(key) }
+                                BarIcon(Icons.Filled.Videocam, "Видео-звонок") { model.callDm(key, video = true) }
                                 BarIcon(Icons.Filled.Info, "О контакте") { screen = Screen.Info }
                             }
                         }
@@ -229,6 +229,9 @@ private fun Root(model: AppModel) {
             }
         }
         model.incomingCall?.let { IncomingCallOverlay(model, it) }
+        if (model.videoActive) {
+            model.dmCallPeer?.let { DmVideoCallScreen(model, it) }
+        }
         if (showProfileSheet) {
             ProfileSheet(model, onDismiss = { showProfileSheet = false }) { dest ->
                 if (dest == Screen.Groups) model.refreshGroups()
@@ -796,6 +799,46 @@ private fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
 }
 
 // ── Входящий звонок (полный экран, Telegram-style) ──────────────────────────
+
+@Composable
+private fun DmVideoCallScreen(model: AppModel, peerKey: String) {
+    val name = model.contacts.firstOrNull { it.key == peerKey }?.name ?: (peerKey.take(6) + "…")
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(
+            factory = { ctx ->
+                android.view.SurfaceView(ctx).also { sv ->
+                    sv.holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                            model.attachVideoReceiver(peerKey, holder.surface)
+                        }
+                        override fun surfaceChanged(holder: android.view.SurfaceHolder, f: Int, w: Int, h: Int) {}
+                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {}
+                    })
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+        Column(
+            Modifier.fillMaxSize().padding(bottom = 48.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                name,
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0x88000000))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                CallButton(Icons.Filled.CallEnd, "Завершить", HoloError) { model.leaveRoom() }
+            }
+        }
+    }
+}
 
 @Composable
 private fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {

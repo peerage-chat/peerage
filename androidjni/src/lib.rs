@@ -1072,6 +1072,57 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetMuted<'local>(
     }
 }
 
+/// Закодированный H264 access-unit → фрагментация + мультикаст всем участникам комнаты.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushVideo<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    data: JByteArray<'local>,
+    keyframe: jboolean,
+) {
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let bytes = env.convert_byte_array(&data).unwrap_or_default();
+        if bytes.is_empty() { return; }
+        if let Some(engine) = session.room_engine() {
+            engine.push_video(&bytes, keyframe != JNI_FALSE);
+        }
+    });
+}
+
+/// Следующий входящий H264-пакет от peer. Возвращает пустой массив если очередь пуста.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullVideoPacket<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    peer_hex: JString<'local>,
+) -> JByteArray<'local> {
+    if session_ptr == 0 { return env.new_byte_array(0).unwrap(); }
+    let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+    let hex: String = match env.get_string(&peer_hex) {
+        Ok(s) => s.into(),
+        Err(_) => return env.new_byte_array(0).unwrap(),
+    };
+    let mut key = [0u8; 32];
+    if hex::decode_to_slice(&hex, &mut key).is_err() {
+        return env.new_byte_array(0).unwrap();
+    }
+    let frame = session.room_engine().and_then(|e| e.pull_video_for(&key));
+    match frame {
+        Some(f) => {
+            let arr = env.new_byte_array(f.len() as i32).unwrap();
+            // SAFETY: u8 и i8 одинаковый размер/выравнивание; JNI хранит байты.
+            let signed = unsafe { std::slice::from_raw_parts(f.as_ptr() as *const i8, f.len()) };
+            let _ = env.set_byte_array_region(&arr, 0, signed);
+            arr
+        }
+        None => env.new_byte_array(0).unwrap(),
+    }
+}
+
 // ── Группы (MLS) ───────────────────────────────────────────────────────────
 
 // Команды уходят групповому актору (event_pump) fire-and-forget — результат

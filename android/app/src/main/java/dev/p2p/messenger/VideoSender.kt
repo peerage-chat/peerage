@@ -72,7 +72,7 @@ class VideoSender(
         val t = HandlerThread("venc-cam").apply { start() }
         camThread = t
         camHandler = Handler(t.looper)
-        mgr.openCamera(camId, object : CameraDevice.StateCallback() {
+        try { mgr.openCamera(camId, object : CameraDevice.StateCallback() {
             override fun onOpened(cam: CameraDevice) {
                 android.util.Log.i("VideoSender", "Camera $camId opened successfully")
                 device = cam
@@ -109,8 +109,13 @@ class VideoSender(
             override fun onError(cam: CameraDevice, error: Int) {
                 android.util.Log.e("VideoSender", "Camera $camId error: $error")
                 cam.close()
+                // Повторная попытка через 500мс — камера могла быть занята предыдущей сессией
+                camHandler?.postDelayed({ if (running) openCamera(target) }, 500)
             }
-        }, camHandler)
+        }, camHandler) } catch (e: Exception) {
+            android.util.Log.e("VideoSender", "openCamera failed: ${e.message}")
+            camHandler?.postDelayed({ if (running) openCamera(target) }, 500)
+        }
     }
 
     private fun drain(enc: MediaCodec) {

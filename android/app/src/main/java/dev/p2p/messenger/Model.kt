@@ -148,7 +148,10 @@ class AppModel private constructor() {
     var appContext: android.content.Context? = null
     var incomingCall by mutableStateOf<IncomingRoomCall?>(null)
     var dmCallPeer by mutableStateOf<String?>(null)
+    var videoActive by mutableStateOf(false)
     @Volatile private var roomAudio: CallAudio? = null
+    @Volatile private var videoSender: VideoSender? = null
+    @Volatile private var videoReceiver: VideoReceiver? = null
 
     // Фоновое взаимодействие с ядром (никогда не на главном потоке).
     private val ops = Executors.newSingleThreadExecutor { Thread(it, "native-ops").apply { isDaemon = true } }
@@ -553,7 +556,7 @@ class AppModel private constructor() {
             dmCallPeer = peer
             roomMembers.clear()
             CallService.start(ctx, name)
-            startRoomAudio(ctx, roomId)
+            startRoomMedia(ctx, roomId, video)
         }
     }
 
@@ -571,7 +574,7 @@ class AppModel private constructor() {
             dmCallPeer = ic.peer
             roomMembers.clear()
             CallService.start(ctx, name)
-            startRoomAudio(ctx, roomId)
+            startRoomMedia(ctx, roomId, ic.video)
         }
     }
 
@@ -583,7 +586,7 @@ class AppModel private constructor() {
         ops.execute { Native.roomDeclineDm(sessionPtr, ic.peer) }
     }
 
-    private fun startRoomAudio(ctx: android.content.Context, gid: String) {
+    private fun startRoomMedia(ctx: android.content.Context, gid: String, video: Boolean) {
         val p = JSONObject(Native.roomAudioStart(sessionPtr, gid))
         val sr = p.optInt("sample_rate", 48000)
         val ch = p.optInt("channels", 1)
@@ -593,6 +596,22 @@ class AppModel private constructor() {
             { out -> Native.roomPullAudio(sessionPtr, out) },
             { m -> Native.roomSetMuted(sessionPtr, m) }
         ).also { it.start(sr, ch) }
+        if (video) {
+            videoActive = true
+            videoSender = VideoSender(
+                ctx,
+                videoQuality.width, videoQuality.height, videoQuality.fps, videoQuality.bitrate
+            ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start() }
+        }
+    }
+
+    /** Подключить Surface для отображения входящего видео (вызывается из UI). */
+    fun attachVideoReceiver(peerHex: String, surface: android.view.Surface) {
+        videoReceiver?.stop()
+        videoReceiver = VideoReceiver(
+            surface,
+            videoQuality.width, videoQuality.height, videoQuality.fps
+        ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
     }
 
     // ── Комната-звонок (присутствие, Discord-style) ───────────────────────────
@@ -608,24 +627,31 @@ class AppModel private constructor() {
         ops.execute {
             Native.roomJoin(sessionPtr, gid, audio, video)
             CallService.start(ctx, name)
-            startRoomAudio(ctx, gid)
+            startRoomMedia(ctx, gid, video)
         }
     }
 
-    /** Выйти из комнаты: стоп аудио + маячок «вышел». */
+    /** Выйти из комнаты: стоп медиа + маячок «вышел». */
     fun leaveRoom() {
         val gid = currentRoom ?: return
         currentRoom = null
         dmCallPeer = null
+        videoActive = false
         roomMembers.clear()
         val a = roomAudio; roomAudio = null
+        val vs = videoSender; videoSender = null
+        val vr = videoReceiver; videoReceiver = null
         val ctx = appContext
         ops.execute {
             Native.roomLeave(sessionPtr, gid)
             Native.roomAudioStop(sessionPtr)
             if (ctx != null) CallService.stop(ctx)
         }
-        Thread { runCatching { a?.stop() } }.apply { isDaemon = true }.start()
+        Thread {
+            runCatching { a?.stop() }
+            runCatching { vs?.stop() }
+            runCatching { vr?.stop() }
+        }.apply { isDaemon = true }.start()
     }
 
     // ── Группы ──────────────────────────────────────────────────────────────

@@ -63,38 +63,35 @@ class CallAudio(
         rec.startRecording(); trk.play()
 
         val chunk = sampleRate / 50 * (if (channels >= 2) 2 else 1) // 20ms frame
-        val frameNs = chunk * 1_000_000_000L / sampleRate
 
         threads += thread(name = "call-capture") {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
             while (running) {
-                val n = rec.read(buf, 0, buf.size, AudioRecord.READ_NON_BLOCKING)
+                val n = rec.read(buf, 0, buf.size)  // blocking: ровный 20мс ритм захвата
                 when {
-                    n > 0  -> push(buf, n)
-                    n == 0 -> Thread.sleep(4)
-                    else   -> { android.util.Log.e("CallAudio", "capture error $n"); Thread.sleep(10) }
+                    n > 0 -> push(buf, n)
+                    else  -> { if (!running) break; android.util.Log.e("CallAudio", "capture error $n") }
                 }
             }
         }
 
-        // Real-time pacing: consume exactly one frame per 20ms regardless of trk.write() timing.
+        // Темп воспроизведения задаёт САМО железо: блокирующий trk.write() возвращается
+        // ровно тогда, когда AudioTrack освободил место под новый кадр (= частота ЦАП).
+        // Без ручного nanoTime-сна: он добавлял третьи часы (дрейф к отправителю/железу)
+        // и мешал дозаполнить буфер после голодания. Это подход WebRTC/Telegram —
+        // потребление аудио управляется аудио-устройством, а не таймером.
         threads += thread(name = "call-playback") {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
-            var nextFrameNs = System.nanoTime() + frameNs
             var starvations = 0
             var lastLogMs = System.currentTimeMillis()
             while (running) {
-                if (pull(buf) == 0) starvations++
-                trk.write(buf, 0, buf.size)
-                val sleepNs = nextFrameNs - System.nanoTime()
-                nextFrameNs += frameNs
-                if (sleepNs > 1_000_000L)
-                    Thread.sleep(sleepNs / 1_000_000L, (sleepNs % 1_000_000L).toInt())
+                if (pull(buf) == 0) { starvations++; buf.fill(0) }
+                trk.write(buf, 0, buf.size) // blocking: железо задаёт ритм
                 val nowMs = System.currentTimeMillis()
                 if (nowMs - lastLogMs >= 5000) {
-                    android.util.Log.i("CallAudio", "playback: $starvations starvations in last 5s")
+                    android.util.Log.i("CallAudio", "playback: $starvations starv/5s")
                     starvations = 0; lastLogMs = nowMs
                 }
             }

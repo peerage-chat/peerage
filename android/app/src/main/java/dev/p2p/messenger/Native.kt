@@ -86,6 +86,10 @@ object Native {
     /** Смешанный PCM комнаты для воспроизведения. Возвращает число сэмплов. */
     external fun roomPullAudio(sessionPtr: Long, out: ShortArray): Int
     external fun roomSetMuted(sessionPtr: Long, muted: Boolean)
+    /** Закодированный H264 access-unit → фрагментация + мультикаст всем в комнате. */
+    external fun roomPushVideo(sessionPtr: Long, data: ByteArray, keyframe: Boolean)
+    /** Следующий входящий H264-пакет от peer. Пустой массив если очередь пуста. */
+    external fun roomPullVideoPacket(sessionPtr: Long, peerHex: String): ByteArray
 
     // ── Диагностика: тест пропускной способности меша ─────────────────────
     /** Включить приём бенча (считать входящие bench-датаграммы). */

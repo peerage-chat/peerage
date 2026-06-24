@@ -10,12 +10,15 @@
 //! (lib.rs) по мере входа/выхода. Движок `Send` — живёт в `Arc`, зовётся из JNI.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use p2p_core::media::TRACK_AUDIO;
+use p2p_core::media::{
+    fragment_video, parse_video_frag, CompleteFrame, VideoReassembler,
+    TRACK_AUDIO, TRACK_VIDEO,
+};
 use p2p_core::settings::AudioSettings;
 use p2p_media::{AudioDecoder, AudioEncoder, JitterBuffer, JitterOut};
 use p2p_messenger::Messenger;
@@ -24,7 +27,7 @@ type PeerKey = [u8; 32];
 type Ring = Arc<Mutex<VecDeque<i16>>>;
 
 /// Подряд идущих PLC-кадров на источник; дальше — тишина (Opus PLC иначе шумит).
-const MAX_PLC: u32 = 3;
+const MAX_PLC: u32 = 4;
 
 /// Состояние приёма одного участника: джиттер + декодер + счётчик PLC + расчет джиттера.
 struct Source {
@@ -55,7 +58,8 @@ impl Source {
             let send_diff_ms = (send_diff_samples as f64) / (sample_rate / 1000.0);
             let recv_diff_ms = now.saturating_duration_since(l_arr).as_secs_f64() * 1000.0;
             let d = (recv_diff_ms - send_diff_ms).abs();
-            self.jitter_estimate_ms += (d - self.jitter_estimate_ms) / 16.0;
+            let alpha = if d > self.jitter_estimate_ms { 0.25 } else { 0.0625 };
+            self.jitter_estimate_ms += (d - self.jitter_estimate_ms) * alpha;
             
             let target_depth = ((self.jitter_estimate_ms / 20.0).round() as usize + 2).clamp(2, 8);
             self.jitter.set_depth(target_depth);
@@ -96,6 +100,13 @@ pub struct RoomCallEngine {
     sources: Arc<Mutex<HashMap<PeerKey, Source>>>,
     /// Смешанный PCM, ещё не отданный потребителю.
     mix_carry: Mutex<VecDeque<i16>>,
+    /// Входящие собранные H264-кадры per-peer (после реассемблера).
+    vid_sources: Arc<Mutex<HashMap<PeerKey, VecDeque<Vec<u8>>>>>,
+    /// Для push_video: мультикаст исходящих H264-кадров.
+    messenger: Arc<Messenger>,
+    members: Arc<Mutex<Vec<PeerKey>>>,
+    vid_seq: AtomicU16,
+    vid_frame_id: AtomicU16,
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -109,27 +120,43 @@ impl RoomCallEngine {
         let muted = Arc::new(AtomicBool::new(false));
         let in_ring: Ring = Arc::new(Mutex::new(VecDeque::new()));
         let sources: Arc<Mutex<HashMap<PeerKey, Source>>> = Arc::new(Mutex::new(HashMap::new()));
+        let vid_sources: Arc<Mutex<HashMap<PeerKey, VecDeque<Vec<u8>>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let in_cap = audio.interleaved_len() * 50;
         let frame_len = audio.interleaved_len();
         let mut threads = Vec::new();
 
         let media_rx = messenger.media_channel(2048);
 
-        // --- Приём: аудио каждого участника → в его джиттер ---
+        // --- Приём: аудио → джиттер; видео → реассемблер → per-peer очередь ---
         {
             let running = running.clone();
             let sources = sources.clone();
+            let vid_sources = vid_sources.clone();
             let members = members.clone();
             let sample_rate = audio.sample_rate as f64;
             threads.push(thread::spawn(move || {
+                // VideoReassembler per-peer: собирает фрагменты в целые H264-кадры.
+                let mut vid_asm: HashMap<PeerKey, VideoReassembler> = HashMap::new();
                 while running.load(Ordering::Relaxed) {
                     let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else { continue };
-                    if p.track != TRACK_AUDIO {
-                        continue; // видео в комнате — отдельный шаг
-                    }
                     if !members.lock().unwrap().contains(&p.src) {
-                        continue; // только от участников комнаты
+                        continue;
                     }
+                    if p.track == TRACK_VIDEO {
+                        if let Some(frag) = parse_video_frag(&p.payload) {
+                            let asm = vid_asm.entry(p.src).or_insert_with(VideoReassembler::new);
+                            if let Some(CompleteFrame { data, .. }) = asm.push(frag) {
+                                let mut vs = vid_sources.lock().unwrap();
+                                let q = vs.entry(p.src).or_default();
+                                q.push_back(data);
+                                // Не копим больше 90 кадров (~3с): при заморозке сбрасываем бэклог
+                                while q.len() > 90 { q.pop_front(); }
+                            }
+                        }
+                        continue;
+                    }
+                    if p.track != TRACK_AUDIO { continue; }
                     sources
                         .lock()
                         .unwrap()
@@ -193,8 +220,31 @@ impl RoomCallEngine {
             frame_len,
             sources,
             mix_carry: Mutex::new(VecDeque::new()),
+            vid_sources,
+            messenger,
+            members,
+            vid_seq: AtomicU16::new(0),
+            vid_frame_id: AtomicU16::new(0),
             threads: Mutex::new(threads),
         })
+    }
+
+    /// Закодированный H264 access-unit → фрагментация + мультикаст всем участникам.
+    pub fn push_video(&self, frame: &[u8], keyframe: bool) {
+        let frame_id = self.vid_frame_id.fetch_add(1, Ordering::Relaxed) as u32;
+        let fragments = fragment_video(frame, frame_id, keyframe);
+        let members = self.members.lock().unwrap();
+        for chunk in &fragments {
+            let seq = self.vid_seq.fetch_add(1, Ordering::Relaxed);
+            for m in members.iter() {
+                let _ = self.messenger.send_media(m, TRACK_VIDEO, seq, 0, chunk);
+            }
+        }
+    }
+
+    /// Следующий входящий H264-пакет от peer, или None если очередь пуста.
+    pub fn pull_video_for(&self, peer: &PeerKey) -> Option<Vec<u8>> {
+        self.vid_sources.lock().unwrap().get_mut(peer)?.pop_front()
     }
 
     /// Захваченный PCM с микрофона → в очередь отправки.
