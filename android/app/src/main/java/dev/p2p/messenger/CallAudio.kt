@@ -55,7 +55,7 @@ class CallAudio(
             .setAudioFormat(
                 AudioFormat.Builder().setSampleRate(sampleRate).setEncoding(fmt).setChannelMask(outMask).build()
             )
-            .setBufferSizeInBytes(outMin * 4)
+            .setBufferSizeInBytes(outMin * 2) // меньше буфер = меньше задержка вывода
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 

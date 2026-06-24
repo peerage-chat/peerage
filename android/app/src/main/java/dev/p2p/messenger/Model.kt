@@ -598,6 +598,17 @@ class AppModel private constructor() {
         ).also { it.start(sr, ch) }
         if (video) {
             videoActive = true
+            // Кап входящей видео-очереди в кадрах. Декодер пейсит вывод по wall-clock,
+            // поэтому кап = постоянная задержка. Тяжёлые 1080p-кадры приходят пачками
+            // (много фрагментов на меше) и требуют глубже буфер против ложных скипов;
+            // лёгкие режимы держат низкую задержку. Привязка к разрешению, а не к fps:
+            // запрошенный fps ненадёжен (камера 1080p часто отдаёт 30 вместо 60).
+            val cap = when {
+                videoQuality.height >= 1080 -> 24  // ~800мс при реальных 30fps
+                videoQuality.height >= 720  -> 14
+                else                        -> 9
+            }
+            Native.roomSetVideoCap(sessionPtr, cap)
             videoSender = VideoSender(
                 ctx,
                 videoQuality.width, videoQuality.height, videoQuality.fps, videoQuality.bitrate

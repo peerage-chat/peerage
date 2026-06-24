@@ -88,6 +88,8 @@ object Native {
     external fun roomSetMuted(sessionPtr: Long, muted: Boolean)
     /** Закодированный H264 access-unit → фрагментация + мультикаст всем в комнате. */
     external fun roomPushVideo(sessionPtr: Long, data: ByteArray, keyframe: Boolean)
+    /** Задать кап входящей видео-очереди (кадров). Политику бюджета считает Kotlin. */
+    external fun roomSetVideoCap(sessionPtr: Long, cap: Int)
     /** Следующий входящий H264-пакет от peer. Пустой массив если очередь пуста. */
     external fun roomPullVideoPacket(sessionPtr: Long, peerHex: String): ByteArray
 

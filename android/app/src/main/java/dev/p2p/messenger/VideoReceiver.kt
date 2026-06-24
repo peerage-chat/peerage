@@ -45,7 +45,13 @@ class VideoReceiver(
             try {
                 if (dec == null) {
                     android.util.Log.i("VideoReceiver", "Initializing MediaCodec H.264 decoder")
-                    val fmt = MediaFormat.createVideoFormat("video/avc", width, height)
+                    val fmt = MediaFormat.createVideoFormat("video/avc", width, height).apply {
+                        // Low-latency декодирование (API 30+): минимум внутренней
+                        // буферизации кодека — критично для реалтайм-звонка.
+                        if (android.os.Build.VERSION.SDK_INT >= 30) {
+                            setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                        }
+                    }
                     dec = MediaCodec.createDecoderByType("video/avc").apply {
                         configure(fmt, surface, null, 0)
                         start()

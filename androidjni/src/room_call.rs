@@ -10,7 +10,7 @@
 //! (lib.rs) по мере входа/выхода. Движок `Send` — живёт в `Arc`, зовётся из JNI.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -28,6 +28,11 @@ type Ring = Arc<Mutex<VecDeque<i16>>>;
 
 /// Подряд идущих PLC-кадров на источник; дальше — тишина (Opus PLC иначе шумит).
 const MAX_PLC: u32 = 4;
+
+/// Дефолтный кап видео-очереди в кадрах (≈300мс при 30fps), пока Kotlin не уточнит
+/// под разрешение/fps через [`RoomCallEngine::set_video_cap`]. Декодер пейсит вывод
+/// по wall-clock, поэтому бэклог в очереди = постоянная задержка.
+const VID_CAP_DEFAULT: usize = 9;
 
 /// Состояние приёма одного участника: джиттер + декодер + счётчик PLC + расчет джиттера.
 struct Source {
@@ -100,13 +105,15 @@ pub struct RoomCallEngine {
     sources: Arc<Mutex<HashMap<PeerKey, Source>>>,
     /// Смешанный PCM, ещё не отданный потребителю.
     mix_carry: Mutex<VecDeque<i16>>,
-    /// Входящие собранные H264-кадры per-peer (после реассемблера).
-    vid_sources: Arc<Mutex<HashMap<PeerKey, VecDeque<Vec<u8>>>>>,
+    /// Входящие собранные H264-кадры per-peer (после реассемблера): (данные, keyframe).
+    vid_sources: Arc<Mutex<HashMap<PeerKey, VecDeque<(Vec<u8>, bool)>>>>,
     /// Для push_video: мультикаст исходящих H264-кадров.
     messenger: Arc<Messenger>,
     members: Arc<Mutex<Vec<PeerKey>>>,
     vid_seq: AtomicU16,
     vid_frame_id: AtomicU16,
+    /// Кап видео-очереди в кадрах (зависит от fps, см. [`set_video_fps`]).
+    vid_cap: Arc<AtomicUsize>,
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -120,10 +127,12 @@ impl RoomCallEngine {
         let muted = Arc::new(AtomicBool::new(false));
         let in_ring: Ring = Arc::new(Mutex::new(VecDeque::new()));
         let sources: Arc<Mutex<HashMap<PeerKey, Source>>> = Arc::new(Mutex::new(HashMap::new()));
-        let vid_sources: Arc<Mutex<HashMap<PeerKey, VecDeque<Vec<u8>>>>> =
+        let vid_sources: Arc<Mutex<HashMap<PeerKey, VecDeque<(Vec<u8>, bool)>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let in_cap = audio.interleaved_len() * 50;
         let frame_len = audio.interleaved_len();
+        // Дефолт; уточняется set_video_cap() из Kotlin при старте видео.
+        let vid_cap = Arc::new(AtomicUsize::new(VID_CAP_DEFAULT));
         let mut threads = Vec::new();
 
         let media_rx = messenger.media_channel(2048);
@@ -134,6 +143,7 @@ impl RoomCallEngine {
             let sources = sources.clone();
             let vid_sources = vid_sources.clone();
             let members = members.clone();
+            let vid_cap = vid_cap.clone();
             let sample_rate = audio.sample_rate as f64;
             threads.push(thread::spawn(move || {
                 // VideoReassembler per-peer: собирает фрагменты в целые H264-кадры.
@@ -146,12 +156,22 @@ impl RoomCallEngine {
                     if p.track == TRACK_VIDEO {
                         if let Some(frag) = parse_video_frag(&p.payload) {
                             let asm = vid_asm.entry(p.src).or_insert_with(VideoReassembler::new);
-                            if let Some(CompleteFrame { data, .. }) = asm.push(frag) {
+                            if let Some(CompleteFrame { data, keyframe, .. }) = asm.push(frag) {
                                 let mut vs = vid_sources.lock().unwrap();
                                 let q = vs.entry(p.src).or_default();
-                                q.push_back(data);
-                                // Не копим больше 90 кадров (~3с): при заморозке сбрасываем бэклог
-                                while q.len() > 90 { q.pop_front(); }
+                                q.push_back((data, keyframe));
+                                // Анти-латентность: декодер пейсит вывод по wall-clock от
+                                // первого кадра, поэтому бэклог в очереди = постоянная
+                                // задержка. Держим кап (≈300мс, см. VID_BUDGET_MS); при
+                                // переполнении ПРЫГАЕМ к свежему keyframe (decoder
+                                // ресинкается чисто), а не тянем устаревшие кадры по одному.
+                                let cap = vid_cap.load(Ordering::Relaxed).max(4);
+                                if q.len() > cap {
+                                    if let Some(kf) = q.iter().rposition(|(_, k)| *k) {
+                                        if kf > 0 { q.drain(0..kf); }
+                                    }
+                                    while q.len() > cap { q.pop_front(); }
+                                }
                             }
                         }
                         continue;
@@ -225,8 +245,16 @@ impl RoomCallEngine {
             members,
             vid_seq: AtomicU16::new(0),
             vid_frame_id: AtomicU16::new(0),
+            vid_cap,
             threads: Mutex::new(threads),
         })
+    }
+
+    /// Задать кап входящей видео-очереди (в кадрах). Политику считает Kotlin: он
+    /// знает разрешение/fps и даёт тяжёлым режимам (1080p) больший запас на пачки,
+    /// а лёгким — низкую задержку.
+    pub fn set_video_cap(&self, frames: usize) {
+        self.vid_cap.store(frames.clamp(4, 60), Ordering::Relaxed);
     }
 
     /// Закодированный H264 access-unit → фрагментация + мультикаст всем участникам.
@@ -244,7 +272,7 @@ impl RoomCallEngine {
 
     /// Следующий входящий H264-пакет от peer, или None если очередь пуста.
     pub fn pull_video_for(&self, peer: &PeerKey) -> Option<Vec<u8>> {
-        self.vid_sources.lock().unwrap().get_mut(peer)?.pop_front()
+        self.vid_sources.lock().unwrap().get_mut(peer)?.pop_front().map(|(d, _)| d)
     }
 
     /// Захваченный PCM с микрофона → в очередь отправки.

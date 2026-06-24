@@ -1092,6 +1092,23 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushVideo<'local>(
     });
 }
 
+/// Задать кап входящей видео-очереди (кадров) — политику бюджета считает Kotlin.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetVideoCap<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    cap: jint,
+) {
+    jni_safe!((), {
+        if session_ptr == 0 { return; }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        if let Some(engine) = session.room_engine() {
+            engine.set_video_cap(cap.max(1) as usize);
+        }
+    });
+}
+
 /// Следующий входящий H264-пакет от peer. Возвращает пустой массив если очередь пуста.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullVideoPacket<'local>(
