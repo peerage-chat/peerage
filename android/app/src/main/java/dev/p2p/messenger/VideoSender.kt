@@ -69,6 +69,7 @@ class VideoSender(
             return
         }
         android.util.Log.i("VideoSender", "Opening camera: $camId")
+        runCatching { camThread?.quitSafely() } // не плодить потоки при ретрае открытия
         val t = HandlerThread("venc-cam").apply { start() }
         camThread = t
         camHandler = Handler(t.looper)
@@ -105,6 +106,10 @@ class VideoSender(
             override fun onDisconnected(cam: CameraDevice) {
                 android.util.Log.w("VideoSender", "Camera $camId disconnected")
                 cam.close()
+                device = null
+                // Камеру забрали (другое приложение/система) — пробуем вернуть,
+                // как в onError. Иначе видео встаёт навсегда до перезвона.
+                camHandler?.postDelayed({ if (running) openCamera(target) }, 500)
             }
             override fun onError(cam: CameraDevice, error: Int) {
                 android.util.Log.e("VideoSender", "Camera $camId error: $error")
@@ -122,12 +127,17 @@ class VideoSender(
         val info = MediaCodec.BufferInfo()
         var config: ByteArray? = null // SPS+PPS
         var encodedCount = 0
+        var errStreak = 0
         android.util.Log.i("VideoSender", "venc-drain thread started")
         while (running) {
             val idx = try { enc.dequeueOutputBuffer(info, 10000) } catch (e: Exception) {
-                android.util.Log.e("VideoSender", "Encoder dequeueOutputBuffer exception", e)
-                break
+                // Разовый сбой не должен убивать дренаж на весь звонок. Переживаем
+                // транзиент; выходим лишь если энкодер стабильно мёртв (10 подряд).
+                android.util.Log.e("VideoSender", "Encoder dequeue exception (streak=${errStreak + 1})", e)
+                if (++errStreak >= 10) { android.util.Log.e("VideoSender", "encoder unrecoverable, drain stops"); break }
+                Thread.sleep(20); continue
             }
+            errStreak = 0
             if (idx < 0) continue
             val buf = enc.getOutputBuffer(idx)
             if (buf != null && info.size > 0) {
