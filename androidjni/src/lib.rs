@@ -8,13 +8,15 @@
 //! JSON следующего события (или пустую строку). Просто и устойчиво через JNI;
 //! состояние и история живут в Rust (как на десктопе), UI — отражение.
 
+mod bench_jni;
 mod call_jni;
+mod group_jni;
 mod groups;
 mod room_call;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -67,7 +69,7 @@ impl<T> LockRecover<T> for Mutex<T> {
 /// Read-данные (список/история/участники) UI читает из кэша [`Session::group_cache`],
 /// который event_pump поддерживает актуальным после каждой мутации. Структурные
 /// изменения (create/join) уведомляют UI событием `groups_changed`.
-enum GroupCmd {
+pub(crate) enum GroupCmd {
     Create { name: String },
     Invite { gid: Vec<u8>, peer: [u8; 32] },
     SendText { gid: Vec<u8>, text: String },
@@ -91,7 +93,7 @@ pub(crate) const PRESENCE_TTL: Duration = Duration::from_secs(5);
 /// Бит в `flags`: «я выхожу из комнаты» — получатель убирает участника сразу.
 const PRESENCE_LEFT: u8 = 0x80;
 
-const BENCH_TRACK: u8 = 200;
+pub(crate) const BENCH_TRACK: u8 = 200;
 
 /// Присутствие в комнатах-звонках (Discord-style).
 #[derive(Default)]
@@ -114,11 +116,11 @@ pub(crate) struct RoomCall {
 
 const PUBLIC_PEERS: &str = include_str!("../../peers/public-peers.txt");
 
-struct BenchRecv {
-    bytes: AtomicU64,
-    pkts: AtomicU64,
-    running: AtomicBool,
-    start: Instant,
+pub(crate) struct BenchRecv {
+    pub(crate) bytes: AtomicU64,
+    pub(crate) pkts: AtomicU64,
+    pub(crate) running: AtomicBool,
+    pub(crate) start: Instant,
 }
 
 /// Кэш групповых read-данных для UI. event_pump поддерживает его актуальным
@@ -796,201 +798,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_stop<'local>(
     });
 }
 
-// Звонки/комнаты (DM + presence) вынесены в модуль `call_jni`.
+// JNI-обёртки по доменам вынесены в модули: звонки/комнаты → call_jni,
+// группы → group_jni, диагностика пропускной способности → bench_jni.
 
-// ── Группы (MLS) ───────────────────────────────────────────────────────────
 
-// Команды уходят групповому актору (event_pump) fire-and-forget — результат
-// приходит в UI через событие `groups_changed` + обновлённый кэш. Read-запросы
-// (list/history/members) отдают кэш мгновенно, без блокировки event_pump.
-
-/// Создать группу. Fire-and-forget: результат — через событие `groups_changed`.
-/// Возвращает true (запрос принят).
-
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupCreate<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-    name: JString<'local>,
-) -> jboolean {
-    jni_safe!(JNI_FALSE, {
-        if session_ptr == 0 { return JNI_FALSE; }
-        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-        let name = jstr(&mut env, &name);
-        let sent = session.jobs.send(Job::Cmd(GroupCmd::Create { name })).is_ok();
-        if sent { JNI_TRUE } else { JNI_FALSE }
-    })
-}
-
-/// Пригласить контакт в группу. Fire-and-forget.
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-    gid_hex: JString<'local>,
-    peer_hex: JString<'local>,
-) {
-    jni_safe!((), {
-        if session_ptr == 0 { return; }
-        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-        let (Some(gid), Some(peer)) = (
-            hex::decode(jstr(&mut env, &gid_hex)).ok(),
-            parse_key(&jstr(&mut env, &peer_hex)),
-        ) else { return };
-        let _ = session.jobs.send(Job::Cmd(GroupCmd::Invite { gid, peer }));
-    });
-}
-
-/// Отправить текст в группу. Fire-and-forget.
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-    gid_hex: JString<'local>,
-    text: JString<'local>,
-) {
-    jni_safe!((), {
-        if session_ptr == 0 { return; }
-        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-        let Some(gid) = hex::decode(jstr(&mut env, &gid_hex)).ok() else { return };
-        let text = jstr(&mut env, &text);
-        let _ = session.jobs.send(Job::Cmd(GroupCmd::SendText { gid, text }));
-    });
-}
-
-/// Список групп как JSON-массив [{gid, name, members}]. Читает кэш — мгновенно.
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(
-    env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-) -> jstring {
-    jni_safe!(ret(&env, "[]"), {
-        if session_ptr == 0 { return ret(&env, "[]"); }
-        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-        let json = session.group_cache.lock_safe().list.clone();
-        ret(&env, if json.is_empty() { "[]" } else { &json })
-    })
-}
-
-/// История группового чата как JSON-массив [{text, mine, time}]. Читает кэш.
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistory<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-    gid_hex: JString<'local>,
-) -> jstring {
-    jni_safe!(ret(&env, "[]"), {
-        if session_ptr == 0 { return ret(&env, "[]"); }
-        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
-        let json = session.group_cache.lock_safe().history.get(&gid).cloned().unwrap_or_else(|| "[]".into());
-        ret(&env, &json)
-    })
-}
-
-/// Ключи участников группы как JSON-массив. Читает кэш.
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-    gid_hex: JString<'local>,
-) -> jstring {
-    jni_safe!(ret(&env, "[]"), {
-        if session_ptr == 0 { return ret(&env, "[]"); }
-        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
-        let json = session.group_cache.lock_safe().members.get(&gid).cloned().unwrap_or_else(|| "[]".into());
-        ret(&env, &json)
-    })
-}
-
-// ── Диагностика: тест пропускной способности меша ──────────────────────────
-
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStart<'local>(
-    _env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-) {
-    jni_safe!((), {
-        if session_ptr == 0 { return; }
-        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-        let rx = session.messenger.media_channel(8192);
-        let st = Arc::new(BenchRecv {
-            bytes: AtomicU64::new(0), pkts: AtomicU64::new(0),
-            running: AtomicBool::new(true), start: Instant::now(),
-        });
-        *session.bench.lock_safe() = Some(st.clone());
-        std::thread::spawn(move || {
-            while st.running.load(Ordering::Relaxed) {
-                match rx.recv_timeout(Duration::from_millis(200)) {
-                    Ok(p) if p.track == BENCH_TRACK => {
-                        st.bytes.fetch_add(p.payload.len() as u64, Ordering::Relaxed);
-                        st.pkts.fetch_add(1, Ordering::Relaxed);
-                    }
-                    Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                    Err(_) => return,
-                }
-            }
-        });
-    });
-}
-
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStats<'local>(
-    env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-) -> jstring {
-    jni_safe!(ret(&env, "{}"), {
-        if session_ptr == 0 { return ret(&env, "{}"); }
-        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-        let g = session.bench.lock_safe();
-        let json = match g.as_ref() {
-            Some(st) => {
-                let bytes = st.bytes.load(Ordering::Relaxed);
-                let pkts = st.pkts.load(Ordering::Relaxed);
-                let secs = st.start.elapsed().as_secs_f64().max(0.001);
-                serde_json::json!({"pkts": pkts, "bytes": bytes, "secs": secs, "mbps": bytes as f64 * 8.0 / 1e6 / secs}).to_string()
-            }
-            None => "{}".into(),
-        };
-        ret(&env, &json)
-    })
-}
-
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_benchBlast<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-    key_hex: JString<'local>,
-    total_kb: jint,
-) -> jstring {
-    jni_safe!(ret(&env, "{}"), {
-        if session_ptr == 0 { return ret(&env, "{}"); }
-        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
-        let Some(peer) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "{}") };
-        let payload = vec![0u8; 1200];
-        let target = (total_kb.max(0) as u64) * 1024;
-        let mut sent_bytes = 0u64;
-        let mut sent_pkts = 0u64;
-        let mut seq = 0u16;
-        let t0 = Instant::now();
-        while sent_bytes < target && t0.elapsed() < Duration::from_secs(10) {
-            if session.messenger.send_media(&peer, BENCH_TRACK, seq, 0, &payload).is_ok() {
-                sent_bytes += payload.len() as u64;
-                sent_pkts += 1;
-                seq = seq.wrapping_add(1);
-            }
-        }
-        let secs = t0.elapsed().as_secs_f64().max(0.001);
-        ret(&env, &serde_json::json!({"sent_pkts": sent_pkts, "sent_bytes": sent_bytes, "secs": secs, "mbps": sent_bytes as f64 * 8.0 / 1e6 / secs}).to_string())
-    })
-}
