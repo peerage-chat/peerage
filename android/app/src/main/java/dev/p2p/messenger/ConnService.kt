@@ -3,11 +3,13 @@ package dev.p2p.messenger
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -20,13 +22,24 @@ import android.os.PowerManager
  * рвётся, входящие не доходят). Это «режим A» Фазы D (serverless): без своего
  * сервера, ценой батареи.
  *
- * Держит два лока:
- *  - PARTIAL_WAKE_LOCK — CPU не засыпает, потоки ygg/звонка продолжают работать;
- *  - WifiLock(FULL_HIGH_PERF) — Wi-Fi не уходит в power-save, пакеты не теряются.
+ * Держит PARTIAL_WAKE_LOCK — CPU не засыпает, потоки ygg продолжают работать.
+ * Wi-Fi-лок FULL_HIGH_PERF НЕ берём в фоне (пинит радио на полную → лишний жор):
+ * для keepalive хватает обычного Wi-Fi (power-save добавляет лишь задержку,
+ * Yggdrasil ретраит). Высокую производительность Wi-Fi берёт [CallService] только
+ * на время звонка, когда это реально нужно.
+ *
+ * Кнопка «Отключить» в уведомлении останавливает сервис → локи отпускаются, CPU
+ * засыпает, фоновый расход прекращается. Повторный вход в приложение (onStart)
+ * поднимает сервис заново.
  */
 class ConnService : Service() {
     private var wake: PowerManager.WakeLock? = null
-    private var wifi: WifiManager.WifiLock? = null
+
+    private val disconnectReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            stop(ctx)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -36,10 +49,11 @@ class ConnService : Service() {
             setReferenceCounted(false)
             acquire()
         }
-        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        wifi = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "p2p:mesh").apply {
-            setReferenceCounted(false)
-            acquire()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(disconnectReceiver, IntentFilter(ACTION_DISCONNECT), RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(disconnectReceiver, IntentFilter(ACTION_DISCONNECT))
         }
     }
 
@@ -47,10 +61,9 @@ class ConnService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(disconnectReceiver) }
         runCatching { wake?.takeIf { it.isHeld }?.release() }
-        runCatching { wifi?.takeIf { it.isHeld }?.release() }
         wake = null
-        wifi = null
         super.onDestroy()
     }
 
@@ -79,23 +92,45 @@ class ConnService : Service() {
             }
             nm.createNotificationChannel(ch)
         }
+
+        val openPi = PendingIntent.getActivity(this, 0,
+            Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        val disconnectPi = PendingIntent.getBroadcast(this, 0,
+            Intent(ACTION_DISCONNECT).apply { setPackage(packageName) },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
         @Suppress("DEPRECATION")
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL)
         } else {
             Notification.Builder(this)
         }
-        return b
-            .setContentTitle("p2p messenger")
+
+        b.setContentTitle("p2p messenger")
             .setContentText("В сети — держим mesh-соединение")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
-            .build()
+            .setContentIntent(openPi)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            b.addAction(Notification.Action.Builder(
+                android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_lock_power_off),
+                "Отключить", disconnectPi,
+            ).build())
+        } else {
+            @Suppress("DEPRECATION")
+            b.addAction(0, "Отключить", disconnectPi)
+        }
+
+        return b.build()
     }
 
     companion object {
         private const val CHANNEL = "p2p_conn"
         private const val NOTIF_ID = 1
+        private const val ACTION_DISCONNECT = "dev.p2p.messenger.DISCONNECT_MESH"
 
         fun start(ctx: Context) {
             val i = Intent(ctx, ConnService::class.java)

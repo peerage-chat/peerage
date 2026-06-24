@@ -146,6 +146,9 @@ class AppModel private constructor() {
     }
 
     var appContext: android.content.Context? = null
+    /** Приложение на переднем плане? Ставит MainActivity (onStart/onStop). В фоне
+     *  poll/ticker троттлятся — меньше пробуждений CPU при удержанном wakelock. */
+    @Volatile var foreground = true
     var incomingCall by mutableStateOf<IncomingRoomCall?>(null)
     var dmCallPeer by mutableStateOf<String?>(null)
     var videoActive by mutableStateOf(false)
@@ -233,7 +236,9 @@ class AppModel private constructor() {
                     runCatching { applyEvent(e) }
                     e = Native.pollEvent(sessionPtr)
                 }
-                Thread.sleep(80)
+                // В фоне реже опрашиваем (входящие задержатся максимум на интервал —
+                // приемлемо), на переднем плане — отзывчиво.
+                Thread.sleep(if (foreground) 80 else 400)
             }
         }.apply { isDaemon = true; name = "native-poll"; start() }
         tickerThread = Thread {
@@ -289,7 +294,14 @@ class AppModel private constructor() {
                     android.util.Log.i("p2pnet", "tick=$tick peers=$p tree=$t incoming=${incomingCall != null} room=${currentRoom != null}")
                 }
                 tick++
-                Thread.sleep(if (benchRecv) 1000 else if (currentRoom != null) 2000 else 3000)
+                // В звонке (currentRoom) держим присутствие свежим (2с) даже в фоне;
+                // иначе на переднем плане 3с, в фоне 15с — реже будим CPU.
+                Thread.sleep(when {
+                    benchRecv -> 1000
+                    currentRoom != null -> 2000
+                    foreground -> 3000
+                    else -> 15000
+                })
             }
         }.apply { isDaemon = true; name = "native-ticker"; start() }
     }

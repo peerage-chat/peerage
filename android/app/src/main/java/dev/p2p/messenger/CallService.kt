@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 
@@ -24,6 +25,7 @@ import android.os.IBinder
 class CallService : Service() {
     private var startMs = 0L
     private var peerName = ""
+    private var wifi: WifiManager.WifiLock? = null
 
     private val endReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -39,6 +41,20 @@ class CallService : Service() {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(endReceiver, IntentFilter(ACTION_END_CALL))
         }
+        // Высокопроизводительный Wi-Fi-лок ТОЛЬКО на время звонка: радио без
+        // power-save → меньше потеря/джиттер медиа-пакетов. Вне звонка ConnService
+        // его не держит (экономия батареи). LOW_LATENCY (API 29+) оптимизирует
+        // задержку; на старых — FULL_HIGH_PERF.
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION") WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        wifi = wm.createWifiLock(mode, "p2p:call").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -51,6 +67,8 @@ class CallService : Service() {
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(endReceiver) }
+        runCatching { wifi?.takeIf { it.isHeld }?.release() }
+        wifi = null
         super.onDestroy()
     }
 

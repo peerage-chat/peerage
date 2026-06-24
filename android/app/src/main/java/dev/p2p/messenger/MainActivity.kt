@@ -105,10 +105,22 @@ class MainActivity : ComponentActivity() {
         }
         val need = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (need.isNotEmpty()) perms.launch(need.toTypedArray())
-        // Постоянный mesh-узел: держим процесс/сеть живыми при погасшем экране.
-        ConnService.start(applicationContext)
         val dataDir = filesDir.absolutePath
         setContent { P2PTheme { App(model, dataDir) } }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        model.foreground = true
+        // Поднимаем mesh-узел при выходе на передний план (в т.ч. после кнопки
+        // «Отключить» в уведомлении): держим процесс/сеть живыми при погасшем экране.
+        ConnService.start(applicationContext)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // В фоне троттлим поллинг (см. AppModel) — меньше пробуждений CPU.
+        model.foreground = false
     }
 }
 
