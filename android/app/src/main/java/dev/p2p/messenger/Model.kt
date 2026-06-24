@@ -657,6 +657,8 @@ class AppModel private constructor() {
     /** Выйти из комнаты: стоп медиа + маячок «вышел». */
     fun leaveRoom() {
         val gid = currentRoom ?: return
+        // Запомнить ДО очистки: для DM-звонка нужно явно уведомить пира.
+        val peer = dmCallPeer
         currentRoom = null
         dmCallPeer = null
         videoActive = false
@@ -666,6 +668,12 @@ class AppModel private constructor() {
         val vr = videoReceiver; videoReceiver = null
         val ctx = appContext
         ops.execute {
+            // DM-звонок: явный сигнал пиру (отмена дозвона ИЛИ сброс активного
+            // звонка). roomLeave шлёт маячок «вышел» только ЧЛЕНАМ комнаты, а при
+            // отмене дозвона пир ещё не вступил → у него висел бы экран входящего.
+            // RoomDecline у пира гасит incomingCall+уведомление, а если он уже в
+            // звонке — завершает его (как «положили трубку»).
+            if (peer != null) Native.roomDeclineDm(sessionPtr, peer)
             Native.roomLeave(sessionPtr, gid)
             Native.roomAudioStop(sessionPtr)
             if (ctx != null) CallService.stop(ctx)
