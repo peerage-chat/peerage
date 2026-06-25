@@ -37,9 +37,16 @@ class VideoReceiver(
         var pts = 0L                  // microseconds, для queueInputBuffer
         val frameUs = 1_000_000L / fps
         val frameNs = 1_000_000_000L / fps
+        // Буфер джиттера: на сколько кадров рендер отстаёт от прихода, чтобы
+        // поглощать рывки сетевой доставки (эмулятор шлёт пачками). Раньше был 1
+        // кадр → любой джиттер > кадра ронял пейсинг в ресинк (видимый скачок ~раз
+        // в 300мс). ТЕСТ: 10 кадров (~333мс). Если ресинки не падают — буфер упёрся
+        // в глубину пайплайна кодека (нужна очередь пакетов на уровне приложения).
+        val jitterNs = 10 * frameNs
         val info = MediaCodec.BufferInfo()
         var pulledCount = 0
         var renderedCount = 0
+        var resyncCount = 0           // диагностика: сколько раз пересинхронили часы
         var pendingPacket: ByteArray? = null
         var renderBaseNs = 0L         // wall-clock момент первого output-кадра
         var firstPtsUs = 0L           // PTS первого output-кадра
@@ -112,14 +119,15 @@ class VideoReceiver(
                 if (outIdx >= 0) {
                     val nowNs = System.nanoTime()
                     if (renderBaseNs == 0L) {
-                        renderBaseNs = nowNs + frameNs
+                        renderBaseNs = nowNs + jitterNs
                         firstPtsUs = info.presentationTimeUs
                     }
                     val renderNs = renderBaseNs + (info.presentationTimeUs - firstPtsUs) * 1_000L
                     val renderAt = if (renderNs < nowNs - 3 * frameNs) {
                         // Отстаём на 3+ кадра (после стала/заморозки) — ресинк clock,
                         // иначе burst-рендер ускоряет видео вместо плавного восстановления.
-                        renderBaseNs = nowNs + frameNs
+                        resyncCount++
+                        renderBaseNs = nowNs + jitterNs
                         firstPtsUs = info.presentationTimeUs
                         renderBaseNs
                     } else {
@@ -129,7 +137,7 @@ class VideoReceiver(
                     renderedCount++
                     restartStreak = 0 // успешный рендер — цепочка рестартов сброшена
                     if (renderedCount % 30 == 0) {
-                        android.util.Log.i("VideoReceiver", "Rendered 30 frames to surface")
+                        android.util.Log.i("VideoReceiver", "Rendered 30 frames (resyncs=$resyncCount)")
                     }
                 }
                 // INFO_OUTPUT_FORMAT_CHANGED (-2) и INFO_OUTPUT_BUFFERS_CHANGED (-3) игнорируем
