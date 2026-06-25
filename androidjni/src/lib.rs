@@ -238,14 +238,21 @@ fn event_pump(
                 beacon_tick(&session, &groups, &messenger);
             }
             Ok(Job::Leave(gid)) => {
-                // Явный выход: шлём LEFT-маячок. DM — только пиру, группа — всем членам.
-                let dm_peer = session.rooms.lock_safe().dm_peers.remove(&gid);
-                if let Some(peer) = dm_peer {
-                    let _ = messenger.send_room_presence(&peer, &gid, PRESENCE_LEFT);
+                // Стабильная комната: если мы УЖЕ перезашли (joined содержит gid), этот
+                // отложенный Leave относится к прошлой сессии — игнорируем. Иначе он
+                // снёс бы свежий dm_peer и послал ложный LEFT по тому же room_id.
+                if session.rooms.lock_safe().joined.contains_key(&gid) {
+                    // перезашли — выход устарел, ничего не делаем
                 } else {
-                    for m in groups.members(&gid) {
-                        if m == session.me_pub { continue; }
-                        let _ = messenger.send_room_presence(&m, &gid, PRESENCE_LEFT);
+                    // Явный выход: шлём LEFT-маячок. DM — только пиру, группа — всем членам.
+                    let dm_peer = session.rooms.lock_safe().dm_peers.remove(&gid);
+                    if let Some(peer) = dm_peer {
+                        let _ = messenger.send_room_presence(&peer, &gid, PRESENCE_LEFT);
+                    } else {
+                        for m in groups.members(&gid) {
+                            if m == session.me_pub { continue; }
+                            let _ = messenger.send_room_presence(&m, &gid, PRESENCE_LEFT);
+                        }
                     }
                 }
             }

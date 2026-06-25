@@ -154,7 +154,14 @@ class AppModel private constructor() {
     var videoActive by mutableStateOf(false)
     @Volatile private var roomAudio: CallAudio? = null
     @Volatile private var videoSender: VideoSender? = null
+    /** Один приёмник видео (текущий показываемый удалённый участник). Стабилен:
+     *  создаётся при появлении его surface, гасится когда участника не показываем.
+     *  Сетка на N>1 (групповые звонки) — отдельная задача через TextureView. */
     @Volatile private var videoReceiver: VideoReceiver? = null
+    @Volatile private var videoReceiverPeer: String? = null
+    /** Микрофон заглушён (управляется из UI звонка). */
+    var muted by mutableStateOf(false)
+        private set
 
     // Фоновое взаимодействие с ядром (никогда не на главном потоке).
     private val ops = Executors.newSingleThreadExecutor { Thread(it, "native-ops").apply { isDaemon = true } }
@@ -420,11 +427,15 @@ class AppModel private constructor() {
                 val roomId = o.getString("room_id")
                 val audio = o.optBoolean("audio", true)
                 val video = o.optBoolean("video", false)
+                // Стабильная комната: если мы УЖЕ в этой комнате с этим пиром, он
+                // просто перезашёл — остаёмся в звонке, его возврат отразит presence.
+                // НЕ рвём звонок и не показываем промпт заново (иначе teardown +
+                // каскад decline — это и было «реентри ломает звонок»).
+                if (currentRoom == roomId && dmCallPeer == peer) return
                 val existing = incomingCall
                 // Свободны — обычный входящий. Тот же собеседник перезванивает —
-                // показываем новый экран входящего. От другого пира, пока заняты — игнор.
+                // обновляем экран входящего. От другого пира, пока заняты — игнор.
                 if (existing == null || existing.peer == peer) {
-                    if (currentRoom != null && dmCallPeer == peer) leaveRoom()
                     incomingCall = IncomingRoomCall(peer, roomId, audio, video)
                     val callerName = contacts.firstOrNull { it.key == peer }?.name ?: "Контакт"
                     appContext?.let { IncomingCallReceiver.show(it, callerName) }
@@ -628,13 +639,30 @@ class AppModel private constructor() {
         }
     }
 
-    /** Подключить Surface для отображения входящего видео (вызывается из UI). */
+    /** Подключить Surface к видео-потоку участника. Идемпотентно: если уже
+     *  показываем этого же пира — ничего не пересоздаём (без тёрки декодеров). */
     fun attachVideoReceiver(peerHex: String, surface: android.view.Surface) {
+        if (videoReceiverPeer == peerHex && videoReceiver != null) return
         videoReceiver?.stop()
+        videoReceiverPeer = peerHex
         videoReceiver = VideoReceiver(
             surface,
             videoQuality.width, videoQuality.height, videoQuality.fps
         ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
+    }
+
+    /** Отключить приёмник (surface участника ушёл — он вышел/перестал слать видео). */
+    fun detachVideoReceiver(peerHex: String) {
+        if (videoReceiverPeer != peerHex) return
+        videoReceiver?.stop()
+        videoReceiver = null
+        videoReceiverPeer = null
+    }
+
+    /** Переключить заглушение микрофона (кнопка в экране звонка). */
+    fun toggleMute() {
+        muted = !muted
+        roomAudio?.setMuted(muted)
     }
 
     // ── Комната-звонок (присутствие, Discord-style) ───────────────────────────
@@ -657,23 +685,25 @@ class AppModel private constructor() {
     /** Выйти из комнаты: стоп медиа + маячок «вышел». */
     fun leaveRoom() {
         val gid = currentRoom ?: return
-        // Запомнить ДО очистки: для DM-звонка нужно явно уведомить пира.
+        // Запомнить ДО очистки. peerPresent: активный звонок (пир в комнате) vs
+        // ещё дозваниваемся (пира в комнате нет) — от этого зависит, слать ли decline.
         val peer = dmCallPeer
+        val peerPresent = peer != null && roomMembers.any { it.peer == peer }
         currentRoom = null
         dmCallPeer = null
         videoActive = false
         roomMembers.clear()
+        muted = false
         val a = roomAudio; roomAudio = null
         val vs = videoSender; videoSender = null
-        val vr = videoReceiver; videoReceiver = null
+        val vr = videoReceiver; videoReceiver = null; videoReceiverPeer = null
         val ctx = appContext
         ops.execute {
-            // DM-звонок: явный сигнал пиру (отмена дозвона ИЛИ сброс активного
-            // звонка). roomLeave шлёт маячок «вышел» только ЧЛЕНАМ комнаты, а при
-            // отмене дозвона пир ещё не вступил → у него висел бы экран входящего.
-            // RoomDecline у пира гасит incomingCall+уведомление, а если он уже в
-            // звонке — завершает его (как «положили трубку»).
-            if (peer != null) Native.roomDeclineDm(sessionPtr, peer)
+            // RoomDecline шлём ТОЛЬКО чтобы отменить ДОЗВОН (пир ещё не вошёл) → у
+            // него гаснет экран входящего+уведомление. Выход из АКТИВНОЙ комнаты —
+            // только presence LEFT (roomLeave): пир ОСТАЁТСЯ в комнате (комнатная
+            // модель), мы не «кладём ему трубку».
+            if (peer != null && !peerPresent) Native.roomDeclineDm(sessionPtr, peer)
             Native.roomLeave(sessionPtr, gid)
             Native.roomAudioStop(sessionPtr)
             if (ctx != null) CallService.stop(ctx)

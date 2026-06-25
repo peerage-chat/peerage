@@ -202,10 +202,6 @@ private fun Root(model: AppModel) {
                     Screen.Settings -> TopBar("Настройки", onBack = { screen = Screen.Contacts })
                     Screen.Scanner -> TopBar("Сканировать QR", onBack = { screen = Screen.Add })
                 }
-                // ── DmCallBar: прямо под шапкой, толкает контент вниз ─────────────
-                if (model.incomingCall == null) {
-                    model.dmCallPeer?.let { DmCallBar(model, it) }
-                }
                 // ── Activity bar + фильтр-чипы: только на главном экране ─────────
                 if (screen == Screen.Contacts) {
                     ActivityStrip(model, activityBarExpanded) { activityBarExpanded = !activityBarExpanded }
@@ -241,8 +237,9 @@ private fun Root(model: AppModel) {
             }
         }
         model.incomingCall?.let { IncomingCallOverlay(model, it) }
-        if (model.videoActive) {
-            model.dmCallPeer?.let { DmVideoCallScreen(model, it) }
+        // Активный DM-звонок (аудио или видео) — полноэкранная комната-сетка.
+        if (model.incomingCall == null) {
+            model.dmCallPeer?.let { RoomCallScreen(model, it) }
         }
         if (showProfileSheet) {
             ProfileSheet(model, onDismiss = { showProfileSheet = false }) { dest ->
@@ -811,46 +808,7 @@ private fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
 }
 
 // ── Входящий звонок (полный экран, Telegram-style) ──────────────────────────
-
-@Composable
-private fun DmVideoCallScreen(model: AppModel, peerKey: String) {
-    val name = model.contacts.firstOrNull { it.key == peerKey }?.name ?: (peerKey.take(6) + "…")
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(
-            factory = { ctx ->
-                android.view.SurfaceView(ctx).also { sv ->
-                    sv.holder.addCallback(object : android.view.SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: android.view.SurfaceHolder) {
-                            model.attachVideoReceiver(peerKey, holder.surface)
-                        }
-                        override fun surfaceChanged(holder: android.view.SurfaceHolder, f: Int, w: Int, h: Int) {}
-                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {}
-                    })
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-        Column(
-            Modifier.fillMaxSize().padding(bottom = 48.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                name,
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .padding(16.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0x88000000))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                CallButton(Icons.Filled.CallEnd, "Завершить", HoloError) { model.leaveRoom() }
-            }
-        }
-    }
-}
+// Активный звонок — см. RoomCallScreen.kt (сетка участников).
 
 @Composable
 private fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
@@ -879,31 +837,6 @@ private fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                 verticalAlignment = Alignment.CenterVertically) {
                 CallButton(Icons.Filled.CallEnd, "Отклонить", HoloError) { model.declineDmCall() }
                 CallButton(Icons.Filled.Call, "Принять", HoloOnline) { model.acceptDmCall() }
-            }
-        }
-    }
-}
-
-/** Мини-полоса активного DM-звонка — встраивается в Column Root между шапкой и контентом. */
-@Composable
-private fun DmCallBar(model: AppModel, peerKey: String) {
-    val name = model.contacts.firstOrNull { it.key == peerKey }?.name ?: (peerKey.take(6) + "…")
-    val ringing = model.roomMembers.isEmpty()
-    Surface(color = Color(0xFF1B2E1B), modifier = Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.Call, null, tint = HoloOnline, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(name, color = Color.White, fontSize = 14.sp)
-                Text(if (ringing) "Вызов…" else "Идёт звонок",
-                    color = HoloSecondary, fontSize = 11.sp)
-            }
-            IconButton(onClick = { model.leaveRoom() }) {
-                Icon(Icons.Filled.CallEnd, "Завершить", tint = HoloError,
-                    modifier = Modifier.size(22.dp))
             }
         }
     }

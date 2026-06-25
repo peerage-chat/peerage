@@ -40,6 +40,7 @@ class VideoReceiver(
         var pendingPacket: ByteArray? = null
         var renderBaseNs = 0L         // wall-clock момент первого output-кадра
         var firstPtsUs = 0L           // PTS первого output-кадра
+        var restartStreak = 0         // подряд идущих рестартов декодера без успешного рендера
 
         while (running) {
             try {
@@ -113,6 +114,7 @@ class VideoReceiver(
                     }
                     runCatching { currentDec.releaseOutputBuffer(outIdx, renderAt) }
                     renderedCount++
+                    restartStreak = 0 // успешный рендер — цепочка рестартов сброшена
                     if (renderedCount % 30 == 0) {
                         android.util.Log.i("VideoReceiver", "Rendered 30 frames to surface")
                     }
@@ -121,14 +123,23 @@ class VideoReceiver(
 
             } catch (e: Exception) {
                 if (running) {
-                    android.util.Log.e("VideoReceiver", "Decoder error, restarting...", e)
                     runCatching { dec?.stop() }
                     runCatching { dec?.release() }
                     dec = null
                     decoder = null
                     pendingPacket = null
                     renderBaseNs = 0L
-                    Thread.sleep(100)
+                    // КАП: не пересоздавать декодер бесконечно. Каждый createDecoder =
+                    // новый аппаратный OMX-узел; их лимит, и тёрка вешает кодек-сервис
+                    // (а с ним весь звонок). После 6 рестартов подряд без успешного
+                    // рендера — сдаёмся (running=false), выходим из цикла.
+                    if (++restartStreak >= 6) {
+                        android.util.Log.e("VideoReceiver", "decoder unrecoverable ($restartStreak), stopping", e)
+                        running = false
+                        break
+                    }
+                    android.util.Log.e("VideoReceiver", "Decoder error, restart $restartStreak", e)
+                    Thread.sleep(150L * restartStreak) // нарастающий бэкофф
                 }
             }
         }
