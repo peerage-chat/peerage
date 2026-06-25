@@ -159,6 +159,8 @@ class AppModel private constructor() {
      *  вышел / тайл скрыт). key(peer) в Compose не даёт пересоздавать surface на
      *  перерисовке → нет тёрки декодеров. */
     private val videoReceivers = java.util.concurrent.ConcurrentHashMap<String, VideoReceiver>()
+    /** Surface тайла «Вы» для локального превью с камеры (без энкодера). */
+    @Volatile private var selfPreviewSurface: android.view.Surface? = null
     /** Микрофон заглушён (управляется из UI звонка). */
     var muted by mutableStateOf(false)
         private set
@@ -621,7 +623,7 @@ class AppModel private constructor() {
         ).also { it.start(sr, ch) }
         if (video) {
             videoActive = true
-            startVideoSender(ctx)
+            maybeStartVideoSender() // стартует, когда surface тайла «Вы» будет готов
         }
     }
 
@@ -649,14 +651,12 @@ class AppModel private constructor() {
 
     /** Вкл/выкл свою камеру по ходу звонка (кнопка «Видео»). */
     fun toggleVideo() {
-        val ctx = appContext ?: return
         if (videoActive) {
             videoActive = false
-            val vs = videoSender; videoSender = null
-            Thread { runCatching { vs?.stop() } }.apply { isDaemon = true }.start()
+            stopVideoSender()
         } else {
             videoActive = true
-            startVideoSender(ctx)
+            maybeStartVideoSender() // реально стартует, когда surface тайла «Вы» готов
         }
         propagateAvFlags()
     }
@@ -671,9 +671,14 @@ class AppModel private constructor() {
         ops.execute { Native.roomJoin(sessionPtr, gid, audioOn, videoOn) }
     }
 
-    /** Запустить отправку своего видео (камера → энкодер → мультикаст). */
-    private fun startVideoSender(ctx: android.content.Context) {
-        // Кап входящей очереди привязан к разрешению (тяжёлые кадры приходят пачками).
+    /** Стартуем отправку видео ТОЛЬКО когда совпало: видео включено, surface тайла
+     *  «Вы» готов (он же — превью), отправитель ещё не запущен. Камера рендерит в
+     *  энкодер + превью ОДНОЙ сессией (без хрупкой пересборки). Нет surface (ты
+     *  один) → не кодируем/не шлём — ровно как в дизайне. */
+    private fun maybeStartVideoSender() {
+        val ctx = appContext ?: return
+        val preview = selfPreviewSurface
+        if (!videoActive || videoSender != null || preview == null) return
         val cap = when {
             videoQuality.height >= 1080 -> 24
             videoQuality.height >= 720 -> 14
@@ -682,7 +687,20 @@ class AppModel private constructor() {
         Native.roomSetVideoCap(sessionPtr, cap)
         videoSender = VideoSender(
             ctx, videoQuality.width, videoQuality.height, videoQuality.fps, videoQuality.bitrate
-        ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start() }
+        ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start(preview) }
+    }
+
+    private fun stopVideoSender() {
+        val vs = videoSender; videoSender = null
+        Thread { runCatching { vs?.stop() } }.apply { isDaemon = true }.start()
+    }
+
+    /** Surface тайла «Вы» появился/ушёл. Появился → можно стартовать отправку;
+     *  ушёл при включённом видео (ты остался один, тайла «Вы» нет) → стоп отправки. */
+    fun setSelfPreviewSurface(surface: android.view.Surface?) {
+        selfPreviewSurface = surface
+        if (surface != null) maybeStartVideoSender()
+        else if (videoActive) stopVideoSender()
     }
 
     // ── Комната-звонок (присутствие, Discord-style) ───────────────────────────

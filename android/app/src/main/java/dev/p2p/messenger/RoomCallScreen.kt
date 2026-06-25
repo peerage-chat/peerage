@@ -1,7 +1,8 @@
 package dev.p2p.messenger
 
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.graphics.SurfaceTexture
+import android.view.Surface
+import android.view.TextureView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -106,10 +107,10 @@ private fun ParticipantTile(model: AppModel, t: Tile, chrome: Boolean, modifier:
         modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF1A1D21)),
         contentAlignment = Alignment.Center,
     ) {
-        if (t.video && !t.me) {
-            VideoSurface(model, t.id, Modifier.fillMaxSize())
-        } else {
-            Avatar(name, 64)
+        when {
+            t.video && t.me -> SelfPreviewSurface(model, Modifier.fillMaxSize())
+            t.video -> VideoSurface(model, t.id, Modifier.fillMaxSize())
+            else -> Avatar(name, 64)
         }
         // голубая рамка у себя (скруглённая — по форме тайла)
         if (t.me) {
@@ -150,17 +151,47 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
     }
 }
 
-/** Стабильный SurfaceView, привязанный к видео-потоку участника. */
+/** Локальное превью «Вы» — TextureView (рисуется как обычная вьюха, без
+ *  z-order-конфликтов нескольких SurfaceView в сетке). Surface отдаётся
+ *  VideoSender'у (камера рендерит прямо сюда, без энкодера/декодера). */
+@Composable
+private fun SelfPreviewSurface(model: AppModel, modifier: Modifier) {
+    AndroidView(
+        factory = { ctx ->
+            TextureView(ctx).apply {
+                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                        st.setDefaultBufferSize(model.videoQuality.width, model.videoQuality.height)
+                        model.setSelfPreviewSurface(Surface(st))
+                    }
+                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                        model.setSelfPreviewSurface(null); return true
+                    }
+                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                }
+            }
+        },
+        modifier = modifier,
+    )
+}
+
+/** Видео участника — TextureView (несколько в сетке без z-order-конфликтов).
+ *  Surface отдаётся приёмнику (декодер рендерит сюда). */
 @Composable
 private fun VideoSurface(model: AppModel, peer: String, modifier: Modifier) {
     AndroidView(
         factory = { ctx ->
-            SurfaceView(ctx).apply {
-                holder.addCallback(object : SurfaceHolder.Callback {
-                    override fun surfaceCreated(h: SurfaceHolder) = model.attachVideoReceiver(peer, h.surface)
-                    override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
-                    override fun surfaceDestroyed(h: SurfaceHolder) = model.detachVideoReceiver(peer)
-                })
+            TextureView(ctx).apply {
+                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) =
+                        model.attachVideoReceiver(peer, Surface(st))
+                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                        model.detachVideoReceiver(peer); return true
+                    }
+                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                }
             }
         },
         modifier = modifier,

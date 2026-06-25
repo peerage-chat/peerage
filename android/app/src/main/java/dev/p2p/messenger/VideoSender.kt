@@ -39,10 +39,16 @@ class VideoSender(
     private var camHandler: Handler? = null
     private var drainThread: Thread? = null
     @Volatile private var running = false
+    private var camId: String? = null
+    /** Surface тайла «Вы» — локальное превью прямо с камеры (без энкодера). */
+    @Volatile private var previewSurface: Surface? = null
 
+    /** [preview] — surface тайла «Вы» для локального превью (или null). Камера
+     *  рендерит в энкодер + (если задан) превью ОДНОЙ сессией — без пересборки. */
     @SuppressLint("MissingPermission") // CAMERA запрашивается до видео-звонка
-    fun start() {
-        android.util.Log.i("VideoSender", "start() called: width=$width, height=$height, fps=$fps, bitrate=$bitrate")
+    fun start(preview: Surface? = null) {
+        android.util.Log.i("VideoSender", "start(): ${width}x${height}@$fps, preview=${preview != null}")
+        previewSurface = preview
         val fmt = MediaFormat.createVideoFormat("video/avc", width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
@@ -63,48 +69,25 @@ class VideoSender(
     @SuppressLint("MissingPermission")
     private fun openCamera(target: Surface) {
         val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val camId = pickFront(mgr)
-        if (camId == null) {
+        val cid = pickFront(mgr)
+        if (cid == null) {
             android.util.Log.e("VideoSender", "No camera found (facing front or fallback)!")
             return
         }
-        android.util.Log.i("VideoSender", "Opening camera: $camId")
+        camId = cid
+        android.util.Log.i("VideoSender", "Opening camera: $cid")
         runCatching { camThread?.quitSafely() } // не плодить потоки при ретрае открытия
         val t = HandlerThread("venc-cam").apply { start() }
         camThread = t
         camHandler = Handler(t.looper)
-        try { mgr.openCamera(camId, object : CameraDevice.StateCallback() {
+        try { mgr.openCamera(cid, object : CameraDevice.StateCallback() {
             override fun onOpened(cam: CameraDevice) {
-                android.util.Log.i("VideoSender", "Camera $camId opened successfully")
+                android.util.Log.i("VideoSender", "Camera $cid opened successfully")
                 device = cam
-                @Suppress("DEPRECATION")
-                cam.createCaptureSession(listOf(target), object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(s: CameraCaptureSession) {
-                        android.util.Log.i("VideoSender", "Camera capture session configured")
-                        session = s
-                        val req = cam.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                            addTarget(target)
-                            // Ограничиваем частоту камеры под целевой fps (меньше
-                            // перепроизводства кадров → меньше рывков/трафика).
-                            val range = pickFpsRange(mgr, camId)
-                            android.util.Log.i("VideoSender", "AE Target FPS Range selected: $range")
-                            range?.let {
-                                set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
-                            }
-                        }
-                        runCatching { s.setRepeatingRequest(req.build(), null, camHandler) }
-                        // Камера только начала подавать кадры — гарантируем I-frame немедленно.
-                        // requestKeyframe() на call_accept срабатывает до открытия камеры
-                        // и теряется; здесь момент всегда правильный.
-                        requestKeyframe()
-                    }
-                    override fun onConfigureFailed(s: CameraCaptureSession) {
-                        android.util.Log.e("VideoSender", "Camera capture session configuration failed")
-                    }
-                }, camHandler)
+                configureSession(cam)
             }
             override fun onDisconnected(cam: CameraDevice) {
-                android.util.Log.w("VideoSender", "Camera $camId disconnected")
+                android.util.Log.w("VideoSender", "Camera $cid disconnected")
                 cam.close()
                 device = null
                 // Камеру забрали (другое приложение/система) — пробуем вернуть,
@@ -112,7 +95,7 @@ class VideoSender(
                 camHandler?.postDelayed({ if (running) openCamera(target) }, 500)
             }
             override fun onError(cam: CameraDevice, error: Int) {
-                android.util.Log.e("VideoSender", "Camera $camId error: $error")
+                android.util.Log.e("VideoSender", "Camera $cid error: $error")
                 cam.close()
                 // Повторная попытка через 500мс — камера могла быть занята предыдущей сессией
                 camHandler?.postDelayed({ if (running) openCamera(target) }, 500)
@@ -121,6 +104,35 @@ class VideoSender(
             android.util.Log.e("VideoSender", "openCamera failed: ${e.message}")
             camHandler?.postDelayed({ if (running) openCamera(target) }, 500)
         }
+    }
+
+    /** (Пере)создать capture-сессию с текущими целями: энкодер + (опц.) превью-surface
+     *  тайла «Вы». Превью идёт ПРЯМО с камеры — без отдельного энкодера/декодера.
+     *  Camera2 не даёт добавить цель в готовую сессию → пересоздаём (редко: при
+     *  появлении/уходе превью). */
+    @Suppress("DEPRECATION")
+    private fun configureSession(cam: CameraDevice) {
+        val enc = inputSurface ?: return
+        val cid = camId ?: return
+        val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val targets = listOfNotNull(enc, previewSurface)
+        runCatching { session?.close() }
+        cam.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(s: CameraCaptureSession) {
+                android.util.Log.i("VideoSender", "Session configured (targets=${targets.size})")
+                session = s
+                val req = cam.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                    targets.forEach { addTarget(it) }
+                    val range = pickFpsRange(mgr, cid)
+                    range?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+                }
+                runCatching { s.setRepeatingRequest(req.build(), null, camHandler) }
+                requestKeyframe()
+            }
+            override fun onConfigureFailed(s: CameraCaptureSession) {
+                android.util.Log.e("VideoSender", "Camera capture session configuration failed")
+            }
+        }, camHandler)
     }
 
     private fun drain(enc: MediaCodec) {
@@ -184,6 +196,7 @@ class VideoSender(
         runCatching { inputSurface?.release() }
         runCatching { camThread?.quitSafely() }
         session = null; device = null; encoder = null; inputSurface = null; camThread = null
+        previewSurface = null
     }
 
     /** FPS-диапазон, максимально близкий к ФИКСИРОВАННОМУ целевому fps. Фикс.
