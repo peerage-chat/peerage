@@ -281,17 +281,20 @@ class AppModel private constructor() {
                             val o = arr.getJSONObject(it)
                             RoomMember(o.getString("peer"), o.optBoolean("audio"), o.optBoolean("video"))
                         }
-                        roomMembers.clear(); roomMembers.addAll(list)
+                        // Только при реальном изменении состава/флагов — иначе каждый тик
+                        // (2с в звонке) форсит рекомпозицию всего экрана → рывок видео.
+                        if (roomMembers != list) { roomMembers.clear(); roomMembers.addAll(list) }
                     }
                     // Присутствие в группах, к которым мы НЕ подключены:
                     // показывает кто уже в комнате до того как мы вошли.
                     groups.forEach { g ->
                         if (g.gid == currentRoom) return@forEach
                         val arr = JSONArray(Native.roomPresencePeers(sessionPtr, g.gid))
-                        groupPresence[g.gid] = (0 until arr.length()).map {
+                        val list = (0 until arr.length()).map {
                             val o = arr.getJSONObject(it)
                             RoomMember(o.getString("peer"), o.optBoolean("audio"), o.optBoolean("video"))
                         }
+                        if (groupPresence[g.gid] != list) groupPresence[g.gid] = list
                     }
                     // Диагностика + авто-реконнект меша.
                     // peers=0 два тика подряд (~6с) → Yggdrasil потерял все пиры.
