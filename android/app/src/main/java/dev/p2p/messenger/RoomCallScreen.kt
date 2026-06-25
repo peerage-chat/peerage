@@ -1,5 +1,6 @@
 package dev.p2p.messenger
 
+import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.view.Surface
 import android.view.TextureView
@@ -159,12 +160,16 @@ private fun SelfPreviewSurface(model: AppModel, modifier: Modifier) {
     AndroidView(
         factory = { ctx ->
             TextureView(ctx).apply {
+                val bw = model.videoQuality.width; val bh = model.videoQuality.height
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                        st.setDefaultBufferSize(model.videoQuality.width, model.videoQuality.height)
+                        st.setDefaultBufferSize(bw, bh)
+                        setTransform(coverMatrix(w, h, bw, bh, mirror = true))
                         model.setSelfPreviewSurface(Surface(st))
                     }
-                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                        setTransform(coverMatrix(w, h, bw, bh, mirror = true))
+                    }
                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                         model.setSelfPreviewSurface(null); return true
                     }
@@ -183,10 +188,15 @@ private fun VideoSurface(model: AppModel, peer: String, modifier: Modifier) {
     AndroidView(
         factory = { ctx ->
             TextureView(ctx).apply {
+                val bw = model.videoQuality.width; val bh = model.videoQuality.height
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) =
+                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                        setTransform(coverMatrix(w, h, bw, bh, mirror = false))
                         model.attachVideoReceiver(peer, Surface(st))
-                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                    }
+                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                        setTransform(coverMatrix(w, h, bw, bh, mirror = false))
+                    }
                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                         model.detachVideoReceiver(peer); return true
                     }
@@ -196,6 +206,22 @@ private fun VideoSurface(model: AppModel, peer: String, modifier: Modifier) {
         },
         modifier = modifier,
     )
+}
+
+/** Матрица для TextureView: заполнить тайл с СОХРАНЕНИЕМ аспекта (cover-crop,
+ *  края обрезаются — не растягиваем), по центру. [mirror] — зеркалить (фронталка).
+ *  vw/vh — размер вьюхи, bw/bh — размер буфера (видео). */
+private fun coverMatrix(vw: Int, vh: Int, bw: Int, bh: Int, mirror: Boolean): Matrix {
+    val m = Matrix()
+    if (vw <= 0 || vh <= 0 || bw <= 0 || bh <= 0) return m
+    // TextureView по умолчанию растягивает буфер на всю вьюху. Масштабируем вокруг
+    // центра так, чтобы буфер ПОКРЫЛ вьюху, сохранив аспект (большее измерение режется).
+    val scale = maxOf(vw.toFloat() / bw, vh.toFloat() / bh)
+    val sx = bw * scale / vw
+    val sy = bh * scale / vh
+    m.setScale(sx, sy, vw / 2f, vh / 2f)
+    if (mirror) m.postScale(-1f, 1f, vw / 2f, vh / 2f)
+    return m
 }
 
 @Composable
