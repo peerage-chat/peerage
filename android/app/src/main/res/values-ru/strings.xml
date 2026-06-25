@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Русский перевод. Ключи и порядок — как в values/strings.xml (база, англ.). -->
+<resources>
+
+    <!-- ── Звонок: сетка участников ────────────────────────────────────── -->
+    <string name="call_in_room">В звонке · %1$d</string>
+    <string name="call_btn_invite">Пригласить</string>
+    <string name="call_btn_mic">Микрофон</string>
+    <string name="call_btn_video">Видео</string>
+    <string name="call_btn_leave">Выход</string>
+    <string name="call_btn_settings">Настройки</string>
+    <string name="call_btn_switch_camera">Сменить камеру</string>
+    <string name="call_minimize">Свернуть в сетку</string>
+    <string name="call_traffic_rate">~%1$d МБ/мин</string>
+
+    <!-- ── Звонок: вы одни в комнате ───────────────────────────────────── -->
+    <string name="call_alone_title">Вы одни в комнате</string>
+    <string name="call_alone_subtitle">Ждём остальных</string>
+
+    <!-- ── Звонок: приглашение в комнату (входящий) ────────────────────── -->
+    <string name="call_invite_subtitle">приглашает в комнату</string>
+    <string name="call_invite_btn_decline">Отклонить</string>
+    <string name="call_invite_btn_join">Войти</string>
+    <string name="call_invite_traffic_caption">суммарный входящий трафик</string>
+    <plurals name="call_others_in_room">
+        <item quantity="one">и ещё %d в комнате</item>
+        <item quantity="few">и ещё %d в комнате</item>
+        <item quantity="many">и ещё %d в комнате</item>
+        <item quantity="other">и ещё %d в комнате</item>
+    </plurals>
+
+    <!-- ── Экран шаринга (долгий тап «Видео») ──────────────────────────── -->
+    <string name="share_title">Показать видео</string>
+    <string name="share_source_camera">Камера</string>
+    <string name="share_source_screen">Экран</string>
+    <string name="share_resolution">Разрешение</string>
+    <string name="share_fps">Частота кадров</string>
+    <string name="share_bitrate">Битрейт</string>
+    <string name="share_available_on_device">доступно на устройстве</string>
+    <string name="share_auto">авто</string>
+    <string name="share_btn_show">Показать</string>
+    <string name="share_preview_front">превью · фронтальная</string>
+    <string name="share_preview_back">превью · тыловая</string>
+    <string name="share_preview_screen">превью · экран устройства</string>
+    <string name="share_fps_value">%1$d fps</string>
+    <string name="share_bitrate_value">%1$d Мбит/с</string>
+</resources>

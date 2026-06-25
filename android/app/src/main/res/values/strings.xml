@@ -1,4 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Base language = English. Translations live in values-<lang>/ (e.g. values-ru/).
+  Missing translations fall back here.
+
+  Key convention: feature_element, snake_case, lowercase.
+    e.g. call_btn_mic, share_resolution, call_alone_title
+  Icon-only buttons still need a string (used as contentDescription for a11y).
+  Use <plurals> for counts (Russian needs one/few/many/other).
+  Placeholders: %1$s text, %1$d number. Do not concatenate strings in code.
+-->
 <resources>
     <string name="app_name">p2p messenger</string>
+
+    <!-- ── Call: in-room grid ──────────────────────────────────────────── -->
+    <string name="call_in_room">In call · %1$d</string>
+    <string name="call_btn_invite">Invite</string>
+    <string name="call_btn_mic">Microphone</string>
+    <string name="call_btn_video">Video</string>
+    <string name="call_btn_leave">Leave</string>
+    <string name="call_btn_settings">Settings</string>
+    <string name="call_btn_switch_camera">Switch camera</string>
+    <string name="call_minimize">Minimize to grid</string>
+    <string name="call_traffic_rate">~%1$d MB/min</string>
+
+    <!-- ── Call: alone in room ─────────────────────────────────────────── -->
+    <string name="call_alone_title">You\'re alone in the room</string>
+    <string name="call_alone_subtitle">Waiting for others</string>
+
+    <!-- ── Call: room invitation (incoming) ────────────────────────────── -->
+    <string name="call_invite_subtitle">invites you to the room</string>
+    <string name="call_invite_btn_decline">Decline</string>
+    <string name="call_invite_btn_join">Join</string>
+    <string name="call_invite_traffic_caption">total incoming traffic</string>
+    <plurals name="call_others_in_room">
+        <item quantity="one">and %d more in the room</item>
+        <item quantity="other">and %d more in the room</item>
+    </plurals>
+
+    <!-- ── Share setup (long-press Video) ──────────────────────────────── -->
+    <string name="share_title">Share video</string>
+    <string name="share_source_camera">Camera</string>
+    <string name="share_source_screen">Screen</string>
+    <string name="share_resolution">Resolution</string>
+    <string name="share_fps">Frame rate</string>
+    <string name="share_bitrate">Bitrate</string>
+    <string name="share_available_on_device">available on device</string>
+    <string name="share_auto">auto</string>
+    <string name="share_btn_show">Show</string>
+    <string name="share_preview_front">preview · front camera</string>
+    <string name="share_preview_back">preview · back camera</string>
+    <string name="share_preview_screen">preview · device screen</string>
+    <string name="share_fps_value">%1$d fps</string>
+    <string name="share_bitrate_value">%1$d Mbps</string>
 </resources>
