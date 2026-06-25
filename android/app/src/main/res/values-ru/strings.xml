@@ -3,6 +3,7 @@
 <resources>
 
     <!-- ── Звонок: сетка участников ────────────────────────────────────── -->
+    <string name="call_you">Вы</string>
     <string name="call_in_room">В звонке · %1$d</string>
     <string name="call_btn_invite">Пригласить</string>
     <string name="call_btn_mic">Микрофон</string>

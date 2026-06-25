@@ -13,6 +13,7 @@
     <string name="app_name">p2p messenger</string>
 
     <!-- ── Call: in-room grid ──────────────────────────────────────────── -->
+    <string name="call_you">You</string>
     <string name="call_in_room">In call · %1$d</string>
     <string name="call_btn_invite">Invite</string>
     <string name="call_btn_mic">Microphone</string>

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -156,6 +157,26 @@ private fun Root(model: AppModel) {
     var showProfileSheet by remember { mutableStateOf(false) }
     var activityBarExpanded by remember { mutableStateOf(false) }
     var activeFilter by remember { mutableStateOf("all") }
+
+    // Системная «назад» — навигация по приложению, а не выход. Во время звонка/
+    // входящего гасим (не выходим), профиль-шит закрываем, иначе возврат к родителю.
+    // На главном (Contacts) без оверлеев — обработчик выключен, back выходит штатно.
+    BackHandler(
+        enabled = model.dmCallPeer != null || model.incomingCall != null ||
+            showProfileSheet || screen != Screen.Contacts
+    ) {
+        when {
+            model.incomingCall != null -> {}
+            model.dmCallPeer != null -> {}
+            showProfileSheet -> showProfileSheet = false
+            else -> screen = when (screen) {
+                Screen.Scanner -> Screen.Add
+                Screen.CreateGroup -> Screen.Groups
+                Screen.AddMember -> Screen.GroupChat
+                else -> Screen.Contacts
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         Surface(Modifier.fillMaxSize(), color = HoloBg) {

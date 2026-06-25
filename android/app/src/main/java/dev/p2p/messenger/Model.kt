@@ -154,11 +154,11 @@ class AppModel private constructor() {
     var videoActive by mutableStateOf(false)
     @Volatile private var roomAudio: CallAudio? = null
     @Volatile private var videoSender: VideoSender? = null
-    /** Один приёмник видео (текущий показываемый удалённый участник). Стабилен:
-     *  создаётся при появлении его surface, гасится когда участника не показываем.
-     *  Сетка на N>1 (групповые звонки) — отдельная задача через TextureView. */
-    @Volatile private var videoReceiver: VideoReceiver? = null
-    @Volatile private var videoReceiverPeer: String? = null
+    /** Приёмники видео per-peer: тайл сетки даёт surface → приёмник на этого пира.
+     *  Стабильны: создаются при появлении surface тайла, гасятся при уходе (участник
+     *  вышел / тайл скрыт). key(peer) в Compose не даёт пересоздавать surface на
+     *  перерисовке → нет тёрки декодеров. */
+    private val videoReceivers = java.util.concurrent.ConcurrentHashMap<String, VideoReceiver>()
     /** Микрофон заглушён (управляется из UI звонка). */
     var muted by mutableStateOf(false)
         private set
@@ -621,48 +621,68 @@ class AppModel private constructor() {
         ).also { it.start(sr, ch) }
         if (video) {
             videoActive = true
-            // Кап входящей видео-очереди в кадрах. Декодер пейсит вывод по wall-clock,
-            // поэтому кап = постоянная задержка. Тяжёлые 1080p-кадры приходят пачками
-            // (много фрагментов на меше) и требуют глубже буфер против ложных скипов;
-            // лёгкие режимы держат низкую задержку. Привязка к разрешению, а не к fps:
-            // запрошенный fps ненадёжен (камера 1080p часто отдаёт 30 вместо 60).
-            val cap = when {
-                videoQuality.height >= 1080 -> 24  // ~800мс при реальных 30fps
-                videoQuality.height >= 720  -> 14
-                else                        -> 9
-            }
-            Native.roomSetVideoCap(sessionPtr, cap)
-            videoSender = VideoSender(
-                ctx,
-                videoQuality.width, videoQuality.height, videoQuality.fps, videoQuality.bitrate
-            ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start() }
+            startVideoSender(ctx)
         }
     }
 
-    /** Подключить Surface к видео-потоку участника. Идемпотентно: если уже
-     *  показываем этого же пира — ничего не пересоздаём (без тёрки декодеров). */
+    /** Подключить surface тайла к видео-потоку участника. Идемпотентно: если у пира
+     *  уже есть приёмник — не пересоздаём (защита от тёрки декодеров). */
     fun attachVideoReceiver(peerHex: String, surface: android.view.Surface) {
-        if (videoReceiverPeer == peerHex && videoReceiver != null) return
-        videoReceiver?.stop()
-        videoReceiverPeer = peerHex
-        videoReceiver = VideoReceiver(
+        if (videoReceivers.containsKey(peerHex)) return
+        videoReceivers[peerHex] = VideoReceiver(
             surface,
             videoQuality.width, videoQuality.height, videoQuality.fps
         ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
     }
 
-    /** Отключить приёмник (surface участника ушёл — он вышел/перестал слать видео). */
+    /** Отключить приёмник пира (его тайл ушёл — вышел / перестал слать видео). */
     fun detachVideoReceiver(peerHex: String) {
-        if (videoReceiverPeer != peerHex) return
-        videoReceiver?.stop()
-        videoReceiver = null
-        videoReceiverPeer = null
+        videoReceivers.remove(peerHex)?.stop()
     }
 
     /** Переключить заглушение микрофона (кнопка в экране звонка). */
     fun toggleMute() {
         muted = !muted
         roomAudio?.setMuted(muted)
+        propagateAvFlags()
+    }
+
+    /** Вкл/выкл свою камеру по ходу звонка (кнопка «Видео»). */
+    fun toggleVideo() {
+        val ctx = appContext ?: return
+        if (videoActive) {
+            videoActive = false
+            val vs = videoSender; videoSender = null
+            Thread { runCatching { vs?.stop() } }.apply { isDaemon = true }.start()
+        } else {
+            videoActive = true
+            startVideoSender(ctx)
+        }
+        propagateAvFlags()
+    }
+
+    /** Разослать текущие A/V-флаги (маячок), чтобы собеседники знали, что у нас
+     *  сейчас включено, и подписались/отписались на наше видео. roomJoin обновляет
+     *  флаги комнаты + шлёт presence (для DM — пиру). */
+    private fun propagateAvFlags() {
+        val gid = currentRoom ?: return
+        val audioOn = !muted
+        val videoOn = videoActive
+        ops.execute { Native.roomJoin(sessionPtr, gid, audioOn, videoOn) }
+    }
+
+    /** Запустить отправку своего видео (камера → энкодер → мультикаст). */
+    private fun startVideoSender(ctx: android.content.Context) {
+        // Кап входящей очереди привязан к разрешению (тяжёлые кадры приходят пачками).
+        val cap = when {
+            videoQuality.height >= 1080 -> 24
+            videoQuality.height >= 720 -> 14
+            else -> 9
+        }
+        Native.roomSetVideoCap(sessionPtr, cap)
+        videoSender = VideoSender(
+            ctx, videoQuality.width, videoQuality.height, videoQuality.fps, videoQuality.bitrate
+        ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start() }
     }
 
     // ── Комната-звонок (присутствие, Discord-style) ───────────────────────────
@@ -696,7 +716,7 @@ class AppModel private constructor() {
         muted = false
         val a = roomAudio; roomAudio = null
         val vs = videoSender; videoSender = null
-        val vr = videoReceiver; videoReceiver = null; videoReceiverPeer = null
+        val vrs = videoReceivers.values.toList(); videoReceivers.clear()
         val ctx = appContext
         ops.execute {
             // RoomDecline шлём ТОЛЬКО чтобы отменить ДОЗВОН (пир ещё не вошёл) → у
@@ -711,7 +731,7 @@ class AppModel private constructor() {
         Thread {
             runCatching { a?.stop() }
             runCatching { vs?.stop() }
-            runCatching { vr?.stop() }
+            vrs.forEach { runCatching { it.stop() } }
         }.apply { isDaemon = true }.start()
     }
 
