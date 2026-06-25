@@ -40,6 +40,10 @@ class VideoSender(
     private var drainThread: Thread? = null
     @Volatile private var running = false
     private var camId: String? = null
+    /** Ориентация сенсора камеры (0/90/180/270). Энкодер пишет сырой кадр с сенсора
+     *  (без коррекции, в отличие от превью-SurfaceTexture) → шлём угол приёмнику,
+     *  чтобы он довернул картинку до «правильной». */
+    @Volatile private var sensorOrientation = 0
     /** Surface тайла «Вы» — локальное превью прямо с камеры (без энкодера). */
     @Volatile private var previewSurface: Surface? = null
 
@@ -75,7 +79,10 @@ class VideoSender(
             return
         }
         camId = cid
-        android.util.Log.i("VideoSender", "Opening camera: $cid")
+        sensorOrientation = runCatching {
+            mgr.getCameraCharacteristics(cid).get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        }.getOrDefault(0)
+        android.util.Log.i("VideoSender", "Opening camera: $cid (sensorOrientation=$sensorOrientation)")
         runCatching { camThread?.quitSafely() } // не плодить потоки при ретрае открытия
         val t = HandlerThread("venc-cam").apply { start() }
         camThread = t
@@ -163,7 +170,13 @@ class VideoSender(
                 } else {
                     val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
                     val cfg = config
-                    val out = if (key && cfg != null) cfg + data else data
+                    val au = if (key && cfg != null) cfg + data else data
+                    // 1-байтовый заголовок ориентации (угол сенсора / 90) перед каждым
+                    // access-unit'ом. Rust релеит байты прозрачно; приёмник снимает
+                    // байт и доворачивает картинку. Без него видео уходит боком.
+                    val out = ByteArray(au.size + 1)
+                    out[0] = ((sensorOrientation / 90) % 4).toByte()
+                    System.arraycopy(au, 0, out, 1, au.size)
                     encodedCount++
                     if (encodedCount % 30 == 0) {
                         android.util.Log.i("VideoSender", "Encoded and sent 30 frames, last size = ${out.size} bytes (key=$key)")

@@ -125,6 +125,9 @@ class AppModel private constructor() {
     // Комната-звонок (Discord-style присутствие). gid комнаты, где мы сейчас.
     var currentRoom by mutableStateOf<String?>(null)
     val roomMembers = mutableStateListOf<RoomMember>()
+    /** Угол поворота входящего видео на участника (град, угол сенсора отправителя).
+     *  UI доворачивает тайл. Энкодер шлёт сырой кадр с сенсора → нужен доворот. */
+    val roomMemberRotation = mutableStateMapOf<String, Int>()
     /** Живые участники каждой группы по маячкам — обновляется тикером.
      *  Заполняется даже когда мы сами не в комнате (peer слал нам RoomPresence). */
     val groupPresence = mutableStateMapOf<String, List<RoomMember>>()
@@ -633,7 +636,8 @@ class AppModel private constructor() {
         if (videoReceivers.containsKey(peerHex)) return
         videoReceivers[peerHex] = VideoReceiver(
             surface,
-            videoQuality.width, videoQuality.height, videoQuality.fps
+            videoQuality.width, videoQuality.height, videoQuality.fps,
+            onRotation = { rot -> roomMemberRotation[peerHex] = rot },
         ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
     }
 

@@ -16,6 +16,9 @@ class VideoReceiver(
     private val width: Int,
     private val height: Int,
     private val fps: Int = 30,
+    /** Вызывается при изменении ориентации потока (угол сенсора отправителя, 0/90/
+     *  180/270) — UI доворачивает тайл. Идёт 1-м байтом каждого access-unit'а. */
+    private val onRotation: (Int) -> Unit = {},
     private val pullVideoPacket: () -> ByteArray
 ) {
     private var decoder: MediaCodec? = null
@@ -41,6 +44,7 @@ class VideoReceiver(
         var renderBaseNs = 0L         // wall-clock момент первого output-кадра
         var firstPtsUs = 0L           // PTS первого output-кадра
         var restartStreak = 0         // подряд идущих рестартов декодера без успешного рендера
+        var lastRotation = -1         // последний сообщённый угол (чтобы не дёргать UI зря)
 
         while (running) {
             try {
@@ -65,7 +69,16 @@ class VideoReceiver(
                 val currentDec = dec!!
 
                 // ── Подать входной пакет ──────────────────────────────────────
-                val pkt = pendingPacket ?: pullVideoPacket()
+                // Снимаем 1-байтовый заголовок ориентации, остаток (сам access-unit)
+                // отдаём декодеру. pendingPacket уже без заголовка.
+                val pkt = pendingPacket ?: run {
+                    val raw = pullVideoPacket()
+                    if (raw.isEmpty()) raw else {
+                        val rot = ((raw[0].toInt() and 0xFF) % 4) * 90
+                        if (rot != lastRotation) { lastRotation = rot; onRotation(rot) }
+                        raw.copyOfRange(1, raw.size)
+                    }
+                }
                 if (pkt.isNotEmpty()) {
                     val inIdx = currentDec.dequeueInputBuffer(5_000)
                     if (inIdx >= 0) {

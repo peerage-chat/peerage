@@ -164,11 +164,14 @@ private fun SelfPreviewSurface(model: AppModel, modifier: Modifier) {
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
                         st.setDefaultBufferSize(bw, bh)
-                        setTransform(coverMatrix(w, h, bw, bh, mirror = true))
+                        // Камера уже поворачивает превью в портрет → матрицу считаем по
+                        // ПОРТРЕТНЫМ размерам (bh×bw), rotation=0. Cover-crop как у
+                        // приёмника (WYSIWYG) + зеркало (селфи).
+                        applyTextureTransform(this@apply, bh, bw, 0, mirror = true)
                         model.setSelfPreviewSurface(Surface(st))
                     }
                     override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                        setTransform(coverMatrix(w, h, bw, bh, mirror = true))
+                        applyTextureTransform(this@apply, bh, bw, 0, mirror = true)
                     }
                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                         model.setSelfPreviewSurface(null); return true
@@ -185,17 +188,19 @@ private fun SelfPreviewSurface(model: AppModel, modifier: Modifier) {
  *  Surface отдаётся приёмнику (декодер рендерит сюда). */
 @Composable
 private fun VideoSurface(model: AppModel, peer: String, modifier: Modifier) {
+    val bw = model.videoQuality.width; val bh = model.videoQuality.height
+    // Угол сенсора отправителя (энкодер шлёт сырой кадр боком) — доворачиваем тайл.
+    val rotation = model.roomMemberRotation[peer] ?: 0
     AndroidView(
         factory = { ctx ->
             TextureView(ctx).apply {
-                val bw = model.videoQuality.width; val bh = model.videoQuality.height
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                        setTransform(coverMatrix(w, h, bw, bh, mirror = false))
+                        applyTextureTransform(this@apply, bw, bh, model.roomMemberRotation[peer] ?: 0, mirror = false)
                         model.attachVideoReceiver(peer, Surface(st))
                     }
                     override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                        setTransform(coverMatrix(w, h, bw, bh, mirror = false))
+                        applyTextureTransform(this@apply, bw, bh, model.roomMemberRotation[peer] ?: 0, mirror = false)
                     }
                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                         model.detachVideoReceiver(peer); return true
@@ -204,24 +209,34 @@ private fun VideoSurface(model: AppModel, peer: String, modifier: Modifier) {
                 }
             }
         },
+        // Угол приходит из потока ПОСЛЕ создания surface → re-apply при изменении.
+        update = { view -> applyTextureTransform(view, bw, bh, rotation, mirror = false) },
         modifier = modifier,
     )
 }
 
-/** Матрица для TextureView: заполнить тайл с СОХРАНЕНИЕМ аспекта (cover-crop,
- *  края обрезаются — не растягиваем), по центру. [mirror] — зеркалить (фронталка).
- *  vw/vh — размер вьюхи, bw/bh — размер буфера (видео). */
-private fun coverMatrix(vw: Int, vh: Int, bw: Int, bh: Int, mirror: Boolean): Matrix {
+/** Трансформация TextureView: поворот на [rotationDeg] (0/90/180/270) + заполнение
+ *  тайла с СОХРАНЕНИЕМ аспекта (cover-crop, по центру) + опц. зеркало [mirror].
+ *  bufW/bufH — размер буфера (видео); размер вьюхи берём из самой [view]. */
+private fun applyTextureTransform(view: TextureView, bufW: Int, bufH: Int, rotationDeg: Int, mirror: Boolean) {
+    val vw = view.width.toFloat(); val vh = view.height.toFloat()
+    if (vw <= 0f || vh <= 0f || bufW <= 0 || bufH <= 0) return
+    val cx = vw / 2f; val cy = vh / 2f
+    val rot = ((rotationDeg % 360) + 360) % 360
+    val rotated = rot == 90 || rot == 270
+    // Эффективные размеры контента после поворота.
+    val effW = if (rotated) bufH.toFloat() else bufW.toFloat()
+    val effH = if (rotated) bufW.toFloat() else bufH.toFloat()
+    val scale = maxOf(vw / effW, vh / effH)
+    val drawW = effW * scale; val drawH = effH * scale
+    // Размер ДО поворота (чтобы после поворота получить drawW×drawH).
+    val preW = if (rotated) drawH else drawW
+    val preH = if (rotated) drawW else drawH
     val m = Matrix()
-    if (vw <= 0 || vh <= 0 || bw <= 0 || bh <= 0) return m
-    // TextureView по умолчанию растягивает буфер на всю вьюху. Масштабируем вокруг
-    // центра так, чтобы буфер ПОКРЫЛ вьюху, сохранив аспект (большее измерение режется).
-    val scale = maxOf(vw.toFloat() / bw, vh.toFloat() / bh)
-    val sx = bw * scale / vw
-    val sy = bh * scale / vh
-    m.setScale(sx, sy, vw / 2f, vh / 2f)
-    if (mirror) m.postScale(-1f, 1f, vw / 2f, vh / 2f)
-    return m
+    m.setScale(preW / vw, preH / vh, cx, cy)
+    if (rot != 0) m.postRotate(rot.toFloat(), cx, cy)
+    if (mirror) m.postScale(-1f, 1f, cx, cy)
+    view.setTransform(m)
 }
 
 @Composable
