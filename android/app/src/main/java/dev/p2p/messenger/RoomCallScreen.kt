@@ -64,12 +64,17 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
         }
 
         if (chrome) {
-            // верх-право: смена камеры + настройки (заглушки на первый заход)
+            // верх-право: смена камеры + настройки
             Row(
                 Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                ChromeChip(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera)) {}
+                // Флип активен только при включённом своём видео.
+                if (model.videoActive) {
+                    ChromeChip(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera)) {
+                        model.switchCamera()
+                    }
+                }
                 ChromeChip(Icons.Filled.Settings, stringResource(R.string.call_btn_settings)) {}
             }
             // низ: панель управления (выше системной навигации)
@@ -157,21 +162,23 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
  *  VideoSender'у (камера рендерит прямо сюда, без энкодера/декодера). */
 @Composable
 private fun SelfPreviewSurface(model: AppModel, modifier: Modifier) {
+    val bw = model.videoQuality.width; val bh = model.videoQuality.height
+    // Зеркало — только у фронталки (селфи); у тыловой камеры без зеркала.
+    val mirror = model.cameraFront
     AndroidView(
         factory = { ctx ->
             TextureView(ctx).apply {
-                val bw = model.videoQuality.width; val bh = model.videoQuality.height
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
                         st.setDefaultBufferSize(bw, bh)
                         // Камера уже поворачивает превью в портрет → матрицу считаем по
                         // ПОРТРЕТНЫМ размерам (bh×bw), rotation=0. Cover-crop как у
-                        // приёмника (WYSIWYG) + зеркало (селфи).
-                        applyTextureTransform(this@apply, bh, bw, 0, mirror = true)
+                        // приёмника (WYSIWYG) + зеркало (для фронталки).
+                        applyTextureTransform(this@apply, bh, bw, 0, model.cameraFront)
                         model.setSelfPreviewSurface(Surface(st))
                     }
                     override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                        applyTextureTransform(this@apply, bh, bw, 0, mirror = true)
+                        applyTextureTransform(this@apply, bh, bw, 0, model.cameraFront)
                     }
                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                         model.setSelfPreviewSurface(null); return true
@@ -180,6 +187,8 @@ private fun SelfPreviewSurface(model: AppModel, modifier: Modifier) {
                 }
             }
         },
+        // Флип камеры меняет зеркало без пересоздания surface → re-apply из update.
+        update = { view -> applyTextureTransform(view, bh, bw, 0, mirror) },
         modifier = modifier,
     )
 }

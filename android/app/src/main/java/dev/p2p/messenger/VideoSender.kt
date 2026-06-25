@@ -46,6 +46,8 @@ class VideoSender(
     @Volatile private var sensorOrientation = 0
     /** Surface тайла «Вы» — локальное превью прямо с камеры (без энкодера). */
     @Volatile private var previewSurface: Surface? = null
+    /** Какую камеру открывать: фронтальную (true) или тыловую. Меняется флипом. */
+    @Volatile private var facingFront = true
 
     /** [preview] — surface тайла «Вы» для локального превью (или null). Камера
      *  рендерит в энкодер + (если задан) превью ОДНОЙ сессией — без пересборки. */
@@ -70,10 +72,25 @@ class VideoSender(
         openCamera(surf)
     }
 
+    /** Переключить фронт/тыл по ходу звонка. Энкодер остаётся (тот же Surface) —
+     *  пересоздаём только сессию камеры под новый объектив. Угол сенсора другой →
+     *  заголовок ориентации в потоке обновится сам (читается в drain). */
+    fun switchCamera() {
+        val h = camHandler ?: return
+        h.post {
+            val surf = inputSurface ?: return@post
+            facingFront = !facingFront
+            runCatching { session?.close() }
+            runCatching { device?.close() }
+            device = null
+            openCamera(surf)
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private fun openCamera(target: Surface) {
         val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val cid = pickFront(mgr)
+        val cid = pickCamera(mgr)
         if (cid == null) {
             android.util.Log.e("VideoSender", "No camera found (facing front or fallback)!")
             return
@@ -227,12 +244,15 @@ class VideoSender(
             ?: ranges.minByOrNull { it.upper }                                          // запас: наименьший верх
     }.getOrNull()
 
-    private fun pickFront(mgr: CameraManager): String? {
+    /** Камера нужного объектива ([facingFront]); если такой нет — первая попавшаяся. */
+    private fun pickCamera(mgr: CameraManager): String? {
+        val want = if (facingFront) CameraCharacteristics.LENS_FACING_FRONT
+                   else CameraCharacteristics.LENS_FACING_BACK
         var fallback: String? = null
         for (id in mgr.cameraIdList) {
             val facing = mgr.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING)
             if (fallback == null) fallback = id
-            if (facing == CameraCharacteristics.LENS_FACING_FRONT) return id
+            if (facing == want) return id
         }
         return fallback
     }

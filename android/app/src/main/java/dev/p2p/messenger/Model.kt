@@ -166,6 +166,9 @@ class AppModel private constructor() {
     @Volatile private var selfPreviewSurface: android.view.Surface? = null
     /** Микрофон заглушён (управляется из UI звонка). */
     var muted by mutableStateOf(false)
+    /** Текущий объектив: фронтальная камера (true) или тыловая. Влияет на зеркало
+     *  превью «Вы» (селфи-зеркало только у фронталки). */
+    var cameraFront by mutableStateOf(true)
         private set
 
     // Фоновое взаимодействие с ядром (никогда не на главном потоке).
@@ -689,6 +692,7 @@ class AppModel private constructor() {
             else -> 9
         }
         Native.roomSetVideoCap(sessionPtr, cap)
+        cameraFront = true // новый VideoSender всегда стартует с фронталки
         videoSender = VideoSender(
             ctx, videoQuality.width, videoQuality.height, videoQuality.fps, videoQuality.bitrate
         ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start(preview) }
@@ -697,6 +701,12 @@ class AppModel private constructor() {
     private fun stopVideoSender() {
         val vs = videoSender; videoSender = null
         Thread { runCatching { vs?.stop() } }.apply { isDaemon = true }.start()
+    }
+
+    /** Переключить фронт/тыл по ходу звонка (чип смены камеры). */
+    fun switchCamera() {
+        cameraFront = !cameraFront
+        videoSender?.switchCamera()
     }
 
     /** Surface тайла «Вы» появился/ушёл. Появился → можно стартовать отправку;
