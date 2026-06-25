@@ -142,17 +142,19 @@ class VideoReceiver(
                     decoder = null
                     pendingPacket = null
                     renderBaseNs = 0L
-                    // КАП: не пересоздавать декодер бесконечно. Каждый createDecoder =
-                    // новый аппаратный OMX-узел; их лимит, и тёрка вешает кодек-сервис
-                    // (а с ним весь звонок). После 6 рестартов подряд без успешного
-                    // рендера — сдаёмся (running=false), выходим из цикла.
-                    if (++restartStreak >= 6) {
-                        android.util.Log.e("VideoReceiver", "decoder unrecoverable ($restartStreak), stopping", e)
-                        running = false
-                        break
-                    }
-                    android.util.Log.e("VideoReceiver", "Decoder error, restart $restartStreak", e)
-                    Thread.sleep(150L * restartStreak) // нарастающий бэкофф
+                    // НЕ сдаёмся насмерть: раньше после 6 ошибок ставили running=false
+                    // и выходили — а тайл-SurfaceTexture жив, onSurfaceTextureAvailable
+                    // повторно не стреляет → приёмник не пересоздаётся → картинка СЕРАЯ
+                    // навсегда, пока не пересоздадут тайл (toggle камеры). Теперь после
+                    // порога держим ДЛИННЫЙ backoff (≤ раза в 2с — каждый createDecoder
+                    // это новый OMX-узел, частая тёрка вешает кодек-сервис; 2с безопасны).
+                    // Декодер пересоздастся на след. итерации и восстановится, когда поток
+                    // снова здоров и придёт keyframe. restartStreak сбрасывается при первом
+                    // успешном рендере.
+                    restartStreak++
+                    val backoff = if (restartStreak >= 6) 2000L else 150L * restartStreak
+                    android.util.Log.e("VideoReceiver", "Decoder error, restart $restartStreak, backoff ${backoff}ms", e)
+                    Thread.sleep(backoff)
                 }
             }
         }
