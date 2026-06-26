@@ -109,6 +109,9 @@ class AppModel private constructor() {
 
     var currentChat by mutableStateOf<String?>(null)
     var netPeers by mutableStateOf(0)
+    /** Режим «узел сети» (ретрансляция чужого трафика). Пока только UI-флаг —
+     *  привязка к движку (вкл/выкл relay) — TODO, когда появится нативный вызов. */
+    var relayEnabled by mutableStateOf(true)
     /** Результат последней попытки добавить контакт ("" | added | known | error). */
     var addStatus by mutableStateOf("")
 

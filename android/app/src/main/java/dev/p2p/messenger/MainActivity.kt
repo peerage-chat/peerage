@@ -37,9 +37,13 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.BatteryStd
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
@@ -58,6 +62,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Settings
@@ -268,7 +273,9 @@ private fun Root(model: AppModel) {
                         BarIcon(Icons.Filled.PersonAdd, "Добавить контакт") { screen = Screen.Add }
                     }
                     Screen.Calls -> TopBar("Звонки", onBack = { screen = Screen.Contacts })
-                    Screen.Network -> TopBar("Сеть", onBack = { screen = Screen.Contacts })
+                    Screen.Network -> TopBar("Сеть", onBack = { screen = Screen.Contacts }) {
+                        BarIcon(Icons.Filled.Refresh, "Обновить") { /* авто-поллинг; ручной рефреш — TODO */ }
+                    }
                     Screen.Saved -> TopBar("Сохранённое", onBack = { screen = Screen.Contacts })
                 }
                 // ── Рейл папок: только на главном экране ────────────────────────
@@ -302,7 +309,7 @@ private fun Root(model: AppModel) {
                         Screen.Settings -> SettingsScreen(model)
                         Screen.ContactList -> ComingSoon(Icons.Filled.Group, "Контакты")
                         Screen.Calls -> ComingSoon(Icons.Filled.Call, "История звонков")
-                        Screen.Network -> ComingSoon(Icons.Filled.Share, "Сеть")
+                        Screen.Network -> NetworkScreen(model) { screen = Screen.Me }
                         Screen.Saved -> ComingSoon(Icons.Filled.Lock, "Сохранённое")
                     }
                 }
@@ -1158,6 +1165,179 @@ private fun SettingsScreen(model: AppModel) {
                 fontSize = 11.sp,
             )
     }
+}
+
+// ── Экран «Сеть» (mesh) ─────────────────────────────────────────────────────
+
+@Composable
+private fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
+    val me = model.me ?: return
+    val ctx = LocalContext.current
+    // Офлайн-очередь = сообщения, ждущие появления получателя (статус "queued").
+    val queued = model.messages.values.sumOf { l -> l.count { it.status == "queued" } }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        // 1. Статус — ровно, в карточке.
+        SurfaceCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(10.dp).clip(CircleShape).background(HoloOnline))
+                Spacer(Modifier.width(10.dp))
+                Row {
+                    Text("Подключено к ", color = Color.White, fontSize = 15.sp)
+                    Text("mesh", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // 2. Метрики. Пинг/трафик пока без нативного источника → «—».
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MetricCard("Пиры", "${model.netPeers}", null, Modifier.weight(1f))
+            MetricCard("Пинг", "—", "мс", Modifier.weight(1f))
+            MetricCard("Трафик", "—", "КБ/с", Modifier.weight(1f))
+        }
+
+        // 3. Мой узел.
+        FieldLabel("МОЙ УЗЕЛ")
+        SurfaceCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                Icon(Icons.Filled.ContentCopy, "Скопировать адрес", tint = HoloAccent,
+                    modifier = Modifier.size(20.dp).clickable { copyToClipboard(ctx, me.address, "Адрес") })
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlineAction("Мой QR", Icons.Filled.QrCode2, Modifier.weight(1f), onMyQr)
+            OutlineAction("Поделиться", Icons.Filled.Share, Modifier.weight(1f)) { shareText(ctx, me.pubkey) }
+        }
+
+        // 4. Режим участия — выгоды + цена.
+        FieldLabel("РЕЖИМ УЧАСТИЯ")
+        SurfaceCard {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Share, null, tint = HoloOnline, modifier = Modifier.size(26.dp))
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Узел сети", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text("Ретранслирую трафик других — помогаю сети",
+                            color = HoloSecondary, fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Switch(
+                        checked = model.relayEnabled,
+                        onCheckedChange = { model.relayEnabled = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = HoloAccent,
+                            uncheckedThumbColor = HoloSecondary,
+                            uncheckedTrackColor = HoloBg,
+                        ),
+                    )
+                }
+                HorizontalDivider(color = HoloBorder, modifier = Modifier.padding(vertical = 12.dp))
+                BenefitRow(Icons.Filled.Bolt, HoloOnline, "Приоритет доставки твоих сообщений")
+                Spacer(Modifier.height(10.dp))
+                BenefitRow(Icons.Filled.Schedule, HoloOnline, "Дольше хранится офлайн-очередь")
+                Spacer(Modifier.height(10.dp))
+                BenefitRow(Icons.Filled.BatteryStd, HoloSecondary, "Цена: выше расход батареи и трафика")
+            }
+        }
+
+        // 5. Пиры. Списка адресов движок пока не отдаёт (только число) → заглушка.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FieldLabel("ПИРЫ · ${model.netPeers}")
+            Spacer(Modifier.weight(1f))
+            Text("Все", color = HoloAccent, fontSize = 13.sp)
+        }
+        SurfaceCard {
+            Text("Список адресов пиров — скоро", color = HoloSecondary, fontSize = 13.sp,
+                modifier = Modifier.padding(vertical = 4.dp))
+        }
+
+        // 6. Офлайн-очередь.
+        SurfaceCard(onClick = { /* TODO: экран очереди */ }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Schedule, null, tint = HoloAccent, modifier = Modifier.size(26.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Офлайн-очередь · $queued", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text("доставится, когда получатель появится", color = HoloSecondary, fontSize = 12.sp)
+                }
+                Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+            }
+        }
+    }
+}
+
+/** Карточка-контейнер (тёмная поверхность, скругление) для разделов Сети. */
+@Composable
+private fun SurfaceCard(onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
+    val base = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(HoloSurface)
+    Box((if (onClick != null) base.clickable { onClick() } else base).padding(14.dp)) { content() }
+}
+
+/** Метрика: подпись + крупное значение (+ опц. единица). */
+@Composable
+private fun MetricCard(label: String, value: String, unit: String?, modifier: Modifier = Modifier) {
+    Box(modifier.clip(RoundedCornerShape(14.dp)).background(HoloSurface).padding(14.dp)) {
+        Column {
+            Text(label, color = HoloSecondary, fontSize = 11.sp)
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(value, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                if (unit != null) {
+                    Spacer(Modifier.width(3.dp))
+                    Text(unit, color = HoloSecondary, fontSize = 11.sp, modifier = Modifier.padding(bottom = 3.dp))
+                }
+            }
+        }
+    }
+}
+
+/** Кнопка-контур с иконкой (Мой QR / Поделиться). */
+@Composable
+private fun OutlineAction(text: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(
+        modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, HoloBorder, RoundedCornerShape(12.dp))
+            .clickable { onClick() }.padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Строка «выгода/цена» режима участия. */
+@Composable
+private fun BenefitRow(icon: ImageVector, tint: Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(text, color = if (tint == HoloSecondary) HoloSecondary else Color.White, fontSize = 13.sp)
+    }
+}
+
+private fun copyToClipboard(ctx: android.content.Context, text: String, label: String) {
+    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+        android.widget.Toast.makeText(ctx, "Скопировано", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun shareText(ctx: android.content.Context, text: String) {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, text)
+    }
+    ctx.startActivity(android.content.Intent.createChooser(send, "Поделиться ключом"))
 }
 
 /** Встроенный Compose-сканер QR-кода на CameraX. Вызывает [onResult] ровно один раз. */
