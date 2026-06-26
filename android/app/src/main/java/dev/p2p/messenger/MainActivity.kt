@@ -45,8 +45,8 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeviceHub
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Forum
@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -301,7 +302,7 @@ private fun Root(model: AppModel) {
                         Screen.Settings -> SettingsScreen(model)
                         Screen.ContactList -> ComingSoon(Icons.Filled.Group, "Контакты")
                         Screen.Calls -> ComingSoon(Icons.Filled.Call, "История звонков")
-                        Screen.Network -> ComingSoon(Icons.Filled.DeviceHub, "Сеть")
+                        Screen.Network -> ComingSoon(Icons.Filled.Share, "Сеть")
                         Screen.Saved -> ComingSoon(Icons.Filled.Lock, "Сохранённое")
                     }
                 }
@@ -314,7 +315,7 @@ private fun Root(model: AppModel) {
                 modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
                 containerColor = HoloAccent,
                 contentColor = HoloAccentDark,
-            ) { Icon(Icons.AutoMirrored.Filled.Chat, "Новый чат", modifier = Modifier.size(22.dp)) }
+            ) { Icon(Icons.Filled.Create, "Новый чат", modifier = Modifier.size(22.dp)) }
         }
         model.incomingCall?.let { IncomingCallOverlay(model, it) }
         // Активный DM-звонок (аудио или видео) — полноэкранная комната-сетка.
@@ -379,7 +380,7 @@ private fun PeerIndicator(peers: Int, onLongPress: () -> Unit = {}) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(Icons.Filled.DeviceHub, "Сеть", tint = if (peers > 0) HoloOnline else HoloSecondary,
+        Icon(Icons.Filled.Share, "Сеть", tint = if (peers > 0) HoloOnline else HoloSecondary,
             modifier = Modifier.size(18.dp))
         Text("$peers", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
@@ -417,12 +418,12 @@ private fun SquareAvatar(
 
 @Composable
 private fun ListRow(onClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
+    // Без разделителей — мягкий «телеграмный» список (по макету).
     Row(
         Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = ScreenPad, vertical = RowPadV),
         verticalAlignment = Alignment.CenterVertically,
         content = content,
     )
-    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
 }
 
 @Composable
@@ -1343,7 +1344,7 @@ private fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
         listOf(
             Triple(Icons.Filled.Group, "Контакты", Screen.ContactList),
             Triple(Icons.Filled.Call, "Звонки", Screen.Calls),
-            Triple(Icons.Filled.DeviceHub, "Сеть", Screen.Network),
+            Triple(Icons.Filled.Share, "Сеть", Screen.Network),
             Triple(Icons.Filled.Lock, "Сохранённое", Screen.Saved),
         ).forEach { (icon, label, dest) -> DrawerItem(icon, label) { navigate(dest) } }
         HorizontalDivider(color = HoloBorder, modifier = Modifier.padding(vertical = 4.dp))
