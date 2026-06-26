@@ -24,7 +24,10 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,9 +36,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeviceHub
@@ -60,7 +68,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -89,6 +99,28 @@ private val FormGap = 12.dp          // вертикальный зазор в �
 private val RowPadV = 14.dp          // вертикальный паддинг ряда списка
 private val OfflineDot = Color(0xFF555555)
 private val WarnColor = Color(0xFFE6A23C)
+private val BubbleIn = Color(0xFF24292F)   // входящий пузырь (нейтральный)
+private val BubbleOut = Color(0xFF245266)  // исходящий пузырь (приглушённый акцент)
+private val FolderSelected = Color(0xFF1C3A47) // фон активной папки (приглушённый, не неон)
+
+/** Время сообщения «ЧЧ:ММ» (time — unix-секунды). */
+private fun fmtMsgTime(ts: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
+
+/** Метка дня для чипа-разделителя: Сегодня / Вчера / «d MMMM». */
+private fun dayLabel(ts: Long): String {
+    val msgDay = java.util.Calendar.getInstance().apply { timeInMillis = ts * 1000 }
+    val today = java.util.Calendar.getInstance()
+    fun sameDay(a: java.util.Calendar, b: java.util.Calendar) =
+        a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) &&
+        a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+    val yesterday = (today.clone() as java.util.Calendar).apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+    return when {
+        sameDay(msgDay, today) -> "Сегодня"
+        sameDay(msgDay, yesterday) -> "Вчера"
+        else -> java.text.SimpleDateFormat("d MMMM", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
+    }
+}
 
 class MainActivity : ComponentActivity() {
     // Синглтон на процесс: переживает пересоздание Activity (фон/возврат), иначе
@@ -147,7 +179,7 @@ private fun CenterMessage(text: String) {
     }
 }
 
-private enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner }
+private enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -202,17 +234,11 @@ private fun Root(model: AppModel) {
                         PeerIndicator(model.netPeers) { model.startBenchRecv() }
                         BarIcon(Icons.Filled.Search, "Поиск") { /* TODO: глобальный поиск */ }
                     }
-                    Screen.Chat -> {
-                        val key = model.currentChat
-                        val name = key?.let { k -> model.contacts.firstOrNull { it.key == k }?.name } ?: "Чат"
-                        TopBar(name, onBack = { screen = Screen.Contacts }) {
-                            if (key != null) {
-                                BarIcon(Icons.Filled.Call, "Аудио-звонок") { model.callDm(key) }
-                                BarIcon(Icons.Filled.Videocam, "Видео-звонок") { model.callDm(key, video = true) }
-                                BarIcon(Icons.Filled.Info, "О контакте") { screen = Screen.Info }
-                            }
-                        }
-                    }
+                    Screen.Chat -> ChatTopBar(
+                        model,
+                        onBack = { screen = Screen.Contacts },
+                        onProfile = { screen = Screen.Info },
+                    )
                     Screen.Add -> TopBar("Добавить контакт", onBack = { screen = Screen.Contacts })
                     Screen.Me -> TopBar("Мой ключ", onBack = { screen = Screen.Contacts })
                     Screen.Info -> TopBar("Контакт", onBack = { screen = Screen.Chat })
@@ -237,6 +263,12 @@ private fun Root(model: AppModel) {
                     Screen.AddMember -> TopBar("Добавить участника", onBack = { screen = Screen.GroupChat })
                     Screen.Settings -> TopBar("Настройки", onBack = { screen = Screen.Contacts })
                     Screen.Scanner -> TopBar("Сканировать QR", onBack = { screen = Screen.Add })
+                    Screen.ContactList -> TopBar("Контакты", onBack = { screen = Screen.Contacts }) {
+                        BarIcon(Icons.Filled.PersonAdd, "Добавить контакт") { screen = Screen.Add }
+                    }
+                    Screen.Calls -> TopBar("Звонки", onBack = { screen = Screen.Contacts })
+                    Screen.Network -> TopBar("Сеть", onBack = { screen = Screen.Contacts })
+                    Screen.Saved -> TopBar("Сохранённое", onBack = { screen = Screen.Contacts })
                 }
                 // ── Рейл папок: только на главном экране ────────────────────────
                 if (screen == Screen.Contacts) {
@@ -267,6 +299,10 @@ private fun Root(model: AppModel) {
                         Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Groups }
                         Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
                         Screen.Settings -> SettingsScreen(model)
+                        Screen.ContactList -> ComingSoon(Icons.Filled.Group, "Контакты")
+                        Screen.Calls -> ComingSoon(Icons.Filled.Call, "История звонков")
+                        Screen.Network -> ComingSoon(Icons.Filled.DeviceHub, "Сеть")
+                        Screen.Saved -> ComingSoon(Icons.Filled.Lock, "Сохранённое")
                     }
                 }
             }
@@ -494,54 +530,190 @@ private fun ContactsScreen(
     }
 }
 
+/** Шапка личного чата: назад · аватар+presence · имя+verified · статус (тап →
+ *  профиль) · аудиозвонок · меню. Видеозвонка нет — камеру включают внутри звонка. */
+@Composable
+private fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit) {
+    val key = model.currentChat
+    val c = key?.let { k -> model.contacts.firstOrNull { it.key == k } }
+    val name = c?.name ?: "Чат"
+    val online = key?.let { model.online[it] == true } ?: false
+    Row(
+        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onClick = onBack)
+        Row(
+            Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onProfile() }
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SquareAvatar(name, size = 38.dp, online = online)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (c?.verified == true) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(14.dp))
+                    }
+                }
+                Text(if (online) "в сети" else "не в сети",
+                    color = if (online) HoloOnline else HoloSecondary, fontSize = 11.sp)
+            }
+        }
+        if (key != null) BarIcon(Icons.Filled.Call, "Аудио-звонок") { model.callDm(key) }
+        BarIcon(Icons.Filled.MoreVert, "Ещё", tint = Color.White, onClick = onProfile)
+    }
+}
+
 @Composable
 private fun ChatScreen(model: AppModel) {
     val key = model.currentChat ?: return
-    val msgs = model.messages[key]
+    val msgs = model.messages[key] ?: emptyList()
     var input by remember(key) { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    // Держим прокрутку у последнего сообщения при появлении новых.
+    LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
 
     Column(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
-            items(msgs ?: emptyList()) { m -> MessageBubble(m) }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
+        ) {
+            item { E2EBanner() }
+            itemsIndexed(msgs) { i, m ->
+                val prev = msgs.getOrNull(i - 1)
+                if (prev == null || dayLabel(prev.time) != dayLabel(m.time)) DateChip(dayLabel(m.time))
+                MessageBubble(m)
+            }
         }
-        MessageInput(input, { input = it }) { model.send(key, input); input = "" }
+        MessageInput(input, { input = it }) {
+            if (input.isNotBlank()) { model.send(key, input); input = "" }
+        }
+    }
+}
+
+/** Системная строка «E2E» в начале переписки. */
+@Composable
+private fun E2EBanner() {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
+        Row(
+            Modifier.clip(RoundedCornerShape(8.dp)).background(HoloSurface)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Lock, null, tint = HoloSecondary, modifier = Modifier.size(12.dp))
+            Spacer(Modifier.width(5.dp))
+            Text("Сообщения защищены сквозным шифрованием", color = HoloSecondary, fontSize = 11.sp)
+        }
+    }
+}
+
+/** Чип-разделитель даты. */
+@Composable
+private fun DateChip(label: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
+        Box(
+            Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface)
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+        ) { Text(label, color = HoloSecondary, fontSize = 11.sp) }
     }
 }
 
 @Composable
 private fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () -> Unit) {
-    Row(Modifier.fillMaxWidth().background(HoloSurface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextField(value, onChange, Modifier.weight(1f),
-            placeholder = { Text("Сообщение…", color = HoloSecondary) }, colors = inputColors(), maxLines = 4)
+    Row(
+        Modifier.fillMaxWidth().background(HoloBg).padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Поле-пилюля: скрепка и эмодзи ВНУТРИ.
+        Row(
+            Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(HoloSurface),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PillIcon(Icons.Filled.AttachFile, "Прикрепить") { /* TODO: вложения */ }
+            BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                cursorBrush = SolidColor(HoloAccent),
+                maxLines = 4,
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (value.isEmpty()) Text("Сообщение…", color = HoloSecondary, fontSize = 15.sp)
+                        inner()
+                    }
+                },
+            )
+            PillIcon(Icons.Filled.EmojiEmotions, "Эмодзи") { /* TODO: эмодзи */ }
+        }
         Spacer(Modifier.width(8.dp))
-        SendButton(onSend)
+        // Отправка / голосовое — отдельной круглой кнопкой 44px.
+        val hasText = value.isNotBlank()
+        Box(
+            Modifier.clip(CircleShape).background(HoloAccent).size(44.dp)
+                .clickable { if (hasText) onSend() /* else TODO: запись голосового */ },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (hasText) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
+                if (hasText) "Отправить" else "Голосовое",
+                tint = HoloAccentDark, modifier = Modifier.size(20.dp),
+            )
+        }
     }
+}
+
+/** Иконка внутри поля-пилюли (44px касание). */
+@Composable
+private fun PillIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(CircleShape).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, desc, tint = HoloSecondary, modifier = Modifier.size(22.dp)) }
 }
 
 @Composable
 private fun MessageBubble(m: Message) {
+    val timeStr = fmtMsgTime(m.time)
+    // Резервируем место под время (+галочку) в последней строке пузыря, чтобы
+    // оверлей не наезжал на текст (em-space ≈ ширине цифры).
+    val reserve = if (m.mine) "        " else "      "
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
-        Column(
-            Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(10.dp))
-                .background(if (m.mine) HoloAccent else HoloSurface).padding(horizontal = 10.dp, vertical = 7.dp),
+        Box(
+            Modifier.widthIn(max = 290.dp).clip(RoundedCornerShape(14.dp))
+                .background(if (m.mine) BubbleOut else BubbleIn)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
-            Text(m.text, color = if (m.mine) HoloAccentDark else Color.White, fontSize = 15.sp)
-            if (m.mine) {
-                val tint = HoloAccentDark.copy(alpha = 0.7f)
-                Row(Modifier.align(Alignment.End).padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    when (m.status) {
-                        "delivered" -> Icon(Icons.Filled.DoneAll, "доставлено", tint = tint, modifier = Modifier.size(13.dp))
-                        // "sent" остаётся для сообщений из БД (сохранены старым кодом).
-                        "sent" -> Icon(Icons.Filled.Done, "отправлено", tint = tint, modifier = Modifier.size(13.dp))
-                        // "pending" — Rust пробует доставить, ACK ещё не пришёл.
-                        "pending" -> Icon(Icons.Filled.Schedule, "отправляется", tint = tint.copy(alpha = 0.5f), modifier = Modifier.size(13.dp))
-                        "failed" -> Text("не доставлено", color = HoloAccentDark.copy(alpha = 0.8f), fontSize = 10.sp)
-                        "queued" -> Text("ожидание…", color = HoloAccentDark.copy(alpha = 0.7f), fontSize = 10.sp)
-                    }
+            Text(m.text + reserve, color = Color.White, fontSize = 15.sp)
+            Row(
+                Modifier.align(Alignment.BottomEnd),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(timeStr, color = Color.White.copy(alpha = 0.55f), fontSize = 10.sp)
+                if (m.mine) {
+                    Spacer(Modifier.width(3.dp))
+                    StatusTick(m.status)
                 }
             }
         }
+    }
+}
+
+/** Галочка статуса доставки исходящего сообщения. */
+@Composable
+private fun StatusTick(status: String) {
+    val tint = Color.White.copy(alpha = 0.7f)
+    when (status) {
+        "delivered" -> Icon(Icons.Filled.DoneAll, "доставлено", tint = tint, modifier = Modifier.size(13.dp))
+        "sent" -> Icon(Icons.Filled.Done, "отправлено", tint = tint, modifier = Modifier.size(13.dp))
+        "pending" -> Icon(Icons.Filled.Schedule, "отправляется", tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+        "queued" -> Icon(Icons.Filled.Schedule, "ожидание", tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+        "failed" -> Text("!", color = HoloError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -1125,10 +1297,10 @@ private fun FolderTile(icon: ImageVector, label: String, selected: Boolean, badg
     Box(Modifier.size(48.dp).clickable { onClick() }, contentAlignment = Alignment.BottomEnd) {
         Box(
             Modifier.size(48.dp).clip(RoundedCornerShape(15.dp))
-                .background(if (selected) HoloAccent else HoloSurface),
+                .background(if (selected) FolderSelected else HoloSurface),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, label, tint = if (selected) HoloAccentDark else HoloSecondary,
+            Icon(icon, label, tint = if (selected) HoloAccent else HoloSecondary,
                 modifier = Modifier.size(24.dp))
         }
         if (badge > 0) {
@@ -1145,8 +1317,8 @@ private fun FolderTile(icon: ImageVector, label: String, selected: Boolean, badg
     }
 }
 
-/** Левое меню (Telegram-style): шапка-профиль + пункты навигации + версия.
- *  Открывается свайпом/гамбургером с Главной. */
+/** Левое меню (Telegram-style): шапка-профиль «Вы» (тап → ключ/QR) + пункты
+ *  Контакты·Звонки·Сеть·Сохранённое·Настройки + версия. */
 @Composable
 private fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
     val me = model.me
@@ -1154,37 +1326,59 @@ private fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
         drawerContainerColor = HoloSurface,
         modifier = Modifier.widthIn(max = 300.dp),
     ) {
-        // Шапка-профиль: аватар, «в сети · N пиров», QR.
-        Column(Modifier.fillMaxWidth().background(HoloAccentDark).padding(20.dp)) {
-            SquareAvatar(me?.pubkey ?: "?", size = 56.dp)
-            Spacer(Modifier.height(12.dp))
-            Text("Мой профиль", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                Icon(Icons.Filled.DeviceHub, null, tint = HoloOnline, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("в сети · ${model.netPeers} пиров", color = HoloSecondary, fontSize = 12.sp)
-            }
+        // Шапка-профиль: квадратный аватар + «Вы»; тап → мой ключ/QR/профиль.
+        Row(
+            Modifier.fillMaxWidth().background(HoloAccentDark).clickable { navigate(Screen.Me) }
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SquareAvatar(me?.pubkey ?: "?", size = 52.dp)
+            Spacer(Modifier.width(14.dp))
+            Text("Вы", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.QrCode2, "Мой ключ и QR", tint = HoloAccent, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.height(8.dp))
+        // Основные разделы.
         listOf(
-            Triple(Icons.Filled.QrCode2, "Мой ключ и QR", Screen.Me),
-            Triple(Icons.Filled.PersonAdd, "Добавить контакт", Screen.Add),
-            Triple(Icons.Filled.Group, "Группы и комнаты", Screen.Groups),
-            Triple(Icons.Filled.Settings, "Настройки", Screen.Settings),
-        ).forEach { (icon, label, dest) ->
-            NavigationDrawerItem(
-                icon = { Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp)) },
-                label = { Text(label, color = Color.White, fontSize = 15.sp) },
-                selected = false,
-                onClick = { navigate(dest) },
-                colors = NavigationDrawerItemDefaults.colors(unselectedContainerColor = HoloSurface),
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-        }
+            Triple(Icons.Filled.Group, "Контакты", Screen.ContactList),
+            Triple(Icons.Filled.Call, "Звонки", Screen.Calls),
+            Triple(Icons.Filled.DeviceHub, "Сеть", Screen.Network),
+            Triple(Icons.Filled.Lock, "Сохранённое", Screen.Saved),
+        ).forEach { (icon, label, dest) -> DrawerItem(icon, label) { navigate(dest) } }
+        HorizontalDivider(color = HoloBorder, modifier = Modifier.padding(vertical = 4.dp))
+        DrawerItem(Icons.Filled.Settings, "Настройки") { navigate(Screen.Settings) }
         Spacer(Modifier.weight(1f))
         HorizontalDivider(color = HoloBorder)
-        Text("p2p messenger · v0.2", color = HoloSecondary, fontSize = 11.sp,
+        Text("p2p messenger · v0.3", color = HoloSecondary, fontSize = 11.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp))
+    }
+}
+
+/** Ровный ряд левого меню (иконка + подпись, без инлайн-метрик). */
+@Composable
+private fun DrawerItem(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(18.dp))
+        Text(label, color = Color.White, fontSize = 15.sp)
+    }
+}
+
+/** Экран-заглушка для разделов, ещё не реализованных. */
+@Composable
+private fun ComingSoon(icon: ImageVector, title: String) {
+    Box(Modifier.fillMaxSize().background(HoloBg), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, null, tint = HoloBorder, modifier = Modifier.size(56.dp))
+            Spacer(Modifier.height(14.dp))
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(4.dp))
+            Text("Скоро", color = HoloSecondary, fontSize = 13.sp)
+        }
     }
 }
 
