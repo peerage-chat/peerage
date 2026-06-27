@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.*
@@ -126,8 +127,45 @@ internal fun ContactsScreen(
     }
 }
 
-/** Шапка личного чата: назад · аватар+presence · имя+verified · статус (тап →
- *  профиль) · аудиозвонок · меню. Видеозвонка нет — камеру включают внутри звонка. */
+/** Полный список контактов (раздел меню «Контакты»). Тап → личный чат.
+ *  Добавление — через кнопку в шапке (Root). */
+@Composable
+internal fun ContactListScreen(model: AppModel, onOpen: (String) -> Unit) {
+    if (model.contacts.isEmpty()) {
+        EmptyState(Icons.Filled.Group, "Нет контактов", "Добавьте собеседника по ключу или QR — кнопкой вверху")
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(model.contacts, key = { it.key }) { c ->
+            val online = model.online[c.key] == true
+            ListRow(onClick = { onOpen(c.key) }) {
+                SquareAvatar(c.name, size = 44.dp, online = online)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            c.name,
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (c.verified) {
+                            Spacer(Modifier.width(4.dp))
+                            Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(13.dp))
+                        }
+                    }
+                    Text(
+                        if (online) "онлайн" else "не в сети",
+                        color = if (online) HoloOnline else HoloSecondary,
+                        fontSize = 11.sp,
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 internal fun AddScreen(

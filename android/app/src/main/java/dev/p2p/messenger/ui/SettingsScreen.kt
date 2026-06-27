@@ -70,6 +70,33 @@ internal fun SettingsScreen(model: AppModel) {
             color = HoloSecondary,
             fontSize = 11.sp,
         )
+
+        Spacer(Modifier.height(24.dp))
+        FieldLabel("О ПРИЛОЖЕНИИ")
+        Spacer(Modifier.height(4.dp))
+        SettingInfoRow("Версия", "0.1.0 (dev)")
+        SettingInfoRow("Транспорт", "Yggdrasil mesh (serverless)")
+        SettingInfoRow("Шифрование", "E2E, всегда включено")
+        SettingInfoRow("Лицензия", "GPL-3.0")
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Энергия, медиа и хранилище — настройки появятся ближе к релизу.",
+            color = HoloSecondary,
+            fontSize = 11.sp,
+        )
+    }
+}
+
+/** Строка «параметр — значение» в настройках (только чтение). */
+@Composable
+private fun SettingInfoRow(label: String, value: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = Color.White, fontSize = 14.sp)
+        Text(value, color = HoloSecondary, fontSize = 13.sp)
     }
 }
 

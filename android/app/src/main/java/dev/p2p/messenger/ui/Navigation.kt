@@ -162,17 +162,3 @@ internal fun DrawerItem(icon: ImageVector, label: String, onClick: () -> Unit) {
         Text(label, color = Color.White, fontSize = 15.sp)
     }
 }
-
-/** Экран-заглушка для разделов, ещё не реализованных. */
-@Composable
-internal fun ComingSoon(icon: ImageVector, title: String) {
-    Box(Modifier.fillMaxSize().background(HoloBg), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, null, tint = HoloBorder, modifier = Modifier.size(56.dp))
-            Spacer(Modifier.height(14.dp))
-            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(4.dp))
-            Text("Скоро", color = HoloSecondary, fontSize = 13.sp)
-        }
-    }
-}

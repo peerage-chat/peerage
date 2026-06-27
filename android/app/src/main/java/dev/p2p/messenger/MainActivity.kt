@@ -13,11 +13,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -91,7 +88,7 @@ internal fun CenterMessage(text: String) {
     }
 }
 
-internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved }
+internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -144,7 +141,7 @@ private fun Root(model: AppModel) {
                             onMenu = { scope.launch { drawerState.open() } },
                         ) {
                             PeerIndicator(model.netPeers) { model.startBenchRecv() }
-                            BarIcon(Icons.Filled.Search, "Поиск") { /* TODO: глобальный поиск */ }
+                            BarIcon(Icons.Filled.Search, "Поиск") { screen = Screen.Search }
                         }
                         Screen.Chat -> ChatTopBar(
                             model,
@@ -174,6 +171,7 @@ private fun Root(model: AppModel) {
                             BarIcon(Icons.Filled.Refresh, "Обновить") { /* авто-поллинг; ручной рефреш — TODO */ }
                         }
                         Screen.Saved -> TopBar("Сохранённое", onBack = { screen = Screen.Contacts })
+                        Screen.Search -> TopBar("Поиск", onBack = { screen = Screen.Contacts })
                     }
                     // ── Рейл папок: только на главном экране ────────────────────────
                     if (screen == Screen.Contacts) {
@@ -214,10 +212,24 @@ private fun Root(model: AppModel) {
                             Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Groups }
                             Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
                             Screen.Settings -> SettingsScreen(model)
-                            Screen.ContactList -> ComingSoon(Icons.Filled.Group, "Контакты")
-                            Screen.Calls -> ComingSoon(Icons.Filled.Call, "История звонков")
+                            Screen.ContactList -> ContactListScreen(model) {
+                                model.openChat(it)
+                                screen = Screen.Chat
+                            }
+                            Screen.Calls -> CallsScreen()
                             Screen.Network -> NetworkScreen(model) { screen = Screen.Me }
-                            Screen.Saved -> ComingSoon(Icons.Filled.Lock, "Сохранённое")
+                            Screen.Saved -> SavedScreen()
+                            Screen.Search -> SearchScreen(
+                                model,
+                                onOpenDm = {
+                                    model.openChat(it)
+                                    screen = Screen.Chat
+                                },
+                                onOpenGroup = {
+                                    model.openGroup(it)
+                                    screen = Screen.GroupChat
+                                },
+                            )
                         }
                     }
                 }
