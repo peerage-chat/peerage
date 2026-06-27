@@ -687,10 +687,11 @@ private fun MessageBubble(m: Message) {
         ) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(m.text, color = Color.White, fontSize = 15.sp,
-                    modifier = Modifier.weight(1f, fill = false))
+                    modifier = Modifier.weight(1f, fill = false).alignByBaseline())
                 Spacer(Modifier.width(8.dp))
+                // Время по базовой линии текста → садится в правый-нижний угол.
                 Text(timeStr, color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp,
-                    modifier = Modifier.padding(bottom = 1.dp))
+                    modifier = Modifier.alignByBaseline())
                 if (m.mine) {
                     Spacer(Modifier.width(3.dp))
                     StatusTick(m.status)
@@ -989,10 +990,10 @@ private fun GroupBubble(text: String, mine: Boolean, time: Long) {
     ) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(text, color = Color.White, fontSize = 15.sp,
-                modifier = Modifier.weight(1f, fill = false))
+                modifier = Modifier.weight(1f, fill = false).alignByBaseline())
             Spacer(Modifier.width(8.dp))
             Text(fmtMsgTime(time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp,
-                modifier = Modifier.padding(bottom = 1.dp))
+                modifier = Modifier.alignByBaseline())
         }
     }
 }
