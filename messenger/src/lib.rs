@@ -22,6 +22,7 @@ use p2p_core::media::{
     parse_media, write_media_header, CHAN_CHAT, CHAN_MEDIA, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN,
 };
 use p2p_core::protocol::{decode, encode, Payload, ProtocolError};
+use p2p_core::ratelimit::RateLimiter;
 use p2p_core::Identity;
 use p2p_ygg::{Node, YggError};
 
@@ -392,6 +393,18 @@ fn receive_loop(shared: Arc<Shared>) {
     let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
     let mut seen_order: std::collections::VecDeque<u64> = std::collections::VecDeque::new();
     const SEEN_CAP: usize = 4096;
+
+    // Приёмный rate-limit (M1, анти-abuse): per-source token-bucket, навязывается
+    // ПРИНИМАЮЩИМ (модификация отправителя не обходит). Применяется по src-ключу
+    // Yggdrasil ДО расшифровки — флуд дропается до дорогого крипто. Каналы разные:
+    //  · control/сообщения (CHAN_CHAT) — строгий бюджет (спам-вектор);
+    //  · медиа (CHAN_MEDIA) — щедрый (звонок легитимно высокочастотен: ~50 ауд/с +
+    //    видео), но абсурдный флуд (>~600/с устойчиво) всё равно режется.
+    // Градуировка по доверию (Sybil-устойчивость) + репутация — M3.
+    let mut chat_rl = RateLimiter::new(60.0, 30.0);
+    let mut media_rl = RateLimiter::new(1200.0, 600.0);
+    let mut pkt_count: u64 = 0;
+    let mut dropped: u64 = 0;
     loop {
         let (n, src) = match shared.node.read(&mut buf) {
             Ok(v) => v,
@@ -399,6 +412,30 @@ fn receive_loop(shared: Arc<Shared>) {
         };
         if n == 0 {
             continue;
+        }
+        // Ingress rate-limit по источнику (до расшифровки). Превышение → дроп.
+        let now = Instant::now();
+        let allowed = if buf[0] == CHAN_MEDIA {
+            media_rl.allow(&src, now)
+        } else {
+            chat_rl.allow(&src, now)
+        };
+        if !allowed {
+            dropped = dropped.wrapping_add(1);
+            // Логируем редко, чтобы лог сам не стал амплификацией флуда.
+            if dropped % 512 == 1 {
+                log::warn!(
+                    "ingress rate-limit: дроп флуда от {:02x?}… (ch={}, всего дропнуто {})",
+                    &src[..4], buf[0], dropped
+                );
+            }
+            continue;
+        }
+        // Периодически чистим простаивающие бакеты (анти-рост памяти).
+        pkt_count = pkt_count.wrapping_add(1);
+        if pkt_count % 4096 == 0 {
+            chat_rl.evict_idle(now);
+            media_rl.evict_idle(now);
         }
         // Демукс по байту канала: медиа — лёгкий путь без крипто/Ack.
         if buf[0] == CHAN_MEDIA {
