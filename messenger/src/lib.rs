@@ -547,6 +547,7 @@ fn receive_loop(shared: Arc<Shared>) {
                 shared.emit(Event::RoomDecline { peer: src, room_id });
             }
             Payload::Group { id, data } => {
+                log::debug!("group recv id={} from={:02x?} len={}", id, &src[..4], data.len());
                 shared.emit(Event::Group { peer: src, data });
                 // ✓ доставлено — гасим повтор у отправителя (дубли отсеет MLS).
                 let _ = shared.send(&src, &Payload::Ack { id });

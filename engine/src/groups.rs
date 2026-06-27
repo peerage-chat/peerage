@@ -275,6 +275,10 @@ impl GroupManager {
                         sender: Some(actor_hex), system: true, joined: false,
                     }
                 }
+                Some(Err(e)) => {
+                    log::warn!("group {} MLS отверг сообщение: {:?}", hex::encode(&gid), e);
+                    GroupOutcome { gid: Some(gid.clone()), text: None, sender: None, system: false, joined: false }
+                }
                 _ => GroupOutcome { gid: Some(gid.clone()), text: None, sender: None, system: false, joined: false },
             };
             self.save_group(&gid);
