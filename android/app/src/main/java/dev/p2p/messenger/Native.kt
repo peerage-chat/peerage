@@ -44,6 +44,8 @@ object Native {
     external fun isOnline(sessionPtr: Long, keyHex: String): Boolean
     external fun netPeers(sessionPtr: Long): Int
     external fun netTree(sessionPtr: Long): Int
+    /** Снапшот стата сети: JSON {peer_count, tree, ping_ms, rx_rate, tx_rate, peers:[…]}. */
+    external fun netStats(sessionPtr: Long): String
     external fun stop(sessionPtr: Long)
     /** Принудительный реконнект к публичным пирам (обход Yggdrasil backoff). */
     external fun reconnectPeers(sessionPtr: Long)

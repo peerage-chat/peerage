@@ -25,6 +25,7 @@ mod ffi {
             out_cap: c_int,
         ) -> c_int;
         pub fn ygg_peer_count(h: u64) -> c_int;
+        pub fn ygg_peers_json(h: u64, out: *mut c_char, out_cap: c_int) -> c_int;
         pub fn ygg_tree_count(h: u64) -> c_int;
         pub fn ygg_add_peer(h: u64, uri: *const c_char) -> c_int;
         pub fn ygg_write(h: u64, dst_pub: *const u8, data: *const u8, data_len: c_int) -> c_int;
@@ -113,6 +114,19 @@ impl Node {
     /// Число узлов в дереве маршрутизации (>1 — сеть согласована).
     pub fn tree_count(&self) -> i32 {
         unsafe { ffi::ygg_tree_count(self.handle) }
+    }
+
+    /// JSON-массив активных пиров (адрес/направление/пинг/трафик) для стата сети.
+    /// Пустой массив при ошибке. Буфер с запасом (~100 пиров).
+    pub fn peers_json(&self) -> String {
+        let mut buf = vec![0u8; 16384];
+        let n = unsafe {
+            ffi::ygg_peers_json(self.handle, buf.as_mut_ptr() as *mut c_char, buf.len() as c_int)
+        };
+        if n < 0 {
+            return "[]".into();
+        }
+        String::from_utf8_lossy(&buf[..n as usize]).into_owned()
     }
 
     /// Добавить пир по URI (напр. `"tls://host:port"`).

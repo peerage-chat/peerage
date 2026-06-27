@@ -14,6 +14,8 @@ import "C"
 
 import (
 	"crypto/ed25519"
+	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/url"
 	"os"
@@ -198,6 +200,43 @@ func ygg_peer_count(h C.uint64_t) C.int {
 		return -1
 	}
 	return C.int(len(n.core.GetPeers()))
+}
+
+//export ygg_peers_json
+// JSON-массив активных пиров для UI/стата сети:
+// [{key, inbound, up, latency_ms, rx_rate, tx_rate, uptime_s}]. -1 если не влезло.
+func ygg_peers_json(h C.uint64_t, out *C.char, outCap C.int) C.int {
+	n := get(h)
+	if n == nil {
+		return -1
+	}
+	type peerJSON struct {
+		Key       string  `json:"key"`
+		Inbound   bool    `json:"inbound"`
+		Up        bool    `json:"up"`
+		LatencyMs float64 `json:"latency_ms"`
+		RxRate    uint64  `json:"rx_rate"`
+		TxRate    uint64  `json:"tx_rate"`
+		UptimeS   float64 `json:"uptime_s"`
+	}
+	peers := n.core.GetPeers()
+	arr := make([]peerJSON, 0, len(peers))
+	for _, p := range peers {
+		arr = append(arr, peerJSON{
+			Key:       hex.EncodeToString(p.Key),
+			Inbound:   p.Inbound,
+			Up:        p.Up,
+			LatencyMs: float64(p.Latency.Microseconds()) / 1000.0,
+			RxRate:    p.RXRate,
+			TxRate:    p.TXRate,
+			UptimeS:   p.Uptime.Seconds(),
+		})
+	}
+	b, err := json.Marshal(arr)
+	if err != nil {
+		return -1
+	}
+	return copyOut(unsafe.Pointer(out), outCap, b)
 }
 
 //export ygg_tree_count

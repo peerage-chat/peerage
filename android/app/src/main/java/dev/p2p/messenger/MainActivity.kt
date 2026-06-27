@@ -1312,11 +1312,14 @@ private fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
             }
         }
 
-        // 2. Метрики. Пинг/трафик пока без нативного источника → «—».
+        // 2. Метрики — из снапшота движка (агрегаты считает движок).
+        val ns = model.netStats
+        val pingTxt = ns?.pingMs?.takeIf { it > 0 }?.let { "%.0f".format(it) } ?: "—"
+        val trafficTxt = if (ns == null) "—" else "↓${ns.rxRate / 1024} ↑${ns.txRate / 1024}"
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCard("Пиры", "${model.netPeers}", null, Modifier.weight(1f))
-            MetricCard("Пинг", "—", "мс", Modifier.weight(1f))
-            MetricCard("Трафик", "—", "КБ/с", Modifier.weight(1f))
+            MetricCard("Пиры", "${ns?.peerCount ?: model.netPeers}", null, Modifier.weight(1f))
+            MetricCard("Пинг", pingTxt, if (pingTxt == "—") null else "мс", Modifier.weight(1f))
+            MetricCard("Трафик", trafficTxt, "КБ/с", Modifier.weight(1f))
         }
 
         // 3. Мой узел.
@@ -1368,15 +1371,24 @@ private fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
             }
         }
 
-        // 5. Пиры. Списка адресов движок пока не отдаёт (только число) → заглушка.
+        // 5. Пиры — реальный список (направление/адрес/пинг с цветом).
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FieldLabel("ПИРЫ · ${model.netPeers}")
+            FieldLabel("ПИРЫ · ${ns?.peerCount ?: model.netPeers}")
             Spacer(Modifier.weight(1f))
-            Text("Все", color = HoloAccent, fontSize = 13.sp)
         }
         SurfaceCard {
-            Text("Список адресов пиров — скоро", color = HoloSecondary, fontSize = 13.sp,
-                modifier = Modifier.padding(vertical = 4.dp))
+            val peers = ns?.peers ?: emptyList()
+            if (peers.isEmpty()) {
+                Text("Нет прямых пиров", color = HoloSecondary, fontSize = 13.sp,
+                    modifier = Modifier.padding(vertical = 4.dp))
+            } else {
+                Column {
+                    peers.forEachIndexed { i, p ->
+                        PeerRow(p)
+                        if (i < peers.lastIndex) HorizontalDivider(color = HoloBorder, thickness = 0.5.dp)
+                    }
+                }
+            }
         }
 
         // 6. Офлайн-очередь.
@@ -1443,6 +1455,29 @@ private fun BenefitRow(icon: ImageVector, tint: Color, text: String) {
         Text(text, color = if (tint == HoloSecondary) HoloSecondary else Color.White, fontSize = 13.sp)
     }
 }
+
+/** Строка пира: направление (вход/исход) · короткий адрес · пинг с цветом. */
+@Composable
+private fun PeerRow(p: NetPeer) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(if (p.inbound) "↙" else "↗", color = HoloSecondary, fontSize = 15.sp)
+        Spacer(Modifier.width(10.dp))
+        Text(shortHex(p.key), color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace,
+            modifier = Modifier.weight(1f))
+        val ms = p.latencyMs
+        val col = when {
+            ms <= 0 -> HoloSecondary
+            ms < 60 -> HoloOnline
+            ms < 150 -> WarnColor
+            else -> HoloError
+        }
+        Text(if (ms <= 0) "—" else "%.0f мс".format(ms), color = col, fontSize = 13.sp)
+    }
+}
+
+/** Короткий вид hex-адреса: первые 8 … последние 4. */
+private fun shortHex(h: String): String =
+    if (h.length > 14) h.take(8) + "…" + h.takeLast(4) else h
 
 private fun copyToClipboard(ctx: android.content.Context, text: String, label: String) {
     val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager

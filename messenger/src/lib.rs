@@ -255,6 +255,11 @@ impl Messenger {
         self.shared.node.tree_count()
     }
 
+    /// JSON-массив пиров транспорта (адрес/направление/пинг/трафик) для стата сети.
+    pub fn net_peers_json(&self) -> String {
+        self.shared.node.peers_json()
+    }
+
     /// Повторно добавить пир по URI: обходит внутренний backoff Yggdrasil и
     /// форсирует немедленную попытку реконнекта (например, после флика WiFi).
     pub fn add_peer(&self, uri: &str) {

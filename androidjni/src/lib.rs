@@ -782,6 +782,58 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_netTree<'local>(
     })
 }
 
+// ── Контракт движка (зерно ADR-003): типизированный снапшот стата сети ──────
+// Домейн-логику (агрегаты) считает движок, не клиент — Kotlin лишь рендерит.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PeerStat {
+    key: String,
+    inbound: bool,
+    up: bool,
+    latency_ms: f64,
+    rx_rate: u64,
+    tx_rate: u64,
+    uptime_s: f64,
+}
+
+#[derive(serde::Serialize)]
+struct NetStats {
+    peer_count: usize,
+    tree: i32,
+    ping_ms: f64, // лучший (минимальный) пинг среди up-пиров; 0 если неизвестен
+    rx_rate: u64, // суммарный входящий байт/с
+    tx_rate: u64, // суммарный исходящий байт/с
+    peers: Vec<PeerStat>,
+}
+
+/// Снапшот стата сети: пиры + агрегаты (число/пинг/трафик). JSON NetStats.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_netStats<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        if session_ptr == 0 { return ret(&env, "{}"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let peers: Vec<PeerStat> =
+            serde_json::from_str(&session.messenger.net_peers_json()).unwrap_or_default();
+        let best_ping = peers
+            .iter()
+            .filter(|p| p.up && p.latency_ms > 0.0)
+            .map(|p| p.latency_ms)
+            .fold(f64::INFINITY, f64::min);
+        let stats = NetStats {
+            peer_count: peers.len(),
+            tree: session.messenger.net_tree(),
+            ping_ms: if best_ping.is_finite() { best_ping } else { 0.0 },
+            rx_rate: peers.iter().map(|p| p.rx_rate).sum(),
+            tx_rate: peers.iter().map(|p| p.tx_rate).sum(),
+            peers,
+        };
+        ret(&env, &serde_json::to_string(&stats).unwrap_or_else(|_| "{}".into()))
+    })
+}
+
 /// Принудительно переподключить всех публичных Yggdrasil-пиров:
 /// обходит внутренний exponential backoff и форсирует немедленную попытку.
 /// Вызывается при смене сети или обнаружении peers=0 из Kotlin-тикера.

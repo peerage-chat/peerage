@@ -58,6 +58,18 @@ data class Message(
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
 data class Group(val gid: String, val name: String, val members: Int)
+/** Пир транспорта (адрес/направление/пинг/трафик) — из снапшота движка. */
+data class NetPeer(
+    val key: String, val inbound: Boolean, val up: Boolean,
+    val latencyMs: Double, val rxRate: Long, val txRate: Long, val uptimeS: Double,
+)
+
+/** Снапшот стата сети (агрегаты считает движок). */
+data class NetStats(
+    val peerCount: Int, val tree: Int, val pingMs: Double,
+    val rxRate: Long, val txRate: Long, val peers: List<NetPeer>,
+)
+
 data class GroupMsg(
     val text: String,
     val mine: Boolean,
@@ -117,6 +129,8 @@ class AppModel private constructor() {
 
     var currentChat by mutableStateOf<String?>(null)
     var netPeers by mutableStateOf(0)
+    /** Снапшот стата сети (экран «Сеть»). Обновляется тикером на переднем плане. */
+    var netStats by mutableStateOf<NetStats?>(null)
     /** Режим «узел сети» (ретрансляция чужого трафика). Пока только UI-флаг —
      *  привязка к движку (вкл/выкл relay) — TODO, когда появится нативный вызов. */
     var relayEnabled by mutableStateOf(true)
@@ -286,6 +300,19 @@ class AppModel private constructor() {
                     }
                     if (benchRecv) {
                         benchRecvMbps = JSONObject(Native.benchRecvStats(sessionPtr)).optDouble("mbps", 0.0)
+                    }
+                    // Снапшот стата сети — только на переднем плане (экран «Сеть»).
+                    if (foreground) {
+                        val o = JSONObject(Native.netStats(sessionPtr))
+                        val pa = o.optJSONArray("peers") ?: JSONArray()
+                        val peers = (0 until pa.length()).map { i ->
+                            val p = pa.getJSONObject(i)
+                            NetPeer(p.optString("key"), p.optBoolean("inbound"), p.optBoolean("up"),
+                                p.optDouble("latency_ms"), p.optLong("rx_rate"), p.optLong("tx_rate"),
+                                p.optDouble("uptime_s"))
+                        }
+                        netStats = NetStats(o.optInt("peer_count"), o.optInt("tree"),
+                            o.optDouble("ping_ms"), o.optLong("rx_rate"), o.optLong("tx_rate"), peers)
                     }
                     // Присутствие в комнате: кто сейчас внутри (по свежим маячкам).
                     currentRoom?.let { gid ->
