@@ -160,6 +160,30 @@ impl Shared {
         });
     }
 
+    /// ЕДИНЫЙ примитив надёжной отправки: выделяет id, шлёт и кладёт в `pending` —
+    /// `maintenance_loop` повторяет до `Ack{id}` или TTL. `mk` строит payload с этим
+    /// id (его получатель эхо-нёт в Ack). `notify` — уведомлять ли UI о доставке
+    /// (DM: true → Ack/Undelivered-события; группы: false — молча).
+    /// Чтобы сделать надёжным новый тип сообщения: добавь ему поле `id`, шли через
+    /// этот метод и ответь `Ack{id}` на приёме. Возвращает id.
+    fn send_reliable(
+        &self,
+        peer: &PeerKey,
+        notify: bool,
+        mk: impl FnOnce(u64) -> Payload,
+    ) -> Result<u64, MessengerError> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let payload = mk(id);
+        self.track(peer);
+        self.send(peer, &payload)?;
+        let now = Instant::now();
+        self.pending.lock().unwrap().insert(
+            id,
+            Pending { peer: *peer, payload, created: now, last_sent: now, notify },
+        );
+        Ok(id)
+    }
+
     fn is_online(&self, peer: &PeerKey) -> bool {
         self.peers
             .lock()
@@ -296,25 +320,9 @@ impl Messenger {
     /// Отправить текст пиру. Возвращает id; доставка повторяется до `Ack` или TTL
     /// (см. [`Event::Ack`] / [`Event::Undelivered`]).
     pub fn send_text(&self, peer: &PeerKey, text: &str) -> Result<u64, MessengerError> {
-        let id = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
-        let payload = Payload::Text {
-            id,
-            text: text.to_string(),
-        };
-        self.shared.track(peer);
-        self.shared.send(peer, &payload)?;
-        let now = Instant::now();
-        self.shared.pending.lock().unwrap().insert(
-            id,
-            Pending {
-                peer: *peer,
-                payload,
-                created: now,
-                last_sent: now,
-                notify: true,
-            },
-        );
-        Ok(id)
+        let text = text.to_string();
+        // DM: notify=true → UI получает Ack/Undelivered (✓✓ / ошибка).
+        self.shared.send_reliable(peer, true, move |id| Payload::Text { id, text })
     }
 
     /// Отправить медиа-датаграмму (реалтайм-канал): без Ack/повторов/шифрования
@@ -364,21 +372,10 @@ impl Messenger {
     /// меняется. Дедуп повторов на приёме делает MLS (generation). Это чинит и
     /// потерю прикладных сообщений, и рассинхрон эпох от потерянных Commit'ов.
     pub fn send_group(&self, peer: &PeerKey, data: &[u8]) -> Result<(), MessengerError> {
-        let id = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
-        let payload = Payload::Group { id, data: data.to_vec() };
-        self.shared.track(peer);
-        self.shared.send(peer, &payload)?;
-        let now = Instant::now();
-        self.shared.pending.lock().unwrap().insert(
-            id,
-            Pending {
-                peer: *peer,
-                payload,
-                created: now,
-                last_sent: now,
-                notify: false, // статус групповой доставки в UI не показываем
-            },
-        );
+        let data = data.to_vec();
+        // Группа: notify=false (статус по участникам в UI не показываем). Каждому
+        // получателю — свой id, одно и то же data; дедуп повторов делает MLS.
+        self.shared.send_reliable(peer, false, move |id| Payload::Group { id, data })?;
         Ok(())
     }
 
