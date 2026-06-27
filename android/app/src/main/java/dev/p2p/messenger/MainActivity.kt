@@ -677,7 +677,6 @@ private fun PillIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
 
 @Composable
 private fun MessageBubble(m: Message) {
-    val timeStr = fmtMsgTime(m.time)
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
         Box(
@@ -685,13 +684,15 @@ private fun MessageBubble(m: Message) {
                 .background(if (m.mine) BubbleOut else BubbleIn)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(m.text, color = Color.White, fontSize = 15.sp,
-                    modifier = Modifier.weight(1f, fill = false).alignByBaseline())
-                Spacer(Modifier.width(8.dp))
-                // Время по базовой линии текста → садится в правый-нижний угол.
-                Text(timeStr, color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp,
-                    modifier = Modifier.alignByBaseline())
+            // Текст резервирует справа место под время+галочку (реальный отступ,
+            // не пробелы) → время оверлеем точно в правом-нижнем углу, без overlap.
+            Text(m.text, color = Color.White, fontSize = 15.sp,
+                modifier = Modifier.padding(end = if (m.mine) 52.dp else 40.dp))
+            Row(
+                Modifier.align(Alignment.BottomEnd),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(fmtMsgTime(m.time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                 if (m.mine) {
                     Spacer(Modifier.width(3.dp))
                     StatusTick(m.status)
@@ -988,13 +989,9 @@ private fun GroupBubble(text: String, mine: Boolean, time: Long) {
         Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(14.dp))
             .background(if (mine) BubbleOut else BubbleIn).padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(text, color = Color.White, fontSize = 15.sp,
-                modifier = Modifier.weight(1f, fill = false).alignByBaseline())
-            Spacer(Modifier.width(8.dp))
-            Text(fmtMsgTime(time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp,
-                modifier = Modifier.alignByBaseline())
-        }
+        Text(text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = 40.dp))
+        Text(fmtMsgTime(time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp,
+            modifier = Modifier.align(Alignment.BottomEnd))
     }
 }
 
