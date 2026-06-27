@@ -3,4 +3,6 @@
 plugins {
     id("com.android.application") version "8.5.2" apply false
     id("org.jetbrains.kotlin.android") version "1.9.25" apply false
+    // Линтер/форматтер Kotlin. Задачи: ktlintCheck (проверка), ktlintFormat (автофикс).
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.1" apply false
 }

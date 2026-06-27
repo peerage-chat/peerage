@@ -2,75 +2,30 @@
 
 package dev.p2p.messenger.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.BatteryStd
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.QrCode2
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,27 +34,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material.icons.filled.Headset
-import androidx.compose.material3.ExperimentalMaterial3Api
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlin.math.abs
 import dev.p2p.messenger.*
 
 @Composable
@@ -122,15 +60,25 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Text(
+                        name,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                     if (c?.verified == true) {
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(14.dp))
                     }
                 }
-                Text(if (online) "в сети" else "не в сети",
-                    color = if (online) HoloOnline else HoloSecondary, fontSize = 11.sp)
+                Text(
+                    if (online) "в сети" else "не в сети",
+                    color = if (online) HoloOnline else HoloSecondary,
+                    fontSize = 11.sp,
+                )
             }
         }
         if (key != null) BarIcon(Icons.Filled.Call, "Аудио-звонок") { model.callDm(key) }
@@ -160,7 +108,10 @@ internal fun ChatScreen(model: AppModel) {
             }
         }
         MessageInput(input, { input = it }) {
-            if (input.isNotBlank()) { model.send(key, input); input = "" }
+            if (input.isNotBlank()) {
+                model.send(key, input)
+                input = ""
+            }
         }
     }
 }
@@ -225,13 +176,17 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () 
         val hasText = value.isNotBlank()
         Box(
             Modifier.clip(CircleShape).background(HoloAccent).size(44.dp)
-                .clickable { if (hasText) onSend() /* else TODO: запись голосового */ },
+                .clickable {
+                    // TODO: при пустом поле — запись голосового
+                    if (hasText) onSend()
+                },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 if (hasText) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
                 if (hasText) "Отправить" else "Голосовое",
-                tint = HoloAccentDark, modifier = Modifier.size(20.dp),
+                tint = HoloAccentDark,
+                modifier = Modifier.size(20.dp),
             )
         }
     }
@@ -248,8 +203,10 @@ internal fun PillIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
 
 @Composable
 internal fun MessageBubble(m: Message) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
+    ) {
         Box(
             Modifier.widthIn(max = 290.dp).clip(RoundedCornerShape(14.dp))
                 .background(if (m.mine) BubbleOut else BubbleIn)
@@ -257,8 +214,12 @@ internal fun MessageBubble(m: Message) {
         ) {
             // Текст резервирует справа место под время+галочку (реальный отступ,
             // не пробелы) → время оверлеем точно в правом-нижнем углу, без overlap.
-            Text(m.text, color = Color.White, fontSize = 15.sp,
-                modifier = Modifier.padding(end = if (m.mine) 52.dp else 40.dp))
+            Text(
+                m.text,
+                color = Color.White,
+                fontSize = 15.sp,
+                modifier = Modifier.padding(end = if (m.mine) 52.dp else 40.dp),
+            )
             Row(
                 Modifier.align(Alignment.BottomEnd),
                 verticalAlignment = Alignment.CenterVertically,
@@ -285,5 +246,3 @@ internal fun StatusTick(status: String) {
         "failed" -> Text("!", color = HoloError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
-
-

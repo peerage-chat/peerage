@@ -19,10 +19,11 @@ class VideoReceiver(
     /** Вызывается при изменении ориентации потока (угол сенсора отправителя, 0/90/
      *  180/270) — UI доворачивает тайл. Идёт 1-м байтом каждого access-unit'а. */
     private val onRotation: (Int) -> Unit = {},
-    private val pullVideoPacket: () -> ByteArray
+    private val pullVideoPacket: () -> ByteArray,
 ) {
     private var decoder: MediaCodec? = null
     private var loopThread: Thread? = null
+
     @Volatile private var running = false
 
     fun start() {
@@ -48,21 +49,24 @@ class VideoReceiver(
         // срок» (за feedLead до показа) → пайплайн кодека мелкий, а вся глубина —
         // в этой очереди. Глубина = задержка, адаптивная: растёт при underrun.
         val queue = ArrayDeque<ByteArray>()
-        val maxQueue = 90                 // жёсткий потолок (≈3с), защита от флуда
-        var feedLeadNs = 3 * frameNs      // насколько раньше показа кормить декодер (зависит от темпа)
-        val minTarget = 3; val maxTarget = 30
-        var targetFrames = 8              // старт ~266мс; растёт при underrun
-        var playing = false               // прошли ли пребуфер
+        val maxQueue = 90 // жёсткий потолок (≈3с), защита от флуда
+        var feedLeadNs = 3 * frameNs // насколько раньше показа кормить декодер (зависит от темпа)
+        val minTarget = 3
+        val maxTarget = 30
+        var targetFrames = 8 // старт ~266мс; растёт при underrun
+        var playing = false // прошли ли пребуфер
         // Якорь часов показа: кадр с pts=clockAnchorPtsUs показывается в clockAnchorNs;
         // остальные — линейно от него. Ребейзится при возобновлении после underrun,
         // чтобы НЕ догонять пачкой (для реалтайма гэп пропускаем, не ускоряемся).
         var clockAnchorNs = 0L
         var clockAnchorPtsUs = 0L
-        var feedIdx = 0                   // МОНОТОННЫЙ счётчик поданных (pts=feedIdx*frameUs); не сбрасывать при underrun
+        var feedIdx = 0 // МОНОТОННЫЙ счётчик поданных (pts=feedIdx*frameUs); не сбрасывать при underrun
         var lastRotation = -1
-        var pulledCount = 0; var renderedCount = 0; var underrunCount = 0
+        var pulledCount = 0
+        var renderedCount = 0
+        var underrunCount = 0
         var restartStreak = 0
-        var sinceUnderrun = 0             // кадров без underrun (для усадки задержки)
+        var sinceUnderrun = 0 // кадров без underrun (для усадки задержки)
 
         while (running) {
             try {
@@ -74,10 +78,13 @@ class VideoReceiver(
                         }
                     }
                     dec = MediaCodec.createDecoderByType("video/avc").apply {
-                        configure(fmt, surface, null, 0); start()
+                        configure(fmt, surface, null, 0)
+                        start()
                     }
                     decoder = dec
-                    playing = false; feedIdx = 0; queue.clear() // новый декодер — свежий pts-таймлайн
+                    playing = false
+                    feedIdx = 0
+                    queue.clear() // новый декодер — свежий pts-таймлайн
                     android.util.Log.i("VideoReceiver", "Decoder started successfully")
                 }
                 val currentDec = dec!!
@@ -87,9 +94,14 @@ class VideoReceiver(
                 //    (угол/90), [1]=fps отправителя (для пейсинга). Остаток — access-unit.
                 while (queue.size < maxQueue) {
                     val raw = pullVideoPacket()
-                    if (raw.size < 2) { if (raw.isEmpty()) break else continue }
+                    if (raw.size < 2) {
+                        if (raw.isEmpty()) break else continue
+                    }
                     val rot = ((raw[0].toInt() and 0xFF) % 4) * 90
-                    if (rot != lastRotation) { lastRotation = rot; onRotation(rot) }
+                    if (rot != lastRotation) {
+                        lastRotation = rot
+                        onRotation(rot)
+                    }
                     val sfps = raw[1].toInt() and 0xFF
                     if (sfps in 1..120 && sfps != streamFps) {
                         streamFps = sfps
@@ -125,7 +137,8 @@ class VideoReceiver(
                             // Underrun: пора кормить, а буфер пуст → растим задержку.
                             playing = false
                             targetFrames = (targetFrames + 2).coerceAtMost(maxTarget)
-                            underrunCount++; sinceUnderrun = 0
+                            underrunCount++
+                            sinceUnderrun = 0
                             android.util.Log.w("VideoReceiver", "underrun → target=$targetFrames (n=$underrunCount)")
                         } else {
                             val inIdx = currentDec.dequeueInputBuffer(0)
@@ -134,7 +147,8 @@ class VideoReceiver(
                             } else {
                                 val ib = currentDec.getInputBuffer(inIdx)
                                 if (ib != null && ib.capacity() >= au.size) {
-                                    ib.clear(); ib.put(au)
+                                    ib.clear()
+                                    ib.put(au)
                                     currentDec.queueInputBuffer(inIdx, 0, au.size, ptsUs, 0)
                                 } else {
                                     currentDec.queueInputBuffer(inIdx, 0, 0, ptsUs, 0)
@@ -148,7 +162,11 @@ class VideoReceiver(
                 // 4. Показ output'ов с ЯВНЫМ пейсингом сном (эмулятор/часть устройств
                 // НЕ чтят present-timestamp в releaseOutputBuffer → метку игнорируют и
                 // кадры летят пачкой). Спим до момента показа, затем рендерим сразу.
-                val outIdx = try { currentDec.dequeueOutputBuffer(info, 4_000) } catch (e: Exception) { -1 }
+                val outIdx = try {
+                    currentDec.dequeueOutputBuffer(info, 4_000)
+                } catch (e: Exception) {
+                    -1
+                }
                 if (outIdx >= 0) {
                     val presentNs = clockAnchorNs + (info.presentationTimeUs - clockAnchorPtsUs) * 1_000L
                     val waitNs = presentNs - System.nanoTime()
@@ -156,22 +174,27 @@ class VideoReceiver(
                         Thread.sleep(waitNs / 1_000_000L, (waitNs % 1_000_000L).toInt())
                     }
                     runCatching { currentDec.releaseOutputBuffer(outIdx, true) } // рендер немедленно
-                    renderedCount++; restartStreak = 0
+                    renderedCount++
+                    restartStreak = 0
                     // Усадка задержки: долго без underrun и буфер с запасом → -1 кадр.
                     if (++sinceUnderrun >= 300 && targetFrames > minTarget && queue.size > targetFrames) {
-                        targetFrames--; sinceUnderrun = 0
+                        targetFrames--
+                        sinceUnderrun = 0
                     }
                     if (renderedCount % 30 == 0) {
                         android.util.Log.i("VideoReceiver", "Rendered 30 (buf=${queue.size} target=$targetFrames underruns=$underrunCount)")
                     }
                 }
                 // INFO_OUTPUT_FORMAT_CHANGED (-2) / INFO_OUTPUT_BUFFERS_CHANGED (-3) игнорируем
-
             } catch (e: Exception) {
                 if (running) {
-                    runCatching { dec?.stop() }; runCatching { dec?.release() }
-                    dec = null; decoder = null
-                    queue.clear(); playing = false; feedIdx = 0
+                    runCatching { dec?.stop() }
+                    runCatching { dec?.release() }
+                    dec = null
+                    decoder = null
+                    queue.clear()
+                    playing = false
+                    feedIdx = 0
                     // НЕ сдаёмся насмерть (иначе серое навсегда до toggle тайла): после
                     // порога длинный backoff (≤ раз/2с — createDecoder это новый OMX-узел,
                     // частая тёрка вешает кодек-сервис). restartStreak сбрасывается при
@@ -184,15 +207,18 @@ class VideoReceiver(
             }
         }
 
-        runCatching { dec?.stop() }; runCatching { dec?.release() }
+        runCatching { dec?.stop() }
+        runCatching { dec?.release() }
         decoder = null
     }
 
     fun stop() {
         running = false
-        val t = loopThread; loopThread = null
+        val t = loopThread
+        loopThread = null
         runCatching { t?.join(500) }
-        val dec = decoder; decoder = null
+        val dec = decoder
+        decoder = null
         runCatching { dec?.stop() }
         runCatching { dec?.release() }
     }

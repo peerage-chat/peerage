@@ -2,105 +2,34 @@
 
 package dev.p2p.messenger.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.BatteryStd
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.EmojiEmotions
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.QrCode2
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material.icons.filled.Headset
-import androidx.compose.material3.ExperimentalMaterial3Api
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlin.math.abs
 import dev.p2p.messenger.*
+import kotlin.math.abs
 
 // ── Общие элементы ──────────────────────────────────────────────────────────
 
@@ -128,8 +57,15 @@ internal fun TopBar(
             onBack != null -> BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onClick = onBack)
             else -> Spacer(Modifier.width(12.dp))
         }
-        Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            title,
+            color = Color.White,
+            fontSize = 19.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         actions()
     }
 }
@@ -156,8 +92,12 @@ internal fun PeerIndicator(peers: Int, onLongPress: () -> Unit = {}) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(Icons.Filled.Share, "Сеть", tint = if (peers > 0) HoloOnline else HoloSecondary,
-            modifier = Modifier.size(18.dp))
+        Icon(
+            Icons.Filled.Share,
+            "Сеть",
+            tint = if (peers > 0) HoloOnline else HoloSecondary,
+            modifier = Modifier.size(18.dp),
+        )
         Text("$peers", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
@@ -178,9 +118,16 @@ internal fun SquareAvatar(
             Modifier.size(size).clip(RoundedCornerShape(size * 0.3f)).background(bg ?: avatarColor(name)),
             contentAlignment = Alignment.Center,
         ) {
-            if (content != null) content()
-            else Text(name.take(1).uppercase(), color = Color.White,
-                fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.Medium)
+            if (content != null) {
+                content()
+            } else {
+                Text(
+                    name.take(1).uppercase(),
+                    color = Color.White,
+                    fontSize = (size.value * 0.4f).sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
         }
         if (online != null) {
             Box(
@@ -209,8 +156,11 @@ internal fun FieldLabel(text: String) {
 
 @Composable
 internal fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Button(onClick = onClick, modifier = modifier,
-        colors = ButtonDefaults.buttonColors(containerColor = HoloAccent)) {
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(containerColor = HoloAccent),
+    ) {
         Text(text, color = HoloAccentDark, fontWeight = FontWeight.Medium)
     }
 }
@@ -225,7 +175,6 @@ internal fun SendButton(onClick: () -> Unit) {
 
 // ── Экраны ──────────────────────────────────────────────────────────────────
 
-
 /** Время сообщения «ЧЧ:ММ» (time — unix-секунды). */
 internal fun fmtMsgTime(ts: Long): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
@@ -236,7 +185,7 @@ internal fun dayLabel(ts: Long): String {
     val today = java.util.Calendar.getInstance()
     fun sameDay(a: java.util.Calendar, b: java.util.Calendar) =
         a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) &&
-        a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+            a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
     val yesterday = (today.clone() as java.util.Calendar).apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
     return when {
         sameDay(msgDay, today) -> "Сегодня"
@@ -248,8 +197,12 @@ internal fun dayLabel(ts: Long): String {
 /** Детерминированный цвет аватара по имени контакта. */
 internal fun avatarColor(name: String): Color {
     val palette = listOf(
-        Color(0xFF1E3A5A), Color(0xFF2A1A3A), Color(0xFF1A2A1A),
-        Color(0xFF2A2A1A), Color(0xFF3A1A1A), Color(0xFF1A3A3A),
+        Color(0xFF1E3A5A),
+        Color(0xFF2A1A3A),
+        Color(0xFF1A2A1A),
+        Color(0xFF2A2A1A),
+        Color(0xFF3A1A1A),
+        Color(0xFF1A3A3A),
     )
     return palette[abs(name.hashCode()) % palette.size]
 }
@@ -276,4 +229,3 @@ internal fun inputColors() = TextFieldDefaults.colors(
     focusedIndicatorColor = HoloAccent,
     unfocusedIndicatorColor = HoloBorder,
 )
-

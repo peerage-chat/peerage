@@ -29,7 +29,7 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 ctx.startActivity(
                     Intent(ctx, MainActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    }
+                    },
                 )
             }
             ACTION_DECLINE -> AppModel.instance.declineDmCall()
@@ -47,19 +47,22 @@ class IncomingCallReceiver : BroadcastReceiver() {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
             val openPi = PendingIntent.getActivity(
-                ctx, 10,
+                ctx,
+                10,
                 Intent(ctx, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             val acceptPi = PendingIntent.getBroadcast(
-                ctx, 11,
+                ctx,
+                11,
                 Intent(ACTION_ACCEPT).apply { setPackage(ctx.packageName) },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             val declinePi = PendingIntent.getBroadcast(
-                ctx, 12,
+                ctx,
+                12,
                 Intent(ACTION_DECLINE).apply { setPackage(ctx.packageName) },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
@@ -81,14 +84,20 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 .setFullScreenIntent(openPi, true)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                b.addAction(Notification.Action.Builder(
-                    android.graphics.drawable.Icon.createWithResource(ctx, android.R.drawable.ic_menu_call),
-                    "Принять", acceptPi,
-                ).build())
-                b.addAction(Notification.Action.Builder(
-                    android.graphics.drawable.Icon.createWithResource(ctx, android.R.drawable.ic_delete),
-                    "Отклонить", declinePi,
-                ).build())
+                b.addAction(
+                    Notification.Action.Builder(
+                        android.graphics.drawable.Icon.createWithResource(ctx, android.R.drawable.ic_menu_call),
+                        "Принять",
+                        acceptPi,
+                    ).build(),
+                )
+                b.addAction(
+                    Notification.Action.Builder(
+                        android.graphics.drawable.Icon.createWithResource(ctx, android.R.drawable.ic_delete),
+                        "Отклонить",
+                        declinePi,
+                    ).build(),
+                )
             } else {
                 @Suppress("DEPRECATION")
                 b.addAction(0, "Принять", acceptPi)
@@ -113,7 +122,7 @@ class IncomingCallReceiver : BroadcastReceiver() {
                             description = "Уведомление о входящем звонке"
                             enableVibration(true)
                             setShowBadge(false)
-                        }
+                        },
                     )
                 }
             }

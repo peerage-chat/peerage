@@ -2,105 +2,34 @@
 
 package dev.p2p.messenger.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.BatteryStd
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.EmojiEmotions
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.QrCode2
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material.icons.filled.Headset
-import androidx.compose.material3.ExperimentalMaterial3Api
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlin.math.abs
 import dev.p2p.messenger.*
+import kotlin.math.abs
 
 @Composable
 internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
@@ -135,8 +64,11 @@ internal fun GroupChatScreen(model: AppModel) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             // В комнате — сетка звонка; иначе если есть присутствие — зелёный баннер.
-            if (inRoom) RoomGrid(model, true, emptyList(), onFocus = { focusedParticipant = it })
-            else if (presenceMembers.isNotEmpty()) RoomBanner(model, presenceMembers) { model.joinRoom(gid) }
+            if (inRoom) {
+                RoomGrid(model, true, emptyList(), onFocus = { focusedParticipant = it })
+            } else if (presenceMembers.isNotEmpty()) {
+                RoomBanner(model, presenceMembers) { model.joinRoom(gid) }
+            }
 
             LazyColumn(
                 state = listState,
@@ -149,13 +81,19 @@ internal fun GroupChatScreen(model: AppModel) {
                 }
             }
             MessageInput(input, { input = it }) {
-                if (input.isNotBlank()) { model.sendGroupText(gid, input); input = "" }
+                if (input.isNotBlank()) {
+                    model.sendGroupText(gid, input)
+                    input = ""
+                }
             }
         }
         focusedParticipant?.let { key ->
             val isMe = key == "me"
-            val name = if (isMe) "Вы" else
+            val name = if (isMe) {
+                "Вы"
+            } else {
                 model.contacts.firstOrNull { it.key == key }?.name ?: (key.take(6) + "…")
+            }
             val audio = if (isMe) true else model.roomMembers.firstOrNull { it.peer == key }?.audio ?: true
             val video = if (isMe) false else model.roomMembers.firstOrNull { it.peer == key }?.video ?: false
             ParticipantFullscreen(name, audio, video, isMe) { focusedParticipant = null }
@@ -190,8 +128,14 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    name,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Text("$total уч. · $onlineN в сети", color = HoloSecondary, fontSize = 11.sp)
             }
         }
@@ -220,8 +164,15 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text("${members.size} в звонке", color = HoloOnline, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            if (names.isNotEmpty()) Text(names, color = HoloSecondary, fontSize = 11.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (names.isNotEmpty()) {
+                Text(
+                    names,
+                    color = HoloSecondary,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Spacer(Modifier.width(12.dp))
         Box(
@@ -239,8 +190,10 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg) {
             val who = groupSenderName(model, m.sender)
             val text = if (m.text.isBlank()) "$who обновил(а) состав группы" else "$who ${m.text}"
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
-                Box(Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)) {
+                Box(
+                    Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
                     Text(text, color = HoloSecondary, fontSize = 11.sp)
                 }
             }
@@ -254,8 +207,13 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg) {
             SquareAvatar(who, size = 32.dp, online = online)
             Spacer(Modifier.width(8.dp))
             Column {
-                Text(who, color = nameColor(m.sender), fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(start = 2.dp, bottom = 2.dp))
+                Text(
+                    who,
+                    color = nameColor(m.sender),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),
+                )
                 GroupBubble(m.text, false, m.time)
             }
         }
@@ -270,8 +228,12 @@ internal fun GroupBubble(text: String, mine: Boolean, time: Long) {
             .background(if (mine) BubbleOut else BubbleIn).padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Text(text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = 40.dp))
-        Text(fmtMsgTime(time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp,
-            modifier = Modifier.align(Alignment.BottomEnd))
+        Text(
+            fmtMsgTime(time),
+            color = Color.White.copy(alpha = 0.5f),
+            fontSize = 10.sp,
+            modifier = Modifier.align(Alignment.BottomEnd),
+        )
     }
 }
 
@@ -284,8 +246,13 @@ internal fun groupSenderName(model: AppModel, hex: String): String = when {
 
 /** Яркий детерминированный цвет имени отправителя (Discord-style). */
 internal val NameColors = listOf(
-    Color(0xFF5BC0EB), Color(0xFF9BC53D), Color(0xFFE5793A), Color(0xFFEF6FB3),
-    Color(0xFF7C5CFC), Color(0xFF20C997), Color(0xFFF6C453),
+    Color(0xFF5BC0EB),
+    Color(0xFF9BC53D),
+    Color(0xFFE5793A),
+    Color(0xFFEF6FB3),
+    Color(0xFF7C5CFC),
+    Color(0xFF20C997),
+    Color(0xFFF6C453),
 )
 internal fun nameColor(hex: String): Color =
     if (hex.isEmpty()) HoloSecondary else NameColors[abs(hex.hashCode()) % NameColors.size]
@@ -300,9 +267,15 @@ internal fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
     Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
         FieldLabel("НАЗВАНИЕ")
         TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-        AccentButton("Создать") { model.createGroup(name); onDone() }
-        Text("Вы станете администратором. Добавляйте участников из контактов внутри группы.",
-            color = HoloSecondary, fontSize = 11.sp)
+        AccentButton("Создать") {
+            model.createGroup(name)
+            onDone()
+        }
+        Text(
+            "Вы станете администратором. Добавляйте участников из контактов внутри группы.",
+            color = HoloSecondary,
+            fontSize = 11.sp,
+        )
     }
 }
 
@@ -314,7 +287,10 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
     } else {
         LazyColumn(Modifier.fillMaxSize()) {
             items(model.contacts, key = { it.key }) { c ->
-                ListRow(onClick = { model.inviteToGroup(gid, c.key); onDone() }) {
+                ListRow(onClick = {
+                    model.inviteToGroup(gid, c.key)
+                    onDone()
+                }) {
                     StatusDot(model.online[c.key] == true)
                     Spacer(Modifier.width(12.dp))
                     Text(c.name, color = Color.White, fontSize = 16.sp)
@@ -326,5 +302,3 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
 
 // ── Входящий звонок (полный экран, Telegram-style) ──────────────────────────
 // Активный звонок — см. RoomCallScreen.kt (сетка участников).
-
-

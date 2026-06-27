@@ -93,13 +93,19 @@ class ConnService : Service() {
             nm.createNotificationChannel(ch)
         }
 
-        val openPi = PendingIntent.getActivity(this, 0,
+        val openPi = PendingIntent.getActivity(
+            this,
+            0,
             Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
-        val disconnectPi = PendingIntent.getBroadcast(this, 0,
+        val disconnectPi = PendingIntent.getBroadcast(
+            this,
+            0,
             Intent(ACTION_DISCONNECT).apply { setPackage(packageName) },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
         @Suppress("DEPRECATION")
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -115,10 +121,13 @@ class ConnService : Service() {
             .setContentIntent(openPi)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            b.addAction(Notification.Action.Builder(
-                android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_lock_power_off),
-                "Отключить", disconnectPi,
-            ).build())
+            b.addAction(
+                Notification.Action.Builder(
+                    android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_lock_power_off),
+                    "Отключить",
+                    disconnectPi,
+                ).build(),
+            )
         } else {
             @Suppress("DEPRECATION")
             b.addAction(0, "Отключить", disconnectPi)

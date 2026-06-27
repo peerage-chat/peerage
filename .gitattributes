@@ -3,3 +3,6 @@
 # Go/Rust исходники — LF для единообразия между Windows и WSL.
 *.go text eol=lf
 *.rs text eol=lf
+# Kotlin/Gradle — LF: ktlint (.editorconfig end_of_line=lf) иначе валит CRLF.
+*.kt text eol=lf
+*.kts text eol=lf

@@ -1,0 +1,25 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{kt,kts}]
+max_line_length = off
+ktlint_code_style = intellij_idea
+
+# Compose-специфика — отключаем правила, противоречащие идиомам Jetpack Compose:
+#  • Composable-функции именуются PascalCase (Foo()), не camelCase.
+ktlint_standard_function-naming = disabled
+#  • top-level val цветов/палитр PascalCase (HoloAccent, NameColors, Folders).
+ktlint_standard_property-naming = disabled
+#  • Compose-импорты идут wildcard'ом (material3.*, runtime.*, foundation.layout.*).
+ktlint_standard_no-wildcard-imports = disabled
+#  • файлы экранов содержат несколько top-level деклараций (имя ≠ один класс).
+ktlint_standard_filename = disabled
+
+# no-unused-imports ОСТАЁТСЯ включённым — он чистит лишние импорты при ktlintFormat.

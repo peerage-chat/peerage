@@ -34,11 +34,11 @@ fun P2PTheme(content: @Composable () -> Unit) {
 }
 
 // ── Единая сетка размеров/отступов (вынесено из MainActivity) ───────────────
-internal val ScreenPad = 16.dp        // отступ контента экрана
-internal val FormGap = 12.dp          // вертикальный зазор в формах
-internal val RowPadV = 14.dp          // вертикальный паддинг ряда списка
+internal val ScreenPad = 16.dp // отступ контента экрана
+internal val FormGap = 12.dp // вертикальный зазор в формах
+internal val RowPadV = 14.dp // вертикальный паддинг ряда списка
 internal val OfflineDot = Color(0xFF555555)
 internal val WarnColor = Color(0xFFE6A23C)
-internal val BubbleIn = Color(0xFF24292F)   // входящий пузырь (нейтральный)
-internal val BubbleOut = Color(0xFF245266)  // исходящий пузырь (приглушённый акцент)
+internal val BubbleIn = Color(0xFF24292F) // входящий пузырь (нейтральный)
+internal val BubbleOut = Color(0xFF245266) // исходящий пузырь (приглушённый акцент)
 internal val FolderSelected = Color(0xFF1C3A47) // фон активной папки (приглушённый, не неон)

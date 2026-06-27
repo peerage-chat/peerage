@@ -1,5 +1,10 @@
 package dev.p2p.messenger
 
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -7,11 +12,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
-import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -25,13 +25,13 @@ data class VideoQuality(
     val fps: Int,
     val bitrate: Int,
 ) {
-    val key get() = "${width}x${height}@${fps}"
+    val key get() = "${width}x$height@$fps"
 
     companion object {
         val presets = listOf(
-            VideoQuality("480p  30fps",  854,  480, 30, 1_000_000),
-            VideoQuality("720p  30fps", 1280,  720, 30, 2_000_000),
-            VideoQuality("720p  60fps", 1280,  720, 60, 4_000_000),
+            VideoQuality("480p  30fps", 854, 480, 30, 1_000_000),
+            VideoQuality("720p  30fps", 1280, 720, 30, 2_000_000),
+            VideoQuality("720p  60fps", 1280, 720, 60, 4_000_000),
             VideoQuality("1080p 30fps", 1920, 1080, 30, 4_000_000),
             VideoQuality("1080p 60fps", 1920, 1080, 60, 8_000_000),
         )
@@ -58,16 +58,26 @@ data class Message(
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
 data class Group(val gid: String, val name: String, val members: Int)
+
 /** Пир транспорта (адрес/направление/пинг/трафик) — из снапшота движка. */
 data class NetPeer(
-    val key: String, val inbound: Boolean, val up: Boolean,
-    val latencyMs: Double, val rxRate: Long, val txRate: Long, val uptimeS: Double,
+    val key: String,
+    val inbound: Boolean,
+    val up: Boolean,
+    val latencyMs: Double,
+    val rxRate: Long,
+    val txRate: Long,
+    val uptimeS: Double,
 )
 
 /** Снапшот стата сети (агрегаты считает движок). */
 data class NetStats(
-    val peerCount: Int, val tree: Int, val pingMs: Double,
-    val rxRate: Long, val txRate: Long, val peers: List<NetPeer>,
+    val peerCount: Int,
+    val tree: Int,
+    val pingMs: Double,
+    val rxRate: Long,
+    val txRate: Long,
+    val peers: List<NetPeer>,
 )
 
 /** Присутствие группы «N уч · M в сети» — агрегат (MLS-ростер ∩ presence) считает движок. */
@@ -132,23 +142,27 @@ class AppModel private constructor() {
 
     var currentChat by mutableStateOf<String?>(null)
     var netPeers by mutableStateOf(0)
+
     /** Снапшот стата сети (экран «Сеть»). Обновляется тикером на переднем плане. */
     var netStats by mutableStateOf<NetStats?>(null)
+
     /** Режим «узел сети» (ретрансляция чужого трафика). Пока только UI-флаг —
      *  привязка к движку (вкл/выкл relay) — TODO, когда появится нативный вызов. */
     var relayEnabled by mutableStateOf(true)
+
     /** Результат последней попытки добавить контакт ("" | added | known | error). */
     var addStatus by mutableStateOf("")
 
     // Диагностика: тест пропускной способности меша.
-    var benchRecv by mutableStateOf(false)   // режим приёмника включён
+    var benchRecv by mutableStateOf(false) // режим приёмника включён
     var benchRecvMbps by mutableStateOf(0.0) // живая скорость приёма
-    var benchResult by mutableStateOf("")    // результат отправки (для blast)
+    var benchResult by mutableStateOf("") // результат отправки (для blast)
 
     // Группы (MLS).
     val groups = mutableStateListOf<Group>()
     val groupMessages = mutableStateMapOf<String, SnapshotStateList<GroupMsg>>()
     var currentGroup by mutableStateOf<String?>(null)
+
     /** Присутствие открытой группы «N уч · M в сети» — агрегат отдаёт движок
      *  (groupPresence). Обновляется тикером, пока групповой чат открыт. */
     var currentGroupRoster by mutableStateOf<GroupRoster?>(null)
@@ -156,9 +170,11 @@ class AppModel private constructor() {
     // Комната-звонок (Discord-style присутствие). gid комнаты, где мы сейчас.
     var currentRoom by mutableStateOf<String?>(null)
     val roomMembers = mutableStateListOf<RoomMember>()
+
     /** Угол поворота входящего видео на участника (град, угол сенсора отправителя).
      *  UI доворачивает тайл. Энкодер шлёт сырой кадр с сенсора → нужен доворот. */
     val roomMemberRotation = mutableStateMapOf<String, Int>()
+
     /** Живые участники каждой группы по маячкам — обновляется тикером.
      *  Заполняется даже когда мы сами не в комнате (peer слал нам RoomPresence). */
     val groupPresence = mutableStateMapOf<String, List<RoomMember>>()
@@ -180,23 +196,30 @@ class AppModel private constructor() {
     }
 
     var appContext: android.content.Context? = null
+
     /** Приложение на переднем плане? Ставит MainActivity (onStart/onStop). В фоне
      *  poll/ticker троттлятся — меньше пробуждений CPU при удержанном wakelock. */
     @Volatile var foreground = true
     var incomingCall by mutableStateOf<IncomingRoomCall?>(null)
     var dmCallPeer by mutableStateOf<String?>(null)
     var videoActive by mutableStateOf(false)
+
     @Volatile private var roomAudio: CallAudio? = null
+
     @Volatile private var videoSender: VideoSender? = null
+
     /** Приёмники видео per-peer: тайл сетки даёт surface → приёмник на этого пира.
      *  Стабильны: создаются при появлении surface тайла, гасятся при уходе (участник
      *  вышел / тайл скрыт). key(peer) в Compose не даёт пересоздавать surface на
      *  перерисовке → нет тёрки декодеров. */
     private val videoReceivers = java.util.concurrent.ConcurrentHashMap<String, VideoReceiver>()
+
     /** Surface тайла «Вы» для локального превью с камеры (без энкодера). */
     @Volatile private var selfPreviewSurface: android.view.Surface? = null
+
     /** Микрофон заглушён (управляется из UI звонка). */
     var muted by mutableStateOf(false)
+
     /** Текущий объектив: фронтальная камера (true) или тыловая. Влияет на зеркало
      *  превью «Вы» (селфи-зеркало только у фронталки). */
     var cameraFront by mutableStateOf(true)
@@ -204,6 +227,7 @@ class AppModel private constructor() {
 
     // Фоновое взаимодействие с ядром (никогда не на главном потоке).
     private val ops = Executors.newSingleThreadExecutor { Thread(it, "native-ops").apply { isDaemon = true } }
+
     @Volatile private var running = false
     private var pollThread: Thread? = null
     private var tickerThread: Thread? = null
@@ -217,7 +241,8 @@ class AppModel private constructor() {
     private val queueLock = Any()
     private val offlineQueueMap = HashMap<String, MutableList<Pair<String, Long>>>()
     private var queueFile: File? = null
-    @Volatile private var localMsgId = -1L  // отрицательные ID для «не отправлено» в логе
+
+    @Volatile private var localMsgId = -1L // отрицательные ID для «не отправлено» в логе
 
     /** Инициализация ядра. Звать с фонового потока (см. MainActivity).
      *  Идемпотентно: при пересоздании Activity повторно НЕ инициализирует. */
@@ -286,10 +311,14 @@ class AppModel private constructor() {
                 // приемлемо), на переднем плане — отзывчиво.
                 Thread.sleep(if (foreground) 80 else 400)
             }
-        }.apply { isDaemon = true; name = "native-poll"; start() }
+        }.apply {
+            isDaemon = true
+            name = "native-poll"
+            start()
+        }
         tickerThread = Thread {
             var tick = 0L
-            var zeroPeerTicks = 0  // счётчик тиков без пиров
+            var zeroPeerTicks = 0 // счётчик тиков без пиров
             while (running) {
                 runCatching {
                     val p = Native.netPeers(sessionPtr)
@@ -311,12 +340,24 @@ class AppModel private constructor() {
                         val pa = o.optJSONArray("peers") ?: JSONArray()
                         val peers = (0 until pa.length()).map { i ->
                             val p = pa.getJSONObject(i)
-                            NetPeer(p.optString("key"), p.optBoolean("inbound"), p.optBoolean("up"),
-                                p.optDouble("latency_ms"), p.optLong("rx_rate"), p.optLong("tx_rate"),
-                                p.optDouble("uptime_s"))
+                            NetPeer(
+                                p.optString("key"),
+                                p.optBoolean("inbound"),
+                                p.optBoolean("up"),
+                                p.optDouble("latency_ms"),
+                                p.optLong("rx_rate"),
+                                p.optLong("tx_rate"),
+                                p.optDouble("uptime_s"),
+                            )
                         }
-                        netStats = NetStats(o.optInt("peer_count"), o.optInt("tree"),
-                            o.optDouble("ping_ms"), o.optLong("rx_rate"), o.optLong("tx_rate"), peers)
+                        netStats = NetStats(
+                            o.optInt("peer_count"),
+                            o.optInt("tree"),
+                            o.optDouble("ping_ms"),
+                            o.optLong("rx_rate"),
+                            o.optLong("tx_rate"),
+                            peers,
+                        )
                     }
                     // Присутствие открытой группы «N уч · M в сети» — агрегат
                     // (ростер ∩ онлайн) считает движок, клиент лишь рендерит.
@@ -333,7 +374,10 @@ class AppModel private constructor() {
                         }
                         // Только при реальном изменении состава/флагов — иначе каждый тик
                         // (2с в звонке) форсит рекомпозицию всего экрана → рывок видео.
-                        if (roomMembers != list) { roomMembers.clear(); roomMembers.addAll(list) }
+                        if (roomMembers != list) {
+                            roomMembers.clear()
+                            roomMembers.addAll(list)
+                        }
                     }
                     // Присутствие в группах, к которым мы НЕ подключены:
                     // показывает кто уже в комнате до того как мы вошли.
@@ -364,14 +408,20 @@ class AppModel private constructor() {
                 tick++
                 // В звонке (currentRoom) держим присутствие свежим (2с) даже в фоне;
                 // иначе на переднем плане 3с, в фоне 15с — реже будим CPU.
-                Thread.sleep(when {
-                    benchRecv -> 1000
-                    currentRoom != null -> 2000
-                    foreground -> 3000
-                    else -> 15000
-                })
+                Thread.sleep(
+                    when {
+                        benchRecv -> 1000
+                        currentRoom != null -> 2000
+                        foreground -> 3000
+                        else -> 15000
+                    },
+                )
             }
-        }.apply { isDaemon = true; name = "native-ticker"; start() }
+        }.apply {
+            isDaemon = true
+            name = "native-ticker"
+            start()
+        }
     }
 
     // ── Контакты / чат ────────────────────────────────────────────────────────
@@ -529,10 +579,15 @@ class AppModel private constructor() {
             }
             "group_msg" -> {
                 val gid = o.getString("gid")
-                groupLog(gid).add(GroupMsg(
-                    o.optString("text"), mine = false, time = System.currentTimeMillis() / 1000,
-                    sender = o.optString("sender"), system = o.optBoolean("system", false),
-                ))
+                groupLog(gid).add(
+                    GroupMsg(
+                        o.optString("text"),
+                        mine = false,
+                        time = System.currentTimeMillis() / 1000,
+                        sender = o.optString("sender"),
+                        system = o.optBoolean("system", false),
+                    ),
+                )
             }
         }
     }
@@ -681,7 +736,7 @@ class AppModel private constructor() {
             ctx,
             { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
             { out -> Native.roomPullAudio(sessionPtr, out) },
-            { m -> Native.roomSetMuted(sessionPtr, m) }
+            { m -> Native.roomSetMuted(sessionPtr, m) },
         ).also { it.start(sr, ch) }
         if (video) {
             videoActive = true
@@ -695,7 +750,9 @@ class AppModel private constructor() {
         if (videoReceivers.containsKey(peerHex)) return
         videoReceivers[peerHex] = VideoReceiver(
             surface,
-            videoQuality.width, videoQuality.height, videoQuality.fps,
+            videoQuality.width,
+            videoQuality.height,
+            videoQuality.fps,
             onRotation = { rot -> roomMemberRotation[peerHex] = rot },
         ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
     }
@@ -750,12 +807,17 @@ class AppModel private constructor() {
         Native.roomSetVideoCap(sessionPtr, cap)
         cameraFront = true // новый VideoSender всегда стартует с фронталки
         videoSender = VideoSender(
-            ctx, videoQuality.width, videoQuality.height, videoQuality.fps, videoQuality.bitrate
+            ctx,
+            videoQuality.width,
+            videoQuality.height,
+            videoQuality.fps,
+            videoQuality.bitrate,
         ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start(preview) }
     }
 
     private fun stopVideoSender() {
-        val vs = videoSender; videoSender = null
+        val vs = videoSender
+        videoSender = null
         Thread { runCatching { vs?.stop() } }.apply { isDaemon = true }.start()
     }
 
@@ -769,8 +831,11 @@ class AppModel private constructor() {
      *  ушёл при включённом видео (ты остался один, тайла «Вы» нет) → стоп отправки. */
     fun setSelfPreviewSurface(surface: android.view.Surface?) {
         selfPreviewSurface = surface
-        if (surface != null) maybeStartVideoSender()
-        else if (videoActive) stopVideoSender()
+        if (surface != null) {
+            maybeStartVideoSender()
+        } else if (videoActive) {
+            stopVideoSender()
+        }
     }
 
     // ── Комната-звонок (присутствие, Discord-style) ───────────────────────────
@@ -802,9 +867,12 @@ class AppModel private constructor() {
         videoActive = false
         roomMembers.clear()
         muted = false
-        val a = roomAudio; roomAudio = null
-        val vs = videoSender; videoSender = null
-        val vrs = videoReceivers.values.toList(); videoReceivers.clear()
+        val a = roomAudio
+        roomAudio = null
+        val vs = videoSender
+        videoSender = null
+        val vrs = videoReceivers.values.toList()
+        videoReceivers.clear()
         val ctx = appContext
         ops.execute {
             // RoomDecline шлём ТОЛЬКО чтобы отменить ДОЗВОН (пир ещё не вошёл) → у
@@ -854,8 +922,11 @@ class AppModel private constructor() {
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             GroupMsg(
-                o.optString("text"), o.getBoolean("mine"), o.optLong("time", 0),
-                sender = o.optString("sender"), system = o.optBoolean("system", false),
+                o.optString("text"),
+                o.getBoolean("mine"),
+                o.optLong("time", 0),
+                sender = o.optString("sender"),
+                system = o.optBoolean("system", false),
             )
         }
         groupMessages[gid] = list.toMutableStateList()
@@ -869,8 +940,14 @@ class AppModel private constructor() {
     fun sendGroupText(gid: String, text: String) {
         if (text.isBlank()) return
         // Оптимистично показываем своё сообщение сразу; отправка — fire-and-forget.
-        groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000,
-            sender = me?.pubkey ?: ""))
+        groupLog(gid).add(
+            GroupMsg(
+                text,
+                mine = true,
+                time = System.currentTimeMillis() / 1000,
+                sender = me?.pubkey ?: "",
+            ),
+        )
         ops.execute { Native.groupSendText(sessionPtr, gid, text) }
     }
 
@@ -888,7 +965,8 @@ class AppModel private constructor() {
         ops.execute {
             val r = JSONObject(Native.benchBlast(sessionPtr, peerHex, 30_000))
             benchResult = "отправлено %.1f Мбит/с (%.1f МБ)".format(
-                r.optDouble("mbps", 0.0), r.optDouble("sent_bytes", 0.0) / 1e6,
+                r.optDouble("mbps", 0.0),
+                r.optDouble("sent_bytes", 0.0) / 1e6,
             )
         }
     }

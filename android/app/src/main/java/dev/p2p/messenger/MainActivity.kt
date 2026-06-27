@@ -8,97 +8,31 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.BatteryStd
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.EmojiEmotions
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material.icons.filled.Headset
-import androidx.compose.material3.ExperimentalMaterial3Api
+import dev.p2p.messenger.ui.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.abs
-import dev.p2p.messenger.ui.*
 
 class MainActivity : ComponentActivity() {
     // Синглтон на процесс: переживает пересоздание Activity (фон/возврат), иначе
@@ -173,7 +107,7 @@ private fun Root(model: AppModel) {
     // На главном (Contacts) без оверлеев — обработчик выключен, back выходит штатно.
     BackHandler(
         enabled = model.dmCallPeer != null || model.incomingCall != null ||
-            drawerState.isOpen || screen != Screen.Contacts
+            drawerState.isOpen || screen != Screen.Contacts,
     ) {
         when {
             model.incomingCall != null -> {}
@@ -200,98 +134,108 @@ private fun Root(model: AppModel) {
         gesturesEnabled = screen == Screen.Contacts && model.dmCallPeer == null && model.incomingCall == null,
         drawerContent = { AppDrawer(model, navigate) },
     ) {
-    Box(Modifier.fillMaxSize()) {
-        Surface(Modifier.fillMaxSize(), color = HoloBg) {
-            Column(Modifier.fillMaxSize()) {
-                // ── Шапка: конфигурируется по текущему экрану ─────────────────────
-                when (screen) {
-                    Screen.Contacts -> TopBar(
-                        if (activeFilter == "all") "Чаты" else folderLabel(activeFilter),
-                        onMenu = { scope.launch { drawerState.open() } },
-                    ) {
-                        PeerIndicator(model.netPeers) { model.startBenchRecv() }
-                        BarIcon(Icons.Filled.Search, "Поиск") { /* TODO: глобальный поиск */ }
-                    }
-                    Screen.Chat -> ChatTopBar(
-                        model,
-                        onBack = { screen = Screen.Contacts },
-                        onProfile = { screen = Screen.Info },
-                    )
-                    Screen.Add -> TopBar("Добавить контакт", onBack = { screen = Screen.Contacts })
-                    Screen.Me -> TopBar("Мой ключ", onBack = { screen = Screen.Contacts })
-                    Screen.Info -> TopBar("Контакт", onBack = { screen = Screen.Chat })
-                    Screen.Groups -> TopBar("Группы", onBack = { screen = Screen.Contacts }) {
-                        BarIcon(Icons.Filled.Add, "Новая группа") { screen = Screen.CreateGroup }
-                    }
-                    Screen.GroupChat -> GroupChatTopBar(
-                        model,
-                        onBack = { screen = Screen.Contacts },
-                        onInfo = { screen = Screen.AddMember },
-                    )
-                    Screen.CreateGroup -> TopBar("Новая группа", onBack = { screen = Screen.Groups })
-                    Screen.AddMember -> TopBar("Добавить участника", onBack = { screen = Screen.GroupChat })
-                    Screen.Settings -> TopBar("Настройки", onBack = { screen = Screen.Contacts })
-                    Screen.Scanner -> TopBar("Сканировать QR", onBack = { screen = Screen.Add })
-                    Screen.ContactList -> TopBar("Контакты", onBack = { screen = Screen.Contacts }) {
-                        BarIcon(Icons.Filled.PersonAdd, "Добавить контакт") { screen = Screen.Add }
-                    }
-                    Screen.Calls -> TopBar("Звонки", onBack = { screen = Screen.Contacts })
-                    Screen.Network -> TopBar("Сеть", onBack = { screen = Screen.Contacts }) {
-                        BarIcon(Icons.Filled.Refresh, "Обновить") { /* авто-поллинг; ручной рефреш — TODO */ }
-                    }
-                    Screen.Saved -> TopBar("Сохранённое", onBack = { screen = Screen.Contacts })
-                }
-                // ── Рейл папок: только на главном экране ────────────────────────
-                if (screen == Screen.Contacts) {
-                    FolderRail(model, activeFilter) { activeFilter = it }
-                }
-                // ── Контент экрана (без шапки) ────────────────────────────────────
-                Box(Modifier.weight(1f)) {
+        Box(Modifier.fillMaxSize()) {
+            Surface(Modifier.fillMaxSize(), color = HoloBg) {
+                Column(Modifier.fillMaxSize()) {
+                    // ── Шапка: конфигурируется по текущему экрану ─────────────────────
                     when (screen) {
-                        Screen.Contacts -> ContactsScreen(
-                            model, activeFilter,
-                            onOpenDm = { model.openChat(it); screen = Screen.Chat },
-                            onOpenGroup = { model.openGroup(it); screen = Screen.GroupChat },
-                        )
-                        Screen.Chat -> ChatScreen(model)
-                        Screen.Add -> AddScreen(
-                            model,
-                            scannedKey = scanResult,
-                            onScan = { screen = Screen.Scanner },
-                        ) { screen = Screen.Contacts }
-                        Screen.Scanner -> QrScannerScreen { key ->
-                            scanResult = key
-                            screen = Screen.Add
+                        Screen.Contacts -> TopBar(
+                            if (activeFilter == "all") "Чаты" else folderLabel(activeFilter),
+                            onMenu = { scope.launch { drawerState.open() } },
+                        ) {
+                            PeerIndicator(model.netPeers) { model.startBenchRecv() }
+                            BarIcon(Icons.Filled.Search, "Поиск") { /* TODO: глобальный поиск */ }
                         }
-                        Screen.Me -> MeScreen(model)
-                        Screen.Info -> InfoScreen(model) { screen = Screen.Contacts }
-                        Screen.Groups -> GroupsScreen(model) { model.openGroup(it); screen = Screen.GroupChat }
-                        Screen.GroupChat -> GroupChatScreen(model)
-                        Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Groups }
-                        Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
-                        Screen.Settings -> SettingsScreen(model)
-                        Screen.ContactList -> ComingSoon(Icons.Filled.Group, "Контакты")
-                        Screen.Calls -> ComingSoon(Icons.Filled.Call, "История звонков")
-                        Screen.Network -> NetworkScreen(model) { screen = Screen.Me }
-                        Screen.Saved -> ComingSoon(Icons.Filled.Lock, "Сохранённое")
+                        Screen.Chat -> ChatTopBar(
+                            model,
+                            onBack = { screen = Screen.Contacts },
+                            onProfile = { screen = Screen.Info },
+                        )
+                        Screen.Add -> TopBar("Добавить контакт", onBack = { screen = Screen.Contacts })
+                        Screen.Me -> TopBar("Мой ключ", onBack = { screen = Screen.Contacts })
+                        Screen.Info -> TopBar("Контакт", onBack = { screen = Screen.Chat })
+                        Screen.Groups -> TopBar("Группы", onBack = { screen = Screen.Contacts }) {
+                            BarIcon(Icons.Filled.Add, "Новая группа") { screen = Screen.CreateGroup }
+                        }
+                        Screen.GroupChat -> GroupChatTopBar(
+                            model,
+                            onBack = { screen = Screen.Contacts },
+                            onInfo = { screen = Screen.AddMember },
+                        )
+                        Screen.CreateGroup -> TopBar("Новая группа", onBack = { screen = Screen.Groups })
+                        Screen.AddMember -> TopBar("Добавить участника", onBack = { screen = Screen.GroupChat })
+                        Screen.Settings -> TopBar("Настройки", onBack = { screen = Screen.Contacts })
+                        Screen.Scanner -> TopBar("Сканировать QR", onBack = { screen = Screen.Add })
+                        Screen.ContactList -> TopBar("Контакты", onBack = { screen = Screen.Contacts }) {
+                            BarIcon(Icons.Filled.PersonAdd, "Добавить контакт") { screen = Screen.Add }
+                        }
+                        Screen.Calls -> TopBar("Звонки", onBack = { screen = Screen.Contacts })
+                        Screen.Network -> TopBar("Сеть", onBack = { screen = Screen.Contacts }) {
+                            BarIcon(Icons.Filled.Refresh, "Обновить") { /* авто-поллинг; ручной рефреш — TODO */ }
+                        }
+                        Screen.Saved -> TopBar("Сохранённое", onBack = { screen = Screen.Contacts })
+                    }
+                    // ── Рейл папок: только на главном экране ────────────────────────
+                    if (screen == Screen.Contacts) {
+                        FolderRail(model, activeFilter) { activeFilter = it }
+                    }
+                    // ── Контент экрана (без шапки) ────────────────────────────────────
+                    Box(Modifier.weight(1f)) {
+                        when (screen) {
+                            Screen.Contacts -> ContactsScreen(
+                                model,
+                                activeFilter,
+                                onOpenDm = {
+                                    model.openChat(it)
+                                    screen = Screen.Chat
+                                },
+                                onOpenGroup = {
+                                    model.openGroup(it)
+                                    screen = Screen.GroupChat
+                                },
+                            )
+                            Screen.Chat -> ChatScreen(model)
+                            Screen.Add -> AddScreen(
+                                model,
+                                scannedKey = scanResult,
+                                onScan = { screen = Screen.Scanner },
+                            ) { screen = Screen.Contacts }
+                            Screen.Scanner -> QrScannerScreen { key ->
+                                scanResult = key
+                                screen = Screen.Add
+                            }
+                            Screen.Me -> MeScreen(model)
+                            Screen.Info -> InfoScreen(model) { screen = Screen.Contacts }
+                            Screen.Groups -> GroupsScreen(model) {
+                                model.openGroup(it)
+                                screen = Screen.GroupChat
+                            }
+                            Screen.GroupChat -> GroupChatScreen(model)
+                            Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Groups }
+                            Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
+                            Screen.Settings -> SettingsScreen(model)
+                            Screen.ContactList -> ComingSoon(Icons.Filled.Group, "Контакты")
+                            Screen.Calls -> ComingSoon(Icons.Filled.Call, "История звонков")
+                            Screen.Network -> NetworkScreen(model) { screen = Screen.Me }
+                            Screen.Saved -> ComingSoon(Icons.Filled.Lock, "Сохранённое")
+                        }
                     }
                 }
             }
+            // FAB «новый чат» — только на Главной, под оверлеями звонка.
+            if (screen == Screen.Contacts && model.dmCallPeer == null && model.incomingCall == null) {
+                FloatingActionButton(
+                    onClick = { screen = Screen.Add },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+                    containerColor = HoloAccent,
+                    contentColor = HoloAccentDark,
+                ) { Icon(Icons.Filled.Create, "Новый чат", modifier = Modifier.size(22.dp)) }
+            }
+            model.incomingCall?.let { IncomingCallOverlay(model, it) }
+            // Активный DM-звонок (аудио или видео) — полноэкранная комната-сетка.
+            if (model.incomingCall == null) {
+                model.dmCallPeer?.let { RoomCallScreen(model, it) }
+            }
         }
-        // FAB «новый чат» — только на Главной, под оверлеями звонка.
-        if (screen == Screen.Contacts && model.dmCallPeer == null && model.incomingCall == null) {
-            FloatingActionButton(
-                onClick = { screen = Screen.Add },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
-                containerColor = HoloAccent,
-                contentColor = HoloAccentDark,
-            ) { Icon(Icons.Filled.Create, "Новый чат", modifier = Modifier.size(22.dp)) }
-        }
-        model.incomingCall?.let { IncomingCallOverlay(model, it) }
-        // Активный DM-звонок (аудио или видео) — полноэкранная комната-сетка.
-        if (model.incomingCall == null) {
-            model.dmCallPeer?.let { RoomCallScreen(model, it) }
-        }
-    }
     }
 }

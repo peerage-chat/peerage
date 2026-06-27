@@ -107,8 +107,11 @@ private fun ParticipantGrid(model: AppModel, tiles: List<Tile>, chrome: Boolean)
 
 @Composable
 private fun ParticipantTile(model: AppModel, t: Tile, chrome: Boolean, modifier: Modifier) {
-    val name = if (t.me) stringResource(R.string.call_you)
-    else model.contacts.firstOrNull { it.key == t.id }?.name ?: (t.id.take(6) + "…")
+    val name = if (t.me) {
+        stringResource(R.string.call_you)
+    } else {
+        model.contacts.firstOrNull { it.key == t.id }?.name ?: (t.id.take(6) + "…")
+    }
     Box(
         modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF1A1D21)),
         contentAlignment = Alignment.Center,
@@ -148,10 +151,18 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
                 Modifier.align(Alignment.Center).offset(y = 78.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(stringResource(R.string.call_alone_title), color = Color.White,
-                    fontSize = 18.sp, fontWeight = FontWeight.Medium)
-                Text(stringResource(R.string.call_alone_subtitle), color = HoloSecondary,
-                    fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
+                Text(
+                    stringResource(R.string.call_alone_title),
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    stringResource(R.string.call_alone_subtitle),
+                    color = HoloSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 5.dp),
+                )
             }
         }
     }
@@ -162,7 +173,8 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
  *  VideoSender'у (камера рендерит прямо сюда, без энкодера/декодера). */
 @Composable
 private fun SelfPreviewSurface(model: AppModel, modifier: Modifier) {
-    val bw = model.videoQuality.width; val bh = model.videoQuality.height
+    val bw = model.videoQuality.width
+    val bh = model.videoQuality.height
     // Зеркало — только у фронталки (селфи); у тыловой камеры без зеркала.
     val mirror = model.cameraFront
     AndroidView(
@@ -181,7 +193,8 @@ private fun SelfPreviewSurface(model: AppModel, modifier: Modifier) {
                         applyTextureTransform(this@apply, bh, bw, 0, model.cameraFront)
                     }
                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
-                        model.setSelfPreviewSurface(null); return true
+                        model.setSelfPreviewSurface(null)
+                        return true
                     }
                     override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
                 }
@@ -197,7 +210,8 @@ private fun SelfPreviewSurface(model: AppModel, modifier: Modifier) {
  *  Surface отдаётся приёмнику (декодер рендерит сюда). */
 @Composable
 private fun VideoSurface(model: AppModel, peer: String, modifier: Modifier) {
-    val bw = model.videoQuality.width; val bh = model.videoQuality.height
+    val bw = model.videoQuality.width
+    val bh = model.videoQuality.height
     // Угол сенсора отправителя (энкодер шлёт сырой кадр боком) — доворачиваем тайл.
     val rotation = model.roomMemberRotation[peer] ?: 0
     AndroidView(
@@ -212,7 +226,8 @@ private fun VideoSurface(model: AppModel, peer: String, modifier: Modifier) {
                         applyTextureTransform(this@apply, bw, bh, model.roomMemberRotation[peer] ?: 0, mirror = false)
                     }
                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
-                        model.detachVideoReceiver(peer); return true
+                        model.detachVideoReceiver(peer)
+                        return true
                     }
                     override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
                 }
@@ -228,16 +243,19 @@ private fun VideoSurface(model: AppModel, peer: String, modifier: Modifier) {
  *  тайла с СОХРАНЕНИЕМ аспекта (cover-crop, по центру) + опц. зеркало [mirror].
  *  bufW/bufH — размер буфера (видео); размер вьюхи берём из самой [view]. */
 private fun applyTextureTransform(view: TextureView, bufW: Int, bufH: Int, rotationDeg: Int, mirror: Boolean) {
-    val vw = view.width.toFloat(); val vh = view.height.toFloat()
+    val vw = view.width.toFloat()
+    val vh = view.height.toFloat()
     if (vw <= 0f || vh <= 0f || bufW <= 0 || bufH <= 0) return
-    val cx = vw / 2f; val cy = vh / 2f
+    val cx = vw / 2f
+    val cy = vh / 2f
     val rot = ((rotationDeg % 360) + 360) % 360
     val rotated = rot == 90 || rot == 270
     // Эффективные размеры контента после поворота.
     val effW = if (rotated) bufH.toFloat() else bufW.toFloat()
     val effH = if (rotated) bufW.toFloat() else bufH.toFloat()
     val scale = maxOf(vw / effW, vh / effH)
-    val drawW = effW * scale; val drawH = effH * scale
+    val drawW = effW * scale
+    val drawH = effH * scale
     // Размер ДО поворота (чтобы после поворота получить drawW×drawH).
     val preW = if (rotated) drawH else drawW
     val preH = if (rotated) drawW else drawH
@@ -297,7 +315,11 @@ private fun Avatar(name: String, size: Int) {
         Modifier.size(size.dp).clip(CircleShape).background(Color(0xFF3A3F45)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(name.take(1).uppercase(), color = Color.White,
-            fontWeight = FontWeight.Bold, fontSize = (size / 2.4f).sp)
+        Text(
+            name.take(1).uppercase(),
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = (size / 2.4f).sp,
+        )
     }
 }

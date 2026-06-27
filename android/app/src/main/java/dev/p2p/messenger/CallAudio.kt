@@ -25,6 +25,7 @@ class CallAudio(
     private var aec: AcousticEchoCanceler? = null
     private var ns: NoiseSuppressor? = null
     private var agc: AutomaticGainControl? = null
+
     @Volatile private var running = false
     private val threads = mutableListOf<Thread>()
 
@@ -50,17 +51,20 @@ class CallAudio(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
+                    .build(),
             )
             .setAudioFormat(
-                AudioFormat.Builder().setSampleRate(sampleRate).setEncoding(fmt).setChannelMask(outMask).build()
+                AudioFormat.Builder().setSampleRate(sampleRate).setEncoding(fmt).setChannelMask(outMask).build(),
             )
             .setBufferSizeInBytes(outMin * 2) // меньше буфер = меньше задержка вывода
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
-        record = rec; track = trk; running = true
-        rec.startRecording(); trk.play()
+        record = rec
+        track = trk
+        running = true
+        rec.startRecording()
+        trk.play()
 
         val chunk = sampleRate / 50 * (if (channels >= 2) 2 else 1) // 20ms frame
 
@@ -68,10 +72,13 @@ class CallAudio(
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
             while (running) {
-                val n = rec.read(buf, 0, buf.size)  // blocking: ровный 20мс ритм захвата
+                val n = rec.read(buf, 0, buf.size) // blocking: ровный 20мс ритм захвата
                 when {
                     n > 0 -> push(buf, n)
-                    else  -> { if (!running) break; android.util.Log.e("CallAudio", "capture error $n") }
+                    else -> {
+                        if (!running) break
+                        android.util.Log.e("CallAudio", "capture error $n")
+                    }
                 }
             }
         }
@@ -87,12 +94,16 @@ class CallAudio(
             var starvations = 0
             var lastLogMs = System.currentTimeMillis()
             while (running) {
-                if (pull(buf) == 0) { starvations++; buf.fill(0) }
+                if (pull(buf) == 0) {
+                    starvations++
+                    buf.fill(0)
+                }
                 trk.write(buf, 0, buf.size) // blocking: железо задаёт ритм
                 val nowMs = System.currentTimeMillis()
                 if (nowMs - lastLogMs >= 5000) {
                     android.util.Log.i("CallAudio", "playback: $starvations starv/5s")
-                    starvations = 0; lastLogMs = nowMs
+                    starvations = 0
+                    lastLogMs = nowMs
                 }
             }
         }
@@ -110,8 +121,14 @@ class CallAudio(
         runCatching { track?.flush() }
         runCatching { track?.stop() }
         runCatching { track?.release() }
-        runCatching { aec?.release() }; runCatching { ns?.release() }; runCatching { agc?.release() }
-        record = null; track = null; aec = null; ns = null; agc = null
+        runCatching { aec?.release() }
+        runCatching { ns?.release() }
+        runCatching { agc?.release() }
+        record = null
+        track = null
+        aec = null
+        ns = null
+        agc = null
         runCatching {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             if (am.mode != AudioManager.MODE_NORMAL) am.mode = AudioManager.MODE_NORMAL

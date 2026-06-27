@@ -49,7 +49,8 @@ class CallService : Service() {
         val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             WifiManager.WIFI_MODE_FULL_LOW_LATENCY
         } else {
-            @Suppress("DEPRECATION") WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            @Suppress("DEPRECATION")
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
         }
         wifi = wm.createWifiLock(mode, "p2p:call").apply {
             setReferenceCounted(false)
@@ -90,11 +91,16 @@ class CallService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (nm.getNotificationChannel(CHANNEL) == null) {
-                nm.createNotificationChannel(NotificationChannel(CHANNEL, "Звонки",
-                    NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Активный звонок или голосовая комната"
-                    setShowBadge(false)
-                })
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL,
+                        "Звонки",
+                        NotificationManager.IMPORTANCE_LOW,
+                    ).apply {
+                        description = "Активный звонок или голосовая комната"
+                        setShowBadge(false)
+                    },
+                )
             }
         }
     }
@@ -102,13 +108,19 @@ class CallService : Service() {
     private fun buildNotification(): Notification {
         val title = if (peerName.isNotEmpty()) "Звонок с $peerName" else "В голосовом чате"
 
-        val openPi = PendingIntent.getActivity(this, 0,
+        val openPi = PendingIntent.getActivity(
+            this,
+            0,
             Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
-        val endPi = PendingIntent.getBroadcast(this, 0,
+        val endPi = PendingIntent.getBroadcast(
+            this,
+            0,
             Intent(ACTION_END_CALL).apply { setPackage(packageName) },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
         @Suppress("DEPRECATION")
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -125,11 +137,16 @@ class CallService : Service() {
             .setContentIntent(openPi)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            b.addAction(Notification.Action.Builder(
-                android.graphics.drawable.Icon.createWithResource(
-                    this, android.R.drawable.ic_delete),
-                "Завершить", endPi,
-            ).build())
+            b.addAction(
+                Notification.Action.Builder(
+                    android.graphics.drawable.Icon.createWithResource(
+                        this,
+                        android.R.drawable.ic_delete,
+                    ),
+                    "Завершить",
+                    endPi,
+                ).build(),
+            )
         } else {
             @Suppress("DEPRECATION")
             b.addAction(0, "Завершить", endPi)
