@@ -21,6 +21,10 @@ pub struct GMsg {
     pub text: String,
     pub mine: bool,
     pub time: i64,
+    /// hex ed25519-pubkey отправителя (для имени/цвета/аватарки в UI).
+    pub sender: String,
+    /// Системное событие (смена состава) — рендерится отдельной строкой.
+    pub system: bool,
 }
 
 struct Entry {
@@ -81,7 +85,10 @@ impl GroupManager {
         let arr: Vec<serde_json::Value> = e
             .messages
             .iter()
-            .map(|m| serde_json::json!({"mine": m.mine, "text": m.text, "time": m.time}))
+            .map(|m| serde_json::json!({
+                "mine": m.mine, "text": m.text, "time": m.time,
+                "sender": m.sender, "system": m.system,
+            }))
             .collect();
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_vec(&arr) {
@@ -101,6 +108,8 @@ impl GroupManager {
                     mine: v["mine"].as_bool()?,
                     text: v["text"].as_str()?.to_string(),
                     time: v["time"].as_i64().unwrap_or(0),
+                    sender: v["sender"].as_str().unwrap_or("").to_string(),
+                    system: v["system"].as_bool().unwrap_or(false),
                 })
             })
             .collect()
@@ -152,7 +161,8 @@ impl GroupManager {
         if e.chat.send_text(text).is_err() {
             return false;
         }
-        e.messages.push(GMsg { text: text.to_string(), mine: true, time: now() });
+        let me = hex::encode(self.identity.public_key_bytes());
+        e.messages.push(GMsg { text: text.to_string(), mine: true, time: now(), sender: me, system: false });
         self.save_msgs(gid);
         true
     }
@@ -180,7 +190,10 @@ impl GroupManager {
         let arr: Vec<serde_json::Value> = e
             .messages
             .iter()
-            .map(|m| serde_json::json!({"text": m.text, "mine": m.mine, "time": m.time}))
+            .map(|m| serde_json::json!({
+                "text": m.text, "mine": m.mine, "time": m.time,
+                "sender": m.sender, "system": m.system,
+            }))
             .collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
@@ -228,18 +241,44 @@ impl GroupManager {
     /// Входящее групповое сообщение. Возвращает Some((gid_hex, text)) для
     /// прикладного сообщения (чтобы UI показал), либо None (Commit/Welcome).
     pub fn on_group(&mut self, data: &[u8]) -> GroupOutcome {
+        use p2p_groupchat::Inbound;
         // Известная группа? (Commit или прикладное сообщение)
         let known = peek_group_id(data).filter(|g| self.groups.contains_key(g));
         if let Some(gid) = known {
-            let text = self.groups.get_mut(&gid).and_then(|e| e.chat.handle(data).ok().flatten());
-            if let Some(t) = &text {
-                if let Some(e) = self.groups.get_mut(&gid) {
-                    e.messages.push(GMsg { text: t.clone(), mine: false, time: now() });
+            let inbound = self.groups.get_mut(&gid).map(|e| e.chat.handle(data));
+            let outcome = match inbound {
+                Some(Ok(Inbound::Message { sender, text })) => {
+                    let sender_hex = hex::encode(sender);
+                    if let Some(e) = self.groups.get_mut(&gid) {
+                        e.messages.push(GMsg {
+                            text: text.clone(), mine: false, time: now(),
+                            sender: sender_hex.clone(), system: false,
+                        });
+                    }
+                    self.save_msgs(&gid);
+                    GroupOutcome {
+                        gid: Some(gid.clone()), text: Some(text),
+                        sender: Some(sender_hex), system: false, joined: false,
+                    }
                 }
-                self.save_msgs(&gid);
-            }
+                Some(Ok(Inbound::Membership { actor })) => {
+                    let actor_hex = hex::encode(actor);
+                    if let Some(e) = self.groups.get_mut(&gid) {
+                        e.messages.push(GMsg {
+                            text: String::new(), mine: false, time: now(),
+                            sender: actor_hex.clone(), system: true,
+                        });
+                    }
+                    self.save_msgs(&gid);
+                    GroupOutcome {
+                        gid: Some(gid.clone()), text: None,
+                        sender: Some(actor_hex), system: true, joined: false,
+                    }
+                }
+                _ => GroupOutcome { gid: Some(gid.clone()), text: None, sender: None, system: false, joined: false },
+            };
             self.save_group(&gid);
-            return GroupOutcome { gid: Some(gid), text, joined: false };
+            return outcome;
         }
         // Иначе — возможно Welcome для ожидающего вступления.
         let joined_gid = self.pending.as_mut().and_then(|p| {
@@ -253,10 +292,10 @@ impl GroupManager {
                 }
                 self.groups.insert(id.clone(), Entry { chat, name: "Группа".into(), messages: Vec::new() });
                 self.save_group(&id);
-                return GroupOutcome { gid: Some(id), text: None, joined: true };
+                return GroupOutcome { gid: Some(id), text: None, sender: None, system: false, joined: true };
             }
         }
-        GroupOutcome { gid: None, text: None, joined: false }
+        GroupOutcome { gid: None, text: None, sender: None, system: false, joined: false }
     }
 }
 
@@ -264,5 +303,9 @@ impl GroupManager {
 pub struct GroupOutcome {
     pub gid: Option<Vec<u8>>,
     pub text: Option<String>,
+    /// hex отправителя (для Message) или актора (для системного события).
+    pub sender: Option<String>,
+    /// Системное событие (смена состава).
+    pub system: bool,
     pub joined: bool,
 }

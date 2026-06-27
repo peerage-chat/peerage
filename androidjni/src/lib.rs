@@ -340,10 +340,17 @@ fn handle_event(session: &Arc<Session>, groups: &mut GroupManager, ev: Event) {
         })),
         Event::Group { data, .. } => {
             let out = groups.on_group(&data);
-            if let (Some(gid), Some(text)) = (&out.gid, &out.text) {
-                push_event(session, serde_json::json!({
-                    "type": "group_msg", "gid": hex::encode(gid), "text": text,
-                }));
+            if let Some(gid) = &out.gid {
+                // Прикладное сообщение или системная строка (смена состава).
+                if out.text.is_some() || out.system {
+                    push_event(session, serde_json::json!({
+                        "type": "group_msg",
+                        "gid": hex::encode(gid),
+                        "text": out.text.clone().unwrap_or_default(),
+                        "sender": out.sender.clone().unwrap_or_default(),
+                        "system": out.system,
+                    }));
+                }
             }
             if out.joined {
                 refresh_group_cache(session, groups);

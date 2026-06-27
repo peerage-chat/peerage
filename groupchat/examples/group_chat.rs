@@ -25,8 +25,8 @@ fn pump_admin(rx: &Receiver<Event>, a: &mut GroupChat, secs: u64) -> Vec<String>
                 let _ = a.add_member(peer, &key_package);
             }
             Ok(Event::Group { data, .. }) => {
-                if let Ok(Some(t)) = a.handle(&data) {
-                    texts.push(t);
+                if let Ok(p2p_groupchat::Inbound::Message { text, .. }) = a.handle(&data) {
+                    texts.push(text);
                 }
             }
             _ => {}

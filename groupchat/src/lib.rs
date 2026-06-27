@@ -17,6 +17,20 @@ use p2p_messenger::Messenger;
 
 pub type PeerKey = [u8; 32];
 
+/// Результат обработки входящего группового сообщения — для показа в UI.
+pub enum Inbound {
+    /// Прикладное сообщение: отправитель + текст.
+    Message { sender: PeerKey, text: String },
+    /// Изменён состав группы (применён Commit), его применил actor.
+    Membership { actor: PeerKey },
+    /// Нечего показывать (вступление по Welcome, служебное).
+    None,
+}
+
+fn to_key(id: Vec<u8>) -> PeerKey {
+    <[u8; 32]>::try_from(id.as_slice()).unwrap_or([0u8; 32])
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum GroupChatError {
     #[error(transparent)]
@@ -87,17 +101,21 @@ impl GroupChat {
     }
 
     /// Обработать входящее групповое сообщение ([`p2p_messenger::Event::Group`]).
-    /// Если мы ещё не в группе — это Welcome (вступаем). Возвращает текст для
-    /// прикладных сообщений.
-    pub fn handle(&mut self, data: &[u8]) -> Result<Option<String>, GroupChatError> {
+    /// Если мы ещё не в группе — это Welcome (вступаем). Возвращает отправителя
+    /// и текст для прикладных сообщений либо актора смены состава.
+    pub fn handle(&mut self, data: &[u8]) -> Result<Inbound, GroupChatError> {
         if !self.member.is_joined() {
             self.member.join(data)?;
-            return Ok(None);
+            return Ok(Inbound::None);
         }
-        match self.member.process(data)? {
-            Incoming::Message(b) => Ok(Some(String::from_utf8_lossy(&b).into_owned())),
-            _ => Ok(None),
-        }
+        Ok(match self.member.process(data)? {
+            Incoming::Message { sender, body } => Inbound::Message {
+                sender: to_key(sender),
+                text: String::from_utf8_lossy(&body).into_owned(),
+            },
+            Incoming::MembershipChanged { actor } => Inbound::Membership { actor: to_key(actor) },
+            Incoming::Other => Inbound::None,
+        })
     }
 
     pub fn member_count(&self) -> usize {

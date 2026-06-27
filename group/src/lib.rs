@@ -39,10 +39,10 @@ fn mls<E: std::fmt::Display>(e: E) -> GroupError {
 
 /// Результат обработки входящего группового сообщения.
 pub enum Incoming {
-    /// Прикладное сообщение (расшифрованный текст/данные).
-    Message(Vec<u8>),
-    /// Применено изменение состава группы (Commit) — данных нет.
-    MembershipChanged,
+    /// Прикладное сообщение: отправитель (identity = ed25519-pubkey) + расшифрованные байты.
+    Message { sender: Vec<u8>, body: Vec<u8> },
+    /// Применено изменение состава группы (Commit). actor — кто его применил.
+    MembershipChanged { actor: Vec<u8> },
     /// Прочее (предложение и т.п.) — игнорируем на уровне приложения.
     Other,
 }
@@ -211,13 +211,16 @@ impl Member {
         let protocol = msg.try_into_protocol_message().map_err(mls)?;
         let group = self.group.as_mut().ok_or(GroupError::NoGroup)?;
         let processed = group.process_message(&self.provider, protocol).map_err(mls)?;
+        // Личность отправителя (= ed25519-pubkey, см. member_identities) доступна
+        // до распаковки содержимого — снимаем до into_content(), который её поглощает.
+        let sender = processed.credential().serialized_content().to_vec();
         match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(app) => {
-                Ok(Incoming::Message(app.into_bytes()))
+                Ok(Incoming::Message { sender, body: app.into_bytes() })
             }
             ProcessedMessageContent::StagedCommitMessage(staged) => {
                 group.merge_staged_commit(&self.provider, *staged).map_err(mls)?;
-                Ok(Incoming::MembershipChanged)
+                Ok(Incoming::MembershipChanged { actor: sender })
             }
             _ => Ok(Incoming::Other),
         }
@@ -283,14 +286,20 @@ mod tests {
         // Alice → группа; Bob расшифровывает.
         let ct = alice.encrypt(b"hi group").unwrap();
         match bob.process(&ct).unwrap() {
-            Incoming::Message(m) => assert_eq!(m, b"hi group"),
+            Incoming::Message { sender, body } => {
+                assert_eq!(body, b"hi group");
+                assert_eq!(sender, id(1).public_key_bytes()); // отправитель = Alice
+            }
             _ => panic!("ожидалось прикладное сообщение"),
         }
 
         // Bob → группа; Alice расшифровывает.
         let ct = bob.encrypt(b"hello back").unwrap();
         match alice.process(&ct).unwrap() {
-            Incoming::Message(m) => assert_eq!(m, b"hello back"),
+            Incoming::Message { sender, body } => {
+                assert_eq!(body, b"hello back");
+                assert_eq!(sender, id(2).public_key_bytes()); // отправитель = Bob
+            }
             _ => panic!("ожидалось прикладное сообщение"),
         }
     }
@@ -315,8 +324,8 @@ mod tests {
 
         // Сообщение от C видят и A, и B.
         let ct = c.encrypt(b"hey all").unwrap();
-        assert!(matches!(a.process(&ct).unwrap(), Incoming::Message(m) if m == b"hey all"));
-        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message(m) if m == b"hey all"));
+        assert!(matches!(a.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"hey all"));
+        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"hey all"));
     }
 
     #[test]
@@ -355,7 +364,7 @@ mod tests {
         let mut a2 = Member::load(&path, &a_id).unwrap();
         assert_eq!(a2.member_count(), 2);
         let ct = a2.encrypt(b"after reload").unwrap();
-        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message(m) if m == b"after reload"));
+        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"after reload"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

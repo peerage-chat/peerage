@@ -251,20 +251,11 @@ private fun Root(model: AppModel) {
                     Screen.Groups -> TopBar("Группы", onBack = { screen = Screen.Contacts }) {
                         BarIcon(Icons.Filled.Add, "Новая группа") { screen = Screen.CreateGroup }
                     }
-                    Screen.GroupChat -> {
-                        val gid = model.currentGroup
-                        val name = gid?.let { g -> model.groups.firstOrNull { it.gid == g }?.name } ?: "Группа"
-                        TopBar(name, onBack = { screen = Screen.Contacts }) {
-                            if (gid != null) {
-                                if (model.currentRoom == gid) {
-                                    BarIcon(Icons.Filled.CallEnd, "Выйти из звонка") { model.leaveRoom() }
-                                } else {
-                                    BarIcon(Icons.Filled.Call, "Войти в звонок") { model.joinRoom(gid) }
-                                }
-                                BarIcon(Icons.Filled.GroupAdd, "Добавить участника") { screen = Screen.AddMember }
-                            }
-                        }
-                    }
+                    Screen.GroupChat -> GroupChatTopBar(
+                        model,
+                        onBack = { screen = Screen.Contacts },
+                        onInfo = { screen = Screen.AddMember },
+                    )
                     Screen.CreateGroup -> TopBar("Новая группа", onBack = { screen = Screen.Groups })
                     Screen.AddMember -> TopBar("Добавить участника", onBack = { screen = Screen.GroupChat })
                     Screen.Settings -> TopBar("Настройки", onBack = { screen = Screen.Contacts })
@@ -855,29 +846,34 @@ private fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
 @Composable
 private fun GroupChatScreen(model: AppModel) {
     val gid = model.currentGroup ?: return
-    val msgs = model.groupMessages[gid]
+    val msgs = model.groupMessages[gid] ?: emptyList()
     var input by remember(gid) { mutableStateOf("") }
     var focusedParticipant by remember { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
+    LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
 
     val inRoom = model.currentRoom == gid
     val presenceMembers = if (inRoom) emptyList() else (model.groupPresence[gid] ?: emptyList())
-    val showGrid = inRoom || presenceMembers.isNotEmpty()
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            if (showGrid) RoomGrid(model, inRoom, presenceMembers, onFocus = { focusedParticipant = it })
-            LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp)) {
-                items(msgs ?: emptyList()) { m ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                        horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
-                        Box(Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(10.dp))
-                            .background(if (m.mine) HoloAccent else HoloSurface).padding(horizontal = 10.dp, vertical = 7.dp)) {
-                            Text(m.text, color = if (m.mine) HoloAccentDark else Color.White, fontSize = 15.sp)
-                        }
-                    }
+            // В комнате — сетка звонка; иначе если есть присутствие — зелёный баннер.
+            if (inRoom) RoomGrid(model, true, emptyList(), onFocus = { focusedParticipant = it })
+            else if (presenceMembers.isNotEmpty()) RoomBanner(model, presenceMembers) { model.joinRoom(gid) }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
+            ) {
+                itemsIndexed(msgs) { i, m ->
+                    val prev = msgs.getOrNull(i - 1)
+                    if (prev == null || dayLabel(prev.time) != dayLabel(m.time)) DateChip(dayLabel(m.time))
+                    GroupMessageRow(model, m)
                 }
             }
-            MessageInput(input, { input = it }) { model.sendGroupText(gid, input); input = "" }
+            MessageInput(input, { input = it }) {
+                if (input.isNotBlank()) { model.sendGroupText(gid, input); input = "" }
+            }
         }
         focusedParticipant?.let { key ->
             val isMe = key == "me"
@@ -889,6 +885,132 @@ private fun GroupChatScreen(model: AppModel) {
         }
     }
 }
+
+/** Шапка группового чата: аватар группы · имя · «N уч · M в сети» (тап → инфо) ·
+ *  войти/выйти из комнаты · меню. */
+@Composable
+private fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit) {
+    val gid = model.currentGroup
+    val g = gid?.let { model.groups.firstOrNull { it.gid == gid } }
+    val name = g?.name ?: "Группа"
+    val total = g?.members ?: 1
+    val others = model.groupMemberKeys[gid] ?: emptyList()
+    val onlineN = 1 + others.count { model.online[it] == true } // +1 = мы сами
+    Row(
+        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onClick = onBack)
+        Row(
+            Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onInfo() }
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SquareAvatar(name, size = 38.dp, bg = Color(0xFF0D2A0D)) {
+                Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("$total уч. · $onlineN в сети", color = HoloSecondary, fontSize = 11.sp)
+            }
+        }
+        if (gid != null) {
+            if (model.currentRoom == gid) {
+                BarIcon(Icons.Filled.CallEnd, "Выйти из звонка") { model.leaveRoom() }
+            } else {
+                BarIcon(Icons.Filled.Call, "Войти в звонок") { model.joinRoom(gid) }
+            }
+        }
+        BarIcon(Icons.Filled.MoreVert, "Ещё", tint = Color.White, onClick = onInfo)
+    }
+}
+
+/** Зелёный баннер активной комнаты: «N в звонке · имена» + Войти. */
+@Composable
+private fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -> Unit) {
+    val names = members.joinToString(", ") { rm ->
+        model.contacts.firstOrNull { it.key == rm.peer }?.name ?: (rm.peer.take(6) + "…")
+    }
+    Row(
+        Modifier.fillMaxWidth().background(Color(0xFF12331A)).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("${members.size} в звонке", color = HoloOnline, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            if (names.isNotEmpty()) Text(names, color = HoloSecondary, fontSize = 11.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(12.dp))
+        Box(
+            Modifier.clip(RoundedCornerShape(10.dp)).background(HoloOnline)
+                .clickable { onJoin() }.padding(horizontal = 18.dp, vertical = 8.dp),
+        ) { Text("Войти", color = Color(0xFF0A1F0A), fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+    }
+}
+
+/** Строка группового сообщения: системная / своя / входящая (имя цветом + аватар). */
+@Composable
+private fun GroupMessageRow(model: AppModel, m: GroupMsg) {
+    when {
+        m.system -> {
+            val who = groupSenderName(model, m.sender)
+            val text = if (m.text.isBlank()) "$who обновил(а) состав группы" else "$who ${m.text}"
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
+                Box(Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)) {
+                    Text(text, color = HoloSecondary, fontSize = 11.sp)
+                }
+            }
+        }
+        m.mine -> Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.End) {
+            GroupBubble(m.text, true, m.time)
+        }
+        else -> Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.Start) {
+            val who = groupSenderName(model, m.sender)
+            val online = model.online[m.sender] == true
+            SquareAvatar(who, size = 32.dp, online = online)
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(who, color = nameColor(m.sender), fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(start = 2.dp, bottom = 2.dp))
+                GroupBubble(m.text, false, m.time)
+            }
+        }
+    }
+}
+
+/** Пузырь группового сообщения (время в углу последней строки; без галочек). */
+@Composable
+private fun GroupBubble(text: String, mine: Boolean, time: Long) {
+    val timeStr = fmtMsgTime(time)
+    Box(
+        Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(14.dp))
+            .background(if (mine) BubbleOut else BubbleIn).padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(text + "      ", color = Color.White, fontSize = 15.sp)
+        Text(timeStr, color = Color.White.copy(alpha = 0.55f), fontSize = 10.sp,
+            modifier = Modifier.align(Alignment.BottomEnd))
+    }
+}
+
+/** Имя отправителя группового сообщения по hex-ключу. */
+private fun groupSenderName(model: AppModel, hex: String): String = when {
+    hex.isEmpty() -> "Участник"
+    hex == model.me?.pubkey -> "Вы"
+    else -> model.contacts.firstOrNull { it.key == hex }?.name ?: (hex.take(6) + "…")
+}
+
+/** Яркий детерминированный цвет имени отправителя (Discord-style). */
+private val NameColors = listOf(
+    Color(0xFF5BC0EB), Color(0xFF9BC53D), Color(0xFFE5793A), Color(0xFFEF6FB3),
+    Color(0xFF7C5CFC), Color(0xFF20C997), Color(0xFFF6C453),
+)
+private fun nameColor(hex: String): Color =
+    if (hex.isEmpty()) HoloSecondary else NameColors[abs(hex.hashCode()) % NameColors.size]
 
 /** Сетка участников комнаты (2 колонки). Тап по тайлу → onFocus(key).
  *  [inRoom] — мы сейчас в комнате (показываем себя + model.roomMembers).

@@ -58,7 +58,15 @@ data class Message(
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
 data class Group(val gid: String, val name: String, val members: Int)
-data class GroupMsg(val text: String, val mine: Boolean, val time: Long)
+data class GroupMsg(
+    val text: String,
+    val mine: Boolean,
+    val time: Long,
+    /** hex ed25519-pubkey отправителя (имя/цвет/аватарка в UI). "" — неизвестно. */
+    val sender: String = "",
+    /** Системная строка (смена состава) — рендерится отдельно. */
+    val system: Boolean = false,
+)
 
 /** Входящий DM-звонок (до того как пользователь ответил или отклонил). */
 data class IncomingRoomCall(
@@ -123,6 +131,8 @@ class AppModel private constructor() {
     // Группы (MLS).
     val groups = mutableStateListOf<Group>()
     val groupMessages = mutableStateMapOf<String, SnapshotStateList<GroupMsg>>()
+    /** gid → hex-ключи ДРУГИХ участников (без себя). Для «N уч · M в сети». */
+    val groupMemberKeys = mutableStateMapOf<String, List<String>>()
     var currentGroup by mutableStateOf<String?>(null)
 
     // Комната-звонок (Discord-style присутствие). gid комнаты, где мы сейчас.
@@ -482,7 +492,10 @@ class AppModel private constructor() {
             }
             "group_msg" -> {
                 val gid = o.getString("gid")
-                groupLog(gid).add(GroupMsg(o.getString("text"), mine = false, time = System.currentTimeMillis() / 1000))
+                groupLog(gid).add(GroupMsg(
+                    o.optString("text"), mine = false, time = System.currentTimeMillis() / 1000,
+                    sender = o.optString("sender"), system = o.optBoolean("system", false),
+                ))
             }
         }
     }
@@ -802,9 +815,17 @@ class AppModel private constructor() {
         val arr = JSONArray(Native.groupHistory(sessionPtr, gid))
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
-            GroupMsg(o.getString("text"), o.getBoolean("mine"), o.optLong("time", 0))
+            GroupMsg(
+                o.optString("text"), o.getBoolean("mine"), o.optLong("time", 0),
+                sender = o.optString("sender"), system = o.optBoolean("system", false),
+            )
         }
         groupMessages[gid] = list.toMutableStateList()
+        // Ключи других участников (для презенса в шапке).
+        runCatching {
+            val ms = JSONArray(Native.groupMembers(sessionPtr, gid))
+            groupMemberKeys[gid] = (0 until ms.length()).map { ms.getString(it) }
+        }
     }
 
     private fun groupLog(gid: String): SnapshotStateList<GroupMsg> =
@@ -815,7 +836,8 @@ class AppModel private constructor() {
     fun sendGroupText(gid: String, text: String) {
         if (text.isBlank()) return
         // Оптимистично показываем своё сообщение сразу; отправка — fire-and-forget.
-        groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000))
+        groupLog(gid).add(GroupMsg(text, mine = true, time = System.currentTimeMillis() / 1000,
+            sender = me?.pubkey ?: ""))
         ops.execute { Native.groupSendText(sessionPtr, gid, text) }
     }
 

@@ -1029,7 +1029,10 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
                 .filter(|gid| GROUPS.with(|g| g.borrow().groups.contains_key(gid)));
             if let Some(gid) = known_gid {
                 let text = GROUPS.with(|g| {
-                    g.borrow_mut().groups.get_mut(&gid).and_then(|e| e.chat.handle(&data).ok().flatten())
+                    g.borrow_mut().groups.get_mut(&gid).and_then(|e| match e.chat.handle(&data) {
+                        Ok(p2p_groupchat::Inbound::Message { text, .. }) => Some(text),
+                        _ => None,
+                    })
                 });
                 if let Some(t) = text {
                     group_push(&gid, false, t);
