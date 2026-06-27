@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
-# JNI-мост: cdylib грузится из Kotlin через System.loadLibrary("p2p_android").
+# JNI-кодек: cdylib грузится из Kotlin через System.loadLibrary("p2p_android").
+# Доменная логика — в крейте p2p-engine; здесь только маршалинг JNI ↔ движок.
 [lib]
 name = "p2p_android"
 crate-type = ["cdylib"]
@@ -14,12 +15,7 @@ crate-type = ["cdylib"]
 jni = "0.21"
 log = "0.4"
 android_logger = "0.14"
-serde = { workspace = true }
 serde_json = "1"
 hex.workspace = true
 p2p-core = { path = "../core", features = ["sqlcipher"] }
-p2p-messenger = { path = "../messenger" }
-p2p-media = { path = "../media" }
-p2p-group = { path = "../group" }
-p2p-groupchat = { path = "../groupchat" }
-p2p-ygg = { path = "../transport" }
+p2p-engine = { path = "../engine" }

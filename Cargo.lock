@@ -5051,12 +5051,7 @@ dependencies = [
  "jni 0.21.1",
  "log",
  "p2p-core",
- "p2p-group",
- "p2p-groupchat",
- "p2p-media",
- "p2p-messenger",
- "p2p-ygg",
- "serde",
+ "p2p-engine",
  "serde_json",
 ]
 
@@ -5110,6 +5105,22 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+]
+
+[[package]]
+name = "p2p-engine"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "log",
+ "p2p-core",
+ "p2p-group",
+ "p2p-groupchat",
+ "p2p-media",
+ "p2p-messenger",
+ "p2p-ygg",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

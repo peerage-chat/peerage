@@ -1,0 +1,24 @@
+[package]
+name = "p2p-engine"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Device-independent ядро движка (ADR-003). Зависит от транспорта (libygg) →
+# собирается под Linux/WSL, как и androidjni. Юнит-тесты ядра (net.rs, презенс)
+# не требуют устройства/эмулятора.
+[lib]
+name = "p2p_engine"
+
+[dependencies]
+log = "0.4"
+serde = { workspace = true }
+serde_json = "1"
+hex.workspace = true
+p2p-core = { path = "../core", features = ["sqlcipher"] }
+p2p-messenger = { path = "../messenger" }
+p2p-media = { path = "../media" }
+p2p-group = { path = "../group" }
+p2p-groupchat = { path = "../groupchat" }
+p2p-ygg = { path = "../transport" }
