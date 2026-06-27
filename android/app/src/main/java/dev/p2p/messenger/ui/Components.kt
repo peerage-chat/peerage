@@ -1,0 +1,279 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
+package dev.p2p.messenger.ui
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.BatteryStd
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material3.ExperimentalMaterial3Api
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import dev.p2p.messenger.*
+
+// ── Общие элементы ──────────────────────────────────────────────────────────
+
+/** Иконка-кнопка топ-бара: единый размер (48dp касание / 24dp иконка). */
+@Composable
+internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = HoloAccent, onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(24.dp))
+    }
+}
+
+@Composable
+internal fun TopBar(
+    title: String,
+    onBack: (() -> Unit)? = null,
+    onMenu: (() -> Unit)? = null,
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    Row(
+        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when {
+            onMenu != null -> BarIcon(Icons.Filled.Menu, "Меню", onClick = onMenu)
+            onBack != null -> BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onClick = onBack)
+            else -> Spacer(Modifier.width(12.dp))
+        }
+        Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        actions()
+    }
+}
+
+/** Индикатор присутствия: маленький кружок (онлайн/офлайн). */
+@Composable
+internal fun StatusDot(online: Boolean) {
+    Box(Modifier.size(10.dp).clip(CircleShape).background(if (online) HoloOnline else OfflineDot))
+}
+
+/** Индикатор пиров меша в шапке Главной (⊹ N). Тап → «Сеть» (TODO),
+ *  долгий тап — диагностический бенч приёма. */
+@Composable
+internal fun PeerIndicator(peers: Int, onLongPress: () -> Unit = {}) {
+    Row(
+        Modifier.clip(RoundedCornerShape(8.dp))
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { /* TODO: экран Сеть */ },
+                    onLongPress = { onLongPress() },
+                )
+            }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(Icons.Filled.Share, "Сеть", tint = if (peers > 0) HoloOnline else HoloSecondary,
+            modifier = Modifier.size(18.dp))
+        Text("$peers", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Квадратная аватарка со скруглением — единый визуальный язык приложения
+ *  (НЕ круг). Буква имени на детерминированном цвете; опционально presence-точка
+ *  в правом-нижнем углу; [bg]/[content] переопределяют фон и содержимое (комнаты). */
+@Composable
+internal fun SquareAvatar(
+    name: String,
+    size: Dp = 44.dp,
+    online: Boolean? = null,
+    bg: Color? = null,
+    content: (@Composable () -> Unit)? = null,
+) {
+    Box(Modifier.size(size), contentAlignment = Alignment.BottomEnd) {
+        Box(
+            Modifier.size(size).clip(RoundedCornerShape(size * 0.3f)).background(bg ?: avatarColor(name)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (content != null) content()
+            else Text(name.take(1).uppercase(), color = Color.White,
+                fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.Medium)
+        }
+        if (online != null) {
+            Box(
+                Modifier.size(size * 0.28f).clip(CircleShape)
+                    .background(if (online) HoloOnline else OfflineDot)
+                    .border(2.dp, HoloBg, CircleShape),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun ListRow(onClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
+    // Без разделителей — мягкий «телеграмный» список (по макету).
+    Row(
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = ScreenPad, vertical = RowPadV),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+@Composable
+internal fun FieldLabel(text: String) {
+    Text(text, color = HoloSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+}
+
+@Composable
+internal fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Button(onClick = onClick, modifier = modifier,
+        colors = ButtonDefaults.buttonColors(containerColor = HoloAccent)) {
+        Text(text, color = HoloAccentDark, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+internal fun SendButton(onClick: () -> Unit) {
+    Box(
+        Modifier.clip(CircleShape).background(HoloAccent).size(44.dp).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { Icon(Icons.AutoMirrored.Filled.Send, "Отправить", tint = HoloAccentDark, modifier = Modifier.size(20.dp)) }
+}
+
+// ── Экраны ──────────────────────────────────────────────────────────────────
+
+
+/** Время сообщения «ЧЧ:ММ» (time — unix-секунды). */
+internal fun fmtMsgTime(ts: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
+
+/** Метка дня для чипа-разделителя: Сегодня / Вчера / «d MMMM». */
+internal fun dayLabel(ts: Long): String {
+    val msgDay = java.util.Calendar.getInstance().apply { timeInMillis = ts * 1000 }
+    val today = java.util.Calendar.getInstance()
+    fun sameDay(a: java.util.Calendar, b: java.util.Calendar) =
+        a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) &&
+        a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+    val yesterday = (today.clone() as java.util.Calendar).apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+    return when {
+        sameDay(msgDay, today) -> "Сегодня"
+        sameDay(msgDay, yesterday) -> "Вчера"
+        else -> java.text.SimpleDateFormat("d MMMM", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
+    }
+}
+
+/** Детерминированный цвет аватара по имени контакта. */
+internal fun avatarColor(name: String): Color {
+    val palette = listOf(
+        Color(0xFF1E3A5A), Color(0xFF2A1A3A), Color(0xFF1A2A1A),
+        Color(0xFF2A2A1A), Color(0xFF3A1A1A), Color(0xFF1A3A3A),
+    )
+    return palette[abs(name.hashCode()) % palette.size]
+}
+
+/** Генерирует QR-код для строки [data] размером 512×512. Возвращает null при ошибке. */
+internal fun generateQrBitmap(data: String): android.graphics.Bitmap? = runCatching {
+    val size = 512
+    val bits = com.google.zxing.qrcode.QRCodeWriter()
+        .encode(data, com.google.zxing.BarcodeFormat.QR_CODE, size, size)
+    val pixels = IntArray(size * size) { i ->
+        if (bits[i % size, i / size]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+    }
+    android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        .also { it.setPixels(pixels, 0, size, 0, 0, size, size) }
+}.getOrNull()
+
+@Composable
+internal fun inputColors() = TextFieldDefaults.colors(
+    focusedContainerColor = HoloBg,
+    unfocusedContainerColor = HoloBg,
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    cursorColor = HoloAccent,
+    focusedIndicatorColor = HoloAccent,
+    unfocusedIndicatorColor = HoloBorder,
+)
+

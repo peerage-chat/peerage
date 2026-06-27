@@ -1,0 +1,292 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
+package dev.p2p.messenger.ui
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.BatteryStd
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material3.ExperimentalMaterial3Api
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import dev.p2p.messenger.*
+
+@Composable
+internal fun RoomGrid(
+    model: AppModel,
+    inRoom: Boolean,
+    presenceMembers: List<RoomMember>,
+    onFocus: (String) -> Unit,
+) {
+    val members = if (inRoom) model.roomMembers else presenceMembers
+    val total = if (inRoom) members.size + 1 else members.size
+    Surface(color = HoloSurface, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
+            Text(
+                if (inRoom) "В ЗВОНКЕ · $total" else "В КОМНАТЕ · $total",
+                color = HoloSecondary, fontSize = 11.sp,
+                modifier = Modifier.padding(start = 2.dp, bottom = 8.dp),
+            )
+            val all = if (inRoom)
+                listOf(Triple("me", true, false)) + members.map { Triple(it.peer, it.audio, it.video) }
+            else
+                members.map { Triple(it.peer, it.audio, it.video) }
+            all.chunked(2).forEach { row ->
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    row.forEach { (key, audio, video) ->
+                        val isMe = key == "me"
+                        val name = if (isMe) "Вы" else
+                            model.contacts.firstOrNull { it.key == key }?.name ?: (key.take(6) + "…")
+                        GridTile(name, audio, video, isMe, Modifier.weight(1f)) { onFocus(key) }
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun GridTile(
+    name: String, audio: Boolean, video: Boolean, me: Boolean,
+    modifier: Modifier = Modifier, onClick: () -> Unit,
+) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (me) HoloAccentDark else Color(0xFF2A2F35))
+            .clickable { onClick() }
+            .aspectRatio(1f),
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                Modifier.size(64.dp).clip(CircleShape)
+                    .background(if (me) HoloAccent else Color(0xFF3A3F45)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(name.take(1).uppercase(), color = if (me) HoloAccentDark else Color.White,
+                    fontWeight = FontWeight.Bold, fontSize = 26.sp)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(name, color = if (me) HoloAccent else Color.White,
+                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+        // Статус микрофона/видео — правый верхний угол
+        if (!audio || video) {
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(6.dp)
+                    .clip(RoundedCornerShape(6.dp)).background(Color(0xAA000000))
+                    .padding(horizontal = 5.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!audio) Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(13.dp))
+                if (video) Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(13.dp))
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ParticipantFullscreen(
+    name: String, audio: Boolean, video: Boolean, me: Boolean, onDismiss: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize().background(Color(0xEE000000)).clickable { onDismiss() }) {
+        // Кнопка закрытия — правый верхний угол
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(16.dp).size(36.dp)
+                .clip(CircleShape).background(Color(0x33FFFFFF)).clickable { onDismiss() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Закрыть", tint = Color.White,
+                modifier = Modifier.size(18.dp).then(
+                    Modifier.graphicsLayer { rotationZ = 90f }
+                ))
+        }
+        // Центральный контент
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                Modifier.size(128.dp).clip(CircleShape)
+                    .background(if (me) HoloAccent else Color(0xFF3A3F45))
+                    .border(3.dp, if (me) HoloAccent.copy(alpha = 0.4f) else Color(0xFF4A4F55), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(name.take(1).uppercase(), color = if (me) HoloAccentDark else Color.White,
+                    fontWeight = FontWeight.Bold, fontSize = 52.sp)
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!audio) Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x33E53935))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(14.dp))
+                    Text("Микрофон выкл", color = WarnColor, fontSize = 12.sp)
+                }
+                if (video) Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x22FFFFFF))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
+                    Text("Видео", color = HoloSecondary, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
+    val name = model.contacts.firstOrNull { it.key == ic.peer }?.name ?: "Контакт"
+    Box(Modifier.fillMaxSize().background(Color(0xF2000000))) {
+        Column(
+            Modifier.fillMaxSize().padding(bottom = 64.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Spacer(Modifier.height(96.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier.size(88.dp).clip(CircleShape).background(HoloAccent),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(name.take(1).uppercase(), color = HoloAccentDark,
+                        fontWeight = FontWeight.Bold, fontSize = 40.sp)
+                }
+                Spacer(Modifier.height(20.dp))
+                Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+                Text("Входящий звонок", color = HoloSecondary, fontSize = 15.sp,
+                    modifier = Modifier.padding(top = 8.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(56.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                CallButton(Icons.Filled.CallEnd, "Отклонить", HoloError) { model.declineDmCall() }
+                CallButton(Icons.Filled.Call, "Принять", HoloOnline) { model.acceptDmCall() }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun CallButton(icon: ImageVector, desc: String, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(CircleShape).background(color).size(64.dp).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(28.dp)) }
+}
+
+
