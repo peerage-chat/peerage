@@ -38,8 +38,10 @@ pub enum Payload {
     /// Отклонение входящего звонка (получатель нажал «Отклонить»).
     RoomDecline { room_id: Vec<u8> },
     /// Групповое MLS-сообщение (Commit/Welcome/прикладное) — для пересылки
-    /// участникам группы. Содержимое уже зашифровано MLS.
-    Group { data: Vec<u8> },
+    /// участникам группы. Содержимое уже зашифровано MLS. `id` — для надёжной
+    /// доставки: получатель шлёт `Ack{id}`, отправитель повторяет до Ack/TTL
+    /// (per-recipient, как у DM). Дедуп повторов — на стороне MLS (generation).
+    Group { id: u64, data: Vec<u8> },
     /// Запрос KeyPackage у контакта (чтобы добавить его в группу).
     GroupKeyRequest,
     /// Ответ с KeyPackage (MLS) для добавления в группу.
@@ -149,7 +151,7 @@ mod tests {
             Payload::Text { id: 1, text: "hi".into() },
             Payload::RoomInvite { room_id: vec![1u8; 16], audio: true, video: false },
             Payload::RoomDecline { room_id: vec![2u8; 16] },
-            Payload::Group { data: vec![1, 2, 3, 9, 9] },
+            Payload::Group { id: 5, data: vec![1, 2, 3, 9, 9] },
             Payload::GroupKeyRequest,
             Payload::GroupKeyReply { key_package: vec![7, 7, 7] },
             Payload::RoomPresence { gid: vec![5, 6, 7], flags: 0b11 },

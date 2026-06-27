@@ -111,6 +111,9 @@ struct Pending {
     payload: Payload,
     created: Instant,
     last_sent: Instant,
+    /// Уведомлять ли UI о доставке/недоставке (`Ack`/`Undelivered`). true для DM,
+    /// false для групповых (статус по участникам в UI не показывается).
+    notify: bool,
 }
 
 struct Shared {
@@ -308,6 +311,7 @@ impl Messenger {
                 payload,
                 created: now,
                 last_sent: now,
+                notify: true,
             },
         );
         Ok(id)
@@ -354,9 +358,28 @@ impl Messenger {
         self.shared.send(peer, &Payload::RoomDecline { room_id: room_id.to_vec() })
     }
 
-    /// Переслать групповое MLS-сообщение конкретному участнику.
+    /// Переслать групповое MLS-сообщение конкретному участнику — НАДЁЖНО:
+    /// повтор до `Ack` или TTL (как DM), per-recipient. Каждому участнику —
+    /// свой `id` (одно и то же `data`), поэтому общая схема `pending[id]` не
+    /// меняется. Дедуп повторов на приёме делает MLS (generation). Это чинит и
+    /// потерю прикладных сообщений, и рассинхрон эпох от потерянных Commit'ов.
     pub fn send_group(&self, peer: &PeerKey, data: &[u8]) -> Result<(), MessengerError> {
-        self.shared.send(peer, &Payload::Group { data: data.to_vec() })
+        let id = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
+        let payload = Payload::Group { id, data: data.to_vec() };
+        self.shared.track(peer);
+        self.shared.send(peer, &payload)?;
+        let now = Instant::now();
+        self.shared.pending.lock().unwrap().insert(
+            id,
+            Pending {
+                peer: *peer,
+                payload,
+                created: now,
+                last_sent: now,
+                notify: false, // статус групповой доставки в UI не показываем
+            },
+        );
+        Ok(())
     }
 
     /// Попросить у контакта KeyPackage (для добавления в группу).
@@ -499,8 +522,17 @@ fn receive_loop(shared: Arc<Shared>) {
                 let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
             }
             Payload::Ack { id } => {
-                let removed = shared.pending.lock().unwrap().remove(&id).is_some();
-                if removed {
+                // Снимаем pending только если ack пришёл от того, КОМУ слали (анти-
+                // спуфинг). Событие Ack в UI — лишь для DM (notify); группы молчат.
+                let acked = {
+                    let mut pending = shared.pending.lock().unwrap();
+                    if pending.get(&id).map(|p| p.peer) == Some(src) {
+                        pending.remove(&id).map(|p| p.notify)
+                    } else {
+                        None
+                    }
+                };
+                if acked == Some(true) {
                     shared.emit(Event::Ack { peer: src, id });
                 }
             }
@@ -514,8 +546,10 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::RoomDecline { room_id } => {
                 shared.emit(Event::RoomDecline { peer: src, room_id });
             }
-            Payload::Group { data } => {
+            Payload::Group { id, data } => {
                 shared.emit(Event::Group { peer: src, data });
+                // ✓ доставлено — гасим повтор у отправителя (дубли отсеет MLS).
+                let _ = shared.send(&src, &Payload::Ack { id });
             }
             Payload::GroupKeyRequest => {
                 shared.emit(Event::GroupKeyRequest { peer: src });
@@ -569,7 +603,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
             let mut pending = shared.pending.lock().unwrap();
             pending.retain(|id, p| {
                 if now.duration_since(p.created) > shared.cfg.message_ttl {
-                    expired.push((*id, p.peer));
+                    expired.push((*id, p.peer, p.notify));
                     return false;
                 }
                 if now.duration_since(p.last_sent) >= shared.cfg.retry_interval {
@@ -579,8 +613,10 @@ fn maintenance_loop(shared: Arc<Shared>) {
                 true
             });
         }
-        for (id, peer) in expired {
-            shared.emit(Event::Undelivered { peer, id });
+        for (id, peer, notify) in expired {
+            if notify {
+                shared.emit(Event::Undelivered { peer, id });
+            }
         }
         for (peer, payload) in to_retry {
             let _ = shared.send(&peer, &payload);
