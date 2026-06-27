@@ -33,24 +33,26 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.R
 
 @Composable
 internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit) {
     val key = model.currentChat
     val c = key?.let { k -> model.contacts.firstOrNull { it.key == k } }
-    val name = c?.name ?: "Чат"
+    val name = c?.name ?: stringResource(R.string.chat_default_title)
     val online = key?.let { model.online[it] == true } ?: false
     Row(
         Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onClick = onBack)
+        BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
         Row(
             Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onProfile() }
                 .padding(horizontal = 4.dp, vertical = 4.dp),
@@ -75,14 +77,14 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                     }
                 }
                 Text(
-                    if (online) "в сети" else "не в сети",
+                    stringResource(if (online) R.string.status_in_network else R.string.status_offline),
                     color = if (online) HoloOnline else HoloSecondary,
                     fontSize = 11.sp,
                 )
             }
         }
-        if (key != null) BarIcon(Icons.Filled.Call, "Аудио-звонок") { model.callDm(key) }
-        BarIcon(Icons.Filled.MoreVert, "Ещё", tint = Color.White, onClick = onProfile)
+        if (key != null) BarIcon(Icons.Filled.Call, stringResource(R.string.cd_audio_call)) { model.callDm(key) }
+        BarIcon(Icons.Filled.MoreVert, stringResource(R.string.common_more), tint = Color.White, onClick = onProfile)
     }
 }
 
@@ -103,7 +105,7 @@ internal fun ChatScreen(model: AppModel) {
             item { E2EBanner() }
             itemsIndexed(msgs) { i, m ->
                 val prev = msgs.getOrNull(i - 1)
-                if (prev == null || dayLabel(prev.time) != dayLabel(m.time)) DateChip(dayLabel(m.time))
+                if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
                 MessageBubble(m)
             }
         }
@@ -127,7 +129,7 @@ internal fun E2EBanner() {
         ) {
             Icon(Icons.Filled.Lock, null, tint = HoloSecondary, modifier = Modifier.size(12.dp))
             Spacer(Modifier.width(5.dp))
-            Text("Сообщения защищены сквозным шифрованием", color = HoloSecondary, fontSize = 11.sp)
+            Text(stringResource(R.string.chat_e2e_banner), color = HoloSecondary, fontSize = 11.sp)
         }
     }
 }
@@ -154,7 +156,7 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () 
             Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(HoloSurface),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PillIcon(Icons.Filled.AttachFile, "Прикрепить") { /* TODO: вложения */ }
+            PillIcon(Icons.Filled.AttachFile, stringResource(R.string.cd_attach)) { /* TODO: вложения */ }
             BasicTextField(
                 value = value,
                 onValueChange = onChange,
@@ -164,12 +166,12 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () 
                 maxLines = 4,
                 decorationBox = { inner ->
                     Box(contentAlignment = Alignment.CenterStart) {
-                        if (value.isEmpty()) Text("Сообщение…", color = HoloSecondary, fontSize = 15.sp)
+                        if (value.isEmpty()) Text(stringResource(R.string.chat_input_hint), color = HoloSecondary, fontSize = 15.sp)
                         inner()
                     }
                 },
             )
-            PillIcon(Icons.Filled.EmojiEmotions, "Эмодзи") { /* TODO: эмодзи */ }
+            PillIcon(Icons.Filled.EmojiEmotions, stringResource(R.string.cd_emoji)) { /* TODO: эмодзи */ }
         }
         Spacer(Modifier.width(8.dp))
         // Отправка / голосовое — отдельной круглой кнопкой 44px.
@@ -184,7 +186,7 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () 
         ) {
             Icon(
                 if (hasText) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
-                if (hasText) "Отправить" else "Голосовое",
+                stringResource(if (hasText) R.string.common_send else R.string.chat_voice),
                 tint = HoloAccentDark,
                 modifier = Modifier.size(20.dp),
             )
@@ -239,10 +241,10 @@ internal fun MessageBubble(m: Message) {
 internal fun StatusTick(status: String) {
     val tint = Color.White.copy(alpha = 0.7f)
     when (status) {
-        "delivered" -> Icon(Icons.Filled.DoneAll, "доставлено", tint = tint, modifier = Modifier.size(13.dp))
-        "sent" -> Icon(Icons.Filled.Done, "отправлено", tint = tint, modifier = Modifier.size(13.dp))
-        "pending" -> Icon(Icons.Filled.Schedule, "отправляется", tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
-        "queued" -> Icon(Icons.Filled.Schedule, "ожидание", tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+        "delivered" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_delivered), tint = tint, modifier = Modifier.size(13.dp))
+        "sent" -> Icon(Icons.Filled.Done, stringResource(R.string.status_sent), tint = tint, modifier = Modifier.size(13.dp))
+        "pending" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_sending), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+        "queued" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_queued), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
         "failed" -> Text("!", color = HoloError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }

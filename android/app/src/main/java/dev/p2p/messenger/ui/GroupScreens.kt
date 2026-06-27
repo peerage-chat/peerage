@@ -24,17 +24,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.R
 import kotlin.math.abs
 
 @Composable
 internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
     if (model.groups.isEmpty()) {
-        CenterMessage("Нет групп. Создайте новую.")
+        CenterMessage(stringResource(R.string.groups_empty))
     } else {
         LazyColumn(Modifier.fillMaxSize()) {
             items(model.groups, key = { it.gid }) { g ->
@@ -42,7 +44,7 @@ internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
                     Icon(Icons.Filled.Group, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(12.dp))
                     Text(g.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                    Text("${g.members} уч.", color = HoloSecondary, fontSize = 12.sp)
+                    Text(stringResource(R.string.members_count, g.members), color = HoloSecondary, fontSize = 12.sp)
                 }
             }
         }
@@ -76,7 +78,7 @@ internal fun GroupChatScreen(model: AppModel) {
             ) {
                 itemsIndexed(msgs) { i, m ->
                     val prev = msgs.getOrNull(i - 1)
-                    if (prev == null || dayLabel(prev.time) != dayLabel(m.time)) DateChip(dayLabel(m.time))
+                    if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
                     GroupMessageRow(model, m)
                 }
             }
@@ -90,7 +92,7 @@ internal fun GroupChatScreen(model: AppModel) {
         focusedParticipant?.let { key ->
             val isMe = key == "me"
             val name = if (isMe) {
-                "Вы"
+                stringResource(R.string.common_you)
             } else {
                 model.contacts.firstOrNull { it.key == key }?.name ?: (key.take(6) + "…")
             }
@@ -107,7 +109,7 @@ internal fun GroupChatScreen(model: AppModel) {
 internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit) {
     val gid = model.currentGroup
     val g = gid?.let { model.groups.firstOrNull { it.gid == gid } }
-    val name = g?.name ?: "Группа"
+    val name = g?.name ?: stringResource(R.string.group_default_name)
     // Агрегат «всего/в сети» считает движок (groupPresence); до первого тика —
     // фолбэк на число участников из списка групп.
     val roster = model.currentGroupRoster
@@ -117,7 +119,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
         Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onClick = onBack)
+        BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
         Row(
             Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onInfo() }
                 .padding(horizontal = 4.dp, vertical = 4.dp),
@@ -136,17 +138,17 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text("$total уч. · $onlineN в сети", color = HoloSecondary, fontSize = 11.sp)
+                Text(stringResource(R.string.group_presence, total, onlineN), color = HoloSecondary, fontSize = 11.sp)
             }
         }
         if (gid != null) {
             if (model.currentRoom == gid) {
-                BarIcon(Icons.Filled.CallEnd, "Выйти из звонка") { model.leaveRoom() }
+                BarIcon(Icons.Filled.CallEnd, stringResource(R.string.cd_leave_call)) { model.leaveRoom() }
             } else {
-                BarIcon(Icons.Filled.Call, "Войти в звонок") { model.joinRoom(gid) }
+                BarIcon(Icons.Filled.Call, stringResource(R.string.cd_join_call)) { model.joinRoom(gid) }
             }
         }
-        BarIcon(Icons.Filled.MoreVert, "Ещё", tint = Color.White, onClick = onInfo)
+        BarIcon(Icons.Filled.MoreVert, stringResource(R.string.common_more), tint = Color.White, onClick = onInfo)
     }
 }
 
@@ -163,7 +165,7 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text("${members.size} в звонке", color = HoloOnline, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.room_in_call, members.size), color = HoloOnline, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             if (names.isNotEmpty()) {
                 Text(
                     names,
@@ -178,7 +180,7 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         Box(
             Modifier.clip(RoundedCornerShape(10.dp)).background(HoloOnline)
                 .clickable { onJoin() }.padding(horizontal = 18.dp, vertical = 8.dp),
-        ) { Text("Войти", color = Color(0xFF0A1F0A), fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+        ) { Text(stringResource(R.string.room_join), color = Color(0xFF0A1F0A), fontSize = 14.sp, fontWeight = FontWeight.Medium) }
     }
 }
 
@@ -188,7 +190,11 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg) {
     when {
         m.system -> {
             val who = groupSenderName(model, m.sender)
-            val text = if (m.text.isBlank()) "$who обновил(а) состав группы" else "$who ${m.text}"
+            val text = if (m.text.isBlank()) {
+                stringResource(R.string.group_system_membership, who)
+            } else {
+                stringResource(R.string.group_system_event, who, m.text)
+            }
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
                 Box(
                     Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface)
@@ -256,9 +262,10 @@ internal fun GroupBubble(
 }
 
 /** Имя отправителя группового сообщения по hex-ключу. */
+@Composable
 internal fun groupSenderName(model: AppModel, hex: String): String = when {
-    hex.isEmpty() -> "Участник"
-    hex == model.me?.pubkey -> "Вы"
+    hex.isEmpty() -> stringResource(R.string.group_member_fallback)
+    hex == model.me?.pubkey -> stringResource(R.string.common_you)
     else -> model.contacts.firstOrNull { it.key == hex }?.name ?: (hex.take(6) + "…")
 }
 
@@ -283,14 +290,14 @@ internal fun nameColor(hex: String): Color =
 internal fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
     var name by remember { mutableStateOf("") }
     Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
-        FieldLabel("НАЗВАНИЕ")
+        FieldLabel(stringResource(R.string.create_label_name))
         TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-        AccentButton("Создать") {
+        AccentButton(stringResource(R.string.create_btn)) {
             model.createGroup(name)
             onDone()
         }
         Text(
-            "Вы станете администратором. Добавляйте участников из контактов внутри группы.",
+            stringResource(R.string.create_hint),
             color = HoloSecondary,
             fontSize = 11.sp,
         )
@@ -301,7 +308,7 @@ internal fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
 internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
     val gid = model.currentGroup ?: return
     if (model.contacts.isEmpty()) {
-        CenterMessage("Нет контактов для приглашения.")
+        CenterMessage(stringResource(R.string.addmember_empty))
     } else {
         LazyColumn(Modifier.fillMaxSize()) {
             items(model.contacts, key = { it.key }) { c ->

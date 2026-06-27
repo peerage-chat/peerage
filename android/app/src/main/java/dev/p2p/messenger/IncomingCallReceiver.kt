@@ -74,7 +74,7 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 Notification.Builder(ctx)
             }
 
-            b.setContentTitle("Входящий звонок")
+            b.setContentTitle(ctx.getString(R.string.notif_incoming_call))
                 .setContentText(callerName)
                 .setSmallIcon(android.R.drawable.stat_sys_phone_call)
                 .setCategory(Notification.CATEGORY_CALL)
@@ -87,22 +87,22 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 b.addAction(
                     Notification.Action.Builder(
                         android.graphics.drawable.Icon.createWithResource(ctx, android.R.drawable.ic_menu_call),
-                        "Принять",
+                        ctx.getString(R.string.notif_accept),
                         acceptPi,
                     ).build(),
                 )
                 b.addAction(
                     Notification.Action.Builder(
                         android.graphics.drawable.Icon.createWithResource(ctx, android.R.drawable.ic_delete),
-                        "Отклонить",
+                        ctx.getString(R.string.notif_decline),
                         declinePi,
                     ).build(),
                 )
             } else {
                 @Suppress("DEPRECATION")
-                b.addAction(0, "Принять", acceptPi)
+                b.addAction(0, ctx.getString(R.string.notif_accept), acceptPi)
                 @Suppress("DEPRECATION")
-                b.addAction(0, "Отклонить", declinePi)
+                b.addAction(0, ctx.getString(R.string.notif_decline), declinePi)
             }
 
             nm.notify(NOTIF_ID, b.build())
@@ -118,8 +118,8 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 if (nm.getNotificationChannel(CHANNEL) == null) {
                     nm.createNotificationChannel(
-                        NotificationChannel(CHANNEL, "Входящие звонки", NotificationManager.IMPORTANCE_HIGH).apply {
-                            description = "Уведомление о входящем звонке"
+                        NotificationChannel(CHANNEL, ctx.getString(R.string.notif_incoming_channel), NotificationManager.IMPORTANCE_HIGH).apply {
+                            description = ctx.getString(R.string.notif_incoming_channel_desc)
                             enableVibration(true)
                             setShowBadge(false)
                         },

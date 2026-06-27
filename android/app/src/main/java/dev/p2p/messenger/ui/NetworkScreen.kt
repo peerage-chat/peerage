@@ -28,12 +28,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.R
 
 @Composable
 internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
@@ -52,7 +54,7 @@ internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(HoloOnline))
                 Spacer(Modifier.width(10.dp))
                 Row {
-                    Text("Подключено к ", color = Color.White, fontSize = 15.sp)
+                    Text(stringResource(R.string.net_connected_to), color = Color.White, fontSize = 15.sp)
                     Text("mesh", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
             }
@@ -63,13 +65,13 @@ internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
         val pingTxt = ns?.pingMs?.takeIf { it > 0 }?.let { "%.0f".format(it) } ?: "—"
         val trafficTxt = if (ns == null) "—" else "↓${ns.rxRate / 1024} ↑${ns.txRate / 1024}"
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCard("Пиры", "${ns?.peerCount ?: model.netPeers}", null, Modifier.weight(1f))
-            MetricCard("Пинг", pingTxt, if (pingTxt == "—") null else "мс", Modifier.weight(1f))
-            MetricCard("Трафик", trafficTxt, "КБ/с", Modifier.weight(1f))
+            MetricCard(stringResource(R.string.net_metric_peers), "${ns?.peerCount ?: model.netPeers}", null, Modifier.weight(1f))
+            MetricCard(stringResource(R.string.net_metric_ping), pingTxt, if (pingTxt == "—") null else stringResource(R.string.net_unit_ms), Modifier.weight(1f))
+            MetricCard(stringResource(R.string.net_metric_traffic), trafficTxt, stringResource(R.string.net_unit_kbs), Modifier.weight(1f))
         }
 
         // 3. Мой узел.
-        FieldLabel("МОЙ УЗЕЛ")
+        FieldLabel(stringResource(R.string.net_my_node))
         SurfaceCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -84,28 +86,28 @@ internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 Icon(
                     Icons.Filled.ContentCopy,
-                    "Скопировать адрес",
+                    stringResource(R.string.net_copy_address),
                     tint = HoloAccent,
-                    modifier = Modifier.size(20.dp).clickable { copyToClipboard(ctx, me.address, "Адрес") },
+                    modifier = Modifier.size(20.dp).clickable { copyToClipboard(ctx, me.address, ctx.getString(R.string.net_address)) },
                 )
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlineAction("Мой QR", Icons.Filled.QrCode2, Modifier.weight(1f), onMyQr)
-            OutlineAction("Поделиться", Icons.Filled.Share, Modifier.weight(1f)) { shareText(ctx, me.pubkey) }
+            OutlineAction(stringResource(R.string.net_my_qr), Icons.Filled.QrCode2, Modifier.weight(1f), onMyQr)
+            OutlineAction(stringResource(R.string.net_share), Icons.Filled.Share, Modifier.weight(1f)) { shareText(ctx, me.pubkey) }
         }
 
         // 4. Режим участия — выгоды + цена.
-        FieldLabel("РЕЖИМ УЧАСТИЯ")
+        FieldLabel(stringResource(R.string.net_mode))
         SurfaceCard {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Share, null, tint = HoloOnline, modifier = Modifier.size(26.dp))
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Узел сети", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.net_node_mode), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                         Text(
-                            "Ретранслирую трафик других — помогаю сети",
+                            stringResource(R.string.net_node_mode_desc),
                             color = HoloSecondary,
                             fontSize = 12.sp,
                         )
@@ -123,24 +125,24 @@ internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
                     )
                 }
                 HorizontalDivider(color = HoloBorder, modifier = Modifier.padding(vertical = 12.dp))
-                BenefitRow(Icons.Filled.Bolt, HoloOnline, "Приоритет доставки твоих сообщений")
+                BenefitRow(Icons.Filled.Bolt, HoloOnline, stringResource(R.string.net_benefit_priority))
                 Spacer(Modifier.height(10.dp))
-                BenefitRow(Icons.Filled.Schedule, HoloOnline, "Дольше хранится офлайн-очередь")
+                BenefitRow(Icons.Filled.Schedule, HoloOnline, stringResource(R.string.net_benefit_queue))
                 Spacer(Modifier.height(10.dp))
-                BenefitRow(Icons.Filled.BatteryStd, HoloSecondary, "Цена: выше расход батареи и трафика")
+                BenefitRow(Icons.Filled.BatteryStd, HoloSecondary, stringResource(R.string.net_benefit_cost))
             }
         }
 
         // 5. Пиры — реальный список (направление/адрес/пинг с цветом).
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FieldLabel("ПИРЫ · ${ns?.peerCount ?: model.netPeers}")
+            FieldLabel(stringResource(R.string.net_peers_label, ns?.peerCount ?: model.netPeers))
             Spacer(Modifier.weight(1f))
         }
         SurfaceCard {
             val peers = ns?.peers ?: emptyList()
             if (peers.isEmpty()) {
                 Text(
-                    "Нет прямых пиров",
+                    stringResource(R.string.net_no_peers),
                     color = HoloSecondary,
                     fontSize = 13.sp,
                     modifier = Modifier.padding(vertical = 4.dp),
@@ -161,8 +163,8 @@ internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
                 Icon(Icons.Filled.Schedule, null, tint = HoloAccent, modifier = Modifier.size(26.dp))
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Офлайн-очередь · $queued", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    Text("доставится, когда получатель появится", color = HoloSecondary, fontSize = 12.sp)
+                    Text(stringResource(R.string.net_offline_queue, queued), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.net_offline_queue_desc), color = HoloSecondary, fontSize = 12.sp)
                 }
                 Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
             }
@@ -240,7 +242,7 @@ internal fun PeerRow(p: NetPeer) {
             ms < 150 -> WarnColor
             else -> HoloError
         }
-        Text(if (ms <= 0) "—" else "%.0f мс".format(ms), color = col, fontSize = 13.sp)
+        Text(if (ms <= 0) "—" else stringResource(R.string.net_ms_value, "%.0f".format(ms)), color = col, fontSize = 13.sp)
     }
 }
 
@@ -252,7 +254,7 @@ internal fun copyToClipboard(ctx: android.content.Context, text: String, label: 
     val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
     cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
     if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
-        android.widget.Toast.makeText(ctx, "Скопировано", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(ctx, ctx.getString(R.string.common_copied), android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -261,7 +263,7 @@ internal fun shareText(ctx: android.content.Context, text: String) {
         type = "text/plain"
         putExtra(android.content.Intent.EXTRA_TEXT, text)
     }
-    ctx.startActivity(android.content.Intent.createChooser(send, "Поделиться ключом"))
+    ctx.startActivity(android.content.Intent.createChooser(send, ctx.getString(R.string.net_share_chooser)))
 }
 
 /** Встроенный Compose-сканер QR-кода на CameraX. Вызывает [onResult] ровно один раз. */

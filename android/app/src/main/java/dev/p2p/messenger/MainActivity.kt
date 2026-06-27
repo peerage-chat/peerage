@@ -24,6 +24,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.ui.*
@@ -75,8 +76,8 @@ fun App(model: AppModel, dataDir: String) {
     }
 
     when {
-        model.error != null -> CenterMessage("Ошибка: ${model.error}")
-        model.me == null -> CenterMessage("Подключение к сети…")
+        model.error != null -> CenterMessage(stringResource(R.string.app_error, model.error.orEmpty()))
+        model.me == null -> CenterMessage(stringResource(R.string.app_connecting))
         else -> Root(model)
     }
 }
@@ -137,41 +138,41 @@ private fun Root(model: AppModel) {
                     // ── Шапка: конфигурируется по текущему экрану ─────────────────────
                     when (screen) {
                         Screen.Contacts -> TopBar(
-                            if (activeFilter == "all") "Чаты" else folderLabel(activeFilter),
+                            if (activeFilter == "all") stringResource(R.string.nav_chats) else stringResource(folderLabel(activeFilter)),
                             onMenu = { scope.launch { drawerState.open() } },
                         ) {
                             PeerIndicator(model.netPeers) { model.startBenchRecv() }
-                            BarIcon(Icons.Filled.Search, "Поиск") { screen = Screen.Search }
+                            BarIcon(Icons.Filled.Search, stringResource(R.string.cd_search)) { screen = Screen.Search }
                         }
                         Screen.Chat -> ChatTopBar(
                             model,
                             onBack = { screen = Screen.Contacts },
                             onProfile = { screen = Screen.Info },
                         )
-                        Screen.Add -> TopBar("Добавить контакт", onBack = { screen = Screen.Contacts })
-                        Screen.Me -> TopBar("Мой ключ", onBack = { screen = Screen.Contacts })
-                        Screen.Info -> TopBar("Контакт", onBack = { screen = Screen.Chat })
-                        Screen.Groups -> TopBar("Группы", onBack = { screen = Screen.Contacts }) {
-                            BarIcon(Icons.Filled.Add, "Новая группа") { screen = Screen.CreateGroup }
+                        Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = { screen = Screen.Contacts })
+                        Screen.Me -> TopBar(stringResource(R.string.title_my_key), onBack = { screen = Screen.Contacts })
+                        Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = { screen = Screen.Chat })
+                        Screen.Groups -> TopBar(stringResource(R.string.title_groups), onBack = { screen = Screen.Contacts }) {
+                            BarIcon(Icons.Filled.Add, stringResource(R.string.cd_new_group)) { screen = Screen.CreateGroup }
                         }
                         Screen.GroupChat -> GroupChatTopBar(
                             model,
                             onBack = { screen = Screen.Contacts },
                             onInfo = { screen = Screen.AddMember },
                         )
-                        Screen.CreateGroup -> TopBar("Новая группа", onBack = { screen = Screen.Groups })
-                        Screen.AddMember -> TopBar("Добавить участника", onBack = { screen = Screen.GroupChat })
-                        Screen.Settings -> TopBar("Настройки", onBack = { screen = Screen.Contacts })
-                        Screen.Scanner -> TopBar("Сканировать QR", onBack = { screen = Screen.Add })
-                        Screen.ContactList -> TopBar("Контакты", onBack = { screen = Screen.Contacts }) {
-                            BarIcon(Icons.Filled.PersonAdd, "Добавить контакт") { screen = Screen.Add }
+                        Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = { screen = Screen.Groups })
+                        Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = { screen = Screen.GroupChat })
+                        Screen.Settings -> TopBar(stringResource(R.string.menu_settings), onBack = { screen = Screen.Contacts })
+                        Screen.Scanner -> TopBar(stringResource(R.string.title_scan_qr), onBack = { screen = Screen.Add })
+                        Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = { screen = Screen.Contacts }) {
+                            BarIcon(Icons.Filled.PersonAdd, stringResource(R.string.cd_add_contact)) { screen = Screen.Add }
                         }
-                        Screen.Calls -> TopBar("Звонки", onBack = { screen = Screen.Contacts })
-                        Screen.Network -> TopBar("Сеть", onBack = { screen = Screen.Contacts }) {
-                            BarIcon(Icons.Filled.Refresh, "Обновить") { /* авто-поллинг; ручной рефреш — TODO */ }
+                        Screen.Calls -> TopBar(stringResource(R.string.menu_calls), onBack = { screen = Screen.Contacts })
+                        Screen.Network -> TopBar(stringResource(R.string.menu_network), onBack = { screen = Screen.Contacts }) {
+                            BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
                         }
-                        Screen.Saved -> TopBar("Сохранённое", onBack = { screen = Screen.Contacts })
-                        Screen.Search -> TopBar("Поиск", onBack = { screen = Screen.Contacts })
+                        Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = { screen = Screen.Contacts })
+                        Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = { screen = Screen.Contacts })
                     }
                     // ── Рейл папок: только на главном экране ────────────────────────
                     if (screen == Screen.Contacts) {
@@ -241,7 +242,7 @@ private fun Root(model: AppModel) {
                     modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
                     containerColor = HoloAccent,
                     contentColor = HoloAccentDark,
-                ) { Icon(Icons.Filled.Create, "Новый чат", modifier = Modifier.size(22.dp)) }
+                ) { Icon(Icons.Filled.Create, stringResource(R.string.cd_new_chat), modifier = Modifier.size(22.dp)) }
             }
             model.incomingCall?.let { IncomingCallOverlay(model, it) }
             // Активный DM-звонок (аудио или видео) — полноэкранная комната-сетка.

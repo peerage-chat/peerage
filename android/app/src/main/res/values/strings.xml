@@ -53,4 +53,191 @@
     <string name="share_preview_screen">preview · device screen</string>
     <string name="share_fps_value">%1$d fps</string>
     <string name="share_bitrate_value">%1$d Mbps</string>
+
+    <!-- ── Common ──────────────────────────────────────────────────────── -->
+    <string name="common_back">Back</string>
+    <string name="common_more">More</string>
+    <string name="common_send">Send</string>
+    <string name="common_you">You</string>
+    <string name="common_copied">Copied</string>
+    <string name="common_contact">Contact</string>
+    <string name="common_menu">Menu</string>
+
+    <!-- ── App states ──────────────────────────────────────────────────── -->
+    <string name="app_connecting">Connecting to network…</string>
+    <string name="app_error">Error: %1$s</string>
+
+    <!-- ── Navigation / drawer / folders ───────────────────────────────── -->
+    <string name="nav_chats">Chats</string>
+    <string name="folder_all">All</string>
+    <string name="folder_rooms">Rooms</string>
+    <string name="folder_channels">Channels</string>
+    <string name="folder_create">Create folder</string>
+    <string name="menu_my_key_qr">My key and QR</string>
+    <string name="menu_contacts">Contacts</string>
+    <string name="menu_calls">Calls</string>
+    <string name="menu_network">Network</string>
+    <string name="menu_saved">Saved</string>
+    <string name="menu_settings">Settings</string>
+
+    <!-- ── Top bars ────────────────────────────────────────────────────── -->
+    <string name="title_add_contact">Add contact</string>
+    <string name="title_my_key">My key</string>
+    <string name="title_groups">Groups</string>
+    <string name="title_new_group">New group</string>
+    <string name="title_add_member">Add member</string>
+    <string name="title_scan_qr">Scan QR</string>
+    <string name="title_search">Search</string>
+    <string name="cd_search">Search</string>
+    <string name="cd_new_group">New group</string>
+    <string name="cd_add_contact">Add contact</string>
+    <string name="cd_refresh">Refresh</string>
+    <string name="cd_new_chat">New chat</string>
+
+    <!-- ── Presence / counts ───────────────────────────────────────────── -->
+    <string name="status_online">online</string>
+    <string name="status_offline">offline</string>
+    <string name="status_in_network">online</string>
+    <string name="members_count">%1$d members</string>
+    <string name="group_presence">%1$d members · %2$d online</string>
+    <string name="presence_in_room">%1$d in room</string>
+    <string name="presence_on_air">On air</string>
+    <string name="room_in_call">%1$d in call</string>
+    <string name="room_join">Join</string>
+
+    <!-- ── Contacts / add / info ───────────────────────────────────────── -->
+    <string name="contacts_empty">No contacts. Add by key.</string>
+    <string name="contacts_empty_title">No contacts</string>
+    <string name="contacts_empty_hint">Add a peer by key or QR — using the button above</string>
+    <string name="channels_soon">Channels — soon</string>
+    <string name="bench_recv_rate">⏱ receiving: %1$s Mbps</string>
+    <string name="add_label_pubkey">PUBLIC KEY (hex)</string>
+    <string name="add_hint_hex">64 hex characters</string>
+    <string name="add_btn">Add</string>
+    <string name="add_known">Contact already exists</string>
+    <string name="add_error">Invalid key</string>
+    <string name="label_name">NAME</string>
+    <string name="qr_cd">Public key QR code</string>
+    <string name="me_fingerprint_label">FINGERPRINT (verify in person)</string>
+    <string name="me_address_label">YGGDRASIL ADDRESS</string>
+    <string name="me_pubkey_label">PUBLIC KEY</string>
+    <string name="me_copy_key">Copy key</string>
+    <string name="info_verify_hint">Verify the words with your peer over another channel — protects against key substitution.</string>
+    <string name="info_verified">Verified</string>
+    <string name="info_not_verified">Not verified</string>
+    <string name="info_unmark">Unmark</string>
+    <string name="info_mark">Mark</string>
+    <string name="info_delete">Delete contact</string>
+    <string name="info_diagnostics">DIAGNOSTICS</string>
+    <string name="info_speed_test">Speed test</string>
+
+    <!-- ── Chat ────────────────────────────────────────────────────────── -->
+    <string name="chat_default_title">Chat</string>
+    <string name="chat_e2e_banner">Messages are end-to-end encrypted</string>
+    <string name="chat_input_hint">Message…</string>
+    <string name="chat_voice">Voice</string>
+    <string name="cd_attach">Attach</string>
+    <string name="cd_emoji">Emoji</string>
+    <string name="cd_audio_call">Audio call</string>
+    <string name="status_delivered">delivered</string>
+    <string name="status_sent">sent</string>
+    <string name="status_sending">sending</string>
+    <string name="status_queued">queued</string>
+
+    <!-- ── Date chips ──────────────────────────────────────────────────── -->
+    <string name="date_today">Today</string>
+    <string name="date_yesterday">Yesterday</string>
+
+    <!-- ── Groups ──────────────────────────────────────────────────────── -->
+    <string name="groups_empty">No groups. Create one.</string>
+    <string name="group_default_name">Group</string>
+    <string name="group_member_fallback">Member</string>
+    <string name="cd_join_call">Join call</string>
+    <string name="cd_leave_call">Leave call</string>
+    <string name="group_system_membership">%1$s updated the group</string>
+    <string name="group_system_event">%1$s %2$s</string>
+    <string name="create_label_name">NAME</string>
+    <string name="create_btn">Create</string>
+    <string name="create_hint">You\'ll become the admin. Add members from contacts inside the group.</string>
+    <string name="addmember_empty">No contacts to invite.</string>
+
+    <!-- ── Search ──────────────────────────────────────────────────────── -->
+    <string name="search_hint">Name, key or group title</string>
+    <string name="search_prompt">Start typing — we\'ll find contacts and groups</string>
+    <string name="search_empty">Nothing found</string>
+    <string name="search_group_subtitle">%1$d members · group</string>
+
+    <!-- ── Empty states (stubs) ────────────────────────────────────────── -->
+    <string name="calls_empty_title">No calls yet</string>
+    <string name="calls_empty_hint">Call history will appear here</string>
+    <string name="saved_empty_title">Saved is empty</string>
+    <string name="saved_empty_hint">Messages you save will appear here</string>
+
+    <!-- ── Network screen ──────────────────────────────────────────────── -->
+    <string name="net_connected_to">Connected to </string>
+    <string name="net_metric_peers">Peers</string>
+    <string name="net_metric_ping">Ping</string>
+    <string name="net_unit_ms">ms</string>
+    <string name="net_metric_traffic">Traffic</string>
+    <string name="net_unit_kbs">KB/s</string>
+    <string name="net_my_node">MY NODE</string>
+    <string name="net_copy_address">Copy address</string>
+    <string name="net_address">Address</string>
+    <string name="net_my_qr">My QR</string>
+    <string name="net_share">Share</string>
+    <string name="net_mode">PARTICIPATION MODE</string>
+    <string name="net_node_mode">Network node</string>
+    <string name="net_node_mode_desc">Relaying others\' traffic — helping the network</string>
+    <string name="net_benefit_priority">Priority delivery of your messages</string>
+    <string name="net_benefit_queue">Offline queue kept longer</string>
+    <string name="net_benefit_cost">Cost: higher battery and data use</string>
+    <string name="net_peers_label">PEERS · %1$d</string>
+    <string name="net_no_peers">No direct peers</string>
+    <string name="net_offline_queue">Offline queue · %1$d</string>
+    <string name="net_offline_queue_desc">will be delivered when the recipient comes online</string>
+    <string name="net_share_chooser">Share key</string>
+    <string name="net_ms_value">%1$s ms</string>
+
+    <!-- ── QR scanner ──────────────────────────────────────────────────── -->
+    <string name="qr_scan_hint">Point the camera at a QR code</string>
+
+    <!-- ── Settings ────────────────────────────────────────────────────── -->
+    <string name="settings_video_quality">VIDEO CALL QUALITY</string>
+    <string name="settings_bitrate">%1$s Mbps</string>
+    <string name="settings_video_apply">Applies to the next call.</string>
+    <string name="settings_about">ABOUT</string>
+    <string name="settings_version_label">Version</string>
+    <string name="settings_version_value">0.1.0 (dev)</string>
+    <string name="settings_transport_label">Transport</string>
+    <string name="settings_transport_value">Yggdrasil mesh (serverless)</string>
+    <string name="settings_encryption_label">Encryption</string>
+    <string name="settings_encryption_value">E2E, always on</string>
+    <string name="settings_license_label">License</string>
+    <string name="settings_about_future">Power, media and storage settings are coming closer to release.</string>
+
+    <!-- ── CallUi extras ───────────────────────────────────────────────── -->
+    <string name="call_in_room_caps">IN CALL · %1$d</string>
+    <string name="call_in_room_presence_caps">IN ROOM · %1$d</string>
+    <string name="call_mic_off">Mic off</string>
+    <string name="call_close">Close</string>
+
+    <!-- ── Diagnostics (bench) ─────────────────────────────────────────── -->
+    <string name="bench_sending">sending…</string>
+    <string name="bench_sent">sent %1$.1f Mbps (%2$.1f MB)</string>
+
+    <!-- ── Services / notifications ────────────────────────────────────── -->
+    <string name="notif_incoming_call">Incoming call</string>
+    <string name="notif_accept">Accept</string>
+    <string name="notif_decline">Decline</string>
+    <string name="notif_incoming_channel">Incoming calls</string>
+    <string name="notif_incoming_channel_desc">Incoming call notification</string>
+    <string name="notif_conn_channel">Connection</string>
+    <string name="notif_conn_channel_desc">p2p online — mesh node active</string>
+    <string name="notif_conn_text">Online — keeping mesh connection</string>
+    <string name="notif_disconnect">Disconnect</string>
+    <string name="notif_call_channel">Calls</string>
+    <string name="notif_call_channel_desc">Active call or voice room</string>
+    <string name="notif_call_with">Call with %1$s</string>
+    <string name="notif_voice_chat">In voice chat</string>
+    <string name="notif_end">End</string>
 </resources>

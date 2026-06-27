@@ -38,7 +38,7 @@ object VaultKeyManager {
             oldFile.exists() -> {
                 // Миграция: plaintext vault.key → защищённый vault.key.enc
                 val raw = oldFile.readBytes()
-                require(raw.size == KEY_LEN) { "vault.key: неверный размер ${raw.size}" }
+                require(raw.size == KEY_LEN) { "vault.key: wrong size ${raw.size}" }
                 encFile.writeBytes(wrap(raw, keystoreKey))
                 oldFile.delete()
                 raw
@@ -84,7 +84,7 @@ object VaultKeyManager {
     }
 
     private fun unwrap(data: ByteArray, key: SecretKey): ByteArray {
-        require(data.size > GCM_IV_LEN) { "vault.key.enc: файл повреждён" }
+        require(data.size > GCM_IV_LEN) { "vault.key.enc: file corrupted" }
         val iv = data.copyOf(GCM_IV_LEN)
         val ct = data.copyOfRange(GCM_IV_LEN, data.size)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

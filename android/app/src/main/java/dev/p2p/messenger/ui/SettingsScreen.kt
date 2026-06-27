@@ -13,10 +13,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.R
 
 @Composable
 internal fun SettingsScreen(model: AppModel) {
@@ -27,7 +29,7 @@ internal fun SettingsScreen(model: AppModel) {
             .padding(ScreenPad),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        FieldLabel("КАЧЕСТВО ВИДЕО-ЗВОНКА")
+        FieldLabel(stringResource(R.string.settings_video_quality))
         Spacer(Modifier.height(4.dp))
         VideoQuality.presets.forEach { preset ->
             val selected = model.videoQuality == preset
@@ -56,7 +58,7 @@ internal fun SettingsScreen(model: AppModel) {
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     )
                     Text(
-                        "%.0f Мбит/с".format(preset.bitrate / 1_000_000.0),
+                        stringResource(R.string.settings_bitrate, "%.0f".format(preset.bitrate / 1_000_000.0)),
                         color = HoloSecondary,
                         fontSize = 11.sp,
                     )
@@ -66,21 +68,21 @@ internal fun SettingsScreen(model: AppModel) {
         }
         Spacer(Modifier.height(16.dp))
         Text(
-            "Изменение применяется к следующему звонку.",
+            stringResource(R.string.settings_video_apply),
             color = HoloSecondary,
             fontSize = 11.sp,
         )
 
         Spacer(Modifier.height(24.dp))
-        FieldLabel("О ПРИЛОЖЕНИИ")
+        FieldLabel(stringResource(R.string.settings_about))
         Spacer(Modifier.height(4.dp))
-        SettingInfoRow("Версия", "0.1.0 (dev)")
-        SettingInfoRow("Транспорт", "Yggdrasil mesh (serverless)")
-        SettingInfoRow("Шифрование", "E2E, всегда включено")
-        SettingInfoRow("Лицензия", "GPL-3.0")
+        SettingInfoRow(stringResource(R.string.settings_version_label), stringResource(R.string.settings_version_value))
+        SettingInfoRow(stringResource(R.string.settings_transport_label), stringResource(R.string.settings_transport_value))
+        SettingInfoRow(stringResource(R.string.settings_encryption_label), stringResource(R.string.settings_encryption_value))
+        SettingInfoRow(stringResource(R.string.settings_license_label), "GPL-3.0")
         Spacer(Modifier.height(12.dp))
         Text(
-            "Энергия, медиа и хранилище — настройки появятся ближе к релизу.",
+            stringResource(R.string.settings_about_future),
             color = HoloSecondary,
             fontSize = 11.sp,
         )

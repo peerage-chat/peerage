@@ -94,10 +94,10 @@ class CallService : Service() {
                 nm.createNotificationChannel(
                     NotificationChannel(
                         CHANNEL,
-                        "Звонки",
+                        getString(R.string.notif_call_channel),
                         NotificationManager.IMPORTANCE_LOW,
                     ).apply {
-                        description = "Активный звонок или голосовая комната"
+                        description = getString(R.string.notif_call_channel_desc)
                         setShowBadge(false)
                     },
                 )
@@ -106,7 +106,7 @@ class CallService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val title = if (peerName.isNotEmpty()) "Звонок с $peerName" else "В голосовом чате"
+        val title = if (peerName.isNotEmpty()) getString(R.string.notif_call_with, peerName) else getString(R.string.notif_voice_chat)
 
         val openPi = PendingIntent.getActivity(
             this,
@@ -143,13 +143,13 @@ class CallService : Service() {
                         this,
                         android.R.drawable.ic_delete,
                     ),
-                    "Завершить",
+                    getString(R.string.notif_end),
                     endPi,
                 ).build(),
             )
         } else {
             @Suppress("DEPRECATION")
-            b.addAction(0, "Завершить", endPi)
+            b.addAction(0, getString(R.string.notif_end), endPi)
         }
 
         return b.build()

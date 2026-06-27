@@ -45,4 +45,191 @@
     <string name="share_preview_screen">превью · экран устройства</string>
     <string name="share_fps_value">%1$d fps</string>
     <string name="share_bitrate_value">%1$d Мбит/с</string>
+
+    <!-- ── Общее ───────────────────────────────────────────────────────── -->
+    <string name="common_back">Назад</string>
+    <string name="common_more">Ещё</string>
+    <string name="common_send">Отправить</string>
+    <string name="common_you">Вы</string>
+    <string name="common_copied">Скопировано</string>
+    <string name="common_contact">Контакт</string>
+    <string name="common_menu">Меню</string>
+
+    <!-- ── Состояния приложения ────────────────────────────────────────── -->
+    <string name="app_connecting">Подключение к сети…</string>
+    <string name="app_error">Ошибка: %1$s</string>
+
+    <!-- ── Навигация / меню / папки ────────────────────────────────────── -->
+    <string name="nav_chats">Чаты</string>
+    <string name="folder_all">Все</string>
+    <string name="folder_rooms">Комнаты</string>
+    <string name="folder_channels">Каналы</string>
+    <string name="folder_create">Создать папку</string>
+    <string name="menu_my_key_qr">Мой ключ и QR</string>
+    <string name="menu_contacts">Контакты</string>
+    <string name="menu_calls">Звонки</string>
+    <string name="menu_network">Сеть</string>
+    <string name="menu_saved">Сохранённое</string>
+    <string name="menu_settings">Настройки</string>
+
+    <!-- ── Шапки экранов ───────────────────────────────────────────────── -->
+    <string name="title_add_contact">Добавить контакт</string>
+    <string name="title_my_key">Мой ключ</string>
+    <string name="title_groups">Группы</string>
+    <string name="title_new_group">Новая группа</string>
+    <string name="title_add_member">Добавить участника</string>
+    <string name="title_scan_qr">Сканировать QR</string>
+    <string name="title_search">Поиск</string>
+    <string name="cd_search">Поиск</string>
+    <string name="cd_new_group">Новая группа</string>
+    <string name="cd_add_contact">Добавить контакт</string>
+    <string name="cd_refresh">Обновить</string>
+    <string name="cd_new_chat">Новый чат</string>
+
+    <!-- ── Присутствие / счётчики ──────────────────────────────────────── -->
+    <string name="status_online">онлайн</string>
+    <string name="status_offline">не в сети</string>
+    <string name="status_in_network">в сети</string>
+    <string name="members_count">%1$d уч.</string>
+    <string name="group_presence">%1$d уч. · %2$d в сети</string>
+    <string name="presence_in_room">%1$d в комнате</string>
+    <string name="presence_on_air">В эфире</string>
+    <string name="room_in_call">%1$d в звонке</string>
+    <string name="room_join">Войти</string>
+
+    <!-- ── Контакты / добавление / профиль ─────────────────────────────── -->
+    <string name="contacts_empty">Нет контактов. Добавьте по ключу.</string>
+    <string name="contacts_empty_title">Нет контактов</string>
+    <string name="contacts_empty_hint">Добавьте собеседника по ключу или QR — кнопкой вверху</string>
+    <string name="channels_soon">Каналы — скоро</string>
+    <string name="bench_recv_rate">⏱ приём: %1$s Мбит/с</string>
+    <string name="add_label_pubkey">ПУБЛИЧНЫЙ КЛЮЧ (hex)</string>
+    <string name="add_hint_hex">64 hex-символа</string>
+    <string name="add_btn">Добавить</string>
+    <string name="add_known">Контакт уже есть</string>
+    <string name="add_error">Неверный ключ</string>
+    <string name="label_name">ИМЯ</string>
+    <string name="qr_cd">QR код публичного ключа</string>
+    <string name="me_fingerprint_label">FINGERPRINT (сверьте при встрече)</string>
+    <string name="me_address_label">АДРЕС YGGDRASIL</string>
+    <string name="me_pubkey_label">ПУБЛИЧНЫЙ КЛЮЧ</string>
+    <string name="me_copy_key">Скопировать ключ</string>
+    <string name="info_verify_hint">Сверьте слова с собеседником по другому каналу — защита от подмены ключа.</string>
+    <string name="info_verified">Проверен</string>
+    <string name="info_not_verified">Не проверен</string>
+    <string name="info_unmark">Снять</string>
+    <string name="info_mark">Пометить</string>
+    <string name="info_delete">Удалить контакт</string>
+    <string name="info_diagnostics">ДИАГНОСТИКА</string>
+    <string name="info_speed_test">Тест скорости</string>
+
+    <!-- ── Чат ─────────────────────────────────────────────────────────── -->
+    <string name="chat_default_title">Чат</string>
+    <string name="chat_e2e_banner">Сообщения защищены сквозным шифрованием</string>
+    <string name="chat_input_hint">Сообщение…</string>
+    <string name="chat_voice">Голосовое</string>
+    <string name="cd_attach">Прикрепить</string>
+    <string name="cd_emoji">Эмодзи</string>
+    <string name="cd_audio_call">Аудио-звонок</string>
+    <string name="status_delivered">доставлено</string>
+    <string name="status_sent">отправлено</string>
+    <string name="status_sending">отправляется</string>
+    <string name="status_queued">ожидание</string>
+
+    <!-- ── Чипы дат ────────────────────────────────────────────────────── -->
+    <string name="date_today">Сегодня</string>
+    <string name="date_yesterday">Вчера</string>
+
+    <!-- ── Группы ──────────────────────────────────────────────────────── -->
+    <string name="groups_empty">Нет групп. Создайте новую.</string>
+    <string name="group_default_name">Группа</string>
+    <string name="group_member_fallback">Участник</string>
+    <string name="cd_join_call">Войти в звонок</string>
+    <string name="cd_leave_call">Выйти из звонка</string>
+    <string name="group_system_membership">%1$s обновил(а) состав группы</string>
+    <string name="group_system_event">%1$s %2$s</string>
+    <string name="create_label_name">НАЗВАНИЕ</string>
+    <string name="create_btn">Создать</string>
+    <string name="create_hint">Вы станете администратором. Добавляйте участников из контактов внутри группы.</string>
+    <string name="addmember_empty">Нет контактов для приглашения.</string>
+
+    <!-- ── Поиск ───────────────────────────────────────────────────────── -->
+    <string name="search_hint">Имя, ключ или название группы</string>
+    <string name="search_prompt">Начните вводить — найдём контакты и группы</string>
+    <string name="search_empty">Ничего не найдено</string>
+    <string name="search_group_subtitle">%1$d уч. · группа</string>
+
+    <!-- ── Пустые состояния ────────────────────────────────────────────── -->
+    <string name="calls_empty_title">Пока нет звонков</string>
+    <string name="calls_empty_hint">Журнал звонков появится здесь</string>
+    <string name="saved_empty_title">Сохранённое пусто</string>
+    <string name="saved_empty_hint">Сообщения, которые вы сохраните, появятся здесь</string>
+
+    <!-- ── Экран «Сеть» ────────────────────────────────────────────────── -->
+    <string name="net_connected_to">Подключено к </string>
+    <string name="net_metric_peers">Пиры</string>
+    <string name="net_metric_ping">Пинг</string>
+    <string name="net_unit_ms">мс</string>
+    <string name="net_metric_traffic">Трафик</string>
+    <string name="net_unit_kbs">КБ/с</string>
+    <string name="net_my_node">МОЙ УЗЕЛ</string>
+    <string name="net_copy_address">Скопировать адрес</string>
+    <string name="net_address">Адрес</string>
+    <string name="net_my_qr">Мой QR</string>
+    <string name="net_share">Поделиться</string>
+    <string name="net_mode">РЕЖИМ УЧАСТИЯ</string>
+    <string name="net_node_mode">Узел сети</string>
+    <string name="net_node_mode_desc">Ретранслирую трафик других — помогаю сети</string>
+    <string name="net_benefit_priority">Приоритет доставки твоих сообщений</string>
+    <string name="net_benefit_queue">Дольше хранится офлайн-очередь</string>
+    <string name="net_benefit_cost">Цена: выше расход батареи и трафика</string>
+    <string name="net_peers_label">ПИРЫ · %1$d</string>
+    <string name="net_no_peers">Нет прямых пиров</string>
+    <string name="net_offline_queue">Офлайн-очередь · %1$d</string>
+    <string name="net_offline_queue_desc">доставится, когда получатель появится</string>
+    <string name="net_share_chooser">Поделиться ключом</string>
+    <string name="net_ms_value">%1$s мс</string>
+
+    <!-- ── Сканер QR ───────────────────────────────────────────────────── -->
+    <string name="qr_scan_hint">Наведите камеру на QR-код</string>
+
+    <!-- ── Настройки ───────────────────────────────────────────────────── -->
+    <string name="settings_video_quality">КАЧЕСТВО ВИДЕО-ЗВОНКА</string>
+    <string name="settings_bitrate">%1$s Мбит/с</string>
+    <string name="settings_video_apply">Изменение применяется к следующему звонку.</string>
+    <string name="settings_about">О ПРИЛОЖЕНИИ</string>
+    <string name="settings_version_label">Версия</string>
+    <string name="settings_version_value">0.1.0 (dev)</string>
+    <string name="settings_transport_label">Транспорт</string>
+    <string name="settings_transport_value">Yggdrasil mesh (serverless)</string>
+    <string name="settings_encryption_label">Шифрование</string>
+    <string name="settings_encryption_value">E2E, всегда включено</string>
+    <string name="settings_license_label">Лицензия</string>
+    <string name="settings_about_future">Энергия, медиа и хранилище — настройки появятся ближе к релизу.</string>
+
+    <!-- ── Доп. строки звонка ──────────────────────────────────────────── -->
+    <string name="call_in_room_caps">В ЗВОНКЕ · %1$d</string>
+    <string name="call_in_room_presence_caps">В КОМНАТЕ · %1$d</string>
+    <string name="call_mic_off">Микрофон выкл</string>
+    <string name="call_close">Закрыть</string>
+
+    <!-- ── Диагностика (bench) ─────────────────────────────────────────── -->
+    <string name="bench_sending">отправка…</string>
+    <string name="bench_sent">отправлено %1$.1f Мбит/с (%2$.1f МБ)</string>
+
+    <!-- ── Сервисы / уведомления ───────────────────────────────────────── -->
+    <string name="notif_incoming_call">Входящий звонок</string>
+    <string name="notif_accept">Принять</string>
+    <string name="notif_decline">Отклонить</string>
+    <string name="notif_incoming_channel">Входящие звонки</string>
+    <string name="notif_incoming_channel_desc">Уведомление о входящем звонке</string>
+    <string name="notif_conn_channel">Соединение</string>
+    <string name="notif_conn_channel_desc">p2p в сети — mesh-узел активен</string>
+    <string name="notif_conn_text">В сети — держим mesh-соединение</string>
+    <string name="notif_disconnect">Отключить</string>
+    <string name="notif_call_channel">Звонки</string>
+    <string name="notif_call_channel_desc">Активный звонок или голосовая комната</string>
+    <string name="notif_call_with">Звонок с %1$s</string>
+    <string name="notif_voice_chat">В голосовом чате</string>
+    <string name="notif_end">Завершить</string>
 </resources>

@@ -30,19 +30,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.R
 
+// Третий элемент — resId подписи (локализуется в месте рендера через stringResource).
 internal val Folders = listOf(
-    Triple("all", Icons.Filled.Forum, "Все"),
-    Triple("dm", Icons.AutoMirrored.Filled.Chat, "Чаты"),
-    Triple("room", Icons.Filled.Headset, "Комнаты"),
-    Triple("channel", Icons.Filled.Campaign, "Каналы"),
+    Triple("all", Icons.Filled.Forum, R.string.folder_all),
+    Triple("dm", Icons.AutoMirrored.Filled.Chat, R.string.nav_chats),
+    Triple("room", Icons.Filled.Headset, R.string.folder_rooms),
+    Triple("channel", Icons.Filled.Campaign, R.string.folder_channels),
 )
 
-internal fun folderLabel(key: String): String = Folders.firstOrNull { it.first == key }?.third ?: "Чаты"
+internal fun folderLabel(key: String): Int = Folders.firstOrNull { it.first == key }?.third ?: R.string.nav_chats
 
 /** Рейл папок-иконок (Discord-стиль): активная подсвечена, бейдж непрочитанного
  *  в правом-нижнем углу, `+` создаёт папку (пока заглушка). */
@@ -62,10 +65,10 @@ internal fun FolderRail(model: AppModel, activeFilter: String, onFilter: (String
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Folders.forEach { (key, icon, label) ->
-            FolderTile(icon, label, key == activeFilter, badgeFor(key)) { onFilter(key) }
+        Folders.forEach { (key, icon, labelRes) ->
+            FolderTile(icon, stringResource(labelRes), key == activeFilter, badgeFor(key)) { onFilter(key) }
         }
-        FolderTile(Icons.Filled.Add, "Создать папку", false, 0) { /* TODO: создать папку */ }
+        FolderTile(Icons.Filled.Add, stringResource(R.string.folder_create), false, 0) { /* TODO: создать папку */ }
     }
     HorizontalDivider(thickness = 1.dp, color = HoloBorder)
 }
@@ -121,24 +124,24 @@ internal fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
             SquareAvatar(me?.pubkey ?: "?", size = 52.dp)
             Spacer(Modifier.width(14.dp))
             Text(
-                "Вы",
+                stringResource(R.string.common_you),
                 color = Color.White,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f),
             )
-            Icon(Icons.Filled.QrCode2, "Мой ключ и QR", tint = HoloAccent, modifier = Modifier.size(22.dp))
+            Icon(Icons.Filled.QrCode2, stringResource(R.string.menu_my_key_qr), tint = HoloAccent, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.height(8.dp))
         // Основные разделы.
         listOf(
-            Triple(Icons.Filled.Group, "Контакты", Screen.ContactList),
-            Triple(Icons.Filled.Call, "Звонки", Screen.Calls),
-            Triple(Icons.Filled.Share, "Сеть", Screen.Network),
-            Triple(Icons.Filled.Lock, "Сохранённое", Screen.Saved),
+            Triple(Icons.Filled.Group, stringResource(R.string.menu_contacts), Screen.ContactList),
+            Triple(Icons.Filled.Call, stringResource(R.string.menu_calls), Screen.Calls),
+            Triple(Icons.Filled.Share, stringResource(R.string.menu_network), Screen.Network),
+            Triple(Icons.Filled.Lock, stringResource(R.string.menu_saved), Screen.Saved),
         ).forEach { (icon, label, dest) -> DrawerItem(icon, label) { navigate(dest) } }
         HorizontalDivider(color = HoloBorder, modifier = Modifier.padding(vertical = 4.dp))
-        DrawerItem(Icons.Filled.Settings, "Настройки") { navigate(Screen.Settings) }
+        DrawerItem(Icons.Filled.Settings, stringResource(R.string.menu_settings)) { navigate(Screen.Settings) }
         Spacer(Modifier.weight(1f))
         HorizontalDivider(color = HoloBorder)
         Text(

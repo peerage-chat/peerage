@@ -23,11 +23,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.R
 
 @Composable
 internal fun RoomGrid(
@@ -41,7 +43,7 @@ internal fun RoomGrid(
     Surface(color = HoloSurface, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
             Text(
-                if (inRoom) "В ЗВОНКЕ · $total" else "В КОМНАТЕ · $total",
+                stringResource(if (inRoom) R.string.call_in_room_caps else R.string.call_in_room_presence_caps, total),
                 color = HoloSecondary,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(start = 2.dp, bottom = 8.dp),
@@ -59,7 +61,7 @@ internal fun RoomGrid(
                     row.forEach { (key, audio, video) ->
                         val isMe = key == "me"
                         val name = if (isMe) {
-                            "Вы"
+                            stringResource(R.string.common_you)
                         } else {
                             model.contacts.firstOrNull { it.key == key }?.name ?: (key.take(6) + "…")
                         }
@@ -149,7 +151,7 @@ internal fun ParticipantFullscreen(
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
-                "Закрыть",
+                stringResource(R.string.call_close),
                 tint = Color.White,
                 modifier = Modifier.size(18.dp).then(
                     Modifier.graphicsLayer { rotationZ = 90f },
@@ -190,7 +192,7 @@ internal fun ParticipantFullscreen(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(14.dp))
-                        Text("Микрофон выкл", color = WarnColor, fontSize = 12.sp)
+                        Text(stringResource(R.string.call_mic_off), color = WarnColor, fontSize = 12.sp)
                     }
                 }
                 if (video) {
@@ -201,7 +203,7 @@ internal fun ParticipantFullscreen(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
-                        Text("Видео", color = HoloSecondary, fontSize = 12.sp)
+                        Text(stringResource(R.string.call_btn_video), color = HoloSecondary, fontSize = 12.sp)
                     }
                 }
             }
@@ -211,7 +213,7 @@ internal fun ParticipantFullscreen(
 
 @Composable
 internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
-    val name = model.contacts.firstOrNull { it.key == ic.peer }?.name ?: "Контакт"
+    val name = model.contacts.firstOrNull { it.key == ic.peer }?.name ?: stringResource(R.string.common_contact)
     Box(Modifier.fillMaxSize().background(Color(0xF2000000))) {
         Column(
             Modifier.fillMaxSize().padding(bottom = 64.dp),
@@ -234,7 +236,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                 Spacer(Modifier.height(20.dp))
                 Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
                 Text(
-                    "Входящий звонок",
+                    stringResource(R.string.notif_incoming_call),
                     color = HoloSecondary,
                     fontSize = 15.sp,
                     modifier = Modifier.padding(top = 8.dp),
@@ -244,8 +246,8 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                 horizontalArrangement = Arrangement.spacedBy(56.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CallButton(Icons.Filled.CallEnd, "Отклонить", HoloError) { model.declineDmCall() }
-                CallButton(Icons.Filled.Call, "Принять", HoloOnline) { model.acceptDmCall() }
+                CallButton(Icons.Filled.CallEnd, stringResource(R.string.call_invite_btn_decline), HoloError) { model.declineDmCall() }
+                CallButton(Icons.Filled.Call, stringResource(R.string.notif_accept), HoloOnline) { model.acceptDmCall() }
             }
         }
     }

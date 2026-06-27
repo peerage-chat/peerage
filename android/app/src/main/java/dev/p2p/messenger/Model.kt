@@ -548,7 +548,8 @@ class AppModel private constructor() {
                 // обновляем экран входящего. От другого пира, пока заняты — игнор.
                 if (existing == null || existing.peer == peer) {
                     incomingCall = IncomingRoomCall(peer, roomId, audio, video)
-                    val callerName = contacts.firstOrNull { it.key == peer }?.name ?: "Контакт"
+                    val callerName = contacts.firstOrNull { it.key == peer }?.name
+                        ?: appContext?.getString(R.string.common_contact).orEmpty()
                     appContext?.let { IncomingCallReceiver.show(it, callerName) }
                 }
             }
@@ -908,7 +909,7 @@ class AppModel private constructor() {
     /** Создать группу (fire-and-forget). Появится в списке по событию
      *  `groups_changed` (см. applyEvent → refreshGroupsNow). */
     fun createGroup(name: String) = ops.execute {
-        Native.groupCreate(sessionPtr, name.ifBlank { "Группа" })
+        Native.groupCreate(sessionPtr, name.ifBlank { appContext?.getString(R.string.group_default_name) ?: "Group" })
     }
 
     fun openGroup(gid: String) {
@@ -961,13 +962,14 @@ class AppModel private constructor() {
 
     /** Блб ~30 МБ на пира; результат отправки в [benchResult]. */
     fun blastBench(peerHex: String) {
-        benchResult = "отправка…"
+        benchResult = appContext?.getString(R.string.bench_sending).orEmpty()
         ops.execute {
             val r = JSONObject(Native.benchBlast(sessionPtr, peerHex, 30_000))
-            benchResult = "отправлено %.1f Мбит/с (%.1f МБ)".format(
+            benchResult = appContext?.getString(
+                R.string.bench_sent,
                 r.optDouble("mbps", 0.0),
                 r.optDouble("sent_bytes", 0.0) / 1e6,
-            )
+            ).orEmpty()
         }
     }
 }

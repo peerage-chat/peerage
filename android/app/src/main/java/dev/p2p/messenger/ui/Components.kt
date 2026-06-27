@@ -23,12 +23,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.R
 import kotlin.math.abs
 
 // ── Общие элементы ──────────────────────────────────────────────────────────
@@ -53,8 +55,8 @@ internal fun TopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when {
-            onMenu != null -> BarIcon(Icons.Filled.Menu, "Меню", onClick = onMenu)
-            onBack != null -> BarIcon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", onClick = onBack)
+            onMenu != null -> BarIcon(Icons.Filled.Menu, stringResource(R.string.common_menu), onClick = onMenu)
+            onBack != null -> BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
             else -> Spacer(Modifier.width(12.dp))
         }
         Text(
@@ -94,7 +96,7 @@ internal fun PeerIndicator(peers: Int, onLongPress: () -> Unit = {}) {
     ) {
         Icon(
             Icons.Filled.Share,
-            "Сеть",
+            stringResource(R.string.menu_network),
             tint = if (peers > 0) HoloOnline else HoloSecondary,
             modifier = Modifier.size(18.dp),
         )
@@ -170,7 +172,7 @@ internal fun SendButton(onClick: () -> Unit) {
     Box(
         Modifier.clip(CircleShape).background(HoloAccent).size(44.dp).clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(Icons.AutoMirrored.Filled.Send, "Отправить", tint = HoloAccentDark, modifier = Modifier.size(20.dp)) }
+    ) { Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.common_send), tint = HoloAccentDark, modifier = Modifier.size(20.dp)) }
 }
 
 // ── Экраны ──────────────────────────────────────────────────────────────────
@@ -179,17 +181,20 @@ internal fun SendButton(onClick: () -> Unit) {
 internal fun fmtMsgTime(ts: Long): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
 
-/** Метка дня для чипа-разделителя: Сегодня / Вчера / «d MMMM». */
+/** Ключ дня для сравнения «сменился ли день» между соседними сообщениями
+ *  (не-Composable: используется в условии группировки). */
+internal fun dayKey(ts: Long): Long {
+    val c = java.util.Calendar.getInstance().apply { timeInMillis = ts * 1000 }
+    return c.get(java.util.Calendar.YEAR) * 1000L + c.get(java.util.Calendar.DAY_OF_YEAR)
+}
+
+/** Локализованная метка дня для чипа-разделителя: Сегодня / Вчера / «d MMMM». */
+@Composable
 internal fun dayLabel(ts: Long): String {
-    val msgDay = java.util.Calendar.getInstance().apply { timeInMillis = ts * 1000 }
-    val today = java.util.Calendar.getInstance()
-    fun sameDay(a: java.util.Calendar, b: java.util.Calendar) =
-        a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) &&
-            a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
-    val yesterday = (today.clone() as java.util.Calendar).apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
-    return when {
-        sameDay(msgDay, today) -> "Сегодня"
-        sameDay(msgDay, yesterday) -> "Вчера"
+    val nowSec = System.currentTimeMillis() / 1000
+    return when (dayKey(ts)) {
+        dayKey(nowSec) -> stringResource(R.string.date_today)
+        dayKey(nowSec - 86_400) -> stringResource(R.string.date_yesterday)
         else -> java.text.SimpleDateFormat("d MMMM", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
     }
 }

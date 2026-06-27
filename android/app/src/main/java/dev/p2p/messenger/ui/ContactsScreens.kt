@@ -26,11 +26,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.R
 
 @Composable
 internal fun ContactsScreen(
@@ -47,16 +49,16 @@ internal fun ContactsScreen(
         // приёма, пока он активен (диагностика; запуск — долгим тапом по индикатору).
         if (model.benchRecv) {
             Text(
-                "⏱ приём: %.1f Мбит/с".format(model.benchRecvMbps),
+                stringResource(R.string.bench_recv_rate, "%.1f".format(model.benchRecvMbps)),
                 color = HoloAccent,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(horizontal = ScreenPad, vertical = 6.dp),
             )
         }
         when {
-            activeFilter == "channel" -> CenterMessage("Каналы — скоро")
+            activeFilter == "channel" -> CenterMessage(stringResource(R.string.channels_soon))
             model.contacts.isEmpty() && model.groups.isEmpty() ->
-                CenterMessage("Нет контактов. Добавьте по ключу.")
+                CenterMessage(stringResource(R.string.contacts_empty))
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 // Комнаты — наверху, если фильтр позволяет
                 if (showRoom) {
@@ -72,11 +74,11 @@ internal fun ContactsScreen(
                                 Text(g.name, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
                                     if (inRoom) {
-                                        "В эфире"
+                                        stringResource(R.string.presence_on_air)
                                     } else if (presenceCount > 0) {
-                                        "$presenceCount в комнате"
+                                        stringResource(R.string.presence_in_room, presenceCount)
                                     } else {
-                                        "${g.members} уч."
+                                        stringResource(R.string.members_count, g.members)
                                     },
                                     color = if (inRoom || presenceCount > 0) HoloOnline else HoloSecondary,
                                     fontSize = 11.sp,
@@ -108,7 +110,7 @@ internal fun ContactsScreen(
                                     }
                                 }
                                 Text(
-                                    if (online) "онлайн" else "не в сети",
+                                    stringResource(if (online) R.string.status_online else R.string.status_offline),
                                     color = if (online) HoloOnline else HoloSecondary,
                                     fontSize = 11.sp,
                                 )
@@ -132,7 +134,7 @@ internal fun ContactsScreen(
 @Composable
 internal fun ContactListScreen(model: AppModel, onOpen: (String) -> Unit) {
     if (model.contacts.isEmpty()) {
-        EmptyState(Icons.Filled.Group, "Нет контактов", "Добавьте собеседника по ключу или QR — кнопкой вверху")
+        EmptyState(Icons.Filled.Group, stringResource(R.string.contacts_empty_title), stringResource(R.string.contacts_empty_hint))
         return
     }
     LazyColumn(Modifier.fillMaxSize()) {
@@ -188,21 +190,21 @@ internal fun AddScreen(
     // Получаем ключ из сканера (приходит через Root → scannedKey).
     LaunchedEffect(scannedKey) { if (scannedKey != null) keyHex = scannedKey }
     Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
-        FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ (hex)")
+        FieldLabel(stringResource(R.string.add_label_pubkey))
         TextField(
             keyHex,
             { keyHex = it },
             Modifier.fillMaxWidth(),
             colors = inputColors(),
-            placeholder = { Text("64 hex-символа", color = HoloSecondary) },
+            placeholder = { Text(stringResource(R.string.add_hint_hex), color = HoloSecondary) },
         )
-        AccentButton("Сканировать QR", modifier = Modifier.fillMaxWidth()) { onScan() }
-        FieldLabel("ИМЯ")
+        AccentButton(stringResource(R.string.title_scan_qr), modifier = Modifier.fillMaxWidth()) { onScan() }
+        FieldLabel(stringResource(R.string.label_name))
         TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-        AccentButton("Добавить") { model.addContact(keyHex.trim(), name.trim()) }
+        AccentButton(stringResource(R.string.add_btn)) { model.addContact(keyHex.trim(), name.trim()) }
         val msg = when (st) {
-            "known" -> "Контакт уже есть"
-            "error" -> "Неверный ключ"
+            "known" -> stringResource(R.string.add_known)
+            "error" -> stringResource(R.string.add_error)
             else -> ""
         }
         if (msg.isNotEmpty()) Text(msg, color = HoloError, fontSize = 13.sp)
@@ -221,26 +223,26 @@ internal fun MeScreen(model: AppModel) {
         if (qr != null) {
             Image(
                 bitmap = qr.asImageBitmap(),
-                contentDescription = "QR код публичного ключа",
+                contentDescription = stringResource(R.string.qr_cd),
                 modifier = Modifier.size(240.dp).clip(RoundedCornerShape(8.dp)),
             )
             Spacer(Modifier.height(4.dp))
         }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(FormGap)) {
-            FieldLabel("FINGERPRINT (сверьте при встрече)")
+            FieldLabel(stringResource(R.string.me_fingerprint_label))
             Text(me.fingerprint, color = HoloAccent, fontSize = 16.sp)
-            FieldLabel("АДРЕС YGGDRASIL")
+            FieldLabel(stringResource(R.string.me_address_label))
             Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-            FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ")
+            FieldLabel(stringResource(R.string.me_pubkey_label))
             Text(me.pubkey, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
             val ctx = LocalContext.current
-            AccentButton("Скопировать ключ", modifier = Modifier.fillMaxWidth()) {
+            AccentButton(stringResource(R.string.me_copy_key), modifier = Modifier.fillMaxWidth()) {
                 val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("p2p pubkey", me.pubkey))
                 // API 33+ сам показывает тост «Скопировано», на старых — делаем вручную.
                 if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
-                    android.widget.Toast.makeText(ctx, "Скопировано", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(ctx, ctx.getString(R.string.common_copied), android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -256,7 +258,7 @@ internal fun InfoScreen(model: AppModel, onDeleted: () -> Unit) {
         Modifier.verticalScroll(rememberScrollState()).padding(ScreenPad),
         verticalArrangement = Arrangement.spacedBy(FormGap),
     ) {
-        FieldLabel("ИМЯ")
+        FieldLabel(stringResource(R.string.label_name))
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextField(name, { name = it }, Modifier.weight(1f), colors = inputColors())
             Spacer(Modifier.width(8.dp))
@@ -265,7 +267,7 @@ internal fun InfoScreen(model: AppModel, onDeleted: () -> Unit) {
         FieldLabel("FINGERPRINT")
         Text(c.fingerprint, color = HoloAccent, fontSize = 15.sp)
         Text(
-            "Сверьте слова с собеседником по другому каналу — защита от подмены ключа.",
+            stringResource(R.string.info_verify_hint),
             color = HoloSecondary,
             fontSize = 11.sp,
         )
@@ -275,13 +277,13 @@ internal fun InfoScreen(model: AppModel, onDeleted: () -> Unit) {
                 Spacer(Modifier.width(6.dp))
             }
             Text(
-                if (c.verified) "Проверен" else "Не проверен",
+                stringResource(if (c.verified) R.string.info_verified else R.string.info_not_verified),
                 color = if (c.verified) HoloVerified else WarnColor,
                 modifier = Modifier.weight(1f),
             )
-            AccentButton(if (c.verified) "Снять" else "Пометить") { model.toggleVerified(key) }
+            AccentButton(stringResource(if (c.verified) R.string.info_unmark else R.string.info_mark)) { model.toggleVerified(key) }
         }
-        FieldLabel("ПУБЛИЧНЫЙ КЛЮЧ")
+        FieldLabel(stringResource(R.string.me_pubkey_label))
         Text(c.key, color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
         Button(
             onClick = {
@@ -293,11 +295,11 @@ internal fun InfoScreen(model: AppModel, onDeleted: () -> Unit) {
         ) {
             Icon(Icons.Filled.Delete, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Удалить контакт", color = Color.White)
+            Text(stringResource(R.string.info_delete), color = Color.White)
         }
         // Диагностика: замер скорости меша до этого контакта (~30 МБ блба).
-        FieldLabel("ДИАГНОСТИКА")
-        AccentButton("Тест скорости") { model.blastBench(key) }
+        FieldLabel(stringResource(R.string.info_diagnostics))
+        AccentButton(stringResource(R.string.info_speed_test)) { model.blastBench(key) }
         if (model.benchResult.isNotEmpty()) {
             Text(model.benchResult, color = HoloSecondary, fontSize = 12.sp)
         }

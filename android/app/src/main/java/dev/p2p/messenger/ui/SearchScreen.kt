@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,6 +31,7 @@ import dev.p2p.messenger.AppModel
 import dev.p2p.messenger.CenterMessage
 import dev.p2p.messenger.HoloOnline
 import dev.p2p.messenger.HoloSecondary
+import dev.p2p.messenger.R
 import dev.p2p.messenger.ScreenPad
 
 /** Глобальный поиск: фильтр контактов и групп по имени/ключу. Сообщения — позже
@@ -54,13 +56,13 @@ internal fun SearchScreen(
             query,
             { query = it },
             Modifier.fillMaxWidth().padding(ScreenPad),
-            placeholder = { Text("Имя, ключ или название группы", color = HoloSecondary) },
+            placeholder = { Text(stringResource(R.string.search_hint), color = HoloSecondary) },
             colors = inputColors(),
             singleLine = true,
         )
         when {
-            q.isEmpty() -> CenterMessage("Начните вводить — найдём контакты и группы")
-            contacts.isEmpty() && groups.isEmpty() -> CenterMessage("Ничего не найдено")
+            q.isEmpty() -> CenterMessage(stringResource(R.string.search_prompt))
+            contacts.isEmpty() && groups.isEmpty() -> CenterMessage(stringResource(R.string.search_empty))
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(groups, key = { "g_${it.gid}" }) { g ->
                     ListRow(onClick = { onOpenGroup(g.gid) }) {
@@ -70,7 +72,7 @@ internal fun SearchScreen(
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(g.name, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("${g.members} уч. · группа", color = HoloSecondary, fontSize = 11.sp)
+                            Text(stringResource(R.string.search_group_subtitle, g.members), color = HoloSecondary, fontSize = 11.sp)
                         }
                     }
                 }
@@ -82,7 +84,7 @@ internal fun SearchScreen(
                         Column(Modifier.weight(1f)) {
                             Text(c.name, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                if (online) "онлайн" else "не в сети",
+                                stringResource(if (online) R.string.status_online else R.string.status_offline),
                                 color = if (online) HoloOnline else HoloSecondary,
                                 fontSize = 11.sp,
                             )

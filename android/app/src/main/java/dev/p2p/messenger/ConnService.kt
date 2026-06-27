@@ -86,8 +86,8 @@ class ConnService : Service() {
     private fun buildNotification(): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL, "Соединение", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "p2p в сети — mesh-узел активен"
+            val ch = NotificationChannel(CHANNEL, getString(R.string.notif_conn_channel), NotificationManager.IMPORTANCE_LOW).apply {
+                description = getString(R.string.notif_conn_channel_desc)
                 setShowBadge(false)
             }
             nm.createNotificationChannel(ch)
@@ -114,8 +114,8 @@ class ConnService : Service() {
             Notification.Builder(this)
         }
 
-        b.setContentTitle("p2p messenger")
-            .setContentText("В сети — держим mesh-соединение")
+        b.setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.notif_conn_text))
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
             .setContentIntent(openPi)
@@ -124,13 +124,13 @@ class ConnService : Service() {
             b.addAction(
                 Notification.Action.Builder(
                     android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_lock_power_off),
-                    "Отключить",
+                    getString(R.string.notif_disconnect),
                     disconnectPi,
                 ).build(),
             )
         } else {
             @Suppress("DEPRECATION")
-            b.addAction(0, "Отключить", disconnectPi)
+            b.addAction(0, getString(R.string.notif_disconnect), disconnectPi)
         }
 
         return b.build()
