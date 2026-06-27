@@ -678,9 +678,6 @@ private fun PillIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
 @Composable
 private fun MessageBubble(m: Message) {
     val timeStr = fmtMsgTime(m.time)
-    // Резервируем место под время (+галочку) в последней строке пузыря, чтобы
-    // оверлей не наезжал на текст (em-space ≈ ширине цифры).
-    val reserve = if (m.mine) "        " else "      "
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
         Box(
@@ -688,12 +685,12 @@ private fun MessageBubble(m: Message) {
                 .background(if (m.mine) BubbleOut else BubbleIn)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
-            Text(m.text + reserve, color = Color.White, fontSize = 15.sp)
-            Row(
-                Modifier.align(Alignment.BottomEnd),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(timeStr, color = Color.White.copy(alpha = 0.55f), fontSize = 10.sp)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(m.text, color = Color.White, fontSize = 15.sp,
+                    modifier = Modifier.weight(1f, fill = false))
+                Spacer(Modifier.width(8.dp))
+                Text(timeStr, color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp,
+                    modifier = Modifier.padding(bottom = 1.dp))
                 if (m.mine) {
                     Spacer(Modifier.width(3.dp))
                     StatusTick(m.status)
@@ -986,14 +983,17 @@ private fun GroupMessageRow(model: AppModel, m: GroupMsg) {
 /** Пузырь группового сообщения (время в углу последней строки; без галочек). */
 @Composable
 private fun GroupBubble(text: String, mine: Boolean, time: Long) {
-    val timeStr = fmtMsgTime(time)
     Box(
         Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(14.dp))
             .background(if (mine) BubbleOut else BubbleIn).padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        Text(text + "      ", color = Color.White, fontSize = 15.sp)
-        Text(timeStr, color = Color.White.copy(alpha = 0.55f), fontSize = 10.sp,
-            modifier = Modifier.align(Alignment.BottomEnd))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(text, color = Color.White, fontSize = 15.sp,
+                modifier = Modifier.weight(1f, fill = false))
+            Spacer(Modifier.width(8.dp))
+            Text(fmtMsgTime(time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp,
+                modifier = Modifier.padding(bottom = 1.dp))
+        }
     }
 }
 
