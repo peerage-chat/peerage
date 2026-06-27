@@ -892,9 +892,11 @@ private fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> U
     val gid = model.currentGroup
     val g = gid?.let { model.groups.firstOrNull { it.gid == gid } }
     val name = g?.name ?: "Группа"
-    val total = g?.members ?: 1
-    val others = model.groupMemberKeys[gid] ?: emptyList()
-    val onlineN = 1 + others.count { model.online[it] == true } // +1 = мы сами
+    // Агрегат «всего/в сети» считает движок (groupPresence); до первого тика —
+    // фолбэк на число участников из списка групп.
+    val roster = model.currentGroupRoster
+    val total = roster?.total ?: g?.members ?: 1
+    val onlineN = roster?.online ?: 1
     Row(
         Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,

@@ -11,6 +11,14 @@ use jni::JNIEnv;
 
 use crate::{jni_safe, jstr, parse_key, ret, GroupCmd, Job, LockRecover, Session};
 
+/// Снапшот присутствия группы (агрегат считает движок, не клиент — ADR-003).
+/// `total` — всего участников (вкл. себя), `online` — сколько сейчас в сети (вкл. себя).
+#[derive(serde::Serialize)]
+struct GroupPresence {
+    total: usize,
+    online: usize,
+}
+
 // ── Группы (MLS) ───────────────────────────────────────────────────────────
 
 // Команды уходят групповому актору (event_pump) fire-and-forget — результат
@@ -120,5 +128,35 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
         let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
         let json = session.group_cache.lock_safe().members.get(&gid).cloned().unwrap_or_else(|| "[]".into());
         ret(&env, &json)
+    })
+}
+
+/// Снапшот присутствия группы: JSON {total, online}. Агрегат «N уч · M в сети»
+/// считает движок (MLS-ростер ∩ presence), клиент лишь рендерит. Презенс
+/// динамичен → считаем на момент чтения (как netStats), а не из кэша.
+/// Кэш `members` хранит ДРУГИХ участников (без себя), поэтому +1 = мы сами.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupPresence<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        if session_ptr == 0 { return ret(&env, "{}"); }
+        let session = unsafe { &*(session_ptr as *const Arc<Session>) };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "{}") };
+        let json = session.group_cache.lock_safe().members.get(&gid).cloned().unwrap_or_else(|| "[]".into());
+        let others: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+        let online_others = others
+            .iter()
+            .filter_map(|h| parse_key(h))
+            .filter(|k| session.messenger.is_online(k))
+            .count();
+        let presence = GroupPresence {
+            total: others.len() + 1,        // +1 = мы сами
+            online: online_others + 1,      // мы всегда «в сети» в своей группе
+        };
+        ret(&env, &serde_json::to_string(&presence).unwrap_or_else(|_| "{}".into()))
     })
 }

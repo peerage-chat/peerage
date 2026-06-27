@@ -70,6 +70,9 @@ data class NetStats(
     val rxRate: Long, val txRate: Long, val peers: List<NetPeer>,
 )
 
+/** Присутствие группы «N уч · M в сети» — агрегат (MLS-ростер ∩ presence) считает движок. */
+data class GroupRoster(val total: Int, val online: Int)
+
 data class GroupMsg(
     val text: String,
     val mine: Boolean,
@@ -145,9 +148,10 @@ class AppModel private constructor() {
     // Группы (MLS).
     val groups = mutableStateListOf<Group>()
     val groupMessages = mutableStateMapOf<String, SnapshotStateList<GroupMsg>>()
-    /** gid → hex-ключи ДРУГИХ участников (без себя). Для «N уч · M в сети». */
-    val groupMemberKeys = mutableStateMapOf<String, List<String>>()
     var currentGroup by mutableStateOf<String?>(null)
+    /** Присутствие открытой группы «N уч · M в сети» — агрегат отдаёт движок
+     *  (groupPresence). Обновляется тикером, пока групповой чат открыт. */
+    var currentGroupRoster by mutableStateOf<GroupRoster?>(null)
 
     // Комната-звонок (Discord-style присутствие). gid комнаты, где мы сейчас.
     var currentRoom by mutableStateOf<String?>(null)
@@ -313,6 +317,12 @@ class AppModel private constructor() {
                         }
                         netStats = NetStats(o.optInt("peer_count"), o.optInt("tree"),
                             o.optDouble("ping_ms"), o.optLong("rx_rate"), o.optLong("tx_rate"), peers)
+                    }
+                    // Присутствие открытой группы «N уч · M в сети» — агрегат
+                    // (ростер ∩ онлайн) считает движок, клиент лишь рендерит.
+                    currentGroup?.let { gid ->
+                        val o = JSONObject(Native.groupPresence(sessionPtr, gid))
+                        currentGroupRoster = GroupRoster(o.optInt("total", 1), o.optInt("online", 1))
                     }
                     // Присутствие в комнате: кто сейчас внутри (по свежим маячкам).
                     currentRoom?.let { gid ->
@@ -835,6 +845,7 @@ class AppModel private constructor() {
 
     fun openGroup(gid: String) {
         currentGroup = gid
+        currentGroupRoster = null // тикер подтянет свежий агрегат
         ops.execute { loadGroupHistory(gid) }
     }
 
@@ -848,11 +859,6 @@ class AppModel private constructor() {
             )
         }
         groupMessages[gid] = list.toMutableStateList()
-        // Ключи других участников (для презенса в шапке).
-        runCatching {
-            val ms = JSONArray(Native.groupMembers(sessionPtr, gid))
-            groupMemberKeys[gid] = (0 until ms.length()).map { ms.getString(it) }
-        }
     }
 
     private fun groupLog(gid: String): SnapshotStateList<GroupMsg> =

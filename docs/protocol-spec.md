@@ -62,6 +62,8 @@
   up,latency_ms,rx_rate,tx_rate,uptime_s}]}. ✅ типизировано (первый пример контракта).
 - `Groups` — [{gid,name,members}] · `GroupHistory{gid}` — [{text,mine,time,sender,system}]
   · `GroupMembers{gid}` — [key…].
+- **`GroupPresence{gid}`** — {total, online}. ✅ типизировано (агрегат «N уч · M в
+  сети» = MLS-ростер ∩ presence, считает движок; презенс динамичен → на момент чтения).
 - `RoomParticipants{gid}` / `RoomPresencePeers{gid}` — [{peer,audio,video}].
 - `OfflineQueue` *(план M3)* — {count, per_peer…}.
 
@@ -91,7 +93,9 @@
 ## Статус миграции (ADR-003)
 - ✅ `NetStats` — первый типизированный снапшот (libygg `ygg_peers_json` → движок
   считает агрегаты → клиент рендерит).
+- ✅ `GroupPresence` — агрегат «N уч · M в сети» репатриирован в движок (раньше
+  Kotlin пересекал ростер ∩ online сам); клиент удалил `groupMemberKeys`.
 - ⏳ Репатриировать: офлайн-очередь+TTL (**M3**, сцеплено с message-model S7),
-  презенс-счётчики групп, настройки.
+  настройки.
 - ⏳ Вынести крейт `engine` (типы Command/Event/Snapshot), `androidjni` → тонкий
   JNI-кодек — когда форма устаканится.
