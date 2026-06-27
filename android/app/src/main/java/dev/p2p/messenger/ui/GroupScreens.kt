@@ -201,33 +201,51 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg) {
         m.mine -> Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.End) {
             GroupBubble(m.text, true, m.time)
         }
-        else -> Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.Start) {
+        // Входящее: аватар выровнен по НИЗУ пузыря (Telegram-style), имя — ВНУТРИ пузыря.
+        else -> Row(
+            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.Bottom,
+        ) {
             val who = groupSenderName(model, m.sender)
             val online = model.online[m.sender] == true
             SquareAvatar(who, size = 32.dp, online = online)
             Spacer(Modifier.width(8.dp))
-            Column {
-                Text(
-                    who,
-                    color = nameColor(m.sender),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),
-                )
-                GroupBubble(m.text, false, m.time)
-            }
+            GroupBubble(m.text, false, m.time, senderName = who, senderColor = nameColor(m.sender))
         }
     }
 }
 
-/** Пузырь группового сообщения (время в углу последней строки; без галочек). */
+/** Пузырь группового сообщения. Имя отправителя (цветом) — встроено сверху внутрь
+ *  пузыря; время — в правом нижнем углу (как DM); без галочек. */
 @Composable
-internal fun GroupBubble(text: String, mine: Boolean, time: Long) {
+internal fun GroupBubble(
+    text: String,
+    mine: Boolean,
+    time: Long,
+    senderName: String? = null,
+    senderColor: Color = Color.White,
+) {
     Box(
         Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(14.dp))
             .background(if (mine) BubbleOut else BubbleIn).padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        Text(text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = 40.dp))
+        Column {
+            if (senderName != null) {
+                Text(
+                    senderName,
+                    color = senderColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(end = 40.dp),
+                )
+            }
+            // Текст резервирует справа место под время (реальный отступ) → время
+            // оверлеем точно в правом-нижнем углу, без наложения.
+            Text(text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = 40.dp))
+        }
         Text(
             fmtMsgTime(time),
             color = Color.White.copy(alpha = 0.5f),
