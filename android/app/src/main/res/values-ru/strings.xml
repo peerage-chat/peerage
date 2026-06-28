@@ -80,6 +80,10 @@
     <string name="title_add_member">Добавить участника</string>
     <string name="title_scan_qr">Сканировать QR</string>
     <string name="title_search">Поиск</string>
+    <string name="newchat_title">Новый чат</string>
+    <string name="newchat_channel">Новый канал</string>
+    <string name="newchat_contacts_header">КОНТАКТЫ</string>
+    <string name="badge_soon">скоро</string>
     <string name="cd_search">Поиск</string>
     <string name="cd_new_group">Новая группа</string>
     <string name="cd_add_contact">Добавить контакт</string>

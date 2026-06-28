@@ -88,6 +88,10 @@
     <string name="title_add_member">Add member</string>
     <string name="title_scan_qr">Scan QR</string>
     <string name="title_search">Search</string>
+    <string name="newchat_title">New chat</string>
+    <string name="newchat_channel">New channel</string>
+    <string name="newchat_contacts_header">CONTACTS</string>
+    <string name="badge_soon">soon</string>
     <string name="cd_search">Search</string>
     <string name="cd_new_group">New group</string>
     <string name="cd_add_contact">Add contact</string>

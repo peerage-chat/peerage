@@ -89,7 +89,7 @@ internal fun CenterMessage(text: String) {
     }
 }
 
-internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search }
+internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -113,7 +113,7 @@ private fun Root(model: AppModel) {
             drawerState.isOpen -> scope.launch { drawerState.close() }
             else -> screen = when (screen) {
                 Screen.Scanner -> Screen.Add
-                Screen.CreateGroup -> Screen.Groups
+                Screen.CreateGroup -> Screen.NewChat
                 Screen.AddMember -> Screen.GroupChat
                 else -> Screen.Contacts
             }
@@ -160,7 +160,8 @@ private fun Root(model: AppModel) {
                             onBack = { screen = Screen.Contacts },
                             onInfo = { screen = Screen.AddMember },
                         )
-                        Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = { screen = Screen.Groups })
+                        Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = { screen = Screen.NewChat })
+                        Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = { screen = Screen.Contacts })
                         Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = { screen = Screen.GroupChat })
                         Screen.Settings -> TopBar(stringResource(R.string.menu_settings), onBack = { screen = Screen.Contacts })
                         Screen.Scanner -> TopBar(stringResource(R.string.title_scan_qr), onBack = { screen = Screen.Add })
@@ -210,7 +211,16 @@ private fun Root(model: AppModel) {
                                 screen = Screen.GroupChat
                             }
                             Screen.GroupChat -> GroupChatScreen(model)
-                            Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Groups }
+                            Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Contacts }
+                            Screen.NewChat -> NewChatScreen(
+                                model,
+                                onNewGroup = { screen = Screen.CreateGroup },
+                                onAddContact = { screen = Screen.Add },
+                                onOpenDm = {
+                                    model.openChat(it)
+                                    screen = Screen.Chat
+                                },
+                            )
                             Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
                             Screen.Settings -> SettingsScreen(model)
                             Screen.ContactList -> ContactListScreen(model) {
@@ -238,7 +248,7 @@ private fun Root(model: AppModel) {
             // FAB «новый чат» — только на Главной, под оверлеями звонка.
             if (screen == Screen.Contacts && model.dmCallPeer == null && model.incomingCall == null) {
                 FloatingActionButton(
-                    onClick = { screen = Screen.Add },
+                    onClick = { screen = Screen.NewChat },
                     modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
                     containerColor = HoloAccent,
                     contentColor = HoloAccentDark,
