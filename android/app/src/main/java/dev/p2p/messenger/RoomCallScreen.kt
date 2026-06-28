@@ -7,6 +7,7 @@ import android.view.TextureView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PersonAdd
@@ -34,12 +36,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.delay
 
 /**
  * Экран активного звонка-комнаты (Discord-style сетка). Дизайн — docs/design/call-ui.md.
@@ -58,32 +62,77 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
     val remotes = model.roomMembers
     var chrome by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
+    var focused by remember { mutableStateOf<String?>(null) }
 
-    Box(
-        Modifier.fillMaxSize().background(Color.Black).clickable { chrome = !chrome },
-    ) {
-        if (remotes.isEmpty()) {
-            AloneTile(model, peerKey, chrome)
-        } else {
-            // тайлы: удалённые участники + ты (последним)
-            val tiles = remotes.map { Tile(it.peer, false, it.audio, it.video) } +
-                Tile("me", true, !model.muted, model.videoActive)
-            ParticipantGrid(model, tiles, chrome)
+    // тайлы: удалённые участники + ты (последним)
+    val tiles = remotes.map { Tile(it.peer, false, it.audio, it.video) } +
+        Tile("me", true, !model.muted, model.videoActive)
+    // Фуллскрин-фокус снимаем, если участник исчез.
+    LaunchedEffect(remotes.size) {
+        if (focused != null && focused != "me" && remotes.none { it.peer == focused }) focused = null
+    }
+    // Авто-скрытие chrome: через паузу UI прячется сам (видео/аватар остаются).
+    LaunchedEffect(chrome, showSettings) {
+        if (chrome && !showSettings) {
+            delay(4000)
+            chrome = false
+        }
+    }
+
+    val foc = focused?.let { f -> tiles.firstOrNull { it.id == f } }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        when {
+            // Фуллскрин участника (даблтап тайла): видео cover на весь экран.
+            foc != null -> Box(
+                Modifier.fillMaxSize().pointerInput(foc.id) {
+                    detectTapGestures(onTap = { chrome = !chrome }, onDoubleTap = { focused = null })
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    foc.video && foc.me -> SelfPreviewSurface(model, Modifier.fillMaxSize())
+                    foc.video -> VideoSurface(model, foc.id, Modifier.fillMaxSize())
+                    else -> Avatar(tileName(model, foc), 104)
+                }
+            }
+            remotes.isEmpty() -> Box(Modifier.fillMaxSize().clickable { chrome = !chrome }) {
+                AloneTile(model, peerKey, chrome)
+            }
+            else -> ParticipantGrid(
+                model,
+                tiles,
+                chrome,
+                onTap = { chrome = !chrome },
+                onFocus = { focused = it },
+            )
         }
 
         if (chrome) {
-            // верх-право: смена камеры + настройки
-            Row(
-                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // Флип активен только при включённом своём видео.
-                if (model.videoActive) {
-                    ChromeChip(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera)) {
-                        model.switchCamera()
-                    }
+            if (foc != null) {
+                // фуллскрин: имя слева-сверху, «свернуть» справа-сверху
+                Text(
+                    tileName(model, foc),
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(14.dp),
+                )
+                Box(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(10.dp)) {
+                    ChromeChip(Icons.Filled.CloseFullscreen, stringResource(R.string.call_minimize)) { focused = null }
                 }
-                ChromeChip(Icons.Filled.Settings, stringResource(R.string.call_btn_settings)) { showSettings = true }
+            } else {
+                // сетка: смена камеры + настройки справа-сверху
+                Row(
+                    Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (model.videoActive) {
+                        ChromeChip(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera)) {
+                            model.switchCamera()
+                        }
+                    }
+                    ChromeChip(Icons.Filled.Settings, stringResource(R.string.call_btn_settings)) { showSettings = true }
+                }
             }
             // низ: панель управления (выше системной навигации)
             Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 18.dp)) {
@@ -93,6 +142,15 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
         if (showSettings) CallSettings(model) { showSettings = false }
     }
 }
+
+/** Имя тайла: «Вы» для себя, иначе имя контакта / короткий ключ. */
+@Composable
+private fun tileName(model: AppModel, t: Tile): String =
+    if (t.me) {
+        stringResource(R.string.call_you)
+    } else {
+        model.contacts.firstOrNull { it.key == t.id }?.name ?: (t.id.take(6) + "…")
+    }
 
 /** Настройки звонка (кнопка ⚙️): вывод звука (динамик), качество видео. Оверлей
  *  поверх звонка; тап по фону не закрывает (только крестик). */
@@ -175,7 +233,13 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
 private data class Tile(val id: String, val me: Boolean, val audio: Boolean, val video: Boolean)
 
 @Composable
-private fun ParticipantGrid(model: AppModel, tiles: List<Tile>, chrome: Boolean) {
+private fun ParticipantGrid(
+    model: AppModel,
+    tiles: List<Tile>,
+    chrome: Boolean,
+    onTap: () -> Unit,
+    onFocus: (String) -> Unit,
+) {
     // Раскладка: 1-2 → стопкой (без горизонтального сплита); 3+ → по 2 в ряд,
     // одиночный последний занимает всю ширину. Оверфлоу >6 — на потом.
     val rows = if (tiles.size <= 2) tiles.map { listOf(it) } else tiles.chunked(2)
@@ -184,7 +248,14 @@ private fun ParticipantGrid(model: AppModel, tiles: List<Tile>, chrome: Boolean)
             Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 row.forEach { t ->
                     key(t.id) {
-                        ParticipantTile(model, t, chrome, Modifier.weight(1f).fillMaxHeight().padding(2.dp))
+                        ParticipantTile(
+                            model,
+                            t,
+                            chrome,
+                            Modifier.weight(1f).fillMaxHeight().padding(2.dp),
+                            onTap = onTap,
+                            onFocus = { onFocus(t.id) },
+                        )
                     }
                 }
             }
@@ -193,14 +264,21 @@ private fun ParticipantGrid(model: AppModel, tiles: List<Tile>, chrome: Boolean)
 }
 
 @Composable
-private fun ParticipantTile(model: AppModel, t: Tile, chrome: Boolean, modifier: Modifier) {
-    val name = if (t.me) {
-        stringResource(R.string.call_you)
-    } else {
-        model.contacts.firstOrNull { it.key == t.id }?.name ?: (t.id.take(6) + "…")
-    }
+private fun ParticipantTile(
+    model: AppModel,
+    t: Tile,
+    chrome: Boolean,
+    modifier: Modifier,
+    onTap: () -> Unit,
+    onFocus: () -> Unit,
+) {
+    val name = tileName(model, t)
     Box(
-        modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF1A1D21)),
+        modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF1A1D21))
+            // одиночный тап — показать/скрыть chrome; даблтап — фуллскрин участника.
+            .pointerInput(t.id) {
+                detectTapGestures(onTap = { onTap() }, onDoubleTap = { onFocus() })
+            },
         contentAlignment = Alignment.Center,
     ) {
         when {
