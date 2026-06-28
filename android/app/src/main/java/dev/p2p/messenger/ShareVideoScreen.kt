@@ -58,7 +58,7 @@ fun ShareVideoScreen(model: AppModel) {
     val has60 = remember(model.shareFront) { CameraCaps.supports60(ctx, model.shareFront) }
 
     Column(
-        Modifier.fillMaxSize().background(Color(0xFF0E0F11)).statusBarsPadding().navigationBarsPadding()
+        Modifier.fillMaxSize().background(Tokens.Colors.callBg).statusBarsPadding().navigationBarsPadding()
             .verticalScroll(rememberScrollState()).padding(horizontal = 18.dp),
     ) {
         Row(
@@ -86,7 +86,7 @@ fun ShareVideoScreen(model: AppModel) {
 
         // Превью — плейсхолдер (живое превью не нужно; переключатель фронт/тыл для камеры).
         Box(
-            Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1A1D21)),
+            Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile),
             contentAlignment = Alignment.Center,
         ) {
             // Живое превью только если камера свободна (видео в звонке выключено).
@@ -98,7 +98,7 @@ fun ShareVideoScreen(model: AppModel) {
                     Icon(
                         if (model.shareScreenMode) Icons.Filled.DesktopWindows else Icons.Filled.Videocam,
                         null,
-                        tint = Color(0xFF5A5F66),
+                        tint = Tokens.Colors.iconMuted,
                         modifier = Modifier.size(40.dp),
                     )
                     Spacer(Modifier.height(10.dp))
@@ -116,7 +116,7 @@ fun ShareVideoScreen(model: AppModel) {
             if (!model.shareScreenMode) {
                 Box(
                     Modifier.align(Alignment.TopEnd).padding(10.dp).clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xCC0E0F11)).size(34.dp).clickable { model.pickFacing(!model.shareFront) },
+                        .background(Tokens.Colors.scrimStrong).size(34.dp).clickable { model.pickFacing(!model.shareFront) },
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera), tint = Color.White, modifier = Modifier.size(18.dp)) }
             }
@@ -154,7 +154,7 @@ fun ShareVideoScreen(model: AppModel) {
             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(HoloAccent)
                 .clickable { model.applyVideoShare() }.padding(vertical = 15.dp),
             contentAlignment = Alignment.Center,
-        ) { Text(stringResource(R.string.share_btn_show), color = Color(0xFF04222E), fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+        ) { Text(stringResource(R.string.share_btn_show), color = Tokens.Colors.accentDark, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -168,7 +168,7 @@ private fun bitrateOptionsMbps(model: AppModel): List<Int> {
 @Composable
 private fun SegButton(icon: ImageVector, label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Row(
-        modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Color(0xFF13313D) else Color(0xFF1A1D21))
+        modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
             .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(10.dp)) else Modifier)
             .clickable { onClick() }.padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -182,7 +182,7 @@ private fun SegButton(icon: ImageVector, label: String, selected: Boolean, modif
 @Composable
 private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Color(0xFF13313D) else Color(0xFF1A1D21))
+        Modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
             .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(10.dp)) else Modifier)
             .clickable { onClick() }.padding(horizontal = 16.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
@@ -199,7 +199,7 @@ private fun SectionLabel(text: String, badge: String? = null) {
         Text(text, color = HoloSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
         if (badge != null) {
             Box(
-                Modifier.clip(RoundedCornerShape(6.dp)).background(Color(0x2233B5E5)).padding(horizontal = 7.dp, vertical = 2.dp),
+                Modifier.clip(RoundedCornerShape(6.dp)).background(Tokens.Colors.accentBadge).padding(horizontal = 7.dp, vertical = 2.dp),
             ) { Text(badge, color = HoloAccent, fontSize = 10.sp) }
         }
     }

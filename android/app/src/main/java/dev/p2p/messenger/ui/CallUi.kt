@@ -100,7 +100,7 @@ internal fun GridTile(
         ) {
             Box(
                 Modifier.size(64.dp).clip(CircleShape)
-                    .background(if (me) HoloAccent else Color(0xFF3A3F45)),
+                    .background(if (me) HoloAccent else Tokens.Colors.avatar),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -125,7 +125,7 @@ internal fun GridTile(
         if (!audio || video) {
             Row(
                 Modifier.align(Alignment.TopEnd).padding(6.dp)
-                    .clip(RoundedCornerShape(6.dp)).background(Color(0xAA000000))
+                    .clip(RoundedCornerShape(6.dp)).background(Tokens.Colors.tileScrim)
                     .padding(horizontal = 5.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -169,7 +169,7 @@ internal fun ParticipantFullscreen(
         ) {
             Box(
                 Modifier.size(128.dp).clip(CircleShape)
-                    .background(if (me) HoloAccent else Color(0xFF3A3F45))
+                    .background(if (me) HoloAccent else Tokens.Colors.avatar)
                     .border(3.dp, if (me) HoloAccent.copy(alpha = 0.4f) else Color(0xFF4A4F55), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
@@ -225,7 +225,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
     // Оценка суммарного входящего «~»: видео-поток ≈30, аудио ≈2 МБ/мин (per call-ui.md).
     val trafficMb = (if (ic.video) 30 else 2) + others.map { if (it.video) 30 else 2 }.sum()
 
-    Box(Modifier.fillMaxSize().background(Color(0xF2000000))) {
+    Box(Modifier.fillMaxSize().background(Tokens.Colors.overlay)) {
         Column(
             Modifier.fillMaxSize().padding(bottom = 56.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -258,7 +258,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.size(22.dp).clip(CircleShape).background(HoloOnline), contentAlignment = Alignment.Center) {
-                            Text(firstName.take(1).uppercase(), color = Color(0xFF0A1F0A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(firstName.take(1).uppercase(), color = Tokens.Colors.onOnline, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         Text(
                             if (more > 0) {
@@ -299,10 +299,10 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
 @Composable
 private fun PresetButton(icon: ImageVector, on: Boolean, desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(16.dp)).background(if (on) Color(0xFF3A3D44) else Color(0xFF3A2A2C))
+        Modifier.clip(RoundedCornerShape(16.dp)).background(if (on) Tokens.Colors.btnNeutral else Tokens.Colors.btnDangerMuted)
             .size(56.dp).clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = if (on) Color.White else Color(0xFFFF8A8A), modifier = Modifier.size(24.dp)) }
+    ) { Icon(icon, desc, tint = if (on) Color.White else Tokens.Colors.iconDangerMuted, modifier = Modifier.size(24.dp)) }
 }
 
 /** Цветная кнопка-сквиркул звонка (отклонить/принять). */

@@ -83,7 +83,7 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
     }
 
     val foc = focused?.let { f -> tiles.firstOrNull { it.id == f } }
-    Box(Modifier.fillMaxSize().background(Color(0xFF181A1F))) {
+    Box(Modifier.fillMaxSize().background(Tokens.Colors.callBg)) {
         when {
             // Фуллскрин участника (даблтап тайла): видео cover на весь экран.
             foc != null -> Box(
@@ -176,7 +176,7 @@ private fun tileName(model: AppModel, t: Tile): String =
 @Composable
 private fun CallSettings(model: AppModel, onClose: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().background(Color(0xF2000000)).clickable(enabled = false) {}
+        Modifier.fillMaxSize().background(Tokens.Colors.overlay).clickable(enabled = false) {}
             .statusBarsPadding().navigationBarsPadding().padding(horizontal = 18.dp),
     ) {
         Row(
@@ -200,7 +200,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
         Spacer(Modifier.height(6.dp))
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { model.toggleSpeaker() }
-                .background(Color(0xFF1A1D21)).padding(horizontal = 14.dp, vertical = 14.dp),
+                .background(Tokens.Colors.tile).padding(horizontal = 14.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -218,7 +218,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                     checkedThumbColor = Color.White,
                     checkedTrackColor = HoloAccent,
                     uncheckedThumbColor = HoloSecondary,
-                    uncheckedTrackColor = Color(0xFF1A1D21),
+                    uncheckedTrackColor = Tokens.Colors.tile,
                 ),
             )
         }
@@ -231,7 +231,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
                     .clickable { model.changeVideoQuality(preset) }
-                    .background(if (selected) Color(0xFF13313D) else Color(0xFF1A1D21))
+                    .background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -293,7 +293,7 @@ private fun ParticipantTile(
 ) {
     val name = tileName(model, t)
     Box(
-        modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF1A1D21))
+        modifier.clip(RoundedCornerShape(12.dp)).background(Tokens.Colors.tile)
             // одиночный тап — показать/скрыть chrome; даблтап — фуллскрин участника.
             .pointerInput(t.id) {
                 detectTapGestures(onTap = { onTap() }, onDoubleTap = { onFocus() })
@@ -312,12 +312,12 @@ private fun ParticipantTile(
         if (chrome) {
             Row(
                 Modifier.align(Alignment.BottomStart).padding(7.dp)
-                    .clip(RoundedCornerShape(7.dp)).background(Color(0xAA000000))
+                    .clip(RoundedCornerShape(7.dp)).background(Tokens.Colors.tileScrim)
                     .padding(horizontal = 7.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                if (!t.audio) Icon(Icons.Filled.MicOff, null, tint = Color(0xFFFF6B6B), modifier = Modifier.size(13.dp))
+                if (!t.audio) Icon(Icons.Filled.MicOff, null, tint = Tokens.Colors.iconDangerMuted, modifier = Modifier.size(13.dp))
                 Text(name, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -453,23 +453,23 @@ internal fun applyTextureTransform(view: TextureView, bufW: Int, bufH: Int, rota
 @Composable
 private fun ControlBar(model: AppModel, peerKey: String) {
     Row(
-        Modifier.clip(RoundedCornerShape(18.dp)).background(Color(0xBC141518))
+        Modifier.clip(RoundedCornerShape(18.dp)).background(Tokens.Colors.barScrim)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CtlButton(Icons.Filled.PersonAdd, stringResource(R.string.call_btn_invite), Color(0xFF3A3D44)) {}
+        CtlButton(Icons.Filled.PersonAdd, stringResource(R.string.call_btn_invite), Tokens.Colors.btnNeutral) {}
         CtlButton(
             if (model.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
             stringResource(R.string.call_btn_mic),
-            if (model.muted) Color(0xFF3A2A2C) else Color(0xFF3A3D44),
-            tint = if (model.muted) Color(0xFFFF8A8A) else Color.White,
+            if (model.muted) Tokens.Colors.btnDangerMuted else Tokens.Colors.btnNeutral,
+            tint = if (model.muted) Tokens.Colors.iconDangerMuted else Color.White,
         ) { model.toggleMute() }
         CtlButton(
             if (model.videoActive) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
             stringResource(R.string.call_btn_video),
-            if (model.videoActive) Color(0xFF3A3D44) else Color(0xFF3A2A2C),
-            tint = if (model.videoActive) Color.White else Color(0xFFFF8A8A),
+            if (model.videoActive) Tokens.Colors.btnNeutral else Tokens.Colors.btnDangerMuted,
+            tint = if (model.videoActive) Color.White else Tokens.Colors.iconDangerMuted,
             // долгий тап → экран «Показать видео» (источник/разрешение/fps/битрейт)
             onLongClick = { model.openVideoShare() },
         ) { model.toggleVideo() }
@@ -497,17 +497,17 @@ private fun CtlButton(
 @Composable
 private fun ChromeChip(icon: ImageVector, desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xB8141518)).size(34.dp)
+        Modifier.clip(RoundedCornerShape(10.dp)).background(Tokens.Colors.chipScrim).size(34.dp)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = Color(0xFFE6E7EA), modifier = Modifier.size(18.dp)) }
+    ) { Icon(icon, desc, tint = Tokens.Colors.iconChrome, modifier = Modifier.size(18.dp)) }
 }
 
 /** Пилюля имени (фуллскрин) — высота как у верхних чипов (34dp). */
 @Composable
 private fun NamePill(name: String) {
     Box(
-        Modifier.height(34.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xB8141518))
+        Modifier.height(34.dp).clip(RoundedCornerShape(10.dp)).background(Tokens.Colors.chipScrim)
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -519,7 +519,7 @@ private fun NamePill(name: String) {
 @Composable
 private fun TrafficChip(mbMin: Int) {
     Row(
-        Modifier.height(34.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xB8141518))
+        Modifier.height(34.dp).clip(RoundedCornerShape(10.dp)).background(Tokens.Colors.chipScrim)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -532,7 +532,7 @@ private fun TrafficChip(mbMin: Int) {
 @Composable
 private fun Avatar(name: String, size: Int) {
     Box(
-        Modifier.size(size.dp).clip(CircleShape).background(Color(0xFF3A3F45)),
+        Modifier.size(size.dp).clip(CircleShape).background(Tokens.Colors.avatar),
         contentAlignment = Alignment.Center,
     ) {
         Text(
