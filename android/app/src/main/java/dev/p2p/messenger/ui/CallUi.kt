@@ -10,8 +10,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -219,6 +220,11 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
     // ПРЕСЕТ join'ера: в каком состоянии войдём (мик/камера). Дефолт — мик вкл, видео выкл.
     var micOn by remember { mutableStateOf(true) }
     var videoOn by remember { mutableStateOf(false) }
+    // Кто уже в комнате помимо звонящего (групповой room-invite); в 1:1 пусто.
+    val others = model.groupPresence[ic.roomId] ?: emptyList()
+    // Оценка суммарного входящего «~»: видео-поток ≈30, аудио ≈2 МБ/мин (per call-ui.md).
+    val trafficMb = (if (ic.video) 30 else 2) + others.map { if (it.video) 30 else 2 }.sum()
+
     Box(Modifier.fillMaxSize().background(Color(0xF2000000))) {
         Column(
             Modifier.fillMaxSize().padding(bottom = 56.dp),
@@ -231,12 +237,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                     Modifier.size(88.dp).clip(CircleShape).background(HoloAccent),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        name.take(1).uppercase(),
-                        color = HoloAccentDark,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 40.sp,
-                    )
+                    Text(name.take(1).uppercase(), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = 40.sp)
                 }
                 Spacer(Modifier.height(20.dp))
                 Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
@@ -246,27 +247,49 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                     fontSize = 15.sp,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-                // Что включено у ЗВОНЯЩЕГО (его маячок).
-                if (ic.audio || ic.video) {
+                // Кто уже в комнате: «Боря [и ещё N] в комнате» (мини-аватар). 1:1 — нет.
+                if (others.isNotEmpty()) {
+                    val firstName = model.contacts.firstOrNull { it.key == others.first().peer }?.name
+                        ?: (others.first().peer.take(6) + "…")
+                    val more = others.size - 1
                     Row(
-                        Modifier.padding(top = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        Modifier.padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (ic.video) Icon(Icons.Filled.Videocam, null, tint = HoloOnline, modifier = Modifier.size(16.dp))
-                        if (ic.audio) Icon(Icons.Filled.Mic, null, tint = HoloOnline, modifier = Modifier.size(16.dp))
+                        Box(Modifier.size(22.dp).clip(CircleShape).background(HoloOnline), contentAlignment = Alignment.Center) {
+                            Text(firstName.take(1).uppercase(), color = Color(0xFF0A1F0A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            if (more > 0) {
+                                "$firstName " + pluralStringResource(R.plurals.call_others_in_room, more, more)
+                            } else {
+                                firstName
+                            },
+                            color = HoloSecondary,
+                            fontSize = 13.sp,
+                        )
                     }
                 }
+                // Ожидаемый суммарный входящий трафик.
+                Spacer(Modifier.height(22.dp))
+                Text(stringResource(R.string.call_traffic_rate, trafficMb), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    stringResource(R.string.call_invite_traffic_caption),
+                    color = HoloSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
-            // Низ: Отклонить · Микрофон(пресет) · Видео(пресет) · Принять.
+            // Низ: Отклонить(✕) · Микрофон(пресет) · Видео(пресет) · Принять(дверь).
             Row(
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CallButton(Icons.Filled.CallEnd, stringResource(R.string.call_invite_btn_decline), HoloError) { model.declineDmCall() }
+                CallButton(Icons.Filled.Close, stringResource(R.string.call_invite_btn_decline), HoloError) { model.declineDmCall() }
                 PresetButton(if (micOn) Icons.Filled.Mic else Icons.Filled.MicOff, micOn, stringResource(R.string.call_btn_mic)) { micOn = !micOn }
                 PresetButton(if (videoOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff, videoOn, stringResource(R.string.call_btn_video)) { videoOn = !videoOn }
-                CallButton(Icons.Filled.Call, stringResource(R.string.notif_accept), HoloOnline) { model.acceptDmCall(micOn, videoOn) }
+                CallButton(Icons.AutoMirrored.Filled.Login, stringResource(R.string.call_invite_btn_join), HoloOnline) { model.acceptDmCall(micOn, videoOn) }
             }
         }
     }
@@ -276,16 +299,17 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
 @Composable
 private fun PresetButton(icon: ImageVector, on: Boolean, desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.clip(CircleShape).background(if (on) Color(0xFF3A3D44) else Color(0xFF3A2A2C))
+        Modifier.clip(RoundedCornerShape(16.dp)).background(if (on) Color(0xFF3A3D44) else Color(0xFF3A2A2C))
             .size(56.dp).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = if (on) Color.White else Color(0xFFFF8A8A), modifier = Modifier.size(24.dp)) }
 }
 
+/** Цветная кнопка-сквиркул звонка (отклонить/принять). */
 @Composable
 internal fun CallButton(icon: ImageVector, desc: String, color: Color, onClick: () -> Unit) {
     Box(
-        Modifier.clip(CircleShape).background(color).size(64.dp).clickable { onClick() },
+        Modifier.clip(RoundedCornerShape(16.dp)).background(color).size(56.dp).clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(28.dp)) }
+    ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(26.dp)) }
 }

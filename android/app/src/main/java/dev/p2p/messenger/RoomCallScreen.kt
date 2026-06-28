@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloseFullscreen
@@ -109,19 +110,34 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
 
         if (chrome) {
             if (foc != null) {
-                // фуллскрин: имя слева-сверху, «свернуть» справа-сверху
-                Text(
-                    tileName(model, foc),
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(14.dp),
-                )
+                // фуллскрин: [имя-пилюля · чип трафика] слева-сверху, «свернуть» справа-сверху
+                Row(
+                    Modifier.align(Alignment.TopStart).statusBarsPadding().padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    NamePill(tileName(model, foc))
+                    if (!foc.me) TrafficChip(if (foc.video) 30 else 2)
+                }
                 Box(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(10.dp)) {
                     ChromeChip(Icons.Filled.CloseFullscreen, stringResource(R.string.call_minimize)) { focused = null }
                 }
             } else {
-                // сетка: смена камеры + настройки справа-сверху
+                // сетка: чип трафика слева-сверху, смена камеры + настройки справа-сверху
+                val incoming = remotes.map {
+                    if (it.video) {
+                        30
+                    } else if (it.audio) {
+                        2
+                    } else {
+                        0
+                    }
+                }.sum()
+                if (incoming > 0) {
+                    Box(Modifier.align(Alignment.TopStart).statusBarsPadding().padding(10.dp)) {
+                        TrafficChip(incoming)
+                    }
+                }
                 Row(
                     Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -468,10 +484,36 @@ private fun CtlButton(icon: ImageVector, desc: String, bg: Color, tint: Color = 
 @Composable
 private fun ChromeChip(icon: ImageVector, desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xB8141518)).size(38.dp)
+        Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xB8141518)).size(34.dp)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = Color(0xFFE6E7EA), modifier = Modifier.size(20.dp)) }
+    ) { Icon(icon, desc, tint = Color(0xFFE6E7EA), modifier = Modifier.size(18.dp)) }
+}
+
+/** Пилюля имени (фуллскрин) — высота как у верхних чипов (34dp). */
+@Composable
+private fun NamePill(name: String) {
+    Box(
+        Modifier.height(34.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xB8141518))
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Чип трафика «↓ ~M МБ/мин» — оценка входящего (34dp). Реальный метеринг — позже. */
+@Composable
+private fun TrafficChip(mbMin: Int) {
+    Row(
+        Modifier.height(34.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xB8141518))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(Icons.Filled.ArrowDownward, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
+        Text(stringResource(R.string.call_traffic_rate, mbMin), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
 }
 
 @Composable
