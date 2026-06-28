@@ -13,13 +13,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,6 +57,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 fun RoomCallScreen(model: AppModel, peerKey: String) {
     val remotes = model.roomMembers
     var chrome by remember { mutableStateOf(true) }
+    var showSettings by remember { mutableStateOf(false) }
 
     Box(
         Modifier.fillMaxSize().background(Color.Black).clickable { chrome = !chrome },
@@ -75,13 +83,92 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
                         model.switchCamera()
                     }
                 }
-                ChromeChip(Icons.Filled.Settings, stringResource(R.string.call_btn_settings)) {}
+                ChromeChip(Icons.Filled.Settings, stringResource(R.string.call_btn_settings)) { showSettings = true }
             }
             // низ: панель управления (выше системной навигации)
             Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 18.dp)) {
                 ControlBar(model, peerKey)
             }
         }
+        if (showSettings) CallSettings(model) { showSettings = false }
+    }
+}
+
+/** Настройки звонка (кнопка ⚙️): вывод звука (динамик), качество видео. Оверлей
+ *  поверх звонка; тап по фону не закрывает (только крестик). */
+@Composable
+private fun CallSettings(model: AppModel, onClose: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().background(Color(0xF2000000)).clickable(enabled = false) {}
+            .statusBarsPadding().navigationBarsPadding().padding(horizontal = 18.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.call_settings_title),
+                color = Color.White,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                Modifier.clip(CircleShape).background(Color(0x33FFFFFF)).size(36.dp).clickable { onClose() },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Close, stringResource(R.string.call_close), tint = Color.White, modifier = Modifier.size(18.dp)) }
+        }
+
+        Text(stringResource(R.string.call_audio_output), color = HoloSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(6.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { model.toggleSpeaker() }
+                .background(Color(0xFF1A1D21)).padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (model.speakerOn) Icons.Filled.VolumeUp else Icons.Filled.PhoneInTalk,
+                null,
+                tint = if (model.speakerOn) HoloAccent else HoloSecondary,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(14.dp))
+            Text(stringResource(R.string.call_speaker), color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Switch(
+                checked = model.speakerOn,
+                onCheckedChange = { model.toggleSpeaker() },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = HoloAccent,
+                    uncheckedThumbColor = HoloSecondary,
+                    uncheckedTrackColor = Color(0xFF1A1D21),
+                ),
+            )
+        }
+
+        Spacer(Modifier.height(22.dp))
+        Text(stringResource(R.string.settings_video_quality), color = HoloSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(6.dp))
+        VideoQuality.presets.forEach { preset ->
+            val selected = model.videoQuality == preset
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .clickable { model.changeVideoQuality(preset) }
+                    .background(if (selected) Color(0xFF13313D) else Color(0xFF1A1D21))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                RadioButton(
+                    selected = selected,
+                    onClick = { model.changeVideoQuality(preset) },
+                    colors = RadioButtonDefaults.colors(selectedColor = HoloAccent, unselectedColor = HoloSecondary),
+                )
+                Text(preset.label, color = if (selected) HoloAccent else Color.White, fontSize = 15.sp)
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+        Text(stringResource(R.string.settings_video_apply), color = HoloSecondary, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 

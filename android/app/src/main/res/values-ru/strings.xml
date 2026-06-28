@@ -216,6 +216,9 @@
     <string name="call_in_room_presence_caps">В КОМНАТЕ · %1$d</string>
     <string name="call_mic_off">Микрофон выкл</string>
     <string name="call_close">Закрыть</string>
+    <string name="call_settings_title">Настройки звонка</string>
+    <string name="call_audio_output">ВЫВОД ЗВУКА</string>
+    <string name="call_speaker">Динамик</string>
 
     <!-- ── Диагностика (bench) ─────────────────────────────────────────── -->
     <string name="bench_sending">отправка…</string>

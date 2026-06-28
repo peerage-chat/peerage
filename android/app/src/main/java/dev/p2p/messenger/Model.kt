@@ -195,6 +195,23 @@ class AppModel private constructor() {
         videoQuality = VideoQuality.presets.find { it.key == key } ?: VideoQuality.default
     }
 
+    /** Вывод звонка через громкую связь (динамик) vs разговорный. Применяется через
+     *  AudioManager поверх MODE_IN_COMMUNICATION (его ставит CallAudio). */
+    var speakerOn by mutableStateOf(false)
+        private set
+
+    fun toggleSpeaker() {
+        speakerOn = !speakerOn
+        applySpeaker()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applySpeaker() {
+        val am = appContext?.getSystemService(android.content.Context.AUDIO_SERVICE)
+            as? android.media.AudioManager ?: return
+        am.isSpeakerphoneOn = speakerOn
+    }
+
     var appContext: android.content.Context? = null
 
     /** Приложение на переднем плане? Ставит MainActivity (onStart/onStop). В фоне
@@ -739,6 +756,7 @@ class AppModel private constructor() {
             { out -> Native.roomPullAudio(sessionPtr, out) },
             { m -> Native.roomSetMuted(sessionPtr, m) },
         ).also { it.start(sr, ch) }
+        applySpeaker() // применить выбранный вывод (динамик/разговорный) к свежей сессии
         if (video) {
             videoActive = true
             maybeStartVideoSender() // стартует, когда surface тайла «Вы» будет готов
@@ -868,6 +886,7 @@ class AppModel private constructor() {
         videoActive = false
         roomMembers.clear()
         muted = false
+        speakerOn = false // следующий звонок — с разговорного по умолчанию
         val a = roomAudio
         roomAudio = null
         val vs = videoSender

@@ -224,6 +224,9 @@
     <string name="call_in_room_presence_caps">IN ROOM · %1$d</string>
     <string name="call_mic_off">Mic off</string>
     <string name="call_close">Close</string>
+    <string name="call_settings_title">Call settings</string>
+    <string name="call_audio_output">AUDIO OUTPUT</string>
+    <string name="call_speaker">Speaker</string>
 
     <!-- ── Diagnostics (bench) ─────────────────────────────────────────── -->
     <string name="bench_sending">sending…</string>
