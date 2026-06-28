@@ -54,4 +54,13 @@ object CameraCaps {
         val ranges = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return false
         return ranges.any { it.upper >= 60 }
     }
+
+    /** Id камеры нужного объектива (для живого превью). */
+    fun cameraId(ctx: Context, front: Boolean): String? = runCatching {
+        cameraId(ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager, front)
+    }.getOrNull()
+
+    /** Угол сенсора камеры (0/90/180/270) — для доворота превью. */
+    fun sensorOrientation(ctx: Context, front: Boolean): Int =
+        characteristics(ctx, front)?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 }

@@ -83,7 +83,7 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
     }
 
     val foc = focused?.let { f -> tiles.firstOrNull { it.id == f } }
-    Box(Modifier.fillMaxSize().background(Color(0xFF0E0F11))) {
+    Box(Modifier.fillMaxSize().background(Color(0xFF181A1F))) {
         when {
             // Фуллскрин участника (даблтап тайла): видео cover на весь экран.
             foc != null -> Box(
@@ -426,7 +426,7 @@ private fun VideoSurface(model: AppModel, peer: String, modifier: Modifier) {
 /** Трансформация TextureView: поворот на [rotationDeg] (0/90/180/270) + заполнение
  *  тайла с СОХРАНЕНИЕМ аспекта (cover-crop, по центру) + опц. зеркало [mirror].
  *  bufW/bufH — размер буфера (видео); размер вьюхи берём из самой [view]. */
-private fun applyTextureTransform(view: TextureView, bufW: Int, bufH: Int, rotationDeg: Int, mirror: Boolean) {
+internal fun applyTextureTransform(view: TextureView, bufW: Int, bufH: Int, rotationDeg: Int, mirror: Boolean) {
     val vw = view.width.toFloat()
     val vh = view.height.toFloat()
     if (vw <= 0f || vh <= 0f || bufW <= 0 || bufH <= 0) return
@@ -488,10 +488,10 @@ private fun CtlButton(
     onClick: () -> Unit,
 ) {
     Box(
-        Modifier.clip(RoundedCornerShape(12.dp)).background(bg).size(width = 52.dp, height = 40.dp)
+        Modifier.clip(RoundedCornerShape(14.dp)).background(bg).size(width = 60.dp, height = 48.dp)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(22.dp)) }
+    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(25.dp)) }
 }
 
 @Composable

@@ -26,10 +26,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.DesktopWindows
-import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,7 +74,7 @@ fun ShareVideoScreen(model: AppModel) {
 
         // Источник: камера / экран.
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SegButton(Icons.Filled.PhotoCamera, stringResource(R.string.share_source_camera), !model.shareScreenMode, Modifier.weight(1f)) {
+            SegButton(Icons.Filled.Videocam, stringResource(R.string.share_source_camera), !model.shareScreenMode, Modifier.weight(1f)) {
                 model.pickSource(false)
             }
             SegButton(Icons.Filled.DesktopWindows, stringResource(R.string.share_source_screen), model.shareScreenMode, Modifier.weight(1f)) {
@@ -88,23 +89,29 @@ fun ShareVideoScreen(model: AppModel) {
             Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1A1D21)),
             contentAlignment = Alignment.Center,
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    if (model.shareScreenMode) Icons.Filled.DesktopWindows else Icons.Filled.PhotoCamera,
-                    null,
-                    tint = Color(0xFF5A5F66),
-                    modifier = Modifier.size(40.dp),
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    when {
-                        model.shareScreenMode -> stringResource(R.string.share_preview_screen)
-                        model.shareFront -> stringResource(R.string.share_preview_front)
-                        else -> stringResource(R.string.share_preview_back)
-                    },
-                    color = HoloSecondary,
-                    fontSize = 13.sp,
-                )
+            // Живое превью только если камера свободна (видео в звонке выключено).
+            // Иначе (экран / камера занята отправителем) — плейсхолдер.
+            if (!model.shareScreenMode && !model.videoActive) {
+                key(model.shareFront) { CameraPreview(model.shareFront, Modifier.fillMaxSize()) }
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        if (model.shareScreenMode) Icons.Filled.DesktopWindows else Icons.Filled.Videocam,
+                        null,
+                        tint = Color(0xFF5A5F66),
+                        modifier = Modifier.size(40.dp),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        when {
+                            model.shareScreenMode -> stringResource(R.string.share_preview_screen)
+                            model.shareFront -> stringResource(R.string.share_preview_front)
+                            else -> stringResource(R.string.share_preview_back)
+                        },
+                        color = HoloSecondary,
+                        fontSize = 13.sp,
+                    )
+                }
             }
             if (!model.shareScreenMode) {
                 Box(
