@@ -28,7 +28,12 @@ pub fn open(dir: &Path) -> rusqlite::Result<Db> {
     }
 
     conn.execute_batch(
+        // busy_timeout: ждать освобождения блокировки до 5с вместо мгновенного
+        // SQLITE_BUSY. У нас одно соединение под Arc<Mutex> (записи и так
+        // сериализованы), но это страхует от контеншена WAL-checkpoint и от
+        // будущего второго соединения (напр. read-only) — см. docs/architecture/invariants.md.
         "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 5000;
          PRAGMA foreign_keys  = ON;",
     )?;
 
@@ -40,7 +45,7 @@ pub fn open(dir: &Path) -> rusqlite::Result<Db> {
 #[cfg(test)]
 pub fn open_in_memory() -> rusqlite::Result<Db> {
     let conn = Connection::open_in_memory()?;
-    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;")?;
     migrate(&conn)?;
     Ok(Arc::new(Mutex::new(conn)))
 }
