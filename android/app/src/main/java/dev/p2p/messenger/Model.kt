@@ -720,21 +720,23 @@ class AppModel private constructor() {
         }
     }
 
-    /** Принять входящий DM-звонок. */
-    fun acceptDmCall() {
+    /** Принять входящий DM-звонок с ПРЕСЕТОМ своего mic/video (выбор join'ера до
+     *  входа, НЕ флаги звонящего). Дефолт — мик вкл, видео выкл. */
+    fun acceptDmCall(audio: Boolean = true, video: Boolean = false) {
         val ic = incomingCall ?: return
         incomingCall = null
         val ctx = appContext ?: return
         IncomingCallReceiver.cancel(ctx)
         val name = contacts.firstOrNull { it.key == ic.peer }?.name ?: ""
+        muted = !audio // мик-пресет → стартовое состояние мьюта
         ops.execute {
-            val roomId = Native.roomJoinDm(sessionPtr, ic.peer, ic.audio, ic.video)
+            val roomId = Native.roomJoinDm(sessionPtr, ic.peer, audio, video)
             if (roomId.isEmpty()) return@execute
             currentRoom = roomId
             dmCallPeer = ic.peer
             roomMembers.clear()
             CallService.start(ctx, name)
-            startRoomMedia(ctx, roomId, ic.video)
+            startRoomMedia(ctx, roomId, video)
         }
     }
 
@@ -755,7 +757,10 @@ class AppModel private constructor() {
             { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
             { out -> Native.roomPullAudio(sessionPtr, out) },
             { m -> Native.roomSetMuted(sessionPtr, m) },
-        ).also { it.start(sr, ch) }
+        ).also {
+            it.start(sr, ch)
+            it.setMuted(muted)
+        } // mic-пресет применяем сразу
         applySpeaker() // применить выбранный вывод (динамик/разговорный) к свежей сессии
         if (video) {
             videoActive = true

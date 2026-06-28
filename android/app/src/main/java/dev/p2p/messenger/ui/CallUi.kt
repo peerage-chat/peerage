@@ -12,8 +12,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -214,9 +216,12 @@ internal fun ParticipantFullscreen(
 @Composable
 internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
     val name = model.contacts.firstOrNull { it.key == ic.peer }?.name ?: stringResource(R.string.common_contact)
+    // ПРЕСЕТ join'ера: в каком состоянии войдём (мик/камера). Дефолт — мик вкл, видео выкл.
+    var micOn by remember { mutableStateOf(true) }
+    var videoOn by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Color(0xF2000000))) {
         Column(
-            Modifier.fillMaxSize().padding(bottom = 64.dp),
+            Modifier.fillMaxSize().padding(bottom = 56.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -236,21 +241,45 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                 Spacer(Modifier.height(20.dp))
                 Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
                 Text(
-                    stringResource(R.string.notif_incoming_call),
+                    stringResource(R.string.call_invite_subtitle),
                     color = HoloSecondary,
                     fontSize = 15.sp,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+                // Что включено у ЗВОНЯЩЕГО (его маячок).
+                if (ic.audio || ic.video) {
+                    Row(
+                        Modifier.padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (ic.video) Icon(Icons.Filled.Videocam, null, tint = HoloOnline, modifier = Modifier.size(16.dp))
+                        if (ic.audio) Icon(Icons.Filled.Mic, null, tint = HoloOnline, modifier = Modifier.size(16.dp))
+                    }
+                }
             }
+            // Низ: Отклонить · Микрофон(пресет) · Видео(пресет) · Принять.
             Row(
-                horizontalArrangement = Arrangement.spacedBy(56.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CallButton(Icons.Filled.CallEnd, stringResource(R.string.call_invite_btn_decline), HoloError) { model.declineDmCall() }
-                CallButton(Icons.Filled.Call, stringResource(R.string.notif_accept), HoloOnline) { model.acceptDmCall() }
+                PresetButton(if (micOn) Icons.Filled.Mic else Icons.Filled.MicOff, micOn, stringResource(R.string.call_btn_mic)) { micOn = !micOn }
+                PresetButton(if (videoOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff, videoOn, stringResource(R.string.call_btn_video)) { videoOn = !videoOn }
+                CallButton(Icons.Filled.Call, stringResource(R.string.notif_accept), HoloOnline) { model.acceptDmCall(micOn, videoOn) }
             }
         }
     }
+}
+
+/** Тумблер пресета mic/video на входящем: вкл — нейтральный, выкл — перечёркнут+красный. */
+@Composable
+private fun PresetButton(icon: ImageVector, on: Boolean, desc: String, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(CircleShape).background(if (on) Color(0xFF3A3D44) else Color(0xFF3A2A2C))
+            .size(56.dp).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, desc, tint = if (on) Color.White else Color(0xFFFF8A8A), modifier = Modifier.size(24.dp)) }
 }
 
 @Composable
