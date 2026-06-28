@@ -81,7 +81,7 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
     }
 
     val foc = focused?.let { f -> tiles.firstOrNull { it.id == f } }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(Color(0xFF0E0F11))) {
         when {
             // Фуллскрин участника (даблтап тайла): видео cover на весь экран.
             foc != null -> Box(
