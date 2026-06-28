@@ -29,6 +29,7 @@ class VideoSender(
     private val height: Int,
     private val fps: Int,
     private val bitrate: Int,
+    startFront: Boolean = true,
     private val sendVideo: (ByteArray, Boolean) -> Unit,
 ) {
     private var encoder: MediaCodec? = null
@@ -50,8 +51,9 @@ class VideoSender(
     /** Surface тайла «Вы» — локальное превью прямо с камеры (без энкодера). */
     @Volatile private var previewSurface: Surface? = null
 
-    /** Какую камеру открывать: фронтальную (true) или тыловую. Меняется флипом. */
-    @Volatile private var facingFront = true
+    /** Какую камеру открывать: фронтальную (true) или тыловую. Стартовая сторона —
+     *  из [startFront] (экран шаринга может выбрать тыловую); меняется флипом. */
+    @Volatile private var facingFront = startFront
 
     /** [preview] — surface тайла «Вы» для локального превью (или null). Камера
      *  рендерит в энкодер + (если задан) превью ОДНОЙ сессией — без пересборки. */

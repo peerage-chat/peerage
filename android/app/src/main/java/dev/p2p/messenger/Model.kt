@@ -195,6 +195,82 @@ class AppModel private constructor() {
         videoQuality = VideoQuality.presets.find { it.key == key } ?: VideoQuality.default
     }
 
+    // ── Экран шаринга видео (долгий тап «Видео» в звонке). ──────────────────────
+    var showVideoShare by mutableStateOf(false)
+        private set
+    var shareScreenMode by mutableStateOf(false) // false = камера, true = экран
+        private set
+    var shareFront by mutableStateOf(true)
+        private set
+    var shareResW by mutableStateOf(1280)
+        private set
+    var shareResH by mutableStateOf(720)
+        private set
+    var shareFps by mutableStateOf(30)
+        private set
+    var shareBitrate by mutableStateOf(2_000_000)
+        private set
+    var shareBitrateAuto by mutableStateOf(true)
+        private set
+
+    /** Рекомендуемый битрейт (бит/с) ≈ w·h·fps·0.08 (H264, ~0.08 bpp/кадр). */
+    fun autoBitrate(w: Int, h: Int, fps: Int): Int =
+        (w.toLong() * h * fps * 0.08).toInt().coerceIn(1_000_000, 40_000_000)
+
+    fun openVideoShare() {
+        shareScreenMode = false
+        shareFront = cameraFront
+        shareResW = videoQuality.width
+        shareResH = videoQuality.height
+        shareFps = videoQuality.fps
+        shareBitrate = autoBitrate(shareResW, shareResH, shareFps)
+        shareBitrateAuto = true
+        showVideoShare = true
+    }
+
+    fun closeVideoShare() {
+        showVideoShare = false
+    }
+
+    fun pickSource(screen: Boolean) {
+        shareScreenMode = screen
+    }
+
+    fun pickFacing(front: Boolean) {
+        shareFront = front
+    }
+
+    fun pickRes(w: Int, h: Int) {
+        shareResW = w
+        shareResH = h
+        if (shareBitrateAuto) shareBitrate = autoBitrate(w, h, shareFps)
+    }
+
+    fun pickFps(f: Int) {
+        shareFps = f
+        if (shareBitrateAuto) shareBitrate = autoBitrate(shareResW, shareResH, f)
+    }
+
+    fun pickBitrate(b: Int) {
+        shareBitrate = b
+        shareBitrateAuto = false
+    }
+
+    /** Применить выбор и начать показ видео с этими параметрами. */
+    fun applyVideoShare() {
+        showVideoShare = false
+        if (shareScreenMode) return // шаринг экрана (MediaProjection) — отдельная фича, пока no-op
+        cameraFront = shareFront
+        changeVideoQuality(VideoQuality("${shareResH}p", shareResW, shareResH, shareFps, shareBitrate))
+        if (videoActive) {
+            // видео уже идёт → пересобрать отправитель с новыми параметрами
+            stopVideoSender()
+            maybeStartVideoSender()
+        } else {
+            toggleVideo()
+        }
+    }
+
     /** Вывод звонка через громкую связь (динамик) vs разговорный. Применяется через
      *  AudioManager поверх MODE_IN_COMMUNICATION (его ставит CallAudio). */
     var speakerOn by mutableStateOf(false)
@@ -829,13 +905,15 @@ class AppModel private constructor() {
             else -> 9
         }
         Native.roomSetVideoCap(sessionPtr, cap)
-        cameraFront = true // новый VideoSender всегда стартует с фронталки
+        // Стартуем с текущей стороны камеры (cameraFront): дефолт — фронталка, но
+        // экран шаринга мог выбрать тыловую (applyVideoShare ставит cameraFront).
         videoSender = VideoSender(
             ctx,
             videoQuality.width,
             videoQuality.height,
             videoQuality.fps,
             videoQuality.bitrate,
+            startFront = cameraFront,
         ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start(preview) }
     }
 

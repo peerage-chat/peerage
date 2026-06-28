@@ -4,9 +4,11 @@ import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.view.Surface
 import android.view.TextureView
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -156,6 +158,7 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
             }
         }
         if (showSettings) CallSettings(model) { showSettings = false }
+        if (model.showVideoShare) ShareVideoScreen(model)
     }
 }
 
@@ -467,16 +470,26 @@ private fun ControlBar(model: AppModel, peerKey: String) {
             stringResource(R.string.call_btn_video),
             if (model.videoActive) Color(0xFF3A3D44) else Color(0xFF3A2A2C),
             tint = if (model.videoActive) Color.White else Color(0xFFFF8A8A),
+            // долгий тап → экран «Показать видео» (источник/разрешение/fps/битрейт)
+            onLongClick = { model.openVideoShare() },
         ) { model.toggleVideo() }
         CtlButton(Icons.AutoMirrored.Filled.Logout, stringResource(R.string.call_btn_leave), HoloError) { model.leaveRoom() }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CtlButton(icon: ImageVector, desc: String, bg: Color, tint: Color = Color.White, onClick: () -> Unit) {
+private fun CtlButton(
+    icon: ImageVector,
+    desc: String,
+    bg: Color,
+    tint: Color = Color.White,
+    onLongClick: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     Box(
         Modifier.clip(RoundedCornerShape(12.dp)).background(bg).size(width = 52.dp, height = 40.dp)
-            .clickable { onClick() },
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(22.dp)) }
 }
