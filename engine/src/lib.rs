@@ -659,6 +659,10 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, ev: Event) {
             let out = groups.on_group(&data);
             if let Some(gid) = &out.gid {
                 if out.text.is_some() || out.system {
+                    // Обновляем кэш истории этого gid: group_history_json читает кэш,
+                    // а не live-messages. Без этого полученное сообщение пропадает при
+                    // переоткрытии чата (отображается только live-событием).
+                    engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(gid));
                     push_event(engine, serde_json::json!({
                         "type": "group_msg",
                         "gid": hex::encode(gid),

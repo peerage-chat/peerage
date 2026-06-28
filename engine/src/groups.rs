@@ -164,6 +164,11 @@ impl GroupManager {
         let me = hex::encode(self.identity.public_key_bytes());
         e.messages.push(GMsg { text: text.to_string(), mine: true, time: now(), sender: me, system: false });
         self.save_msgs(gid);
+        // КРИТИЧНО: отправка двигает MLS sending-ratchet — его надо ПЕРСИСТИТЬ, иначе
+        // после рестарта/убийства приложения отправитель грузит старое состояние и
+        // шлёт со «старого» поколения → получатель (он-то приём сохраняет) уже
+        // удалил тот секрет (forward secrecy) → "secret deleted" → сообщения не доходят.
+        self.save_group(gid);
         true
     }
 
