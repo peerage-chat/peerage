@@ -14,8 +14,10 @@
 
 Serverless P2P-мессенджер с E2E-шифрованием, голосом, видео и шарингом экрана.
 Связь — оверлейная mesh-сеть **Yggdrasil** (у каждого узла постоянный IPv6 из
-ed25519-ключа). Своего сервера для данных нет; единственное внешнее — push-пробуждение
-(ntfy) для спящих устройств.
+ed25519-ключа). Своего сервера для данных нет; единственное внешнее — публичный
+**ntfy.sh**: push-пробуждение спящих устройств и (опц.) relay уже-зашифрованных
+групповых сообщений для офлайн-доставки. Сервер видит только байты (имя топика, размер,
+время) — не содержимое и не участников.
 
 Принципы:
 - **Полный P2P.** Транспорт не доверенный — он лишь маршрутизирует датаграммы по ключу.
@@ -44,9 +46,10 @@ groupchat/   групповой чат поверх Yggdrasil (MLS + транс�
 call/        движок звонка (десктоп): аудио (cpal/Opus) + видео (H.264), демукс по track
 engine/      ДОМЕЙН-ЛОГИКА для клиентов: Engine (фасад), GroupManager (актор !Send),
              RoomCallEngine (мультипати аудио комнат). Граница Command/Event/Snapshot.
-ntfy/        push-пробуждение (ntfy.sh) для спящих устройств
+ntfy/        клиент ntfy.sh: push-пробуждение + (опц.) relay зашифр. групповых сообщений
+             (топик=группа, FIFO-порядок и хранение для офлайн); сервер видит только байты
 androidjni/  ТОНКИЙ JNI-мост (cdylib libp2p_android.so): кодек команд/событий поверх engine
-desktop/     десктоп-приложение (Slint, нативный Rust-GUI, без WebView)
+desktop/     десктоп-приложение (Slint, нативный Rust-GUI, без WebView); зовёт крейты напрямую
 ```
 
 ```
@@ -55,8 +58,9 @@ android/     Kotlin/Compose Android-клиент (см. §9)
 ```
 
 Граф зависимостей грубо: `core` ← всё; `transport` → libygg; `messenger` → core+transport;
-`media`/`group`/`groupchat`/`call` → messenger; `engine` → messenger+groupchat+media;
-`androidjni`/`desktop` → engine.
+`media`/`group`/`groupchat`/`call` → messenger; `engine` → core+messenger+media+group+
+groupchat+ygg. Клиенты по-разному: **`androidjni` → engine** (тонкий кодек, домейн-логика
+в engine), а **`desktop` → messenger+call+groupchat напрямую** (Slint-клиент, не через engine).
 
 ---
 
@@ -73,6 +77,10 @@ android/     Kotlin/Compose Android-клиент (см. §9)
 Контракт и миграция — [protocol-spec.md](protocol-spec.md), решение — [ADR-003](adr/ADR-003-engine-api.md).
 `androidjni` — тонкий кодек: декодирует JNI-аргументы → команда `engine`, кодирует
 событие → JNI. **Никакой логики в JNI/UI.**
+
+Эта граница — **клиентский (Android) путь**. Десктоп (`desktop`) — старше engine и зовёт
+крейты (`messenger`/`call`/`groupchat`) напрямую из Slint; постепенная унификация на engine —
+направление, а не данность.
 
 ---
 
