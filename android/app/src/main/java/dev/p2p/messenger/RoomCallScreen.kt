@@ -46,7 +46,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import kotlinx.coroutines.delay
 
 /**
  * Экран активного звонка-комнаты (Discord-style сетка). Дизайн — docs/design/call-ui.md.
@@ -74,13 +73,7 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
     LaunchedEffect(remotes.size) {
         if (focused != null && focused != "me" && remotes.none { it.peer == focused }) focused = null
     }
-    // Авто-скрытие chrome: через паузу UI прячется сам (видео/аватар остаются).
-    LaunchedEffect(chrome, showSettings) {
-        if (chrome && !showSettings) {
-            delay(4000)
-            chrome = false
-        }
-    }
+    // Оверлей НЕ прячется сам (по просьбе) — скрыть/показать только тапом по тайлу.
 
     val foc = focused?.let { f -> tiles.firstOrNull { it.id == f } }
     Box(Modifier.fillMaxSize().background(Tokens.Colors.callBg)) {

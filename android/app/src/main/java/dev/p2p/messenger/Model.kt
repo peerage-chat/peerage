@@ -992,7 +992,9 @@ class AppModel private constructor() {
         ops.execute { Native.roomDeclineDm(sessionPtr, ic.peer) }
     }
 
-    private fun startRoomMedia(ctx: android.content.Context, gid: String, video: Boolean) {
+    /** Создать аудио-сессию комнаты (Opus-битрейт/режим + fx + устройство из настроек).
+     *  Используется при старте звонка и при «Применить» в настройках звука (рестарт). */
+    private fun startRoomAudioSession(ctx: android.content.Context, gid: String) {
         // битрейт/режим из настроек звука (audioBitrate: дефолт 24к=голос при «Авто»);
         // music = Opus Audio-режим на верхней половине диапазона.
         val p = JSONObject(Native.roomAudioStart(sessionPtr, gid, audioBitrate, audioBitrate >= 32_000))
@@ -1011,6 +1013,23 @@ class AppModel private constructor() {
             it.setMuted(muted)
         } // mic-пресет применяем сразу
         applyOutputDevice() // применить выбранный вывод (встроенный/динамик/bt) к свежей сессии
+    }
+
+    /** Применить настройки звука НА ЛЕТУ: пересобрать аудио-сессию (битрейт/fx/устройство)
+     *  без перезвона. Видео не трогаем. */
+    fun applyAudioSettings() {
+        showAudioSettings = false
+        val gid = currentRoom ?: return
+        val ctx = appContext ?: return
+        ops.execute {
+            roomAudio?.stop()
+            Native.roomAudioStop(sessionPtr)
+            startRoomAudioSession(ctx, gid)
+        }
+    }
+
+    private fun startRoomMedia(ctx: android.content.Context, gid: String, video: Boolean) {
+        startRoomAudioSession(ctx, gid)
         if (video) {
             videoActive = true
             maybeStartVideoSender() // стартует, когда surface тайла «Вы» будет готов

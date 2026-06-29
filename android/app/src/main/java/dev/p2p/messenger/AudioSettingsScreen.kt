@@ -164,7 +164,7 @@ fun AudioSettingsScreen(model: AppModel) {
         Spacer(Modifier.height(20.dp))
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tokens.Colors.accent)
-                .clickable { model.closeAudioSettings() }.padding(vertical = 15.dp),
+                .clickable { model.applyAudioSettings() }.padding(vertical = 15.dp),
             contentAlignment = Alignment.Center,
         ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
         Spacer(Modifier.height(20.dp))

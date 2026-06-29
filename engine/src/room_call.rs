@@ -301,9 +301,9 @@ impl RoomCallEngine {
                 {
                     let mut srcs = self.sources.lock().unwrap();
                     let mut lv = self.levels.lock().unwrap();
-                    // Затухание уровня каждого кадра (плавный decay при тишине).
+                    // Release: плавное затухание уровня каждого кадра (держит сквозь паузы речи).
                     for v in lv.values_mut() {
-                        *v *= 0.6;
+                        *v *= 0.82;
                     }
                     for (key, s) in srcs.iter_mut() {
                         if let Some(pcm) = s.next_frame() {
@@ -315,9 +315,14 @@ impl RoomCallEngine {
                                 }
                             }
                             let rms = (sum / pcm.len().max(1) as f64).sqrt();
-                            let norm = ((rms / 32768.0 * 4.0).min(1.0)) as f32; // как в CallAudio
+                            // Масштаб ×6 разделяет речь (RMS ~1.5–4к → 0.27–0.7) от шума
+                            // (RMS <700 → <0.13). Attack СГЛАЖЕН (40% к цели) → единичный
+                            // шумовой пик не зажигает рамку, нужна устойчивая речь (~2 кадра).
+                            let norm = ((rms / 32768.0 * 6.0).min(1.0)) as f32;
                             let e = lv.entry(*key).or_insert(0.0);
-                            *e = e.max(norm); // attack мгновенный, decay через *0.6 выше
+                            if norm > *e {
+                                *e += (norm - *e) * 0.4;
+                            }
                             any = true;
                         }
                     }
@@ -346,7 +351,7 @@ impl RoomCallEngine {
     pub fn speaking_json(&self) -> String {
         let lv = self.levels.lock().unwrap();
         let arr: Vec<String> =
-            lv.iter().filter(|(_, v)| **v > 0.08).map(|(k, _)| hex::encode(k)).collect();
+            lv.iter().filter(|(_, v)| **v > 0.25).map(|(k, _)| hex::encode(k)).collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
