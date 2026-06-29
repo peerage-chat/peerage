@@ -225,7 +225,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
     // Оценка суммарного входящего «~»: видео-поток ≈30, аудио ≈2 МБ/мин (per call-ui.md).
     val trafficMb = (if (ic.video) 30 else 2) + others.map { if (it.video) 30 else 2 }.sum()
 
-    Box(Modifier.fillMaxSize().background(Tokens.Colors.overlay)) {
+    Box(Modifier.fillMaxSize().background(Tokens.Colors.callBg)) {
         Column(
             Modifier.fillMaxSize().padding(bottom = 56.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

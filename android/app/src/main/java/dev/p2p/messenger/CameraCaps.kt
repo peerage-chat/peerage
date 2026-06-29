@@ -39,13 +39,15 @@ object CameraCaps {
         cm.getCameraCharacteristics(id)
     }.getOrNull()
 
-    /** Поддерживаемые 16:9-разрешения (≤ макс. выходного размера камеры). */
+    /** Поддерживаемые 16:9-разрешения. ВАЖНО: только те корзины, чей ТОЧНЫЙ размер
+     *  реально есть в выходах камеры — иначе createCaptureSession падает (чёрный кадр).
+     *  Напр. 2560×1440 часто отсутствует, хотя 4К есть → раньше предлагали ложно. */
     fun resolutions(ctx: Context, front: Boolean): List<Res> {
         val ch = characteristics(ctx, front) ?: return buckets.take(2)
         val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return buckets.take(2)
         val sizes = map.getOutputSizes(SurfaceTexture::class.java) ?: return buckets.take(2)
-        val maxArea = sizes.maxOfOrNull { it.width.toLong() * it.height } ?: return buckets.take(2)
-        return buckets.filter { it.width.toLong() * it.height <= maxArea }.ifEmpty { buckets.take(1) }
+        return buckets.filter { b -> sizes.any { it.width == b.width && it.height == b.height } }
+            .ifEmpty { buckets.take(1) }
     }
 
     /** Тянет ли камера ≥60 fps (по AE target-fps-диапазонам). */
