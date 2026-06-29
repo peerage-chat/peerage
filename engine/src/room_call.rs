@@ -114,6 +114,9 @@ pub struct RoomCallEngine {
     vid_frame_id: AtomicU16,
     /// Кап видео-очереди в кадрах (зависит от fps, см. [`set_video_fps`]).
     vid_cap: Arc<AtomicUsize>,
+    /// Уровень речи на участника (0..1, сглажен): attack мгновенный, decay плавный.
+    /// Считается в [`pull_audio`] по RMS кадра источника. Для active-speaker рамки.
+    levels: Mutex<HashMap<PeerKey, f32>>,
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -246,6 +249,7 @@ impl RoomCallEngine {
             vid_seq: AtomicU16::new(0),
             vid_frame_id: AtomicU16::new(0),
             vid_cap,
+            levels: Mutex::new(HashMap::new()),
             threads: Mutex::new(threads),
         })
     }
@@ -296,13 +300,24 @@ impl RoomCallEngine {
                 let mut any = false;
                 {
                     let mut srcs = self.sources.lock().unwrap();
-                    for s in srcs.values_mut() {
+                    let mut lv = self.levels.lock().unwrap();
+                    // Затухание уровня каждого кадра (плавный decay при тишине).
+                    for v in lv.values_mut() {
+                        *v *= 0.6;
+                    }
+                    for (key, s) in srcs.iter_mut() {
                         if let Some(pcm) = s.next_frame() {
+                            let mut sum = 0f64;
                             for (i, &v) in pcm.iter().enumerate() {
+                                sum += (v as f64) * (v as f64);
                                 if i < mix.len() {
                                     mix[i] += v as i32;
                                 }
                             }
+                            let rms = (sum / pcm.len().max(1) as f64).sqrt();
+                            let norm = ((rms / 32768.0 * 4.0).min(1.0)) as f32; // как в CallAudio
+                            let e = lv.entry(*key).or_insert(0.0);
+                            *e = e.max(norm); // attack мгновенный, decay через *0.6 выше
                             any = true;
                         }
                     }
@@ -324,6 +339,15 @@ impl RoomCallEngine {
             }
         }
         produced
+    }
+
+    /// Hex-ключи участников, которые сейчас говорят (уровень > порога) — для
+    /// active-speaker рамки. Уровень считается в [`pull_audio`] по RMS кадра.
+    pub fn speaking_json(&self) -> String {
+        let lv = self.levels.lock().unwrap();
+        let arr: Vec<String> =
+            lv.iter().filter(|(_, v)| **v > 0.08).map(|(k, _)| hex::encode(k)).collect();
+        serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
     pub fn set_muted(&self, m: bool) {

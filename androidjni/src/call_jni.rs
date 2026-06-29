@@ -134,11 +134,26 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStart<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
     gid_hex: JString<'local>,
+    bitrate: jint,
+    music: jboolean,
 ) -> jstring {
     jni_safe!(ret(&env, "{}"), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
         let gid = gid_or!(env, gid_hex, ret(&env, "{}"));
-        ret(&env, &e.room_audio_start(gid))
+        ret(&env, &e.room_audio_start(gid, bitrate, music != JNI_FALSE))
+    })
+}
+
+/// Hex-ключи говорящих сейчас участников (active-speaker). JSON-массив.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomSpeakingPeers<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.room_speaking_json())
     })
 }
 

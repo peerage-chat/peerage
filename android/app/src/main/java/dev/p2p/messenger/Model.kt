@@ -171,6 +171,11 @@ class AppModel private constructor() {
     var currentRoom by mutableStateOf<String?>(null)
     val roomMembers = mutableStateListOf<RoomMember>()
 
+    /** Hex-ключи говорящих сейчас участников (active-speaker рамка). Опрашивается
+     *  отдельным потоком ~4 раза/с, пока мы в звонке. */
+    var speakingPeers by mutableStateOf<Set<String>>(emptySet())
+        private set
+
     /** Угол поворота входящего видео на участника (град, угол сенсора отправителя).
      *  UI доворачивает тайл. Энкодер шлёт сырой кадр с сенсора → нужен доворот. */
     val roomMemberRotation = mutableStateMapOf<String, Int>()
@@ -658,6 +663,26 @@ class AppModel private constructor() {
             name = "native-ticker"
             start()
         }
+        // Active-speaker: пока в звонке — опрос говорящих ~4 раза/с (быстрее тикера).
+        Thread {
+            while (running) {
+                if (currentRoom != null && sessionPtr != 0L) {
+                    runCatching {
+                        val arr = JSONArray(Native.roomSpeakingPeers(sessionPtr))
+                        val set = (0 until arr.length()).map { arr.getString(it) }.toSet()
+                        if (speakingPeers != set) speakingPeers = set
+                    }
+                    Thread.sleep(250)
+                } else {
+                    if (speakingPeers.isNotEmpty()) speakingPeers = emptySet()
+                    Thread.sleep(500)
+                }
+            }
+        }.apply {
+            isDaemon = true
+            name = "active-speaker"
+            start()
+        }
     }
 
     // ── Контакты / чат ────────────────────────────────────────────────────────
@@ -968,7 +993,9 @@ class AppModel private constructor() {
     }
 
     private fun startRoomMedia(ctx: android.content.Context, gid: String, video: Boolean) {
-        val p = JSONObject(Native.roomAudioStart(sessionPtr, gid))
+        // битрейт/режим из настроек звука (audioBitrate: дефолт 24к=голос при «Авто»);
+        // music = Opus Audio-режим на верхней половине диапазона.
+        val p = JSONObject(Native.roomAudioStart(sessionPtr, gid, audioBitrate, audioBitrate >= 32_000))
         val sr = p.optInt("sample_rate", 48000)
         val ch = p.optInt("channels", 1)
         roomAudio = CallAudio(

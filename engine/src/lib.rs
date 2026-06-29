@@ -387,10 +387,19 @@ impl Engine {
         self.room_presence_peers_json(gid)
     }
 
-    /// Запустить мультипати аудио комнаты. Возвращает JSON {sample_rate,channels,frame_len}.
-    pub fn room_audio_start(&self, gid: Vec<u8>) -> String {
+    /// Запустить мультипати аудио комнаты. `bitrate` (бит/с, >0) и `music` (Audio-режим
+    /// vs Voip) — из настроек звука; 0 = дефолт. Возвращает JSON {sample_rate,channels,frame_len}.
+    pub fn room_audio_start(&self, gid: Vec<u8>, bitrate: i32, music: bool) -> String {
         let mut audio = AudioSettings::default();
         audio.jitter_depth = 5;
+        if bitrate > 0 {
+            audio.bitrate = bitrate;
+            audio.mode = if music {
+                p2p_core::settings::OpusMode::Audio
+            } else {
+                p2p_core::settings::OpusMode::Voip
+            };
+        }
         let members = Arc::new(Mutex::new(self.live_participants(&gid)));
         let engine = RoomCallEngine::start(self.messenger.clone(), audio, members.clone());
         let old = self.room_call.lock_safe().replace(RoomCall { gid, engine, members });
@@ -415,6 +424,11 @@ impl Engine {
 
     pub fn room_pull_audio(&self, out: &mut [i16]) -> usize {
         self.room_engine().map(|e| e.pull_audio(out)).unwrap_or(0)
+    }
+
+    /// Hex-ключи говорящих сейчас участников (active-speaker). "[]" вне звонка.
+    pub fn room_speaking_json(&self) -> String {
+        self.room_engine().map(|e| e.speaking_json()).unwrap_or_else(|| "[]".into())
     }
 
     pub fn room_set_muted(&self, muted: bool) {

@@ -96,8 +96,12 @@ object Native {
     /** Живые участники любой комнаты по маячкам (не надо быть в ней самому). JSON [{peer, audio, video}]. */
     external fun roomPresencePeers(sessionPtr: Long, gidHex: String): String
 
-    /** Запустить мультипати аудио комнаты. JSON {sample_rate, channels, frame_len}. */
-    external fun roomAudioStart(sessionPtr: Long, gid: String): String
+    /** Запустить мультипати аудио комнаты. bitrate (бит/с, 0=дефолт) + music (Opus
+     *  Audio-режим vs Voip) из настроек звука. JSON {sample_rate, channels, frame_len}. */
+    external fun roomAudioStart(sessionPtr: Long, gid: String, bitrate: Int, music: Boolean): String
+
+    /** Hex-ключи говорящих сейчас участников (active-speaker). JSON-массив. */
+    external fun roomSpeakingPeers(sessionPtr: Long): String
 
     /** Остановить мультипати аудио комнаты. */
     external fun roomAudioStop(sessionPtr: Long)

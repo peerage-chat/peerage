@@ -306,9 +306,11 @@ private fun ParticipantTile(
             t.video -> VideoSurface(model, t.id, Modifier.fillMaxSize())
             else -> Avatar(name, 64)
         }
-        // голубая рамка у себя (скруглённая — по форме тайла)
+        // рамка: голубая у себя; зелёная — у говорящего сейчас участника (active-speaker)
         if (t.me) {
             Box(Modifier.matchParentSize().border(2.dp, HoloAccent, RoundedCornerShape(12.dp)))
+        } else if (t.id in model.speakingPeers) {
+            Box(Modifier.matchParentSize().border(2.dp, Tokens.Colors.online, RoundedCornerShape(12.dp)))
         }
         if (chrome) {
             Row(
