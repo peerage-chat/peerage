@@ -50,11 +50,11 @@ object CameraCaps {
         val ch = characteristics(ctx, front) ?: return fallback()
         val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return fallback()
         val sizes = map.getOutputSizes(SurfaceTexture::class.java) ?: return fallback()
-        val enc = h264Caps()
+        val encoders = avcEncoders()
         return sizes
             .filter { s ->
                 val ratio = s.width.toDouble() / s.height
-                ratio in 1.70..1.85 && s.height in 480..2160 && encoderOk(enc, s.width, s.height)
+                ratio in 1.70..1.85 && s.height in 480..2160 && encoderOk(encoders, s.width, s.height)
             }
             .sortedByDescending { it.width.toLong() * it.height }
             .distinctBy { heightClass(it.height) } // один пункт на класс высоты (самый широкий)
@@ -62,20 +62,24 @@ object CameraCaps {
             .ifEmpty { fallback() }
     }
 
-    /** Кодируем ли размер: энкодер поддерживает И размеры кратны его выравниванию. */
-    private fun encoderOk(enc: MediaCodecInfo.VideoCapabilities?, w: Int, h: Int): Boolean {
-        if (enc == null) return true
-        return runCatching {
-            enc.isSizeSupported(w, h) && w % enc.widthAlignment == 0 && h % enc.heightAlignment == 0
-        }.getOrDefault(false)
+    /** Кодируем ли размер: ХОТЬ ОДИН AVC-энкодер тянет И размеры кратны его выравниванию.
+     *  Важно проверять ВСЕ (а не первый): первый часто софтверный с потолком 1080p, тогда
+     *  как аппаратный умеет 4К — иначе ложно отсекали 4К. */
+    private fun encoderOk(encoders: List<MediaCodecInfo.VideoCapabilities>, w: Int, h: Int): Boolean {
+        if (encoders.isEmpty()) return true
+        return encoders.any { vc ->
+            runCatching {
+                vc.isSizeSupported(w, h) && w % vc.widthAlignment == 0 && h % vc.heightAlignment == 0
+            }.getOrDefault(false)
+        }
     }
 
-    /** Возможности первого аппаратного H264-энкодера (video/avc). */
-    private fun h264Caps(): MediaCodecInfo.VideoCapabilities? = runCatching {
-        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull { ci ->
-            ci.isEncoder && ci.supportedTypes.any { it.equals("video/avc", ignoreCase = true) }
-        }?.getCapabilitiesForType("video/avc")?.videoCapabilities
-    }.getOrNull()
+    /** Возможности ВСЕХ H264-энкодеров (video/avc) устройства. */
+    private fun avcEncoders(): List<MediaCodecInfo.VideoCapabilities> = runCatching {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { ci -> ci.isEncoder && ci.supportedTypes.any { it.equals("video/avc", ignoreCase = true) } }
+            .mapNotNull { runCatching { it.getCapabilitiesForType("video/avc").videoCapabilities }.getOrNull() }
+    }.getOrDefault(emptyList())
 
     private fun heightClass(h: Int): Int = when {
         h <= 600 -> 480
