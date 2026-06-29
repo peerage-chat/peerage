@@ -431,6 +431,13 @@ impl Engine {
         self.room_engine().map(|e| e.speaking_json()).unwrap_or_else(|| "[]".into())
     }
 
+    /// Сменить Opus-битрейт текущей аудио-сессии на лету (настройки звука без перезвона).
+    pub fn room_set_audio_bitrate(&self, bitrate: i32) {
+        if let Some(e) = self.room_engine() {
+            e.set_bitrate(bitrate);
+        }
+    }
+
     pub fn room_set_muted(&self, muted: bool) {
         if let Some(engine) = self.room_engine() {
             engine.set_muted(muted);

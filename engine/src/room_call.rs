@@ -10,7 +10,7 @@
 //! (lib.rs) по мере входа/выхода. Движок `Send` — живёт в `Arc`, зовётся из JNI.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -117,6 +117,9 @@ pub struct RoomCallEngine {
     /// Уровень речи на участника (0..1, сглажен): attack мгновенный, decay плавный.
     /// Считается в [`pull_audio`] по RMS кадра источника. Для active-speaker рамки.
     levels: Mutex<HashMap<PeerKey, f32>>,
+    /// Целевой битрейт Opus (бит/с): меняется на лету из настроек звука, send-тред
+    /// применяет к энкодеру без пересоздания сессии (чтобы не было дыры в звуке).
+    target_bitrate: Arc<AtomicI32>,
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -190,6 +193,8 @@ impl RoomCallEngine {
             }));
         }
 
+        let target_bitrate = Arc::new(AtomicI32::new(audio.bitrate));
+
         // --- Отправка: PCM из Kotlin → Opus → мультикаст участникам ---
         {
             let running = running.clone();
@@ -198,11 +203,13 @@ impl RoomCallEngine {
             let members = members.clone();
             let msgr = messenger.clone();
             let fsamps = audio.frame_samples() as u32;
+            let target_bitrate = target_bitrate.clone();
             threads.push(thread::spawn(move || {
                 let mut enc = match AudioEncoder::new(audio) {
                     Ok(e) => e,
                     Err(_) => return,
                 };
+                let mut cur_bitrate = audio.bitrate;
                 let mut seq = 0u16;
                 let mut ts = 0u32;
                 let mut frame = vec![0i16; frame_len];
@@ -221,6 +228,12 @@ impl RoomCallEngine {
                     if !ready {
                         thread::sleep(Duration::from_millis(2));
                         continue;
+                    }
+                    // Битрейт сменили в настройках звука → применяем на лету.
+                    let want = target_bitrate.load(Ordering::Relaxed);
+                    if want != cur_bitrate {
+                        enc.set_bitrate(want);
+                        cur_bitrate = want;
                     }
                     if !muted.load(Ordering::Relaxed) {
                         if let Ok(pkt) = enc.encode(&frame) {
@@ -250,6 +263,7 @@ impl RoomCallEngine {
             vid_frame_id: AtomicU16::new(0),
             vid_cap,
             levels: Mutex::new(HashMap::new()),
+            target_bitrate,
             threads: Mutex::new(threads),
         })
     }
@@ -321,7 +335,7 @@ impl RoomCallEngine {
                             let norm = ((rms / 32768.0 * 6.0).min(1.0)) as f32;
                             let e = lv.entry(*key).or_insert(0.0);
                             if norm > *e {
-                                *e += (norm - *e) * 0.4;
+                                *e += (norm - *e) * 0.6;
                             }
                             any = true;
                         }
@@ -351,8 +365,14 @@ impl RoomCallEngine {
     pub fn speaking_json(&self) -> String {
         let lv = self.levels.lock().unwrap();
         let arr: Vec<String> =
-            lv.iter().filter(|(_, v)| **v > 0.25).map(|(k, _)| hex::encode(k)).collect();
+            lv.iter().filter(|(_, v)| **v > 0.12).map(|(k, _)| hex::encode(k)).collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Сменить целевой Opus-битрейт на лету (применит send-тред). Режим (Voip/Audio)
+    /// менять live нельзя — он на старте сессии.
+    pub fn set_bitrate(&self, bitrate: i32) {
+        self.target_bitrate.store(bitrate, Ordering::Relaxed);
     }
 
     pub fn set_muted(&self, m: bool) {

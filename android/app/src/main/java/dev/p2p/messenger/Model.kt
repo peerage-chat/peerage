@@ -1015,16 +1015,16 @@ class AppModel private constructor() {
         applyOutputDevice() // применить выбранный вывод (встроенный/динамик/bt) к свежей сессии
     }
 
-    /** Применить настройки звука НА ЛЕТУ: пересобрать аудио-сессию (битрейт/fx/устройство)
-     *  без перезвона. Видео не трогаем. */
+    /** Применить настройки звука НА ЛЕТУ — без перезвона и без дыры в звуке:
+     *  вывод/вход/AEC-NS-AGC/битрейт меняются на работающей сессии. Режим Opus
+     *  (Голос↔Аудио) — только на следующем звонке (live менять нельзя). */
     fun applyAudioSettings() {
         showAudioSettings = false
-        val gid = currentRoom ?: return
-        val ctx = appContext ?: return
-        ops.execute {
-            roomAudio?.stop()
-            Native.roomAudioStop(sessionPtr)
-            startRoomAudioSession(ctx, gid)
+        applyOutputDevice() // вывод — через AudioManager
+        roomAudio?.applyFx(audioFx) // обработка — на существующих эффектах
+        roomAudio?.setInputDevice(selectedInputDevice()) // вход — preferredDevice
+        if (currentRoom != null) {
+            ops.execute { Native.roomSetAudioBitrate(sessionPtr, audioBitrate) }
         }
     }
 

@@ -157,6 +157,21 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSpeakingPeers<'local>(
     })
 }
 
+/// Сменить Opus-битрейт текущей аудио-сессии на лету.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetAudioBitrate<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    bitrate: jint,
+) {
+    jni_safe!((), {
+        if let Some(e) = unsafe { engine(session_ptr) } {
+            e.room_set_audio_bitrate(bitrate);
+        }
+    });
+}
+
 /// Остановить мультипати аудио комнаты.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStop<'local>(

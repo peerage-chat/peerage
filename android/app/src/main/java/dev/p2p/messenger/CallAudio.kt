@@ -133,6 +133,18 @@ class CallAudio(
 
     fun setMuted(muted: Boolean) = mute(muted)
 
+    /** Применить тумблеры обработки на лету (на существующих эффектах). */
+    fun applyFx(newFx: AudioFx) {
+        runCatching { aec?.enabled = newFx.aec }
+        runCatching { ns?.enabled = newFx.ns }
+        runCatching { agc?.enabled = newFx.agc }
+    }
+
+    /** Сменить входное устройство на лету (на работающем AudioRecord). */
+    fun setInputDevice(dev: AudioDeviceInfo?) {
+        runCatching { record?.preferredDevice = dev }
+    }
+
     fun stop() {
         running = false
         runCatching { record?.stop() }

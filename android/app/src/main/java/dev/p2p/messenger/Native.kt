@@ -103,6 +103,9 @@ object Native {
     /** Hex-ключи говорящих сейчас участников (active-speaker). JSON-массив. */
     external fun roomSpeakingPeers(sessionPtr: Long): String
 
+    /** Сменить Opus-битрейт текущей аудио-сессии на лету (настройки звука без перезвона). */
+    external fun roomSetAudioBitrate(sessionPtr: Long, bitrate: Int)
+
     /** Остановить мультипати аудио комнаты. */
     external fun roomAudioStop(sessionPtr: Long)
 

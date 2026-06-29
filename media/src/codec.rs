@@ -55,6 +55,12 @@ impl AudioEncoder {
         Ok(self.enc.encode_vec(pcm, 4000)?)
     }
 
+    /// Сменить битрейт на лету (без пересоздания энкодера) — настройки звука в звонке.
+    pub fn set_bitrate(&mut self, bitrate: i32) {
+        let _ = self.enc.set_bitrate(opus::Bitrate::Bits(bitrate));
+        self.settings.bitrate = bitrate;
+    }
+
     pub fn settings(&self) -> AudioSettings {
         self.settings
     }
