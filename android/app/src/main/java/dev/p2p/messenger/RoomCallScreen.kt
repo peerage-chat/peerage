@@ -159,6 +159,7 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
         }
         if (showSettings) CallSettings(model) { showSettings = false }
         if (model.showVideoShare) ShareVideoScreen(model)
+        if (model.showAudioSettings) AudioSettingsScreen(model)
     }
 }
 
@@ -464,6 +465,8 @@ private fun ControlBar(model: AppModel, peerKey: String) {
             stringResource(R.string.call_btn_mic),
             if (model.muted) Tokens.Colors.btnDangerMuted else Tokens.Colors.btnNeutral,
             tint = if (model.muted) Tokens.Colors.iconDangerMuted else Color.White,
+            // долгий тап → настройки звука (вход/выход/качество/обработка)
+            onLongClick = { model.openAudioSettings() },
         ) { model.toggleMute() }
         CtlButton(
             if (model.videoActive) Icons.Filled.Videocam else Icons.Filled.VideocamOff,

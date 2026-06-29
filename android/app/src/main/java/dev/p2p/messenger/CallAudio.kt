@@ -3,6 +3,7 @@ package dev.p2p.messenger
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -14,11 +15,17 @@ import android.media.audiofx.NoiseSuppressor
 import android.os.Process
 import kotlin.concurrent.thread
 
+/** Тумблеры аппаратной обработки микрофона (экран настроек звука). */
+data class AudioFx(val ns: Boolean = true, val aec: Boolean = true, val agc: Boolean = true)
+
 class CallAudio(
     private val context: Context,
     private val push: (ShortArray, Int) -> Unit,
     private val pull: (ShortArray) -> Int,
     private val mute: (Boolean) -> Unit,
+    private val fx: AudioFx = AudioFx(),
+    private val inputDevice: AudioDeviceInfo? = null,
+    private val onLevel: (Float) -> Unit = {},
 ) {
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
@@ -40,10 +47,11 @@ class CallAudio(
 
         val inMin = AudioRecord.getMinBufferSize(sampleRate, inMask, fmt).coerceAtLeast(2048)
         val rec = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sampleRate, inMask, fmt, inMin * 2)
+        inputDevice?.let { runCatching { rec.preferredDevice = it } } // выбранный микрофон
         val sid = rec.audioSessionId
-        if (AcousticEchoCanceler.isAvailable()) aec = AcousticEchoCanceler.create(sid)?.apply { enabled = true }
-        if (NoiseSuppressor.isAvailable()) ns = NoiseSuppressor.create(sid)?.apply { enabled = true }
-        if (AutomaticGainControl.isAvailable()) agc = AutomaticGainControl.create(sid)?.apply { enabled = true }
+        if (AcousticEchoCanceler.isAvailable()) aec = AcousticEchoCanceler.create(sid)?.apply { enabled = fx.aec }
+        if (NoiseSuppressor.isAvailable()) ns = NoiseSuppressor.create(sid)?.apply { enabled = fx.ns }
+        if (AutomaticGainControl.isAvailable()) agc = AutomaticGainControl.create(sid)?.apply { enabled = fx.agc }
 
         val outMin = AudioTrack.getMinBufferSize(sampleRate, outMask, fmt).coerceAtLeast(2048)
         val trk = AudioTrack.Builder()
@@ -71,10 +79,24 @@ class CallAudio(
         threads += thread(name = "call-capture") {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
+            var levelTick = 0
             while (running) {
                 val n = rec.read(buf, 0, buf.size) // blocking: ровный 20мс ритм захвата
                 when {
-                    n > 0 -> push(buf, n)
+                    n > 0 -> {
+                        push(buf, n)
+                        // Уровень мика (RMS) для индикатора — раз в ~3 кадра (60мс), не каждый.
+                        if (++levelTick >= 3) {
+                            levelTick = 0
+                            var sum = 0.0
+                            for (i in 0 until n) {
+                                val s = buf[i].toDouble()
+                                sum += s * s
+                            }
+                            val rms = Math.sqrt(sum / n)
+                            onLevel((rms / 32768.0 * 4.0).toFloat().coerceIn(0f, 1f))
+                        }
+                    }
                     else -> {
                         if (!running) break
                         android.util.Log.e("CallAudio", "capture error $n")

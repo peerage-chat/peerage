@@ -45,6 +45,25 @@
     <string name="share_preview_screen">превью · экран устройства</string>
     <string name="share_fps_value">%1$d fps</string>
     <string name="share_bitrate_value">%1$d Мбит/с</string>
+    <string name="audio_settings_title">Настройки звука</string>
+    <string name="audio_mic_level">уровень микрофона</string>
+    <string name="audio_input">Микрофон</string>
+    <string name="audio_output">Вывод</string>
+    <string name="audio_dev_builtin">Встроенный</string>
+    <string name="audio_dev_headset">Гарнитура</string>
+    <string name="audio_dev_bluetooth">Bluetooth</string>
+    <string name="audio_dev_speaker">Динамик</string>
+    <string name="audio_quality">Качество звука</string>
+    <string name="audio_quality_auto">Авто</string>
+    <string name="audio_quality_voice">Голос</string>
+    <string name="audio_quality_audio">Аудио</string>
+    <string name="audio_quality_adaptive">адаптивно · %1$d–%2$d кбит</string>
+    <string name="audio_quality_rate">~%1$d кбит</string>
+    <string name="audio_processing">Обработка</string>
+    <string name="audio_ns">Шумоподавление</string>
+    <string name="audio_aec">Эхоподавление</string>
+    <string name="audio_agc">Авто-громкость</string>
+    <string name="audio_apply">Применить</string>
 
     <!-- ── Общее ───────────────────────────────────────────────────────── -->
     <string name="common_back">Назад</string>

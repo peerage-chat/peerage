@@ -53,6 +53,25 @@
     <string name="share_preview_screen">preview · device screen</string>
     <string name="share_fps_value">%1$d fps</string>
     <string name="share_bitrate_value">%1$d Mbps</string>
+    <string name="audio_settings_title">Sound settings</string>
+    <string name="audio_mic_level">microphone level</string>
+    <string name="audio_input">Microphone</string>
+    <string name="audio_output">Output</string>
+    <string name="audio_dev_builtin">Built-in</string>
+    <string name="audio_dev_headset">Headset</string>
+    <string name="audio_dev_bluetooth">Bluetooth</string>
+    <string name="audio_dev_speaker">Speaker</string>
+    <string name="audio_quality">Sound quality</string>
+    <string name="audio_quality_auto">Auto</string>
+    <string name="audio_quality_voice">Voice</string>
+    <string name="audio_quality_audio">Audio</string>
+    <string name="audio_quality_adaptive">adaptive · %1$d–%2$d kbps</string>
+    <string name="audio_quality_rate">~%1$d kbps</string>
+    <string name="audio_processing">Processing</string>
+    <string name="audio_ns">Noise suppression</string>
+    <string name="audio_aec">Echo cancellation</string>
+    <string name="audio_agc">Auto gain</string>
+    <string name="audio_apply">Apply</string>
 
     <!-- ── Common ──────────────────────────────────────────────────────── -->
     <string name="common_back">Back</string>

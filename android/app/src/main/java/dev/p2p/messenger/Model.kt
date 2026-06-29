@@ -271,21 +271,149 @@ class AppModel private constructor() {
         }
     }
 
-    /** Вывод звонка через громкую связь (динамик) vs разговорный. Применяется через
-     *  AudioManager поверх MODE_IN_COMMUNICATION (его ставит CallAudio). */
-    var speakerOn by mutableStateOf(false)
+    // ── Настройки звука (долгий тап «Микрофон» в звонке). ───────────────────────
+    var showAudioSettings by mutableStateOf(false)
         private set
 
-    fun toggleSpeaker() {
-        speakerOn = !speakerOn
-        applySpeaker()
+    /** Вывод звонка: "builtin" (встроенный/разговорный), "speaker" (громкая), "bluetooth". */
+    var audioOut by mutableStateOf("builtin")
+        private set
+
+    /** Вход (микрофон): "builtin", "headset" (проводная гарнитура), "bluetooth". */
+    var audioIn by mutableStateOf("builtin")
+        private set
+
+    /** Аппаратная обработка микрофона (AEC/NS/AGC). */
+    var audioFx by mutableStateOf(AudioFx())
+        private set
+
+    /** Качество: авто (адаптивно) либо ручной Opus-битрейт 16–48 кбит. */
+    var audioQualityAuto by mutableStateOf(true)
+        private set
+    var audioBitrate by mutableStateOf(24_000)
+        private set
+
+    /** Живой уровень микрофона 0..1 — индикатор на экране настроек. */
+    var micLevel by mutableStateOf(0f)
+        private set
+
+    /** Для CallSettings: «громкая связь» = вывод на динамик. */
+    val speakerOn get() = audioOut == "speaker"
+
+    fun toggleSpeaker() = pickAudioOut(if (audioOut == "speaker") "builtin" else "speaker")
+
+    fun openAudioSettings() {
+        showAudioSettings = true
+    }
+
+    fun closeAudioSettings() {
+        showAudioSettings = false
+        micLevel = 0f
+    }
+
+    fun pickAudioOut(dev: String) {
+        audioOut = dev
+        applyOutputDevice()
+        saveAudioPrefs()
+    }
+
+    fun pickAudioIn(dev: String) {
+        audioIn = dev
+        saveAudioPrefs() // вход применяется при следующем старте аудио-сессии (preferredDevice)
+    }
+
+    fun setAudioFx(ns: Boolean = audioFx.ns, aec: Boolean = audioFx.aec, agc: Boolean = audioFx.agc) {
+        audioFx = AudioFx(ns, aec, agc)
+        saveAudioPrefs() // эффекты привязаны к audioSessionId → применяются на следующем старте
+    }
+
+    fun setAudioQuality(auto: Boolean, bitrate: Int = audioBitrate) {
+        audioQualityAuto = auto
+        audioBitrate = bitrate.coerceIn(16_000, 48_000)
+        saveAudioPrefs() // TODO: Opus bitrate/mode на сессию — нужен JNI-сеттер (+ adaptive)
     }
 
     @Suppress("DEPRECATION")
-    private fun applySpeaker() {
+    private fun applyOutputDevice() {
         val am = appContext?.getSystemService(android.content.Context.AUDIO_SERVICE)
             as? android.media.AudioManager ?: return
-        am.isSpeakerphoneOn = speakerOn
+        when (audioOut) {
+            "speaker" -> {
+                runCatching { am.stopBluetoothSco() }
+                am.isBluetoothScoOn = false
+                am.isSpeakerphoneOn = true
+            }
+            "bluetooth" -> {
+                am.isSpeakerphoneOn = false
+                runCatching { am.startBluetoothSco() }
+                am.isBluetoothScoOn = true
+            }
+            else -> { // встроенный (разговорный)
+                runCatching { am.stopBluetoothSco() }
+                am.isBluetoothScoOn = false
+                am.isSpeakerphoneOn = false
+            }
+        }
+    }
+
+    /** Доступные выходы: встроенный/динамик всегда; bluetooth — если подключён. */
+    fun availableAudioOuts(): Set<String> {
+        val am = appContext?.getSystemService(android.content.Context.AUDIO_SERVICE)
+            as? android.media.AudioManager ?: return setOf("builtin", "speaker")
+        val s = linkedSetOf("builtin", "speaker")
+        if (hasBluetoothAudio(am)) s += "bluetooth"
+        return s
+    }
+
+    /** Доступные входы: встроенный всегда; проводная гарнитура/bluetooth — если есть. */
+    fun availableAudioIns(): Set<String> {
+        val am = appContext?.getSystemService(android.content.Context.AUDIO_SERVICE)
+            as? android.media.AudioManager ?: return setOf("builtin")
+        val s = linkedSetOf("builtin")
+        val devs = am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+        if (devs.any { it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET }) s += "headset"
+        if (hasBluetoothAudio(am)) s += "bluetooth"
+        return s
+    }
+
+    private fun hasBluetoothAudio(am: android.media.AudioManager): Boolean =
+        am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+        }
+
+    /** AudioDeviceInfo выбранного входа (для CallAudio.preferredDevice); null = дефолт. */
+    private fun selectedInputDevice(): android.media.AudioDeviceInfo? {
+        if (audioIn == "builtin") return null
+        val am = appContext?.getSystemService(android.content.Context.AUDIO_SERVICE)
+            as? android.media.AudioManager ?: return null
+        val type = when (audioIn) {
+            "headset" -> android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET
+            "bluetooth" -> android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            else -> return null
+        }
+        return am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type == type }
+    }
+
+    private fun saveAudioPrefs() {
+        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)?.edit()
+            ?.putString("audio_out", audioOut)
+            ?.putString("audio_in", audioIn)
+            ?.putBoolean("fx_ns", audioFx.ns)
+            ?.putBoolean("fx_aec", audioFx.aec)
+            ?.putBoolean("fx_agc", audioFx.agc)
+            ?.putBoolean("aq_auto", audioQualityAuto)
+            ?.putInt("aq_bitrate", audioBitrate)
+            ?.apply()
+    }
+
+    private fun loadAudioPrefs() {
+        val p = appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE) ?: return
+        audioOut = p.getString("audio_out", "builtin") ?: "builtin"
+        audioIn = p.getString("audio_in", "builtin") ?: "builtin"
+        audioFx = AudioFx(p.getBoolean("fx_ns", true), p.getBoolean("fx_aec", true), p.getBoolean("fx_agc", true))
+        audioQualityAuto = p.getBoolean("aq_auto", true)
+        audioBitrate = p.getInt("aq_bitrate", 24_000)
     }
 
     var appContext: android.content.Context? = null
@@ -343,6 +471,7 @@ class AppModel private constructor() {
         if (started) return
         started = true
         loadSettings()
+        loadAudioPrefs()
         val vaultKey = VaultKeyManager.getOrCreate(File(dataDir))
         val json = JSONObject(Native.start(dataDir, vaultKey))
         if (json.has("error")) {
@@ -833,11 +962,14 @@ class AppModel private constructor() {
             { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
             { out -> Native.roomPullAudio(sessionPtr, out) },
             { m -> Native.roomSetMuted(sessionPtr, m) },
+            fx = audioFx,
+            inputDevice = selectedInputDevice(),
+            onLevel = { lvl -> if (showAudioSettings) micLevel = lvl }, // только когда экран открыт
         ).also {
             it.start(sr, ch)
             it.setMuted(muted)
         } // mic-пресет применяем сразу
-        applySpeaker() // применить выбранный вывод (динамик/разговорный) к свежей сессии
+        applyOutputDevice() // применить выбранный вывод (встроенный/динамик/bt) к свежей сессии
         if (video) {
             videoActive = true
             maybeStartVideoSender() // стартует, когда surface тайла «Вы» будет готов
@@ -969,7 +1101,7 @@ class AppModel private constructor() {
         videoActive = false
         roomMembers.clear()
         muted = false
-        speakerOn = false // следующий звонок — с разговорного по умолчанию
+        micLevel = 0f // вывод (audioOut) теперь персистится как настройка — не сбрасываем
         val a = roomAudio
         roomAudio = null
         val vs = videoSender
