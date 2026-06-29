@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 
 /**
  * Возможности камеры устройства для экрана шаринга. Список разрешений/fps НЕ
@@ -39,16 +41,59 @@ object CameraCaps {
         cm.getCameraCharacteristics(id)
     }.getOrNull()
 
-    /** Поддерживаемые 16:9-разрешения. ВАЖНО: только те корзины, чей ТОЧНЫЙ размер
-     *  реально есть в выходах камеры — иначе createCaptureSession падает (чёрный кадр).
-     *  Напр. 2560×1440 часто отсутствует, хотя 4К есть → раньше предлагали ложно. */
+    /** Реальные разрешения УСТРОЙСТВА (не жёсткая карта): пересечение выходов камеры и
+     *  возможностей H264-энкодера, аспект ≈16:9 (допуск ловит нестандартные вроде
+     *  2592×1460), с учётом выравнивания энкодера. Список честный — что показано, то и
+     *  кодируется. 4:3/1:1 не предлагаем (для звонка 16:9 эффективнее, тайл кропает);
+     *  если 16:9 нет вовсе — фолбэк. */
     fun resolutions(ctx: Context, front: Boolean): List<Res> {
-        val ch = characteristics(ctx, front) ?: return buckets.take(2)
-        val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return buckets.take(2)
-        val sizes = map.getOutputSizes(SurfaceTexture::class.java) ?: return buckets.take(2)
-        return buckets.filter { b -> sizes.any { it.width == b.width && it.height == b.height } }
-            .ifEmpty { buckets.take(1) }
+        val ch = characteristics(ctx, front) ?: return fallback()
+        val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return fallback()
+        val sizes = map.getOutputSizes(SurfaceTexture::class.java) ?: return fallback()
+        val enc = h264Caps()
+        return sizes
+            .filter { s ->
+                val ratio = s.width.toDouble() / s.height
+                ratio in 1.70..1.85 && s.height in 480..2160 && encoderOk(enc, s.width, s.height)
+            }
+            .sortedByDescending { it.width.toLong() * it.height }
+            .distinctBy { heightClass(it.height) } // один пункт на класс высоты (самый широкий)
+            .map { Res(label(it.height), it.width, it.height) }
+            .ifEmpty { fallback() }
     }
+
+    /** Кодируем ли размер: энкодер поддерживает И размеры кратны его выравниванию. */
+    private fun encoderOk(enc: MediaCodecInfo.VideoCapabilities?, w: Int, h: Int): Boolean {
+        if (enc == null) return true
+        return runCatching {
+            enc.isSizeSupported(w, h) && w % enc.widthAlignment == 0 && h % enc.heightAlignment == 0
+        }.getOrDefault(false)
+    }
+
+    /** Возможности первого аппаратного H264-энкодера (video/avc). */
+    private fun h264Caps(): MediaCodecInfo.VideoCapabilities? = runCatching {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull { ci ->
+            ci.isEncoder && ci.supportedTypes.any { it.equals("video/avc", ignoreCase = true) }
+        }?.getCapabilitiesForType("video/avc")?.videoCapabilities
+    }.getOrNull()
+
+    private fun heightClass(h: Int): Int = when {
+        h <= 600 -> 480
+        h <= 900 -> 720
+        h <= 1200 -> 1080
+        h <= 1600 -> 1440
+        else -> 2160
+    }
+
+    private fun label(h: Int): String = when (heightClass(h)) {
+        480 -> "480p"
+        720 -> "720p"
+        1080 -> "1080p"
+        1440 -> "1440p"
+        else -> "4K"
+    }
+
+    private fun fallback(): List<Res> = buckets.take(2)
 
     /** Тянет ли камера ≥60 fps (по AE target-fps-диапазонам). */
     fun supports60(ctx: Context, front: Boolean): Boolean {
