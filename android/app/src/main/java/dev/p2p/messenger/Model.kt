@@ -208,14 +208,26 @@ class AppModel private constructor() {
         private set
     var shareFps by mutableStateOf(30)
         private set
-    var shareBitrate by mutableStateOf(2_000_000)
-        private set
     var shareBitrateAuto by mutableStateOf(true)
+        private set
+
+    /** Индекс ручного битрейта (0 ниже · 1 рекомендация · 2 выше) — ОТНОСИТЕЛЬНЫЙ:
+     *  переживает смену разрешения/fps (для 4К берётся свой вариант того же уровня). */
+    var shareBitrateIdx by mutableStateOf(1)
         private set
 
     /** Рекомендуемый битрейт (бит/с) ≈ w·h·fps·0.08 (H264, ~0.08 bpp/кадр). */
     fun autoBitrate(w: Int, h: Int, fps: Int): Int =
         (w.toLong() * h * fps * 0.08).toInt().coerceIn(1_000_000, 40_000_000)
+
+    /** Три варианта битрейта (бит/с) под текущее разрешение/fps: ниже · рекоменд. · выше. */
+    fun shareBitrateOptions(): List<Int> {
+        val a = autoBitrate(shareResW, shareResH, shareFps)
+        return listOf(a * 6 / 10, a, a * 3 / 2).map { (it / 1_000_000).coerceAtLeast(1) * 1_000_000 }
+    }
+
+    /** Применяемый битрейт: рекомендация (idx 1) при «Авто», иначе выбранный вариант. */
+    fun shareBitrateBps(): Int = shareBitrateOptions()[if (shareBitrateAuto) 1 else shareBitrateIdx]
 
     fun openVideoShare() {
         shareScreenMode = false
@@ -223,8 +235,8 @@ class AppModel private constructor() {
         shareResW = videoQuality.width
         shareResH = videoQuality.height
         shareFps = videoQuality.fps
-        shareBitrate = autoBitrate(shareResW, shareResH, shareFps)
         shareBitrateAuto = true
+        shareBitrateIdx = 1
         showVideoShare = true
     }
 
@@ -242,17 +254,19 @@ class AppModel private constructor() {
 
     fun pickRes(w: Int, h: Int) {
         shareResW = w
-        shareResH = h
-        if (shareBitrateAuto) shareBitrate = autoBitrate(w, h, shareFps)
+        shareResH = h // битрейт следует сам: авто=рекоменд, ручной=тот же idx под новое разрешение
     }
 
     fun pickFps(f: Int) {
         shareFps = f
-        if (shareBitrateAuto) shareBitrate = autoBitrate(shareResW, shareResH, f)
     }
 
-    fun pickBitrate(b: Int) {
-        shareBitrate = b
+    fun pickBitrateAuto() {
+        shareBitrateAuto = true
+    }
+
+    fun pickBitrateIdx(i: Int) {
+        shareBitrateIdx = i.coerceIn(0, 2)
         shareBitrateAuto = false
     }
 
@@ -261,7 +275,7 @@ class AppModel private constructor() {
         showVideoShare = false
         if (shareScreenMode) return // шаринг экрана (MediaProjection) — отдельная фича, пока no-op
         cameraFront = shareFront
-        changeVideoQuality(VideoQuality("${shareResH}p", shareResW, shareResH, shareFps, shareBitrate))
+        changeVideoQuality(VideoQuality("${shareResH}p", shareResW, shareResH, shareFps, shareBitrateBps()))
         if (videoActive) {
             // видео уже идёт → пересобрать отправитель с новыми параметрами
             stopVideoSender()

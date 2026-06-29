@@ -64,9 +64,13 @@ private class CameraPreviewController(private val ctx: Context) {
     @SuppressLint("MissingPermission") // CAMERA уже выдан для видеозвонков
     fun start(view: TextureView, st: SurfaceTexture, front: Boolean) {
         val id = CameraCaps.cameraId(ctx, front) ?: return
-        val sensor = CameraCaps.sensorOrientation(ctx, front)
-        st.setDefaultBufferSize(1280, 720)
-        applyTextureTransform(view, 1280, 720, sensor, mirror = front)
+        val bw = 1280
+        val bh = 720
+        st.setDefaultBufferSize(bw, bh)
+        // Те же повороты, что у своего превью в звонке (SelfPreviewSurface): камера уже
+        // доворачивает в портрет → матрицу считаем по ПОРТРЕТНЫМ размерам (bh×bw),
+        // rotation=0, зеркало для фронталки.
+        applyTextureTransform(view, bh, bw, 0, mirror = front)
         val surface = Surface(st)
         thread = HandlerThread("cam-preview").also { it.start() }
         handler = Handler(thread!!.looper)

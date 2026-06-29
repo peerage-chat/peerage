@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Videocam
@@ -34,6 +35,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -42,7 +44,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.roundToInt
 
 /**
  * Экран «Показать видео» (долгий тап «Видео» в звонке). Дизайн — макет v2:
@@ -137,14 +138,30 @@ fun ShareVideoScreen(model: AppModel) {
                 if (has60) Chip(stringResource(R.string.share_fps_value, 60), model.shareFps == 60) { model.pickFps(60) }
             }
 
-            SectionLabel(
-                stringResource(R.string.share_bitrate),
-                if (model.shareBitrateAuto) stringResource(R.string.share_auto) else null,
-            )
-            val sel = (model.shareBitrate / 1_000_000.0).roundToInt()
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                bitrateOptionsMbps(model).forEach { mb ->
-                    Chip(stringResource(R.string.share_bitrate_value, mb), sel == mb) { model.pickBitrate(mb * 1_000_000) }
+            Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.share_bitrate), color = HoloSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                val auto = model.shareBitrateAuto
+                Row(
+                    Modifier.clip(RoundedCornerShape(8.dp)).background(if (auto) Tokens.Colors.accentMuted else Tokens.Colors.tile)
+                        .then(if (auto) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(8.dp)) else Modifier)
+                        .clickable { model.pickBitrateAuto() }.padding(horizontal = 11.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(Icons.Filled.Bolt, null, tint = if (auto) HoloAccent else HoloSecondary, modifier = Modifier.size(13.dp))
+                    Text(stringResource(R.string.share_auto), color = if (auto) HoloAccent else Color.White, fontSize = 11.sp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.alpha(if (model.shareBitrateAuto) 0.45f else 1f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                model.shareBitrateOptions().forEachIndexed { i, bps ->
+                    Chip(
+                        stringResource(R.string.share_bitrate_value, bps / 1_000_000),
+                        !model.shareBitrateAuto && model.shareBitrateIdx == i,
+                    ) { model.pickBitrateIdx(i) }
                 }
             }
         }
@@ -154,15 +171,9 @@ fun ShareVideoScreen(model: AppModel) {
             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(HoloAccent)
                 .clickable { model.applyVideoShare() }.padding(vertical = 15.dp),
             contentAlignment = Alignment.Center,
-        ) { Text(stringResource(R.string.share_btn_show), color = Tokens.Colors.accentDark, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+        ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
         Spacer(Modifier.height(20.dp))
     }
-}
-
-/** Три варианта битрейта (Мбит) вокруг авто-рекомендации: ниже · авто · выше. */
-private fun bitrateOptionsMbps(model: AppModel): List<Int> {
-    val a = (model.autoBitrate(model.shareResW, model.shareResH, model.shareFps) / 1_000_000.0).roundToInt().coerceAtLeast(1)
-    return listOf((a * 0.6).roundToInt().coerceAtLeast(1), a, (a * 1.5).roundToInt()).distinct()
 }
 
 @Composable
@@ -171,7 +182,7 @@ private fun SegButton(icon: ImageVector, label: String, selected: Boolean, modif
         modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
             .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(10.dp)) else Modifier)
             .clickable { onClick() }.padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = if (selected) HoloAccent else HoloSecondary, modifier = Modifier.size(18.dp))
