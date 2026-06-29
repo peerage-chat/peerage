@@ -1,10 +1,10 @@
 # Дорожная карта
 
-Спецификация (что строим) — [p2p-messenger-spec.md](p2p-messenger-spec.md).
-Этот файл — **порядок и зависимости** работ. Текущее состояние и решения —
-в [README.md](README.md). Архитектурный обзор — в
-[architecture-review.md](architecture-review.md). Концептуальный индекс
-(подсистемы → фичи, хребет для кода/плана/UI) — в [SUBSYSTEMS.md](SUBSYSTEMS.md).
+Что строим и скоуп — [v1.0-scope.md](v1.0-scope.md) (исходное ТЗ —
+[archive/p2p-messenger-spec.md](archive/p2p-messenger-spec.md)). Этот файл — **порядок
+и зависимости** работ. Сквозная картина системы — в [ARCHITECTURE.md](ARCHITECTURE.md).
+Концептуальный индекс (подсистемы → фичи, хребет для кода/плана/UI) —
+в [SUBSYSTEMS.md](SUBSYSTEMS.md).
 
 ## Принципы
 - Полный P2P, без своего сервера для данных (единственное внешнее — push-пробуждение).
@@ -178,7 +178,7 @@
 
 **Порядок:** H1 → H2(+аватарки) → H3 → H4 (оформляем по ходу) → H5 → H6.
 
-### Архитектурные замечания (см. [architecture-review.md](architecture-review.md))
+### Архитектурные замечания (см. [ARCHITECTURE.md](ARCHITECTURE.md), [archive/architecture-review-2026-06-16.md](archive/architecture-review-2026-06-16.md))
 
 Критические для H1: P5 (сессии вместо static), P3 (приоритизация очереди),
 P9 (selective video вместо full-mesh).

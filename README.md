@@ -7,11 +7,11 @@
 
 | Документ | Описание |
 |----------|----------|
-| [docs/README.md](docs/README.md) | **← основная страница:** архитектура, структура проекта, прогресс, разработка |
-| [docs/architecture-review.md](docs/architecture-review.md) | Архитектурный анализ, проблемы масштабирования, рекомендации |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Дорожная карта: фазы, прогресс, зависимости |
+| [docs/README.md](docs/README.md) | **← индекс-хаб:** routing по всем темам |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **Сквозная картина системы** end-to-end (крейты, крипто, транспорт, медиа, Android, сборка) |
+| [docs/architecture/invariants.md](docs/architecture/invariants.md) | Сквозные правила (FFI/каналы/SQLite/MLS/UI) — не нарушать |
 | [docs/SECURITY.md](docs/SECURITY.md) | Модель угроз, крипто, аудит безопасности |
-| [docs/p2p-messenger-spec.md](docs/p2p-messenger-spec.md) | Исходное техническое задание |
+| [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/v1.0-scope.md](docs/v1.0-scope.md) | Порядок работ и скоуп v1.0 |
 
 ## Быстрый старт
 
