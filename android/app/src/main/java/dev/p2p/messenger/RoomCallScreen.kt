@@ -11,7 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -185,7 +184,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Box(
-                Modifier.clip(CircleShape).background(Color(0x33FFFFFF)).size(36.dp).clickable { onClose() },
+                Modifier.clip(RoundedCornerShape(percent = 30)).background(Color(0x33FFFFFF)).size(36.dp).clickable { onClose() },
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Filled.Close, stringResource(R.string.call_close), tint = Color.White, modifier = Modifier.size(18.dp)) }
         }
@@ -208,6 +207,25 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
             Switch(
                 checked = model.speakerOn,
                 onCheckedChange = { model.toggleSpeaker() },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = HoloAccent,
+                    uncheckedThumbColor = HoloSecondary,
+                    uncheckedTrackColor = Tokens.Colors.tile,
+                ),
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { model.toggleTechInfo() }
+                .background(Tokens.Colors.tile).padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(stringResource(R.string.call_tech_info), color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Switch(
+                checked = model.showTechInfo,
+                onCheckedChange = { model.toggleTechInfo() },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
                     checkedTrackColor = HoloAccent,
@@ -315,6 +333,22 @@ private fun ParticipantTile(
             ) {
                 if (!t.audio) Icon(Icons.Filled.MicOff, null, tint = Tokens.Colors.iconDangerMuted, modifier = Modifier.size(13.dp))
                 Text(name, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        // Тех-инфо (тумблер в ⚙️): своё — разрешение·fps·битрейт; чужое — пинг.
+        if (model.showTechInfo) {
+            val vq = model.videoQuality
+            val info = if (t.me) {
+                "${vq.height}p·${vq.fps} · ${vq.bitrate / 1_000_000}M"
+            } else {
+                model.peerPingMs(t.id)?.let { "${it}ms" } ?: "—"
+            }
+            Box(
+                Modifier.align(Alignment.TopStart).padding(7.dp)
+                    .clip(RoundedCornerShape(6.dp)).background(Tokens.Colors.tileScrim)
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Text(info, color = Tokens.Colors.online, fontSize = 10.sp, maxLines = 1)
             }
         }
     }

@@ -238,6 +238,7 @@
     <string name="call_settings_title">Настройки звонка</string>
     <string name="call_audio_output">ВЫВОД ЗВУКА</string>
     <string name="call_speaker">Динамик</string>
+    <string name="call_tech_info">Тех-инфо</string>
 
     <!-- ── Диагностика (bench) ─────────────────────────────────────────── -->
     <string name="bench_sending">отправка…</string>

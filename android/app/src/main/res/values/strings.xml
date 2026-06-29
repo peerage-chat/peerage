@@ -246,6 +246,7 @@
     <string name="call_settings_title">Call settings</string>
     <string name="call_audio_output">AUDIO OUTPUT</string>
     <string name="call_speaker">Speaker</string>
+    <string name="call_tech_info">Tech info</string>
 
     <!-- ── Diagnostics (bench) ─────────────────────────────────────────── -->
     <string name="bench_sending">sending…</string>

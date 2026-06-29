@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -177,7 +176,7 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () 
         // Отправка / голосовое — отдельной круглой кнопкой 44px.
         val hasText = value.isNotBlank()
         Box(
-            Modifier.clip(CircleShape).background(HoloAccent).size(44.dp)
+            Modifier.clip(RoundedCornerShape(percent = 30)).background(HoloAccent).size(44.dp)
                 .clickable {
                     // TODO: при пустом поле — запись голосового
                     if (hasText) onSend()
@@ -198,7 +197,7 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () 
 @Composable
 internal fun PillIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).clickable { onClick() },
+        Modifier.size(44.dp).clip(RoundedCornerShape(percent = 30)).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = HoloSecondary, modifier = Modifier.size(22.dp)) }
 }

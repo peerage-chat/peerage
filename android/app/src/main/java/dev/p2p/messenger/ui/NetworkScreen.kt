@@ -8,7 +8,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -51,7 +50,7 @@ internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
         // 1. Статус — ровно, в карточке.
         SurfaceCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(HoloOnline))
+                Box(Modifier.size(10.dp).clip(RoundedCornerShape(percent = 30)).background(HoloOnline))
                 Spacer(Modifier.width(10.dp))
                 Row {
                     Text(stringResource(R.string.net_connected_to), color = Color.White, fontSize = 15.sp)

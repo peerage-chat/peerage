@@ -7,7 +7,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -75,7 +74,7 @@ internal fun TopBar(
 /** Индикатор присутствия: маленький кружок (онлайн/офлайн). */
 @Composable
 internal fun StatusDot(online: Boolean) {
-    Box(Modifier.size(10.dp).clip(CircleShape).background(if (online) HoloOnline else OfflineDot))
+    Box(Modifier.size(10.dp).clip(RoundedCornerShape(percent = 30)).background(if (online) HoloOnline else OfflineDot))
 }
 
 /** Индикатор пиров меша в шапке Главной (⊹ N). Тап → «Сеть» (TODO),
@@ -136,9 +135,9 @@ internal fun SquareAvatar(
         }
         if (online != null) {
             Box(
-                Modifier.size(size * 0.28f).clip(CircleShape)
+                Modifier.size(size * 0.28f).clip(RoundedCornerShape(percent = 30))
                     .background(if (online) HoloOnline else OfflineDot)
-                    .border(2.dp, HoloBg, CircleShape),
+                    .border(2.dp, HoloBg, RoundedCornerShape(percent = 30)),
             )
         }
     }
@@ -173,7 +172,7 @@ internal fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: 
 @Composable
 internal fun SendButton(onClick: () -> Unit) {
     Box(
-        Modifier.clip(CircleShape).background(HoloAccent).size(44.dp).clickable { onClick() },
+        Modifier.clip(RoundedCornerShape(percent = 30)).background(HoloAccent).size(44.dp).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.common_send), tint = HoloAccentDark, modifier = Modifier.size(20.dp)) }
 }

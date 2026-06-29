@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.GroupAdd
@@ -116,7 +116,7 @@ private fun ActionRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(44.dp).clip(CircleShape).background(tint.copy(alpha = 0.15f)),
+            Modifier.size(44.dp).clip(RoundedCornerShape(percent = 30)).background(tint.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))

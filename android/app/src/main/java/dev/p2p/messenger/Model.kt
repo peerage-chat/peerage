@@ -194,8 +194,23 @@ class AppModel private constructor() {
             ?.edit()?.putString("video_quality", q.key)?.apply()
     }
 
+    /** Тех-инфо оверлей в звонке (пинг/разрешение/fps/битрейт на тайлах). Тумблер в ⚙️. */
+    var showTechInfo by mutableStateOf(false)
+        private set
+
+    fun toggleTechInfo() {
+        showTechInfo = !showTechInfo
+        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("tech_info", showTechInfo)?.apply()
+    }
+
+    /** Пинг до участника (мс) из снапшота сети, либо null. */
+    fun peerPingMs(peerHex: String): Int? =
+        netStats?.peers?.firstOrNull { it.key == peerHex }?.latencyMs?.takeIf { it > 0 }?.toInt()
+
     private fun loadSettings() {
         val prefs = appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE) ?: return
+        showTechInfo = prefs.getBoolean("tech_info", false)
         val key = prefs.getString("video_quality", null) ?: return
         videoQuality = VideoQuality.presets.find { it.key == key } ?: VideoQuality.default
     }

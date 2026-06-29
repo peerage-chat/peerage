@@ -8,7 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -90,7 +89,7 @@ internal fun FolderTile(icon: ImageVector, label: String, selected: Boolean, bad
         }
         if (badge > 0) {
             Box(
-                Modifier.clip(CircleShape).background(HoloAccent).border(2.dp, HoloBg, CircleShape)
+                Modifier.clip(RoundedCornerShape(percent = 30)).background(HoloAccent).border(2.dp, HoloBg, RoundedCornerShape(percent = 30))
                     .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                     .padding(horizontal = 4.dp),
                 contentAlignment = Alignment.Center,

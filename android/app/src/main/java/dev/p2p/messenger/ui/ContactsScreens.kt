@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -117,7 +116,7 @@ internal fun ContactsScreen(
                             }
                             val unread = model.unread[c.key] ?: 0
                             if (unread > 0) {
-                                Box(Modifier.clip(CircleShape).background(HoloAccent).padding(horizontal = 7.dp, vertical = 2.dp)) {
+                                Box(Modifier.clip(RoundedCornerShape(percent = 30)).background(HoloAccent).padding(horizontal = 7.dp, vertical = 2.dp)) {
                                     Text("$unread", color = HoloAccentDark, fontSize = 11.sp)
                                 }
                             }
