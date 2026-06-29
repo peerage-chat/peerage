@@ -339,7 +339,9 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
         }
         if (chrome) {
             Column(
-                Modifier.align(Alignment.Center).offset(y = 78.dp),
+                Modifier.align(Alignment.Center).offset(y = 78.dp)
+                    .clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.barScrim)
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
