@@ -88,6 +88,7 @@ object Tokens {
         val tile = 12.dp
         val preview = 14.dp
         val button = 14.dp
+        val avatar = 14.dp // «квадрат со скруглением» — абсолютный радиус (app-ui.md: ~14-15px)
         val pill = 18.dp
     }
 

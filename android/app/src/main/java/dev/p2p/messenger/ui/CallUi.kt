@@ -99,7 +99,7 @@ internal fun GridTile(
             verticalArrangement = Arrangement.Center,
         ) {
             Box(
-                Modifier.size(64.dp).clip(RoundedCornerShape(percent = 30))
+                Modifier.size(64.dp).clip(RoundedCornerShape(Tokens.Radius.avatar))
                     .background(if (me) HoloAccent else Tokens.Colors.avatar),
                 contentAlignment = Alignment.Center,
             ) {
@@ -168,9 +168,9 @@ internal fun ParticipantFullscreen(
             verticalArrangement = Arrangement.Center,
         ) {
             Box(
-                Modifier.size(128.dp).clip(RoundedCornerShape(percent = 30))
+                Modifier.size(128.dp).clip(RoundedCornerShape(Tokens.Radius.avatar))
                     .background(if (me) HoloAccent else Tokens.Colors.avatar)
-                    .border(3.dp, if (me) HoloAccent.copy(alpha = 0.4f) else Color(0xFF4A4F55), RoundedCornerShape(percent = 30)),
+                    .border(3.dp, if (me) HoloAccent.copy(alpha = 0.4f) else Color(0xFF4A4F55), RoundedCornerShape(Tokens.Radius.avatar)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -234,7 +234,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
             Spacer(Modifier.height(96.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
-                    Modifier.size(88.dp).clip(RoundedCornerShape(percent = 30)).background(HoloAccent),
+                    Modifier.size(88.dp).clip(RoundedCornerShape(Tokens.Radius.avatar)).background(HoloAccent),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(name.take(1).uppercase(), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = 40.sp)
@@ -257,7 +257,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.size(22.dp).clip(RoundedCornerShape(percent = 30)).background(HoloOnline), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(22.dp).clip(RoundedCornerShape(Tokens.Radius.badge)).background(HoloOnline), contentAlignment = Alignment.Center) {
                             Text(firstName.take(1).uppercase(), color = Tokens.Colors.onOnline, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         Text(
