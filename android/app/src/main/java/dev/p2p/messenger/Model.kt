@@ -204,10 +204,6 @@ class AppModel private constructor() {
             ?.edit()?.putBoolean("tech_info", showTechInfo)?.apply()
     }
 
-    /** Пинг до участника (мс) из снапшота сети, либо null. */
-    fun peerPingMs(peerHex: String): Int? =
-        netStats?.peers?.firstOrNull { it.key == peerHex }?.latencyMs?.takeIf { it > 0 }?.toInt()
-
     private fun loadSettings() {
         val prefs = appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE) ?: return
         showTechInfo = prefs.getBoolean("tech_info", false)

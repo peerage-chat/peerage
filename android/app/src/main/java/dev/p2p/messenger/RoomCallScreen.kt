@@ -335,23 +335,33 @@ private fun ParticipantTile(
                 Text(name, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        // Тех-инфо (тумблер в ⚙️): своё — разрешение·fps·битрейт; чужое — пинг.
-        if (model.showTechInfo) {
+        // Тех-инфо чип (тумблер в ⚙️) — ЧАСТЬ оверлея, право-верх тайла. 4 строки:
+        // разрешение·fps · битрейт(цель) · трафик(реальный kbps) · пинг.
+        if (chrome && model.showTechInfo) {
             val vq = model.videoQuality
-            val info = if (t.me) {
-                "${vq.height}p·${vq.fps} · ${vq.bitrate / 1_000_000}M"
-            } else {
-                model.peerPingMs(t.id)?.let { "${it}ms" } ?: "—"
-            }
-            Box(
-                Modifier.align(Alignment.TopStart).padding(7.dp)
-                    .clip(RoundedCornerShape(6.dp)).background(Tokens.Colors.tileScrim)
-                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            val np = if (t.me) null else model.netStats?.peers?.firstOrNull { it.key == t.id }
+            val rate = if (t.me) (model.netStats?.txRate ?: 0L) else (np?.rxRate ?: 0L)
+            val ping = if (t.me) null else np?.latencyMs?.takeIf { it > 0 }?.toInt()
+            Column(
+                Modifier.align(Alignment.TopEnd).padding(7.dp)
+                    .clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.chipScrim)
+                    .padding(horizontal = 7.dp, vertical = 5.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
-                Text(info, color = Tokens.Colors.online, fontSize = 10.sp, maxLines = 1)
+                TechLine("${vq.height}p·${vq.fps}")
+                TechLine("${vq.bitrate / 1000} kbps")
+                TechLine("↓ ${rate * 8 / 1000} kbps")
+                TechLine(if (ping != null) "$ping ms" else "—")
             }
         }
     }
+}
+
+/** Строка тех-инфо чипа (цвет/размер chrome-оверлея). */
+@Composable
+private fun TechLine(text: String) {
+    Text(text, color = Tokens.Colors.iconChrome, fontSize = 10.sp, maxLines = 1)
 }
 
 @Composable
