@@ -117,7 +117,10 @@ internal fun SquareAvatar(
 ) {
     Box(Modifier.size(size), contentAlignment = Alignment.BottomEnd) {
         Box(
-            Modifier.size(size).clip(RoundedCornerShape(size * 0.3f)).background(bg ?: avatarColor(name)),
+            // «квадрат со скруглением» (app-ui.md ~14-15px): пропорция size×0.3, но с кэпом
+            // на Tokens.Radius.avatar — иначе крупные аватарки «балонят» до почти-круга.
+            Modifier.size(size).clip(RoundedCornerShape(minOf(size * 0.3f, Tokens.Radius.avatar)))
+                .background(bg ?: avatarColor(name)),
             contentAlignment = Alignment.Center,
         ) {
             if (content != null) {
