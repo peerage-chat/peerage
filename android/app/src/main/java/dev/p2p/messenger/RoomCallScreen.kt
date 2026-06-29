@@ -535,7 +535,7 @@ private fun TrafficChip(mbMin: Int) {
 @Composable
 private fun Avatar(name: String, size: Int) {
     Box(
-        Modifier.size(size.dp).clip(CircleShape).background(Tokens.Colors.avatar),
+        Modifier.size(size.dp).clip(RoundedCornerShape(percent = 30)).background(Tokens.Colors.avatar),
         contentAlignment = Alignment.Center,
     ) {
         Text(
