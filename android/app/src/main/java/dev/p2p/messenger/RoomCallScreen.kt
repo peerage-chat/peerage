@@ -329,8 +329,14 @@ private fun ParticipantTile(
 private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
     val name = model.contacts.firstOrNull { it.key == peerKey }?.name ?: (peerKey.take(6) + "…")
     Box(Modifier.fillMaxSize()) {
-        // Аватар — неподвижный базовый слой, чуть выше центра, чтобы текст лёг под ним.
-        Box(Modifier.align(Alignment.Center).offset(y = (-32).dp)) { Avatar(name, 104) }
+        if (model.videoActive) {
+            // Камера включена в одиночестве → своё превью на весь экран (его surface и
+            // запускает VideoSender). Текст «вы одни» ложится поверх.
+            SelfPreviewSurface(model, Modifier.fillMaxSize())
+        } else {
+            // Аватар — неподвижный базовый слой, чуть выше центра, чтобы текст лёг под ним.
+            Box(Modifier.align(Alignment.Center).offset(y = (-32).dp)) { Avatar(name, 104) }
+        }
         if (chrome) {
             Column(
                 Modifier.align(Alignment.Center).offset(y = 78.dp),
