@@ -329,14 +329,12 @@ impl RoomCallEngine {
                                 }
                             }
                             let rms = (sum / pcm.len().max(1) as f64).sqrt();
-                            // Масштаб ×6 разделяет речь (RMS ~1.5–4к → 0.27–0.7) от шума
-                            // (RMS <700 → <0.13). Attack СГЛАЖЕН (40% к цели) → единичный
-                            // шумовой пик не зажигает рамку, нужна устойчивая речь (~2 кадра).
+                            // Индикатор «у участника мик ловит звук»: зажигаем при ЛЮБОМ
+                            // звуке (порог 0.03 ≈ RMS>160), не только речи — проще и честнее.
+                            // Гасит чистую тишину (RMS≈0). Decay держит сквозь паузы.
                             let norm = ((rms / 32768.0 * 6.0).min(1.0)) as f32;
                             let e = lv.entry(*key).or_insert(0.0);
-                            if norm > *e {
-                                *e += (norm - *e) * 0.6;
-                            }
+                            *e = e.max(norm); // мгновенный attack — зажигаем при малейшем звуке
                             any = true;
                         }
                     }
@@ -365,7 +363,7 @@ impl RoomCallEngine {
     pub fn speaking_json(&self) -> String {
         let lv = self.levels.lock().unwrap();
         let arr: Vec<String> =
-            lv.iter().filter(|(_, v)| **v > 0.12).map(|(k, _)| hex::encode(k)).collect();
+            lv.iter().filter(|(_, v)| **v > 0.03).map(|(k, _)| hex::encode(k)).collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
