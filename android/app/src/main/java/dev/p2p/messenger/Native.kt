@@ -106,6 +106,9 @@ object Native {
     /** Сменить Opus-битрейт текущей аудио-сессии на лету (настройки звука без перезвона). */
     external fun roomSetAudioBitrate(sessionPtr: Long, bitrate: Int)
 
+    /** Накопленные байты трафика по участникам (JSON {hex: rx, "self": tx}) для тех-инфо. */
+    external fun roomTrafficJson(sessionPtr: Long): String
+
     /** Остановить мультипати аудио комнаты. */
     external fun roomAudioStop(sessionPtr: Long)
 

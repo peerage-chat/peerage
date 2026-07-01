@@ -176,6 +176,11 @@ class AppModel private constructor() {
     var speakingPeers by mutableStateOf<Set<String>>(emptySet())
         private set
 
+    /** Скорость трафика (kbps) по участникам для тех-инфо: hex участника → входящий от
+     *  него; "self" → свой исходящий. Считается по дельте байт между опросами поллера. */
+    var peerKbps by mutableStateOf<Map<String, Int>>(emptyMap())
+        private set
+
     /** Угол поворота входящего видео на участника (град, угол сенсора отправителя).
      *  UI доворачивает тайл. Энкодер шлёт сырой кадр с сенсора → нужен доворот. */
     val roomMemberRotation = mutableStateMapOf<String, Int>()
@@ -674,18 +679,37 @@ class AppModel private constructor() {
             name = "native-ticker"
             start()
         }
-        // Active-speaker: пока в звонке — опрос говорящих ~4 раза/с (быстрее тикера).
+        // Active-speaker + трафик: пока в звонке — опрос ~4 раза/с (быстрее тикера).
         Thread {
+            var prevBytes = emptyMap<String, Long>()
+            var prevT = 0L
             while (running) {
                 if (currentRoom != null && sessionPtr != 0L) {
                     runCatching {
                         val arr = JSONArray(Native.roomSpeakingPeers(sessionPtr))
                         val set = (0 until arr.length()).map { arr.getString(it) }.toSet()
                         if (speakingPeers != set) speakingPeers = set
+                        // Трафик: скорость = дельта байт × 8 / dt.
+                        val tj = JSONObject(Native.roomTrafficJson(sessionPtr))
+                        val now = System.currentTimeMillis()
+                        val dt = ((now - prevT).coerceAtLeast(1)) / 1000.0
+                        val cur = mutableMapOf<String, Long>()
+                        val kbps = mutableMapOf<String, Int>()
+                        tj.keys().forEach { k ->
+                            val b = tj.getLong(k)
+                            cur[k] = b
+                            val pb = prevBytes[k] ?: b
+                            kbps[k] = (((b - pb).coerceAtLeast(0)) * 8 / 1000 / dt).toInt()
+                        }
+                        prevBytes = cur
+                        prevT = now
+                        if (peerKbps != kbps) peerKbps = kbps
                     }
                     Thread.sleep(250)
                 } else {
                     if (speakingPeers.isNotEmpty()) speakingPeers = emptySet()
+                    if (peerKbps.isNotEmpty()) peerKbps = emptyMap()
+                    prevBytes = emptyMap()
                     Thread.sleep(500)
                 }
             }

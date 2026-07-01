@@ -157,6 +157,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSpeakingPeers<'local>(
     })
 }
 
+/// Накопленные байты трафика по участникам (JSON {hex: rx, "self": tx}).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomTrafficJson<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        ret(&env, &e.room_traffic_json())
+    })
+}
+
 /// Сменить Opus-битрейт текущей аудио-сессии на лету.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetAudioBitrate<'local>(

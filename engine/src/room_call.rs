@@ -10,7 +10,7 @@
 //! (lib.rs) по мере входа/выхода. Движок `Send` — живёт в `Arc`, зовётся из JNI.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -120,6 +120,10 @@ pub struct RoomCallEngine {
     /// Целевой битрейт Opus (бит/с): меняется на лету из настроек звука, send-тред
     /// применяет к энкодеру без пересоздания сессии (чтобы не было дыры в звуке).
     target_bitrate: Arc<AtomicI32>,
+    /// Накопленные байты приёма НА УЧАСТНИКА (аудио+видео) — для тех-инфо трафика.
+    rx_bytes: Arc<Mutex<HashMap<PeerKey, u64>>>,
+    /// Накопленные байты отправки (всего по участникам) — «свой» исходящий трафик.
+    tx_bytes: Arc<AtomicU64>,
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -139,6 +143,8 @@ impl RoomCallEngine {
         let frame_len = audio.interleaved_len();
         // Дефолт; уточняется set_video_cap() из Kotlin при старте видео.
         let vid_cap = Arc::new(AtomicUsize::new(VID_CAP_DEFAULT));
+        let rx_bytes: Arc<Mutex<HashMap<PeerKey, u64>>> = Arc::new(Mutex::new(HashMap::new()));
+        let tx_bytes = Arc::new(AtomicU64::new(0));
         let mut threads = Vec::new();
 
         let media_rx = messenger.media_channel(2048);
@@ -150,6 +156,7 @@ impl RoomCallEngine {
             let vid_sources = vid_sources.clone();
             let members = members.clone();
             let vid_cap = vid_cap.clone();
+            let rx_bytes = rx_bytes.clone();
             let sample_rate = audio.sample_rate as f64;
             threads.push(thread::spawn(move || {
                 // VideoReassembler per-peer: собирает фрагменты в целые H264-кадры.
@@ -159,6 +166,7 @@ impl RoomCallEngine {
                     if !members.lock().unwrap().contains(&p.src) {
                         continue;
                     }
+                    *rx_bytes.lock().unwrap().entry(p.src).or_insert(0) += p.payload.len() as u64;
                     if p.track == TRACK_VIDEO {
                         if let Some(frag) = parse_video_frag(&p.payload) {
                             let asm = vid_asm.entry(p.src).or_insert_with(VideoReassembler::new);
@@ -204,6 +212,7 @@ impl RoomCallEngine {
             let msgr = messenger.clone();
             let fsamps = audio.frame_samples() as u32;
             let target_bitrate = target_bitrate.clone();
+            let tx_bytes = tx_bytes.clone();
             threads.push(thread::spawn(move || {
                 let mut enc = match AudioEncoder::new(audio) {
                     Ok(e) => e,
@@ -237,9 +246,11 @@ impl RoomCallEngine {
                     }
                     if !muted.load(Ordering::Relaxed) {
                         if let Ok(pkt) = enc.encode(&frame) {
-                            for m in members.lock().unwrap().iter() {
+                            let ms = members.lock().unwrap();
+                            for m in ms.iter() {
                                 let _ = msgr.send_media(m, TRACK_AUDIO, seq, ts, &pkt);
                             }
+                            tx_bytes.fetch_add((pkt.len() * ms.len()) as u64, Ordering::Relaxed);
                         }
                     }
                     seq = seq.wrapping_add(1);
@@ -264,6 +275,8 @@ impl RoomCallEngine {
             vid_cap,
             levels: Mutex::new(HashMap::new()),
             target_bitrate,
+            rx_bytes,
+            tx_bytes,
             threads: Mutex::new(threads),
         })
     }
@@ -285,6 +298,7 @@ impl RoomCallEngine {
             for m in members.iter() {
                 let _ = self.messenger.send_media(m, TRACK_VIDEO, seq, 0, chunk);
             }
+            self.tx_bytes.fetch_add((chunk.len() * members.len()) as u64, Ordering::Relaxed);
         }
     }
 
@@ -371,6 +385,18 @@ impl RoomCallEngine {
     /// менять live нельзя — он на старте сессии.
     pub fn set_bitrate(&self, bitrate: i32) {
         self.target_bitrate.store(bitrate, Ordering::Relaxed);
+    }
+
+    /// Накопленные байты трафика: {hex_участника: rx_всего, "self": tx_всего}. Клиент
+    /// считает скорость (kbps) по дельте между опросами. Для тех-инфо чипа.
+    pub fn traffic_json(&self) -> String {
+        let rx = self.rx_bytes.lock().unwrap();
+        let mut m = serde_json::Map::new();
+        for (k, v) in rx.iter() {
+            m.insert(hex::encode(k), serde_json::json!(v));
+        }
+        m.insert("self".into(), serde_json::json!(self.tx_bytes.load(Ordering::Relaxed)));
+        serde_json::to_string(&m).unwrap_or_else(|_| "{}".into())
     }
 
     pub fn set_muted(&self, m: bool) {

@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloseFullscreen
@@ -336,12 +337,10 @@ private fun ParticipantTile(
             }
         }
         // Тех-инфо чип (тумблер в ⚙️) — ЧАСТЬ оверлея, право-верх тайла. 4 строки:
-        // разрешение·fps · битрейт(цель) · трафик(реальный kbps) · пинг.
+        // разрешение·fps · битрейт(цель) · трафик(реальный kbps, ↑своё/↓чужое) · пинг.
         if (chrome && model.showTechInfo) {
             val vq = model.videoQuality
-            val np = if (t.me) null else model.netStats?.peers?.firstOrNull { it.key == t.id }
-            val rate = if (t.me) (model.netStats?.txRate ?: 0L) else (np?.rxRate ?: 0L)
-            val ping = if (t.me) null else np?.latencyMs?.takeIf { it > 0 }?.toInt()
+            val kbps = model.peerKbps[if (t.me) "self" else t.id] ?: 0
             Column(
                 Modifier.align(Alignment.TopEnd).padding(7.dp)
                     .clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.chipScrim)
@@ -351,8 +350,8 @@ private fun ParticipantTile(
             ) {
                 TechLine("${vq.height}p·${vq.fps}")
                 TechLine("${vq.bitrate / 1000} kbps")
-                TechLine("↓ ${rate * 8 / 1000} kbps")
-                TechLine(if (ping != null) "$ping ms" else "—")
+                TechRate(up = t.me, kbps = kbps)
+                TechLine("— ms") // пинг: нужен E2E RTT (Ping/Pong), отдельная задача
             }
         }
     }
@@ -362,6 +361,20 @@ private fun ParticipantTile(
 @Composable
 private fun TechLine(text: String) {
     Text(text, color = Tokens.Colors.iconChrome, fontSize = 10.sp, maxLines = 1)
+}
+
+/** Строка трафика: иконка направления (↑ исходящий своё · ↓ входящий чужое) + kbps. */
+@Composable
+private fun TechRate(up: Boolean, kbps: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        Icon(
+            if (up) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
+            null,
+            tint = Tokens.Colors.iconChrome,
+            modifier = Modifier.size(11.dp),
+        )
+        Text("$kbps kbps", color = Tokens.Colors.iconChrome, fontSize = 10.sp, maxLines = 1)
+    }
 }
 
 @Composable

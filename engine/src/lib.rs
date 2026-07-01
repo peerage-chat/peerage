@@ -438,6 +438,11 @@ impl Engine {
         }
     }
 
+    /// Накопленные байты трафика по участникам {hex: rx, "self": tx}. "{}" вне звонка.
+    pub fn room_traffic_json(&self) -> String {
+        self.room_engine().map(|e| e.traffic_json()).unwrap_or_else(|| "{}".into())
+    }
+
     pub fn room_set_muted(&self, muted: bool) {
         if let Some(engine) = self.room_engine() {
             engine.set_muted(muted);
