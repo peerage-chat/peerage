@@ -23,7 +23,12 @@ pub enum Inbound {
     Message { sender: PeerKey, text: String },
     /// Изменён состав группы (применён Commit), его применил actor.
     Membership { actor: PeerKey },
-    /// Нечего показывать (вступление по Welcome, служебное).
+    /// Нас удалили из группы (ADR-004) — верхний слой забывает группу локально.
+    SelfRemoved,
+    /// Мы отстали (пропущен Commit / удалён секрет эпохи) — верхний слой должен
+    /// инициировать resync (re-add). См. ADR-004.
+    NeedsResync,
+    /// Нечего показывать (вступление по Welcome, ротация ключа, служебное).
     None,
 }
 
@@ -91,6 +96,30 @@ impl GroupChat {
         Ok(())
     }
 
+    /// Администратор отзывает участника (ADR-004). Commit рассылается ВСЕМ текущим
+    /// участникам, **включая удаляемого** (список снимаем ДО удаления) — тот поймёт,
+    /// что его удалили, по [`Inbound::SelfRemoved`]. Авторизацию (мы — админ)
+    /// проверяет верхний слой.
+    pub fn remove_member(&mut self, peer: PeerKey) -> Result<(), GroupChatError> {
+        let recipients = self.others(); // до удаления — ещё включает peer
+        let commit = self.member.remove(&peer)?;
+        for pk in recipients {
+            let _ = self.messenger.send_group(&pk, &commit);
+        }
+        Ok(())
+    }
+
+    /// Ротация собственного ключа (PCS, ADR-004): Commit рассылается всем — сменяет
+    /// эпоху, обесценивая утёкший старый секрет. Периодический вызов даёт «катящийся»
+    /// PCS всей группе.
+    pub fn rekey_self(&mut self) -> Result<(), GroupChatError> {
+        let commit = self.member.update_self()?;
+        for pk in self.others() {
+            let _ = self.messenger.send_group(&pk, &commit);
+        }
+        Ok(())
+    }
+
     /// Отправить текст в группу (рассылается всем текущим участникам).
     pub fn send_text(&mut self, text: &str) -> Result<(), GroupChatError> {
         let ct = self.member.encrypt(text.as_bytes())?;
@@ -108,14 +137,21 @@ impl GroupChat {
             self.member.join(data)?;
             return Ok(Inbound::None);
         }
-        Ok(match self.member.process(data)? {
-            Incoming::Message { sender, body } => Inbound::Message {
+        match self.member.process(data) {
+            Ok(Incoming::Message { sender, body }) => Ok(Inbound::Message {
                 sender: to_key(sender),
                 text: String::from_utf8_lossy(&body).into_owned(),
-            },
-            Incoming::MembershipChanged { actor } => Inbound::Membership { actor: to_key(actor) },
-            Incoming::Other => Inbound::None,
-        })
+            }),
+            Ok(Incoming::MembershipChanged { actor }) => {
+                Ok(Inbound::Membership { actor: to_key(actor) })
+            }
+            Ok(Incoming::SelfRemoved) => Ok(Inbound::SelfRemoved),
+            // Ротация ключа и служебное — молча.
+            Ok(Incoming::Rekeyed | Incoming::Other) => Ok(Inbound::None),
+            // Рассинхрон эпох (ADR-004): не ошибка, а сигнал наверх для resync.
+            Err(GroupError::EpochMismatch) => Ok(Inbound::NeedsResync),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub fn member_count(&self) -> usize {

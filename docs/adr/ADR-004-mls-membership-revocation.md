@@ -157,19 +157,27 @@ Removal/rekey коммитит только админ (нет гонок); от
 
 ## Action items
 
-1. [ ] `Member`: `remove`, `update_self`, `leaf_index_of`; `process` → `SelfRemoved`
-       / `EpochMismatch`; `save` после каждого commit. Юнит-тесты (add→remove→
-       oставшийся шлёт/принимает; удалённый теряет доступ; resync лечит отставшего).
-2. [ ] `GroupChat`: `remove_member`/`rekey_self`/`request_resync` + админ-обработка
-       `GroupResyncRequest` (KeyPackage-обмен → remove+add commit).
-3. [ ] `Payload::GroupResyncRequest` + событие мессенджера; хранение админа группы.
-4. [ ] `GroupManager`: команды remove/rekey/leave, события, rate-limit resync.
+1. [x] **`Member` (крипто-ядро) — СДЕЛАНО 2026-07-02.** `remove`, `update_self`,
+       `leaf_index_of`; `process` различает `SelfRemoved` (через `staged.self_removed()`)
+       / `Rekeyed` (только Update, без смены состава) / `MembershipChanged` и
+       возвращает `EpochMismatch` на `WrongEpoch`/`NoPastEpochData`. 3 юнит-теста
+       (revoke; rekey; missed-commit→EpochMismatch) — `cargo test -p p2p-group` 7/7 ✓.
+2. [~] **`GroupChat` — ЧАСТИЧНО 2026-07-02.** `remove_member` (Commit всем, включая
+       удаляемого — список снят ДО удаления), `rekey_self`; `handle` исчерпывающе
+       мапит новые варианты → `Inbound::{SelfRemoved, NeedsResync, None}`. Проверено
+       `cargo check -p p2p-groupchat`/`-p p2p-engine` (WSL) ✓. **Осталось:**
+       `request_resync` + админ-обработка `GroupResyncRequest` (пункт 3).
+3. [ ] `Payload::GroupResyncRequest` + событие мессенджера; хранение админа группы;
+       админ на resync-запрос от пира-в-ростере → KeyPackage-обмен → remove+add commit.
+4. [ ] `GroupManager`: команды remove/rekey/leave; на `Inbound::SelfRemoved` —
+       удалить группу с диска + `groups_changed`; `NeedsResync` → `request_resync`;
+       rate-limit resync. (Сейчас в `engine` эти варианты попадают в `_` — no-op.)
 5. [ ] **SEC-2:** фильтр `sync_room_members` по `groups.members(gid)` для групп.
 6. [ ] JNI + Compose-админка (kick для админа, «вы удалены», тихий resync, выход).
 7. [ ] Периодический admin-rekey (расписание/при заходе) — «катящийся» PCS.
-8. [ ] Обновить `SECURITY.md` (снять неявное «PCS из коробки»), threat-model N2,
-       ROADMAP H6/E, security-hardening S1/S5.
+8. [~] Доки: SECURITY.md/threat-model/ROADMAP/security-hardening обновлены доп-
+       аудитом (SEC-*); финальную правку статусов — по факту закрытия пунктов.
 
 **Порядок:** 1→2→3→4 (крипто-ядро и протокол, юнит-тестируемо без устройства) →
-5 (SEC-2, дешёвый) → 6 (UI) → 7 (полировка PCS). Пункты 1–4 — под меня/Опуса
-(проектно-крипто), 5–6 — можно отдать дешёвой модели по этому ADR.
+5 (SEC-2, дешёвый) → 6 (UI) → 7 (полировка PCS). Пункты 1–2 сделаны; следующий —
+3 (resync-протокол): единственная часть, требующая правки `core::protocol`.

@@ -31,6 +31,14 @@ pub enum GroupError {
     NotWelcome,
     #[error("идентичность KeyPackage не совпадает с ожидаемой (попытка подмены)")]
     IdentityMismatch,
+    #[error("участника нет в группе")]
+    NotMember,
+    #[error("нельзя отозвать самого себя (используйте leave)")]
+    CannotRemoveSelf,
+    /// Рассинхрон эпох: пропущен Commit или секрет прошлой эпохи уже удалён (FS).
+    /// Верхний слой должен инициировать resync (re-add), а не глотать ошибку.
+    #[error("рассинхрон эпох MLS — нужен resync")]
+    EpochMismatch,
 }
 
 fn mls<E: std::fmt::Display>(e: E) -> GroupError {
@@ -43,6 +51,13 @@ pub enum Incoming {
     Message { sender: Vec<u8>, body: Vec<u8> },
     /// Применено изменение состава группы (Commit). actor — кто его применил.
     MembershipChanged { actor: Vec<u8> },
+    /// Нас удалили из группы (обработали Commit, где нашего leaf-а больше нет).
+    /// Верхний слой должен вычистить локальное состояние группы.
+    SelfRemoved,
+    /// Применён Commit только с ротацией ключа (self-Update, PCS) — состав НЕ менялся.
+    /// Отличаем от [`Incoming::MembershipChanged`], чтобы UI не показывал ложное
+    /// «изменение состава» на плановой ротации.
+    Rekeyed,
     /// Прочее (предложение и т.п.) — игнорируем на уровне приложения.
     Other,
 }
@@ -179,6 +194,45 @@ impl Member {
         ))
     }
 
+    /// Leaf-индекс участника по его ed25519-идентичности (credential). None, если
+    /// такого участника в группе нет.
+    fn leaf_index_of(&self, identity: &[u8; 32]) -> Option<LeafNodeIndex> {
+        let group = self.group.as_ref()?;
+        group
+            .members()
+            .find(|m| m.credential.serialized_content() == identity.as_slice())
+            .map(|m| m.index)
+    }
+
+    /// Отозвать участника по его ed25519-идентичности (ADR-004). Возвращает Commit
+    /// для рассылки ОСТАВШИМСЯ участникам (в т.ч. самому удаляемому — он поймёт, что
+    /// его удалили, из [`Incoming::SelfRemoved`]). Авторизацию (только админ) проверяет
+    /// верхний слой. Своё удаление здесь запрещено — это отдельный «выход» (leave).
+    pub fn remove(&mut self, identity: &[u8; 32]) -> Result<Vec<u8>, GroupError> {
+        let idx = self.leaf_index_of(identity).ok_or(GroupError::NotMember)?;
+        let group = self.group.as_mut().ok_or(GroupError::NoGroup)?;
+        if idx == group.own_leaf_index() {
+            return Err(GroupError::CannotRemoveSelf);
+        }
+        let (commit, _welcome, _info) = group
+            .remove_members(&self.provider, &self.signer, &[idx])
+            .map_err(mls)?;
+        group.merge_pending_commit(&self.provider).map_err(mls)?;
+        commit.tls_serialize_detached().map_err(mls)
+    }
+
+    /// Ротация собственного leaf-ключа (self-Update, PCS по ADR-004): сменяет эпоху,
+    /// делая утёкший старый секрет бесполезным. Возвращает Commit для рассылки всем.
+    pub fn update_self(&mut self) -> Result<Vec<u8>, GroupError> {
+        let group = self.group.as_mut().ok_or(GroupError::NoGroup)?;
+        let bundle = group
+            .self_update(&self.provider, &self.signer, LeafNodeParameters::default())
+            .map_err(mls)?;
+        let commit = bundle.commit().clone();
+        group.merge_pending_commit(&self.provider).map_err(mls)?;
+        commit.tls_serialize_detached().map_err(mls)
+    }
+
     /// Присоединиться к группе по welcome-сообщению.
     pub fn join(&mut self, welcome: &[u8]) -> Result<(), GroupError> {
         let msg = MlsMessageIn::tls_deserialize_exact(welcome).map_err(mls)?;
@@ -210,7 +264,16 @@ impl Member {
         let msg = MlsMessageIn::tls_deserialize_exact(message).map_err(mls)?;
         let protocol = msg.try_into_protocol_message().map_err(mls)?;
         let group = self.group.as_mut().ok_or(GroupError::NoGroup)?;
-        let processed = group.process_message(&self.provider, protocol).map_err(mls)?;
+        let processed = match group.process_message(&self.provider, protocol) {
+            Ok(p) => p,
+            // Рассинхрон эпох (ADR-004): пропущен Commit (WrongEpoch) или секрет
+            // прошлой эпохи уже удалён forward-secrecy (NoPastEpochData — это и есть
+            // «старые группы не лечатся»). Сигналим наверх для resync, не глотаем.
+            Err(ProcessMessageError::ValidationError(
+                ValidationError::WrongEpoch | ValidationError::NoPastEpochData,
+            )) => return Err(GroupError::EpochMismatch),
+            Err(e) => return Err(mls(e)),
+        };
         // Личность отправителя (= ed25519-pubkey, см. member_identities) доступна
         // до распаковки содержимого — снимаем до into_content(), который её поглощает.
         let sender = processed.credential().serialized_content().to_vec();
@@ -219,8 +282,18 @@ impl Member {
                 Ok(Incoming::Message { sender, body: app.into_bytes() })
             }
             ProcessedMessageContent::StagedCommitMessage(staged) => {
+                // Различаем ДО merge: удалили нас / сменился состав / только ротация.
+                let self_removed = staged.self_removed();
+                let roster_changed = staged.add_proposals().next().is_some()
+                    || staged.remove_proposals().next().is_some();
                 group.merge_staged_commit(&self.provider, *staged).map_err(mls)?;
-                Ok(Incoming::MembershipChanged { actor: sender })
+                if self_removed {
+                    Ok(Incoming::SelfRemoved)
+                } else if roster_changed {
+                    Ok(Incoming::MembershipChanged { actor: sender })
+                } else {
+                    Ok(Incoming::Rekeyed)
+                }
             }
             _ => Ok(Incoming::Other),
         }
@@ -342,6 +415,70 @@ mod tests {
         ));
         // С правильной идентичностью — ок.
         assert!(a.add(&kp, &id(2).public_key_bytes()).is_ok());
+    }
+
+    #[test]
+    fn remove_revokes_member() {
+        // ADR-004: админ отзывает участника; оставшиеся видят смену состава,
+        // отозванный узнаёт об удалении и теряет доступ к новым сообщениям.
+        let mut a = Member::new(&id(1)).unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        let mut c = Member::new(&id(3)).unwrap();
+        a.create_group().unwrap();
+        let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
+        b.join(&w).unwrap();
+        let (commit_add_c, w) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
+        b.process(&commit_add_c).unwrap();
+        c.join(&w).unwrap();
+        assert_eq!(a.member_count(), 3);
+
+        // Нельзя отозвать себя / несуществующего.
+        assert!(matches!(a.remove(&id(1).public_key_bytes()), Err(GroupError::CannotRemoveSelf)));
+        assert!(matches!(a.remove(&id(9).public_key_bytes()), Err(GroupError::NotMember)));
+
+        // A отзывает C. Commit идёт ВСЕМ, включая удаляемого.
+        let commit = a.remove(&id(3).public_key_bytes()).unwrap();
+        assert_eq!(a.member_count(), 2);
+        assert!(matches!(b.process(&commit).unwrap(), Incoming::MembershipChanged { .. }));
+        assert_eq!(b.member_count(), 2);
+        assert!(matches!(c.process(&commit).unwrap(), Incoming::SelfRemoved));
+
+        // После отзыва: B читает, отозванный C — уже нет.
+        let ct = a.encrypt(b"after kick").unwrap();
+        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"after kick"));
+        assert!(c.process(&ct).is_err());
+    }
+
+    #[test]
+    fn self_update_rekeys_without_membership_change() {
+        // ADR-004: ротация ключа (PCS) — не «смена состава», группа продолжает жить.
+        let mut a = Member::new(&id(1)).unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        a.create_group().unwrap();
+        let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
+        b.join(&w).unwrap();
+
+        let commit = a.update_self().unwrap();
+        assert!(matches!(b.process(&commit).unwrap(), Incoming::Rekeyed));
+        let ct = a.encrypt(b"post-rekey").unwrap();
+        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"post-rekey"));
+    }
+
+    #[test]
+    fn missed_commit_surfaces_epoch_mismatch() {
+        // ADR-004: отставший (пропустил Commit) получает EpochMismatch, а не
+        // generic-ошибку — сигнал для resync («старые группы не лечатся»).
+        let mut a = Member::new(&id(1)).unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        a.create_group().unwrap();
+        let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
+        b.join(&w).unwrap();
+
+        // A двигает эпоху ротацией — B этот Commit НЕ получает (отстал).
+        let _missed = a.update_self().unwrap();
+        // Сообщение уже из новой эпохи; B на старой → рассинхрон.
+        let ct = a.encrypt(b"from new epoch").unwrap();
+        assert!(matches!(b.process(&ct), Err(GroupError::EpochMismatch)));
     }
 
     #[test]
