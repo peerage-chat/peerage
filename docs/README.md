@@ -15,7 +15,7 @@ Rust-ядро; платформы (Android, десктоп) — тонкие а�
 | **Сквозные правила** (не нарушать) | [architecture/invariants.md](architecture/invariants.md) — FFI/каналы/SQLite/MLS/UI |
 | **Подсистемы → фичи** | [SUBSYSTEMS.md](SUBSYSTEMS.md) — концептуальный хребет |
 | **Контракт движок↔клиент** | [protocol-spec.md](protocol-spec.md), [adr/](adr/) (архитектурные решения) |
-| **Безопасность / модель угроз** | [SECURITY.md](SECURITY.md) |
+| **Безопасность / модель угроз** | [SECURITY.md](SECURITY.md), [architecture/threat-model.md](architecture/threat-model.md) (активы/противники/гарантии), [architecture/security-audit-2026-07-02.md](architecture/security-audit-2026-07-02.md) (крипто-аудит) |
 | **UI** | [design/app-ui.md](design/app-ui.md) (язык, ИСТОЧНИК ИСТИНЫ), [design/call-ui.md](design/call-ui.md) (звонки), [design/tokens.md](design/tokens.md) (цвета/отступы) |
 | **Что и в каком порядке строим** | [v1.0-scope.md](v1.0-scope.md), [completion-plan.md](completion-plan.md), [ROADMAP.md](ROADMAP.md) |
 | **Планы развития** | [plans/media-webrtc-parity.md](plans/media-webrtc-parity.md), [plans/security-hardening.md](plans/security-hardening.md) |
