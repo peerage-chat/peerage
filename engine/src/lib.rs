@@ -325,10 +325,12 @@ impl Engine {
     }
 
     /// Прочитать сохранённый блоб по hex-id (принятый или свой отправленный).
+    /// Расшифровывает at-rest (`vault::open`).
     pub fn blob_read(&self, id_hex: &str) -> Option<Vec<u8>> {
         // Санитизация: только валидный hex → чистое имя файла (без traversal).
         let clean = hex::encode(hex::decode(id_hex.trim()).ok()?);
-        std::fs::read(self.blob_dir.join(clean)).ok()
+        let raw = std::fs::read(self.blob_dir.join(clean)).ok()?;
+        p2p_core::vault::open(&raw).ok()
     }
 
     pub fn group_list_json(&self) -> String {
@@ -700,9 +702,10 @@ fn event_pump(
 }
 
 /// Сохранить блоб на диск по hex-id (принятый или свой отправленный).
+/// Шифрует at-rest (`vault::seal`) — как сообщения/группы.
 fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
     let _ = std::fs::create_dir_all(&engine.blob_dir);
-    let _ = std::fs::write(engine.blob_dir.join(hex::encode(id)), content);
+    let _ = std::fs::write(engine.blob_dir.join(hex::encode(id)), p2p_core::vault::seal(content));
 }
 
 /// Сохранить принятый блоб и уведомить UI (`blob_received`).
