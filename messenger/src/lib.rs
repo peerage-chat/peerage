@@ -98,6 +98,12 @@ pub enum Event {
     GroupResyncRequest { peer: PeerKey, gid: Vec<u8> },
     /// Участник просит админа отозвать его — выход из группы (ADR-004).
     GroupLeaveRequest { peer: PeerKey, gid: Vec<u8> },
+    /// Анонс блоба: пришёл манифест (JSON) — можно начинать докачку (M2).
+    BlobManifest { peer: PeerKey, manifest: String },
+    /// Пир запросил чанк нашего блоба.
+    BlobRequest { peer: PeerKey, id: Vec<u8>, index: u32 },
+    /// Пришёл чанк блоба, который мы качаем.
+    BlobChunk { peer: PeerKey, id: Vec<u8>, index: u32, data: Vec<u8> },
 }
 
 /// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
@@ -464,6 +470,24 @@ impl Messenger {
         self.shared.send(peer, &Payload::GroupResyncRequest { gid: gid.to_vec() })
     }
 
+    /// Анонсировать блоб пиру: отправить манифест (M2). Fire-and-forget — если
+    /// потеряется, отправитель может анонсировать повторно (или получатель уже качает).
+    pub fn send_blob_manifest(&self, peer: &PeerKey, manifest: &str) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::BlobManifest { manifest: manifest.to_string() })
+    }
+
+    /// Запросить чанк блоба (получатель-драйвен pull). Fire-and-forget: недошедший
+    /// запрос/чанк повторно запрашивается по таймауту (см. blob-менеджер).
+    pub fn send_blob_request(&self, peer: &PeerKey, id: &[u8], index: u32) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::BlobRequest { id: id.to_vec(), index })
+    }
+
+    /// Отдать чанк блоба. E2E-шифруется как обычное сообщение; целостность чанка —
+    /// по хэшу в манифесте на приёме.
+    pub fn send_blob_chunk(&self, peer: &PeerKey, id: &[u8], index: u32, data: &[u8]) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::BlobChunk { id: id.to_vec(), index, data: data.to_vec() })
+    }
+
     /// Запрос на выход из группы админу (ADR-004). Fire-and-forget.
     pub fn send_group_leave_request(&self, peer: &PeerKey, gid: &[u8]) -> Result<(), MessengerError> {
         self.shared.send(peer, &Payload::GroupLeaveRequest { gid: gid.to_vec() })
@@ -638,6 +662,15 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::GroupLeaveRequest { gid } => {
                 shared.emit(Event::GroupLeaveRequest { peer: src, gid });
+            }
+            Payload::BlobManifest { manifest } => {
+                shared.emit(Event::BlobManifest { peer: src, manifest });
+            }
+            Payload::BlobRequest { id, index } => {
+                shared.emit(Event::BlobRequest { peer: src, id, index });
+            }
+            Payload::BlobChunk { id, index, data } => {
+                shared.emit(Event::BlobChunk { peer: src, id, index, data });
             }
         }
     }

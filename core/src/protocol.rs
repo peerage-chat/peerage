@@ -59,6 +59,38 @@ pub enum Payload {
     /// Запрос на выход из группы (ADR-004): отправитель уходит и просит админа
     /// отозвать его (Remove + смена эпохи). Отправитель локально уже забыл группу.
     GroupLeaveRequest { gid: Vec<u8> },
+    /// Анонс блоба (M2): манифест (JSON) — план докачки. Получатель качает чанки
+    /// запросами `BlobRequest`. `manifest` непрозрачен для core (парсит слой blob).
+    BlobManifest { manifest: String },
+    /// Запрос чанка блоба по id (BLAKE3) и индексу (получатель-драйвен pull).
+    BlobRequest {
+        #[serde(with = "hex_bytes")]
+        id: Vec<u8>,
+        index: u32,
+    },
+    /// Ответ с чанком блоба. Шифруется как обычное сообщение (E2E), целостность
+    /// чанка отдельно проверяется по хэшу в манифесте на слое blob. `id`/`data` —
+    /// hex, а не JSON-массив чисел (иначе payload раздувался бы в ~3.5× и не влезал
+    /// в датаграмму).
+    BlobChunk {
+        #[serde(with = "hex_bytes")]
+        id: Vec<u8>,
+        index: u32,
+        #[serde(with = "hex_bytes")]
+        data: Vec<u8>,
+    },
+}
+
+/// Компактная hex-сериализация байтовых полей блоб-сообщений.
+mod hex_bytes {
+    use serde::{Deserialize, Deserializer, Serializer};
+    pub fn serialize<S: Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&hex::encode(v))
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let s = String::deserialize(d)?;
+        hex::decode(&s).map_err(serde::de::Error::custom)
+    }
 }
 
 /// Внешний конверт, передаваемый по транспорту.
@@ -166,6 +198,9 @@ mod tests {
             Payload::RoomPresence { gid: vec![5, 6, 7], flags: 0b11 },
             Payload::GroupResyncRequest { gid: vec![8, 9, 10] },
             Payload::GroupLeaveRequest { gid: vec![11, 12] },
+            Payload::BlobManifest { manifest: "{}".into() },
+            Payload::BlobRequest { id: vec![1u8; 32], index: 2 },
+            Payload::BlobChunk { id: vec![2u8; 32], index: 3, data: vec![9, 8, 7] },
         ] {
             let d = encode(&a, &b.public_key_bytes(), &p, 0).unwrap();
             let (_, got) = decode(&b, &d).unwrap();

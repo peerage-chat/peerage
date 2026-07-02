@@ -21,9 +21,11 @@ pub mod scrub;
 /// BLAKE3-хэш (256 бит) — и id блоба, и хэш чанка.
 pub type Hash = [u8; 32];
 
-/// Размер чанка (64 KiB). Yggdrasil сам фрагментирует на IP-уровне, поэтому берём
-/// крупные чанки — манифест остаётся компактным (файл 5 МБ ≈ 80 хэшей ≈ 2.5 КБ).
-pub const CHUNK_SIZE: usize = 64 * 1024;
+/// Размер чанка (12 KiB). Ограничен сверху датаграммой транспорта (~65535 Б на
+/// приёме). Чанк едет E2E-зашифрованным JSON-сообщением, где байты hex-кодируются
+/// ДВАЖДЫ (data в payload + весь sealed-конверт), т.е. ×4: 12 КБ → датаграмма ≈
+/// 49 КБ, влезает с запасом. Крупнее не влезало и молча обрезалось на приёме.
+pub const CHUNK_SIZE: usize = 12 * 1024;
 
 fn hash(data: &[u8]) -> Hash {
     *blake3::hash(data).as_bytes()
@@ -46,8 +48,11 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        // 64 MiB — с запасом на файлы/голосовые, но не безгранично.
-        let max_size = 64 * 1024 * 1024;
+        // 4 MiB: с запасом на аватарки/картинки/голосовые. Предел выбран так, чтобы и
+        // МАНИФЕСТ влезал в одну датаграмму: 4 МБ / 12 КБ ≈ 342 чанка × 32 Б → ~22 КБ
+        // hex-манифеста, конверт ~44 КБ < 65535. Более крупные блобы потребуют
+        // чанкования самого манифеста (бэклог).
+        let max_size = 4 * 1024 * 1024;
         Self { max_size, max_chunks: (max_size as usize / CHUNK_SIZE) + 1 }
     }
 }
@@ -61,6 +66,10 @@ impl Limits {
 
 /// Манифест блоба — план докачки и проверки + типизированный конверт (mime).
 /// Передаётся в аутентифицированном E2E-сообщении, поэтому хэши чанков доверенные.
+///
+/// Хэши сериализуются в hex (id — строка, chunks — одна конкатенированная строка),
+/// а не как JSON-массивы чисел: иначе манифест раздувался бы в ~3–4 раза и не влезал
+/// в датаграмму даже для средних блобов.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     /// MIME-тип (image/jpeg, application/octet-stream, audio/opus, …).
@@ -68,9 +77,44 @@ pub struct Manifest {
     /// Полный размер содержимого в байтах.
     pub size: u64,
     /// BLAKE3 всего содержимого — контент-адрес (id, ключ дедупликации).
+    #[serde(with = "hex_hash")]
     pub id: Hash,
     /// BLAKE3-хэши чанков по порядку.
+    #[serde(with = "hex_hashes")]
     pub chunks: Vec<Hash>,
+}
+
+mod hex_hash {
+    use super::Hash;
+    use serde::{Deserialize, Deserializer, Serializer};
+    pub fn serialize<S: Serializer>(h: &Hash, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&hex::encode(h))
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Hash, D::Error> {
+        let s = String::deserialize(d)?;
+        let v = hex::decode(&s).map_err(serde::de::Error::custom)?;
+        <[u8; 32]>::try_from(v.as_slice()).map_err(|_| serde::de::Error::custom("плохая длина хэша"))
+    }
+}
+
+mod hex_hashes {
+    use super::Hash;
+    use serde::{Deserialize, Deserializer, Serializer};
+    pub fn serialize<S: Serializer>(v: &[Hash], s: S) -> Result<S::Ok, S::Error> {
+        let mut out = String::with_capacity(v.len() * 64);
+        for h in v {
+            out.push_str(&hex::encode(h));
+        }
+        s.serialize_str(&out)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Hash>, D::Error> {
+        let s = String::deserialize(d)?;
+        let bytes = hex::decode(&s).map_err(serde::de::Error::custom)?;
+        if bytes.len() % 32 != 0 {
+            return Err(serde::de::Error::custom("длина хэшей не кратна 32"));
+        }
+        Ok(bytes.chunks(32).map(|c| <[u8; 32]>::try_from(c).unwrap()).collect())
+    }
 }
 
 impl Manifest {

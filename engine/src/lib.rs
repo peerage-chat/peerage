@@ -8,6 +8,7 @@
 //! маршрутизацию) считает движок, не клиент. Поэтому ядро юнит-тестируется без
 //! устройства (см. `net.rs`, тесты презенса ниже).
 
+pub mod blobs;
 pub mod groups;
 pub mod net;
 pub mod room_call;
@@ -764,6 +765,9 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, ev: Event) {
                 push_event(engine, serde_json::json!({"type": "groups_changed"}));
             }
         }
+        // M2 блобы: логика в blobs::BlobManager (покрыта loopback-тестом). Проводка в
+        // event_pump + JNI (offer/приём картинки) — следующий шаг вместе с UI.
+        Event::BlobManifest { .. } | Event::BlobRequest { .. } | Event::BlobChunk { .. } => {}
         Event::GroupKeyReply { peer, key_package } => {
             if groups.on_key_reply(peer, &key_package) {
                 refresh_group_cache(engine, groups);
