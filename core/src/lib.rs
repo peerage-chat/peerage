@@ -8,6 +8,7 @@ pub mod db;
 pub mod identity;
 pub mod media;
 pub mod outbox;
+pub mod pad;
 pub mod protocol;
 pub mod ratelimit;
 pub mod settings;

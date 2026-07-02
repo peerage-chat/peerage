@@ -122,6 +122,19 @@ pub enum ProtocolError {
     Version(u8),
     #[error("неверная длина публичного ключа отправителя")]
     BadFrom,
+    #[error("повреждённый паддинг сообщения")]
+    BadPadding,
+}
+
+/// Размерный бакет паддинга (M5) по типу payload: текст DM/группы добиваем до 4 КБ
+/// (прячем длину сообщения по размеру), мелкий control/keepalive — только префикс
+/// длины (0), чтобы не амплифицировать частые пакеты.
+const TEXT_BUCKET: usize = 4096;
+fn bucket_for(payload: &Payload) -> usize {
+    match payload {
+        Payload::Text { .. } | Payload::Group { .. } => TEXT_BUCKET,
+        _ => 0,
+    }
 }
 
 /// Закодировать и зашифровать `payload` для контакта `peer_ed_pub`.
@@ -133,7 +146,9 @@ pub fn encode(
     time: i64,
 ) -> Result<Vec<u8>, ProtocolError> {
     let plaintext = serde_json::to_vec(payload)?;
-    let sealed = crypto::seal(me, peer_ed_pub, &plaintext)?;
+    // M5: добить до размерного бакета ДО шифрования (прячем длину по размеру).
+    let padded = crate::pad::pad(&plaintext, bucket_for(payload));
+    let sealed = crypto::seal(me, peer_ed_pub, &padded)?;
     let envelope = Envelope {
         v: PROTOCOL_VERSION,
         from: hex::encode(me.public_key_bytes()),
@@ -159,7 +174,8 @@ pub fn decode(me: &Identity, datagram: &[u8]) -> Result<([u8; 32], Payload), Pro
         .try_into()
         .map_err(|_| ProtocolError::BadFrom)?;
     let sealed = hex::decode(&envelope.data)?;
-    let plaintext = crypto::open(me, &from, &sealed)?;
+    let padded = crypto::open(me, &from, &sealed)?;
+    let plaintext = crate::pad::unpad(&padded).ok_or(ProtocolError::BadPadding)?;
     let payload: Payload = serde_json::from_slice(&plaintext)?;
     Ok((from, payload))
 }
@@ -210,6 +226,19 @@ mod tests {
             let (_, got) = decode(&b, &d).unwrap();
             assert_eq!(got, p);
         }
+    }
+
+    #[test]
+    fn padding_hides_text_length() {
+        let a = Identity::generate();
+        let b = Identity::generate();
+        let short = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "да".into() }, 0).unwrap();
+        let long = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "a".repeat(500) }, 0).unwrap();
+        // M5: разные по длине тексты → одинаковый размер датаграммы (бакет скрыл длину).
+        assert_eq!(short.len(), long.len(), "паддинг должен скрыть длину текста");
+        // Расшифровка по-прежнему работает.
+        let (_, p) = decode(&b, &short).unwrap();
+        assert!(matches!(p, Payload::Text { text, .. } if text == "да"));
     }
 
     #[test]
