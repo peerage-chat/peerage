@@ -42,10 +42,12 @@ pub enum Payload {
     /// доставки: получатель шлёт `Ack{id}`, отправитель повторяет до Ack/TTL
     /// (per-recipient, как у DM). Дедуп повторов — на стороне MLS (generation).
     Group { id: u64, data: Vec<u8> },
-    /// Запрос KeyPackage у контакта (чтобы добавить его в группу).
-    GroupKeyRequest,
-    /// Ответ с KeyPackage (MLS) для добавления в группу.
-    GroupKeyReply { key_package: Vec<u8> },
+    /// Запрос KeyPackage у контакта (чтобы добавить его в группу). `id` — для
+    /// надёжной доставки (retry-until-Ack): получатель эхо-нёт `Ack{id}`. Раньше был
+    /// fire-and-forget → на холодной сессии терялся (инвайт «не срабатывал»).
+    GroupKeyRequest { id: u64 },
+    /// Ответ с KeyPackage (MLS) для добавления в группу. `id` — надёжная доставка.
+    GroupKeyReply { id: u64, key_package: Vec<u8> },
     /// Маячок присутствия в комнате-звонке (Discord-style): периодический сигнал
     /// «я сейчас в комнате `gid`, A/V-флаги такие». `flags`: bit0 — аудио,
     /// bit1 — видео. Низкочастотный control-plane (не медиа).
@@ -159,8 +161,8 @@ mod tests {
             Payload::RoomInvite { room_id: vec![1u8; 16], audio: true, video: false },
             Payload::RoomDecline { room_id: vec![2u8; 16] },
             Payload::Group { id: 5, data: vec![1, 2, 3, 9, 9] },
-            Payload::GroupKeyRequest,
-            Payload::GroupKeyReply { key_package: vec![7, 7, 7] },
+            Payload::GroupKeyRequest { id: 3 },
+            Payload::GroupKeyReply { id: 4, key_package: vec![7, 7, 7] },
             Payload::RoomPresence { gid: vec![5, 6, 7], flags: 0b11 },
             Payload::GroupResyncRequest { gid: vec![8, 9, 10] },
             Payload::GroupLeaveRequest { gid: vec![11, 12] },

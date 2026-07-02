@@ -435,15 +435,21 @@ impl Messenger {
         Ok(())
     }
 
-    /// Попросить у контакта KeyPackage (для добавления в группу).
+    /// Попросить у контакта KeyPackage (для добавления в группу) — НАДЁЖНО
+    /// (retry-until-Ack): на холодной сессии первый пакет мог теряться, из-за чего
+    /// инвайт «не срабатывал». Дедуп повторов на приёме — по идемпотентности
+    /// (повторный запрос лишь пере-присылает KeyPackage).
     pub fn send_group_key_request(&self, peer: &PeerKey) -> Result<(), MessengerError> {
-        self.shared.send(peer, &Payload::GroupKeyRequest)
+        self.shared.send_reliable(peer, false, |id| Payload::GroupKeyRequest { id })?;
+        Ok(())
     }
 
-    /// Прислать контакту свой KeyPackage.
+    /// Прислать контакту свой KeyPackage — надёжно (retry-until-Ack).
     pub fn send_group_key_reply(&self, peer: &PeerKey, key_package: &[u8]) -> Result<(), MessengerError> {
+        let kp = key_package.to_vec();
         self.shared
-            .send(peer, &Payload::GroupKeyReply { key_package: key_package.to_vec() })
+            .send_reliable(peer, false, move |id| Payload::GroupKeyReply { id, key_package: kp })?;
+        Ok(())
     }
 
     /// Маячок присутствия в комнате-звонке участнику группы (один выстрел,
@@ -616,11 +622,13 @@ fn receive_loop(shared: Arc<Shared>) {
                 // ✓ доставлено — гасим повтор у отправителя (дубли отсеет MLS).
                 let _ = shared.send(&src, &Payload::Ack { id });
             }
-            Payload::GroupKeyRequest => {
+            Payload::GroupKeyRequest { id } => {
                 shared.emit(Event::GroupKeyRequest { peer: src });
+                let _ = shared.send(&src, &Payload::Ack { id }); // гасим ретрай инвайта
             }
-            Payload::GroupKeyReply { key_package } => {
+            Payload::GroupKeyReply { id, key_package } => {
                 shared.emit(Event::GroupKeyReply { peer: src, key_package });
+                let _ = shared.send(&src, &Payload::Ack { id });
             }
             Payload::RoomPresence { gid, flags } => {
                 shared.emit(Event::RoomPresence { peer: src, gid, flags });
@@ -833,5 +841,22 @@ mod tests {
         a.send_text(&b_key, "сквозь потери").unwrap();
         let got = wait_for(&b_rx, |e| matches!(e, Event::Text { text, .. } if text == "сквозь потери"));
         assert!(got.is_some(), "ретрай должен дожать сообщение несмотря на потери");
+    }
+
+    /// Инвайт-хендшейк надёжен: `GroupKeyRequest` доходит несмотря на потери — это
+    /// чинит «инвайт не срабатывает на холодной сессии» (был fire-and-forget).
+    #[test]
+    fn group_key_request_survives_packet_loss() {
+        let net = LoopbackNet::new();
+        net.set_drop_every(2);
+        let (a_id, b_id) = (id(5), id(6));
+        let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+        let cfg = Config { retry_interval: Duration::from_millis(50), ..Config::default() };
+        let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), cfg.clone());
+        let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
+
+        a.send_group_key_request(&b_key).unwrap();
+        let got = wait_for(&b_rx, |e| matches!(e, Event::GroupKeyRequest { .. }));
+        assert!(got.is_some(), "GroupKeyRequest должен дойти несмотря на потери (ретрай)");
     }
 }
