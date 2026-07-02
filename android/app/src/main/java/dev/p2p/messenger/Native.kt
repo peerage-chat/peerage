@@ -62,7 +62,13 @@ object Native {
     /** Отправить текст в группу (fire-and-forget). UI добавляет оптимистично. */
     external fun groupSendText(sessionPtr: Long, gid: String, text: String)
 
-    /** Список групп: JSON [{gid, name, members}]. */
+    /** Отозвать участника группы по hex-ключу (ADR-004, только админ). */
+    external fun groupRemoveMember(sessionPtr: Long, gid: String, peerHex: String)
+
+    /** Ротация ключа группы (PCS, ADR-004). */
+    external fun groupRekey(sessionPtr: Long, gid: String)
+
+    /** Список групп: JSON [{gid, name, members, admin}]. */
     external fun groupList(sessionPtr: Long): String
 
     /** История группы: JSON [{text, mine, time}]. */

@@ -47,6 +47,10 @@ pub(crate) enum GroupCmd {
     Create { name: String },
     Invite { gid: Vec<u8>, peer: [u8; 32] },
     SendText { gid: Vec<u8>, text: String },
+    /// Отозвать участника (ADR-004, только админ).
+    RemoveMember { gid: Vec<u8>, peer: [u8; 32] },
+    /// Ротация ключа группы (PCS, ADR-004).
+    Rekey { gid: Vec<u8> },
 }
 
 /// Работа для потока event_pump: событие мессенджера, групповая команда либо
@@ -283,6 +287,16 @@ impl Engine {
 
     pub fn group_send_text(&self, gid: Vec<u8>, text: String) {
         let _ = self.jobs.send(Job::Cmd(GroupCmd::SendText { gid, text }));
+    }
+
+    /// Отозвать участника из группы (ADR-004, только админ). Fire-and-forget.
+    pub fn group_remove_member(&self, gid: Vec<u8>, peer: [u8; 32]) {
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::RemoveMember { gid, peer }));
+    }
+
+    /// Ротация ключа группы (PCS, ADR-004). Fire-and-forget.
+    pub fn group_rekey(&self, gid: Vec<u8>) {
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::Rekey { gid }));
     }
 
     pub fn group_list_json(&self) -> String {
@@ -785,6 +799,18 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
         GroupCmd::Invite { gid, peer } => groups.invite(&gid, peer),
         GroupCmd::SendText { gid, text } => {
             if groups.send_text(&gid, &text) {
+                refresh_group_cache(engine, groups);
+            }
+        }
+        GroupCmd::RemoveMember { gid, peer } => {
+            if groups.remove_member(&gid, peer) {
+                refresh_group_cache(engine, groups);
+                engine.sync_room_members(); // SEC-2: отозванного убрать и из звонка
+                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+            }
+        }
+        GroupCmd::Rekey { gid } => {
+            if groups.rekey(&gid) {
                 refresh_group_cache(engine, groups);
             }
         }

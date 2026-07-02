@@ -58,6 +58,40 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
     });
 }
 
+/// Отозвать участника группы (ADR-004, только админ). Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupRemoveMember<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    peer_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let (Some(gid), Some(peer)) = (
+            hex::decode(jstr(&mut env, &gid_hex).trim()).ok(),
+            parse_key(&jstr(&mut env, &peer_hex)),
+        ) else { return };
+        e.group_remove_member(gid, peer);
+    });
+}
+
+/// Ротация ключа группы (PCS, ADR-004). Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupRekey<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        e.group_rekey(gid);
+    });
+}
+
 /// Список групп: JSON [{gid, name, members}]. Снапшот движка.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(

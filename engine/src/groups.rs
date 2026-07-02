@@ -31,6 +31,9 @@ struct Entry {
     chat: GroupChat,
     name: String,
     messages: Vec<GMsg>,
+    /// Мы — админ/секвенсор этой группы (создатель). Только админ вправе отзывать
+    /// участников и коммитить ротацию (ADR-004: избегаем одновременных Commit).
+    admin: bool,
 }
 
 pub struct GroupManager {
@@ -71,6 +74,32 @@ impl GroupManager {
         if let Ok(j) = serde_json::to_vec_pretty(&idx) {
             let _ = std::fs::write(self.dir.join("index.json"), j);
         }
+        self.save_admins();
+    }
+
+    /// Флаг «мы админ» хранится отдельным файлом (admins.json — массив hex gid),
+    /// чтобы не ломать формат index.json существующих установок (ADR-004).
+    fn save_admins(&self) {
+        let admins: Vec<String> = self
+            .groups
+            .iter()
+            .filter(|(_, e)| e.admin)
+            .map(|(id, _)| hex::encode(id))
+            .collect();
+        if let Ok(j) = serde_json::to_vec(&admins) {
+            let _ = std::fs::write(self.dir.join("admins.json"), j);
+        }
+    }
+
+    /// Множество gid, где мы админ (из admins.json).
+    fn load_admins(&self) -> std::collections::HashSet<Vec<u8>> {
+        std::fs::read(self.dir.join("admins.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|h| hex::decode(h).ok())
+            .collect()
     }
 
     fn save_group(&self, id: &[u8]) {
@@ -118,6 +147,7 @@ impl GroupManager {
     fn load_all(&mut self) {
         let Ok(bytes) = std::fs::read(self.dir.join("index.json")) else { return };
         let Ok(idx) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else { return };
+        let admins = self.load_admins();
         for (hexid, name) in idx {
             let Ok(raw) = hex::decode(&hexid) else { continue };
             let path = self.group_path(&raw);
@@ -126,7 +156,8 @@ impl GroupManager {
                     crate::spawn_connect(self.messenger.clone(), m);
                 }
                 let messages = self.load_msgs(&raw);
-                self.groups.insert(raw, Entry { chat, name, messages });
+                let admin = admins.contains(&raw);
+                self.groups.insert(raw, Entry { chat, name, messages, admin });
             }
         }
     }
@@ -137,7 +168,8 @@ impl GroupManager {
     pub fn create(&mut self, name: &str) -> Option<Vec<u8>> {
         let chat = GroupChat::create(&self.identity, self.messenger.clone()).ok()?;
         let id = chat.group_id()?;
-        self.groups.insert(id.clone(), Entry { chat, name: name.to_string(), messages: Vec::new() });
+        // Создатель = админ/секвенсор (ADR-004).
+        self.groups.insert(id.clone(), Entry { chat, name: name.to_string(), messages: Vec::new(), admin: true });
         self.save_group(&id);
         Some(id)
     }
@@ -172,6 +204,42 @@ impl GroupManager {
         true
     }
 
+    /// Отозвать участника из группы (ADR-004). Только админ. Двигает MLS-состояние
+    /// → save_group. Возвращает true при успехе. Commit ушёл всем (вкл. удаляемого).
+    pub fn remove_member(&mut self, gid: &[u8], peer: [u8; 32]) -> bool {
+        let Some(e) = self.groups.get_mut(gid) else { return false };
+        if !e.admin {
+            log::warn!("remove_member: не админ группы {} — отказано", hex::encode(gid));
+            return false;
+        }
+        if e.chat.remove_member(peer).is_err() {
+            return false;
+        }
+        // Системная строка «участник удалён» (актор — удалённый).
+        e.messages.push(GMsg {
+            text: String::new(), mine: true, time: now(),
+            sender: hex::encode(peer), system: true,
+        });
+        self.save_msgs(gid);
+        self.save_group(gid); // Commit сдвинул эпоху — персистим (инвариант MLS).
+        true
+    }
+
+    /// Ротация собственного ключа группы (PCS, ADR-004). Двигает эпоху → save_group.
+    pub fn rekey(&mut self, gid: &[u8]) -> bool {
+        let Some(e) = self.groups.get_mut(gid) else { return false };
+        if e.chat.rekey_self().is_err() {
+            return false;
+        }
+        self.save_group(gid);
+        true
+    }
+
+    /// Мы ли админ группы (для гейта UI «удалить участника»).
+    pub fn is_admin(&self, gid: &[u8]) -> bool {
+        self.groups.get(gid).map(|e| e.admin).unwrap_or(false)
+    }
+
     /// Все id групп (для обновления кэша истории/участников разом).
     pub fn group_ids(&self) -> Vec<Vec<u8>> {
         self.groups.keys().cloned().collect()
@@ -185,6 +253,7 @@ impl GroupManager {
                 "gid": hex::encode(id),
                 "name": e.name,
                 "members": e.chat.member_count(),
+                "admin": e.admin,
             }))
             .collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
@@ -312,7 +381,8 @@ impl GroupManager {
                 for m in chat.members() {
                     crate::spawn_connect(self.messenger.clone(), m);
                 }
-                self.groups.insert(id.clone(), Entry { chat, name: "Группа".into(), messages: Vec::new() });
+                // Мы вступили по Welcome → мы НЕ админ (админ — пригласивший).
+                self.groups.insert(id.clone(), Entry { chat, name: "Группа".into(), messages: Vec::new(), admin: false });
                 self.save_group(&id);
                 return GroupOutcome { gid: Some(id), joined: true, ..Default::default() };
             }
