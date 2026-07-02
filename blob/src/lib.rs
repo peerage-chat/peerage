@@ -16,6 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod scrub;
+
 /// BLAKE3-хэш (256 бит) — и id блоба, и хэш чанка.
 pub type Hash = [u8; 32];
 
