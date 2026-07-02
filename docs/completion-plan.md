@@ -64,13 +64,16 @@ reply), длинный тап, детали статуса доставки, м�
 Крейт `blob` (BLAKE3, чанки, pull, анти-DoS) + конверт; картинки/файлы/голосовые/
 аватарки — закрывает медиа-часть P1 И P2 разом. + metadata-scrub (EXIF). См. scope M2.
 
-**Прогресс 2026-07-02:**
+**Прогресс 2026-07-02 (data plane готов, весь под тестами без устройств):**
 - ✅ Крейт `p2p-blob`: контент-адресный примитив (build/Reassembler/Manifest/Limits),
   по-чанковая + итоговая BLAKE3-проверка, анти-DoS. `cargo test -p p2p-blob` (хост).
 - ✅ `blob::scrub`: снятие EXIF/GPS с JPEG/PNG без ре-энкода (PET-ось).
-- ⏳ Осталось: сетевая докачка (pull-протокол по мешу: запрос манифеста/чанков +
-  Event/Payload + blob-store в движке) — тестируется loopback-харнесом; интеграция в
-  чат (отправка/приём картинки, аватарки по хэшу) — Android UI, нужен девайс.
+- ✅ Pull-протокол: `Payload/Event` Blob{Manifest,Request,Chunk} + `engine::blobs::
+  BlobManager` (offer/докачка/отдача/tick). Loopback-тест `blob_flow` (вкл. потери).
+  Ограничения из-за датаграммы 65535: CHUNK_SIZE 12 КБ, max_size 4 МБ, hex-поля.
+- ⏳ Осталось (интеграция): проводка `BlobManager` в event_pump (тестируемо loopback)
+  + JNI (offer/приём) + Android UI (отправка/приём картинки, аватарка по хэшу) —
+  вот UI-часть нужен девайс.
 
 ## P4+ — Backend/PET-вехи (как в scope)
 M3 (офлайн-outbox + бюджет ресурсов) → M5 (анти-трафик-анализ) → M6 (security/fuzz) →
