@@ -57,7 +57,7 @@ data class Message(
 /** Идентичность пользователя (своя «визитка»). */
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
-data class Group(val gid: String, val name: String, val members: Int)
+data class Group(val gid: String, val name: String, val members: Int, val admin: Boolean = false)
 
 /** Пир транспорта (адрес/направление/пинг/трафик) — из снапшота движка. */
 data class NetPeer(
@@ -872,7 +872,19 @@ class AppModel private constructor() {
             }
             "groups_changed" -> {
                 refreshGroupsNow()
-                currentGroup?.let { loadGroupHistory(it) }
+                currentGroup?.let { loadGroupHistory(it); loadGroupMembers(it) }
+            }
+            "group_removed" -> {
+                // ADR-004: нас отозвали. Если открыт этот чат — выходим и уведомляем.
+                val gid = o.optString("gid")
+                if (currentGroup == gid) currentGroup = null
+                appContext?.let { ctx ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        android.widget.Toast.makeText(
+                            ctx, ctx.getString(R.string.group_you_removed), android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
             }
             "group_msg" -> {
                 val gid = o.getString("gid")
@@ -1229,10 +1241,31 @@ class AppModel private constructor() {
         val arr = JSONArray(Native.groupList(sessionPtr))
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
-            Group(o.getString("gid"), o.getString("name"), o.optInt("members", 1))
+            Group(o.getString("gid"), o.getString("name"), o.optInt("members", 1), o.optBoolean("admin", false))
         }
         groups.clear()
         groups.addAll(list)
+    }
+
+    /** Ключи участников группы (hex, кроме себя) — для экрана управления. */
+    val groupMemberKeys = mutableStateMapOf<String, List<String>>()
+
+    /** Мы ли админ группы (гейт кнопки «удалить»). */
+    fun isGroupAdmin(gid: String): Boolean = groups.firstOrNull { it.gid == gid }?.admin == true
+
+    /** Имя для показа по hex-ключу: имя контакта либо укороченный ключ. */
+    fun peerName(hex: String): String =
+        contacts.firstOrNull { it.key == hex }?.name ?: (hex.take(8) + "…")
+
+    fun loadGroupMembers(gid: String) = ops.execute {
+        val arr = JSONArray(Native.groupMembers(sessionPtr, gid))
+        groupMemberKeys[gid] = (0 until arr.length()).map { arr.getString(it) }
+    }
+
+    /** Отозвать участника (ADR-004, только админ). Ростер обновит `groups_changed`. */
+    fun removeGroupMember(gid: String, peerHex: String) = ops.execute {
+        Native.groupRemoveMember(sessionPtr, gid, peerHex)
+        loadGroupMembers(gid)
     }
 
     /** Создать группу (fire-and-forget). Появится в списке по событию
@@ -1244,6 +1277,7 @@ class AppModel private constructor() {
     fun openGroup(gid: String) {
         currentGroup = gid
         currentGroupRoster = null // тикер подтянет свежий агрегат
+        loadGroupMembers(gid)
         ops.execute { loadGroupHistory(gid) }
     }
 

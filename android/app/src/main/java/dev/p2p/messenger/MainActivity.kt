@@ -95,6 +95,12 @@ internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, C
 @Composable
 private fun Root(model: AppModel) {
     var screen by remember { mutableStateOf(Screen.Contacts) }
+    // ADR-004: нас отозвали из открытой группы (currentGroup → null) — уходим на список.
+    LaunchedEffect(model.currentGroup) {
+        if (model.currentGroup == null && (screen == Screen.GroupChat || screen == Screen.AddMember)) {
+            screen = Screen.Groups
+        }
+    }
     var scanResult by remember { mutableStateOf<String?>(null) }
     var activeFilter by remember { mutableStateOf("all") }
     val drawerState = rememberDrawerState(DrawerValue.Closed)

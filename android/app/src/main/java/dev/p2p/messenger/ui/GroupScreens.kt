@@ -304,14 +304,42 @@ internal fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
     }
 }
 
+/** Управление группой: текущие участники (с отзывом для админа, ADR-004) + добавление. */
 @Composable
 internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
     val gid = model.currentGroup ?: return
-    if (model.contacts.isEmpty()) {
-        CenterMessage(stringResource(R.string.addmember_empty))
-    } else {
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(model.contacts, key = { it.key }) { c ->
+    val isAdmin = model.isGroupAdmin(gid)
+    val memberKeys = model.groupMemberKeys[gid] ?: emptyList()
+    LazyColumn(Modifier.fillMaxSize()) {
+        if (memberKeys.isNotEmpty()) {
+            item { SectionHeader(stringResource(R.string.group_members_header)) }
+            items(memberKeys, key = { "m_$it" }) { key ->
+                ListRow(onClick = {}) {
+                    StatusDot(model.online[key] == true)
+                    Spacer(Modifier.width(12.dp))
+                    Text(model.peerName(key), color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    if (isAdmin) {
+                        TextButton(onClick = { model.removeGroupMember(gid, key) }) {
+                            Text(
+                                stringResource(R.string.group_remove_member),
+                                color = Color(0xFFE0563B), fontSize = 14.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item { SectionHeader(stringResource(R.string.group_add_header)) }
+        if (model.contacts.isEmpty()) {
+            item {
+                Text(
+                    stringResource(R.string.addmember_empty),
+                    color = HoloSecondary, fontSize = 14.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        } else {
+            items(model.contacts, key = { "c_${it.key}" }) { c ->
                 ListRow(onClick = {
                     model.inviteToGroup(gid, c.key)
                     onDone()
@@ -323,6 +351,15 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text,
+        color = HoloSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+    )
 }
 
 // ── Входящий звонок (полный экран, Telegram-style) ──────────────────────────
