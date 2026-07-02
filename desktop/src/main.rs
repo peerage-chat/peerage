@@ -1068,8 +1068,9 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
         }
         // Комнаты-звонки реализуются на Android; десктоп пока игнорирует маячок.
         Event::RoomPresence { .. } => {}
-        // Resync членства (ADR-004) обслуживает Android-движок; десктоп игнорирует.
+        // Resync/leave членства (ADR-004) обслуживает Android-движок; десктоп игнорирует.
         Event::GroupResyncRequest { .. } => {}
+        Event::GroupLeaveRequest { .. } => {}
     }
 }
 

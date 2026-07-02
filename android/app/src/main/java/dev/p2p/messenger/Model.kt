@@ -1268,6 +1268,12 @@ class AppModel private constructor() {
         loadGroupMembers(gid)
     }
 
+    /** Выйти из группы (ADR-004). Локально забываем сразу; движок просит админа отозвать. */
+    fun leaveGroup(gid: String) {
+        if (currentGroup == gid) currentGroup = null
+        ops.execute { Native.groupLeave(sessionPtr, gid) }
+    }
+
     /** Создать группу (fire-and-forget). Появится в списке по событию
      *  `groups_changed` (см. applyEvent → refreshGroupsNow). */
     fun createGroup(name: String) = ops.execute {

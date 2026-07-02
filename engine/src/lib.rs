@@ -51,6 +51,8 @@ pub(crate) enum GroupCmd {
     RemoveMember { gid: Vec<u8>, peer: [u8; 32] },
     /// Ротация ключа группы (PCS, ADR-004).
     Rekey { gid: Vec<u8> },
+    /// Выйти из группы (ADR-004).
+    Leave { gid: Vec<u8> },
 }
 
 /// Работа для потока event_pump: событие мессенджера, групповая команда либо
@@ -297,6 +299,11 @@ impl Engine {
     /// Ротация ключа группы (PCS, ADR-004). Fire-and-forget.
     pub fn group_rekey(&self, gid: Vec<u8>) {
         let _ = self.jobs.send(Job::Cmd(GroupCmd::Rekey { gid }));
+    }
+
+    /// Выйти из группы (ADR-004). Fire-and-forget.
+    pub fn group_leave(&self, gid: Vec<u8>) {
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::Leave { gid }));
     }
 
     pub fn group_list_json(&self) -> String {
@@ -751,6 +758,12 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, ev: Event) {
         }
         Event::GroupKeyRequest { peer } => groups.on_key_request(peer),
         Event::GroupResyncRequest { peer, gid } => groups.on_resync_request(peer, &gid),
+        Event::GroupLeaveRequest { peer, gid } => {
+            if groups.on_leave_request(peer, &gid) {
+                refresh_group_cache(engine, groups);
+                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+            }
+        }
         Event::GroupKeyReply { peer, key_package } => {
             if groups.on_key_reply(peer, &key_package) {
                 refresh_group_cache(engine, groups);
@@ -813,6 +826,15 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
         GroupCmd::Rekey { gid } => {
             if groups.rekey(&gid) {
                 refresh_group_cache(engine, groups);
+            }
+        }
+        GroupCmd::Leave { gid } => {
+            // Добровольный выход: группа забыта локально. Навигацию делает UI сам
+            // (без «вас удалили»-тоста — это не отзыв). Обновляем список.
+            if groups.leave(&gid) {
+                refresh_group_cache(engine, groups);
+                engine.sync_room_members();
+                push_event(engine, serde_json::json!({"type": "groups_changed"}));
             }
         }
     }

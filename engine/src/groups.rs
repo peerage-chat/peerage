@@ -38,6 +38,8 @@ struct Entry {
 
 /// Не чаще одного resync-обслуживания на пира+группу за это окно (анти-амплификация).
 const RESYNC_COOLDOWN: Duration = Duration::from_secs(10);
+/// Не чаще раза в сутки админ ротирует ключ группы (катящийся PCS без лишней churn).
+const REKEY_INTERVAL_SECS: i64 = 24 * 3600;
 
 pub struct GroupManager {
     groups: HashMap<Vec<u8>, Entry>,
@@ -67,7 +69,43 @@ impl GroupManager {
             dir,
         };
         m.load_all();
+        m.maybe_rekey_admin_groups();
         m
+    }
+
+    /// Времена последней ротации ключа (hex gid → unix) из `rekey.json`.
+    fn rekey_times(&self) -> HashMap<String, i64> {
+        std::fs::read(self.dir.join("rekey.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    /// Катящийся PCS (ADR-004 п.7): при старте админ ротирует ключ тех своих групп,
+    /// где прошло >суток с прошлой ротации. Fire-and-forget; отставшие вылечатся
+    /// resync'ом. Дёшево (раз в сутки на группу) и не завязано на таймер-поток.
+    fn maybe_rekey_admin_groups(&mut self) {
+        let now = now();
+        let mut times = self.rekey_times();
+        let stale: Vec<Vec<u8>> = self
+            .groups
+            .iter()
+            .filter(|(id, e)| {
+                e.admin && now - times.get(&hex::encode(id)).copied().unwrap_or(0) >= REKEY_INTERVAL_SECS
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        if stale.is_empty() {
+            return;
+        }
+        for gid in stale {
+            if self.rekey(&gid) {
+                times.insert(hex::encode(&gid), now);
+            }
+        }
+        if let Ok(j) = serde_json::to_vec(&times) {
+            let _ = std::fs::write(self.dir.join("rekey.json"), j);
+        }
     }
 
     fn group_path(&self, id: &[u8]) -> PathBuf {
@@ -448,6 +486,30 @@ impl GroupManager {
         let _ = self.messenger.send_group_key_request(&peer);
         self.invites.insert(peer, gid.to_vec());
         self.resyncing.insert(peer); // on_key_reply сделает Remove+Add, не просто Add
+    }
+
+    /// Выйти из группы (ADR-004): просим админа отозвать нас (Remove+смена эпохи —
+    /// настоящий криптографический выход) и локально забываем группу. Если админ
+    /// офлайн — остаётся мягкий локальный выход (нас отзовут при его доступности).
+    pub fn leave(&mut self, gid: &[u8]) -> bool {
+        let Some(e) = self.groups.get(gid) else { return false };
+        for peer in e.chat.members() {
+            let _ = self.messenger.send_group_leave_request(&peer, gid);
+        }
+        self.delete_group(gid);
+        true
+    }
+
+    /// Админ получил запрос на выход участника (ADR-004): отзываем его, если мы
+    /// админ и он в текущем ростере. Переиспользует `remove_member`. Возвращает
+    /// true, если отзыв произошёл (UI/кэш надо обновить).
+    pub fn on_leave_request(&mut self, peer: [u8; 32], gid: &[u8]) -> bool {
+        let is_admin_member = self
+            .groups
+            .get(gid)
+            .map(|e| e.admin && e.chat.members().contains(&peer))
+            .unwrap_or(false);
+        is_admin_member && self.remove_member(gid, peer)
     }
 
     /// Удалить группу локально (нас из неё отозвали, ADR-004): файлы + кэш + индекс.

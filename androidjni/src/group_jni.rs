@@ -92,6 +92,21 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupRekey<'local>(
     });
 }
 
+/// Выйти из группы (ADR-004). Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupLeave<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        e.group_leave(gid);
+    });
+}
+
 /// Список групп: JSON [{gid, name, members}]. Снапшот движка.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(

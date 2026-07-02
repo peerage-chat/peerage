@@ -350,6 +350,16 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
                 }
             }
         }
+        item {
+            // Выход из группы (ADR-004): currentGroup=null → MainActivity уводит на список.
+            ListRow(onClick = { model.leaveGroup(gid) }) {
+                Text(
+                    stringResource(R.string.group_leave),
+                    color = Color(0xFFE0563B), fontSize = 16.sp,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
     }
 }
 

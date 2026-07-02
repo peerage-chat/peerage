@@ -180,6 +180,7 @@
     <string name="group_remove_member">Remove</string>
     <string name="cd_remove_member">Remove from group</string>
     <string name="group_you_removed">You were removed from the group</string>
+    <string name="group_leave">Leave group</string>
     <string name="cd_join_call">Join call</string>
     <string name="cd_leave_call">Leave call</string>
     <string name="group_system_membership">%1$s updated the group</string>

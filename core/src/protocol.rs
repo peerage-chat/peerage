@@ -54,6 +54,9 @@ pub enum Payload {
     /// (пропустил Commit / удалён секрет эпохи) и просит админа заново добавить
     /// его (Remove+Add). Админ игнорирует, если проситель не в текущем ростере.
     GroupResyncRequest { gid: Vec<u8> },
+    /// Запрос на выход из группы (ADR-004): отправитель уходит и просит админа
+    /// отозвать его (Remove + смена эпохи). Отправитель локально уже забыл группу.
+    GroupLeaveRequest { gid: Vec<u8> },
 }
 
 /// Внешний конверт, передаваемый по транспорту.
@@ -160,6 +163,7 @@ mod tests {
             Payload::GroupKeyReply { key_package: vec![7, 7, 7] },
             Payload::RoomPresence { gid: vec![5, 6, 7], flags: 0b11 },
             Payload::GroupResyncRequest { gid: vec![8, 9, 10] },
+            Payload::GroupLeaveRequest { gid: vec![11, 12] },
         ] {
             let d = encode(&a, &b.public_key_bytes(), &p, 0).unwrap();
             let (_, got) = decode(&b, &d).unwrap();

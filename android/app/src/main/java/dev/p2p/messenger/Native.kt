@@ -68,6 +68,9 @@ object Native {
     /** Ротация ключа группы (PCS, ADR-004). */
     external fun groupRekey(sessionPtr: Long, gid: String)
 
+    /** Выйти из группы (ADR-004). */
+    external fun groupLeave(sessionPtr: Long, gid: String)
+
     /** Список групп: JSON [{gid, name, members, admin}]. */
     external fun groupList(sessionPtr: Long): String
 

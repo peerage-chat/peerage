@@ -172,6 +172,7 @@
     <string name="group_remove_member">Удалить</string>
     <string name="cd_remove_member">Удалить из группы</string>
     <string name="group_you_removed">Вас удалили из группы</string>
+    <string name="group_leave">Выйти из группы</string>
     <string name="cd_join_call">Войти в звонок</string>
     <string name="cd_leave_call">Выйти из звонка</string>
     <string name="group_system_membership">%1$s обновил(а) состав группы</string>
