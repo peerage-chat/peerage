@@ -342,7 +342,10 @@ private fun ParticipantTile(
             val vq = model.videoQuality
             val kbps = model.peerKbps[if (t.me) "self" else t.id] ?: 0
             Column(
-                Modifier.align(Alignment.TopEnd).padding(7.dp)
+                // Ниже строки chrome-кнопок (шестерёнка/смена камеры в TopEnd), чтобы
+                // не перекрываться. Настроено под текущий 1:1 (тайл = экран); при
+                // мультипати-сетке (#24) вернуться к per-tile-раскладке.
+                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 52.dp, end = 7.dp)
                     .clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.chipScrim)
                     .padding(horizontal = 7.dp, vertical = 5.dp),
                 horizontalAlignment = Alignment.End,
