@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn video_fragment_reassemble_in_order() {
-        let frame = make_frame(5000, 0xAB);
+        let frame = make_frame(MAX_VIDEO_CHUNK * 2 + 100, 0xAB);
         let frags = fragment_video(&frame, 1, true);
         assert!(frags.len() > 1, "большой кадр должен разрезаться");
 
@@ -270,8 +270,9 @@ mod tests {
 
     #[test]
     fn video_reassemble_out_of_order() {
-        let frame = make_frame(4096, 7);
+        let frame = make_frame(MAX_VIDEO_CHUNK * 2, 7);
         let mut frags: Vec<Vec<u8>> = fragment_video(&frame, 10, false);
+        assert!(frags.len() > 1, "кадр должен быть многофрагментным для теста");
         frags.reverse(); // обратный порядок прихода
 
         let mut r = VideoReassembler::new();
@@ -286,7 +287,7 @@ mod tests {
 
     #[test]
     fn incomplete_frame_dropped_when_newer_completes() {
-        let f1 = fragment_video(&make_frame(5000, 1), 1, false); // потеряем один фрагмент
+        let f1 = fragment_video(&make_frame(MAX_VIDEO_CHUNK * 2 + 100, 1), 1, false); // потеряем фрагмент
         let f2 = fragment_video(&make_frame(500, 2), 2, true);
 
         let mut r = VideoReassembler::new();
