@@ -71,9 +71,11 @@ reply), длинный тап, детали статуса доставки, м�
 - ✅ Pull-протокол: `Payload/Event` Blob{Manifest,Request,Chunk} + `engine::blobs::
   BlobManager` (offer/докачка/отдача/tick). Loopback-тест `blob_flow` (вкл. потери).
   Ограничения из-за датаграммы 65535: CHUNK_SIZE 12 КБ, max_size 4 МБ, hex-поля.
-- ⏳ Осталось (интеграция): проводка `BlobManager` в event_pump (тестируемо loopback)
-  + JNI (offer/приём) + Android UI (отправка/приём картинки, аватарка по хэшу) —
-  вот UI-часть нужен девайс.
+- ✅ Проводка в движок: `BlobManager` в event_pump (Blob*-события → докачка/отдача,
+  `tick`), приём → `data_dir/blobs/<id>` + событие `blob_received`; `Engine::blob_offer/
+  blob_read/blob_id_hex`; JNI `blobOffer/blobIdHex/blobRead` + `Native.kt`.
+- ⏳ Осталось ТОЛЬКО: Compose-UI — пикер картинки → `blobOffer` (+scrub на отправке);
+  показ принятой по `blob_received`/`blobRead`; аватарка по хэшу. **Нужен девайс.**
 
 ## P4+ — Backend/PET-вехи (как в scope)
 M3 (офлайн-outbox + бюджет ресурсов) → M5 (анти-трафик-анализ) → M6 (security/fuzz) →
