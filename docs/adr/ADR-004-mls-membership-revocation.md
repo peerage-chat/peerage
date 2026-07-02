@@ -167,17 +167,31 @@ Removal/rekey коммитит только админ (нет гонок); от
        мапит новые варианты → `Inbound::{SelfRemoved, NeedsResync, None}`. Проверено
        `cargo check -p p2p-groupchat`/`-p p2p-engine` (WSL) ✓. **Осталось:**
        `request_resync` + админ-обработка `GroupResyncRequest` (пункт 3).
-3. [ ] `Payload::GroupResyncRequest` + событие мессенджера; хранение админа группы;
-       админ на resync-запрос от пира-в-ростере → KeyPackage-обмен → remove+add commit.
-4. [ ] `GroupManager`: команды remove/rekey/leave; на `Inbound::SelfRemoved` —
-       удалить группу с диска + `groups_changed`; `NeedsResync` → `request_resync`;
-       rate-limit resync. (Сейчас в `engine` эти варианты попадают в `_` — no-op.)
-5. [ ] **SEC-2:** фильтр `sync_room_members` по `groups.members(gid)` для групп.
-6. [ ] JNI + Compose-админка (kick для админа, «вы удалены», тихий resync, выход).
+3. [ ] `Payload::GroupResyncRequest` + событие мессенджера; хранение админ-**ключа**
+       группы; админ на resync-запрос от пира-в-ростере → KeyPackage-обмен →
+       remove+add commit. **Единственная оставшаяся правка `core::protocol`.**
+4. [x] **`GroupManager` — СДЕЛАНО 2026-07-02.** `remove_member` (только админ, флаг
+       из `admins.json` — не ломает `index.json`), `rekey`, `is_admin`; на
+       `Inbound::SelfRemoved` — `delete_group` (файлы+кэш+индекс) + событие
+       `group_removed` + `groups_changed`; `NeedsResync` → лог (request_resync —
+       п.3). `GroupCmd::RemoveMember/Rekey` + fire-and-forget. `list_json` отдаёт
+       `admin`. Осталось: `leave` (самовыход).
+5. [x] **SEC-2 — СДЕЛАНО 2026-07-02.** `sync_room_members` пересекает presence с
+       `group_roster_set` для групп (DM — как есть), fail-open при холодном кэше.
+6. [~] **JNI — СДЕЛАНО** (`groupRemoveMember`/`groupRekey` + `Native.kt`, проверено
+       `cargo check -p p2p-android` + `compileDebugKotlin`). **Осталось:** Compose-
+       админка (список участников + kick для админа по `admin`-флагу; «вы удалены» по
+       событию `group_removed`; тихий resync). Требует проверки скриншотом эмулятора.
 7. [ ] Периодический admin-rekey (расписание/при заходе) — «катящийся» PCS.
 8. [~] Доки: SECURITY.md/threat-model/ROADMAP/security-hardening обновлены доп-
        аудитом (SEC-*); финальную правку статусов — по факту закрытия пунктов.
 
 **Порядок:** 1→2→3→4 (крипто-ядро и протокол, юнит-тестируемо без устройства) →
-5 (SEC-2, дешёвый) → 6 (UI) → 7 (полировка PCS). Пункты 1–2 сделаны; следующий —
-3 (resync-протокол): единственная часть, требующая правки `core::protocol`.
+5 (SEC-2, дешёвый) → 6 (UI) → 7 (полировка PCS).
+
+**Прогресс 2026-07-02:** сделаны 1, 2 (кроме request_resync), 4 (кроме leave), 5,
+6-бэкенд (JNI). Осталось два независимых куска:
+- **3 — resync-протокол** (чистый Rust, верифицируемо без устройства): следующий
+  логичный шаг. Единственная правка `core::protocol`.
+- **6-UI — Compose-админка** (нужен эмулятор для скриншот-проверки): делать в
+  сессии с устройством.
