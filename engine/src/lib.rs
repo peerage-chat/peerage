@@ -750,6 +750,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, ev: Event) {
             }
         }
         Event::GroupKeyRequest { peer } => groups.on_key_request(peer),
+        Event::GroupResyncRequest { peer, gid } => groups.on_resync_request(peer, &gid),
         Event::GroupKeyReply { peer, key_package } => {
             if groups.on_key_reply(peer, &key_package) {
                 refresh_group_cache(engine, groups);

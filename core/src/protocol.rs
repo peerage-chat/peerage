@@ -50,6 +50,10 @@ pub enum Payload {
     /// «я сейчас в комнате `gid`, A/V-флаги такие». `flags`: bit0 — аудио,
     /// bit1 — видео. Низкочастотный control-plane (не медиа).
     RoomPresence { gid: Vec<u8>, flags: u8 },
+    /// Запрос повторной синхронизации группы (ADR-004): отправитель отстал
+    /// (пропустил Commit / удалён секрет эпохи) и просит админа заново добавить
+    /// его (Remove+Add). Админ игнорирует, если проситель не в текущем ростере.
+    GroupResyncRequest { gid: Vec<u8> },
 }
 
 /// Внешний конверт, передаваемый по транспорту.
@@ -155,6 +159,7 @@ mod tests {
             Payload::GroupKeyRequest,
             Payload::GroupKeyReply { key_package: vec![7, 7, 7] },
             Payload::RoomPresence { gid: vec![5, 6, 7], flags: 0b11 },
+            Payload::GroupResyncRequest { gid: vec![8, 9, 10] },
         ] {
             let d = encode(&a, &b.public_key_bytes(), &p, 0).unwrap();
             let (_, got) = decode(&b, &d).unwrap();

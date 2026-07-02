@@ -3,10 +3,10 @@
 //! групповые события мессенджера — оттуда же. Зеркалит десктопную логику:
 //! админ-секвенсор, маршрутизация по group_id, персистентность в data_dir/groups.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use p2p_core::Identity;
 use p2p_group::peek_group_id;
@@ -36,10 +36,18 @@ struct Entry {
     admin: bool,
 }
 
+/// Не чаще одного resync-обслуживания на пира+группу за это окно (анти-амплификация).
+const RESYNC_COOLDOWN: Duration = Duration::from_secs(10);
+
 pub struct GroupManager {
     groups: HashMap<Vec<u8>, Entry>,
     pending: Option<GroupChat>,
     invites: HashMap<[u8; 32], Vec<u8>>,
+    /// Пиры, для которых текущий KeyPackage-обмен — это RE-ADD (resync, ADR-004),
+    /// а не первое приглашение: на `on_key_reply` делаем Remove+Add, не просто Add.
+    resyncing: HashSet<[u8; 32]>,
+    /// Троттлинг resync-обслуживания на админе: (peer,gid) → время последнего.
+    resync_last: HashMap<([u8; 32], Vec<u8>), Instant>,
     identity: Identity,
     messenger: Arc<Messenger>,
     dir: PathBuf,
@@ -52,6 +60,8 @@ impl GroupManager {
             groups: HashMap::new(),
             pending: None,
             invites: HashMap::new(),
+            resyncing: HashSet::new(),
+            resync_last: HashMap::new(),
             identity,
             messenger,
             dir,
@@ -298,12 +308,20 @@ impl GroupManager {
     }
 
     /// Контакт прислал KeyPackage — добавляем его в группу, куда приглашали.
+    /// RESYNC (ADR-004): если это re-add отставшего, сперва убираем его устаревший
+    /// leaf (Remove), затем добавляем свежим (Add) — участник входит с текущей эпохи.
     pub fn on_key_reply(&mut self, peer: [u8; 32], key_package: &[u8]) -> bool {
         let Some(id) = self.invites.remove(&peer) else { return false };
+        let resync = self.resyncing.remove(&peer);
         let added = self
             .groups
             .get_mut(&id)
-            .map(|e| e.chat.add_member(peer, key_package).is_ok())
+            .map(|e| {
+                if resync {
+                    let _ = e.chat.remove_member(peer); // снять устаревший leaf
+                }
+                e.chat.add_member(peer, key_package).is_ok()
+            })
             .unwrap_or(false);
         if added {
             crate::spawn_connect(self.messenger.clone(), peer);
@@ -356,10 +374,11 @@ impl GroupManager {
                     self.delete_group(&gid);
                     return GroupOutcome { gid: Some(gid), removed: true, ..Default::default() };
                 }
-                // ADR-004: отстали (пропущен Commit / удалён секрет эпохи). Инкремент 2
-                // здесь пошлёт request_resync админу; пока — лог, состояние не тронуто.
+                // ADR-004: отстали (пропущен Commit / удалён секрет эпохи) — просим
+                // админа заново синхронизировать нас (Remove+Add).
                 Some(Ok(Inbound::NeedsResync)) => {
-                    log::warn!("group {}: рассинхрон эпох — нужен resync (ADR-004 п.3)", hex::encode(&gid));
+                    log::warn!("group {}: рассинхрон эпох — запрашиваю resync", hex::encode(&gid));
+                    self.request_resync(&gid);
                     GroupOutcome { gid: Some(gid.clone()), ..Default::default() }
                 }
                 Some(Err(e)) => {
@@ -381,13 +400,54 @@ impl GroupManager {
                 for m in chat.members() {
                     crate::spawn_connect(self.messenger.clone(), m);
                 }
-                // Мы вступили по Welcome → мы НЕ админ (админ — пригласивший).
+                // RESYNC (ADR-004): Welcome для УЖЕ известной группы = нас заново
+                // добавили после рассинхрона. Меняем только MLS-состояние (chat),
+                // сохраняя имя и историю сообщений; событие тихое (не «joined»).
+                if let Some(existing) = self.groups.get_mut(&id) {
+                    existing.chat = chat;
+                    self.save_group(&id);
+                    log::info!("group {}: resync завершён (перевступили)", hex::encode(&id));
+                    return GroupOutcome { gid: Some(id), ..Default::default() };
+                }
+                // Иначе — первое вступление. Мы НЕ админ (админ — пригласивший).
                 self.groups.insert(id.clone(), Entry { chat, name: "Группа".into(), messages: Vec::new(), admin: false });
                 self.save_group(&id);
                 return GroupOutcome { gid: Some(id), joined: true, ..Default::default() };
             }
         }
         GroupOutcome::default()
+    }
+
+    /// Отставший просит админа заново синхронизировать нас (ADR-004): рассылаем
+    /// `GroupResyncRequest` текущему (последнему известному) ростеру — среагирует
+    /// только админ. Fire-and-forget; троттлится на приёмнике.
+    fn request_resync(&self, gid: &[u8]) {
+        if let Some(e) = self.groups.get(gid) {
+            for peer in e.chat.members() {
+                let _ = self.messenger.send_group_resync_request(&peer, gid);
+            }
+        }
+    }
+
+    /// Админ получил запрос resync (ADR-004). Обслуживаем, только если мы админ,
+    /// проситель в текущем ростере (отозванного не «лечим» назад) и не слишком
+    /// часто. Просим свежий KeyPackage и помечаем обмен как re-add.
+    pub fn on_resync_request(&mut self, peer: [u8; 32], gid: &[u8]) {
+        let Some(e) = self.groups.get(gid) else { return };
+        if !e.admin || !e.chat.members().contains(&peer) {
+            return;
+        }
+        let now = Instant::now();
+        let key = (peer, gid.to_vec());
+        if let Some(t) = self.resync_last.get(&key) {
+            if now.duration_since(*t) < RESYNC_COOLDOWN {
+                return;
+            }
+        }
+        self.resync_last.insert(key, now);
+        let _ = self.messenger.send_group_key_request(&peer);
+        self.invites.insert(peer, gid.to_vec());
+        self.resyncing.insert(peer); // on_key_reply сделает Remove+Add, не просто Add
     }
 
     /// Удалить группу локально (нас из неё отозвали, ADR-004): файлы + кэш + индекс.

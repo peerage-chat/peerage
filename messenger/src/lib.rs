@@ -52,6 +52,8 @@ pub enum Event {
     GroupKeyReply { peer: PeerKey, key_package: Vec<u8> },
     /// Маячок присутствия участника в комнате-звонке (Discord-style).
     RoomPresence { peer: PeerKey, gid: Vec<u8>, flags: u8 },
+    /// Отставший участник просит админа заново синхронизировать его в группе (ADR-004).
+    GroupResyncRequest { peer: PeerKey, gid: Vec<u8> },
 }
 
 /// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
@@ -396,6 +398,12 @@ impl Messenger {
         self.shared.send(peer, &Payload::RoomPresence { gid: gid.to_vec(), flags })
     }
 
+    /// Запрос повторной синхронизации группы админу (ADR-004). Fire-and-forget:
+    /// потеряется — следующий рассинхрон запросит снова.
+    pub fn send_group_resync_request(&self, peer: &PeerKey, gid: &[u8]) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::GroupResyncRequest { gid: gid.to_vec() })
+    }
+
     /// Включить приём медиа: возвращает bounded-канал. При переполнении новые
     /// пакеты отбрасываются (для реалтайма ронять опоздавшие лучше, чем копить).
     pub fn media_channel(&self, capacity: usize) -> Receiver<MediaPacket> {
@@ -557,6 +565,9 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::RoomPresence { gid, flags } => {
                 shared.emit(Event::RoomPresence { peer: src, gid, flags });
+            }
+            Payload::GroupResyncRequest { gid } => {
+                shared.emit(Event::GroupResyncRequest { peer: src, gid });
             }
         }
     }
