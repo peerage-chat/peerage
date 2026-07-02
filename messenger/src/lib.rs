@@ -29,6 +29,48 @@ use p2p_ygg::{Node, YggError};
 /// Публичный ключ ed25519 пира — он же его идентификатор.
 pub type PeerKey = [u8; 32];
 
+/// Абстракция транспорта датаграмм по ключу пира. Реальный меш — [`p2p_ygg::Node`];
+/// для тестов — loopback-двойник (см. [`loopback`]), что позволяет прогонять весь
+/// сетевой слой (инвайт/группы/resync/доставка) в одном процессе без устройств.
+pub trait Transport: Send + Sync {
+    fn write(&self, dst_pub: &PeerKey, data: &[u8]) -> Result<usize, YggError>;
+    /// Блокирующе читает одну датаграмму; возвращает (длину, ключ отправителя).
+    fn read(&self, buf: &mut [u8]) -> Result<(usize, PeerKey), YggError>;
+    fn address(&self) -> String;
+    fn peer_count(&self) -> i32;
+    fn tree_count(&self) -> i32;
+    fn peers_json(&self) -> String;
+    fn add_peer(&self, uri: &str) -> Result<(), YggError>;
+    fn stop(&self);
+}
+
+impl Transport for Node {
+    fn write(&self, dst_pub: &PeerKey, data: &[u8]) -> Result<usize, YggError> {
+        Node::write(self, dst_pub, data)
+    }
+    fn read(&self, buf: &mut [u8]) -> Result<(usize, PeerKey), YggError> {
+        Node::read(self, buf)
+    }
+    fn address(&self) -> String {
+        Node::address(self)
+    }
+    fn peer_count(&self) -> i32 {
+        Node::peer_count(self)
+    }
+    fn tree_count(&self) -> i32 {
+        Node::tree_count(self)
+    }
+    fn peers_json(&self) -> String {
+        Node::peers_json(self)
+    }
+    fn add_peer(&self, uri: &str) -> Result<(), YggError> {
+        Node::add_peer(self, uri)
+    }
+    fn stop(&self) {
+        Node::stop(self)
+    }
+}
+
 /// События, доставляемые приложению из фоновых потоков.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -122,7 +164,7 @@ struct Pending {
 
 struct Shared {
     identity: Identity,
-    node: Node,
+    node: Arc<dyn Transport>,
     cfg: Config,
     peers: Mutex<HashMap<PeerKey, PeerState>>,
     pending: Mutex<HashMap<u64, Pending>>,
@@ -230,10 +272,20 @@ impl Messenger {
         Self::start_with_config(identity, node, Config::default())
     }
 
-    /// Запустить с заданной конфигурацией.
+    /// Запустить с заданной конфигурацией (реальный меш-узел).
     pub fn start_with_config(
         identity: Identity,
         node: Node,
+        cfg: Config,
+    ) -> (Messenger, Receiver<Event>) {
+        Self::start_with_transport(identity, Arc::new(node), cfg)
+    }
+
+    /// Запустить поверх произвольного транспорта (реальный `Node` или loopback-двойник
+    /// в тестах). Ядро логики надёжности/диспетчеризации не зависит от вида транспорта.
+    pub fn start_with_transport(
+        identity: Identity,
+        node: Arc<dyn Transport>,
         cfg: Config,
     ) -> (Messenger, Receiver<Event>) {
         let (tx, rx) = mpsc::channel();
@@ -640,5 +692,146 @@ fn maintenance_loop(shared: Arc<Shared>) {
         for (peer, payload) in to_retry {
             let _ = shared.send(&peer, &payload);
         }
+    }
+}
+
+/// Loopback-транспорт: маршрутизирует датаграммы по ключу получателя в памяти.
+/// Позволяет прогонять весь сетевой слой (доставка/инвайт/группы/resync) в одном
+/// процессе без Yggdrasil и устройств. Публичный, чтобы им пользовались и
+/// интеграционные тесты движка. Поддерживает инъекцию потерь (для проверки ретраев).
+pub mod loopback {
+    use super::*;
+    use std::sync::atomic::AtomicU32;
+
+    type Inbox = Sender<(PeerKey, Vec<u8>)>;
+
+    /// Общая «сеть» в памяти. Клонируется дёшево (Arc внутри).
+    #[derive(Clone, Default)]
+    pub struct LoopbackNet {
+        inboxes: Arc<Mutex<HashMap<PeerKey, Inbox>>>,
+        /// Ронять каждую N-ю датаграмму (0 = без потерь) — для тестов ретрая.
+        drop_every: Arc<AtomicU32>,
+        counter: Arc<AtomicU32>,
+    }
+
+    impl LoopbackNet {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Ронять каждую `n`-ю доставку (эмуляция потерь; 0 — выключить).
+        pub fn set_drop_every(&self, n: u32) {
+            self.drop_every.store(n, Ordering::Relaxed);
+        }
+
+        /// Эндпоинт-транспорт для узла с ключом `key`.
+        pub fn endpoint(&self, key: PeerKey) -> Arc<LoopbackTransport> {
+            let (tx, rx) = mpsc::channel();
+            self.inboxes.lock().unwrap().insert(key, tx);
+            Arc::new(LoopbackTransport { key, net: self.clone(), rx: Mutex::new(rx) })
+        }
+    }
+
+    pub struct LoopbackTransport {
+        key: PeerKey,
+        net: LoopbackNet,
+        rx: Mutex<Receiver<(PeerKey, Vec<u8>)>>,
+    }
+
+    impl Transport for LoopbackTransport {
+        fn write(&self, dst_pub: &PeerKey, data: &[u8]) -> Result<usize, YggError> {
+            let drop_every = self.net.drop_every.load(Ordering::Relaxed);
+            if drop_every > 0 {
+                let n = self.net.counter.fetch_add(1, Ordering::Relaxed) + 1;
+                if n % drop_every == 0 {
+                    return Ok(data.len()); // «потеряли» пакет
+                }
+            }
+            if let Some(tx) = self.net.inboxes.lock().unwrap().get(dst_pub) {
+                let _ = tx.send((self.key, data.to_vec()));
+            }
+            Ok(data.len())
+        }
+        fn read(&self, buf: &mut [u8]) -> Result<(usize, PeerKey), YggError> {
+            let (src, data) = self.rx.lock().unwrap().recv().map_err(|_| YggError::OpFailed)?;
+            let n = data.len().min(buf.len());
+            buf[..n].copy_from_slice(&data[..n]);
+            Ok((n, src))
+        }
+        fn address(&self) -> String {
+            String::new()
+        }
+        fn peer_count(&self) -> i32 {
+            self.net.inboxes.lock().unwrap().len() as i32
+        }
+        fn tree_count(&self) -> i32 {
+            self.peer_count()
+        }
+        fn peers_json(&self) -> String {
+            "[]".into()
+        }
+        fn add_peer(&self, _uri: &str) -> Result<(), YggError> {
+            Ok(())
+        }
+        fn stop(&self) {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loopback::LoopbackNet;
+    use super::*;
+    use p2p_core::Identity;
+    use std::time::Duration;
+
+    fn id(n: u8) -> Identity {
+        Identity::from_seed(&[n; 32]).unwrap()
+    }
+
+    /// Дождаться конкретного события до таймаута (фон-потоки доставляют асинхронно).
+    fn wait_for(rx: &Receiver<Event>, pred: impl Fn(&Event) -> bool) -> Option<Event> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if let Ok(ev) = rx.recv_timeout(Duration::from_millis(50)) {
+                if pred(&ev) {
+                    return Some(ev);
+                }
+            }
+        }
+        None
+    }
+
+    /// Два мессенджера поверх loopback обмениваются текстом; приходит Ack (✓✓).
+    #[test]
+    fn text_delivered_and_acked_over_loopback() {
+        let net = LoopbackNet::new();
+        let (a_id, b_id) = (id(1), id(2));
+        let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+        let (a, a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
+        let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), Config::default());
+
+        let mid = a.send_text(&b_key, "привет").unwrap();
+        // B получает текст…
+        let got = wait_for(&b_rx, |e| matches!(e, Event::Text { text, .. } if text == "привет"));
+        assert!(got.is_some(), "B должен получить текст");
+        // …а A — подтверждение доставки.
+        let ack = wait_for(&a_rx, |e| matches!(e, Event::Ack { id, .. } if *id == mid));
+        assert!(ack.is_some(), "A должен получить Ack");
+    }
+
+    /// Надёжная доставка переживает потери: роняем каждый 2-й пакет — ретрай дожимает.
+    #[test]
+    fn reliable_delivery_survives_packet_loss() {
+        let net = LoopbackNet::new();
+        net.set_drop_every(2); // половина датаграмм теряется
+        let (a_id, b_id) = (id(3), id(4));
+        let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+        let cfg = Config { retry_interval: Duration::from_millis(50), ..Config::default() };
+        let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), cfg.clone());
+        let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
+
+        a.send_text(&b_key, "сквозь потери").unwrap();
+        let got = wait_for(&b_rx, |e| matches!(e, Event::Text { text, .. } if text == "сквозь потери"));
+        assert!(got.is_some(), "ретрай должен дожать сообщение несмотря на потери");
     }
 }
