@@ -33,3 +33,4 @@ sqlcipher = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
 
 [dev-dependencies]
 hex = "0.4"
+proptest.workspace = true
