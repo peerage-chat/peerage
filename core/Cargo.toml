@@ -20,6 +20,7 @@ hex.workspace = true
 bip39.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+blake3.workspace = true
 chacha20poly1305 = "0.10"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 # На хосте (тесты, desktop) — обычный bundled SQLite.

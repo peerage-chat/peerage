@@ -88,6 +88,19 @@ impl Identity {
         sk
     }
 
+    /// Доменно-разделённый под-ключ (32 байта) из seed по контекстной метке
+    /// (SEC-5). BLAKE3 в режиме KDF: `context` — уникальная незасекреченная строка-
+    /// домен (напр. `"dev.p2p.blob-at-rest.v1"`), одна метка → один детерминированный
+    /// ключ, независимый от seed и от ключей других доменов.
+    ///
+    /// ПОЛИТИКА: **любой новый симметричный ключ** (шифрование блобов at-rest, ключи
+    /// медиа/группового звонка и т.п.) выводить ЧЕРЕЗ этот метод, а не переиспользуя
+    /// seed/идентичность/Box-ключ. Существующие ключи (ed25519-идентичность =
+    /// транспорт+MLS-credential; X25519 Box из seed — стандарт libsodium) не трогаем.
+    pub fn derive_subkey(&self, context: &str) -> [u8; 32] {
+        blake3::derive_key(context, &self.signing.to_bytes())
+    }
+
     /// Fingerprint — 8 слов BIP39 из SHA-256(публичный ключ).
     pub fn fingerprint_words(&self) -> [&'static str; FINGERPRINT_WORDS] {
         fingerprint_words(&self.public_key_bytes())
@@ -214,6 +227,24 @@ mod tests {
         let id = Identity::generate();
         let c = id.curve25519_public().expect("конвертация должна пройти");
         assert_ne!(c, [0u8; 32]);
+    }
+
+    #[test]
+    fn derive_subkey_is_domain_separated_and_deterministic() {
+        let id = Identity::from_seed(&[5u8; 32]).unwrap();
+        let a1 = id.derive_subkey("dev.p2p.blob-at-rest.v1");
+        let a2 = id.derive_subkey("dev.p2p.blob-at-rest.v1");
+        let b = id.derive_subkey("dev.p2p.media-key.v1");
+        // Детерминирован по (seed, context).
+        assert_eq!(a1, a2);
+        // Разные домены → разные ключи.
+        assert_ne!(a1, b);
+        // Не равен ни seed, ни X25519-секрету (не переиспользование).
+        assert_ne!(a1, id.seed());
+        assert_ne!(a1, id.x25519_secret());
+        // Разные идентичности → разные под-ключи для того же домена.
+        let other = Identity::from_seed(&[6u8; 32]).unwrap();
+        assert_ne!(a1, other.derive_subkey("dev.p2p.blob-at-rest.v1"));
     }
 
     #[test]
