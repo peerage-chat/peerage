@@ -263,7 +263,7 @@ impl GroupManager {
                     self.save_msgs(&gid);
                     GroupOutcome {
                         gid: Some(gid.clone()), text: Some(text),
-                        sender: Some(sender_hex), system: false, joined: false,
+                        sender: Some(sender_hex), ..Default::default()
                     }
                 }
                 Some(Ok(Inbound::Membership { actor })) => {
@@ -276,15 +276,28 @@ impl GroupManager {
                     }
                     self.save_msgs(&gid);
                     GroupOutcome {
-                        gid: Some(gid.clone()), text: None,
-                        sender: Some(actor_hex), system: true, joined: false,
+                        gid: Some(gid.clone()), sender: Some(actor_hex), system: true,
+                        ..Default::default()
                     }
+                }
+                // ADR-004: нас отозвали — чистим локальное состояние группы и
+                // сообщаем UI. Ранний возврат: save_group ниже уже не нужен.
+                Some(Ok(Inbound::SelfRemoved)) => {
+                    log::info!("group {}: нас удалили из группы", hex::encode(&gid));
+                    self.delete_group(&gid);
+                    return GroupOutcome { gid: Some(gid), removed: true, ..Default::default() };
+                }
+                // ADR-004: отстали (пропущен Commit / удалён секрет эпохи). Инкремент 2
+                // здесь пошлёт request_resync админу; пока — лог, состояние не тронуто.
+                Some(Ok(Inbound::NeedsResync)) => {
+                    log::warn!("group {}: рассинхрон эпох — нужен resync (ADR-004 п.3)", hex::encode(&gid));
+                    GroupOutcome { gid: Some(gid.clone()), ..Default::default() }
                 }
                 Some(Err(e)) => {
                     log::warn!("group {} MLS отверг сообщение: {:?}", hex::encode(&gid), e);
-                    GroupOutcome { gid: Some(gid.clone()), text: None, sender: None, system: false, joined: false }
+                    GroupOutcome { gid: Some(gid.clone()), ..Default::default() }
                 }
-                _ => GroupOutcome { gid: Some(gid.clone()), text: None, sender: None, system: false, joined: false },
+                _ => GroupOutcome { gid: Some(gid.clone()), ..Default::default() },
             };
             self.save_group(&gid);
             return outcome;
@@ -301,14 +314,23 @@ impl GroupManager {
                 }
                 self.groups.insert(id.clone(), Entry { chat, name: "Группа".into(), messages: Vec::new() });
                 self.save_group(&id);
-                return GroupOutcome { gid: Some(id), text: None, sender: None, system: false, joined: true };
+                return GroupOutcome { gid: Some(id), joined: true, ..Default::default() };
             }
         }
-        GroupOutcome { gid: None, text: None, sender: None, system: false, joined: false }
+        GroupOutcome::default()
+    }
+
+    /// Удалить группу локально (нас из неё отозвали, ADR-004): файлы + кэш + индекс.
+    fn delete_group(&mut self, id: &[u8]) {
+        self.groups.remove(id);
+        let _ = std::fs::remove_file(self.group_path(id));
+        let _ = std::fs::remove_file(self.msgs_path(id));
+        self.save_index();
     }
 }
 
 /// Результат обработки группового сообщения для уведомления UI.
+#[derive(Default)]
 pub struct GroupOutcome {
     pub gid: Option<Vec<u8>>,
     pub text: Option<String>,
@@ -317,4 +339,6 @@ pub struct GroupOutcome {
     /// Системное событие (смена состава).
     pub system: bool,
     pub joined: bool,
+    /// Нас отозвали из группы (ADR-004) — UI должен убрать группу и уведомить.
+    pub removed: bool,
 }

@@ -324,9 +324,30 @@ impl Engine {
     fn sync_room_members(&self) {
         let guard = self.room_call.lock_safe();
         if let Some(rc) = guard.as_ref() {
-            let live = self.live_participants(&rc.gid);
+            let mut live = self.live_participants(&rc.gid);
+            // SEC-2 (ADR-004): для ГРУППОВОЙ комнаты в состав звонка допускаем только
+            // пиров из текущего MLS-ростера — маячок присутствия по gid сам по себе не
+            // пропуск. DM-комнаты (room_id в dm_peers) не фильтруем: там ростера нет.
+            // Fail-open, если ростер ещё не в кэше (не рвём легитимный звонок): гейт
+            // обретает зубы после отзыва (SEC-1), когда ростер реально сужается.
+            let is_dm = self.rooms.lock_safe().dm_peers.contains_key(&rc.gid);
+            if !is_dm {
+                let roster = self.group_roster_set(&rc.gid);
+                if !roster.is_empty() {
+                    live.retain(|p| roster.contains(p));
+                }
+            }
             *rc.members.lock_safe() = live;
         }
+    }
+
+    /// Множество ключей текущего MLS-ростера группы (без себя) из кэша — для SEC-2.
+    fn group_roster_set(&self, gid: &[u8]) -> std::collections::HashSet<[u8; 32]> {
+        serde_json::from_str::<Vec<String>>(&self.group_members_json(gid))
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|h| parse_key(h))
+            .collect()
     }
 
     /// DM-звонок: создать комнату, послать RoomInvite, начать слать маячок.
@@ -700,6 +721,17 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, ev: Event) {
             }
             if out.joined {
                 refresh_group_cache(engine, groups);
+                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+            }
+            if out.removed {
+                // ADR-004: нас отозвали — обновляем кэш и уведомляем UI отдельным
+                // событием (чтобы показать «вы удалены» и закрыть экран группы).
+                refresh_group_cache(engine, groups);
+                if let Some(gid) = &out.gid {
+                    push_event(engine, serde_json::json!({
+                        "type": "group_removed", "gid": hex::encode(gid),
+                    }));
+                }
                 push_event(engine, serde_json::json!({"type": "groups_changed"}));
             }
         }
