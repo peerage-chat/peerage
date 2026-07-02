@@ -5153,6 +5153,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "log",
+ "p2p-blob",
  "p2p-core",
  "p2p-group",
  "p2p-groupchat",
