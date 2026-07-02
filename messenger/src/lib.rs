@@ -420,12 +420,19 @@ impl Messenger {
         audio: bool,
         video: bool,
     ) -> Result<(), MessengerError> {
-        self.shared.send(peer, &Payload::RoomInvite { room_id: room_id.to_vec(), audio, video })
+        // Надёжно (retry-until-Ack): чинит потерю первого пакета на холодной сессии.
+        let room_id = room_id.to_vec();
+        self.shared
+            .send_reliable(peer, false, move |id| Payload::RoomInvite { id, room_id, audio, video })?;
+        Ok(())
     }
 
-    /// Отклонить входящий звонок.
+    /// Отклонить входящий звонок — надёжно (звонящий гарантированно узнаёт отказ).
     pub fn send_room_decline(&self, peer: &PeerKey, room_id: &[u8]) -> Result<(), MessengerError> {
-        self.shared.send(peer, &Payload::RoomDecline { room_id: room_id.to_vec() })
+        let room_id = room_id.to_vec();
+        self.shared
+            .send_reliable(peer, false, move |id| Payload::RoomDecline { id, room_id })?;
+        Ok(())
     }
 
     /// Переслать групповое MLS-сообщение конкретному участнику — НАДЁЖНО:
@@ -634,11 +641,13 @@ fn receive_loop(shared: Arc<Shared>) {
                 let _ = shared.send(&src, &Payload::Pong);
             }
             Payload::Pong => {}
-            Payload::RoomInvite { room_id, audio, video } => {
+            Payload::RoomInvite { id, room_id, audio, video } => {
                 shared.emit(Event::RoomInvite { peer: src, room_id, audio, video });
+                let _ = shared.send(&src, &Payload::Ack { id }); // гасим ретрай инвайта
             }
-            Payload::RoomDecline { room_id } => {
+            Payload::RoomDecline { id, room_id } => {
                 shared.emit(Event::RoomDecline { peer: src, room_id });
+                let _ = shared.send(&src, &Payload::Ack { id });
             }
             Payload::Group { id, data } => {
                 log::debug!("group recv id={} from={:02x?} len={}", id, &src[..4], data.len());
@@ -891,5 +900,22 @@ mod tests {
         a.send_group_key_request(&b_key).unwrap();
         let got = wait_for(&b_rx, |e| matches!(e, Event::GroupKeyRequest { .. }));
         assert!(got.is_some(), "GroupKeyRequest должен дойти несмотря на потери (ретрай)");
+    }
+
+    /// Приглашение в звонок надёжно: `RoomInvite` доходит несмотря на потери —
+    /// чинит «первый звонок не доходит» на холодной сессии.
+    #[test]
+    fn room_invite_survives_packet_loss() {
+        let net = LoopbackNet::new();
+        net.set_drop_every(2);
+        let (a_id, b_id) = (id(7), id(8));
+        let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+        let cfg = Config { retry_interval: Duration::from_millis(50), ..Config::default() };
+        let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), cfg.clone());
+        let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
+
+        a.send_room_invite(&b_key, &[9u8; 16], true, false).unwrap();
+        let got = wait_for(&b_rx, |e| matches!(e, Event::RoomInvite { audio: true, .. }));
+        assert!(got.is_some(), "RoomInvite должен дойти несмотря на потери (ретрай)");
     }
 }

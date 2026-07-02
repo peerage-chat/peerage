@@ -34,9 +34,13 @@ pub enum Payload {
     Pong,
     /// Приглашение в голосовую комнату (DM-звонок). room_id = первые 16 байт
     /// SHA-256(min(keyA,keyB) ++ max(keyA,keyB)) — детерминирован для обеих сторон.
-    RoomInvite { room_id: Vec<u8>, audio: bool, video: bool },
-    /// Отклонение входящего звонка (получатель нажал «Отклонить»).
-    RoomDecline { room_id: Vec<u8> },
+    /// `id` — надёжная доставка (retry-until-Ack): Ack шлётся при ДОСТАВКЕ (до ответа
+    /// пользователя), поэтому ретрай гаснет, как только звонок долетел — чинит потерю
+    /// первого пакета на холодной сессии («первый звонок не доходит»).
+    RoomInvite { id: u64, room_id: Vec<u8>, audio: bool, video: bool },
+    /// Отклонение входящего звонка (получатель нажал «Отклонить»). Надёжно —
+    /// звонящий гарантированно узнаёт отказ и перестаёт звонить.
+    RoomDecline { id: u64, room_id: Vec<u8> },
     /// Групповое MLS-сообщение (Commit/Welcome/прикладное) — для пересылки
     /// участникам группы. Содержимое уже зашифровано MLS. `id` — для надёжной
     /// доставки: получатель шлёт `Ack{id}`, отправитель повторяет до Ack/TTL
@@ -190,8 +194,8 @@ mod tests {
             Payload::Pong,
             Payload::Ack { id: 7 },
             Payload::Text { id: 1, text: "hi".into() },
-            Payload::RoomInvite { room_id: vec![1u8; 16], audio: true, video: false },
-            Payload::RoomDecline { room_id: vec![2u8; 16] },
+            Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: false },
+            Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] },
             Payload::Group { id: 5, data: vec![1, 2, 3, 9, 9] },
             Payload::GroupKeyRequest { id: 3 },
             Payload::GroupKeyReply { id: 4, key_package: vec![7, 7, 7] },
