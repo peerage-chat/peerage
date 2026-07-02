@@ -64,6 +64,8 @@ pub(crate) enum Job {
     Beacon,
     /// Рассылка «я вышел» членам комнаты `gid` (мгновенное исчезновение).
     Leave(Vec<u8>),
+    /// Предложить блоб пиру (M2): сохранить локально + анонсировать манифест.
+    BlobOffer { peer: [u8; 32], content: Vec<u8>, mime: String },
 }
 
 /// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
@@ -149,6 +151,8 @@ pub struct Engine {
     room_call: Mutex<Option<RoomCall>>,
     rooms: Mutex<RoomState>,
     bench: Mutex<Option<Arc<BenchRecv>>>,
+    /// Каталог хранения блобов (контент по hex-id). M2.
+    blob_dir: PathBuf,
 }
 
 /// Результат инициализации: движок + публичная идентичность для UI.
@@ -305,6 +309,26 @@ impl Engine {
     /// Выйти из группы (ADR-004). Fire-and-forget.
     pub fn group_leave(&self, gid: Vec<u8>) {
         let _ = self.jobs.send(Job::Cmd(GroupCmd::Leave { gid }));
+    }
+
+    // — Блобы (M2) —
+    /// Предложить пиру блоб (картинку/файл/голосовое). Fire-and-forget: движок
+    /// сохранит локально и анонсирует манифест; докачку ведёт получатель. id блоба
+    /// детерминирован — `blob_id` (BLAKE3), UI может вычислить его сам для ссылки.
+    pub fn blob_offer(&self, peer: [u8; 32], content: Vec<u8>, mime: String) {
+        let _ = self.jobs.send(Job::BlobOffer { peer, content, mime });
+    }
+
+    /// Контент-адрес (hex) содержимого — для ссылки на блоб из сообщения/аватарки.
+    pub fn blob_id_hex(&self, content: &[u8]) -> String {
+        hex::encode(p2p_blob::blob_id(content))
+    }
+
+    /// Прочитать сохранённый блоб по hex-id (принятый или свой отправленный).
+    pub fn blob_read(&self, id_hex: &str) -> Option<Vec<u8>> {
+        // Санитизация: только валидный hex → чистое имя файла (без traversal).
+        let clean = hex::encode(hex::decode(id_hex.trim()).ok()?);
+        std::fs::read(self.blob_dir.join(clean)).ok()
     }
 
     pub fn group_list_json(&self) -> String {
@@ -630,13 +654,20 @@ fn event_pump(
     data_dir: PathBuf,
 ) {
     let mut groups = GroupManager::new(identity, messenger.clone(), data_dir);
+    let mut blobs = blobs::BlobManager::new(messenger.clone(), p2p_blob::Limits::default());
     refresh_group_cache(&engine, &groups); // прайм кэша
     push_event(&engine, serde_json::json!({"type": "groups_changed"}));
     let mut last_beacon = Instant::now();
     loop {
         match job_rx.recv_timeout(Duration::from_millis(500)) {
-            Ok(Job::Ev(ev)) => handle_event(&engine, &mut groups, ev),
+            Ok(Job::Ev(ev)) => handle_event(&engine, &mut groups, &mut blobs, ev),
             Ok(Job::Cmd(cmd)) => handle_cmd(&engine, &mut groups, cmd),
+            Ok(Job::BlobOffer { peer, content, mime }) => {
+                // Сохраняем свой блоб локально (чтобы отправитель тоже его показывал)
+                // и анонсируем манифест — докачку ведёт получатель.
+                save_blob(&engine, p2p_blob::blob_id(&content), &content);
+                blobs.offer(peer, &content, &mime);
+            }
             Ok(Job::Beacon) => {
                 last_beacon = Instant::now();
                 beacon_tick(&engine, &groups, &messenger);
@@ -664,7 +695,25 @@ fn event_pump(
             last_beacon = Instant::now();
             beacon_tick(&engine, &groups, &messenger);
         }
+        blobs.tick(); // переспросить потерянные чанки докачки (M2)
     }
+}
+
+/// Сохранить блоб на диск по hex-id (принятый или свой отправленный).
+fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
+    let _ = std::fs::create_dir_all(&engine.blob_dir);
+    let _ = std::fs::write(engine.blob_dir.join(hex::encode(id)), content);
+}
+
+/// Сохранить принятый блоб и уведомить UI (`blob_received`).
+fn save_and_notify_blob(engine: &Arc<Engine>, done: blobs::Completed) {
+    save_blob(engine, done.id, &done.content);
+    push_event(engine, serde_json::json!({
+        "type": "blob_received",
+        "id": hex::encode(done.id),
+        "mime": done.manifest.mime,
+        "size": done.manifest.size,
+    }));
 }
 
 /// Разослать маячок присутствия членам всех наших комнат и подчистить протухших.
@@ -689,7 +738,7 @@ fn beacon_tick(engine: &Arc<Engine>, groups: &GroupManager, messenger: &Messenge
 }
 
 /// Обработать одно событие мессенджера: персист + JSON в очередь + маршрутизация групп.
-fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, ev: Event) {
+fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blobs::BlobManager, ev: Event) {
     match ev {
         Event::Presence { peer, online } => {
             if online {
@@ -765,9 +814,19 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, ev: Event) {
                 push_event(engine, serde_json::json!({"type": "groups_changed"}));
             }
         }
-        // M2 блобы: логика в blobs::BlobManager (покрыта loopback-тестом). Проводка в
-        // event_pump + JNI (offer/приём картинки) — следующий шаг вместе с UI.
-        Event::BlobManifest { .. } | Event::BlobRequest { .. } | Event::BlobChunk { .. } => {}
+        // M2 блобы: докачка получателем + отдача чанков. Событие blob_received →
+        // UI (сохранён на диск, доступен через blob_read).
+        Event::BlobManifest { peer, manifest } => {
+            if let Some(done) = blobs.on_manifest(peer, &manifest) {
+                save_and_notify_blob(engine, done);
+            }
+        }
+        Event::BlobRequest { peer, id, index } => blobs.on_request(&id, index, peer),
+        Event::BlobChunk { id, index, data, .. } => {
+            if let Some(done) = blobs.on_chunk(&id, index, &data) {
+                save_and_notify_blob(engine, done);
+            }
+        }
         Event::GroupKeyReply { peer, key_package } => {
             if groups.on_key_reply(peer, &key_package) {
                 refresh_group_cache(engine, groups);
@@ -925,6 +984,7 @@ impl Engine {
             room_call: Mutex::new(None),
             rooms: Mutex::new(RoomState::default()),
             bench: Mutex::new(None),
+            blob_dir: dir.join("blobs"),
         });
 
         let pump_engine = engine.clone();

@@ -177,6 +177,59 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_history<'local>(
     })
 }
 
+// ── Блобы (M2) ──────────────────────────────────────────────────────────────
+
+/// Предложить блоб пиру (картинка/файл/голосовое). Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_blobOffer<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    peer_hex: JString<'local>,
+    content: JByteArray<'local>,
+    mime: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Some(peer) = parse_key(&jstr(&mut env, &peer_hex)) else { return };
+        let bytes = env.convert_byte_array(&content).unwrap_or_default();
+        if bytes.is_empty() { return; }
+        e.blob_offer(peer, bytes, jstr(&mut env, &mime));
+    });
+}
+
+/// Контент-адрес (hex) содержимого — id блоба для ссылки из сообщения/аватарки.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_blobIdHex<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    content: JByteArray<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, ""), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
+        let bytes = env.convert_byte_array(&content).unwrap_or_default();
+        ret(&env, &e.blob_id_hex(&bytes))
+    })
+}
+
+/// Прочитать сохранённый блоб по hex-id. Пустой массив, если блоба нет.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_blobRead<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    id_hex: JString<'local>,
+) -> JByteArray<'local> {
+    let empty = env.new_byte_array(0).unwrap();
+    let Some(e) = (unsafe { engine(session_ptr) }) else { return empty };
+    let id = jstr(&mut env, &id_hex);
+    match e.blob_read(&id) {
+        Some(bytes) => env.byte_array_from_slice(&bytes).unwrap_or(empty),
+        None => empty,
+    }
+}
+
 // ── Контакты (TOFU) ─────────────────────────────────────────────────────────
 
 /// Добавить контакт. Возвращает "added" | "known" | "error".

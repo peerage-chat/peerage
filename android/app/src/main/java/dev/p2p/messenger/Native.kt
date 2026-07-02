@@ -29,6 +29,16 @@ object Native {
     /** Держать фоновое соединение с пиром. */
     external fun connect(sessionPtr: Long, keyHex: String)
 
+    // ── Блобы (M2) ────────────────────────────────────────────────────────
+    /** Предложить блоб пиру (картинка/файл/голосовое). Fire-and-forget. */
+    external fun blobOffer(sessionPtr: Long, peerHex: String, content: ByteArray, mime: String)
+
+    /** Контент-адрес (hex) содержимого — id блоба для ссылки. */
+    external fun blobIdHex(sessionPtr: Long, content: ByteArray): String
+
+    /** Прочитать сохранённый блоб по hex-id. Пустой массив, если нет. */
+    external fun blobRead(sessionPtr: Long, idHex: String): ByteArray
+
     /** Добавить контакт (TOFU). Возвращает "added" | "known" | "error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
 
