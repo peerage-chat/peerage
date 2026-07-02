@@ -7,6 +7,7 @@ pub mod crypto;
 pub mod db;
 pub mod identity;
 pub mod media;
+pub mod outbox;
 pub mod protocol;
 pub mod ratelimit;
 pub mod settings;
