@@ -69,9 +69,18 @@ fn pump_until(
     done(a, b)
 }
 
-/// Полный инвайт: A создаёт группу, приглашает B; после обмена ключами и Welcome
-/// обе стороны в группе и видят друг друга в ростере. `drop_every` эмулирует потери.
-fn invite_join(drop_every: u32) {
+/// Два узла в общей loopback-сети с уже пройденным инвайтом: A (админ) + B в одной
+/// группе. `drop_every` эмулирует потери на всём протяжении.
+struct Ctx {
+    gm_a: GroupManager,
+    a_rx: Receiver<Event>,
+    gm_b: GroupManager,
+    b_rx: Receiver<Event>,
+    gid: Vec<u8>,
+    b_key: [u8; 32],
+}
+
+fn setup_and_join(drop_every: u32) -> Ctx {
     let net = LoopbackNet::new();
     if drop_every > 0 {
         net.set_drop_every(drop_every);
@@ -86,22 +95,49 @@ fn invite_join(drop_every: u32) {
 
     let gid = gm_a.create("тест").expect("группа создана");
     gm_a.invite(&gid, b_key);
-
-    let ok = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
+    let joined = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
         a.members(&gid).contains(&b_key) && b.group_ids().contains(&gid)
     });
-    assert!(ok, "инвайт должен довести обе стороны в группу (drop_every={drop_every})");
+    assert!(joined, "инвайт должен довести обе стороны в группу (drop_every={drop_every})");
     assert!(gm_b.members(&gid).contains(&a_key), "B видит A в ростере");
+    Ctx { gm_a, a_rx, gm_b, b_rx, gid, b_key }
 }
 
 #[test]
 fn invite_join_flow_over_loopback() {
-    invite_join(0);
+    setup_and_join(0);
 }
 
 /// Тот же путь под потерями — доказывает, что надёжный invite-хендшейк дожимает
 /// приглашение сквозь дропы (регрессия против «инвайт не срабатывает»).
 #[test]
 fn invite_join_flow_survives_packet_loss() {
-    invite_join(3);
+    setup_and_join(3);
+}
+
+/// ADR-004: админ отзывает участника → у него SelfRemoved (группа исчезает), из
+/// ростера админа он тоже пропадает.
+#[test]
+fn admin_kick_removes_member() {
+    let mut c = setup_and_join(0);
+    let (gid, b_key) = (c.gid.clone(), c.b_key);
+    assert!(c.gm_a.remove_member(&gid, b_key), "админ инициировал отзыв");
+    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |a, b| {
+        !a.members(&gid).contains(&b_key) && !b.group_ids().contains(&gid)
+    });
+    assert!(ok, "после kick: A убрал B из ростера, B забыл группу (SelfRemoved)");
+}
+
+/// ADR-004: участник выходит → админ отзывает его из общего ростера; локально он
+/// забывает группу сразу.
+#[test]
+fn member_leave_revoked_by_admin() {
+    let mut c = setup_and_join(0);
+    let (gid, b_key) = (c.gid.clone(), c.b_key);
+    assert!(c.gm_b.leave(&gid), "B инициировал выход");
+    assert!(!c.gm_b.group_ids().contains(&gid), "B забыл группу локально сразу");
+    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |a, _b| {
+        !a.members(&gid).contains(&b_key)
+    });
+    assert!(ok, "после leave: админ A отозвал B из ростера");
 }
