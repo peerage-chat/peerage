@@ -232,11 +232,19 @@ impl Engine {
         match self.contacts.lock_safe().add(key, &name, now()) {
             Ok(p2p_core::store::AddOutcome::Added) => {
                 spawn_connect(self.messenger.clone(), *key);
+                self.refresh_trusted(); // M3: контакт → щедрый ingress-бюджет
                 "added"
             }
             Ok(p2p_core::store::AddOutcome::AlreadyKnown) => "known",
             Err(_) => "error",
         }
+    }
+
+    /// Пере-залить множество доверенных ключей в мессенджер (градуированный лимит M3).
+    fn refresh_trusted(&self) {
+        let keys: Vec<[u8; 32]> =
+            self.contacts.lock_safe().list().iter().filter_map(|c| parse_key(&c.key)).collect();
+        self.messenger.set_trusted(&keys);
     }
 
     pub fn contacts_json(&self) -> String {
@@ -257,6 +265,7 @@ impl Engine {
 
     pub fn remove_contact(&self, key: &[u8; 32]) {
         let _ = self.contacts.lock_safe().remove(key);
+        self.refresh_trusted();
     }
 
     pub fn is_online(&self, key: &[u8; 32]) -> bool {
@@ -639,11 +648,19 @@ fn public_peer_uris() -> impl Iterator<Item = &'static str> {
 
 /// TOFU: добавить неизвестного пира в контакты (имя по умолчанию — префикс ключа).
 fn ensure_contact(engine: &Engine, peer: [u8; 32]) {
-    let mut store = engine.contacts.lock_safe();
-    if !store.contains(&peer) {
-        let hex = hex::encode(peer);
-        let name = format!("{}…", &hex[..8]);
-        let _ = store.add(&peer, &name, now());
+    let added = {
+        let mut store = engine.contacts.lock_safe();
+        if store.contains(&peer) {
+            false
+        } else {
+            let hex = hex::encode(peer);
+            let name = format!("{}…", &hex[..8]);
+            let _ = store.add(&peer, &name, now());
+            true
+        }
+    };
+    if added {
+        engine.refresh_trusted(); // M3: новый TOFU-контакт → щедрый ingress-бюджет
     }
 }
 
@@ -971,6 +988,7 @@ impl Engine {
         let identity_for_groups = identity.clone();
         let (messenger, rx) = Messenger::start(identity, node);
         let messenger = Arc::new(messenger);
+        messenger.set_trusted(&contact_keys); // M3: контакты → щедрый ingress-бюджет
         for k in &contact_keys {
             spawn_connect(messenger.clone(), *k);
         }

@@ -22,7 +22,7 @@ use p2p_core::media::{
     parse_media, write_media_header, CHAN_CHAT, CHAN_MEDIA, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN,
 };
 use p2p_core::protocol::{decode, encode, Payload, ProtocolError};
-use p2p_core::ratelimit::RateLimiter;
+use p2p_core::ratelimit::{RateLimiter, TieredRateLimiter};
 use p2p_core::Identity;
 use p2p_ygg::{Node, YggError};
 
@@ -178,6 +178,9 @@ struct Shared {
     running: AtomicBool,
     tx: Sender<Event>,
     media_tx: Mutex<Option<SyncSender<MediaPacket>>>,
+    /// Доверенные ключи (контакты) — для градуированного ingress-лимита (M3). Чужие
+    /// делят одну корзину. Обновляется движком (`set_trusted`) при смене контактов.
+    trusted: Mutex<std::collections::HashSet<PeerKey>>,
 }
 
 impl Shared {
@@ -326,6 +329,7 @@ impl Messenger {
             running: AtomicBool::new(true),
             tx,
             media_tx: Mutex::new(None),
+            trusted: Mutex::new(std::collections::HashSet::new()),
         });
         let s1 = shared.clone();
         let rx_thread = thread::spawn(move || receive_loop(s1));
@@ -344,6 +348,12 @@ impl Messenger {
     /// Наш публичный ключ.
     pub fn public_key(&self) -> PeerKey {
         self.shared.identity.public_key_bytes()
+    }
+
+    /// Обновить множество доверенных ключей (контактов) для градуированного
+    /// ingress-лимита (M3). Зовётся движком при старте и смене контактов.
+    pub fn set_trusted(&self, keys: &[PeerKey]) {
+        *self.shared.trusted.lock().unwrap() = keys.iter().copied().collect();
     }
 
     /// Адрес Yggdrasil нашего узла.
@@ -552,8 +562,10 @@ fn receive_loop(shared: Arc<Shared>) {
     //  · control/сообщения (CHAN_CHAT) — строгий бюджет (спам-вектор);
     //  · медиа (CHAN_MEDIA) — щедрый (звонок легитимно высокочастотен: ~50 ауд/с +
     //    видео), но абсурдный флуд (>~600/с устойчиво) всё равно режется.
-    // Градуировка по доверию (Sybil-устойчивость) + репутация — M3.
-    let mut chat_rl = RateLimiter::new(60.0, 30.0);
+    // M3: control/сообщения градуированы по доверию — контакты щедро (60/30 на
+    // источник), чужие делят ОДНУ мелкую корзину (30 всплеск, 10/с на весь класс) →
+    // Sybil из 1000 ключей не расширяет бюджет. Медиа — щедрый per-source (звонок).
+    let mut chat_rl = TieredRateLimiter::new(60.0, 30.0, 30.0, 10.0);
     let mut media_rl = RateLimiter::new(1200.0, 600.0);
     let mut pkt_count: u64 = 0;
     let mut dropped: u64 = 0;
@@ -570,7 +582,8 @@ fn receive_loop(shared: Arc<Shared>) {
         let allowed = if buf[0] == CHAN_MEDIA {
             media_rl.allow(&src, now)
         } else {
-            chat_rl.allow(&src, now)
+            let trusted = shared.trusted.lock().unwrap().contains(&src);
+            chat_rl.allow(&src, trusted, now)
         };
         if !allowed {
             dropped = dropped.wrapping_add(1);
