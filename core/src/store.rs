@@ -336,6 +336,18 @@ impl MessageStore {
         Ok(n > 0)
     }
 
+    /// Есть ли уже сообщение (peer, id, mine) — для дедупа повторной доставки
+    /// (офлайн-досылка со стабильным id приходит дважды).
+    pub fn contains(&self, peer: &[u8; 32], id: u64, mine: bool) -> bool {
+        db::lock(&self.db)
+            .query_row(
+                "SELECT 1 FROM messages WHERE peer=?1 AND id=?2 AND mine=?3",
+                rusqlite::params![peer.as_slice(), id as i64, mine as i64],
+                |_| Ok(()),
+            )
+            .is_ok()
+    }
+
     pub fn history(&self, peer: &[u8; 32]) -> Vec<StoredMessage> {
         let conn = db::lock(&self.db);
         let mut stmt = match conn.prepare(

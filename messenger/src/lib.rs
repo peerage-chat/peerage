@@ -236,6 +236,27 @@ impl Shared {
         Ok(id)
     }
 
+    /// Как [`send_reliable`], но с ЗАДАННЫМ `id` (для пере-отправки из офлайн-очереди:
+    /// тот же id → получатель дедуплицирует, дублей нет). Пере-вставка в `pending` с
+    /// тем же id идемпотентна.
+    fn send_reliable_with_id(
+        &self,
+        peer: &PeerKey,
+        id: u64,
+        notify: bool,
+        mk: impl FnOnce(u64) -> Payload,
+    ) -> Result<(), MessengerError> {
+        let payload = mk(id);
+        self.track(peer);
+        self.send(peer, &payload)?;
+        let now = Instant::now();
+        self.pending.lock().unwrap().insert(
+            id,
+            Pending { peer: *peer, payload, created: now, last_sent: now, notify },
+        );
+        Ok(())
+    }
+
     fn is_online(&self, peer: &PeerKey) -> bool {
         self.peers
             .lock()
@@ -385,6 +406,13 @@ impl Messenger {
         let text = text.to_string();
         // DM: notify=true → UI получает Ack/Undelivered (✓✓ / ошибка).
         self.shared.send_reliable(peer, true, move |id| Payload::Text { id, text })
+    }
+
+    /// Пере-отправить текст с ТЕМ ЖЕ `id` (офлайн-досылка): получатель дедуплицирует
+    /// по (peer, id), поэтому дублей нет. Используется [`p2p_core`]-очередью через движок.
+    pub fn resend_text(&self, peer: &PeerKey, id: u64, text: &str) -> Result<(), MessengerError> {
+        let text = text.to_string();
+        self.shared.send_reliable_with_id(peer, id, true, move |id| Payload::Text { id, text })
     }
 
     /// Отправить медиа-датаграмму (реалтайм-канал): без Ack/повторов/шифрования

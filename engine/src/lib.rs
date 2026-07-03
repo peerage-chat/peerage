@@ -153,6 +153,8 @@ pub struct Engine {
     bench: Mutex<Option<Arc<BenchRecv>>>,
     /// Каталог хранения блобов (контент по hex-id). M2.
     blob_dir: PathBuf,
+    /// Персистентная офлайн-очередь исходящих (M3): досылка после офлайна/рестарта.
+    outbox: Mutex<p2p_core::outbox::OutboxManager>,
 }
 
 /// Результат инициализации: движок + публичная идентичность для UI.
@@ -203,9 +205,12 @@ impl Engine {
     pub fn send_text(&self, key: &[u8; 32], text: &str) -> Option<i64> {
         match self.messenger.send_text(key, text) {
             Ok(id) => {
+                let t = now();
                 let _ = self.messages.lock_safe().append(key, StoredMessage {
-                    id, text: text.to_string(), mine: true, time: now(), status: "sent".into(),
+                    id, text: text.to_string(), mine: true, time: t, status: "sent".into(),
                 });
+                // M3: в офлайн-очередь — если не дойдёт, дошлём при онлайне/рестарте.
+                self.outbox.lock_safe().on_sent(key, id, text, t);
                 Some(id as i64)
             }
             Err(_) => None,
@@ -657,6 +662,7 @@ fn event_pump(
 ) {
     let mut groups = GroupManager::new(identity, messenger.clone(), data_dir);
     let mut blobs = blobs::BlobManager::new(messenger.clone(), p2p_blob::Limits::default());
+    engine.outbox.lock_safe().on_start(now()); // M3: prune TTL + дослать недоставленное
     refresh_group_cache(&engine, &groups); // прайм кэша
     push_event(&engine, serde_json::json!({"type": "groups_changed"}));
     let mut last_beacon = Instant::now();
@@ -746,6 +752,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         Event::Presence { peer, online } => {
             if online {
                 ensure_contact(engine, peer);
+                engine.outbox.lock_safe().on_online(&peer); // M3: дослать ожидающее пиру
             }
             push_event(engine, serde_json::json!({
                 "type": "presence", "peer": hex::encode(peer), "online": online,
@@ -753,16 +760,21 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }
         Event::Text { peer, id, text } => {
             ensure_contact(engine, peer);
-            let t = now();
-            let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
-                id, text: text.clone(), mine: false, time: t, status: String::new(),
-            });
-            push_event(engine, serde_json::json!({
-                "type": "text", "peer": hex::encode(peer), "id": id, "text": text, "time": t,
-            }));
+            // Дедуп повторной доставки: офлайн-досылка со стабильным id приходит дважды.
+            let dup = engine.messages.lock_safe().contains(&peer, id, false);
+            if !dup {
+                let t = now();
+                let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
+                    id, text: text.clone(), mine: false, time: t, status: String::new(),
+                });
+                push_event(engine, serde_json::json!({
+                    "type": "text", "peer": hex::encode(peer), "id": id, "text": text, "time": t,
+                }));
+            }
         }
         Event::Ack { peer, id } => {
             let _ = engine.messages.lock_safe().set_status(&peer, id, "delivered");
+            engine.outbox.lock_safe().on_ack(&peer, id); // M3: снять из очереди
             push_event(engine, serde_json::json!({"type": "ack", "peer": hex::encode(peer), "id": id}));
         }
         Event::Undelivered { peer, id } => {
@@ -976,10 +988,22 @@ impl Engine {
             });
         }
 
+        // Офлайн-очередь (M3): досылку делает messenger.resend_text (тот же id → дедуп).
+        let outbox = {
+            let m = messenger.clone();
+            p2p_core::outbox::OutboxManager::new(
+                p2p_core::outbox::OutboxStore::new(db.clone()),
+                Box::new(move |peer, id, text| {
+                    let _ = m.resend_text(peer, id, text);
+                }),
+            )
+        };
+
         let engine = Arc::new(Engine {
             messenger: messenger.clone(),
             contacts: Mutex::new(contacts),
             messages: Mutex::new(messages),
+            outbox: Mutex::new(outbox),
             me_pub,
             events: Mutex::new(VecDeque::new()),
             group_cache: Mutex::new(GroupCache::default()),
