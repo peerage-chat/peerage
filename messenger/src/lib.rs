@@ -325,7 +325,14 @@ impl Messenger {
             cfg,
             peers: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(1),
+            // Сеем от времени (мс с эпохи), а НЕ с 1: id монотонно растут между
+            // перезапусками и не рециклируются. Иначе после рестарта id снова 1..N
+            // сталкивались бы со старыми сообщениями в базе получателя → затирание
+            // истории (INSERT OR REPLACE) и ложный дедуп «уже видел» (сообщение не
+            // показывается, хотя доставлено). Внутри сессии просто инкрементируется.
+            next_id: AtomicU64::new(
+                SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(1),
+            ),
             running: AtomicBool::new(true),
             tx,
             media_tx: Mutex::new(None),
@@ -759,7 +766,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
         }
 
         // Повтор недоставленных сообщений; отсев по TTL.
-        let mut to_retry = Vec::new();
+        let mut to_retry: Vec<(u64, PeerKey, Payload)> = Vec::new();
         let mut expired = Vec::new();
         {
             let mut pending = shared.pending.lock().unwrap();
@@ -770,7 +777,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
                 }
                 if now.duration_since(p.last_sent) >= shared.cfg.retry_interval {
                     p.last_sent = now;
-                    to_retry.push((p.peer, p.payload.clone()));
+                    to_retry.push((*id, p.peer, p.payload.clone()));
                 }
                 true
             });
@@ -780,7 +787,10 @@ fn maintenance_loop(shared: Arc<Shared>) {
                 shared.emit(Event::Undelivered { peer, id });
             }
         }
-        for (peer, payload) in to_retry {
+        // По id (монотонный) → отправка в порядке постановки: при накоплении в
+        // офлайне сообщения ретраятся по порядку, а не в случайном (HashMap) порядке.
+        to_retry.sort_by_key(|(id, _, _)| *id);
+        for (_, peer, payload) in to_retry {
             let _ = shared.send(&peer, &payload);
         }
     }
@@ -864,7 +874,11 @@ pub mod loopback {
         fn add_peer(&self, _uri: &str) -> Result<(), YggError> {
             Ok(())
         }
-        fn stop(&self) {}
+        fn stop(&self) {
+            // Снимаемся из сети: наш Sender в inboxes дропается → recv у нашего rx
+            // вернёт Err → receive_loop завершится (чистая остановка для тестов рестарта).
+            self.net.inboxes.lock().unwrap().remove(&self.key);
+        }
     }
 }
 

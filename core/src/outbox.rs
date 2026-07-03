@@ -168,6 +168,11 @@ impl OutboxManager {
         let _ = self.store.remove_by_msg(peer, msg_id);
     }
 
+    /// Число ожидающих записей (диагностика).
+    pub fn pending_count(&self) -> i64 {
+        self.store.count().unwrap_or(-1)
+    }
+
     /// Пир вышел в онлайн — дослать всё ожидающее ему (тем же msg_id).
     pub fn on_online(&mut self, peer: &[u8; 32]) {
         if let Ok(entries) = self.store.pending_for(peer) {

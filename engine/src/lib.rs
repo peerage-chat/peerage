@@ -210,7 +210,9 @@ impl Engine {
                     id, text: text.to_string(), mine: true, time: t, status: "sent".into(),
                 });
                 // M3: в офлайн-очередь — если не дойдёт, дошлём при онлайне/рестарте.
-                self.outbox.lock_safe().on_sent(key, id, text, t);
+                let ob = self.outbox.lock_safe();
+                ob.on_sent(key, id, text, t);
+                log::info!("outbox: enqueued id={} peer={:02x?} count={}", id, &key[..4], ob.pending_count());
                 Some(id as i64)
             }
             Err(_) => None,
@@ -679,6 +681,10 @@ fn event_pump(
 ) {
     let mut groups = GroupManager::new(identity, messenger.clone(), data_dir);
     let mut blobs = blobs::BlobManager::new(messenger.clone(), p2p_blob::Limits::default());
+    {
+        let ob = engine.outbox.lock_safe();
+        log::info!("outbox on_start: pending={} (до prune+досылки)", ob.pending_count());
+    }
     engine.outbox.lock_safe().on_start(now()); // M3: prune TTL + дослать недоставленное
     refresh_group_cache(&engine, &groups); // прайм кэша
     push_event(&engine, serde_json::json!({"type": "groups_changed"}));
@@ -769,7 +775,12 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         Event::Presence { peer, online } => {
             if online {
                 ensure_contact(engine, peer);
-                engine.outbox.lock_safe().on_online(&peer); // M3: дослать ожидающее пиру
+                let mut ob = engine.outbox.lock_safe();
+                let c = ob.pending_count();
+                ob.on_online(&peer); // M3: дослать ожидающее пиру
+                if c > 0 {
+                    log::info!("outbox on_online peer={:02x?}: досылка (в очереди {})", &peer[..4], c);
+                }
             }
             push_event(engine, serde_json::json!({
                 "type": "presence", "peer": hex::encode(peer), "online": online,
@@ -969,14 +980,35 @@ impl Engine {
             }
             Err(e) => return Err(e.to_string()),
         };
-        let me_pub = identity.public_key_bytes();
-
         let node = Node::start(&identity.seed()).map_err(|e| e.to_string())?;
         let address = node.address();
         for uri in public_peer_uris() {
             let _ = node.add_peer(uri);
         }
+        Self::start_inner(dir, identity, Arc::new(node), address)
+    }
 
+    /// Поднять движок поверх ПРОИЗВОЛЬНОГО транспорта (loopback в интеграционных
+    /// тестах): идентичность задаёт вызывающий, реальный меш-узел НЕ создаётся —
+    /// можно гонять два движка в одном процессе (доставка/офлайн/рестарт/дедуп).
+    pub fn start_with_transport(
+        dir: PathBuf,
+        identity: Identity,
+        transport: Arc<dyn p2p_messenger::Transport>,
+    ) -> Result<StartOk, String> {
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let address = transport.address();
+        Self::start_inner(dir, identity, transport, address)
+    }
+
+    /// Общая сборка движка поверх готового транспорта (реального или loopback).
+    fn start_inner(
+        dir: PathBuf,
+        identity: Identity,
+        transport: Arc<dyn p2p_messenger::Transport>,
+        address: String,
+    ) -> Result<StartOk, String> {
+        let me_pub = identity.public_key_bytes();
         let db = p2p_core::db::open(&dir).map_err(|e| format!("db: {e}"))?;
         let contacts = ContactStore::open(db.clone(), Some(&dir.join("contacts.json")))
             .map_err(|e| format!("contacts: {e}"))?;
@@ -986,7 +1018,8 @@ impl Engine {
             contacts.list().iter().filter_map(|c| parse_key(&c.key)).collect();
 
         let identity_for_groups = identity.clone();
-        let (messenger, rx) = Messenger::start(identity, node);
+        let (messenger, rx) =
+            Messenger::start_with_transport(identity, transport, p2p_messenger::Config::default());
         let messenger = Arc::new(messenger);
         messenger.set_trusted(&contact_keys); // M3: контакты → щедрый ingress-бюджет
         for k in &contact_keys {
