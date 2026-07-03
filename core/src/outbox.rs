@@ -110,6 +110,18 @@ impl OutboxStore {
         Ok(())
     }
 
+    /// Ограничить очередь пира сверху: удалить самые СТАРЫЕ сверх `cap` (анти-DoS на
+    /// хранилище — пир, офлайн навсегда, не копит бесконечно). Возвращает удалённых.
+    pub fn trim_peer(&self, peer: &[u8; 32], cap: usize) -> Result<usize, StoreError> {
+        let n = db::lock(&self.db).execute(
+            "DELETE FROM outbox WHERE peer = ?1 AND id NOT IN (
+                 SELECT id FROM outbox WHERE peer = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2
+             )",
+            rusqlite::params![peer.as_slice(), cap as i64],
+        )?;
+        Ok(n)
+    }
+
     /// Выбросить протухшие записи (created_at < `cutoff`). Возвращает число удалённых.
     pub fn prune_older_than(&self, cutoff: i64) -> Result<usize, StoreError> {
         let n = db::lock(&self.db)
@@ -127,6 +139,8 @@ impl OutboxStore {
 
 /// TTL офлайн-очереди — 7 дней. Старше — выбрасываем (не досылаем вечно).
 pub const OUTBOX_TTL_SECS: i64 = 7 * 24 * 3600;
+/// Максимум ожидающих на одного пира (анти-DoS хранилища): старейшие сверх — прочь.
+pub const OUTBOX_PEER_CAP: usize = 500;
 
 /// Оркестратор офлайн-очереди: персистит исходящий текст, снимает по Ack, досылает
 /// при возвращении пира и на старте, чистит по TTL. Отправку делает через
@@ -142,9 +156,11 @@ impl OutboxManager {
         Self { store, send }
     }
 
-    /// Запомнить отправленный текст (на случай, если не дойдёт).
+    /// Запомнить отправленный текст (на случай, если не дойдёт). Держит очередь пира
+    /// в пределах [`OUTBOX_PEER_CAP`] (анти-DoS хранилища).
     pub fn on_sent(&self, peer: &[u8; 32], msg_id: u64, text: &str, now: i64) {
         let _ = self.store.enqueue(peer, msg_id, "text", text.as_bytes(), now);
+        let _ = self.store.trim_peer(peer, OUTBOX_PEER_CAP);
     }
 
     /// Доставка подтверждена (Ack) — снять из очереди.
@@ -270,6 +286,23 @@ mod tests {
         let blob = vec![0u8, 1, 2, 255, 254, 0, 42];
         s.enqueue(&peer(9), 1, "blob_ref", &blob, 5).unwrap();
         assert_eq!(s.pending_for(&peer(9)).unwrap()[0].payload, blob);
+    }
+
+    #[test]
+    fn trim_peer_keeps_newest_cap() {
+        let s = store();
+        for i in 0..5 {
+            s.enqueue(&peer(1), i as u64, "text", format!("m{i}").as_bytes(), i).unwrap();
+        }
+        s.enqueue(&peer(2), 99, "text", b"other", 0).unwrap(); // другой пир не трогаем
+        let dropped = s.trim_peer(&peer(1), 2).unwrap();
+        assert_eq!(dropped, 3);
+        let left = s.pending_for(&peer(1)).unwrap();
+        assert_eq!(left.len(), 2);
+        // остались 2 самых свежих (created_at 3 и 4)
+        assert_eq!(left[0].payload, b"m3");
+        assert_eq!(left[1].payload, b"m4");
+        assert_eq!(s.pending_for(&peer(2)).unwrap().len(), 1);
     }
 
     // ── OutboxManager ────────────────────────────────────────────────────────
