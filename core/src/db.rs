@@ -79,11 +79,14 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS outbox (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             peer         BLOB    NOT NULL,
+            msg_id       INTEGER NOT NULL DEFAULT 0,
             payload_type TEXT    NOT NULL,
             payload      BLOB    NOT NULL,
             created_at   INTEGER NOT NULL,
             status       TEXT    NOT NULL DEFAULT 'pending'
         );
     ")?;
+    // Миграция для установок с outbox без msg_id (идемпотентно: дубль-колонка → игнор).
+    let _ = conn.execute("ALTER TABLE outbox ADD COLUMN msg_id INTEGER NOT NULL DEFAULT 0", []);
     Ok(())
 }
