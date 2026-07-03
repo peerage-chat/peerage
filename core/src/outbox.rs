@@ -125,13 +125,79 @@ impl OutboxStore {
     }
 }
 
+/// TTL офлайн-очереди — 7 дней. Старше — выбрасываем (не досылаем вечно).
+pub const OUTBOX_TTL_SECS: i64 = 7 * 24 * 3600;
+
+/// Оркестратор офлайн-очереди: персистит исходящий текст, снимает по Ack, досылает
+/// при возвращении пира и на старте, чистит по TTL. Отправку делает через
+/// callback (в движке = `Messenger::resend_text`), поэтому вся логика тестируема без
+/// сети. Досылка — с тем же `msg_id`, так что получатель дедуплицирует (нет дублей).
+pub struct OutboxManager {
+    store: OutboxStore,
+    send: Box<dyn FnMut(&[u8; 32], u64, &str) + Send>,
+}
+
+impl OutboxManager {
+    pub fn new(store: OutboxStore, send: Box<dyn FnMut(&[u8; 32], u64, &str) + Send>) -> Self {
+        Self { store, send }
+    }
+
+    /// Запомнить отправленный текст (на случай, если не дойдёт).
+    pub fn on_sent(&self, peer: &[u8; 32], msg_id: u64, text: &str, now: i64) {
+        let _ = self.store.enqueue(peer, msg_id, "text", text.as_bytes(), now);
+    }
+
+    /// Доставка подтверждена (Ack) — снять из очереди.
+    pub fn on_ack(&self, peer: &[u8; 32], msg_id: u64) {
+        let _ = self.store.remove_by_msg(peer, msg_id);
+    }
+
+    /// Пир вышел в онлайн — дослать всё ожидающее ему (тем же msg_id).
+    pub fn on_online(&mut self, peer: &[u8; 32]) {
+        if let Ok(entries) = self.store.pending_for(peer) {
+            self.resend(entries);
+        }
+    }
+
+    /// Старт приложения: выбросить протухшее (>TTL) и дослать оставшееся.
+    pub fn on_start(&mut self, now: i64) {
+        let _ = self.store.prune_older_than(now - OUTBOX_TTL_SECS);
+        if let Ok(entries) = self.store.pending_all() {
+            self.resend(entries);
+        }
+    }
+
+    fn resend(&mut self, entries: Vec<OutboxEntry>) {
+        for e in entries {
+            if e.payload_type == "text" {
+                if let Ok(text) = String::from_utf8(e.payload) {
+                    (self.send)(&e.peer, e.msg_id, &text);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db;
+    use std::sync::{Arc, Mutex};
 
     fn store() -> OutboxStore {
         OutboxStore::new(db::open_in_memory().unwrap())
+    }
+
+    type Log = Arc<Mutex<Vec<([u8; 32], u64, String)>>>;
+
+    /// Менеджер над свежим стором + журнал вызовов отправки (записывающий callback).
+    fn mgr_with(store: OutboxStore) -> (OutboxManager, Log) {
+        let log: Log = Arc::new(Mutex::new(Vec::new()));
+        let l2 = log.clone();
+        let send = Box::new(move |p: &[u8; 32], id: u64, t: &str| {
+            l2.lock().unwrap().push((*p, id, t.to_string()));
+        });
+        (OutboxManager::new(store, send), log)
     }
 
     fn peer(n: u8) -> [u8; 32] {
@@ -204,5 +270,48 @@ mod tests {
         let blob = vec![0u8, 1, 2, 255, 254, 0, 42];
         s.enqueue(&peer(9), 1, "blob_ref", &blob, 5).unwrap();
         assert_eq!(s.pending_for(&peer(9)).unwrap()[0].payload, blob);
+    }
+
+    // ── OutboxManager ────────────────────────────────────────────────────────
+
+    #[test]
+    fn manager_resends_on_online_with_stable_id() {
+        let (mut m, log) = mgr_with(store());
+        m.on_sent(&peer(1), 5, "привет", 100);
+        m.on_online(&peer(1));
+        // Дослано с тем же msg_id (получатель дедуплицирует).
+        assert_eq!(*log.lock().unwrap(), vec![(peer(1), 5, "привет".to_string())]);
+    }
+
+    #[test]
+    fn manager_ack_stops_resend() {
+        let (mut m, log) = mgr_with(store());
+        m.on_sent(&peer(1), 5, "hi", 100);
+        m.on_ack(&peer(1), 5); // доставлено → снято из очереди
+        log.lock().unwrap().clear();
+        m.on_online(&peer(1));
+        assert!(log.lock().unwrap().is_empty(), "после Ack досылки быть не должно");
+    }
+
+    #[test]
+    fn manager_online_targets_only_that_peer() {
+        let (mut m, log) = mgr_with(store());
+        m.on_sent(&peer(1), 1, "to1", 10);
+        m.on_sent(&peer(2), 2, "to2", 10);
+        m.on_online(&peer(1));
+        assert_eq!(*log.lock().unwrap(), vec![(peer(1), 1, "to1".to_string())]);
+    }
+
+    #[test]
+    fn manager_start_prunes_expired_and_resends_rest() {
+        let s = store();
+        // Протухшее (старше TTL) и свежее.
+        s.enqueue(&peer(1), 1, "text", b"old", 0).unwrap();
+        let now = OUTBOX_TTL_SECS + 1000;
+        s.enqueue(&peer(1), 2, "text", b"fresh", now - 10).unwrap();
+        let (mut m, log) = mgr_with(s);
+        m.on_start(now);
+        // old (created_at 0 < now-TTL) выброшено; дослан только fresh.
+        assert_eq!(*log.lock().unwrap(), vec![(peer(1), 2, "fresh".to_string())]);
     }
 }
