@@ -74,6 +74,55 @@ impl RateLimiter {
     }
 }
 
+/// Градуированный лимитер по доверию (M3, анти-Sybil). Доверенные (контакты) —
+/// ЩЕДРЫЙ per-source бюджет; чужие (не в доверенном множестве) черпают из ОДНОЙ
+/// общей мелкой корзины на весь класс: нагенерил 1000 ключей → все делят одну
+/// корзину, Sybil обнулён. Флаг `trusted` передаёт вызывающий (мессенджер сверяет
+/// src с набором контактов) — сам лимитер остаётся чистым.
+pub struct TieredRateLimiter {
+    trusted: RateLimiter,
+    stranger: Bucket,
+    stranger_cap: f64,
+    stranger_refill: f64,
+}
+
+impl TieredRateLimiter {
+    pub fn new(
+        trusted_cap: f64,
+        trusted_refill: f64,
+        stranger_cap: f64,
+        stranger_refill: f64,
+    ) -> TieredRateLimiter {
+        TieredRateLimiter {
+            trusted: RateLimiter::new(trusted_cap, trusted_refill),
+            stranger: Bucket { tokens: stranger_cap.max(1.0), last: Instant::now() },
+            stranger_cap: stranger_cap.max(1.0),
+            stranger_refill: stranger_refill.max(0.0001),
+        }
+    }
+
+    /// Принять пакет от `src`. `trusted` — известен ли src как контакт.
+    pub fn allow(&mut self, src: &[u8; 32], trusted: bool, now: Instant) -> bool {
+        if trusted {
+            return self.trusted.allow(src, now);
+        }
+        // Общая корзина всех чужих.
+        let elapsed = now.saturating_duration_since(self.stranger.last).as_secs_f64();
+        self.stranger.tokens = (self.stranger.tokens + elapsed * self.stranger_refill).min(self.stranger_cap);
+        self.stranger.last = now;
+        if self.stranger.tokens >= 1.0 {
+            self.stranger.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn evict_idle(&mut self, now: Instant) {
+        self.trusted.evict_idle(now);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +184,43 @@ mod tests {
         assert_eq!(rl.tracked(), 2);
         rl.evict_idle(t0 + Duration::from_secs(200));
         assert_eq!(rl.tracked(), 0);
+    }
+
+    // ── TieredRateLimiter (анти-Sybil) ────────────────────────────────────────
+
+    #[test]
+    fn strangers_share_one_bucket_anti_sybil() {
+        // Общая корзина на 3, чужие ключи РАЗНЫЕ — но делят одну корзину.
+        let mut t = TieredRateLimiter::new(100.0, 100.0, 3.0, 0.001);
+        let now = Instant::now();
+        assert!(t.allow(&key(1), false, now));
+        assert!(t.allow(&key(2), false, now));
+        assert!(t.allow(&key(3), false, now));
+        // Четвёртый чужой (ещё один новый ключ) — отказ: корзина класса исчерпана.
+        assert!(!t.allow(&key(4), false, now));
+    }
+
+    #[test]
+    fn trusted_get_generous_independent_buckets() {
+        let mut t = TieredRateLimiter::new(5.0, 0.001, 1.0, 0.001);
+        let now = Instant::now();
+        // Доверенный источник — свой щедрый бюджет (5), независимо от чужой корзины.
+        for _ in 0..5 {
+            assert!(t.allow(&key(1), true, now));
+        }
+        assert!(!t.allow(&key(1), true, now)); // его бюджет исчерпан
+        // Другой доверенный — свой отдельный бюджет.
+        assert!(t.allow(&key(2), true, now));
+    }
+
+    #[test]
+    fn trusted_unaffected_by_stranger_flood() {
+        let mut t = TieredRateLimiter::new(5.0, 0.001, 1.0, 0.001);
+        let now = Instant::now();
+        // Чужие выжрали свою корзину...
+        assert!(t.allow(&key(9), false, now));
+        assert!(!t.allow(&key(8), false, now));
+        // ...но контакт по-прежнему проходит (разные тиры).
+        assert!(t.allow(&key(1), true, now));
     }
 }
