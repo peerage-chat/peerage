@@ -83,6 +83,13 @@ pub enum Payload {
         #[serde(with = "hex_bytes")]
         data: Vec<u8>,
     },
+    /// Неизвестный/будущий тип payload — forward-compat (ADR-006). Сообщения версий,
+    /// которые этот клиент ещё НЕ понимает (напр. реакции/закрепы/правки — post-1.0),
+    /// декодируются СЮДА и молча игнорируются, а не роняют `decode`. Так новые типы
+    /// сообщений добавляются аддитивно, не ломая старые клиенты. Приёмник новых типов
+    /// НЕ шлёт `Ack` — отправитель погасит ретрай по TTL (безопасно).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Компактная hex-сериализация байтовых полей блоб-сообщений.
@@ -198,6 +205,15 @@ mod tests {
 
         assert_eq!(from, alice.public_key_bytes());
         assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn unknown_payload_type_is_ignored_not_error() {
+        // Forward-compat (ADR-006): будущий тип, которого этот клиент ещё не знает
+        // (напр. реакция post-1.0), декодируется в Unknown, а НЕ роняет разбор.
+        let future = r#"{"type":"reaction","target":42,"emoji":"fire"}"#;
+        let p: Payload = serde_json::from_str(future).unwrap();
+        assert_eq!(p, Payload::Unknown);
     }
 
     #[test]

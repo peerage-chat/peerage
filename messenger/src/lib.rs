@@ -729,6 +729,9 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::BlobChunk { id, index, data } => {
                 shared.emit(Event::BlobChunk { peer: src, id, index, data });
             }
+            // Forward-compat (ADR-006): будущий тип, который этот клиент не знает —
+            // молча игнорируем (Ack не шлём, отправитель погасит ретрай по TTL).
+            Payload::Unknown => {}
         }
     }
 }
