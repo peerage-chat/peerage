@@ -176,7 +176,7 @@ private fun CompactShell(model: AppModel) {
                             onMenu = { scope.launch { drawerState.open() } },
                         ) {
                             PeerIndicator(model.netPeers) { model.startBenchRecv() }
-                            BarIcon(Icons.Filled.Search, stringResource(R.string.cd_search)) { screen = Screen.Search }
+                            BarIcon(TablerIcons.Search, stringResource(R.string.cd_search)) { screen = Screen.Search }
                         }
                         Screen.Chat -> ChatTopBar(
                             model,
