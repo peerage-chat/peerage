@@ -21,6 +21,9 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +42,7 @@ class MainActivity : ComponentActivity() {
     private val perms =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         model.appContext = applicationContext
@@ -49,7 +53,16 @@ class MainActivity : ComponentActivity() {
         val need = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (need.isNotEmpty()) perms.launch(need.toTypedArray())
         val dataDir = filesDir.absolutePath
-        setContent { P2PTheme { App(model, dataDir) } }
+        setContent {
+            // ADR-005: класс ширины окна читается ЗДЕСЬ (единственная точка), дальше по
+            // приложению ходит наш enum WidthClass — experimental-API не течёт в UI-код.
+            val width = when (calculateWindowSizeClass(this@MainActivity).widthSizeClass) {
+                WindowWidthSizeClass.Expanded -> WidthClass.Expanded
+                WindowWidthSizeClass.Medium -> WidthClass.Medium
+                else -> WidthClass.Compact
+            }
+            P2PTheme { App(model, dataDir, width) }
+        }
     }
 
     override fun onStart() {
@@ -68,7 +81,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun App(model: AppModel, dataDir: String) {
+internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
     // Инициализация ядра на фоне; опрос событий/тикер статуса model запускает сам
     // на выделенных потоках (см. AppModel — UI ничего нативного не вызывает напрямую).
     LaunchedEffect(Unit) {
@@ -78,7 +91,7 @@ fun App(model: AppModel, dataDir: String) {
     when {
         model.error != null -> CenterMessage(stringResource(R.string.app_error, model.error.orEmpty()))
         model.me == null -> CenterMessage(stringResource(R.string.app_connecting))
-        else -> Root(model)
+        else -> Root(model, width)
     }
 }
 
@@ -91,9 +104,24 @@ internal fun CenterMessage(text: String) {
 
 internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat }
 
+/** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
+ *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
+internal enum class WidthClass { Compact, Medium, Expanded }
+
+/** Диспетчер оболочки по ширине окна (ADR-005). v1.0 реализует только Compact; Medium/
+ *  Expanded — швы на будущее (пока рендерят Compact-оболочку, без переписывания контента). */
+@Composable
+private fun Root(model: AppModel, width: WidthClass) {
+    when (width) {
+        // TODO(ADR-005): MediumShell (nav-rail + одна панель), ExpandedShell (rail+список+детали).
+        // Контент-экраны переиспользуются как есть — добавляется только новая оболочка.
+        WidthClass.Compact, WidthClass.Medium, WidthClass.Expanded -> CompactShell(model)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Root(model: AppModel) {
+private fun CompactShell(model: AppModel) {
     var screen by remember { mutableStateOf(Screen.Contacts) }
     // ADR-004: нас отозвали из открытой группы (currentGroup → null) — уходим на список.
     LaunchedEffect(model.currentGroup) {
