@@ -24,8 +24,8 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
-        // arm64 — реальные устройства; x86_64 — эмулятор.
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        // Набор ABI задаётся ниже через splits (arm64 — устройства, x86_64 — эмулятор);
+        // abiFilters здесь конфликтует со splits, поэтому не используется.
     }
 
     buildTypes {
@@ -49,8 +49,22 @@ android {
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
 
     packaging {
-        // Go c-shared libygg.so не выровнена под uncompressed-загрузку — извлекаем.
-        jniLibs.useLegacyPackaging = true
+        // Нативка лежит в APK несжатой+выровненной (AGP zipalign) и грузится ПРЯМО из
+        // APK — без распаковки-дубликата на диск. Проверено: и Go c-shared libygg.so,
+        // и Rust libp2p_android.so корректно мапятся (nativeloader: base.apk!/lib/…: ok).
+        jniLibs.useLegacyPackaging = false
+    }
+
+    // Сплит по ABI: каждому устройству — своя одна архитектура (arm64 на телефон,
+    // x86_64 на эмулятор). Иначе universal-APK несёт обе несжатыми и раздувается.
+    // Вместе с useLegacyPackaging=false даёт минимальный размер на устройстве.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
     }
 }
 
