@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
@@ -286,7 +285,7 @@ private fun CompactShell(model: AppModel) {
                     modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
                     containerColor = HoloAccent,
                     contentColor = HoloAccentDark,
-                ) { Icon(Icons.Filled.Create, stringResource(R.string.cd_new_chat), modifier = Modifier.size(22.dp)) }
+                ) { Icon(TablerIcons.Pencil, stringResource(R.string.cd_new_chat), modifier = Modifier.size(22.dp)) }
             }
             model.incomingCall?.let { IncomingCallOverlay(model, it) }
             // Активный DM-звонок (аудио или видео) — полноэкранная комната-сетка.

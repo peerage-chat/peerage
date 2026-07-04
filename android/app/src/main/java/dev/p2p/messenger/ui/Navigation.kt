@@ -10,13 +10,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Settings
@@ -38,10 +33,10 @@ import dev.p2p.messenger.R
 
 // Третий элемент — resId подписи (локализуется в месте рендера через stringResource).
 internal val Folders = listOf(
-    Triple("all", Icons.Filled.Forum, R.string.folder_all),
-    Triple("dm", Icons.AutoMirrored.Filled.Chat, R.string.nav_chats),
-    Triple("room", Icons.Filled.Headset, R.string.folder_rooms),
-    Triple("channel", Icons.Filled.Campaign, R.string.folder_channels),
+    Triple("all", TablerIcons.Messages, R.string.folder_all),
+    Triple("dm", TablerIcons.Message, R.string.nav_chats),
+    Triple("room", TablerIcons.Headphones, R.string.folder_rooms),
+    Triple("channel", TablerIcons.Speakerphone, R.string.folder_channels),
 )
 
 internal fun folderLabel(key: String): Int = Folders.firstOrNull { it.first == key }?.third ?: R.string.nav_chats
@@ -67,7 +62,7 @@ internal fun FolderRail(model: AppModel, activeFilter: String, onFilter: (String
         Folders.forEach { (key, icon, labelRes) ->
             FolderTile(icon, stringResource(labelRes), key == activeFilter, badgeFor(key)) { onFilter(key) }
         }
-        FolderTile(Icons.Filled.Add, stringResource(R.string.folder_create), false, 0) { /* TODO: создать папку */ }
+        FolderTile(TablerIcons.Plus, stringResource(R.string.folder_create), false, 0) { /* TODO: создать папку */ }
     }
     HorizontalDivider(thickness = 1.dp, color = HoloBorder)
 }
