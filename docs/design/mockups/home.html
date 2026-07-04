@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Главная (Чаты)</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; position: relative; color: var(--on-dark); }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px 14px; background: var(--accent-dark); }
+  .topbar .title { font-size: 20px; font-weight: 500; flex: 1; }
+  .peers { display: flex; align-items: center; gap: 5px; color: var(--online); font-size: 14px; }
+  .rail { display: flex; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .tile { width: 48px; height: 48px; border-radius: 15px; background: var(--surface); display: flex;
+          align-items: center; justify-content: center; position: relative; flex: 0 0 auto; color: var(--secondary); font-size: 24px; }
+  .tile.active { background: var(--folder-selected); color: var(--accent); }
+  .tile .badge { position: absolute; right: -3px; bottom: -3px; min-width: 18px; height: 18px; background: var(--accent);
+                 color: var(--accent-dark); border: 2px solid var(--bg); border-radius: 9px; font-size: 10px;
+                 font-weight: 500; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: var(--row-v) var(--space-l); }
+  .av { width: 50px; height: 50px; border-radius: var(--radius-avatar); display: flex; align-items: center;
+        justify-content: center; font-size: 20px; font-weight: 500; }
+  .av-wrap { position: relative; flex: 0 0 auto; }
+  .presence { position: absolute; right: -2px; bottom: -2px; width: 14px; height: 14px; background: var(--online);
+              border: 2px solid var(--bg); border-radius: 5px; }
+  .meta { flex: 1; min-width: 0; }
+  .name { font-size: var(--font-label); font-weight: 500; display: flex; align-items: center; gap: 5px; }
+  .name i { font-size: 16px; color: var(--verified); }
+  .sub { font-size: var(--font-body); color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .right { text-align: right; flex: 0 0 auto; }
+  .time { font-size: var(--font-small); color: var(--secondary); }
+  .unread { display: inline-flex; margin-top: 4px; min-width: 20px; height: 20px; background: var(--accent);
+            color: var(--accent-dark); border-radius: 10px; font-size: 12px; font-weight: 500; align-items: center;
+            justify-content: center; padding: 0 6px; }
+  .fab { position: absolute; right: 20px; bottom: 20px; width: 56px; height: 56px; border-radius: 16px;
+         background: var(--accent); display: flex; align-items: center; justify-content: center;
+         font-size: 24px; color: var(--accent-dark); }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+
+  <div class="topbar">
+    <i class="ti ti-menu-2" style="font-size:24px;color:var(--icon-chrome)"></i>
+    <span class="title">Чаты</span>
+    <span class="peers"><i class="ti ti-affiliate" style="font-size:19px"></i>8</span>
+    <i class="ti ti-search" style="font-size:22px;color:var(--accent)"></i>
+  </div>
+
+  <div class="rail">
+    <div class="tile active"><i class="ti ti-messages"></i><span class="badge">4</span></div>
+    <div class="tile"><i class="ti ti-message"></i></div>
+    <div class="tile"><i class="ti ti-headphones"></i></div>
+    <div class="tile"><i class="ti ti-speakerphone"></i></div>
+    <div class="tile" style="color:var(--icon-muted)"><i class="ti ti-plus"></i></div>
+  </div>
+
+  <div class="row">
+    <div class="av-wrap"><div class="av" style="background:#2A4034;color:var(--online)"><i class="ti ti-users" style="font-size:24px"></i></div></div>
+    <div class="meta">
+      <div class="name">Группа</div>
+      <div class="sub">2 участника · <span style="color:var(--online)">1 в сети</span></div>
+    </div>
+    <div class="right"><div class="time">14:20</div></div>
+  </div>
+
+  <div class="row">
+    <div class="av-wrap"><div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div><span class="presence"></span></div>
+    <div class="meta">
+      <div class="name">Алиса <i class="ti ti-rosette-discount-check"></i></div>
+      <div class="sub">Договорились, до завтра</div>
+    </div>
+    <div class="right"><div class="time">13:58</div><span class="unread">3</span></div>
+  </div>
+
+  <div class="row">
+    <div class="av-wrap"><div class="av" style="background:#4A2E2E;color:#f0c7c7">2</div><span class="presence"></span></div>
+    <div class="meta">
+      <div class="name" style="font-family:ui-monospace,monospace">2cbbb91c8f4a…</div>
+      <div class="sub" style="color:var(--online)">в сети</div>
+    </div>
+    <div class="right"><div class="time">пн</div></div>
+  </div>
+
+  <div class="row">
+    <div class="av-wrap"><div class="av" style="background:#2E3A4A;color:#c7d6f0">Б</div></div>
+    <div class="meta">
+      <div class="name">Борис</div>
+      <div class="sub"><i class="ti ti-microphone" style="font-size:15px;vertical-align:-2px"></i> Голосовое · 0:14</div>
+    </div>
+    <div class="right"><div class="time">вс</div><i class="ti ti-bell-off" style="font-size:16px;color:var(--icon-muted)"></i></div>
+  </div>
+
+  <div style="height:96px"></div>
+  <div class="fab"><i class="ti ti-pencil"></i></div>
+
+</div>
+</body>
+</html>

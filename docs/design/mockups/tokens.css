@@ -1,0 +1,72 @@
+/* Дизайн-токены приложения как CSS-переменные — ЗЕРКАЛО
+   android/app/src/main/java/dev/p2p/messenger/Tokens.kt (единый источник истины).
+   ПРАВИЛО: правишь Tokens.kt → синхронизируй здесь (значения 1-в-1). Макеты берут
+   цвета/отступы/радиусы ТОЛЬКО отсюда — тогда макет сам себе референс токенов, а
+   реализация в Compose ложится на Tokens.* без пересчёта. */
+:root {
+  /* ── Бренд/акцент ── */
+  --accent: #33B5E5;
+  --accent-dark: #04222E;        /* текст/иконка НА акценте; фон топ-бара (HoloAccentDark) */
+  --accent-muted: #13313D;
+  --accent-badge: rgba(51, 181, 229, 0.13);
+
+  /* ── Поверхности ── */
+  --bg: #1A1A1A;
+  --surface: #222222;
+  --border: #333333;
+  --call-bg: #181A1F;
+  --tile: #1A1D21;
+  --avatar: #3A3F45;
+
+  /* ── Текст/иконки ── */
+  --on-dark: #FFFFFF;
+  --secondary: #888888;
+  --icon-muted: #5A5F66;
+  --icon-chrome: #E6E7EA;
+  --on-online: #0A1F0A;
+
+  /* ── Статусы ── */
+  --online: #8BC34A;
+  --verified: #4CAF50;
+  --error: #E53935;
+  --warn: #E6A23C;
+  --offline-dot: #555555;
+
+  /* ── Чат ── */
+  --bubble-in: #24292F;          /* входящий пузырь (нейтральный) */
+  --bubble-out: #245266;         /* исходящий (приглушённый акцент) */
+  --folder-selected: #1C3A47;
+
+  /* ── Скримы/оверлеи ── */
+  --overlay: rgba(0, 0, 0, 0.95);
+  --chip-scrim: rgba(20, 21, 24, 0.72);
+  --tile-scrim: rgba(0, 0, 0, 0.67);
+
+  /* ── Отступы (сетка 4dp; row-v — намеренная плотность ряда) ── */
+  --space-xxs: 2px;
+  --space-xs: 4px;
+  --space-s: 8px;
+  --space-m: 12px;
+  --space-l: 16px;
+  --space-xl: 20px;
+  --space-xxl: 24px;
+  --row-v: 9px;
+
+  /* ── Радиусы ── */
+  --radius-badge: 6px;
+  --radius-chip: 10px;
+  --radius-tile: 12px;
+  --radius-preview: 14px;
+  --radius-button: 14px;
+  --radius-avatar: 14px;         /* «квадрат со скруглением» */
+  --radius-pill: 18px;
+
+  /* ── Шрифт (sp ≈ px) ── */
+  --font-caption: 11px;
+  --font-small: 12px;
+  --font-body: 13px;
+  --font-label: 15px;
+  --font-title: 19px;
+  --font-big: 26px;
+  --font-huge: 28px;
+}
