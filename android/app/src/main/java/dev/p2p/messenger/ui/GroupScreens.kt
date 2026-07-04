@@ -322,7 +322,8 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
                         TextButton(onClick = { model.removeGroupMember(gid, key) }) {
                             Text(
                                 stringResource(R.string.group_remove_member),
-                                color = Color(0xFFE0563B), fontSize = 14.sp,
+                                color = Color(0xFFE0563B),
+                                fontSize = 14.sp,
                             )
                         }
                     }
@@ -334,7 +335,8 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
             item {
                 Text(
                     stringResource(R.string.addmember_empty),
-                    color = HoloSecondary, fontSize = 14.sp,
+                    color = HoloSecondary,
+                    fontSize = 14.sp,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
@@ -355,7 +357,8 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
             ListRow(onClick = { model.leaveGroup(gid) }) {
                 Text(
                     stringResource(R.string.group_leave),
-                    color = Color(0xFFE0563B), fontSize = 16.sp,
+                    color = Color(0xFFE0563B),
+                    fontSize = 16.sp,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
@@ -367,7 +370,9 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
 private fun SectionHeader(text: String) {
     Text(
         text,
-        color = HoloSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+        color = HoloSecondary,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
         modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
     )
 }

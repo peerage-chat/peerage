@@ -872,7 +872,10 @@ class AppModel private constructor() {
             }
             "groups_changed" -> {
                 refreshGroupsNow()
-                currentGroup?.let { loadGroupHistory(it); loadGroupMembers(it) }
+                currentGroup?.let {
+                    loadGroupHistory(it)
+                    loadGroupMembers(it)
+                }
             }
             "group_removed" -> {
                 // ADR-004: нас отозвали. Если открыт этот чат — выходим и уведомляем.
@@ -881,7 +884,9 @@ class AppModel private constructor() {
                 appContext?.let { ctx ->
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         android.widget.Toast.makeText(
-                            ctx, ctx.getString(R.string.group_you_removed), android.widget.Toast.LENGTH_LONG,
+                            ctx,
+                            ctx.getString(R.string.group_you_removed),
+                            android.widget.Toast.LENGTH_LONG,
                         ).show()
                     }
                 }
