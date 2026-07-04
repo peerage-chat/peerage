@@ -19,6 +19,19 @@ members = [
 # крейтами, чтобы не ломать Windows. transport собираем явно: cargo build -p p2p-ygg.
 default-members = ["core"]
 
+# Профиль release для всего воркспейса (в т.ч. android cdylib libp2p_android.so).
+# Цель — меньше размер .so без риска для отзывчивости и корректности:
+#   strip           — срезать таблицу символов (.symtab/.strtab ~2.7 МБ), код не трогает;
+#   lto = "thin"    — межкрейтовый инлайн: меньше и обычно быстрее, приемлемый линк;
+#   codegen-units=1 — лучше оптимизация/размер (дольше компиляция).
+# opt-level НЕ трогаем (=3): крипта (MLS) и медиа чувствительны к скорости.
+# panic="abort" ЗАПРЕЩЁН: ломает catch_unwind на JNI-границе (инвариант #1 —
+# паника на границе обязана ловиться, иначе краш всего процесса).
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+
 [workspace.package]
 edition = "2021"
 # GPL-3.0: используем Slint под GPL-вариантом его три-лицензии, поэтому всё
