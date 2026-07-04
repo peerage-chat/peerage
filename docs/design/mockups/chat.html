@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Личный чат (DM)</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; flex-wrap: wrap; gap: 28px;
+         justify-content: center; align-items: flex-start; padding: 24px;
+         font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .cap { color: #8a8a8a; font-size: 13px; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; position: relative; color: var(--on-dark); }
+
+  /* Шапка */
+  .header { display: flex; align-items: center; gap: 10px; padding: 12px 12px; background: var(--accent-dark); }
+  .header .av { width: 40px; height: 40px; border-radius: 12px; background: #3A2E4A; color: #d9c7f0;
+                display: flex; align-items: center; justify-content: center; font-weight: 500; position: relative; }
+  .header .presence { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px;
+                      background: var(--online); border: 2px solid var(--accent-dark); border-radius: 4px; }
+  .header .who { flex: 1; min-width: 0; }
+  .header .nm { font-size: 16px; font-weight: 500; display: flex; align-items: center; gap: 5px; }
+  .header .nm i { font-size: 15px; color: var(--verified); }
+  .header .st { font-size: 12px; color: var(--online); }
+  .header .act { font-size: 22px; color: var(--accent); padding: 0 4px; }
+
+  /* Полоса закреплённого (будущее) */
+  .pinned { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--surface);
+            border-left: 3px solid var(--accent); }
+  .pinned .pl { flex: 1; min-width: 0; }
+  .pinned .plt { font-size: 12px; color: var(--accent); }
+  .pinned .pls { font-size: 13px; color: var(--on-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Тело */
+  .body { padding: 10px 12px 0; display: flex; flex-direction: column; gap: 8px; }
+  .e2e { align-self: center; font-size: 11px; color: var(--secondary); background: var(--surface);
+         padding: 4px 12px; border-radius: 10px; display: flex; align-items: center; gap: 5px; margin: 4px 0; }
+  .day { align-self: center; font-size: 12px; color: var(--secondary); background: var(--surface);
+         padding: 3px 12px; border-radius: 10px; margin: 4px 0; }
+
+  .m { display: flex; max-width: 78%; }
+  .m.in { align-self: flex-start; }
+  .m.out { align-self: flex-end; }
+  .bub { padding: 7px 10px 5px; border-radius: 14px; font-size: 14px; line-height: 1.35; position: relative; }
+  .in .bub { background: var(--bubble-in); border-bottom-left-radius: 5px; }
+  .out .bub { background: var(--bubble-out); border-bottom-right-radius: 5px; }
+  .meta { display: flex; align-items: center; gap: 3px; justify-content: flex-end; font-size: 11px;
+          color: #b7c3cb; margin-top: 2px; }
+  .meta .edited { color: #8fa3ab; }
+  .meta i { font-size: 14px; }
+  .meta .rd { color: var(--accent); }
+
+  /* Ответ-цитата (будущее) */
+  .reply { border-left: 2px solid var(--accent); padding: 2px 8px; margin-bottom: 4px; border-radius: 3px; }
+  .reply .rn { font-size: 12px; color: var(--accent); font-weight: 500; }
+  .reply .rs { font-size: 12px; color: var(--secondary); white-space: nowrap; overflow: hidden;
+               text-overflow: ellipsis; max-width: 200px; }
+  /* Пересланное (будущее) */
+  .fwd { font-size: 12px; color: var(--accent); margin-bottom: 3px; display: flex; align-items: center; gap: 4px; }
+
+  /* Реакции (будущее) */
+  .rx { display: flex; gap: 5px; margin-top: 5px; }
+  .rx .chip { display: flex; align-items: center; gap: 4px; background: var(--tile); border: 1px solid var(--border);
+              border-radius: 12px; padding: 2px 7px; font-size: 12px; color: #cfd8dc; }
+  .rx .chip.mine { background: var(--accent-muted); border-color: var(--accent); color: var(--accent); }
+  .rx .chip i { font-size: 14px; }
+
+  /* Голосовое */
+  .voice { display: flex; align-items: center; gap: 8px; }
+  .voice .play { font-size: 26px; color: #fff; }
+  .voice .wave { display: flex; align-items: center; gap: 2px; height: 22px; }
+  .voice .wave span { width: 3px; background: rgba(255,255,255,.7); border-radius: 2px; }
+  .voice .dur { font-size: 12px; color: #cfe0e8; }
+
+  /* Вложение-картинка */
+  .img { width: 200px; height: 130px; border-radius: 10px; background: var(--tile);
+         display: flex; align-items: center; justify-content: center; color: var(--icon-muted); font-size: 34px; }
+
+  /* Ввод */
+  .input { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-top: 8px; }
+  .pill { flex: 1; display: flex; align-items: center; gap: 8px; background: var(--tile); border-radius: 22px;
+          padding: 0 12px; height: 44px; color: var(--secondary); }
+  .pill i { font-size: 22px; color: var(--secondary); }
+  .pill .ph { flex: 1; font-size: 15px; }
+  .mic { width: 44px; height: 44px; border-radius: 14px; background: var(--accent); color: var(--accent-dark);
+         display: flex; align-items: center; justify-content: center; font-size: 22px; flex: 0 0 auto; }
+
+  /* Долгий тап: пикер реакций + контекст-меню (faux-overlay) */
+  .dim { position: absolute; inset: 0; background: rgba(0,0,0,.55); display: flex; flex-direction: column;
+         justify-content: center; gap: 10px; padding: 0 12px; }
+  .picker { align-self: flex-end; display: flex; gap: 6px; background: var(--surface); border: 1px solid var(--border);
+            border-radius: 22px; padding: 7px 10px; }
+  .picker span { font-size: 23px; line-height: 1; }
+  .picker i { font-size: 24px; color: #cfd8dc; }
+  .picker .add { color: var(--secondary); }
+  .menu { align-self: flex-end; width: 210px; background: var(--surface); border: 1px solid var(--border);
+          border-radius: 12px; overflow: hidden; }
+  .menu .it { display: flex; align-items: center; gap: 12px; padding: 11px 14px; font-size: 14px; color: var(--on-dark); }
+  .menu .it i { font-size: 19px; color: var(--secondary); }
+  .menu .it.danger { color: var(--error); }
+  .menu .it.danger i { color: var(--error); }
+  .menu .sep { height: 1px; background: var(--border); }
+</style>
+</head>
+<body>
+
+<div class="col">
+  <div class="phone">
+    <div class="header">
+      <i class="ti ti-arrow-left act"></i>
+      <div class="av">А<span class="presence"></span></div>
+      <div class="who">
+        <div class="nm">Алиса <i class="ti ti-rosette-discount-check"></i></div>
+        <div class="st">в сети</div>
+      </div>
+      <i class="ti ti-phone act"></i>
+      <i class="ti ti-dots-vertical act"></i>
+    </div>
+
+    <div class="pinned">
+      <i class="ti ti-pin" style="font-size:18px;color:var(--accent)"></i>
+      <div class="pl">
+        <div class="plt">Закреплённое · 1/2</div>
+        <div class="pls">Встреча в 18:00 у метро</div>
+      </div>
+      <i class="ti ti-list" style="font-size:18px;color:var(--secondary)"></i>
+    </div>
+
+    <div class="body">
+      <div class="e2e"><i class="ti ti-lock" style="font-size:13px"></i> Защищено сквозным шифрованием</div>
+      <div class="day">Сегодня</div>
+
+      <div class="m in"><div class="bub">
+        Привет! Ты уже в сети?
+        <div class="meta">13:40</div>
+        <div class="rx"><span class="chip mine">👍 1</span></div>
+      </div></div>
+
+      <div class="m out"><div class="bub">
+        <div class="reply"><div class="rn">Алиса</div><div class="rs">Привет! Ты уже в сети?</div></div>
+        Да, только подключился
+        <div class="meta">13:41 <i class="ti ti-checks rd"></i></div>
+      </div></div>
+
+      <div class="m in"><div class="bub">
+        <div class="fwd"><i class="ti ti-arrow-forward-up" style="font-size:13px"></i> Переслано от Борис</div>
+        Скинул файл, глянь
+        <div class="meta">13:42</div>
+      </div></div>
+
+      <div class="m out"><div class="bub">
+        <div class="voice">
+          <i class="ti ti-player-play play"></i>
+          <div class="wave"><span style="height:8px"></span><span style="height:16px"></span><span style="height:22px"></span><span style="height:12px"></span><span style="height:18px"></span><span style="height:9px"></span><span style="height:14px"></span><span style="height:20px"></span><span style="height:11px"></span></div>
+          <span class="dur">0:14</span>
+        </div>
+        <div class="meta">13:43 <i class="ti ti-checks rd"></i></div>
+      </div></div>
+
+      <div class="m in"><div class="bub">
+        <div class="img"><i class="ti ti-photo"></i></div>
+        <div class="meta">13:44</div>
+        <div class="rx"><span class="chip">❤️ 1</span><span class="chip">🔥 2</span></div>
+      </div></div>
+
+      <div class="m out"><div class="bub">
+        Буду через 10 минут
+        <div class="meta"><span class="edited">изм. </span>13:50 <i class="ti ti-clock" style="color:#9fb0b8"></i></div>
+      </div></div>
+    </div>
+
+    <div class="input">
+      <div class="pill">
+        <i class="ti ti-paperclip"></i>
+        <span class="ph">Сообщение</span>
+        <i class="ti ti-mood-smile"></i>
+      </div>
+      <div class="mic"><i class="ti ti-microphone"></i></div>
+    </div>
+  </div>
+  <div class="cap">Обычный вид — закреп, ответ, пересылка, реакции, голосовое, картинка, «изм.», статусы</div>
+</div>
+
+<div class="col">
+  <div class="phone" style="min-height:720px">
+    <div class="header">
+      <i class="ti ti-arrow-left act"></i>
+      <div class="av">А<span class="presence"></span></div>
+      <div class="who"><div class="nm">Алиса <i class="ti ti-rosette-discount-check"></i></div><div class="st">в сети</div></div>
+      <i class="ti ti-phone act"></i>
+      <i class="ti ti-dots-vertical act"></i>
+    </div>
+    <div class="dim">
+      <div class="picker">
+        <span>👍</span><span>❤️</span><span>🔥</span><span>😂</span><span>😮</span><span>😢</span>
+        <i class="ti ti-plus add"></i>
+      </div>
+      <div class="m out" style="max-width:78%"><div class="bub" style="box-shadow:0 0 0 2px var(--accent)">
+        Буду через 10 минут
+        <div class="meta">13:50 <i class="ti ti-checks rd"></i></div>
+      </div></div>
+      <div class="menu">
+        <div class="it"><i class="ti ti-arrow-back-up"></i> Ответить</div>
+        <div class="it"><i class="ti ti-pin"></i> Закрепить</div>
+        <div class="it"><i class="ti ti-copy"></i> Копировать</div>
+        <div class="it"><i class="ti ti-arrow-forward-up"></i> Переслать</div>
+        <div class="it"><i class="ti ti-pencil"></i> Изменить</div>
+        <div class="sep"></div>
+        <div class="it danger"><i class="ti ti-trash"></i> Удалить</div>
+      </div>
+    </div>
+  </div>
+  <div class="cap">Долгий тап — пикер реакций сверху, контекст-меню снизу</div>
+</div>
+
+</body>
+</html>
