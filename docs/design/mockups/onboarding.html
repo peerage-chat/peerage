@@ -13,52 +13,61 @@
          font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
   .col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .cap { color: #8a8a8a; font-size: 12px; }
-  .phone { width: 320px; height: 600px; background: var(--bg); border: 1px solid var(--border); border-radius: 26px;
-           overflow: hidden; position: relative; color: var(--on-dark); display: flex; flex-direction: column; }
-  .pad { flex: 1; display: flex; flex-direction: column; padding: 28px 24px; }
-  .brand { display: flex; flex-direction: column; align-items: center; margin-top: 16px; }
-  .mark { width: 68px; height: 68px; border-radius: 20px; background: var(--accent-dark); display: flex;
-          align-items: center; justify-content: center; font-size: 36px; color: var(--accent); }
-  h1 { font-size: 22px; font-weight: 500; text-align: center; margin: 18px 0 4px; }
-  .lead { font-size: var(--font-body); color: var(--secondary); text-align: center; }
-  .bul { display: flex; align-items: center; gap: 12px; padding: 9px 0; }
-  .bul i { font-size: 22px; color: var(--accent); width: 24px; text-align: center; }
-  .bul span { font-size: 14px; }
-  .spring { flex: 1; }
-  /* Единый подвал: primary + secondary на фиксированной высоте у низа — выровнены по всем экранам. */
-  .footer { display: flex; flex-direction: column; gap: 10px; }
-  .btn { height: 48px; border-radius: var(--radius-button); display: flex; align-items: center; justify-content: center;
-         gap: 8px; font-size: var(--font-label); font-weight: 500; }
+  .phone { width: 320px; height: 620px; background: var(--bg); border: 1px solid var(--border);
+           border-radius: 26px; overflow: hidden; color: var(--on-dark); display: flex; flex-direction: column; }
+  .pad { flex: 1; display: flex; flex-direction: column; padding: 26px 24px 24px; }
+
+  /* ── Единый скелет: фиксированные зоны одинаковы на всех экранах, контент — flex:1.
+     Порядок: заголовок · описание · контент · короткая надпись · Готово · Пропустить. ── */
+  .z-title { height: 56px; display: flex; align-items: center; justify-content: center; text-align: center; }
+  .z-title h1 { font-size: 22px; font-weight: 500; line-height: 1.15; }
+  .z-desc { height: 40px; display: flex; align-items: center; justify-content: center; text-align: center; }
+  .z-desc span { font-size: var(--font-body); color: var(--secondary); line-height: 1.35; }
+  .z-content { flex: 1; display: flex; flex-direction: column; gap: 10px; margin: 8px 0 10px; }
+  .z-content.fill > * { flex: 1; }
+  .z-content.mid { justify-content: center; align-items: center; }
+  .z-cap { height: 20px; display: flex; align-items: center; justify-content: center; gap: 6px;
+           font-size: var(--font-caption); color: var(--secondary); }
+  .z-cap.ok { color: var(--online); }
+  .z-btns { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+  .btn { height: 48px; border-radius: var(--radius-button); display: flex; align-items: center;
+         justify-content: center; font-size: var(--font-label); font-weight: 500; }
   .btn.pri { background: var(--accent); color: var(--accent-dark); }
   .btn.sec { background: transparent; border: 1px solid var(--border); color: var(--icon-chrome); }
   .btn.hidden { visibility: hidden; }
-  .av { width: 100px; height: 100px; border-radius: 26px; background: var(--avatar); align-self: center;
-        display: flex; align-items: center; justify-content: center; position: relative; margin: 18px 0 8px; }
+
+  /* ── Контент-элементы ── */
+  .mark { width: 62px; height: 62px; border-radius: 18px; background: var(--accent-dark); display: flex;
+          align-items: center; justify-content: center; font-size: 32px; color: var(--accent); margin-bottom: 6px; }
+  .bul { display: flex; align-items: center; gap: 12px; padding: 7px 0; width: 100%; }
+  .bul i { font-size: 22px; color: var(--accent); width: 24px; text-align: center; }
+  .bul span { font-size: 14px; }
+  .av { width: 96px; height: 96px; border-radius: 26px; background: var(--avatar); display: flex;
+        align-items: center; justify-content: center; position: relative; margin-bottom: 14px; }
   .av .badge { position: absolute; right: -4px; bottom: -4px; width: 34px; height: 34px; border-radius: 12px;
                background: var(--accent); color: var(--accent-dark); display: flex; align-items: center;
                justify-content: center; font-size: 18px; border: 3px solid var(--bg); }
-  .field { display: flex; align-items: center; gap: 10px; background: var(--tile); border-radius: 14px; padding: 0 14px;
-           height: 50px; color: var(--secondary); margin-top: 8px; }
+  .field { display: flex; align-items: center; gap: 10px; background: var(--tile); border-radius: 14px;
+           padding: 0 14px; height: 50px; color: var(--secondary); width: 100%; }
   .field span { font-size: var(--font-label); }
-  .banner { display: flex; gap: 10px; background: rgba(230,162,60,.12); border: 1px solid rgba(230,162,60,.4);
-            border-radius: 12px; padding: 12px; margin-bottom: 16px; }
-  .banner i { color: var(--warn); font-size: 20px; flex: 0 0 auto; }
-  .banner p { font-size: 12.5px; color: #e8c98a; line-height: 1.4; }
-  .opt { display: flex; align-items: center; gap: 12px; background: var(--tile); border: 1px solid var(--border);
-         border-radius: 14px; padding: 14px; margin-bottom: 10px; }
-  .opt > i { font-size: 24px; color: var(--accent); }
-  .opt .ot { font-size: var(--font-label); font-weight: 500; }
-  .opt .os { font-size: var(--font-small); color: var(--secondary); }
-  .opt .chev { margin-left: auto; color: var(--secondary); font-size: 18px; }
-  .note { font-size: 11.5px; color: var(--secondary); line-height: 1.45; margin-top: 6px; }
-  .flag { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--online); margin-top: 10px; }
-  .pcard { background: var(--tile); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .box { border-radius: 14px; padding: 0 14px; display: flex; align-items: center; gap: 12px; }
+  .box.banner { background: rgba(230,162,60,.12); border: 1px solid rgba(230,162,60,.4); }
+  .box.banner i { color: var(--warn); font-size: 20px; flex: 0 0 auto; }
+  .box.banner p { font-size: 12.5px; color: #e8c98a; line-height: 1.35; }
+  .box.opt { background: var(--tile); border: 1px solid var(--border); }
+  .box.opt > i { font-size: 24px; color: var(--accent); }
+  .box.opt .ot { font-size: var(--font-label); font-weight: 500; }
+  .box.opt .os { font-size: var(--font-small); color: var(--secondary); }
+  .box.opt .chev { margin-left: auto; color: var(--secondary); font-size: 18px; }
+  .pcard { background: var(--tile); border: 1px solid var(--border); border-radius: 14px; padding: 0 14px;
+           display: flex; flex-direction: column; justify-content: center; gap: 9px; }
   .pcard .ph { display: flex; align-items: center; gap: 10px; }
   .pcard .ph i { font-size: 22px; color: var(--accent); }
   .pcard .ph .pt { font-size: var(--font-label); font-weight: 500; }
-  .pcard .pd { font-size: 12.5px; color: var(--secondary); margin: 7px 0 11px; line-height: 1.4; }
+  .pcard .pd { font-size: 12.5px; color: var(--secondary); line-height: 1.4; }
   .prow { display: flex; gap: 8px; }
-  .prow div { flex: 1; height: 40px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: var(--font-body); }
+  .prow div { flex: 1; height: 40px; border-radius: 11px; display: flex; align-items: center;
+              justify-content: center; font-size: var(--font-body); }
   .allow { background: var(--accent); color: var(--accent-dark); font-weight: 500; }
   .later { background: transparent; border: 1px solid var(--border); color: var(--secondary); }
 </style>
@@ -66,69 +75,65 @@
 <body>
 
   <div class="col">
-    <div class="phone">
-      <div class="pad">
-        <div class="brand"><div class="mark"><i class="ti ti-shield-lock"></i></div></div>
-        <h1>Приватность по умолчанию</h1>
-        <div class="lead">Серверов нет. Ваши данные — только у вас.</div>
-        <div style="margin-top:22px">
-          <div class="bul"><i class="ti ti-phone-off"></i><span>Без номера телефона</span></div>
-          <div class="bul"><i class="ti ti-address-book-off"></i><span>Не читаем ваши контакты</span></div>
-          <div class="bul"><i class="ti ti-map-pin-off"></i><span>Не знаем, где вы</span></div>
-          <div class="bul"><i class="ti ti-server-off"></i><span>Нет центрального сервера</span></div>
-        </div>
-        <div class="spring"></div>
-        <div class="footer">
-          <div class="btn pri">Начать</div>
-          <div class="btn sec">Импортировать ключ</div>
-        </div>
+    <div class="phone"><div class="pad">
+      <div class="z-title"><h1>Приватность по умолчанию</h1></div>
+      <div class="z-desc"><span>Серверов нет. Данные — только у вас.</span></div>
+      <div class="z-content mid">
+        <div class="mark"><i class="ti ti-shield-lock"></i></div>
+        <div class="bul"><i class="ti ti-phone-off"></i><span>Без номера телефона</span></div>
+        <div class="bul"><i class="ti ti-address-book-off"></i><span>Не читаем ваши контакты</span></div>
+        <div class="bul"><i class="ti ti-map-pin-off"></i><span>Не знаем, где вы</span></div>
+        <div class="bul"><i class="ti ti-server-off"></i><span>Нет центрального сервера</span></div>
       </div>
-    </div>
+      <div class="z-cap">Открытый код · GPL-3.0</div>
+      <div class="z-btns">
+        <div class="btn pri">Начать</div>
+        <div class="btn sec">У меня уже есть ключ</div>
+      </div>
+    </div></div>
     <div class="cap">1 · Приветствие</div>
   </div>
 
   <div class="col">
-    <div class="phone">
-      <div class="pad">
-        <h1 style="margin-top:8px">Ваш профиль</h1>
-        <div class="lead">Необязательно — можно изменить позже</div>
-        <div class="av"><i class="ti ti-user" style="font-size:42px;color:#9aa0a6"></i><span class="badge"><i class="ti ti-camera"></i></span></div>
+    <div class="phone"><div class="pad">
+      <div class="z-title"><h1>Ваш профиль</h1></div>
+      <div class="z-desc"><span>Необязательно — можно изменить позже</span></div>
+      <div class="z-content mid">
+        <div class="av"><i class="ti ti-user" style="font-size:40px;color:#9aa0a6"></i><span class="badge"><i class="ti ti-camera"></i></span></div>
         <div class="field"><i class="ti ti-user" style="font-size:20px"></i><span>Имя</span></div>
-        <div class="note">Имя и аватар видят только те, кому вы дадите свой QR-код или ключ.</div>
-        <div class="spring"></div>
-        <div class="footer">
-          <div class="btn pri">Готово</div>
-          <div class="btn sec">Пропустить</div>
-        </div>
       </div>
-    </div>
+      <div class="z-cap">Видно только по вашему QR-коду</div>
+      <div class="z-btns">
+        <div class="btn pri">Готово</div>
+        <div class="btn sec">Пропустить</div>
+      </div>
+    </div></div>
     <div class="cap">2 · Профиль</div>
   </div>
 
   <div class="col">
-    <div class="phone">
-      <div class="pad">
-        <h1 style="margin-top:8px">Резервная копия ключа</h1>
-        <div class="lead" style="margin-bottom:16px">Ваш ключ = ваша личность</div>
-        <div class="banner"><i class="ti ti-alert-triangle"></i><p>Восстановить доступ можно <b>только</b> этим ключом. Сервера, который «вспомнит» вас, — нет.</p></div>
-        <div class="opt"><i class="ti ti-file-download"></i><div><div class="ot">Сохранить в файл</div><div class="os">Зашифрованный ключ на устройство</div></div><i class="ti ti-chevron-right chev"></i></div>
-        <div class="opt"><i class="ti ti-list-numbers"></i><div><div class="ot">Показать фразу</div><div class="os">24 слова — запишите на бумаге</div></div><i class="ti ti-chevron-right chev"></i></div>
-        <div class="flag"><i class="ti ti-shield-check" style="font-size:14px"></i> Экран защищён · не фотографируйте</div>
-        <div class="spring"></div>
-        <div class="footer">
-          <div class="btn pri">Готово</div>
-          <div class="btn sec">Пропустить (напомним позже)</div>
-        </div>
+    <div class="phone"><div class="pad">
+      <div class="z-title"><h1>Резервная копия ключа</h1></div>
+      <div class="z-desc"><span>Ключ заменяет логин и пароль — только у вас</span></div>
+      <div class="z-content fill">
+        <div class="box banner"><i class="ti ti-alert-triangle"></i><p>Восстановить доступ можно <b>только</b> этим ключом. Сервера, который «вспомнит» вас, — нет.</p></div>
+        <div class="box opt"><i class="ti ti-file-download"></i><div><div class="ot">Сохранить в файл</div><div class="os">Зашифрованный ключ на устройство</div></div><i class="ti ti-chevron-right chev"></i></div>
+        <div class="box opt"><i class="ti ti-list-numbers"></i><div><div class="ot">Показать фразу</div><div class="os">24 слова — запишите на бумаге</div></div><i class="ti ti-chevron-right chev"></i></div>
       </div>
-    </div>
+      <div class="z-cap ok"><i class="ti ti-shield-check" style="font-size:13px"></i> Экран защищён · не фотографируйте</div>
+      <div class="z-btns">
+        <div class="btn pri">Готово</div>
+        <div class="btn sec">Пропустить (напомним позже)</div>
+      </div>
+    </div></div>
     <div class="cap">3 · Ключ</div>
   </div>
 
   <div class="col">
-    <div class="phone">
-      <div class="pad">
-        <h1 style="margin-top:8px">Пара разрешений</h1>
-        <div class="lead" style="margin-bottom:18px">Только необходимое</div>
+    <div class="phone"><div class="pad">
+      <div class="z-title"><h1>Пара разрешений</h1></div>
+      <div class="z-desc"><span>Только необходимое</span></div>
+      <div class="z-content fill">
         <div class="pcard">
           <div class="ph"><i class="ti ti-bell"></i><span class="pt">Уведомления</span></div>
           <div class="pd">Чтобы видеть новые сообщения и звонки.</div>
@@ -139,14 +144,13 @@
           <div class="pd">Держать связь при погасшем экране (mesh-узел).</div>
           <div class="prow"><div class="allow">Разрешить</div><div class="later">Позже</div></div>
         </div>
-        <div class="note">Камеру, микрофон и фото спросим только когда понадобятся. Контакты и гео — не спрашиваем вовсе.</div>
-        <div class="spring"></div>
-        <div class="footer">
-          <div class="btn pri">Готово</div>
-          <div class="btn sec hidden">—</div>
-        </div>
       </div>
-    </div>
+      <div class="z-cap"></div>
+      <div class="z-btns">
+        <div class="btn pri">Готово</div>
+        <div class="btn sec hidden">—</div>
+      </div>
+    </div></div>
     <div class="cap">4 · Разрешения</div>
   </div>
 
