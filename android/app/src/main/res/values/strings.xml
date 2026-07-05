@@ -273,4 +273,44 @@
     <string name="notif_call_with">Call with %1$s</string>
     <string name="notif_voice_chat">In voice chat</string>
     <string name="notif_end">End</string>
+
+    <!-- Onboarding (M4) -->
+    <string name="onb_welcome_title">Privacy by default</string>
+    <string name="onb_welcome_sub">No servers. Your data stays with you.</string>
+    <string name="onb_start">Get started</string>
+    <string name="onb_have_key">I already have a key</string>
+    <string name="onb_opensource">Open source · GPL-3.0</string>
+    <string name="onb_bullet_nophone">No phone number</string>
+    <string name="onb_bullet_nocontacts">We don\'t read your contacts</string>
+    <string name="onb_bullet_nolocation">We don\'t know where you are</string>
+    <string name="onb_bullet_noserver">No central server</string>
+    <string name="onb_profile_title">Your profile</string>
+    <string name="onb_profile_sub">Optional — you can change it later</string>
+    <string name="onb_done">Done</string>
+    <string name="onb_skip">Skip</string>
+    <string name="onb_profile_hint">Visible only via your QR code</string>
+    <string name="onb_name">Name</string>
+    <string name="onb_key_title">Key backup</string>
+    <string name="onb_key_sub">Write down the 24 words and keep them offline — the only way to restore access</string>
+    <string name="onb_show_phrase">Show phrase</string>
+    <string name="onb_skip_remind">Skip (we\'ll remind you)</string>
+    <string name="onb_key_warn">Access can be restored only with this key. There\'s no server that will “remember” you.</string>
+    <string name="onb_phrase_title">Your seed phrase</string>
+    <string name="onb_phrase_sub">Write down the 24 words in order and keep them offline</string>
+    <string name="onb_wrote_down">I wrote it down</string>
+    <string name="onb_screen_secure">Screen protected · don\'t photograph</string>
+    <string name="onb_perms_title">A couple of permissions</string>
+    <string name="onb_perms_sub">Only what\'s needed</string>
+    <string name="onb_perm_notif">Notifications</string>
+    <string name="onb_perm_notif_desc">To see new messages and calls.</string>
+    <string name="onb_perm_bg">Background activity</string>
+    <string name="onb_perm_bg_desc">Stay connected with the screen off (mesh node).</string>
+    <string name="onb_allow">Allow</string>
+    <string name="onb_later">Later</string>
+    <string name="onb_restore_title">Restore</string>
+    <string name="onb_restore_sub">Enter the 24 words of your seed phrase, separated by spaces</string>
+    <string name="onb_restore">Restore</string>
+    <string name="onb_checking">Checking…</string>
+    <string name="onb_bad_phrase">Invalid phrase — check the 24 words</string>
+    <string name="onb_phrase_placeholder">word1 word2 word3 …</string>
 </resources>

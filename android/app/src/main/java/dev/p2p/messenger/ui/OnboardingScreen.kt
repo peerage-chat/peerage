@@ -21,19 +21,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.R
 
 // Онбординг (M4) — реализация по макету docs/design/mockups/onboarding.html.
 // Единый скелет с фиксированными зонами: заголовок · описание · контент · короткая
 // надпись · Готово · Пропустить — зоны совпадают по высоте, поэтому шаги не «прыгают».
-// TODO(i18n): строки захардкожены (RU) — вынести в strings.xml (EN+RU) при интеграции.
-// TODO(M4): подключить гейт первого запуска, реальный TextField имени/аватар, экспорт
-//   сид-фразы в файл/фразу (движковый хвост), запрос разрешений по кнопкам.
+// Строки — в strings.xml (EN/RU), ключи onb_*.
+// TODO(M4): выбор аватара (image pick + M2-блоб); per-card запрос разрешений на экране
+//   «Пара разрешений» (сейчас грант делает App() после гейта).
 
 private val WarnBg = WarnColor.copy(alpha = 0.12f)
 private val WarnBorder = WarnColor.copy(alpha = 0.40f)
@@ -78,9 +80,9 @@ private fun ImportKeyStep(model: AppModel, onBack: () -> Unit) {
     var error by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     OnbScaffold(
-        title = "Восстановление",
-        desc = "Введите 24 слова сид-фразы через пробел",
-        primary = if (busy) "Проверяем…" else "Восстановить",
+        title = stringResource(R.string.onb_restore_title),
+        desc = stringResource(R.string.onb_restore_sub),
+        primary = if (busy) stringResource(R.string.onb_checking) else stringResource(R.string.onb_restore),
         onPrimary = {
             if (!busy && phrase.isNotBlank()) {
                 busy = true
@@ -99,17 +101,17 @@ private fun ImportKeyStep(model: AppModel, onBack: () -> Unit) {
                 }
             }
         },
-        secondary = "Назад",
+        secondary = stringResource(R.string.common_back),
         onSecondary = onBack,
         caption = {
-            if (error) Text("Неверная фраза — проверьте 24 слова", color = HoloError, fontSize = 11.sp)
+            if (error) Text(stringResource(R.string.onb_bad_phrase), color = HoloError, fontSize = 11.sp)
         },
     ) {
         Box(
             Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile)
                 .border(1.dp, if (error) HoloError else HoloBorder, RoundedCornerShape(14.dp)).padding(14.dp),
         ) {
-            if (phrase.isEmpty()) Text("слово1 слово2 слово3 …", color = HoloSecondary, fontSize = 15.sp)
+            if (phrase.isEmpty()) Text(stringResource(R.string.onb_phrase_placeholder), color = HoloSecondary, fontSize = 15.sp)
             BasicTextField(
                 value = phrase,
                 onValueChange = {
@@ -207,23 +209,23 @@ private fun Bullet(icon: ImageVector, text: String) {
 @Composable
 private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
     OnbScaffold(
-        title = "Приватность по умолчанию",
-        desc = "Серверов нет. Данные — только у вас.",
-        primary = "Начать",
+        title = stringResource(R.string.onb_welcome_title),
+        desc = stringResource(R.string.onb_welcome_sub),
+        primary = stringResource(R.string.onb_start),
         onPrimary = onStart,
-        secondary = "У меня уже есть ключ",
+        secondary = stringResource(R.string.onb_have_key),
         onSecondary = onImport,
-        caption = { Text("Открытый код · GPL-3.0", color = HoloSecondary, fontSize = 11.sp) },
+        caption = { Text(stringResource(R.string.onb_opensource), color = HoloSecondary, fontSize = 11.sp) },
     ) {
         Box(
             Modifier.size(62.dp).clip(RoundedCornerShape(18.dp)).background(HoloAccentDark),
             contentAlignment = Alignment.Center,
         ) { Icon(TablerIcons.ShieldLock, null, tint = HoloAccent, modifier = Modifier.size(32.dp)) }
         Spacer(Modifier.height(8.dp))
-        Bullet(TablerIcons.PhoneOff, "Без номера телефона")
-        Bullet(TablerIcons.AddressBookOff, "Не читаем ваши контакты")
-        Bullet(TablerIcons.MapPinOff, "Не знаем, где вы")
-        Bullet(TablerIcons.ServerOff, "Нет центрального сервера")
+        Bullet(TablerIcons.PhoneOff, stringResource(R.string.onb_bullet_nophone))
+        Bullet(TablerIcons.AddressBookOff, stringResource(R.string.onb_bullet_nocontacts))
+        Bullet(TablerIcons.MapPinOff, stringResource(R.string.onb_bullet_nolocation))
+        Bullet(TablerIcons.ServerOff, stringResource(R.string.onb_bullet_noserver))
     }
 }
 
@@ -233,16 +235,16 @@ private fun ProfileStep(onDone: () -> Unit, onSkip: () -> Unit) {
     var name by rememberSaveable { mutableStateOf(prefs.getString("profile_name", "").orEmpty()) }
     val save = { prefs.edit().putString("profile_name", name.trim()).apply() }
     OnbScaffold(
-        title = "Ваш профиль",
-        desc = "Необязательно — можно изменить позже",
-        primary = "Готово",
+        title = stringResource(R.string.onb_profile_title),
+        desc = stringResource(R.string.onb_profile_sub),
+        primary = stringResource(R.string.onb_done),
         onPrimary = {
             save()
             onDone()
         },
-        secondary = "Пропустить",
+        secondary = stringResource(R.string.onb_skip),
         onSecondary = onSkip,
-        caption = { Text("Видно только по вашему QR-коду", color = HoloSecondary, fontSize = 11.sp) },
+        caption = { Text(stringResource(R.string.onb_profile_hint), color = HoloSecondary, fontSize = 11.sp) },
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
             Box(
@@ -262,6 +264,7 @@ private fun ProfileStep(onDone: () -> Unit, onSkip: () -> Unit) {
         ) {
             Icon(TablerIcons.User, null, tint = HoloSecondary, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
+            val hint = stringResource(R.string.onb_name)
             BasicTextField(
                 value = name,
                 onValueChange = { name = it },
@@ -270,7 +273,7 @@ private fun ProfileStep(onDone: () -> Unit, onSkip: () -> Unit) {
                 cursorBrush = SolidColor(HoloAccent),
                 modifier = Modifier.weight(1f),
                 decorationBox = { inner ->
-                    if (name.isEmpty()) Text("Имя", color = HoloSecondary, fontSize = 15.sp)
+                    if (name.isEmpty()) Text(hint, color = HoloSecondary, fontSize = 15.sp)
                     inner()
                 },
             )
@@ -284,14 +287,14 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
     if (revealed) {
         SecureFlag() // секрет на экране — блокируем скриншот/запись/превью
         OnbScaffold(
-            title = "Ваша сид-фраза",
-            desc = "Запишите 24 слова по порядку и храните офлайн",
-            primary = "Я записал",
+            title = stringResource(R.string.onb_phrase_title),
+            desc = stringResource(R.string.onb_phrase_sub),
+            primary = stringResource(R.string.onb_wrote_down),
             onPrimary = {
                 model.clearRevealedPhrase()
                 onDone()
             },
-            secondary = "Назад",
+            secondary = stringResource(R.string.common_back),
             onSecondary = {
                 model.clearRevealedPhrase()
                 revealed = false
@@ -299,7 +302,7 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
             caption = {
                 Icon(TablerIcons.ShieldCheck, null, tint = HoloOnline, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Экран защищён · не фотографируйте", color = HoloOnline, fontSize = 11.sp)
+                Text(stringResource(R.string.onb_screen_secure), color = HoloOnline, fontSize = 11.sp)
             },
         ) { PhraseGrid(model.revealedPhrase) }
         return
@@ -308,14 +311,14 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
     // экспорт намеренно НЕ делаем: секрет в ФС = лишняя поверхность атаки + второй пароль
     // (см. обсуждение). Восстановление — вводом фразы («У меня уже есть ключ»).
     OnbScaffold(
-        title = "Резервная копия ключа",
-        desc = "Запишите 24 слова и храните офлайн — единственный способ восстановить доступ",
-        primary = "Показать фразу",
+        title = stringResource(R.string.onb_key_title),
+        desc = stringResource(R.string.onb_key_sub),
+        primary = stringResource(R.string.onb_show_phrase),
         onPrimary = {
             model.revealSeedPhrase()
             revealed = true
         },
-        secondary = "Пропустить (напомним позже)",
+        secondary = stringResource(R.string.onb_skip_remind),
         onSecondary = onSkip,
     ) {
         Row(
@@ -326,7 +329,7 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
             Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(12.dp))
             Text(
-                "Восстановить доступ можно только этим ключом. Сервера, который «вспомнит» вас, — нет.",
+                stringResource(R.string.onb_key_warn),
                 color = WarnText,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
@@ -368,14 +371,14 @@ private fun ColumnScope.PhraseGrid(phrase: String?) {
 @Composable
 private fun PermissionsStep(onDone: () -> Unit) {
     OnbScaffold(
-        title = "Пара разрешений",
-        desc = "Только необходимое",
-        primary = "Готово",
+        title = stringResource(R.string.onb_perms_title),
+        desc = stringResource(R.string.onb_perms_sub),
+        primary = stringResource(R.string.onb_done),
         onPrimary = onDone,
         contentArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        PermCard(TablerIcons.Bell, "Уведомления", "Чтобы видеть новые сообщения и звонки.")
-        PermCard(TablerIcons.BatteryCharging, "Работа в фоне", "Держать связь при погасшем экране (mesh-узел).")
+        PermCard(TablerIcons.Bell, stringResource(R.string.onb_perm_notif), stringResource(R.string.onb_perm_notif_desc))
+        PermCard(TablerIcons.BatteryCharging, stringResource(R.string.onb_perm_bg), stringResource(R.string.onb_perm_bg_desc))
     }
 }
 
@@ -398,11 +401,11 @@ private fun ColumnScope.PermCard(icon: ImageVector, title: String, desc: String)
             Box(
                 Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(11.dp)).background(HoloAccent).clickable { /* TODO grant */ },
                 contentAlignment = Alignment.Center,
-            ) { Text("Разрешить", color = HoloAccentDark, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+            ) { Text(stringResource(R.string.onb_allow), color = HoloAccentDark, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
             Box(
                 Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(11.dp)).border(1.dp, HoloBorder, RoundedCornerShape(11.dp)).clickable { /* later */ },
                 contentAlignment = Alignment.Center,
-            ) { Text("Позже", color = HoloSecondary, fontSize = 13.sp) }
+            ) { Text(stringResource(R.string.onb_later), color = HoloSecondary, fontSize = 13.sp) }
         }
     }
 }
