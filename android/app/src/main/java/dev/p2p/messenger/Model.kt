@@ -146,6 +146,13 @@ class AppModel private constructor() {
         revealedPhrase = null
     }
 
+    /** Импорт личности из фразы (M4): валидирует+пишет profile.json на [ops], результат
+     *  на главном потоке. true → успех (вызывающий перезапускает процесс). */
+    fun importIdentity(dataDir: String, phrase: String, onResult: (Boolean) -> Unit) = ops.execute {
+        val ok = Native.importSeedPhrase(dataDir, phrase)
+        android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(ok) }
+    }
+
     val contacts = mutableStateListOf<Contact>()
     val online = mutableStateMapOf<String, Boolean>()
     val unread = mutableStateMapOf<String, Int>()

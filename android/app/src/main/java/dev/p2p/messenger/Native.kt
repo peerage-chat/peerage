@@ -26,6 +26,10 @@ object Native {
     /** Секретная сид-фраза (24 слова BIP39) для резервной копии ключа (M4). СЕКРЕТ. */
     external fun seedPhrase(sessionPtr: Long): String
 
+    /** Импорт личности из фразы (M4): валидирует и перезаписывает profile.json.
+     *  true = успех (Kotlin затем перезапускает процесс). Не трогает живую сессию. */
+    external fun importSeedPhrase(dataDir: String, phrase: String): Boolean
+
     /** Отправить текст. Возвращает id сообщения (>=0) или -1 при ошибке. */
     external fun sendText(sessionPtr: Long, keyHex: String, text: String): Long
 

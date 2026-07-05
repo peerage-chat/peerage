@@ -55,13 +55,82 @@ private fun SecureFlag() {
 @Composable
 internal fun OnboardingFlow(model: AppModel, onFinish: () -> Unit) {
     var step by rememberSaveable { mutableStateOf(0) }
+    var importing by rememberSaveable { mutableStateOf(false) }
+    if (importing) {
+        ImportKeyStep(model = model, onBack = { importing = false })
+        return
+    }
     val next: () -> Unit = { if (step < 3) step++ else onFinish() }
     when (step) {
-        0 -> WelcomeStep(onStart = next, onImport = next)
+        0 -> WelcomeStep(onStart = next, onImport = { importing = true })
         1 -> ProfileStep(onDone = next, onSkip = next)
         2 -> KeyBackupStep(model = model, onDone = next, onSkip = next)
         else -> PermissionsStep(onDone = onFinish)
     }
+}
+
+/** Восстановление личности из сид-фразы (M4 «У меня уже есть ключ»). Импорт пишет
+ *  profile.json и перезапускает процесс — новая личность грузится начисто. */
+@Composable
+private fun ImportKeyStep(model: AppModel, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    var phrase by rememberSaveable { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    OnbScaffold(
+        title = "Восстановление",
+        desc = "Введите 24 слова сид-фразы через пробел",
+        primary = if (busy) "Проверяем…" else "Восстановить",
+        onPrimary = {
+            if (!busy && phrase.isNotBlank()) {
+                busy = true
+                error = false
+                model.importIdentity(ctx.filesDir.absolutePath, phrase) { ok ->
+                    if (ok) {
+                        // commit() (СИНХРОННЫЙ): apply() не успевает записаться на диск до
+                        // System.exit в relaunchApp → флаг терялся, онбординг повторялся.
+                        ctx.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+                            .edit().putBoolean("onboarded", true).commit()
+                        relaunchApp(ctx)
+                    } else {
+                        busy = false
+                        error = true
+                    }
+                }
+            }
+        },
+        secondary = "Назад",
+        onSecondary = onBack,
+        caption = {
+            if (error) Text("Неверная фраза — проверьте 24 слова", color = HoloError, fontSize = 11.sp)
+        },
+    ) {
+        Box(
+            Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile)
+                .border(1.dp, if (error) HoloError else HoloBorder, RoundedCornerShape(14.dp)).padding(14.dp),
+        ) {
+            if (phrase.isEmpty()) Text("слово1 слово2 слово3 …", color = HoloSecondary, fontSize = 15.sp)
+            BasicTextField(
+                value = phrase,
+                onValueChange = {
+                    phrase = it
+                    error = false
+                },
+                textStyle = TextStyle(color = Color.White, fontSize = 15.sp, lineHeight = 24.sp),
+                cursorBrush = SolidColor(HoloAccent),
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/** Полный перезапуск процесса (после импорта личности): новый profile.json грузится
+ *  начисто, без стейл-состояния нативного узла/потоков. */
+private fun relaunchApp(ctx: android.content.Context) {
+    val intent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+    intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    ctx.startActivity(intent)
+    Runtime.getRuntime().exit(0)
 }
 
 /** Единый скелет экрана онбординга (фиксированные зоны из макета). */
@@ -235,39 +304,33 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
         ) { PhraseGrid(model.revealedPhrase) }
         return
     }
+    // Единственный способ бэкапа — сид-фраза (по паперу/в менеджер паролей). Файловый
+    // экспорт намеренно НЕ делаем: секрет в ФС = лишняя поверхность атаки + второй пароль
+    // (см. обсуждение). Восстановление — вводом фразы («У меня уже есть ключ»).
     OnbScaffold(
         title = "Резервная копия ключа",
-        desc = "Ключ заменяет логин и пароль — только у вас",
-        primary = "Готово",
-        onPrimary = onDone,
+        desc = "Запишите 24 слова и храните офлайн — единственный способ восстановить доступ",
+        primary = "Показать фразу",
+        onPrimary = {
+            model.revealSeedPhrase()
+            revealed = true
+        },
         secondary = "Пропустить (напомним позже)",
         onSecondary = onSkip,
-        contentArrangement = Arrangement.spacedBy(10.dp),
-        caption = {
-            Icon(TablerIcons.ShieldCheck, null, tint = HoloOnline, modifier = Modifier.size(13.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Экран защищён · не фотографируйте", color = HoloOnline, fontSize = 11.sp)
-        },
     ) {
-        // Варнинг (амбер).
         Row(
-            Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(14.dp)).background(WarnBg)
-                .border(1.dp, WarnBorder, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(WarnBg)
+                .border(1.dp, WarnBorder, RoundedCornerShape(14.dp)).padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(20.dp))
+            Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(12.dp))
             Text(
                 "Восстановить доступ можно только этим ключом. Сервера, который «вспомнит» вас, — нет.",
                 color = WarnText,
-                fontSize = 12.5.sp,
-                lineHeight = 17.sp,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
             )
-        }
-        KeyOption(TablerIcons.FileDownload, "Сохранить в файл", "Зашифрованный ключ на устройство") { /* TODO(M4): экспорт в файл */ }
-        KeyOption(TablerIcons.ListNumbers, "Показать фразу", "24 слова — запишите на бумаге") {
-            model.revealSeedPhrase()
-            revealed = true
         }
     }
 }
@@ -299,23 +362,6 @@ private fun ColumnScope.PhraseGrid(phrase: String?) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ColumnScope.KeyOption(icon: ImageVector, title: String, sub: String, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile)
-            .border(1.dp, HoloBorder, RoundedCornerShape(14.dp)).clickable { onClick() }.padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(sub, color = HoloSecondary, fontSize = 12.sp)
-        }
-        Icon(TablerIcons.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(18.dp))
     }
 }
 

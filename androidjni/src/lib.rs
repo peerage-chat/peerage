@@ -143,6 +143,33 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_seedPhrase<'local>(
     })
 }
 
+/// Импорт личности из сид-фразы (M4 «У меня уже есть ключ»): валидирует 24 слова и
+/// ПЕРЕЗАПИСЫВАЕТ profile.json импортированной личностью (запечатывается глобальным
+/// vault-ключом, уже установленным при старте движка). Возвращает true при успехе.
+/// Kotlin после успеха перезапускает процесс — новый profile.json грузится начисто.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_importSeedPhrase<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    data_dir: JString<'local>,
+    phrase: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let dir = jstr(&mut env, &data_dir);
+        let phrase = jstr(&mut env, &phrase);
+        match p2p_core::Identity::from_phrase(&phrase) {
+            Ok(identity) => {
+                let path = std::path::Path::new(&dir).join("profile.json");
+                match (p2p_core::store::Profile { identity }).save(&path) {
+                    Ok(()) => JNI_TRUE,
+                    Err(_) => JNI_FALSE,
+                }
+            }
+            Err(_) => JNI_FALSE,
+        }
+    })
+}
+
 // ── Сообщения 1:1 ───────────────────────────────────────────────────────────
 
 /// Отправить текст. Возвращает id (≥0) либо -1 при ошибке.
