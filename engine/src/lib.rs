@@ -358,6 +358,41 @@ impl Engine {
         p2p_core::vault::open(&raw).ok()
     }
 
+    // — Свой аватар (M2) — контент-адресный блоб + запись id как «мой аватар».
+    // Рассылку контактам делает blob_offer позже (тот же блоб, без переделок).
+    fn store_blob(&self, id: p2p_blob::Hash, content: &[u8]) {
+        let _ = std::fs::create_dir_all(&self.blob_dir);
+        let _ = std::fs::write(self.blob_dir.join(hex::encode(id)), p2p_core::vault::seal(content));
+    }
+
+    fn avatar_id_path(&self) -> PathBuf {
+        self.blob_dir.parent().unwrap_or(&self.blob_dir).join("avatar_id")
+    }
+
+    /// Установить свой аватар: снять метаданные (scrub, PET), сохранить блобом
+    /// (контент-адрес), записать его hex-id как «мой аватар». Возвращает hex-id.
+    pub fn set_self_avatar(&self, content: Vec<u8>, mime: &str) -> String {
+        let scrubbed = p2p_blob::scrub::scrub(mime, &content);
+        let id = p2p_blob::blob_id(&scrubbed);
+        self.store_blob(id, &scrubbed);
+        let id_hex = hex::encode(id);
+        let _ = std::fs::write(self.avatar_id_path(), &id_hex);
+        id_hex
+    }
+
+    /// hex-id своего аватара, если задан.
+    pub fn self_avatar_id(&self) -> Option<String> {
+        std::fs::read_to_string(self.avatar_id_path())
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Байты своего аватара (расшифрованные at-rest), если задан.
+    pub fn self_avatar(&self) -> Option<Vec<u8>> {
+        self.blob_read(&self.self_avatar_id()?)
+    }
+
     pub fn group_list_json(&self) -> String {
         let s = self.group_cache.lock_safe().list.clone();
         if s.is_empty() { "[]".into() } else { s }
