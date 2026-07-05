@@ -26,6 +26,8 @@ pub enum IdentityError {
     BadSeedLen(usize),
     #[error("не удалось сконвертировать ключ ed25519 в curve25519")]
     KeyConversion,
+    #[error("неверная сид-фраза BIP39")]
+    BadPhrase,
 }
 
 /// Идентичность узла. Хранит только seed; всё остальное выводится из него.
@@ -54,6 +56,27 @@ impl Identity {
     /// Seed для сохранения на диск (32 байта). Это секрет — храните защищённо.
     pub fn seed(&self) -> [u8; SEED_LEN] {
         self.signing.to_bytes()
+    }
+
+    /// Секретная сид-фраза (24 слова BIP39) — ПОЛНЫЙ бэкап личности: 32-байтный seed
+    /// (256 бит) как мнемоника. СЕКРЕТ. Восстанавливает ЛИЧНОСТЬ (не историю — серверов
+    /// нет). НЕ путать с [`fingerprint_words`] (8 слов из ПУБЛИЧНОГО ключа — сверка
+    /// контакта, не секрет). Для онбординга M4 «Показать фразу». См. app-ui.md.
+    pub fn seed_phrase(&self) -> String {
+        bip39::Mnemonic::from_entropy(&self.signing.to_bytes())
+            .expect("32 байта seed → валидная 24-словная мнемоника BIP39")
+            .to_string()
+    }
+
+    /// Восстановить личность из секретной сид-фразы (24 слова BIP39). Пробелы/регистр
+    /// нормализуются. Обратна [`seed_phrase`].
+    pub fn from_phrase(phrase: &str) -> Result<Self, IdentityError> {
+        // Английский wordlist — строчный; понижаем регистр, чтобы ввод/копипаст с
+        // заглавными не отвергался (неоднозначности это не создаёт).
+        let normalized = phrase.trim().to_lowercase();
+        let mnemonic = bip39::Mnemonic::parse_in_normalized(bip39::Language::English, &normalized)
+            .map_err(|_| IdentityError::BadPhrase)?;
+        Self::from_seed(&mnemonic.to_entropy())
     }
 
     /// Публичный ключ ed25519.
@@ -255,6 +278,22 @@ mod tests {
         for w in words {
             assert!(!w.is_empty());
         }
+    }
+
+    #[test]
+    fn seed_phrase_roundtrip_restores_identity() {
+        // Сид-фраза = 24 слова и восстанавливает ТУ ЖЕ личность (тот же seed/pubkey).
+        let id = Identity::from_seed(&[7u8; 32]).unwrap();
+        let phrase = id.seed_phrase();
+        assert_eq!(phrase.split_whitespace().count(), 24);
+        let restored = Identity::from_phrase(&phrase).unwrap();
+        assert_eq!(restored.seed(), id.seed());
+        assert_eq!(restored.public_key_bytes(), id.public_key_bytes());
+        // Нормализация пробелов/регистра.
+        let messy = format!("  {}  ", phrase.to_uppercase());
+        assert_eq!(Identity::from_phrase(&messy).unwrap().seed(), id.seed());
+        // Мусор → ошибка, не паника.
+        assert!(Identity::from_phrase("not a valid mnemonic phrase").is_err());
     }
 
     /// Известный вектор: для ключа из всех 0x01 проверяем,
