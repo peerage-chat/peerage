@@ -146,3 +146,129 @@ val TablerIcons.Pencil: ImageVector by lazy {
 val TablerIcons.Plus: ImageVector by lazy {
     tabler("plus", "M12 5l0 14", "M5 12l14 0")
 }
+
+// ── Онбординг (M4) ──
+val TablerIcons.ShieldLock: ImageVector by lazy {
+    tabler(
+        "shield-lock",
+        "M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3",
+        "M11 11a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+        "M12 12l0 2.5",
+    )
+}
+
+val TablerIcons.PhoneOff: ImageVector by lazy {
+    tabler(
+        "phone-off",
+        "M3 21l18 -18",
+        "M5.831 14.161a15.946 15.946 0 0 1 -2.831 -8.161a2 2 0 0 1 2 -2h4l2 5l-2.5 1.5c.108 .22 .223 .435 .345 .645m1.751 2.277c.843 .84 1.822 1.544 2.904 2.078l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a15.963 15.963 0 0 1 -10.344 -4.657",
+    )
+}
+
+val TablerIcons.AddressBookOff: ImageVector by lazy {
+    tabler(
+        "address-book-off",
+        "M8 4h10a2 2 0 0 1 2 2v10m-.57 3.399c-.363 .37 -.87 .601 -1.43 .601h-10a2 2 0 0 1 -2 -2v-12",
+        "M10 16h6",
+        "M11 11a2 2 0 0 0 2 2m2 -2a2 2 0 0 0 -2 -2",
+        "M4 8h3",
+        "M4 12h3",
+        "M4 16h3",
+        "M3 3l18 18",
+    )
+}
+
+val TablerIcons.MapPinOff: ImageVector by lazy {
+    tabler(
+        "map-pin-off",
+        "M9.442 9.432a3 3 0 0 0 4.113 4.134m1.445 -2.566a3 3 0 0 0 -3 -3",
+        "M17.152 17.162l-3.738 3.738a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 0 1 -.476 -10.794m2.18 -1.82a8.003 8.003 0 0 1 10.91 10.912",
+        "M3 3l18 18",
+    )
+}
+
+val TablerIcons.ServerOff: ImageVector by lazy {
+    tabler(
+        "server-off",
+        "M12 12h-6a3 3 0 0 1 -3 -3v-2c0 -1.083 .574 -2.033 1.435 -2.56m3.565 -.44h10a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-2",
+        "M16 12h2a3 3 0 0 1 3 3v2m-1.448 2.568a2.986 2.986 0 0 1 -1.552 .432h-12a3 3 0 0 1 -3 -3v-2a3 3 0 0 1 3 -3h6",
+        "M7 8v.01",
+        "M7 16v.01",
+        "M3 3l18 18",
+    )
+}
+
+val TablerIcons.User: ImageVector by lazy {
+    tabler(
+        "user",
+        "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0",
+        "M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2",
+    )
+}
+
+val TablerIcons.Camera: ImageVector by lazy {
+    tabler(
+        "camera",
+        "M5 7h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2",
+        "M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0",
+    )
+}
+
+val TablerIcons.AlertTriangle: ImageVector by lazy {
+    tabler(
+        "alert-triangle",
+        "M12 9v4",
+        "M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0",
+        "M12 16h.01",
+    )
+}
+
+val TablerIcons.FileDownload: ImageVector by lazy {
+    tabler(
+        "file-download",
+        "M14 3v4a1 1 0 0 0 1 1h4",
+        "M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2",
+        "M12 17v-6",
+        "M9.5 14.5l2.5 2.5l2.5 -2.5",
+    )
+}
+
+val TablerIcons.ListNumbers: ImageVector by lazy {
+    tabler(
+        "list-numbers",
+        "M11 6h9",
+        "M11 12h9",
+        "M12 18h8",
+        "M4 16a2 2 0 1 1 4 0c0 .591 -.5 1 -1 1.5l-3 2.5h4",
+        "M6 10v-6l-2 2",
+    )
+}
+
+val TablerIcons.ChevronRight: ImageVector by lazy {
+    tabler("chevron-right", "M9 6l6 6l-6 6")
+}
+
+val TablerIcons.ShieldCheck: ImageVector by lazy {
+    tabler(
+        "shield-check",
+        "M11.46 20.846a12 12 0 0 1 -7.96 -14.846a12 12 0 0 0 8.5 -3a12 12 0 0 0 8.5 3a12 12 0 0 1 -.09 7.06",
+        "M15 19l2 2l4 -4",
+    )
+}
+
+val TablerIcons.Bell: ImageVector by lazy {
+    tabler(
+        "bell",
+        "M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6",
+        "M9 17v1a3 3 0 0 0 6 0v-1",
+    )
+}
+
+val TablerIcons.BatteryCharging: ImageVector by lazy {
+    tabler(
+        "battery-charging",
+        "M16 7h1a2 2 0 0 1 2 2v.5a.5 .5 0 0 0 .5 .5a.5 .5 0 0 1 .5 .5v3a.5 .5 0 0 1 -.5 .5a.5 .5 0 0 0 -.5 .5v.5a2 2 0 0 1 -2 2h-2",
+        "M8 7h-2a2 2 0 0 0 -2 2v6a2 2 0 0 0 2 2h1",
+        "M12 8l-2 4h3l-2 4",
+    )
+}
