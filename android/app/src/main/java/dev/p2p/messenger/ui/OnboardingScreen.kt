@@ -2,11 +2,14 @@
 
 package dev.p2p.messenger.ui
 
+import android.app.Activity
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -15,7 +18,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -32,6 +38,18 @@ import dev.p2p.messenger.*
 private val WarnBg = WarnColor.copy(alpha = 0.12f)
 private val WarnBorder = WarnColor.copy(alpha = 0.40f)
 private val WarnText = Color(0xFFE8C98A)
+
+/** FLAG_SECURE на окно, пока композабл в композиции (блокирует скриншот/запись экрана
+ *  и превью в «недавних»). Ставим на экранах с секретом — сид-фраза. */
+@Composable
+private fun SecureFlag() {
+    val ctx = LocalContext.current
+    DisposableEffect(Unit) {
+        val window = (ctx as? Activity)?.window
+        window?.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
+}
 
 /** Пошаговый флоу первого запуска. `onFinish` — онбординг завершён (пометить флаг). */
 @Composable
@@ -142,11 +160,17 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
 
 @Composable
 private fun ProfileStep(onDone: () -> Unit, onSkip: () -> Unit) {
+    val prefs = LocalContext.current.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+    var name by rememberSaveable { mutableStateOf(prefs.getString("profile_name", "").orEmpty()) }
+    val save = { prefs.edit().putString("profile_name", name.trim()).apply() }
     OnbScaffold(
         title = "Ваш профиль",
         desc = "Необязательно — можно изменить позже",
         primary = "Готово",
-        onPrimary = onDone,
+        onPrimary = {
+            save()
+            onDone()
+        },
         secondary = "Пропустить",
         onSecondary = onSkip,
         caption = { Text("Видно только по вашему QR-коду", color = HoloSecondary, fontSize = 11.sp) },
@@ -156,20 +180,31 @@ private fun ProfileStep(onDone: () -> Unit, onSkip: () -> Unit) {
                 Modifier.size(96.dp).clip(RoundedCornerShape(26.dp)).background(Tokens.Colors.avatar),
                 contentAlignment = Alignment.Center,
             ) { Icon(TablerIcons.User, null, tint = Color(0xFF9AA0A6), modifier = Modifier.size(40.dp)) }
+            // TODO(M4): выбор аватара (image pick + хранение через M2-блоб).
             Box(
                 Modifier.size(34.dp).clip(RoundedCornerShape(12.dp)).background(HoloAccent).border(3.dp, HoloBg, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center,
             ) { Icon(TablerIcons.Camera, null, tint = HoloAccentDark, modifier = Modifier.size(17.dp)) }
         }
         Spacer(Modifier.height(14.dp))
-        // TODO(M4): реальный TextField имени.
         Row(
             Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(TablerIcons.User, null, tint = HoloSecondary, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
-            Text("Имя", color = HoloSecondary, fontSize = 15.sp)
+            BasicTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                cursorBrush = SolidColor(HoloAccent),
+                modifier = Modifier.weight(1f),
+                decorationBox = { inner ->
+                    if (name.isEmpty()) Text("Имя", color = HoloSecondary, fontSize = 15.sp)
+                    inner()
+                },
+            )
         }
     }
 }
@@ -178,6 +213,7 @@ private fun ProfileStep(onDone: () -> Unit, onSkip: () -> Unit) {
 private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit) {
     var revealed by remember { mutableStateOf(false) }
     if (revealed) {
+        SecureFlag() // секрет на экране — блокируем скриншот/запись/превью
         OnbScaffold(
             title = "Ваша сид-фраза",
             desc = "Запишите 24 слова по порядку и храните офлайн",

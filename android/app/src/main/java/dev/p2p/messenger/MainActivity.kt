@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -40,19 +41,13 @@ class MainActivity : ComponentActivity() {
     // Синглтон на процесс: переживает пересоздание Activity (фон/возврат), иначе
     // утекают второй нативный узел и дублирующие poll/ticker-циклы.
     private val model = AppModel.instance
-    private val perms =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         model.appContext = applicationContext
-        val wanted = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            wanted += Manifest.permission.POST_NOTIFICATIONS // иначе уведомление сервиса не покажется
-        }
-        val need = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (need.isNotEmpty()) perms.launch(need.toTypedArray())
+        // Разрешения НЕ просим здесь: во время онбординга системный диалог не нужен.
+        // Запрашиваются в App() после гейта (onboarded) — см. requestCorePermissions.
         val dataDir = filesDir.absolutePath
         setContent {
             // ADR-005: класс ширины окна читается ЗДЕСЬ (единственная точка), дальше по
@@ -91,12 +86,29 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
 
     // Гейт первого запуска (M4). Флаг в SharedPreferences; существующим пользователям
     // (уже есть контакты) онбординг НЕ показываем — тихая миграция.
-    val prefs = LocalContext.current.getSharedPreferences("p2p_settings", Context.MODE_PRIVATE)
+    val ctx = LocalContext.current
+    val prefs = ctx.getSharedPreferences("p2p_settings", Context.MODE_PRIVATE)
     var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
     LaunchedEffect(model.me, model.contacts.size) {
         if (!onboarded && model.me != null && model.contacts.isNotEmpty()) {
             prefs.edit().putBoolean("onboarded", true).apply()
             onboarded = true
+        }
+    }
+
+    // Разрешения запрашиваем ПОСЛЕ гейта: существующим — сразу, новым — по завершении
+    // онбординга. Так системный диалог не выскакивает поверх/до онбординга.
+    // TODO(M4): camera/mic в идеале контекстно (перед звонком) — сейчас app полагается
+    // на ранний грант; для этого нужен пермишен-гейт на call-flow + двух-девайсный тест.
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+    LaunchedEffect(onboarded) {
+        if (onboarded) {
+            val wanted = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                wanted += Manifest.permission.POST_NOTIFICATIONS
+            }
+            val need = wanted.filter { ctx.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+            if (need.isNotEmpty()) permLauncher.launch(need.toTypedArray())
         }
     }
 
