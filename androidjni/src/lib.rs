@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
+use jni::sys::{jboolean, jbyteArray, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
 use p2p_engine::{parse_key, Engine};
@@ -166,6 +166,39 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_importSeedPhrase<'local>(
                 }
             }
             Err(_) => JNI_FALSE,
+        }
+    })
+}
+
+/// Установить свой аватар (M2): scrub + сохранить блобом. Возвращает hex-id ("" при ошибке).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_setSelfAvatar<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    content: JByteArray<'local>,
+    mime: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, ""), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
+        let bytes = env.convert_byte_array(&content).unwrap_or_default();
+        let mime = jstr(&mut env, &mime);
+        ret(&env, &e.set_self_avatar(bytes, &mime))
+    })
+}
+
+/// Байты своего аватара (M2), либо null если не задан.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_selfAvatar<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jbyteArray {
+    jni_safe!(std::ptr::null_mut(), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return std::ptr::null_mut() };
+        match e.self_avatar() {
+            Some(bytes) => env.byte_array_from_slice(&bytes).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut()),
+            None => std::ptr::null_mut(),
         }
     })
 }

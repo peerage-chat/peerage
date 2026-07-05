@@ -153,6 +153,17 @@ class AppModel private constructor() {
         android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(ok) }
     }
 
+    /** Свой аватар (M2), байты изображения; null = не задан. Читается через [ops]. */
+    var selfAvatar by mutableStateOf<ByteArray?>(null)
+        private set
+
+    fun loadSelfAvatar() = ops.execute { selfAvatar = Native.selfAvatar(sessionPtr) }
+
+    fun setSelfAvatar(content: ByteArray, mime: String) = ops.execute {
+        Native.setSelfAvatar(sessionPtr, content, mime)
+        selfAvatar = Native.selfAvatar(sessionPtr)
+    }
+
     val contacts = mutableStateListOf<Contact>()
     val online = mutableStateMapOf<String, Boolean>()
     val unread = mutableStateMapOf<String, Int>()
@@ -539,6 +550,7 @@ class AppModel private constructor() {
         )
         refreshContactsNow()
         refreshGroupsNow()
+        selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         queueFile = File(dataDir, "offline_queue.json")
         loadOfflineQueue()
         restoreQueuedToLog()

@@ -2,6 +2,7 @@
 
 package dev.p2p.messenger.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,8 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -110,8 +113,13 @@ internal fun SquareAvatar(
     size: Dp = 44.dp,
     online: Boolean? = null,
     bg: Color? = null,
+    avatarBytes: ByteArray? = null,
     content: (@Composable () -> Unit)? = null,
 ) {
+    // Декод байт аватара (M2) — один раз на набор байт, не на каждую рекомпозицию.
+    val bmp = avatarBytes?.let {
+        remember(it) { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
+    }
     Box(Modifier.size(size), contentAlignment = Alignment.BottomEnd) {
         Box(
             // «квадрат со скруглением» (app-ui.md ~14-15px): пропорция size×0.3, но с кэпом
@@ -120,10 +128,10 @@ internal fun SquareAvatar(
                 .background(bg ?: avatarColor(name)),
             contentAlignment = Alignment.Center,
         ) {
-            if (content != null) {
-                content()
-            } else {
-                Text(
+            when {
+                bmp != null -> Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                content != null -> content()
+                else -> Text(
                     name.take(1).uppercase(),
                     color = Color.White,
                     fontSize = (size.value * 0.4f).sp,

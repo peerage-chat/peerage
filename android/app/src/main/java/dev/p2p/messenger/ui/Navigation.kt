@@ -120,7 +120,7 @@ internal fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
                 .padding(20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SquareAvatar(me?.pubkey ?: "?", size = 52.dp)
+            SquareAvatar(me?.pubkey ?: "?", size = 52.dp, avatarBytes = model.selfAvatar)
             Spacer(Modifier.width(14.dp))
             Text(
                 savedName ?: stringResource(R.string.common_you),

@@ -4,6 +4,10 @@ package dev.p2p.messenger.ui
 
 import android.app.Activity
 import android.view.WindowManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,7 +23,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -29,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
 import dev.p2p.messenger.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 // Онбординг (M4) — реализация по макету docs/design/mockups/onboarding.html.
 // Единый скелет с фиксированными зонами: заголовок · описание · контент · короткая
@@ -65,7 +73,7 @@ internal fun OnboardingFlow(model: AppModel, onFinish: () -> Unit) {
     val next: () -> Unit = { if (step < 3) step++ else onFinish() }
     when (step) {
         0 -> WelcomeStep(onStart = next, onImport = { importing = true })
-        1 -> ProfileStep(onDone = next, onSkip = next)
+        1 -> ProfileStep(model = model, onDone = next, onSkip = next)
         2 -> KeyBackupStep(model = model, onDone = next, onSkip = next)
         else -> PermissionsStep(onDone = onFinish)
     }
@@ -230,10 +238,23 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
 }
 
 @Composable
-private fun ProfileStep(onDone: () -> Unit, onSkip: () -> Unit) {
-    val prefs = LocalContext.current.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit) {
+    val ctx = LocalContext.current
+    val prefs = ctx.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
     var name by rememberSaveable { mutableStateOf(prefs.getString("profile_name", "").orEmpty()) }
     val save = { prefs.edit().putString("profile_name", name.trim()).apply() }
+    val scope = rememberCoroutineScope()
+    // Системный Photo Picker (M2): выбор картинки → чтение байт в IO → set_self_avatar
+    // (scrub + блоб на движке). Аватар реактивно показывается из model.selfAvatar.
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { u ->
+            scope.launch(Dispatchers.IO) {
+                val bytes = ctx.contentResolver.openInputStream(u)?.use { it.readBytes() } ?: return@launch
+                val mime = ctx.contentResolver.getType(u) ?: "image/jpeg"
+                model.setSelfAvatar(bytes, mime)
+            }
+        }
+    }
     OnbScaffold(
         title = stringResource(R.string.onb_profile_title),
         desc = stringResource(R.string.onb_profile_sub),
@@ -246,12 +267,24 @@ private fun ProfileStep(onDone: () -> Unit, onSkip: () -> Unit) {
         onSecondary = onSkip,
         caption = { Text(stringResource(R.string.onb_profile_hint), color = HoloSecondary, fontSize = 11.sp) },
     ) {
-        Box(contentAlignment = Alignment.BottomEnd) {
+        Box(
+            contentAlignment = Alignment.BottomEnd,
+            modifier = Modifier.clickable {
+                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            },
+        ) {
             Box(
                 Modifier.size(96.dp).clip(RoundedCornerShape(26.dp)).background(Tokens.Colors.avatar),
                 contentAlignment = Alignment.Center,
-            ) { Icon(TablerIcons.User, null, tint = Color(0xFF9AA0A6), modifier = Modifier.size(40.dp)) }
-            // TODO(M4): выбор аватара (image pick + хранение через M2-блоб).
+            ) {
+                val av = model.selfAvatar
+                val bmp = av?.let { remember(it) { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() } }
+                if (bmp != null) {
+                    Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                } else {
+                    Icon(TablerIcons.User, null, tint = Color(0xFF9AA0A6), modifier = Modifier.size(40.dp))
+                }
+            }
             Box(
                 Modifier.size(34.dp).clip(RoundedCornerShape(12.dp)).background(HoloAccent).border(3.dp, HoloBg, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center,

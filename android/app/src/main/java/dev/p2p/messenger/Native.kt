@@ -30,6 +30,12 @@ object Native {
      *  true = успех (Kotlin затем перезапускает процесс). Не трогает живую сессию. */
     external fun importSeedPhrase(dataDir: String, phrase: String): Boolean
 
+    /** Установить свой аватар (M2): scrub + контент-адресный блоб. Возвращает hex-id. */
+    external fun setSelfAvatar(sessionPtr: Long, content: ByteArray, mime: String): String
+
+    /** Байты своего аватара, либо null если не задан. */
+    external fun selfAvatar(sessionPtr: Long): ByteArray?
+
     /** Отправить текст. Возвращает id сообщения (>=0) или -1 при ошибке. */
     external fun sendText(sessionPtr: Long, keyHex: String, text: String): Long
 
