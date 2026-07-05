@@ -104,6 +104,10 @@ pub enum Event {
     BlobRequest { peer: PeerKey, id: Vec<u8>, index: u32 },
     /// Пришёл чанк блоба, который мы качаем.
     BlobChunk { peer: PeerKey, id: Vec<u8>, index: u32, data: Vec<u8> },
+    /// Обновление профиля контакта (M2): его самоназвание + хэш аватара.
+    ProfileUpdate { peer: PeerKey, name: String, avatar_hash: Vec<u8> },
+    /// Пир запросил манифест нашего блоба по id (pull-по-хэшу).
+    BlobManifestRequest { peer: PeerKey, id: Vec<u8> },
 }
 
 /// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
@@ -528,6 +532,18 @@ impl Messenger {
         self.shared.send(peer, &Payload::BlobManifest { manifest: manifest.to_string() })
     }
 
+    /// Рассылка обновления профиля (M2): самоназвание + хэш аватара. Fire-and-forget
+    /// (идемпотентно, повторяется на коннекте).
+    pub fn send_profile_update(&self, peer: &PeerKey, name: &str, avatar_hash: &[u8]) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::ProfileUpdate { name: name.to_string(), avatar_hash: avatar_hash.to_vec() })
+    }
+
+    /// Запросить манифест блоба по id (pull-по-хэшу, M2). Fire-and-forget — при потере
+    /// запрашивается снова.
+    pub fn request_blob_manifest(&self, peer: &PeerKey, id: &[u8]) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::BlobManifestRequest { id: id.to_vec() })
+    }
+
     /// Запросить чанк блоба (получатель-драйвен pull). Fire-and-forget: недошедший
     /// запрос/чанк повторно запрашивается по таймауту (см. blob-менеджер).
     pub fn send_blob_request(&self, peer: &PeerKey, id: &[u8], index: u32) -> Result<(), MessengerError> {
@@ -728,6 +744,12 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::BlobChunk { id, index, data } => {
                 shared.emit(Event::BlobChunk { peer: src, id, index, data });
+            }
+            Payload::ProfileUpdate { name, avatar_hash } => {
+                shared.emit(Event::ProfileUpdate { peer: src, name, avatar_hash });
+            }
+            Payload::BlobManifestRequest { id } => {
+                shared.emit(Event::BlobManifestRequest { peer: src, id });
             }
             // Forward-compat (ADR-006): будущий тип, который этот клиент не знает —
             // молча игнорируем (Ack не шлём, отправитель погасит ретрай по TTL).

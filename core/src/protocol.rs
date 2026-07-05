@@ -83,6 +83,21 @@ pub enum Payload {
         #[serde(with = "hex_bytes")]
         data: Vec<u8>,
     },
+    /// Обновление профиля (M2): самоназвание + хэш аватара. Рассылается контактам при
+    /// смене и на коннекте (fire-and-forget, идемпотентно). `avatar_hash` пуст = аватара
+    /// нет. Получатель тянет аватар-блоб по хэшу (`BlobManifestRequest`) ТОЛЬКО если хэш
+    /// новый и блоба ещё нет — контент-адрес даёт авто-дедуп.
+    ProfileUpdate {
+        name: String,
+        #[serde(with = "hex_bytes")]
+        avatar_hash: Vec<u8>,
+    },
+    /// Запрос манифеста блоба по id (BLAKE3) — pull-по-хэшу (аватар / ленивые картинки).
+    /// Ответ — `BlobManifest`. Делает блобы запрашиваемыми, а не только push-анонсом.
+    BlobManifestRequest {
+        #[serde(with = "hex_bytes")]
+        id: Vec<u8>,
+    },
     /// Неизвестный/будущий тип payload — forward-compat (ADR-006). Сообщения версий,
     /// которые этот клиент ещё НЕ понимает (напр. реакции/закрепы/правки — post-1.0),
     /// декодируются СЮДА и молча игнорируются, а не роняют `decode`. Так новые типы
@@ -237,6 +252,8 @@ mod tests {
             Payload::BlobManifest { manifest: "{}".into() },
             Payload::BlobRequest { id: vec![1u8; 32], index: 2 },
             Payload::BlobChunk { id: vec![2u8; 32], index: 3, data: vec![9, 8, 7] },
+            Payload::ProfileUpdate { name: "Алиса".into(), avatar_hash: vec![3u8; 32] },
+            Payload::BlobManifestRequest { id: vec![4u8; 32] },
         ] {
             let d = encode(&a, &b.public_key_bytes(), &p, 0).unwrap();
             let (_, got) = decode(&b, &d).unwrap();
