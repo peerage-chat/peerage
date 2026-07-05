@@ -129,6 +129,20 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_stop<'local>(
     });
 }
 
+/// Секретная сид-фраза (24 слова BIP39) для резервной копии ключа (M4). СЕКРЕТ —
+/// показывать только на FLAG_SECURE-экране. "" если сессии нет.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_seedPhrase<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, ""), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
+        ret(&env, &e.seed_phrase())
+    })
+}
+
 // ── Сообщения 1:1 ───────────────────────────────────────────────────────────
 
 /// Отправить текст. Возвращает id (≥0) либо -1 при ошибке.

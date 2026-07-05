@@ -1,6 +1,7 @@
 package dev.p2p.messenger
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -26,6 +27,7 @@ import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -87,9 +89,24 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
         withContext(Dispatchers.IO) { model.start(dataDir) }
     }
 
+    // Гейт первого запуска (M4). Флаг в SharedPreferences; существующим пользователям
+    // (уже есть контакты) онбординг НЕ показываем — тихая миграция.
+    val prefs = LocalContext.current.getSharedPreferences("p2p_settings", Context.MODE_PRIVATE)
+    var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
+    LaunchedEffect(model.me, model.contacts.size) {
+        if (!onboarded && model.me != null && model.contacts.isNotEmpty()) {
+            prefs.edit().putBoolean("onboarded", true).apply()
+            onboarded = true
+        }
+    }
+
     when {
         model.error != null -> CenterMessage(stringResource(R.string.app_error, model.error.orEmpty()))
         model.me == null -> CenterMessage(stringResource(R.string.app_connecting))
+        !onboarded -> OnboardingFlow(model) {
+            prefs.edit().putBoolean("onboarded", true).apply()
+            onboarded = true
+        }
         else -> Root(model, width)
     }
 }

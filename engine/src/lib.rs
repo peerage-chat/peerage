@@ -145,6 +145,9 @@ pub struct Engine {
     contacts: Mutex<ContactStore>,
     messages: Mutex<MessageStore>,
     me_pub: [u8; 32],
+    /// Личность для экспорта секретной сид-фразы (M4 key backup). Секрет уже живёт в
+    /// messenger; здесь — только для `seed_phrase()` по запросу пользователя.
+    identity: Identity,
     events: Mutex<VecDeque<String>>,
     group_cache: Mutex<GroupCache>,
     jobs: Sender<Job>,
@@ -198,6 +201,12 @@ impl Engine {
 
     pub fn me_pub(&self) -> [u8; 32] {
         self.me_pub
+    }
+
+    /// Секретная сид-фраза (24 слова BIP39) — по запросу пользователя (онбординг M4
+    /// «Показать фразу»). СЕКРЕТ: показывать только на FLAG_SECURE-экране.
+    pub fn seed_phrase(&self) -> String {
+        self.identity.seed_phrase()
     }
 
     // — Сообщения 1:1 —
@@ -1018,6 +1027,7 @@ impl Engine {
             contacts.list().iter().filter_map(|c| parse_key(&c.key)).collect();
 
         let identity_for_groups = identity.clone();
+        let identity_for_engine = identity.clone();
         let (messenger, rx) =
             Messenger::start_with_transport(identity, transport, p2p_messenger::Config::default());
         let messenger = Arc::new(messenger);
@@ -1056,6 +1066,7 @@ impl Engine {
             messages: Mutex::new(messages),
             outbox: Mutex::new(outbox),
             me_pub,
+            identity: identity_for_engine,
             events: Mutex::new(VecDeque::new()),
             group_cache: Mutex::new(GroupCache::default()),
             jobs: job_tx,

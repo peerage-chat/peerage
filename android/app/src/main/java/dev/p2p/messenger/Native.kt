@@ -23,6 +23,9 @@ object Native {
     /** Следующее событие как JSON-строка, либо "" если очередь пуста. */
     external fun pollEvent(sessionPtr: Long): String
 
+    /** Секретная сид-фраза (24 слова BIP39) для резервной копии ключа (M4). СЕКРЕТ. */
+    external fun seedPhrase(sessionPtr: Long): String
+
     /** Отправить текст. Возвращает id сообщения (>=0) или -1 при ошибке. */
     external fun sendText(sessionPtr: Long, keyHex: String, text: String): Long
 

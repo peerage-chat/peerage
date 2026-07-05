@@ -135,6 +135,17 @@ class AppModel private constructor() {
     var error by mutableStateOf<String?>(null)
     var sessionPtr: Long = 0L
 
+    /** Секретная сид-фраза (24 слова) — раскрывается по запросу (онбординг M4
+     *  «Показать фразу»), СЕКРЕТ. null = скрыта. Читается через [ops], не с UI-потока. */
+    var revealedPhrase by mutableStateOf<String?>(null)
+        private set
+
+    fun revealSeedPhrase() = ops.execute { revealedPhrase = Native.seedPhrase(sessionPtr) }
+
+    fun clearRevealedPhrase() {
+        revealedPhrase = null
+    }
+
     val contacts = mutableStateListOf<Contact>()
     val online = mutableStateMapOf<String, Boolean>()
     val unread = mutableStateMapOf<String, Int>()

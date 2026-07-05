@@ -35,13 +35,13 @@ private val WarnText = Color(0xFFE8C98A)
 
 /** Пошаговый флоу первого запуска. `onFinish` — онбординг завершён (пометить флаг). */
 @Composable
-internal fun OnboardingFlow(onFinish: () -> Unit) {
+internal fun OnboardingFlow(model: AppModel, onFinish: () -> Unit) {
     var step by rememberSaveable { mutableStateOf(0) }
     val next: () -> Unit = { if (step < 3) step++ else onFinish() }
     when (step) {
         0 -> WelcomeStep(onStart = next, onImport = next)
         1 -> ProfileStep(onDone = next, onSkip = next)
-        2 -> KeyBackupStep(onDone = next, onSkip = next)
+        2 -> KeyBackupStep(model = model, onDone = next, onSkip = next)
         else -> PermissionsStep(onDone = onFinish)
     }
 }
@@ -175,7 +175,30 @@ private fun ProfileStep(onDone: () -> Unit, onSkip: () -> Unit) {
 }
 
 @Composable
-private fun KeyBackupStep(onDone: () -> Unit, onSkip: () -> Unit) {
+private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit) {
+    var revealed by remember { mutableStateOf(false) }
+    if (revealed) {
+        OnbScaffold(
+            title = "Ваша сид-фраза",
+            desc = "Запишите 24 слова по порядку и храните офлайн",
+            primary = "Я записал",
+            onPrimary = {
+                model.clearRevealedPhrase()
+                onDone()
+            },
+            secondary = "Назад",
+            onSecondary = {
+                model.clearRevealedPhrase()
+                revealed = false
+            },
+            caption = {
+                Icon(TablerIcons.ShieldCheck, null, tint = HoloOnline, modifier = Modifier.size(13.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Экран защищён · не фотографируйте", color = HoloOnline, fontSize = 11.sp)
+            },
+        ) { PhraseGrid(model.revealedPhrase) }
+        return
+    }
     OnbScaffold(
         title = "Резервная копия ключа",
         desc = "Ключ заменяет логин и пароль — только у вас",
@@ -205,8 +228,41 @@ private fun KeyBackupStep(onDone: () -> Unit, onSkip: () -> Unit) {
                 lineHeight = 17.sp,
             )
         }
-        KeyOption(TablerIcons.FileDownload, "Сохранить в файл", "Зашифрованный ключ на устройство") { /* TODO */ }
-        KeyOption(TablerIcons.ListNumbers, "Показать фразу", "24 слова — запишите на бумаге") { /* TODO */ }
+        KeyOption(TablerIcons.FileDownload, "Сохранить в файл", "Зашифрованный ключ на устройство") { /* TODO(M4): экспорт в файл */ }
+        KeyOption(TablerIcons.ListNumbers, "Показать фразу", "24 слова — запишите на бумаге") {
+            model.revealSeedPhrase()
+            revealed = true
+        }
+    }
+}
+
+/** Сетка 24 слов сид-фразы: два столбца по 12, каждое пронумеровано. `phrase` = null —
+ *  ещё грузится (читается через ops). */
+@Composable
+private fun ColumnScope.PhraseGrid(phrase: String?) {
+    val words = phrase?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
+    if (words.size < 24) {
+        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            Text("…", color = HoloSecondary, fontSize = 20.sp)
+        }
+        return
+    }
+    Row(
+        Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile)
+            .border(1.dp, HoloBorder, RoundedCornerShape(14.dp)).padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        for (col in 0 until 2) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.SpaceEvenly) {
+                for (row in 0 until 12) {
+                    val i = col * 12 + row
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${i + 1}", color = HoloSecondary, fontSize = 12.sp, modifier = Modifier.width(22.dp))
+                        Text(words[i], color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
     }
 }
 
