@@ -160,6 +160,18 @@ pub struct Engine {
     outbox: Mutex<p2p_core::outbox::OutboxManager>,
 }
 
+/// Свой профиль на диске (M2): самоназвание + аватар (id блоба + mime). Не секрет —
+/// уходит контактам; хранится plaintext в profile_meta.json.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct ProfileMeta {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    avatar_id: String,
+    #[serde(default)]
+    avatar_mime: String,
+}
+
 /// Результат инициализации: движок + публичная идентичность для UI.
 pub struct StartOk {
     pub engine: Arc<Engine>,
@@ -240,7 +252,11 @@ impl Engine {
         } else {
             name.to_string()
         };
-        match self.contacts.lock_safe().add(key, &name, now()) {
+        // ВАЖНО: гард лока из scrutinee `match` живёт до конца всех арм → refresh_trusted
+        // (лочит contacts) внутри арма = повторный лок того же мьютекса = дедлок. Поэтому
+        // снимаем результат в переменную (гард освобождается на `;`), затем match.
+        let outcome = self.contacts.lock_safe().add(key, &name, now());
+        match outcome {
             Ok(p2p_core::store::AddOutcome::Added) => {
                 spawn_connect(self.messenger.clone(), *key);
                 self.refresh_trusted(); // M3: контакт → щедрый ingress-бюджет
@@ -358,39 +374,78 @@ impl Engine {
         p2p_core::vault::open(&raw).ok()
     }
 
-    // — Свой аватар (M2) — контент-адресный блоб + запись id как «мой аватар».
-    // Рассылку контактам делает blob_offer позже (тот же блоб, без переделок).
+    // — Свой профиль (M2): имя + аватар (контент-адресный блоб). Хранится в
+    // profile_meta.json; рассылается контактам при смене и на коннекте.
     fn store_blob(&self, id: p2p_blob::Hash, content: &[u8]) {
         let _ = std::fs::create_dir_all(&self.blob_dir);
         let _ = std::fs::write(self.blob_dir.join(hex::encode(id)), p2p_core::vault::seal(content));
     }
 
-    fn avatar_id_path(&self) -> PathBuf {
-        self.blob_dir.parent().unwrap_or(&self.blob_dir).join("avatar_id")
+    fn profile_meta_path(&self) -> PathBuf {
+        self.blob_dir.parent().unwrap_or(&self.blob_dir).join("profile_meta.json")
     }
 
-    /// Установить свой аватар: снять метаданные (scrub, PET), сохранить блобом
-    /// (контент-адрес), записать его hex-id как «мой аватар». Возвращает hex-id.
+    fn load_profile_meta(&self) -> ProfileMeta {
+        std::fs::read(self.profile_meta_path())
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_profile_meta(&self, m: &ProfileMeta) {
+        if let Ok(v) = serde_json::to_vec(m) {
+            let _ = std::fs::write(self.profile_meta_path(), v);
+        }
+    }
+
+    /// Своё самоназвание.
+    pub fn self_name(&self) -> String {
+        self.load_profile_meta().name
+    }
+
+    /// Установить своё имя → сохранить и разослать контактам.
+    pub fn set_self_name(&self, name: &str) {
+        let mut m = self.load_profile_meta();
+        m.name = name.to_string();
+        self.save_profile_meta(&m);
+        self.broadcast_profile();
+    }
+
+    /// Установить свой аватар: scrub (PET) → контент-адресный блоб → запись id+mime.
+    /// Разослать контактам. Возвращает hex-id.
     pub fn set_self_avatar(&self, content: Vec<u8>, mime: &str) -> String {
         let scrubbed = p2p_blob::scrub::scrub(mime, &content);
         let id = p2p_blob::blob_id(&scrubbed);
         self.store_blob(id, &scrubbed);
         let id_hex = hex::encode(id);
-        let _ = std::fs::write(self.avatar_id_path(), &id_hex);
+        let mut m = self.load_profile_meta();
+        m.avatar_id = id_hex.clone();
+        m.avatar_mime = mime.to_string();
+        self.save_profile_meta(&m);
+        self.broadcast_profile();
         id_hex
     }
 
     /// hex-id своего аватара, если задан.
     pub fn self_avatar_id(&self) -> Option<String> {
-        std::fs::read_to_string(self.avatar_id_path())
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+        let id = self.load_profile_meta().avatar_id;
+        (!id.is_empty()).then_some(id)
     }
 
     /// Байты своего аватара (расшифрованные at-rest), если задан.
     pub fn self_avatar(&self) -> Option<Vec<u8>> {
         self.blob_read(&self.self_avatar_id()?)
+    }
+
+    /// Разослать свой профиль (имя + хэш аватара) всем контактам (M2). Fire-and-forget.
+    pub fn broadcast_profile(&self) {
+        let m = self.load_profile_meta();
+        let hash = hex::decode(&m.avatar_id).unwrap_or_default();
+        let keys: Vec<[u8; 32]> =
+            self.contacts.lock_safe().list().iter().filter_map(|c| parse_key(&c.key)).collect();
+        for k in keys {
+            let _ = self.messenger.send_profile_update(&k, &m.name, &hash);
+        }
     }
 
     pub fn group_list_json(&self) -> String {
@@ -819,6 +874,10 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         Event::Presence { peer, online } => {
             if online {
                 ensure_contact(engine, peer);
+                // M2: на коннекте шлём контакту свой профиль (догоняет смену, что была офлайн).
+                let m = engine.load_profile_meta();
+                let hash = hex::decode(&m.avatar_id).unwrap_or_default();
+                let _ = engine.messenger.send_profile_update(&peer, &m.name, &hash);
                 let mut ob = engine.outbox.lock_safe();
                 let c = ob.pending_count();
                 ob.on_online(&peer); // M3: дослать ожидающее пиру
@@ -912,6 +971,32 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         Event::BlobChunk { id, index, data, .. } => {
             if let Some(done) = blobs.on_chunk(&id, index, &data) {
                 save_and_notify_blob(engine, done);
+            }
+        }
+        // M2 профиль: контакт прислал самоназвание + хэш аватара.
+        Event::ProfileUpdate { peer, name, avatar_hash } => {
+            // Только от контактов (профиль не принимаем от посторонних). ВАЖНО: гард лока
+            // в условии `if` живёт до конца тела → повторный лок внутри = дедлок; поэтому
+            // читаем `contains` в переменную (гард снимается на `;`).
+            let is_contact = engine.contacts.lock_safe().contains(&peer);
+            if is_contact {
+                let avatar_id = if avatar_hash.is_empty() { String::new() } else { hex::encode(&avatar_hash) };
+                let _ = engine.contacts.lock_safe().set_profile(&peer, &name, &avatar_id);
+                // Аватар тянем по хэшу ТОЛЬКО если новый и блоба ещё нет (контент-адрес → дедуп).
+                if !avatar_id.is_empty() && engine.blob_read(&avatar_id).is_none() {
+                    let _ = engine.messenger.request_blob_manifest(&peer, &avatar_hash);
+                }
+                push_event(engine, serde_json::json!({"type": "contacts_changed"}));
+            }
+        }
+        // M2 pull-по-хэшу: пир просит манифест нашего блоба (пока — аватар).
+        Event::BlobManifestRequest { peer, id } => {
+            let id_hex = hex::encode(&id);
+            let meta = engine.load_profile_meta();
+            if meta.avatar_id == id_hex {
+                if let Some(bytes) = engine.blob_read(&id_hex) {
+                    blobs.offer(peer, &bytes, &meta.avatar_mime);
+                }
             }
         }
         Event::GroupKeyReply { peer, key_package } => {

@@ -58,11 +58,13 @@ pub fn lock(db: &Db) -> MutexGuard<'_, Connection> {
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS contacts (
-            key         BLOB PRIMARY KEY,
-            name        TEXT NOT NULL,
-            fingerprint TEXT NOT NULL,
-            added       INTEGER NOT NULL,
-            verified    INTEGER NOT NULL DEFAULT 0
+            key          BLOB PRIMARY KEY,
+            name         TEXT NOT NULL,
+            fingerprint  TEXT NOT NULL,
+            added        INTEGER NOT NULL,
+            verified     INTEGER NOT NULL DEFAULT 0,
+            profile_name TEXT NOT NULL DEFAULT '',
+            avatar_id    TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -88,5 +90,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     ")?;
     // Миграция для установок с outbox без msg_id (идемпотентно: дубль-колонка → игнор).
     let _ = conn.execute("ALTER TABLE outbox ADD COLUMN msg_id INTEGER NOT NULL DEFAULT 0", []);
+    // Профиль контакта (M2): самоназвание + хэш аватара (идемпотентно).
+    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN profile_name TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN avatar_id TEXT NOT NULL DEFAULT ''", []);
     Ok(())
 }

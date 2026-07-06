@@ -93,11 +93,19 @@ fn write_secret(path: &Path, data: &[u8]) -> std::io::Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Contact {
     pub key: String,
+    /// Локальное имя — как ЭТОТ пользователь назвал контакт (TOFU-заметка).
     pub name: String,
     pub fingerprint: String,
     pub added: i64,
     #[serde(default)]
     pub verified: bool,
+    /// Самоназвание контакта (M2): как он назвал СЕБЯ. Приоритет отображения:
+    /// локальное `name` → `profile_name` → hex. Приходит в `ProfileUpdate`.
+    #[serde(default)]
+    pub profile_name: String,
+    /// hex-хэш аватара контакта (M2). Байты тянутся блобом по хэшу; показ — blob_read.
+    #[serde(default)]
+    pub avatar_id: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -131,7 +139,7 @@ impl ContactStore {
     fn load_cache(&mut self) -> Result<(), StoreError> {
         let conn = db::lock(&self.db);
         let mut stmt = conn.prepare(
-            "SELECT key, name, fingerprint, added, verified FROM contacts",
+            "SELECT key, name, fingerprint, added, verified, profile_name, avatar_id FROM contacts",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -140,10 +148,12 @@ impl ContactStore {
                 row.get::<_, String>(2)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
             ))
         })?;
         for row in rows {
-            let (kb, name, fp, added, ver) = row?;
+            let (kb, name, fp, added, ver, profile_name, avatar_id) = row?;
             if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
                 self.cache.insert(key, Contact {
                     key: hex::encode(key),
@@ -151,6 +161,8 @@ impl ContactStore {
                     fingerprint: fp,
                     added,
                     verified: ver != 0,
+                    profile_name,
+                    avatar_id,
                 });
             }
         }
@@ -194,6 +206,8 @@ impl ContactStore {
             fingerprint: crate::identity::fingerprint_words(key).join(" "),
             added,
             verified: false,
+            profile_name: String::new(),
+            avatar_id: String::new(),
         };
         db::lock(&self.db).execute(
             "INSERT OR IGNORE INTO contacts (key, name, fingerprint, added, verified)
@@ -237,6 +251,23 @@ impl ContactStore {
                 db::lock(&self.db).execute(
                     "UPDATE contacts SET name=?1 WHERE key=?2",
                     rusqlite::params![name, key.as_slice()],
+                )?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Обновить профиль контакта (M2): его самоназвание + hex-хэш аватара (из
+    /// `ProfileUpdate`). Локальное `name` не трогаем (приоритет за пользователем).
+    pub fn set_profile(&mut self, key: &[u8; 32], profile_name: &str, avatar_id: &str) -> Result<bool, StoreError> {
+        match self.cache.get_mut(key) {
+            Some(c) => {
+                c.profile_name = profile_name.to_string();
+                c.avatar_id = avatar_id.to_string();
+                db::lock(&self.db).execute(
+                    "UPDATE contacts SET profile_name=?1, avatar_id=?2 WHERE key=?3",
+                    rusqlite::params![profile_name, avatar_id, key.as_slice()],
                 )?;
                 Ok(true)
             }
@@ -459,6 +490,23 @@ mod tests {
 
         let s2 = ContactStore::open(shared, None).unwrap();
         assert!(s2.get(&k).unwrap().verified);
+    }
+
+    #[test]
+    fn contacts_profile_persists() {
+        let k = key();
+        let shared = db();
+        let mut store = ContactStore::open(shared.clone(), None).unwrap();
+        store.add(&k, "MyNote", 0).unwrap();
+        assert!(store.set_profile(&k, "TheirName", "ab12").unwrap());
+        let c = store.get(&k).unwrap();
+        assert_eq!(c.name, "MyNote"); // локальное имя не тронуто
+        assert_eq!(c.profile_name, "TheirName");
+        assert_eq!(c.avatar_id, "ab12");
+        // Персист через переоткрытие.
+        let s2 = ContactStore::open(shared, None).unwrap();
+        assert_eq!(s2.get(&k).unwrap().profile_name, "TheirName");
+        assert_eq!(s2.get(&k).unwrap().avatar_id, "ab12");
     }
 
     #[test]
