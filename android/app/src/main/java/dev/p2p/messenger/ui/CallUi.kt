@@ -66,7 +66,7 @@ internal fun RoomGrid(
                         val name = if (isMe) {
                             stringResource(R.string.common_you)
                         } else {
-                            model.contacts.firstOrNull { it.key == key }?.name ?: (key.take(6) + "…")
+                            model.contacts.firstOrNull { it.key == key }?.displayName ?: (key.take(6) + "…")
                         }
                         GridTile(name, audio, video, isMe, Modifier.weight(1f)) { onFocus(key) }
                     }
@@ -249,7 +249,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                 )
                 // Кто уже в комнате: «Боря [и ещё N] в комнате» (мини-аватар). 1:1 — нет.
                 if (others.isNotEmpty()) {
-                    val firstName = model.contacts.firstOrNull { it.key == others.first().peer }?.name
+                    val firstName = model.contacts.firstOrNull { it.key == others.first().peer }?.displayName
                         ?: (others.first().peer.take(6) + "…")
                     val more = others.size - 1
                     Row(

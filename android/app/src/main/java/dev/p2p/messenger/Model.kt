@@ -934,7 +934,7 @@ class AppModel private constructor() {
                 // обновляем экран входящего. От другого пира, пока заняты — игнор.
                 if (existing == null || existing.peer == peer) {
                     incomingCall = IncomingRoomCall(peer, roomId, audio, video)
-                    val callerName = contacts.firstOrNull { it.key == peer }?.name
+                    val callerName = contacts.firstOrNull { it.key == peer }?.displayName
                         ?: appContext?.getString(R.string.common_contact).orEmpty()
                     appContext?.let { IncomingCallReceiver.show(it, callerName) }
                 }
@@ -1101,7 +1101,7 @@ class AppModel private constructor() {
     fun callDm(peer: String, audio: Boolean = true, video: Boolean = false) {
         if (currentRoom != null) return
         val ctx = appContext ?: return
-        val name = contacts.firstOrNull { it.key == peer }?.name ?: ""
+        val name = contacts.firstOrNull { it.key == peer }?.displayName ?: ""
         ops.execute {
             val roomId = Native.roomInviteDm(sessionPtr, peer, audio, video)
             if (roomId.isEmpty()) return@execute
@@ -1120,7 +1120,7 @@ class AppModel private constructor() {
         incomingCall = null
         val ctx = appContext ?: return
         IncomingCallReceiver.cancel(ctx)
-        val name = contacts.firstOrNull { it.key == ic.peer }?.name ?: ""
+        val name = contacts.firstOrNull { it.key == ic.peer }?.displayName ?: ""
         muted = !audio // мик-пресет → стартовое состояние мьюта
         ops.execute {
             val roomId = Native.roomJoinDm(sessionPtr, ic.peer, audio, video)
@@ -1355,9 +1355,9 @@ class AppModel private constructor() {
     /** Мы ли админ группы (гейт кнопки «удалить»). */
     fun isGroupAdmin(gid: String): Boolean = groups.firstOrNull { it.gid == gid }?.admin == true
 
-    /** Имя для показа по hex-ключу: имя контакта либо укороченный ключ. */
+    /** Имя для показа по hex-ключу: имя контакта (local→profile→hex) либо укороченный ключ. */
     fun peerName(hex: String): String =
-        contacts.firstOrNull { it.key == hex }?.name ?: (hex.take(8) + "…")
+        contacts.firstOrNull { it.key == hex }?.displayName ?: (hex.take(8) + "…")
 
     fun loadGroupMembers(gid: String) = ops.execute {
         val arr = JSONArray(Native.groupMembers(sessionPtr, gid))

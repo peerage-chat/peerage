@@ -747,16 +747,17 @@ fn public_peer_uris() -> impl Iterator<Item = &'static str> {
 
 // ── Внутренняя оркестрация: event_pump + обработчики ────────────────────────
 
-/// TOFU: добавить неизвестного пира в контакты (имя по умолчанию — префикс ключа).
+/// TOFU: добавить неизвестного пира в контакты. Локальную заметку (`name`) НЕ
+/// придумываем — оставляем пустой: приоритет показа `local → profile_name → hex`
+/// сам покажет самоназвание пира (когда придёт `ProfileUpdate`) или короткий hex.
+/// Плейсхолдер-имя тут перебивало бы самоназвание в UI (см. Contact.displayName).
 fn ensure_contact(engine: &Engine, peer: [u8; 32]) {
     let added = {
         let mut store = engine.contacts.lock_safe();
         if store.contains(&peer) {
             false
         } else {
-            let hex = hex::encode(peer);
-            let name = format!("{}…", &hex[..8]);
-            let _ = store.add(&peer, &name, now());
+            let _ = store.add(&peer, "", now());
             true
         }
     };

@@ -74,4 +74,13 @@ class ContactTest {
         val o = JSONObject().put("key", hex).put("name", "").put("profile_name", "Charlie")
         assertEquals("Charlie", Contact.fromJson(o).displayName)
     }
+
+    @Test fun auto_added_contact_shows_self_name_not_placeholder() {
+        // TOFU-авто-добавление (ensure_contact) даёт пустое локальное имя; когда придёт
+        // самоназвание — оно и показывается (а не hex-плейсхолдер, как было в баге).
+        val autoAdded = Contact(hex, name = "", fingerprint = "", verified = false)
+        assertEquals("ea4a6c63", autoAdded.displayName) // до профиля — короткий hex
+        val withProfile = autoAdded.copy(profileName = "Dave")
+        assertEquals("Dave", withProfile.displayName) // профиль пришёл → самоназвание
+    }
 }
