@@ -55,6 +55,20 @@ data class Contact(
      *  (docs/architecture: приоритет local → profile_name → hex.) */
     val displayName: String
         get() = name.ifBlank { profileName.ifBlank { key.take(8) } }
+
+    companion object {
+        /** Разобрать один контакт из JSON движка (поля контракта: key/name/fingerprint/
+         *  verified/profile_name/avatar_id). Чистая функция — покрыта юнит-тестом,
+         *  ловит рассинхрон имён полей между Rust и Kotlin. */
+        fun fromJson(o: JSONObject) = Contact(
+            key = o.getString("key"),
+            name = o.getString("name"),
+            fingerprint = o.optString("fingerprint"),
+            verified = o.optBoolean("verified", false),
+            profileName = o.optString("profile_name"),
+            avatarId = o.optString("avatar_id"),
+        )
+    }
 }
 
 data class Message(
@@ -797,17 +811,7 @@ class AppModel private constructor() {
 
     private fun refreshContactsNow() {
         val arr = JSONArray(Native.listContacts(sessionPtr))
-        val list = (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            Contact(
-                o.getString("key"),
-                o.getString("name"),
-                o.optString("fingerprint"),
-                o.optBoolean("verified", false),
-                o.optString("profile_name"),
-                o.optString("avatar_id"),
-            )
-        }
+        val list = (0 until arr.length()).map { Contact.fromJson(arr.getJSONObject(it)) }
         contacts.clear()
         contacts.addAll(list)
         list.forEach { online.putIfAbsent(it.key, Native.isOnline(sessionPtr, it.key)) }

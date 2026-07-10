@@ -44,6 +44,10 @@ android {
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
 
+    // JVM-юнит-тесты (чистая логика: displayName, парсинг контактов). org.json из
+    // android.jar в юнит-тестах — заглушка; настоящий берётся из testImplementation ниже.
+    testOptions { unitTests.isReturnDefaultValues = true }
+
     // Нативные .so (libygg.so + libp2p_android.so) стейджатся скриптом
     // scripts/build-android-libs.sh в этот каталог по ABI.
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
@@ -85,4 +89,8 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.4")
     implementation("androidx.camera:camera-view:1.3.4")
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Юнит-тесты (чистая Kotlin-логика без Android-фреймворка).
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
