@@ -2,7 +2,14 @@
 
 package dev.p2p.messenger.ui
 
+import android.Manifest
 import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -42,8 +49,6 @@ import kotlinx.coroutines.launch
 // Единый скелет с фиксированными зонами: заголовок · описание · контент · короткая
 // надпись · Готово · Пропустить — зоны совпадают по высоте, поэтому шаги не «прыгают».
 // Строки — в strings.xml (EN/RU), ключи onb_*.
-// TODO(M4): выбор аватара (image pick + M2-блоб); per-card запрос разрешений на экране
-//   «Пара разрешений» (сейчас грант делает App() после гейта).
 
 private val WarnBg = WarnColor.copy(alpha = 0.12f)
 private val WarnBorder = WarnColor.copy(alpha = 0.40f)
@@ -401,24 +406,99 @@ private fun ColumnScope.PhraseGrid(phrase: String?) {
     }
 }
 
+/**
+ * Разрешения, нужные приложению ЦЕЛИКОМ, а не отдельному экрану: уведомления
+ * (иначе входящие не видны) и работа в фоне (mesh-узел при погасшем экране).
+ * Камеру/микрофон здесь НЕ просим — они запрашиваются в момент звонка/сканера
+ * (см. [rememberPermissionRunner]).
+ *
+ * Карточка уведомлений показывается только на Android 13+: до неё разрешение
+ * не существовало и выдавалось автоматически.
+ */
 @Composable
 private fun PermissionsStep(onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val showNotif = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+    var notifGranted by remember {
+        mutableStateOf(!showNotif || ctx.hasPermission(Manifest.permission.POST_NOTIFICATIONS))
+    }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        notifGranted = it
+    }
+    // Состояние «в фоне» перечитываем после возврата из системных настроек.
+    var bgGranted by remember { mutableStateOf(ctx.ignoresBatteryOptimizations()) }
+    val bgLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        bgGranted = ctx.ignoresBatteryOptimizations()
+    }
+
     OnbScaffold(
         title = stringResource(R.string.onb_perms_title),
         desc = stringResource(R.string.onb_perms_sub),
         primary = stringResource(R.string.onb_done),
         onPrimary = onDone,
-        contentArrangement = Arrangement.spacedBy(12.dp),
+        // Две карточки делят зону поровну; одна — не растягивается на весь экран,
+        // а стоит по центру (иначе внутри карточки зияет пустота).
+        contentArrangement = if (showNotif) Arrangement.spacedBy(12.dp) else Arrangement.Center,
     ) {
-        PermCard(TablerIcons.Bell, stringResource(R.string.onb_perm_notif), stringResource(R.string.onb_perm_notif_desc))
-        PermCard(TablerIcons.BatteryCharging, stringResource(R.string.onb_perm_bg), stringResource(R.string.onb_perm_bg_desc))
+        if (showNotif) {
+            PermCard(
+                TablerIcons.Bell,
+                stringResource(R.string.onb_perm_notif),
+                stringResource(R.string.onb_perm_notif_desc),
+                granted = notifGranted,
+                fill = true,
+            ) { notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+        }
+        PermCard(
+            TablerIcons.BatteryCharging,
+            stringResource(R.string.onb_perm_bg),
+            stringResource(R.string.onb_perm_bg_desc),
+            granted = bgGranted,
+            fill = showNotif,
+        ) { bgLauncher.launch(batteryOptimizationIntent(ctx)) }
     }
 }
 
+/** Приложение уже выведено из-под оптимизации батареи? */
+private fun Context.ignoresBatteryOptimizations(): Boolean {
+    val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+    return pm.isIgnoringBatteryOptimizations(packageName)
+}
+
+/**
+ * Прямой диалог «не оптимизировать» (требует REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).
+ *
+ * На части прошивок (проверено на MIUI) этот экшен ловят ДВА обработчика, и вместо
+ * диалога система показывает выбор «Что использовать?». Поэтому целимся явно в
+ * системные настройки; если их нет — отдаём неявный интент, а в крайнем случае
+ * общий список батарейных исключений (он есть всегда).
+ */
+private fun batteryOptimizationIntent(ctx: Context): Intent {
+    val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
+    val settings = Intent(direct).setPackage("com.android.settings")
+    return when {
+        settings.resolveActivity(ctx.packageManager) != null -> settings
+        direct.resolveActivity(ctx.packageManager) != null -> direct
+        else -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+    }
+}
+
+/** Карточка разрешения. Выдано — вместо кнопок статичная отметка (жать больше нечего).
+ *  `fill` — занять свою долю зоны (когда карточек несколько). */
 @Composable
-private fun ColumnScope.PermCard(icon: ImageVector, title: String, desc: String) {
+private fun ColumnScope.PermCard(
+    icon: ImageVector,
+    title: String,
+    desc: String,
+    granted: Boolean,
+    fill: Boolean,
+    onGrant: () -> Unit,
+) {
+    var dismissed by remember { mutableStateOf(false) }
     Column(
-        Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile)
+        Modifier.fillMaxWidth().then(if (fill) Modifier.weight(1f) else Modifier)
+            .clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile)
             .border(1.dp, HoloBorder, RoundedCornerShape(14.dp)).padding(14.dp),
         verticalArrangement = Arrangement.Center,
     ) {
@@ -430,15 +510,28 @@ private fun ColumnScope.PermCard(icon: ImageVector, title: String, desc: String)
         Spacer(Modifier.height(9.dp))
         Text(desc, color = HoloSecondary, fontSize = 12.5.sp, lineHeight = 17.sp)
         Spacer(Modifier.height(11.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(
-                Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(11.dp)).background(HoloAccent).clickable { /* TODO grant */ },
-                contentAlignment = Alignment.Center,
-            ) { Text(stringResource(R.string.onb_allow), color = HoloAccentDark, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
-            Box(
-                Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(11.dp)).border(1.dp, HoloBorder, RoundedCornerShape(11.dp)).clickable { /* later */ },
-                contentAlignment = Alignment.Center,
-            ) { Text(stringResource(R.string.onb_later), color = HoloSecondary, fontSize = 13.sp) }
+        // Высота зоны кнопок постоянна (38.dp) — карточки не «прыгают» после гранта.
+        Box(Modifier.fillMaxWidth().height(38.dp), contentAlignment = Alignment.CenterStart) {
+            when {
+                granted -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(TablerIcons.Check, null, tint = HoloOnline, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.onb_granted), color = HoloOnline, fontSize = 13.sp)
+                }
+                dismissed -> Text(stringResource(R.string.onb_later_hint), color = HoloSecondary, fontSize = 12.5.sp)
+                else -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(11.dp)).background(HoloAccent)
+                            .clickable(onClick = onGrant),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(stringResource(R.string.onb_allow), color = HoloAccentDark, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+                    Box(
+                        Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(11.dp))
+                            .border(1.dp, HoloBorder, RoundedCornerShape(11.dp)).clickable { dismissed = true },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(stringResource(R.string.onb_later), color = HoloSecondary, fontSize = 13.sp) }
+                }
+            }
         }
     }
 }

@@ -2,6 +2,7 @@
 
 package dev.p2p.messenger.ui
 
+import android.Manifest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -82,7 +83,14 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                 )
             }
         }
-        if (key != null) BarIcon(Icons.Filled.Call, stringResource(R.string.cd_audio_call)) { model.callDm(key) }
+        if (key != null) {
+            // Микрофон спрашиваем здесь, а не на старте приложения: пользователь жмёт
+            // «позвонить» — смысл запроса очевиден.
+            val runWithPerm = rememberPermissionRunner()
+            BarIcon(Icons.Filled.Call, stringResource(R.string.cd_audio_call)) {
+                runWithPerm(arrayOf(Manifest.permission.RECORD_AUDIO), R.string.perm_denied_mic) { model.callDm(key) }
+            }
+        }
         BarIcon(Icons.Filled.MoreVert, stringResource(R.string.common_more), tint = Color.White, onClick = onProfile)
     }
 }

@@ -2,6 +2,7 @@
 
 package dev.p2p.messenger.ui
 
+import android.Manifest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -281,6 +282,10 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                 )
             }
             // Низ: Отклонить(✕) · Микрофон(пресет) · Видео(пресет) · Принять(дверь).
+            // Разрешения спрашиваем на «Принять», по пресетам: камеру — только если
+            // входим с видео. Отказ = в звонок не входим (иначе сессия стартует без
+            // потока и выглядит как зависший звонок).
+            val runWithPerm = rememberPermissionRunner()
             Row(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -288,7 +293,14 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                 CallButton(Icons.Filled.Close, stringResource(R.string.call_invite_btn_decline), HoloError) { model.declineDmCall() }
                 PresetButton(if (micOn) Icons.Filled.Mic else Icons.Filled.MicOff, micOn, stringResource(R.string.call_btn_mic)) { micOn = !micOn }
                 PresetButton(if (videoOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff, videoOn, stringResource(R.string.call_btn_video)) { videoOn = !videoOn }
-                CallButton(Icons.AutoMirrored.Filled.Login, stringResource(R.string.call_invite_btn_join), HoloOnline) { model.acceptDmCall(micOn, videoOn) }
+                CallButton(Icons.AutoMirrored.Filled.Login, stringResource(R.string.call_invite_btn_join), HoloOnline) {
+                    val perms = if (videoOn) {
+                        arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+                    } else {
+                        arrayOf(Manifest.permission.RECORD_AUDIO)
+                    }
+                    runWithPerm(perms, R.string.perm_denied_call) { model.acceptDmCall(micOn, videoOn) }
+                }
             }
         }
     }

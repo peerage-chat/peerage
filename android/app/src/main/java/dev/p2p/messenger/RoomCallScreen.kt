@@ -1,5 +1,6 @@
 package dev.p2p.messenger
 
+import android.Manifest
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.view.Surface
@@ -46,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.p2p.messenger.ui.rememberPermissionRunner
 
 /**
  * Экран активного звонка-комнаты (Discord-style сетка). Дизайн — docs/design/call-ui.md.
@@ -522,6 +524,8 @@ private fun ControlBar(model: AppModel, peerKey: String) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Камера нужна только при ВКЛЮЧЕНИИ видео; выключение разрешения не требует.
+        val runWithPerm = rememberPermissionRunner()
         CtlButton(Icons.Filled.PersonAdd, stringResource(R.string.call_btn_invite), Tokens.Colors.btnNeutral) {}
         CtlButton(
             if (model.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
@@ -538,7 +542,13 @@ private fun ControlBar(model: AppModel, peerKey: String) {
             tint = if (model.videoActive) Color.White else Tokens.Colors.iconDangerMuted,
             // долгий тап → экран «Показать видео» (источник/разрешение/fps/битрейт)
             onLongClick = { model.openVideoShare() },
-        ) { model.toggleVideo() }
+        ) {
+            if (model.videoActive) {
+                model.toggleVideo()
+            } else {
+                runWithPerm(arrayOf(Manifest.permission.CAMERA), R.string.perm_denied_camera) { model.toggleVideo() }
+            }
+        }
         CtlButton(Icons.AutoMirrored.Filled.Logout, stringResource(R.string.call_btn_leave), HoloError) { model.leaveRoom() }
     }
 }

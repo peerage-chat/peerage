@@ -256,6 +256,13 @@ val TablerIcons.ShieldCheck: ImageVector by lazy {
     )
 }
 
+val TablerIcons.Check: ImageVector by lazy {
+    tabler(
+        "check",
+        "M5 12l5 5l10 -10",
+    )
+}
+
 val TablerIcons.Bell: ImageVector by lazy {
     tabler(
         "bell",

@@ -307,6 +307,11 @@
     <string name="onb_perm_bg_desc">Stay connected with the screen off (mesh node).</string>
     <string name="onb_allow">Allow</string>
     <string name="onb_later">Later</string>
+    <string name="onb_granted">Granted</string>
+    <string name="onb_later_hint">Can be enabled later in settings</string>
+    <string name="perm_denied_mic">Calls need microphone access</string>
+    <string name="perm_denied_camera">Camera access is required</string>
+    <string name="perm_denied_call">Joining a call needs microphone access</string>
     <string name="onb_restore_title">Restore</string>
     <string name="onb_restore_sub">Enter the 24 words of your seed phrase, separated by spaces</string>
     <string name="onb_restore">Restore</string>

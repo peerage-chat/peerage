@@ -2,7 +2,6 @@ package dev.p2p.messenger
 
 import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -96,19 +95,18 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
         }
     }
 
-    // Разрешения запрашиваем ПОСЛЕ гейта: существующим — сразу, новым — по завершении
-    // онбординга. Так системный диалог не выскакивает поверх/до онбординга.
-    // TODO(M4): camera/mic в идеале контекстно (перед звонком) — сейчас app полагается
-    // на ранний грант; для этого нужен пермишен-гейт на call-flow + двух-девайсный тест.
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+    // Камеру и микрофон здесь НЕ просим: они запрашиваются контекстно, в момент
+    // использования (звонок / включение видео / сканер QR) — см. rememberPermissionRunner.
+    // Здесь остаются только уведомления: они нужны приложению целиком, а не отдельному
+    // экрану, и просить их можно лишь после гейта (иначе диалог накроет онбординг).
+    // Прошедшие онбординг жмут «Разрешить» в его карточке; сюда попадают те, кому
+    // онбординг не показывался (тихая миграция существующих пользователей).
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(onboarded) {
-        if (onboarded) {
-            val wanted = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                wanted += Manifest.permission.POST_NOTIFICATIONS
-            }
-            val need = wanted.filter { ctx.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-            if (need.isNotEmpty()) permLauncher.launch(need.toTypedArray())
+        if (onboarded && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !ctx.hasPermission(Manifest.permission.POST_NOTIFICATIONS)
+        ) {
+            permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 

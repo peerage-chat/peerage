@@ -2,6 +2,9 @@
 
 package dev.p2p.messenger.ui
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -32,8 +35,25 @@ import dev.p2p.messenger.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** Сканер QR. Камеру просим на входе на экран — это и есть контекст запроса.
+ *  Без разрешения показываем объяснение вместо чёрного превью. */
 @Composable
 internal fun QrScannerScreen(onResult: (String) -> Unit) {
+    val ctx = LocalContext.current
+    var granted by remember { mutableStateOf(ctx.hasPermission(Manifest.permission.CAMERA)) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
+    LaunchedEffect(Unit) {
+        if (!granted) launcher.launch(Manifest.permission.CAMERA)
+    }
+    if (!granted) {
+        CenterMessage(stringResource(R.string.perm_denied_camera))
+        return
+    }
+    ScannerContent(onResult)
+}
+
+@Composable
+private fun ScannerContent(onResult: (String) -> Unit) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
