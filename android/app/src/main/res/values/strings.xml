@@ -153,6 +153,7 @@
     <string name="info_delete">Delete contact</string>
     <string name="info_diagnostics">DIAGNOSTICS</string>
     <string name="info_speed_test">Speed test</string>
+    <string name="info_self_name">Calls themselves: %1$s</string>
 
     <!-- ── Chat ────────────────────────────────────────────────────────── -->
     <string name="chat_default_title">Chat</string>

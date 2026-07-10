@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -91,12 +92,12 @@ internal fun ContactsScreen(
                     items(model.contacts, key = { "c_${it.key}" }) { c ->
                         val online = model.online[c.key] == true
                         ListRow(onClick = { onOpenDm(c.key) }) {
-                            SquareAvatar(c.name, size = 44.dp, online = online)
+                            SquareAvatar(c.displayName, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c.avatarId])
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        c.name,
+                                        c.displayName,
                                         color = Color.White,
                                         fontSize = 15.sp,
                                         maxLines = 1,
@@ -140,12 +141,12 @@ internal fun ContactListScreen(model: AppModel, onOpen: (String) -> Unit) {
         items(model.contacts, key = { it.key }) { c ->
             val online = model.online[c.key] == true
             ListRow(onClick = { onOpen(c.key) }) {
-                SquareAvatar(c.name, size = 44.dp, online = online)
+                SquareAvatar(c.displayName, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c.avatarId])
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            c.name,
+                            c.displayName,
                             color = Color.White,
                             fontSize = 15.sp,
                             maxLines = 1,
@@ -257,11 +258,25 @@ internal fun InfoScreen(model: AppModel, onDeleted: () -> Unit) {
         Modifier.verticalScroll(rememberScrollState()).padding(ScreenPad),
         verticalArrangement = Arrangement.spacedBy(FormGap),
     ) {
+        // Шапка: аватар + имя для показа (M2) — сразу видно, кто это.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SquareAvatar(c.displayName, size = 56.dp, avatarBytes = model.contactAvatars[c.avatarId])
+            Spacer(Modifier.width(14.dp))
+            Text(c.displayName, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+        }
         FieldLabel(stringResource(R.string.label_name))
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextField(name, { name = it }, Modifier.weight(1f), colors = inputColors())
             Spacer(Modifier.width(8.dp))
             AccentButton("OK") { model.rename(key, name) }
+        }
+        // Самоназвание контакта (как он назвал СЕБЯ) — подсказка для выбора заметки.
+        if (c.profileName.isNotBlank()) {
+            Text(
+                stringResource(R.string.info_self_name, c.profileName),
+                color = HoloSecondary,
+                fontSize = 11.sp,
+            )
         }
         FieldLabel("FINGERPRINT")
         Text(c.fingerprint, color = HoloAccent, fontSize = 15.sp)

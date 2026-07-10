@@ -245,9 +245,9 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
 @Composable
 private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit) {
     val ctx = LocalContext.current
-    val prefs = ctx.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
-    var name by rememberSaveable { mutableStateOf(prefs.getString("profile_name", "").orEmpty()) }
-    val save = { prefs.edit().putString("profile_name", name.trim()).apply() }
+    // Имя живёт в движке (M2): он его хранит и рассылает контактам. Не в prefs.
+    var name by rememberSaveable { mutableStateOf(model.selfName) }
+    val save = { if (name.trim() != model.selfName) model.updateSelfName(name) }
     val scope = rememberCoroutineScope()
     // Системный Photo Picker (M2): выбор картинки → чтение байт в IO → set_self_avatar
     // (scrub + блоб на движке). Аватар реактивно показывается из model.selfAvatar.

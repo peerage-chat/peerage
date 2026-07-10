@@ -74,12 +74,12 @@ internal fun NewChatScreen(
         items(model.contacts, key = { it.key }) { c ->
             val online = model.online[c.key] == true
             ListRow(onClick = { onOpenDm(c.key) }) {
-                SquareAvatar(c.name, size = 44.dp, online = online)
+                SquareAvatar(c.displayName, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c.avatarId])
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            c.name,
+                            c.displayName,
                             color = Color.White,
                             fontSize = 15.sp,
                             maxLines = 1,

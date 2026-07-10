@@ -145,6 +145,7 @@
     <string name="info_delete">Удалить контакт</string>
     <string name="info_diagnostics">ДИАГНОСТИКА</string>
     <string name="info_speed_test">Тест скорости</string>
+    <string name="info_self_name">Называет себя: %1$s</string>
 
     <!-- ── Чат ─────────────────────────────────────────────────────────── -->
     <string name="chat_default_title">Чат</string>

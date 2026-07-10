@@ -1,5 +1,6 @@
 package dev.p2p.messenger
 
+import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -41,10 +42,20 @@ data class VideoQuality(
 
 data class Contact(
     val key: String,
+    /** Локальная заметка — как ЭТОТ пользователь назвал контакт (может быть пустой). */
     val name: String,
     val fingerprint: String,
     val verified: Boolean,
-)
+    /** Самоназвание контакта (M2): как он назвал себя (ProfileUpdate). */
+    val profileName: String = "",
+    /** hex-хэш аватара контакта (M2); байты — через [AppModel.contactAvatars]. */
+    val avatarId: String = "",
+) {
+    /** Имя для показа: локальная заметка → самоназвание → короткий hex.
+     *  (docs/architecture: приоритет local → profile_name → hex.) */
+    val displayName: String
+        get() = name.ifBlank { profileName.ifBlank { key.take(8) } }
+}
 
 data class Message(
     val id: Long,
@@ -157,12 +168,26 @@ class AppModel private constructor() {
     var selfAvatar by mutableStateOf<ByteArray?>(null)
         private set
 
+    /** Своё самоназвание (M2). Живёт в движке (рассылается контактам), не в prefs. */
+    var selfName by mutableStateOf("")
+        private set
+
     fun loadSelfAvatar() = ops.execute { selfAvatar = Native.selfAvatar(sessionPtr) }
 
     fun setSelfAvatar(content: ByteArray, mime: String) = ops.execute {
         Native.setSelfAvatar(sessionPtr, content, mime)
         selfAvatar = Native.selfAvatar(sessionPtr)
     }
+
+    /** Задать своё имя (M2): движок сохранит и разошлёт контактам. */
+    fun updateSelfName(name: String) = ops.execute {
+        Native.setSelfName(sessionPtr, name.trim())
+        selfName = Native.selfName(sessionPtr)
+    }
+
+    /** Байты аватаров контактов по hex-хэшу (M2). Заполняется при обновлении контактов;
+     *  UI читает [Contact.avatarId] → сюда. */
+    val contactAvatars = mutableStateMapOf<String, ByteArray>()
 
     val contacts = mutableStateListOf<Contact>()
     val online = mutableStateMapOf<String, Boolean>()
@@ -551,11 +576,27 @@ class AppModel private constructor() {
         refreshContactsNow()
         refreshGroupsNow()
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
+        selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
+        migrateSelfNameFromPrefs(dataDir) // разовый перенос имени из старых prefs в движок
         queueFile = File(dataDir, "offline_queue.json")
         loadOfflineQueue()
         restoreQueuedToLog()
         startLoops()
         registerNetworkCallback()
+    }
+
+    /** Разовая миграция (M2): раньше имя жило только в SharedPreferences и не
+     *  рассылалось. Если движок пустой, а в prefs имя есть — переносим в движок
+     *  (он сохранит и разошлёт), затем чистим prefs, чтобы не повторяться. */
+    private fun migrateSelfNameFromPrefs(dataDir: String) {
+        val ctx = appContext ?: return
+        val prefs = ctx.getSharedPreferences("p2p_settings", Context.MODE_PRIVATE)
+        val old = prefs.getString("profile_name", "").orEmpty().trim()
+        if (selfName.isBlank() && old.isNotBlank()) {
+            Native.setSelfName(sessionPtr, old)
+            selfName = Native.selfName(sessionPtr)
+        }
+        if (old.isNotBlank()) prefs.edit().remove("profile_name").apply()
     }
 
     // Мгновенный реконнект при восстановлении сети (до срабатывания тикера).
@@ -758,11 +799,26 @@ class AppModel private constructor() {
         val arr = JSONArray(Native.listContacts(sessionPtr))
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
-            Contact(o.getString("key"), o.getString("name"), o.optString("fingerprint"), o.optBoolean("verified", false))
+            Contact(
+                o.getString("key"),
+                o.getString("name"),
+                o.optString("fingerprint"),
+                o.optBoolean("verified", false),
+                o.optString("profile_name"),
+                o.optString("avatar_id"),
+            )
         }
         contacts.clear()
         contacts.addAll(list)
         list.forEach { online.putIfAbsent(it.key, Native.isOnline(sessionPtr, it.key)) }
+        // Аватары контактов (M2): байты уже подтянутого блоба по хэшу. Пусто → нет (ещё
+        // не докачался или контакт без аватара) — покажем букву. Читаем на этом же [ops].
+        list.forEach { c ->
+            if (c.avatarId.isNotEmpty() && !contactAvatars.containsKey(c.avatarId)) {
+                Native.blobRead(sessionPtr, c.avatarId).takeIf { it.isNotEmpty() }
+                    ?.let { contactAvatars[c.avatarId] = it }
+            }
+        }
     }
 
     fun openChat(key: String) {
@@ -899,6 +955,13 @@ class AppModel private constructor() {
                     val idx = roomMembers.indexOfFirst { it.peer == peer }
                     if (idx >= 0) roomMembers[idx] = rm else roomMembers.add(rm)
                 }
+            }
+            // M2: контакт прислал профиль (имя/аватар) → перечитать список.
+            "contacts_changed" -> refreshContactsNow()
+            // M2: докачался блоб. Если это аватар контакта — перечитать, чтобы показать.
+            "blob_received" -> {
+                val id = o.optString("id")
+                if (contacts.any { it.avatarId == id }) refreshContactsNow()
             }
             "groups_changed" -> {
                 refreshGroupsNow()

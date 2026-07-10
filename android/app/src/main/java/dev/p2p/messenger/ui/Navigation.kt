@@ -24,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -106,10 +105,8 @@ internal fun FolderTile(icon: ImageVector, label: String, selected: Boolean, bad
 @Composable
 internal fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
     val me = model.me
-    // Имя из онбординга (M4), если задано; иначе «Вы».
-    val savedName = LocalContext.current
-        .getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
-        .getString("profile_name", null)?.takeIf { it.isNotBlank() }
+    // Своё имя из движка (M2); иначе «Вы».
+    val savedName = model.selfName.takeIf { it.isNotBlank() }
     ModalDrawerSheet(
         drawerContainerColor = HoloSurface,
         modifier = Modifier.widthIn(max = 300.dp),

@@ -47,7 +47,9 @@ internal fun SearchScreen(
     val contacts = if (q.isEmpty()) {
         emptyList()
     } else {
-        model.contacts.filter { it.name.lowercase().contains(q) || it.key.lowercase().contains(q) }
+        model.contacts.filter {
+            it.displayName.lowercase().contains(q) || it.name.lowercase().contains(q) || it.key.lowercase().contains(q)
+        }
     }
     val groups = if (q.isEmpty()) emptyList() else model.groups.filter { it.name.lowercase().contains(q) }
 
@@ -79,10 +81,10 @@ internal fun SearchScreen(
                 items(contacts, key = { "c_${it.key}" }) { c ->
                     val online = model.online[c.key] == true
                     ListRow(onClick = { onOpenDm(c.key) }) {
-                        SquareAvatar(c.name, size = 44.dp, online = online)
+                        SquareAvatar(c.displayName, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c.avatarId])
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(c.name, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(c.displayName, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
                                 stringResource(if (online) R.string.status_online else R.string.status_offline),
                                 color = if (online) HoloOnline else HoloSecondary,

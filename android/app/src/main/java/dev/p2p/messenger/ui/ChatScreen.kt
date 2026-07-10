@@ -46,8 +46,9 @@ import dev.p2p.messenger.R
 internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit) {
     val key = model.currentChat
     val c = key?.let { k -> model.contacts.firstOrNull { it.key == k } }
-    val name = c?.name ?: stringResource(R.string.chat_default_title)
+    val name = c?.displayName ?: stringResource(R.string.chat_default_title)
     val online = key?.let { model.online[it] == true } ?: false
+    val avatar = c?.avatarId?.let { model.contactAvatars[it] }
     Row(
         Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -58,7 +59,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SquareAvatar(name, size = 38.dp, online = online)
+            SquareAvatar(name, size = 38.dp, online = online, avatarBytes = avatar)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

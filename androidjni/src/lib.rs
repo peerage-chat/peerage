@@ -170,6 +170,33 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_importSeedPhrase<'local>(
     })
 }
 
+/// Своё самоназвание (M2). "" если не задано.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_selfName<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, ""), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
+        ret(&env, &e.self_name())
+    })
+}
+
+/// Установить своё имя (M2): сохранить и разослать контактам (ProfileUpdate).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_setSelfName<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    name: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        e.set_self_name(&jstr(&mut env, &name));
+    });
+}
+
 /// Установить свой аватар (M2): scrub + сохранить блобом. Возвращает hex-id ("" при ошибке).
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_setSelfAvatar<'local>(

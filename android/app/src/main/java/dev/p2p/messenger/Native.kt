@@ -30,6 +30,12 @@ object Native {
      *  true = успех (Kotlin затем перезапускает процесс). Не трогает живую сессию. */
     external fun importSeedPhrase(dataDir: String, phrase: String): Boolean
 
+    /** Своё самоназвание (M2). "" если не задано. */
+    external fun selfName(sessionPtr: Long): String
+
+    /** Установить своё имя (M2): сохранить + разослать контактам (ProfileUpdate). */
+    external fun setSelfName(sessionPtr: Long, name: String)
+
     /** Установить свой аватар (M2): scrub + контент-адресный блоб. Возвращает hex-id. */
     external fun setSelfAvatar(sessionPtr: Long, content: ByteArray, mime: String): String
 
