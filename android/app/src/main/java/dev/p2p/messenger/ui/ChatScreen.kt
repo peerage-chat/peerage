@@ -3,6 +3,10 @@
 package dev.p2p.messenger.ui
 
 import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -32,15 +36,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import dev.p2p.messenger.*
 import dev.p2p.messenger.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit) {
@@ -102,8 +112,21 @@ internal fun ChatScreen(model: AppModel) {
     val msgs = model.messages[key] ?: emptyList()
     var input by remember(key) { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     // Держим прокрутку у последнего сообщения при появлении новых.
     LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+
+    // M2: выбор картинки → чтение байт в IO → sendMedia (scrub+блоб+сообщение в движке).
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { u ->
+            scope.launch(Dispatchers.IO) {
+                val bytes = ctx.contentResolver.openInputStream(u)?.use { it.readBytes() } ?: return@launch
+                val mime = ctx.contentResolver.getType(u) ?: "image/jpeg"
+                model.sendMedia(key, bytes, mime, "image")
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -114,10 +137,14 @@ internal fun ChatScreen(model: AppModel) {
             itemsIndexed(msgs) { i, m ->
                 val prev = msgs.getOrNull(i - 1)
                 if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
-                MessageBubble(m)
+                MessageBubble(m, model)
             }
         }
-        MessageInput(input, { input = it }) {
+        MessageInput(
+            input,
+            { input = it },
+            onAttach = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        ) {
             if (input.isNotBlank()) {
                 model.send(key, input)
                 input = ""
@@ -154,7 +181,7 @@ internal fun DateChip(label: String) {
 }
 
 @Composable
-internal fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () -> Unit) {
+internal fun MessageInput(value: String, onChange: (String) -> Unit, onAttach: () -> Unit = {}, onSend: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(HoloBg).padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -164,7 +191,7 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onSend: () 
             Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(HoloSurface),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PillIcon(Icons.Filled.AttachFile, stringResource(R.string.cd_attach)) { /* TODO: вложения */ }
+            PillIcon(Icons.Filled.AttachFile, stringResource(R.string.cd_attach), onClick = onAttach)
             BasicTextField(
                 value = value,
                 onValueChange = onChange,
@@ -212,7 +239,10 @@ internal fun PillIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun MessageBubble(m: Message) {
+internal fun MessageBubble(m: Message, model: AppModel) {
+    // M2: байты вложения из реактивного кэша (появятся по докачке без рефреша).
+    val blobBytes = if (m.blobId.isNotEmpty()) model.mediaBlobs[m.blobId] else null
+    var viewer by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().padding(vertical = 3.dp),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
@@ -222,14 +252,16 @@ internal fun MessageBubble(m: Message) {
                 .background(if (m.mine) BubbleOut else BubbleIn)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
-            // Текст резервирует справа место под время+галочку (реальный отступ,
-            // не пробелы) → время оверлеем точно в правом-нижнем углу, без overlap.
-            Text(
-                m.text,
-                color = Color.White,
-                fontSize = 15.sp,
-                modifier = Modifier.padding(end = if (m.mine) 52.dp else 40.dp),
-            )
+            when (m.kind) {
+                "image" -> ImageAttachment(blobBytes) { viewer = true }
+                "file" -> FileAttachment(m.name)
+                else -> Text(
+                    m.text,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(end = if (m.mine) 52.dp else 40.dp),
+                )
+            }
             Row(
                 Modifier.align(Alignment.BottomEnd),
                 verticalAlignment = Alignment.CenterVertically,
@@ -240,6 +272,53 @@ internal fun MessageBubble(m: Message) {
                     StatusTick(m.status)
                 }
             }
+        }
+    }
+    if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
+}
+
+/** Картинка-вложение в пузыре: миниатюра (тап → полный экран) или плейсхолдер, пока
+ *  байты докачиваются. */
+@Composable
+private fun ImageAttachment(bytes: ByteArray?, onOpen: () -> Unit) {
+    val bmp = bytes?.let {
+        remember(it) { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
+    }
+    Box(
+        Modifier.size(220.dp).clip(RoundedCornerShape(10.dp)).background(HoloSurface).clickable(enabled = bmp != null, onClick = onOpen),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bmp != null) {
+            Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+        }
+    }
+}
+
+/** Файл-вложение: иконка + имя. */
+@Composable
+private fun FileAttachment(name: String) {
+    Row(
+        Modifier.padding(end = 44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.AttachFile, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(name.ifBlank { stringResource(R.string.chat_file) }, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Полноэкранный просмотр картинки (тап по фону — закрыть). */
+@Composable
+private fun ImageViewer(bytes: ByteArray, onClose: () -> Unit) {
+    val bmp = remember(bytes) { runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull() }
+    Dialog(onDismissRequest = onClose) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable(onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bmp != null) Image(bmp, null, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
         }
     }
 }

@@ -32,6 +32,7 @@ fn main() {
     let mut name: Option<String> = None;
     let mut avatar = false;
     let mut avatar_file: Option<String> = None;
+    let mut send_media: Option<String> = None;
     let mut adds: Vec<String> = Vec::new();
     let mut rest = args.collect::<Vec<_>>().into_iter();
     while let Some(a) = rest.next() {
@@ -44,6 +45,7 @@ fn main() {
             }
             "--avatar" => avatar = true,
             "--avatar-file" => avatar_file = rest.next(),
+            "--send-media" => send_media = rest.next(),
             other => eprintln!("неизвестный аргумент: {other}"),
         }
     }
@@ -82,10 +84,29 @@ fn main() {
     use std::io::Write;
     let _ = std::io::stdout().flush();
 
+    // Одноразовая отправка картинки первому --add контакту (тест приёма медиа на клиенте).
+    let media_peer: Option<[u8; 32]> = adds.first()
+        .and_then(|h| hex::decode(h).ok())
+        .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());
+    let mut sent_media = false;
+
     // Крутимся: движок сам обрабатывает входящие (ProfileUpdate/блобы) на своём потоке.
     // Раз в 2с печатаем контакты — видно, подтянулся ли профиль второй стороны.
+    let mut ticks = 0;
     loop {
         std::thread::sleep(Duration::from_secs(2));
+        ticks += 1;
+        // Даём presence подняться (~6с), потом шлём картинку один раз.
+        if !sent_media && ticks >= 3 {
+            if let (Some(path), Some(peer)) = (&send_media, media_peer) {
+                let bytes = std::fs::read(path).expect("send-media file");
+                let mime = if path.ends_with(".png") { "image/png" } else { "image/jpeg" };
+                let id = engine.send_media(&peer, bytes, mime, "from-bob.png");
+                println!("SENT_MEDIA {id:?}");
+                let _ = std::io::stdout().flush();
+            }
+            sent_media = true;
+        }
         println!("CONTACTS {}", engine.contacts_json());
         let _ = std::io::stdout().flush();
     }

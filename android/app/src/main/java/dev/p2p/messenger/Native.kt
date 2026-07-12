@@ -45,6 +45,9 @@ object Native {
     /** Отправить текст. Возвращает id сообщения (>=0) или -1 при ошибке. */
     external fun sendText(sessionPtr: Long, keyHex: String, text: String): Long
 
+    /** Отправить медиа-вложение (M2): scrub + блоб + медиа-сообщение. id (>=0) или -1. */
+    external fun sendMedia(sessionPtr: Long, keyHex: String, content: ByteArray, mime: String, name: String): Long
+
     /** Держать фоновое соединение с пиром. */
     external fun connect(sessionPtr: Long, keyHex: String)
 

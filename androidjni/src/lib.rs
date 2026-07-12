@@ -249,6 +249,29 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendText<'local>(
     })
 }
 
+/// Отправить медиа-вложение (M2): scrub картинок + блоб + медиа-сообщение.
+/// Возвращает id (≥0) либо -1 при ошибке.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_sendMedia<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+    content: JByteArray<'local>,
+    mime: JString<'local>,
+    name: JString<'local>,
+) -> jlong {
+    jni_safe!(-1, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return -1 };
+        let bytes = env.convert_byte_array(&content).unwrap_or_default();
+        if bytes.is_empty() { return -1; }
+        let mime = jstr(&mut env, &mime);
+        let name = jstr(&mut env, &name);
+        e.send_media(&key, bytes, &mime, &name).unwrap_or(-1)
+    })
+}
+
 /// Инициировать/держать соединение с пиром (фоновый коннект).
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_connect<'local>(

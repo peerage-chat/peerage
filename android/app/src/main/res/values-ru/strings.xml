@@ -152,6 +152,7 @@
     <string name="chat_e2e_banner">Сообщения защищены сквозным шифрованием</string>
     <string name="chat_input_hint">Сообщение…</string>
     <string name="chat_voice">Голосовое</string>
+    <string name="chat_file">Файл</string>
     <string name="cd_attach">Прикрепить</string>
     <string name="cd_emoji">Эмодзи</string>
     <string name="cd_audio_call">Аудио-звонок</string>

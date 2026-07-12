@@ -77,6 +77,13 @@ data class Message(
     val mine: Boolean,
     val time: Long,
     val status: String,
+    /** Тип (M2): "text" | "image" | "file". */
+    val kind: String = "text",
+    /** hex-хэш блоба вложения (M2); байты — через Native.blobRead. */
+    val blobId: String = "",
+    val mime: String = "",
+    /** Исходное имя файла вложения (M2). */
+    val name: String = "",
 )
 
 /** Идентичность пользователя (своя «визитка»). */
@@ -202,6 +209,17 @@ class AppModel private constructor() {
     /** Байты аватаров контактов по hex-хэшу (M2). Заполняется при обновлении контактов;
      *  UI читает [Contact.avatarId] → сюда. */
     val contactAvatars = mutableStateMapOf<String, ByteArray>()
+
+    /** Байты вложений чата по hex-хэшу блоба (M2). Реактивный кэш: при докачке
+     *  (blob_received) картинка появляется в пузыре без ручного рефреша. */
+    val mediaBlobs = mutableStateMapOf<String, ByteArray>()
+
+    /** Подтянуть байты блоба в кэш, если он уже есть локально (на [ops]). */
+    private fun cacheBlob(blobId: String) {
+        if (blobId.isNotEmpty() && !mediaBlobs.containsKey(blobId)) {
+            Native.blobRead(sessionPtr, blobId).takeIf { it.isNotEmpty() }?.let { mediaBlobs[blobId] = it }
+        }
+    }
 
     val contacts = mutableStateListOf<Contact>()
     val online = mutableStateMapOf<String, Boolean>()
@@ -835,12 +853,17 @@ class AppModel private constructor() {
         val arr = JSONArray(Native.history(sessionPtr, key))
         val list = (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
-            Message(o.getLong("id"), o.getString("text"), o.getBoolean("mine"), o.getLong("time"), o.optString("status"))
+            Message(
+                o.getLong("id"), o.optString("text"), o.getBoolean("mine"), o.getLong("time"), o.optString("status"),
+                o.optString("kind", "text"), o.optString("blob_id"), o.optString("mime"), o.optString("name"),
+            )
         }.toMutableList()
         // Queued messages (отрицательные localId) не сохраняются в БД — добавляем их обратно.
         synchronized(queueLock) { offlineQueueMap[key]?.toList() ?: emptyList() }
             .forEach { (text, ts) -> list.add(Message(--localMsgId, text, mine = true, time = ts, status = "queued")) }
         messages[key] = list.toMutableStateList()
+        // M2: подтянуть байты вложений, которые уже докачаны (иначе — появятся по blob_received).
+        list.forEach { if (it.blobId.isNotEmpty()) cacheBlob(it.blobId) }
     }
 
     private fun log(key: String): SnapshotStateList<Message> =
@@ -860,6 +883,15 @@ class AppModel private constructor() {
                 log(key).add(Message(localId, text, mine = true, time = now, status = "queued"))
                 enqueueOffline(key, text, now)
             }
+        }
+    }
+
+    /** Отправить вложение (M2): движок чистит картинку (scrub), шлёт блоб + медиа-
+     *  сообщение. Хэш блоба считается от ОЧИЩЕННЫХ байт в движке, поэтому своё
+     *  сообщение подтягиваем перечитыванием истории из стора (там верный blob_id). */
+    fun sendMedia(key: String, content: ByteArray, mime: String, name: String) = ops.execute {
+        if (Native.sendMedia(sessionPtr, key, content, mime, name) >= 0 && currentChat == key) {
+            loadHistory(key)
         }
     }
 
@@ -903,6 +935,19 @@ class AppModel private constructor() {
                 val peer = o.getString("peer")
                 if (contacts.none { it.key == peer }) refreshContactsNow()
                 log(peer).add(Message(o.getLong("id"), o.getString("text"), mine = false, time = o.getLong("time"), status = ""))
+                if (currentChat != peer) unread[peer] = (unread[peer] ?: 0) + 1
+            }
+            // M2: входящее медиа-сообщение (ссылка на блоб; байты подтянутся блоб-каналом).
+            "media" -> {
+                val peer = o.getString("peer")
+                if (contacts.none { it.key == peer }) refreshContactsNow()
+                log(peer).add(
+                    Message(
+                        o.getLong("id"), "", mine = false, time = o.getLong("time"), status = "",
+                        kind = o.optString("kind", "file"), blobId = o.optString("blob_id"),
+                        mime = o.optString("mime"), name = o.optString("name"),
+                    ),
+                )
                 if (currentChat != peer) unread[peer] = (unread[peer] ?: 0) + 1
             }
             "ack" -> updateStatus(o.getString("peer"), o.getLong("id"), "delivered")
@@ -962,10 +1007,12 @@ class AppModel private constructor() {
             }
             // M2: контакт прислал профиль (имя/аватар) → перечитать список.
             "contacts_changed" -> refreshContactsNow()
-            // M2: докачался блоб. Если это аватар контакта — перечитать, чтобы показать.
+            // M2: докачался блоб. Аватар контакта — перечитать контакты; вложение чата —
+            // положить байты в реактивный кэш (пузырь перерисуется).
             "blob_received" -> {
                 val id = o.optString("id")
                 if (contacts.any { it.avatarId == id }) refreshContactsNow()
+                cacheBlob(id)
             }
             "groups_changed" -> {
                 refreshGroupsNow()
