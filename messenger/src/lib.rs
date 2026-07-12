@@ -78,6 +78,8 @@ pub enum Event {
     Presence { peer: PeerKey, online: bool },
     /// Входящее текстовое сообщение.
     Text { peer: PeerKey, id: u64, text: String },
+    /// Входящее медиа-сообщение (M2): ссылка на блоб-вложение по хэшу.
+    Media { peer: PeerKey, id: u64, hash: Vec<u8>, mime: String, name: String },
     /// Пир подтвердил доставку нашего сообщения с данным id (✓✓).
     Ack { peer: PeerKey, id: u64 },
     /// Не удалось доставить наше сообщение за отведённое время (TTL).
@@ -436,6 +438,14 @@ impl Messenger {
         self.shared.send_reliable_with_id(peer, id, true, move |id| Payload::Text { id, text })
     }
 
+    /// Отправить медиа-СООБЩЕНИЕ чата (M2): ссылка на блоб по хэшу. Надёжно
+    /// (retry-until-Ack), как текст; сами байты идут блоб-каналом отдельно.
+    /// (Отличать от [`Messenger::send_media`] — realtime-датаграммы звонка.)
+    pub fn send_media_message(&self, peer: &PeerKey, hash: &[u8], mime: &str, name: &str) -> Result<u64, MessengerError> {
+        let (hash, mime, name) = (hash.to_vec(), mime.to_string(), name.to_string());
+        self.shared.send_reliable(peer, true, move |id| Payload::Media { id, hash, mime, name })
+    }
+
     /// Отправить медиа-датаграмму (реалтайм-канал): без Ack/повторов/шифрования
     /// приложения — конфиденциальность даёт E2E-шифрование транспорта Yggdrasil.
     /// Собирается в стековый буфер без аллокаций кучи.
@@ -684,6 +694,10 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::Hello => {}
             Payload::Text { id, text } => {
                 shared.emit(Event::Text { peer: src, id, text });
+                let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
+            }
+            Payload::Media { id, hash, mime, name } => {
+                shared.emit(Event::Media { peer: src, id, hash, mime, name });
                 let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
             }
             Payload::Ack { id } => {

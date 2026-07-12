@@ -26,6 +26,17 @@ pub enum Payload {
     Hello,
     /// Текстовое сообщение чата.
     Text { id: u64, text: String },
+    /// Медиа-сообщение чата (M2): ссылка на блоб по контент-хэшу. Байты идут отдельно
+    /// блоб-каналом (push при отправке + pull-по-хэшу при промахе), сообщение несёт лишь
+    /// ссылку → тот же надёжный путь, что и `Text` (id + `Ack`, ретраи, офлайн-очередь,
+    /// дедуп). `mime` — тип (image/*, …), `name` — исходное имя файла (для не-картинок).
+    Media {
+        id: u64,
+        #[serde(with = "hex_bytes")]
+        hash: Vec<u8>,
+        mime: String,
+        name: String,
+    },
     /// Подтверждение доставки сообщения с данным id (✓✓ в ТЗ).
     Ack { id: u64 },
     /// Keep-alive / проверка присутствия.
@@ -241,6 +252,7 @@ mod tests {
             Payload::Pong,
             Payload::Ack { id: 7 },
             Payload::Text { id: 1, text: "hi".into() },
+            Payload::Media { id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "p.jpg".into() },
             Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: false },
             Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] },
             Payload::Group { id: 5, data: vec![1, 2, 3, 9, 9] },

@@ -229,11 +229,43 @@ impl Engine {
                 let t = now();
                 let _ = self.messages.lock_safe().append(key, StoredMessage {
                     id, text: text.to_string(), mine: true, time: t, status: "sent".into(),
+                    ..Default::default()
                 });
                 // M3: в офлайн-очередь — если не дойдёт, дошлём при онлайне/рестарте.
                 let ob = self.outbox.lock_safe();
                 ob.on_sent(key, id, text, t);
                 log::info!("outbox: enqueued id={} peer={:02x?} count={}", id, &key[..4], ob.pending_count());
+                Some(id as i64)
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Отправить медиа-вложение (M2): scrub (для картинок) → блоб пиру (push) →
+    /// медиа-сообщение со ссылкой на блоб по хэшу (тот же надёжный путь, что текст).
+    /// Возвращает id сообщения или None. `name` — исходное имя файла (для не-картинок).
+    pub fn send_media(&self, key: &[u8; 32], content: Vec<u8>, mime: &str, name: &str) -> Option<i64> {
+        // Картинки чистим от метаданных (EXIF/GPS) перед отправкой, как аватар.
+        let bytes = if mime.starts_with("image/") {
+            p2p_blob::scrub::scrub(mime, &content)
+        } else {
+            content
+        };
+        let hash = p2p_blob::blob_id(&bytes);
+        let kind = if mime.starts_with("image/") { "image" } else { "file" };
+        // Блоб получателю: push-анонс + отдача чанков (если промахнётся — pull по хэшу).
+        self.blob_offer(*key, bytes.clone(), mime.to_string());
+        // Сохраняем локально, чтобы показывать своё вложение сразу и после рестарта.
+        self.store_blob(hash, &bytes);
+        let id_hex = hex::encode(hash);
+        match self.messenger.send_media_message(key, &hash, mime, name) {
+            Ok(id) => {
+                let t = now();
+                let _ = self.messages.lock_safe().append(key, StoredMessage {
+                    id, mine: true, time: t, status: "sent".into(),
+                    kind: kind.into(), blob_id: id_hex, mime: mime.into(), name: name.into(),
+                    ..Default::default()
+                });
                 Some(id as i64)
             }
             Err(_) => None,
@@ -898,9 +930,33 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 let t = now();
                 let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
                     id, text: text.clone(), mine: false, time: t, status: String::new(),
+                    ..Default::default()
                 });
                 push_event(engine, serde_json::json!({
                     "type": "text", "peer": hex::encode(peer), "id": id, "text": text, "time": t,
+                }));
+            }
+        }
+        Event::Media { peer, id, hash, mime, name } => {
+            ensure_contact(engine, peer);
+            let dup = engine.messages.lock_safe().contains(&peer, id, false);
+            if !dup {
+                let t = now();
+                let id_hex = hex::encode(&hash);
+                let kind = if mime.starts_with("image/") { "image" } else { "file" };
+                let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
+                    id, mine: false, time: t, status: String::new(),
+                    kind: kind.into(), blob_id: id_hex.clone(), mime: mime.clone(), name: name.clone(),
+                    ..Default::default()
+                });
+                // Байты вложения: отправитель их push-нул, но если чанк промахнулся —
+                // тянем по хэшу (контент-адрес → авто-дедуп; blob_received перерисует).
+                if engine.blob_read(&id_hex).is_none() {
+                    let _ = engine.messenger.request_blob_manifest(&peer, &hash);
+                }
+                push_event(engine, serde_json::json!({
+                    "type": "media", "peer": hex::encode(peer), "id": id, "time": t,
+                    "kind": kind, "blob_id": id_hex, "mime": mime, "name": name,
                 }));
             }
         }

@@ -287,13 +287,25 @@ impl ContactStore {
 
 // ---- История сообщений -----------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoredMessage {
     pub id: u64,
     pub text: String,
     pub mine: bool,
     pub time: i64,
     pub status: String,
+    /// Тип сообщения (M2): "text" (по умолчанию) | "image" | "file". Пустой = "text".
+    #[serde(default)]
+    pub kind: String,
+    /// hex-хэш блоба вложения (M2); пусто для текста. Байты — через blob_read.
+    #[serde(default)]
+    pub blob_id: String,
+    /// MIME вложения (M2).
+    #[serde(default)]
+    pub mime: String,
+    /// Исходное имя файла вложения (M2; для не-картинок).
+    #[serde(default)]
+    pub name: String,
 }
 
 /// SQLite-хранилище сообщений без кэша — каждый вызов делает SQL-запрос.
@@ -349,11 +361,12 @@ impl MessageStore {
 
     pub fn append(&self, peer: &[u8; 32], msg: StoredMessage) -> Result<(), StoreError> {
         db::lock(&self.db).execute(
-            "INSERT OR REPLACE INTO messages (peer, id, mine, text, time, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT OR REPLACE INTO messages (peer, id, mine, text, time, status, kind, blob_id, mime, name)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 peer.as_slice(), msg.id as i64, msg.mine as i64,
                 &msg.text, msg.time, &msg.status,
+                &msg.kind, &msg.blob_id, &msg.mime, &msg.name,
             ],
         )?;
         Ok(())
@@ -382,7 +395,7 @@ impl MessageStore {
     pub fn history(&self, peer: &[u8; 32]) -> Vec<StoredMessage> {
         let conn = db::lock(&self.db);
         let mut stmt = match conn.prepare(
-            "SELECT id, text, mine, time, status
+            "SELECT id, text, mine, time, status, kind, blob_id, mime, name
              FROM messages WHERE peer=?1 ORDER BY time, id",
         ) {
             Ok(s) => s,
@@ -395,6 +408,10 @@ impl MessageStore {
                 mine: row.get::<_, i64>(2)? != 0,
                 time: row.get(3)?,
                 status: row.get(4)?,
+                kind: row.get(5)?,
+                blob_id: row.get(6)?,
+                mime: row.get(7)?,
+                name: row.get(8)?,
             })
         })
         .and_then(|rows| rows.collect())
@@ -513,8 +530,8 @@ mod tests {
     fn messages_append_status_history() {
         let peer = key();
         let store = MessageStore::open(db(), None).unwrap();
-        store.append(&peer, StoredMessage { id: 1, text: "hi".into(), mine: true,  time: 10, status: "sent".into() }).unwrap();
-        store.append(&peer, StoredMessage { id: 5, text: "yo".into(), mine: false, time: 11, status: "".into()     }).unwrap();
+        store.append(&peer, StoredMessage { id: 1, text: "hi".into(), mine: true,  time: 10, status: "sent".into(), ..Default::default() }).unwrap();
+        store.append(&peer, StoredMessage { id: 5, text: "yo".into(), mine: false, time: 11, status: "".into(), ..Default::default() }).unwrap();
         assert!(store.set_status(&peer, 1, "delivered").unwrap());
 
         let h = store.history(&peer);
@@ -528,7 +545,7 @@ mod tests {
     fn messages_clear() {
         let peer = key();
         let store = MessageStore::open(db(), None).unwrap();
-        store.append(&peer, StoredMessage { id: 1, text: "x".into(), mine: true, time: 0, status: "".into() }).unwrap();
+        store.append(&peer, StoredMessage { id: 1, text: "x".into(), mine: true, time: 0, status: "".into(), ..Default::default() }).unwrap();
         store.clear(&peer).unwrap();
         assert!(store.history(&peer).is_empty());
     }

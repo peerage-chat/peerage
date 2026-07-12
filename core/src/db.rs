@@ -68,12 +68,16 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS messages (
-            peer   BLOB    NOT NULL,
-            id     INTEGER NOT NULL,
-            mine   INTEGER NOT NULL,
-            text   TEXT    NOT NULL,
-            time   INTEGER NOT NULL,
-            status TEXT    NOT NULL DEFAULT '',
+            peer    BLOB    NOT NULL,
+            id      INTEGER NOT NULL,
+            mine    INTEGER NOT NULL,
+            text    TEXT    NOT NULL,
+            time    INTEGER NOT NULL,
+            status  TEXT    NOT NULL DEFAULT '',
+            kind    TEXT    NOT NULL DEFAULT 'text',
+            blob_id TEXT    NOT NULL DEFAULT '',
+            mime    TEXT    NOT NULL DEFAULT '',
+            name    TEXT    NOT NULL DEFAULT '',
             PRIMARY KEY (peer, id, mine)
         );
         CREATE INDEX IF NOT EXISTS messages_peer_time ON messages(peer, time);
@@ -93,5 +97,10 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     // Профиль контакта (M2): самоназвание + хэш аватара (идемпотентно).
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN profile_name TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN avatar_id TEXT NOT NULL DEFAULT ''", []);
+    // Медиа-сообщения (M2): тип + ссылка на блоб вложения (идемпотентно).
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'", []);
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN blob_id TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN mime TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN name TEXT NOT NULL DEFAULT ''", []);
     Ok(())
 }
