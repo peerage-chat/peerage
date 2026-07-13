@@ -1,7 +1,7 @@
 //! JNI-кодек групп (MLS). Мутации (create/invite/sendText) — fire-and-forget в
 //! движок; read-данные (list/history/members/presence) — снапшоты движка.
 
-use jni::objects::{JClass, JString};
+use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
@@ -55,6 +55,26 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
         let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
         e.group_send_text(gid, jstr(&mut env, &text));
+    });
+}
+
+/// Отправить медиа-вложение в группу (M2): scrub + блоб всем + MLS-ссылка. Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMedia<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    content: JByteArray<'local>,
+    mime: JString<'local>,
+    name: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        let bytes = env.convert_byte_array(&content).unwrap_or_default();
+        if bytes.is_empty() { return; }
+        e.group_send_media(gid, bytes, jstr(&mut env, &mime), jstr(&mut env, &name));
     });
 }
 

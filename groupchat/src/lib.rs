@@ -14,13 +14,28 @@ use std::sync::Arc;
 use p2p_core::Identity;
 use p2p_group::{GroupError, Incoming, Member};
 use p2p_messenger::Messenger;
+use serde::{Deserialize, Serialize};
 
 pub type PeerKey = [u8; 32];
+
+/// Прикладное тело группового сообщения (M2): текст или ссылка на медиа-блоб.
+/// Сериализуется в JSON и шифруется MLS. Старое сырое-UTF-8 (до M2) распознаётся
+/// как текст фолбэком в [`GroupChat::handle`] — группы пересоздавать не обязательно.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "t")]
+enum AppMsg {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "media")]
+    Media { kind: String, hash: String, mime: String, name: String },
+}
 
 /// Результат обработки входящего группового сообщения — для показа в UI.
 pub enum Inbound {
     /// Прикладное сообщение: отправитель + текст.
     Message { sender: PeerKey, text: String },
+    /// Медиа-сообщение (M2): отправитель + ссылка на блоб по хэшу.
+    Media { sender: PeerKey, kind: String, hash: String, mime: String, name: String },
     /// Изменён состав группы (применён Commit), его применил actor.
     Membership { actor: PeerKey },
     /// Нас удалили из группы (ADR-004) — верхний слой забывает группу локально.
@@ -122,7 +137,22 @@ impl GroupChat {
 
     /// Отправить текст в группу (рассылается всем текущим участникам).
     pub fn send_text(&mut self, text: &str) -> Result<(), GroupChatError> {
-        let ct = self.member.encrypt(text.as_bytes())?;
+        self.send_app(&AppMsg::Text { text: text.to_string() })
+    }
+
+    /// Отправить медиа-сообщение (M2): ссылка на блоб по хэшу. Байты блоба идут
+    /// отдельно (движок пушит их каждому участнику). `hash` — hex.
+    pub fn send_media(&mut self, kind: &str, hash: &str, mime: &str, name: &str) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::Media {
+            kind: kind.to_string(), hash: hash.to_string(),
+            mime: mime.to_string(), name: name.to_string(),
+        })
+    }
+
+    /// Зашифровать прикладное тело (JSON) MLS и разослать участникам.
+    fn send_app(&mut self, msg: &AppMsg) -> Result<(), GroupChatError> {
+        let body = serde_json::to_vec(msg).unwrap_or_default();
+        let ct = self.member.encrypt(&body)?;
         for pk in self.others() {
             let _ = self.messenger.send_group(&pk, &ct);
         }
@@ -138,10 +168,17 @@ impl GroupChat {
             return Ok(Inbound::None);
         }
         match self.member.process(data) {
-            Ok(Incoming::Message { sender, body }) => Ok(Inbound::Message {
-                sender: to_key(sender),
-                text: String::from_utf8_lossy(&body).into_owned(),
-            }),
+            Ok(Incoming::Message { sender, body }) => {
+                let sender = to_key(sender);
+                // M2: тело — JSON-envelope (текст/медиа); старое сырое-UTF-8 → текст.
+                Ok(match serde_json::from_slice::<AppMsg>(&body) {
+                    Ok(AppMsg::Text { text }) => Inbound::Message { sender, text },
+                    Ok(AppMsg::Media { kind, hash, mime, name }) => {
+                        Inbound::Media { sender, kind, hash, mime, name }
+                    }
+                    Err(_) => Inbound::Message { sender, text: String::from_utf8_lossy(&body).into_owned() },
+                })
+            }
             Ok(Incoming::MembershipChanged { actor }) => {
                 Ok(Inbound::Membership { actor: to_key(actor) })
             }

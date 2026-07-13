@@ -17,6 +17,7 @@ fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+#[derive(Default)]
 pub struct GMsg {
     pub text: String,
     pub mine: bool,
@@ -25,6 +26,12 @@ pub struct GMsg {
     pub sender: String,
     /// Системное событие (смена состава) — рендерится отдельной строкой.
     pub system: bool,
+    /// Тип (M2): "text" (по умолчанию) | "image" | "voice" | "file".
+    pub kind: String,
+    /// hex-хэш блоба вложения (M2); пусто для текста.
+    pub blob_id: String,
+    pub mime: String,
+    pub name: String,
 }
 
 struct Entry {
@@ -165,6 +172,7 @@ impl GroupManager {
             .map(|m| serde_json::json!({
                 "mine": m.mine, "text": m.text, "time": m.time,
                 "sender": m.sender, "system": m.system,
+                "kind": m.kind, "blob_id": m.blob_id, "mime": m.mime, "name": m.name,
             }))
             .collect();
         let _ = std::fs::create_dir_all(&self.dir);
@@ -183,10 +191,14 @@ impl GroupManager {
             .filter_map(|v| {
                 Some(GMsg {
                     mine: v["mine"].as_bool()?,
-                    text: v["text"].as_str()?.to_string(),
+                    text: v["text"].as_str().unwrap_or("").to_string(),
                     time: v["time"].as_i64().unwrap_or(0),
                     sender: v["sender"].as_str().unwrap_or("").to_string(),
                     system: v["system"].as_bool().unwrap_or(false),
+                    kind: v["kind"].as_str().unwrap_or("").to_string(),
+                    blob_id: v["blob_id"].as_str().unwrap_or("").to_string(),
+                    mime: v["mime"].as_str().unwrap_or("").to_string(),
+                    name: v["name"].as_str().unwrap_or("").to_string(),
                 })
             })
             .collect()
@@ -242,7 +254,9 @@ impl GroupManager {
             return false;
         }
         let me = hex::encode(self.identity.public_key_bytes());
-        e.messages.push(GMsg { text: text.to_string(), mine: true, time: now(), sender: me, system: false });
+        e.messages.push(GMsg {
+            text: text.to_string(), mine: true, time: now(), sender: me, ..Default::default()
+        });
         self.save_msgs(gid);
         // КРИТИЧНО: отправка двигает MLS sending-ratchet — его надо ПЕРСИСТИТЬ, иначе
         // после рестарта/убийства приложения отправитель грузит старое состояние и
@@ -265,11 +279,29 @@ impl GroupManager {
         }
         // Системная строка «участник удалён» (актор — удалённый).
         e.messages.push(GMsg {
-            text: String::new(), mine: true, time: now(),
-            sender: hex::encode(peer), system: true,
+            mine: true, time: now(), sender: hex::encode(peer), system: true, ..Default::default()
         });
         self.save_msgs(gid);
         self.save_group(gid); // Commit сдвинул эпоху — персистим (инвариант MLS).
+        true
+    }
+
+    /// Отправить медиа-вложение в группу (M2): MLS-сообщение со ссылкой на блоб.
+    /// Байты блоба пушит вызывающий (engine) каждому участнику отдельно. Двигает
+    /// sending-ratchet → save_group (как send_text). Возвращает участников для push.
+    pub fn send_media(&mut self, gid: &[u8], kind: &str, blob_id: &str, mime: &str, name: &str) -> bool {
+        let Some(e) = self.groups.get_mut(gid) else { return false };
+        if e.chat.send_media(kind, blob_id, mime, name).is_err() {
+            return false;
+        }
+        let me = hex::encode(self.identity.public_key_bytes());
+        e.messages.push(GMsg {
+            mine: true, time: now(), sender: me,
+            kind: kind.into(), blob_id: blob_id.into(), mime: mime.into(), name: name.into(),
+            ..Default::default()
+        });
+        self.save_msgs(gid);
+        self.save_group(gid);
         true
     }
 
@@ -315,6 +347,7 @@ impl GroupManager {
             .map(|m| serde_json::json!({
                 "text": m.text, "mine": m.mine, "time": m.time,
                 "sender": m.sender, "system": m.system,
+                "kind": m.kind, "blob_id": m.blob_id, "mime": m.mime, "name": m.name,
             }))
             .collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
@@ -382,7 +415,7 @@ impl GroupManager {
                     if let Some(e) = self.groups.get_mut(&gid) {
                         e.messages.push(GMsg {
                             text: text.clone(), mine: false, time: now(),
-                            sender: sender_hex.clone(), system: false,
+                            sender: sender_hex.clone(), ..Default::default()
                         });
                     }
                     self.save_msgs(&gid);
@@ -391,12 +424,28 @@ impl GroupManager {
                         sender: Some(sender_hex), ..Default::default()
                     }
                 }
+                Some(Ok(Inbound::Media { sender, kind, hash, mime, name })) => {
+                    let sender_hex = hex::encode(sender);
+                    if let Some(e) = self.groups.get_mut(&gid) {
+                        e.messages.push(GMsg {
+                            mine: false, time: now(), sender: sender_hex.clone(),
+                            kind: kind.clone(), blob_id: hash.clone(), mime: mime.clone(), name: name.clone(),
+                            ..Default::default()
+                        });
+                    }
+                    self.save_msgs(&gid);
+                    GroupOutcome {
+                        gid: Some(gid.clone()), sender: Some(sender_hex),
+                        media: Some(GroupMediaRef { kind, blob_id: hash, mime, name }),
+                        ..Default::default()
+                    }
+                }
                 Some(Ok(Inbound::Membership { actor })) => {
                     let actor_hex = hex::encode(actor);
                     if let Some(e) = self.groups.get_mut(&gid) {
                         e.messages.push(GMsg {
-                            text: String::new(), mine: false, time: now(),
-                            sender: actor_hex.clone(), system: true,
+                            mine: false, time: now(), sender: actor_hex.clone(), system: true,
+                            ..Default::default()
                         });
                     }
                     self.save_msgs(&gid);
@@ -533,4 +582,15 @@ pub struct GroupOutcome {
     pub joined: bool,
     /// Нас отозвали из группы (ADR-004) — UI должен убрать группу и уведомить.
     pub removed: bool,
+    /// Медиа-сообщение (M2): тип + ссылка на блоб. Пусто → не медиа.
+    pub media: Option<GroupMediaRef>,
+}
+
+/// Ссылка на медиа-вложение группового сообщения (M2).
+#[derive(Clone)]
+pub struct GroupMediaRef {
+    pub kind: String,
+    pub blob_id: String,
+    pub mime: String,
+    pub name: String,
 }

@@ -13,6 +13,8 @@ p2p-core = { path = "../core" }
 p2p-group = { path = "../group" }
 p2p-messenger = { path = "../messenger" }
 thiserror.workspace = true
+serde = { workspace = true }
+serde_json = "1"
 
 [dev-dependencies]
 p2p-ygg = { path = "../transport" }

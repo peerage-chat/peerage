@@ -108,6 +108,34 @@ fn invite_join_flow_over_loopback() {
     setup_and_join(0);
 }
 
+/// M2: медиа-сообщение в группе. A шлёт MLS-ссылку на блоб → B получает его как
+/// медиа (kind/blob_id/mime/name), а не текст. (Байты блоба пушит слой Engine —
+/// тот же blobs.offer, что в DM, покрыт media.rs.)
+#[test]
+fn group_media_message_propagates() {
+    let mut ctx = setup_and_join(0);
+    assert!(ctx.gm_a.send_media(&ctx.gid, "image", "abcd1234", "image/jpeg", "photo.jpg"));
+
+    let field = |gm: &GroupManager, gid: &[u8], key: &str| -> Option<String> {
+        let h: serde_json::Value = serde_json::from_str(&gm.history_json(gid)).ok()?;
+        h.as_array()?.iter().find(|m| m["kind"] == "image")
+            .and_then(|m| m[key].as_str().map(str::to_string))
+    };
+
+    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
+        field(b, &ctx.gid, "blob_id").as_deref() == Some("abcd1234")
+    });
+    assert!(got, "B получил групповое медиа-сообщение");
+    assert_eq!(field(&ctx.gm_b, &ctx.gid, "mime").as_deref(), Some("image/jpeg"));
+    assert_eq!(field(&ctx.gm_b, &ctx.gid, "name").as_deref(), Some("photo.jpg"));
+
+    // У A своё сообщение тоже записано как медиа (mine).
+    let ha: serde_json::Value = serde_json::from_str(&ctx.gm_a.history_json(&ctx.gid)).unwrap();
+    let mine = ha.as_array().unwrap().iter().find(|m| m["kind"] == "image").unwrap();
+    assert_eq!(mine["mine"], true);
+    assert_eq!(mine["blob_id"], "abcd1234");
+}
+
 /// Тот же путь под потерями — доказывает, что надёжный invite-хендшейк дожимает
 /// приглашение сквозь дропы (регрессия против «инвайт не срабатывает»).
 #[test]

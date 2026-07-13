@@ -66,6 +66,9 @@ pub(crate) enum Job {
     Leave(Vec<u8>),
     /// Предложить блоб пиру (M2): сохранить локально + анонсировать манифест.
     BlobOffer { peer: [u8; 32], content: Vec<u8>, mime: String },
+    /// Отправить медиа-вложение в группу (M2): scrub → сохранить → MLS-ссылка всем +
+    /// push блоба каждому участнику. В одном Job (нужны и группы, и BlobManager).
+    GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String },
 }
 
 /// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
@@ -379,6 +382,12 @@ impl Engine {
 
     pub fn group_send_text(&self, gid: Vec<u8>, text: String) {
         let _ = self.jobs.send(Job::Cmd(GroupCmd::SendText { gid, text }));
+    }
+
+    /// Отправить медиа-вложение в группу (M2). Fire-and-forget: движок чистит
+    /// картинку, сохраняет блоб, шлёт MLS-ссылку всем и пушит байты каждому.
+    pub fn group_send_media(&self, gid: Vec<u8>, content: Vec<u8>, mime: String, name: String) {
+        let _ = self.jobs.send(Job::GroupMedia { gid, content, mime, name });
     }
 
     /// Отозвать участника из группы (ADR-004, только админ). Fire-and-forget.
@@ -843,6 +852,28 @@ fn event_pump(
                 save_blob(&engine, p2p_blob::blob_id(&content), &content);
                 blobs.offer(peer, &content, &mime);
             }
+            Ok(Job::GroupMedia { gid, content, mime, name }) => {
+                // Картинки чистим (scrub), считаем контент-адрес, сохраняем локально.
+                let bytes = if mime.starts_with("image/") {
+                    p2p_blob::scrub::scrub(&mime, &content)
+                } else {
+                    content
+                };
+                let hash = p2p_blob::blob_id(&bytes);
+                let id_hex = hex::encode(hash);
+                let kind = Engine::media_kind(&mime);
+                save_blob(&engine, hash, &bytes);
+                // MLS-сообщение со ссылкой всем + push байтов каждому участнику.
+                if groups.send_media(&gid, kind, &id_hex, &mime, &name) {
+                    for m in groups.members(&gid) {
+                        if m != engine.me_pub {
+                            blobs.offer(m, &bytes, &mime);
+                        }
+                    }
+                    engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(&gid));
+                    push_event(&engine, serde_json::json!({"type": "group_msg", "gid": hex::encode(&gid), "mine": true}));
+                }
+            }
             Ok(Job::Beacon) => {
                 last_beacon = Instant::now();
                 beacon_tick(&engine, &groups, &messenger);
@@ -988,21 +1019,34 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         Event::RoomDecline { peer, room_id } => push_event(engine, serde_json::json!({
             "type": "room_decline", "peer": hex::encode(peer), "room_id": hex::encode(&room_id),
         })),
-        Event::Group { data, .. } => {
+        Event::Group { peer, data } => {
             let out = groups.on_group(&data);
             if let Some(gid) = &out.gid {
-                if out.text.is_some() || out.system {
+                if out.text.is_some() || out.system || out.media.is_some() {
                     // Обновляем кэш истории этого gid: group_history_json читает кэш,
                     // а не live-messages. Без этого полученное сообщение пропадает при
                     // переоткрытии чата (отображается только live-событием).
                     engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(gid));
-                    push_event(engine, serde_json::json!({
+                    let mut ev = serde_json::json!({
                         "type": "group_msg",
                         "gid": hex::encode(gid),
                         "text": out.text.clone().unwrap_or_default(),
                         "sender": out.sender.clone().unwrap_or_default(),
                         "system": out.system,
-                    }));
+                    });
+                    // M2: медиа-поля + докачка блоба по хэшу от отправителя, если промах.
+                    if let Some(m) = &out.media {
+                        ev["kind"] = m.kind.clone().into();
+                        ev["blob_id"] = m.blob_id.clone().into();
+                        ev["mime"] = m.mime.clone().into();
+                        ev["name"] = m.name.clone().into();
+                        if engine.blob_read(&m.blob_id).is_none() {
+                            if let Ok(h) = hex::decode(&m.blob_id) {
+                                let _ = engine.messenger.request_blob_manifest(&peer, &h);
+                            }
+                        }
+                    }
+                    push_event(engine, ev);
                 }
             }
             if out.joined {
@@ -1060,12 +1104,15 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }
         // M2 pull-по-хэшу: пир просит манифест нашего блоба (пока — аватар).
         Event::BlobManifestRequest { peer, id } => {
+            // Отдаём ЛЮБОЙ сохранённый у нас блоб по хэшу (аватар / вложение чата или
+            // группы). Безопасно: контент-адрес узнаёт лишь тот, кому мы уже прислали
+            // ссылку (профиль/сообщение); чужой хэш не угадать. Mime для аватара точный,
+            // для вложений неизвестен на этом слое → generic (клиент знает mime из ссылки).
             let id_hex = hex::encode(&id);
-            let meta = engine.load_profile_meta();
-            if meta.avatar_id == id_hex {
-                if let Some(bytes) = engine.blob_read(&id_hex) {
-                    blobs.offer(peer, &bytes, &meta.avatar_mime);
-                }
+            if let Some(bytes) = engine.blob_read(&id_hex) {
+                let meta = engine.load_profile_meta();
+                let mime = if meta.avatar_id == id_hex { meta.avatar_mime } else { "application/octet-stream".into() };
+                blobs.offer(peer, &bytes, &mime);
             }
         }
         Event::GroupKeyReply { peer, key_package } => {
