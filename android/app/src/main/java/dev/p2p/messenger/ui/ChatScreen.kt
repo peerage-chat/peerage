@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -23,9 +24,12 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.*
@@ -38,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -117,13 +122,31 @@ internal fun ChatScreen(model: AppModel) {
     // Держим прокрутку у последнего сообщения при появлении новых.
     LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
 
-    // M2: выбор картинки → чтение байт в IO → sendMedia (scrub+блоб+сообщение в движке).
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { u ->
-            scope.launch(Dispatchers.IO) {
-                val bytes = ctx.contentResolver.openInputStream(u)?.use { it.readBytes() } ?: return@launch
-                val mime = ctx.contentResolver.getType(u) ?: "image/jpeg"
-                model.sendMedia(key, bytes, mime, "image")
+    // M2: картинка → чтение байт в IO → sendMedia (scrub+блоб+сообщение в движке).
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { sendUriAttachment(ctx, model, key, it, scope, "image.jpg") }
+    }
+    // M2: произвольный файл (любой mime) → sendMedia (kind file/voice по mime в движке).
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { sendUriAttachment(ctx, model, key, it, scope, "file") }
+    }
+
+    // Голосовые (M2): held-to-record. RECORD_AUDIO спрашиваем при первой попытке.
+    val recorder = remember { VoiceRecorder(ctx) }
+    var recording by remember { mutableStateOf(false) }
+    val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    val startVoice = {
+        if (ctx.hasPermission(Manifest.permission.RECORD_AUDIO)) {
+            recording = recorder.start()
+        } else {
+            micPerm.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+    val stopVoice = {
+        if (recording) {
+            recording = false
+            recorder.stop()?.let { bytes ->
+                scope.launch(Dispatchers.IO) { model.sendMedia(key, bytes, "audio/mp4", "voice.m4a") }
             }
         }
     }
@@ -141,17 +164,47 @@ internal fun ChatScreen(model: AppModel) {
             }
         }
         MessageInput(
-            input,
-            { input = it },
-            onAttach = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-        ) {
-            if (input.isNotBlank()) {
-                model.send(key, input)
-                input = ""
-            }
-        }
+            value = input,
+            onChange = { input = it },
+            onPickImage = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onPickFile = { filePicker.launch(arrayOf("*/*")) },
+            recording = recording,
+            onVoiceStart = startVoice,
+            onVoiceStop = stopVoice,
+            onSend = {
+                if (input.isNotBlank()) {
+                    model.send(key, input)
+                    input = ""
+                }
+            },
+        )
     }
 }
+
+/** Прочитать содержимое uri (байты + mime + имя) в IO и отправить как вложение (M2). */
+private fun sendUriAttachment(
+    ctx: android.content.Context,
+    model: AppModel,
+    key: String,
+    uri: android.net.Uri,
+    scope: kotlinx.coroutines.CoroutineScope,
+    fallbackName: String,
+) {
+    scope.launch(Dispatchers.IO) {
+        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
+        val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+        val name = displayName(ctx, uri) ?: fallbackName
+        model.sendMedia(key, bytes, mime, name)
+    }
+}
+
+/** Человекочитаемое имя файла из content-uri (OpenableColumns.DISPLAY_NAME). */
+private fun displayName(ctx: android.content.Context, uri: android.net.Uri): String? =
+    runCatching {
+        ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull()
 
 /** Системная строка «E2E» в начале переписки. */
 @Composable
@@ -181,7 +234,16 @@ internal fun DateChip(label: String) {
 }
 
 @Composable
-internal fun MessageInput(value: String, onChange: (String) -> Unit, onAttach: () -> Unit = {}, onSend: () -> Unit) {
+internal fun MessageInput(
+    value: String,
+    onChange: (String) -> Unit,
+    onPickImage: () -> Unit = {},
+    onPickFile: () -> Unit = {},
+    recording: Boolean = false,
+    onVoiceStart: () -> Unit = {},
+    onVoiceStop: () -> Unit = {},
+    onSend: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().background(HoloBg).padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -191,7 +253,29 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onAttach: (
             Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(HoloSurface),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PillIcon(Icons.Filled.AttachFile, stringResource(R.string.cd_attach), onClick = onAttach)
+            // Скрепка → меню «Фото / Файл» (M2).
+            Box {
+                var attachOpen by remember { mutableStateOf(false) }
+                PillIcon(Icons.Filled.AttachFile, stringResource(R.string.cd_attach)) { attachOpen = true }
+                DropdownMenu(expanded = attachOpen, onDismissRequest = { attachOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.attach_photo)) },
+                        leadingIcon = { Icon(Icons.Filled.Image, null) },
+                        onClick = {
+                            attachOpen = false
+                            onPickImage()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.attach_file)) },
+                        leadingIcon = { Icon(Icons.Filled.AttachFile, null) },
+                        onClick = {
+                            attachOpen = false
+                            onPickFile()
+                        },
+                    )
+                }
+            }
             BasicTextField(
                 value = value,
                 onValueChange = onChange,
@@ -201,7 +285,13 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onAttach: (
                 maxLines = 4,
                 decorationBox = { inner ->
                     Box(contentAlignment = Alignment.CenterStart) {
-                        if (value.isEmpty()) Text(stringResource(R.string.chat_input_hint), color = HoloSecondary, fontSize = 15.sp)
+                        if (value.isEmpty()) {
+                            Text(
+                                stringResource(if (recording) R.string.chat_recording else R.string.chat_input_hint),
+                                color = if (recording) HoloError else HoloSecondary,
+                                fontSize = 15.sp,
+                            )
+                        }
                         inner()
                     }
                 },
@@ -209,20 +299,29 @@ internal fun MessageInput(value: String, onChange: (String) -> Unit, onAttach: (
             PillIcon(Icons.Filled.EmojiEmotions, stringResource(R.string.cd_emoji)) { /* TODO: эмодзи */ }
         }
         Spacer(Modifier.width(8.dp))
-        // Отправка / голосовое — отдельной круглой кнопкой 44px.
+        // Отправка (есть текст) / голосовое удержанием (поле пустое).
         val hasText = value.isNotBlank()
+        val btnMod = if (hasText) {
+            Modifier.clickable { onSend() }
+        } else {
+            // Held-to-record: запись на нажатии, отправка на отпускании.
+            Modifier.pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    onVoiceStart()
+                    tryAwaitRelease()
+                    onVoiceStop()
+                })
+            }
+        }
         Box(
-            Modifier.clip(RoundedCornerShape(percent = 30)).background(HoloAccent).size(44.dp)
-                .clickable {
-                    // TODO: при пустом поле — запись голосового
-                    if (hasText) onSend()
-                },
+            Modifier.clip(RoundedCornerShape(percent = 30))
+                .background(if (recording) HoloError else HoloAccent).size(44.dp).then(btnMod),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 if (hasText) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
                 stringResource(if (hasText) R.string.common_send else R.string.chat_voice),
-                tint = HoloAccentDark,
+                tint = if (recording) Color.White else HoloAccentDark,
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -254,7 +353,8 @@ internal fun MessageBubble(m: Message, model: AppModel) {
         ) {
             when (m.kind) {
                 "image" -> ImageAttachment(blobBytes) { viewer = true }
-                "file" -> FileAttachment(m.name)
+                "voice" -> VoiceAttachment(blobBytes)
+                "file" -> FileAttachment(m.name, blobBytes)
                 else -> Text(
                     m.text,
                     color = Color.White,
@@ -296,17 +396,122 @@ private fun ImageAttachment(bytes: ByteArray?, onOpen: () -> Unit) {
     }
 }
 
-/** Файл-вложение: иконка + имя. */
+/** Файл-вложение: иконка + имя + размер; тап (когда скачан) → открыть системой. */
 @Composable
-private fun FileAttachment(name: String) {
+private fun FileAttachment(name: String, bytes: ByteArray?) {
+    val ctx = LocalContext.current
     Row(
-        Modifier.padding(end = 44.dp),
+        Modifier.padding(end = 44.dp).widthIn(min = 160.dp).clickable(enabled = bytes != null) { bytes?.let { openWithSystem(ctx, name, it) } },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.AttachFile, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+        if (bytes == null) {
+            CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Filled.AttachFile, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+        }
         Spacer(Modifier.width(8.dp))
-        Text(name.ifBlank { stringResource(R.string.chat_file) }, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column {
+            Text(name.ifBlank { stringResource(R.string.chat_file) }, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (bytes != null) fmtSize(bytes.size) else stringResource(R.string.chat_downloading),
+                color = HoloSecondary,
+                fontSize = 11.sp,
+            )
+        }
     }
+}
+
+/** Голосовое-вложение: play/pause + длительность (M2). Плеер на байтах блоба. */
+@Composable
+private fun VoiceAttachment(bytes: ByteArray?) {
+    val ctx = LocalContext.current
+    var playing by remember { mutableStateOf(false) }
+    var durationMs by remember(bytes) { mutableStateOf(0) }
+    val player = remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    DisposableEffect(bytes) {
+        onDispose {
+            player.value?.release()
+            player.value = null
+        }
+    }
+    Row(
+        Modifier.padding(end = 44.dp).widthIn(min = 150.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(38.dp).clip(RoundedCornerShape(percent = 50)).background(HoloAccent)
+                .clickable(enabled = bytes != null) {
+                    val mp = player.value
+                    if (mp != null && mp.isPlaying) {
+                        mp.pause()
+                        playing = false
+                    } else if (mp != null) {
+                        mp.start()
+                        playing = true
+                    } else if (bytes != null) {
+                        val f = java.io.File(ctx.cacheDir, "play_${bytes.size}.m4a").apply { writeBytes(bytes) }
+                        val np = android.media.MediaPlayer().apply {
+                            setDataSource(f.absolutePath)
+                            prepare()
+                            durationMs = duration
+                            setOnCompletionListener {
+                                playing = false
+                                seekTo(0)
+                            }
+                            start()
+                        }
+                        player.value = np
+                        playing = true
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bytes == null) {
+                CircularProgressIndicator(color = HoloAccentDark, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    null,
+                    tint = HoloAccentDark,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Icon(Icons.Filled.Mic, null, tint = HoloSecondary, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            if (durationMs > 0) fmtDuration(durationMs) else stringResource(R.string.chat_voice),
+            color = Color.White,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(end = 8.dp),
+        )
+    }
+}
+
+/** Открыть скачанный блоб системным приложением через FileProvider. */
+private fun openWithSystem(ctx: android.content.Context, name: String, bytes: ByteArray) {
+    runCatching {
+        val dir = java.io.File(ctx.cacheDir, "shared").apply { mkdirs() }
+        val f = java.io.File(dir, name.ifBlank { "file" }).apply { writeBytes(bytes) }
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+        val mime = ctx.contentResolver.getType(uri) ?: "*/*"
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setDataAndType(uri, mime)
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        ctx.startActivity(intent)
+    }
+}
+
+private fun fmtSize(bytes: Int): String = when {
+    bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
+    bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
+}
+
+private fun fmtDuration(ms: Int): String {
+    val s = ms / 1000
+    return "%d:%02d".format(s / 60, s % 60)
 }
 
 /** Полноэкранный просмотр картинки (тап по фону — закрыть). */

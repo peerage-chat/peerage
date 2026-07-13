@@ -161,6 +161,10 @@
     <string name="chat_input_hint">Message…</string>
     <string name="chat_voice">Voice</string>
     <string name="chat_file">File</string>
+    <string name="chat_recording">Recording…</string>
+    <string name="chat_downloading">Downloading…</string>
+    <string name="attach_photo">Photo</string>
+    <string name="attach_file">File</string>
     <string name="cd_attach">Attach</string>
     <string name="cd_emoji">Emoji</string>
     <string name="cd_audio_call">Audio call</string>

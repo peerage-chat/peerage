@@ -153,6 +153,10 @@
     <string name="chat_input_hint">Сообщение…</string>
     <string name="chat_voice">Голосовое</string>
     <string name="chat_file">Файл</string>
+    <string name="chat_recording">Запись…</string>
+    <string name="chat_downloading">Загрузка…</string>
+    <string name="attach_photo">Фото</string>
+    <string name="attach_file">Файл</string>
     <string name="cd_attach">Прикрепить</string>
     <string name="cd_emoji">Эмодзи</string>
     <string name="cd_audio_call">Аудио-звонок</string>

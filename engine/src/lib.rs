@@ -241,6 +241,18 @@ impl Engine {
         }
     }
 
+    /// Тип медиа-сообщения по MIME (M2): картинка → превью, аудио → голосовое-плеер,
+    /// остальное → файл-карточка.
+    fn media_kind(mime: &str) -> &'static str {
+        if mime.starts_with("image/") {
+            "image"
+        } else if mime.starts_with("audio/") {
+            "voice"
+        } else {
+            "file"
+        }
+    }
+
     /// Отправить медиа-вложение (M2): scrub (для картинок) → блоб пиру (push) →
     /// медиа-сообщение со ссылкой на блоб по хэшу (тот же надёжный путь, что текст).
     /// Возвращает id сообщения или None. `name` — исходное имя файла (для не-картинок).
@@ -252,7 +264,7 @@ impl Engine {
             content
         };
         let hash = p2p_blob::blob_id(&bytes);
-        let kind = if mime.starts_with("image/") { "image" } else { "file" };
+        let kind = Self::media_kind(mime);
         // Блоб получателю: push-анонс + отдача чанков (если промахнётся — pull по хэшу).
         self.blob_offer(*key, bytes.clone(), mime.to_string());
         // Сохраняем локально, чтобы показывать своё вложение сразу и после рестарта.
@@ -943,7 +955,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             if !dup {
                 let t = now();
                 let id_hex = hex::encode(&hash);
-                let kind = if mime.starts_with("image/") { "image" } else { "file" };
+                let kind = Engine::media_kind(&mime);
                 let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
                     id, mine: false, time: t, status: String::new(),
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.clone(), name: name.clone(),

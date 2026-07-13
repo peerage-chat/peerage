@@ -39,6 +39,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Открытие скачанных файлов-вложений системным приложением (M2). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Держит узел Yggdrasil живым при погасшем экране (см. ConnService). -->
         <service
             android:name=".ConnService"

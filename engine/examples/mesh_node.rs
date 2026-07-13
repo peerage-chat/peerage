@@ -100,8 +100,16 @@ fn main() {
         if !sent_media && ticks >= 3 {
             if let (Some(path), Some(peer)) = (&send_media, media_peer) {
                 let bytes = std::fs::read(path).expect("send-media file");
-                let mime = if path.ends_with(".png") { "image/png" } else { "image/jpeg" };
-                let id = engine.send_media(&peer, bytes, mime, "from-bob.png");
+                let (mime, name) = if path.ends_with(".png") {
+                    ("image/png", "from-bob.png")
+                } else if path.ends_with(".jpg") || path.ends_with(".jpeg") {
+                    ("image/jpeg", "from-bob.jpg")
+                } else if path.ends_with(".txt") {
+                    ("text/plain", "from-bob.txt")
+                } else {
+                    ("application/octet-stream", "from-bob.bin")
+                };
+                let id = engine.send_media(&peer, bytes, mime, name);
                 println!("SENT_MEDIA {id:?}");
                 let _ = std::io::stdout().flush();
             }
