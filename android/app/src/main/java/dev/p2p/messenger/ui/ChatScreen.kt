@@ -199,7 +199,7 @@ private fun sendUriAttachment(
 }
 
 /** Человекочитаемое имя файла из content-uri (OpenableColumns.DISPLAY_NAME). */
-private fun displayName(ctx: android.content.Context, uri: android.net.Uri): String? =
+internal fun displayName(ctx: android.content.Context, uri: android.net.Uri): String? =
     runCatching {
         ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
@@ -380,7 +380,7 @@ internal fun MessageBubble(m: Message, model: AppModel) {
 /** Картинка-вложение в пузыре: миниатюра (тап → полный экран) или плейсхолдер, пока
  *  байты докачиваются. */
 @Composable
-private fun ImageAttachment(bytes: ByteArray?, onOpen: () -> Unit) {
+internal fun ImageAttachment(bytes: ByteArray?, onOpen: () -> Unit) {
     val bmp = bytes?.let {
         remember(it) { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
     }
@@ -398,7 +398,7 @@ private fun ImageAttachment(bytes: ByteArray?, onOpen: () -> Unit) {
 
 /** Файл-вложение: иконка + имя + размер; тап (когда скачан) → открыть системой. */
 @Composable
-private fun FileAttachment(name: String, bytes: ByteArray?) {
+internal fun FileAttachment(name: String, bytes: ByteArray?) {
     val ctx = LocalContext.current
     Row(
         Modifier.padding(end = 44.dp).widthIn(min = 160.dp).clickable(enabled = bytes != null) { bytes?.let { openWithSystem(ctx, name, it) } },
@@ -423,7 +423,7 @@ private fun FileAttachment(name: String, bytes: ByteArray?) {
 
 /** Голосовое-вложение: play/pause + длительность (M2). Плеер на байтах блоба. */
 @Composable
-private fun VoiceAttachment(bytes: ByteArray?) {
+internal fun VoiceAttachment(bytes: ByteArray?) {
     val ctx = LocalContext.current
     var playing by remember { mutableStateOf(false) }
     var durationMs by remember(bytes) { mutableStateOf(0) }
@@ -516,7 +516,7 @@ private fun fmtDuration(ms: Int): String {
 
 /** Полноэкранный просмотр картинки (тап по фону — закрыть). */
 @Composable
-private fun ImageViewer(bytes: ByteArray, onClose: () -> Unit) {
+internal fun ImageViewer(bytes: ByteArray, onClose: () -> Unit) {
     val bmp = remember(bytes) { runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull() }
     Dialog(onDismissRequest = onClose) {
         Box(

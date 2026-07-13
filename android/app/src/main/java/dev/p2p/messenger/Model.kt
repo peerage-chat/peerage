@@ -123,6 +123,12 @@ data class GroupMsg(
     val sender: String = "",
     /** Системная строка (смена состава) — рендерится отдельно. */
     val system: Boolean = false,
+    /** Тип (M2): "text" | "image" | "voice" | "file". */
+    val kind: String = "text",
+    /** hex-хэш блоба вложения (M2); байты — через AppModel.mediaBlobs. */
+    val blobId: String = "",
+    val mime: String = "",
+    val name: String = "",
 )
 
 /** Входящий DM-звонок (до того как пользователь ответил или отклонил). */
@@ -1037,15 +1043,27 @@ class AppModel private constructor() {
             }
             "group_msg" -> {
                 val gid = o.getString("gid")
-                groupLog(gid).add(
-                    GroupMsg(
-                        o.optString("text"),
-                        mine = false,
-                        time = System.currentTimeMillis() / 1000,
-                        sender = o.optString("sender"),
-                        system = o.optBoolean("system", false),
-                    ),
-                )
+                if (o.optBoolean("mine", false)) {
+                    // Своё групповое медиа: blob_id считается от очищенных байт в движке —
+                    // перечитываем историю, чтобы показать вложение с верным хэшем.
+                    if (currentGroup == gid) loadGroupHistory(gid)
+                } else {
+                    val blobId = o.optString("blob_id")
+                    if (blobId.isNotEmpty()) cacheBlob(blobId) // M2: подтянуть вложение
+                    groupLog(gid).add(
+                        GroupMsg(
+                            o.optString("text"),
+                            mine = false,
+                            time = System.currentTimeMillis() / 1000,
+                            sender = o.optString("sender"),
+                            system = o.optBoolean("system", false),
+                            kind = o.optString("kind", "text"),
+                            blobId = blobId,
+                            mime = o.optString("mime"),
+                            name = o.optString("name"),
+                        ),
+                    )
+                }
             }
         }
     }
@@ -1446,9 +1464,15 @@ class AppModel private constructor() {
                 o.optLong("time", 0),
                 sender = o.optString("sender"),
                 system = o.optBoolean("system", false),
+                kind = o.optString("kind", "text"),
+                blobId = o.optString("blob_id"),
+                mime = o.optString("mime"),
+                name = o.optString("name"),
             )
         }
         groupMessages[gid] = list.toMutableStateList()
+        // M2: подтянуть байты уже докачанных вложений (иначе — по blob_received).
+        list.forEach { if (it.blobId.isNotEmpty()) cacheBlob(it.blobId) }
     }
 
     private fun groupLog(gid: String): SnapshotStateList<GroupMsg> =
@@ -1468,6 +1492,13 @@ class AppModel private constructor() {
             ),
         )
         ops.execute { Native.groupSendText(sessionPtr, gid, text) }
+    }
+
+    /** Отправить вложение в группу (M2): движок чистит картинку, шлёт блоб всем
+     *  участникам + MLS-ссылку. Своё сообщение подтянется перечитыванием истории
+     *  (event group_msg mine=true), т.к. blob_id считается от очищенных байт в движке. */
+    fun sendGroupMedia(gid: String, content: ByteArray, mime: String, name: String) = ops.execute {
+        Native.groupSendMedia(sessionPtr, gid, content, mime, name)
     }
 
     // ── Диагностика: тест пропускной способности ─────────────────────────────

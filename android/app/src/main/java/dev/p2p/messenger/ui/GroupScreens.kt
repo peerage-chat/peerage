@@ -2,6 +2,10 @@
 
 package dev.p2p.messenger.ui
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -31,7 +36,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
 import dev.p2p.messenger.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlin.math.abs
+
+/** Прочитать uri (байты+mime+имя) в IO и отправить как вложение в группу (M2). */
+private fun sendGroupUriAttachment(
+    ctx: android.content.Context,
+    model: AppModel,
+    gid: String,
+    uri: android.net.Uri,
+    scope: kotlinx.coroutines.CoroutineScope,
+    fallbackName: String,
+) {
+    scope.launch(Dispatchers.IO) {
+        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
+        val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+        val name = displayName(ctx, uri) ?: fallbackName
+        model.sendGroupMedia(gid, bytes, mime, name)
+    }
+}
 
 @Composable
 internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
@@ -58,7 +82,34 @@ internal fun GroupChatScreen(model: AppModel) {
     var input by remember(gid) { mutableStateOf("") }
     var focusedParticipant by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+
+    // M2: вложения в группе — картинка/файл → sendGroupMedia (движок пушит блоб всем).
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { sendGroupUriAttachment(ctx, model, gid, it, scope, "image.jpg") }
+    }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { sendGroupUriAttachment(ctx, model, gid, it, scope, "file") }
+    }
+    // Голосовые в группе: held-to-record.
+    val recorder = remember { VoiceRecorder(ctx) }
+    var recording by remember { mutableStateOf(false) }
+    val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    val startVoice = {
+        if (ctx.hasPermission(Manifest.permission.RECORD_AUDIO)) {
+            recording = recorder.start()
+        } else {
+            micPerm.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+    val stopVoice = {
+        if (recording) {
+            recording = false
+            recorder.stop()?.let { bytes -> scope.launch(Dispatchers.IO) { model.sendGroupMedia(gid, bytes, "audio/mp4", "voice.m4a") } }
+        }
+    }
 
     val inRoom = model.currentRoom == gid
     val presenceMembers = if (inRoom) emptyList() else (model.groupPresence[gid] ?: emptyList())
@@ -82,12 +133,21 @@ internal fun GroupChatScreen(model: AppModel) {
                     GroupMessageRow(model, m)
                 }
             }
-            MessageInput(input, { input = it }) {
-                if (input.isNotBlank()) {
-                    model.sendGroupText(gid, input)
-                    input = ""
-                }
-            }
+            MessageInput(
+                value = input,
+                onChange = { input = it },
+                onPickImage = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onPickFile = { filePicker.launch(arrayOf("*/*")) },
+                recording = recording,
+                onVoiceStart = startVoice,
+                onVoiceStop = stopVoice,
+                onSend = {
+                    if (input.isNotBlank()) {
+                        model.sendGroupText(gid, input)
+                        input = ""
+                    }
+                },
+            )
         }
         focusedParticipant?.let { key ->
             val isMe = key == "me"
@@ -205,7 +265,7 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg) {
             }
         }
         m.mine -> Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.End) {
-            GroupBubble(m.text, true, m.time)
+            GroupBubble(m, model, true, m.time)
         }
         // Входящее: аватар выровнен по НИЗУ пузыря (Telegram-style), имя — ВНУТРИ пузыря.
         else -> Row(
@@ -217,7 +277,7 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg) {
             val online = model.online[m.sender] == true
             SquareAvatar(who, size = 32.dp, online = online)
             Spacer(Modifier.width(8.dp))
-            GroupBubble(m.text, false, m.time, senderName = who, senderColor = nameColor(m.sender))
+            GroupBubble(m, model, false, m.time, senderName = who, senderColor = nameColor(m.sender))
         }
     }
 }
@@ -226,12 +286,16 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg) {
  *  пузыря; время — в правом нижнем углу (как DM); без галочек. */
 @Composable
 internal fun GroupBubble(
-    text: String,
+    m: GroupMsg,
+    model: AppModel,
     mine: Boolean,
     time: Long,
     senderName: String? = null,
     senderColor: Color = Color.White,
 ) {
+    // M2: байты вложения из реактивного кэша (появятся по докачке блоба без рефреша).
+    val blobBytes = if (m.blobId.isNotEmpty()) model.mediaBlobs[m.blobId] else null
+    var viewer by remember { mutableStateOf(false) }
     Box(
         Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(14.dp))
             .background(if (mine) BubbleOut else BubbleIn).padding(horizontal = 10.dp, vertical = 6.dp),
@@ -248,10 +312,15 @@ internal fun GroupBubble(
                     modifier = Modifier.padding(end = 40.dp),
                 )
             }
-            // Текст резервирует справа место под время (реальный отступ) → время
-            // оверлеем точно в правом-нижнем углу, без наложения.
-            Text(text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = 40.dp))
+            when (m.kind) {
+                "image" -> ImageAttachment(blobBytes) { viewer = true }
+                "voice" -> VoiceAttachment(blobBytes)
+                "file" -> FileAttachment(m.name, blobBytes)
+                // Текст резервирует справа место под время → время оверлеем без наложения.
+                else -> Text(m.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = 40.dp))
+            }
         }
+        if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
         Text(
             fmtMsgTime(time),
             color = Color.White.copy(alpha = 0.5f),
