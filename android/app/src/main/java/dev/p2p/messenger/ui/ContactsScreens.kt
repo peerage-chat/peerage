@@ -57,9 +57,24 @@ internal fun ContactsScreen(
         }
         when {
             activeFilter == "channel" -> CenterMessage(stringResource(R.string.channels_soon))
-            model.contacts.isEmpty() && model.groups.isEmpty() ->
+            model.contacts.isEmpty() && model.groups.isEmpty() && model.contactRequests.isEmpty() ->
                 CenterMessage(stringResource(R.string.contacts_empty))
             else -> LazyColumn(Modifier.fillMaxSize()) {
+                // Гейт: входящие запросы от незнакомцев — карточками наверху (фильтр DM/all).
+                if (showDm && model.contactRequests.isNotEmpty()) {
+                    item(key = "req_header") {
+                        Text(
+                            stringResource(R.string.requests_header, model.contactRequests.size),
+                            color = HoloAccent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = ScreenPad, end = ScreenPad, top = 10.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(model.contactRequests, key = { "req_${it.key}" }) { r ->
+                        ContactRequestCard(model, r)
+                    }
+                }
                 // Комнаты — наверху, если фильтр позволяет
                 if (showRoom) {
                     items(model.groups, key = { "g_${it.gid}" }) { g ->
@@ -124,6 +139,60 @@ internal fun ContactsScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Карточка входящего запроса в контакты (гейт вместо TOFU): аватар-буква, короткий
+ *  ключ, превью первого сообщения и кнопки Принять / Отклонить / Заблокировать. */
+@Composable
+private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = ScreenPad, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(HoloSurface)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SquareAvatar(r.shortKey, size = 40.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    r.shortKey + "…",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (r.preview.isNotBlank()) {
+                    Text(
+                        r.preview,
+                        color = HoloSecondary,
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = { model.acceptRequest(r.key) },
+                colors = ButtonDefaults.buttonColors(containerColor = HoloAccent, contentColor = HoloAccentDark),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+            ) { Text(stringResource(R.string.req_accept), fontSize = 13.sp) }
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = { model.declineRequest(r.key) }) {
+                Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = 13.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { model.blockRequest(r.key) }) {
+                Text(stringResource(R.string.req_block), color = HoloError, fontSize = 13.sp)
             }
         }
     }

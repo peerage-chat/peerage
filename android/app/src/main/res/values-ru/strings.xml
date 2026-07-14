@@ -125,6 +125,11 @@
     <string name="contacts_empty_title">Нет контактов</string>
     <string name="contacts_empty_hint">Добавьте собеседника по ключу или QR — кнопкой вверху</string>
     <string name="channels_soon">Каналы — скоро</string>
+    <!-- Запросы в контакты (гейт вместо TOFU-автодобавления) -->
+    <string name="requests_header">Запросы · %1$d</string>
+    <string name="req_accept">Принять</string>
+    <string name="req_decline">Отклонить</string>
+    <string name="req_block">Заблокировать</string>
     <string name="bench_recv_rate">⏱ приём: %1$s Мбит/с</string>
     <string name="add_label_pubkey">ПУБЛИЧНЫЙ КЛЮЧ (hex)</string>
     <string name="add_hint_hex">64 hex-символа</string>

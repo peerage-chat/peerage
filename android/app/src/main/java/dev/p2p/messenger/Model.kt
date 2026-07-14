@@ -71,6 +71,27 @@ data class Contact(
     }
 }
 
+/** Входящий «запрос в контакты» от незнакомца (гейт вместо TOFU). Первое сообщение
+ *  приходит сюда карточкой на одобрение, а не в чат. */
+data class ContactRequest(
+    val key: String,
+    val fingerprint: String,
+    /** Превью первого сообщения (или «[image]»/«[file]»/«[voice]»). */
+    val preview: String,
+    val time: Long,
+) {
+    val shortKey: String get() = key.take(8)
+
+    companion object {
+        fun fromJson(o: JSONObject) = ContactRequest(
+            key = o.getString("key"),
+            fingerprint = o.optString("fingerprint"),
+            preview = o.optString("preview"),
+            time = o.optLong("time"),
+        )
+    }
+}
+
 data class Message(
     val id: Long,
     val text: String,
@@ -228,6 +249,9 @@ class AppModel private constructor() {
     }
 
     val contacts = mutableStateListOf<Contact>()
+
+    /** Входящие запросы в контакты от незнакомцев (гейт). */
+    val contactRequests = mutableStateListOf<ContactRequest>()
     val online = mutableStateMapOf<String, Boolean>()
     val unread = mutableStateMapOf<String, Int>()
     val messages = mutableStateMapOf<String, SnapshotStateList<Message>>()
@@ -612,6 +636,7 @@ class AppModel private constructor() {
             fingerprint = json.getString("fingerprint"),
         )
         refreshContactsNow()
+        refreshRequestsNow()
         refreshGroupsNow()
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
@@ -924,6 +949,38 @@ class AppModel private constructor() {
         refreshContactsNow()
     }
 
+    // ── Гейт контактов (запросы от незнакомцев) ────────────────────────────
+    fun refreshRequests() = ops.execute { refreshRequestsNow() }
+
+    private fun refreshRequestsNow() {
+        val arr = JSONArray(Native.contactRequests(sessionPtr))
+        val list = (0 until arr.length()).map { ContactRequest.fromJson(arr.getJSONObject(it)) }
+            .sortedByDescending { it.time }
+        contactRequests.clear()
+        contactRequests.addAll(list)
+    }
+
+    /** Одобрить запрос: незнакомец становится контактом. */
+    fun acceptRequest(key: String) = ops.execute {
+        if (Native.acceptContactRequest(sessionPtr, key)) {
+            refreshRequestsNow()
+            refreshContactsNow()
+        }
+    }
+
+    /** Отклонить запрос (тихо). */
+    fun declineRequest(key: String) = ops.execute {
+        Native.declineContactRequest(sessionPtr, key)
+        refreshRequestsNow()
+    }
+
+    /** Заблокировать пира: будущие сообщения тихо дропаются. */
+    fun blockRequest(key: String) = ops.execute {
+        Native.blockContact(sessionPtr, key)
+        refreshRequestsNow()
+        refreshContactsNow()
+    }
+
     /** Применить одно событие из ядра. Вызывается из [pollThread] (фон). */
     private fun applyEvent(json: String) {
         if (json.isEmpty()) return
@@ -1011,6 +1068,8 @@ class AppModel private constructor() {
                     if (idx >= 0) roomMembers[idx] = rm else roomMembers.add(rm)
                 }
             }
+            // Гейт: незнакомец постучался — обновить очередь запросов (UI покажет карточку).
+            "contact_request" -> refreshRequestsNow()
             // M2: контакт прислал профиль (имя/аватар) → перечитать список.
             "contacts_changed" -> refreshContactsNow()
             // M2: докачался блоб. Аватар контакта — перечитать контакты; вложение чата —

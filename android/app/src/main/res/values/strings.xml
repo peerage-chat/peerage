@@ -133,6 +133,11 @@
     <string name="contacts_empty_title">No contacts</string>
     <string name="contacts_empty_hint">Add a peer by key or QR — using the button above</string>
     <string name="channels_soon">Channels — soon</string>
+    <!-- Contact requests (gate instead of TOFU auto-add) -->
+    <string name="requests_header">Requests · %1$d</string>
+    <string name="req_accept">Accept</string>
+    <string name="req_decline">Decline</string>
+    <string name="req_block">Block</string>
     <string name="bench_recv_rate">⏱ receiving: %1$s Mbps</string>
     <string name="add_label_pubkey">PUBLIC KEY (hex)</string>
     <string name="add_hint_hex">64 hex characters</string>

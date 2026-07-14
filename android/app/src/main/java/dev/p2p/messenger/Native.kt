@@ -73,6 +73,22 @@ object Native {
     external fun setVerified(sessionPtr: Long, keyHex: String, verified: Boolean)
     external fun renameContact(sessionPtr: Long, keyHex: String, name: String)
     external fun removeContact(sessionPtr: Long, keyHex: String)
+
+    // ── Гейт контактов (запросы от незнакомцев + блок-лист) ────────────────
+    /** Входящие запросы в контакты: JSON [{key, fingerprint, preview, time}]. */
+    external fun contactRequests(sessionPtr: Long): String
+
+    /** Одобрить запрос: незнакомец становится контактом. true при успехе. */
+    external fun acceptContactRequest(sessionPtr: Long, keyHex: String): Boolean
+
+    /** Отклонить запрос (тихо). true, если запрос был. */
+    external fun declineContactRequest(sessionPtr: Long, keyHex: String): Boolean
+
+    /** Заблокировать пира: будущие сообщения тихо дропаются. */
+    external fun blockContact(sessionPtr: Long, keyHex: String): Boolean
+
+    /** Разблокировать пира. */
+    external fun unblockContact(sessionPtr: Long, keyHex: String): Boolean
     external fun isOnline(sessionPtr: Long, keyHex: String): Boolean
     external fun netPeers(sessionPtr: Long): Int
     external fun netTree(sessionPtr: Long): Int
