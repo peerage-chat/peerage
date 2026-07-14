@@ -33,6 +33,7 @@ fn main() {
     let mut avatar = false;
     let mut avatar_file: Option<String> = None;
     let mut send_media: Option<String> = None;
+    let mut send_text: Option<String> = None;
     let mut adds: Vec<String> = Vec::new();
     let mut rest = args.collect::<Vec<_>>().into_iter();
     while let Some(a) = rest.next() {
@@ -46,6 +47,7 @@ fn main() {
             "--avatar" => avatar = true,
             "--avatar-file" => avatar_file = rest.next(),
             "--send-media" => send_media = rest.next(),
+            "--send-text" => send_text = rest.next(),
             other => eprintln!("неизвестный аргумент: {other}"),
         }
     }
@@ -96,8 +98,13 @@ fn main() {
     loop {
         std::thread::sleep(Duration::from_secs(2));
         ticks += 1;
-        // Даём presence подняться (~6с), потом шлём картинку один раз.
+        // Даём presence подняться (~6с), потом шлём текст/картинку один раз.
         if !sent_media && ticks >= 3 {
+            if let (Some(text), Some(peer)) = (&send_text, media_peer) {
+                let id = engine.send_text(&peer, text);
+                println!("SENT_TEXT {id:?}");
+                let _ = std::io::stdout().flush();
+            }
             if let (Some(path), Some(peer)) = (&send_media, media_peer) {
                 let bytes = std::fs::read(path).expect("send-media file");
                 let (mime, name) = if path.ends_with(".png") {
