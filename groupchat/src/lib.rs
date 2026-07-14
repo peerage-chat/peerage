@@ -28,6 +28,10 @@ enum AppMsg {
     Text { text: String },
     #[serde(rename = "media")]
     Media { kind: String, hash: String, mime: String, name: String },
+    /// Служебное: имя группы. Админ шлёт его новому участнику после add, чтобы тот
+    /// увидел настоящее название, а не дефолт (в UI не показывается как сообщение).
+    #[serde(rename = "name")]
+    Name { name: String },
 }
 
 /// Результат обработки входящего группового сообщения — для показа в UI.
@@ -36,6 +40,8 @@ pub enum Inbound {
     Message { sender: PeerKey, text: String },
     /// Медиа-сообщение (M2): отправитель + ссылка на блоб по хэшу.
     Media { sender: PeerKey, kind: String, hash: String, mime: String, name: String },
+    /// Имя группы (служебное): верхний слой обновляет название, без показа в чате.
+    Name { name: String },
     /// Изменён состав группы (применён Commit), его применил actor.
     Membership { actor: PeerKey },
     /// Нас удалили из группы (ADR-004) — верхний слой забывает группу локально.
@@ -149,6 +155,12 @@ impl GroupChat {
         })
     }
 
+    /// Разослать имя группы участникам (служебное). Админ зовёт после добавления
+    /// участника — тот увидит настоящее название вместо дефолта.
+    pub fn send_name(&mut self, name: &str) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::Name { name: name.to_string() })
+    }
+
     /// Зашифровать прикладное тело (JSON) MLS и разослать участникам.
     fn send_app(&mut self, msg: &AppMsg) -> Result<(), GroupChatError> {
         let body = serde_json::to_vec(msg).unwrap_or_default();
@@ -176,6 +188,7 @@ impl GroupChat {
                     Ok(AppMsg::Media { kind, hash, mime, name }) => {
                         Inbound::Media { sender, kind, hash, mime, name }
                     }
+                    Ok(AppMsg::Name { name }) => Inbound::Name { name },
                     Err(_) => Inbound::Message { sender, text: String::from_utf8_lossy(&body).into_owned() },
                 })
             }

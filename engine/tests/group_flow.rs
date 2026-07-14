@@ -136,6 +136,26 @@ fn group_media_message_propagates() {
     assert_eq!(mine["blob_id"], "abcd1234");
 }
 
+/// Имя группы доезжает до вступившего: админ создаёт «тест», после add шлёт имя
+/// служебным AppMsg — joiner видит «тест», а не дефолт «Группа».
+#[test]
+fn group_name_propagates_to_joiner() {
+    let mut ctx = setup_and_join(0);
+
+    let name_of = |gm: &GroupManager, gid: &[u8]| -> Option<String> {
+        let v: serde_json::Value = serde_json::from_str(&gm.list_json()).ok()?;
+        v.as_array()?.iter()
+            .find(|g| g["gid"] == hex::encode(gid))
+            .and_then(|g| g["name"].as_str().map(str::to_string))
+    };
+
+    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
+        name_of(b, &ctx.gid).as_deref() == Some("тест")
+    });
+    assert!(got, "joiner получил настоящее имя группы");
+    assert_eq!(name_of(&ctx.gm_a, &ctx.gid).as_deref(), Some("тест"), "у админа имя не изменилось");
+}
+
 /// Тот же путь под потерями — доказывает, что надёжный invite-хендшейк дожимает
 /// приглашение сквозь дропы (регрессия против «инвайт не срабатывает»).
 #[test]

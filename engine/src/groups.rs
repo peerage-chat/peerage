@@ -397,6 +397,13 @@ impl GroupManager {
         if added {
             crate::spawn_connect(self.messenger.clone(), peer);
             self.save_group(&id);
+            // Догоняем нового участника настоящим именем группы (иначе у него дефолт).
+            // Welcome уже ушёл в add_member (раньше в очереди) → имя применится после
+            // вступления. Идемпотентно и для уже состоящих участников.
+            if let Some(e) = self.groups.get_mut(&id) {
+                let name = e.name.clone();
+                let _ = e.chat.send_name(&name);
+            }
         }
         added
     }
@@ -439,6 +446,20 @@ impl GroupManager {
                         media: Some(GroupMediaRef { kind, blob_id: hash, mime, name }),
                         ..Default::default()
                     }
+                }
+                // Служебное: админ прислал имя группы — обновляем название (не сообщение).
+                Some(Ok(Inbound::Name { name })) => {
+                    let changed = if let Some(e) = self.groups.get_mut(&gid) {
+                        let diff = e.name != name;
+                        e.name = name;
+                        diff
+                    } else {
+                        false
+                    };
+                    if changed {
+                        self.save_group(&gid); // персист имени в index.json
+                    }
+                    GroupOutcome { gid: Some(gid.clone()), renamed: changed, ..Default::default() }
                 }
                 Some(Ok(Inbound::Membership { actor })) => {
                     let actor_hex = hex::encode(actor);
@@ -582,6 +603,8 @@ pub struct GroupOutcome {
     pub joined: bool,
     /// Нас отозвали из группы (ADR-004) — UI должен убрать группу и уведомить.
     pub removed: bool,
+    /// Имя группы изменилось (пришло от админа) — UI обновить название в списке.
+    pub renamed: bool,
     /// Медиа-сообщение (M2): тип + ссылка на блоб. Пусто → не медиа.
     pub media: Option<GroupMediaRef>,
 }

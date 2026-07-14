@@ -1128,6 +1128,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 refresh_group_cache(engine, groups);
                 push_event(engine, serde_json::json!({"type": "groups_changed"}));
             }
+            if out.renamed {
+                // Имя группы пришло от админа — обновляем кэш списка и уведомляем UI.
+                refresh_group_cache(engine, groups);
+                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+            }
             if out.removed {
                 // ADR-004: нас отозвали — обновляем кэш и уведомляем UI отдельным
                 // событием (чтобы показать «вы удалены» и закрыть экран группы).
