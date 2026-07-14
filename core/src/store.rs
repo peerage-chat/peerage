@@ -7,7 +7,7 @@
 //! Оба стора принимают [`crate::db::Db`] — общее `Arc<Mutex<Connection>>`.
 //! Миграция из JSON-файлов выполняется один раз в `open()` при наличии legacy-файла.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -285,6 +285,142 @@ impl ContactStore {
     }
 }
 
+// ---- Гейт контактов: входящие запросы + блок-лист (анти-abuse) --------------
+
+/// Входящий «запрос в контакты» от незнакомца. Первое сообщение приходит НЕ в чат,
+/// а карточкой на одобрение — замена тихого TOFU-автодобавления. `preview` — текст
+/// первого сообщения (или «[image]»/«[file]»/«[voice]» для медиа), чтобы получатель
+/// решал осознанно.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContactRequest {
+    pub key: String,
+    pub fingerprint: String,
+    #[serde(default)]
+    pub preview: String,
+    pub time: i64,
+}
+
+/// SQLite-хранилище гейта: `contact_requests` (pending) + `blocklist` (тихий дроп).
+/// In-memory кэши — приём сообщений проверяет гейт на горячем пути.
+pub struct GateStore {
+    db: Db,
+    requests: HashMap<[u8; 32], ContactRequest>,
+    blocked: HashSet<[u8; 32]>,
+}
+
+impl GateStore {
+    pub fn open(db: Db) -> Result<Self, StoreError> {
+        let mut store = GateStore { db, requests: HashMap::new(), blocked: HashSet::new() };
+        store.load_cache()?;
+        Ok(store)
+    }
+
+    fn load_cache(&mut self) -> Result<(), StoreError> {
+        let conn = db::lock(&self.db);
+        {
+            let mut stmt =
+                conn.prepare("SELECT key, fingerprint, preview, time FROM contact_requests")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (kb, fp, preview, time) = row?;
+                if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
+                    self.requests.insert(key, ContactRequest {
+                        key: hex::encode(key), fingerprint: fp, preview, time,
+                    });
+                }
+            }
+        }
+        {
+            let mut stmt = conn.prepare("SELECT key FROM blocklist")?;
+            let rows = stmt.query_map([], |row| row.get::<_, Vec<u8>>(0))?;
+            for row in rows {
+                if let Ok(key) = <[u8; 32]>::try_from(row?.as_slice()) {
+                    self.blocked.insert(key);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // — Запросы —
+
+    /// Записать/обновить входящий запрос. Первый `preview` сохраняем; повторные
+    /// сообщения до одобрения НЕ копим (анти-DoS) — только двигаем `time`.
+    /// Возвращает `true`, если запрос новый (UI показать уведомление).
+    pub fn upsert_request(&mut self, key: &[u8; 32], preview: &str, time: i64) -> Result<bool, StoreError> {
+        if let Some(existing) = self.requests.get_mut(key) {
+            existing.time = time;
+            db::lock(&self.db).execute(
+                "UPDATE contact_requests SET time=?1 WHERE key=?2",
+                rusqlite::params![time, key.as_slice()],
+            )?;
+            return Ok(false);
+        }
+        let fingerprint = crate::identity::fingerprint_words(key).join(" ");
+        db::lock(&self.db).execute(
+            "INSERT OR IGNORE INTO contact_requests (key, fingerprint, preview, time) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![key.as_slice(), &fingerprint, preview, time],
+        )?;
+        self.requests.insert(*key, ContactRequest {
+            key: hex::encode(key), fingerprint, preview: preview.to_string(), time,
+        });
+        Ok(true)
+    }
+
+    pub fn has_request(&self, key: &[u8; 32]) -> bool {
+        self.requests.contains_key(key)
+    }
+
+    pub fn list_requests(&self) -> Vec<&ContactRequest> {
+        self.requests.values().collect()
+    }
+
+    /// Снять запрос из очереди (при одобрении/отклонении/блоке).
+    pub fn take_request(&mut self, key: &[u8; 32]) -> Option<ContactRequest> {
+        let r = self.requests.remove(key);
+        if r.is_some() {
+            let _ = db::lock(&self.db).execute(
+                "DELETE FROM contact_requests WHERE key=?1",
+                rusqlite::params![key.as_slice()],
+            );
+        }
+        r
+    }
+
+    // — Блоки —
+
+    pub fn is_blocked(&self, key: &[u8; 32]) -> bool {
+        self.blocked.contains(key)
+    }
+
+    /// Заблокировать пира: будущие сообщения тихо дропаются. Снимает висящий запрос.
+    pub fn block(&mut self, key: &[u8; 32], time: i64) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "INSERT OR REPLACE INTO blocklist (key, blocked) VALUES (?1, ?2)",
+            rusqlite::params![key.as_slice(), time],
+        )?;
+        self.blocked.insert(*key);
+        let _ = self.take_request(key);
+        Ok(())
+    }
+
+    pub fn unblock(&mut self, key: &[u8; 32]) -> Result<bool, StoreError> {
+        if !self.blocked.remove(key) { return Ok(false); }
+        db::lock(&self.db).execute(
+            "DELETE FROM blocklist WHERE key=?1",
+            rusqlite::params![key.as_slice()],
+        )?;
+        Ok(true)
+    }
+}
+
 // ---- История сообщений -----------------------------------------------------
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -548,5 +684,52 @@ mod tests {
         store.append(&peer, StoredMessage { id: 1, text: "x".into(), mine: true, time: 0, status: "".into(), ..Default::default() }).unwrap();
         store.clear(&peer).unwrap();
         assert!(store.history(&peer).is_empty());
+    }
+
+    #[test]
+    fn gate_request_upsert_keeps_first_preview() {
+        let k = key();
+        let mut g = GateStore::open(db()).unwrap();
+        assert!(g.upsert_request(&k, "привет", 100).unwrap()); // новый
+        assert!(!g.upsert_request(&k, "ещё раз", 200).unwrap()); // повтор → не новый
+        assert!(g.has_request(&k));
+        let r = g.list_requests();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].preview, "привет"); // первый превью сохранён (анти-DoS)
+        assert_eq!(r[0].time, 200); // время подвинуто
+    }
+
+    #[test]
+    fn gate_request_persists_and_take_removes() {
+        let k = key();
+        let shared = db();
+        {
+            let mut g = GateStore::open(shared.clone()).unwrap();
+            g.upsert_request(&k, "[image]", 1).unwrap();
+        }
+        let mut g2 = GateStore::open(shared).unwrap();
+        assert!(g2.has_request(&k));
+        let taken = g2.take_request(&k).unwrap();
+        assert_eq!(taken.preview, "[image]");
+        assert!(!g2.has_request(&k));
+        assert!(g2.take_request(&k).is_none()); // повторный take — пусто
+    }
+
+    #[test]
+    fn gate_block_drops_request_and_persists() {
+        let k = key();
+        let shared = db();
+        {
+            let mut g = GateStore::open(shared.clone()).unwrap();
+            g.upsert_request(&k, "спам", 1).unwrap();
+            g.block(&k, 2).unwrap();
+            assert!(g.is_blocked(&k));
+            assert!(!g.has_request(&k)); // блок снял запрос
+        }
+        let mut g2 = GateStore::open(shared).unwrap();
+        assert!(g2.is_blocked(&k)); // блок пережил переоткрытие
+        assert!(g2.unblock(&k).unwrap());
+        assert!(!g2.is_blocked(&k));
+        assert!(!g2.unblock(&k).unwrap()); // повторный unblock — уже нет
     }
 }

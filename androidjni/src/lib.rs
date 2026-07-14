@@ -434,6 +434,81 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_removeContact<'local>(
     });
 }
 
+// ── Гейт контактов (запросы от незнакомцев + блок-лист) ──────────────────────
+
+/// Входящие запросы в контакты как JSON-массив [{key, fingerprint, preview, time}].
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_contactRequests<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.contact_requests_json())
+    })
+}
+
+/// Одобрить запрос: незнакомец → контакт. Возвращает true при успехе.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_acceptContactRequest<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let ok = parse_key(&jstr(&mut env, &key_hex)).map(|k| e.accept_contact_request(&k)).unwrap_or(false);
+        if ok { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
+/// Отклонить запрос (тихо). Возвращает true, если запрос был.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_declineContactRequest<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let ok = parse_key(&jstr(&mut env, &key_hex)).map(|k| e.decline_contact_request(&k)).unwrap_or(false);
+        if ok { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
+/// Заблокировать пира: будущие сообщения тихо дропаются, запрос снят, из контактов убран.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_blockContact<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let ok = parse_key(&jstr(&mut env, &key_hex)).map(|k| e.block_contact(&k)).unwrap_or(false);
+        if ok { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
+/// Разблокировать пира. Возвращает true, если был в блок-листе.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_unblockContact<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let ok = parse_key(&jstr(&mut env, &key_hex)).map(|k| e.unblock_contact(&k)).unwrap_or(false);
+        if ok { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_isOnline<'local>(
     mut env: JNIEnv<'local>,

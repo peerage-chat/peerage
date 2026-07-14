@@ -91,6 +91,19 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             created_at   INTEGER NOT NULL,
             status       TEXT    NOT NULL DEFAULT 'pending'
         );
+
+        -- Гейт контактов (замена TOFU-автодобавления): первое сообщение незнакомца
+        -- ждёт одобрения здесь, а не сыплется в чат. blocklist — тихий дроп.
+        CREATE TABLE IF NOT EXISTS contact_requests (
+            key         BLOB PRIMARY KEY,
+            fingerprint TEXT    NOT NULL,
+            preview     TEXT    NOT NULL DEFAULT '',
+            time        INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS blocklist (
+            key     BLOB    PRIMARY KEY,
+            blocked INTEGER NOT NULL
+        );
     ")?;
     // Миграция для установок с outbox без msg_id (идемпотентно: дубль-колонка → игнор).
     let _ = conn.execute("ALTER TABLE outbox ADD COLUMN msg_id INTEGER NOT NULL DEFAULT 0", []);

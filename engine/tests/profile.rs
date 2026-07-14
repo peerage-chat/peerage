@@ -133,34 +133,48 @@ fn profile_change_repropagates_by_new_hash() {
     b.shutdown();
 }
 
-/// Авто-добавленный по presence (TOFU) контакт НЕ получает плейсхолдер-имя: локальная
-/// заметка пустая, поэтому в UI показывается самоназвание пира (Contact.displayName:
-/// local → profile_name → hex). Раньше `ensure_contact` писал "hex8…" в `name`, и это
-/// перебивало самоназвание. Здесь B НЕ добавляет A вручную — A появляется у B сам.
+/// Принятый через гейт контакт НЕ получает плейсхолдер-имя: локальная заметка пустая,
+/// поэтому в UI показывается самоназвание пира (Contact.displayName: local →
+/// profile_name → hex). Раньше это тестировалось на TOFU-автодобавлении по presence;
+/// теперь незнакомец добавляется только после явного accept (гейт контактов, gate.rs).
+/// После accept A меняет имя → ProfileUpdate долетает уже КОНТАКТУ B.
 #[test]
-fn auto_added_contact_keeps_blank_name_so_self_name_shows() {
+fn accepted_contact_keeps_blank_name_so_self_name_shows() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(5), id(6));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
     let a = start(&net, a_id, tmpdir("a3"));
     let b = start(&net, b_id, tmpdir("b3"));
-    a.add_contact(&b_key, "B"); // A знает B → шлёт ему профиль; B про A НЕ знает
-    a.set_self_name("Алиса");
+    a.add_contact(&b_key, "B"); // A знает B; B про A узнаёт из запроса
+    a.send_text(&b_key, "постучался"); // незнакомец → запрос у B
 
     let a_hex = hex::encode(a_key);
+    // Ждём запрос и одобряем — A становится контактом с пустым локальным именем.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let rj: serde_json::Value = serde_json::from_str(&b.contact_requests_json()).unwrap();
+        if rj.as_array().map(|a| a.iter().any(|r| r["key"] == a_hex)).unwrap_or(false) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "запрос от A не пришёл за 10с");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(b.accept_contact_request(&a_key));
+
+    // A меняет имя → ProfileUpdate долетает контакту B; локальная заметка пустая.
+    a.set_self_name("Алиса");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let cj: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
         if let Some(c) = cj.as_array().and_then(|a| a.iter().find(|c| c["key"] == a_hex)) {
             if c["profile_name"] == "Алиса" {
-                // Ключевое: локальное имя пустое (не "hex8…") → displayName = самоназвание.
-                assert_eq!(c["name"], "", "авто-контакт без плейсхолдер-имени");
+                assert_eq!(c["name"], "", "принятый контакт без плейсхолдер-имени");
                 a.shutdown();
                 b.shutdown();
                 return;
             }
         }
-        assert!(Instant::now() < deadline, "B не авто-добавил A с профилем за 10с");
+        assert!(Instant::now() < deadline, "B не увидел самоназвание A за 10с");
         std::thread::sleep(Duration::from_millis(30));
     }
 }

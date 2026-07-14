@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use p2p_core::settings::AudioSettings;
-use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
+use p2p_core::store::{ContactStore, GateStore, MessageStore, Profile, StoredMessage};
 use p2p_core::Identity;
 use p2p_messenger::{Event, Messenger};
 use p2p_ygg::Node;
@@ -146,6 +146,8 @@ struct GroupCache {
 pub struct Engine {
     messenger: Arc<Messenger>,
     contacts: Mutex<ContactStore>,
+    /// Гейт контактов (замена TOFU): входящие запросы незнакомцев + блок-лист.
+    gate: Mutex<GateStore>,
     messages: Mutex<MessageStore>,
     me_pub: [u8; 32],
     /// Личность для экспорта секретной сид-фразы (M4 key backup). Секрет уже живёт в
@@ -340,6 +342,47 @@ impl Engine {
     pub fn remove_contact(&self, key: &[u8; 32]) {
         let _ = self.contacts.lock_safe().remove(key);
         self.refresh_trusted();
+    }
+
+    // — Гейт контактов (замена TOFU-автодобавления) —
+    /// Входящие запросы от незнакомцев как JSON-массив (ключ, fingerprint, превью, время).
+    pub fn contact_requests_json(&self) -> String {
+        serde_json::to_string(&self.gate.lock_safe().list_requests()).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Одобрить запрос: незнакомец становится контактом, снимаем запрос, шлём ему свой
+    /// профиль и держим коннект. Дальнейшие его сообщения идут в чат как обычно.
+    /// (Первое сообщение-превью в историю не заливаем — это было только для решения.)
+    pub fn accept_contact_request(&self, key: &[u8; 32]) -> bool {
+        if self.gate.lock_safe().take_request(key).is_none() {
+            return false;
+        }
+        // Пустое локальное имя → покажется самоназвание пира или hex (см. Contact.displayName).
+        let _ = self.contacts.lock_safe().add(key, "", now());
+        self.refresh_trusted();
+        spawn_connect(self.messenger.clone(), *key);
+        let m = self.load_profile_meta();
+        let hash = hex::decode(&m.avatar_id).unwrap_or_default();
+        let _ = self.messenger.send_profile_update(key, &m.name, &hash);
+        true
+    }
+
+    /// Отклонить запрос: тихо убрать из очереди (пир об этом не узнаёт).
+    pub fn decline_contact_request(&self, key: &[u8; 32]) -> bool {
+        self.gate.lock_safe().take_request(key).is_some()
+    }
+
+    /// Заблокировать пира: будущие сообщения тихо дропаются, запрос снят, из контактов
+    /// удалён (перестаёт быть доверенным и получать наш профиль).
+    pub fn block_contact(&self, key: &[u8; 32]) -> bool {
+        let _ = self.gate.lock_safe().block(key, now());
+        let _ = self.contacts.lock_safe().remove(key);
+        self.refresh_trusted();
+        true
+    }
+
+    pub fn unblock_contact(&self, key: &[u8; 32]) -> bool {
+        self.gate.lock_safe().unblock(key).unwrap_or(false)
     }
 
     pub fn is_online(&self, key: &[u8; 32]) -> bool {
@@ -800,23 +843,37 @@ fn public_peer_uris() -> impl Iterator<Item = &'static str> {
 
 // ── Внутренняя оркестрация: event_pump + обработчики ────────────────────────
 
-/// TOFU: добавить неизвестного пира в контакты. Локальную заметку (`name`) НЕ
-/// придумываем — оставляем пустой: приоритет показа `local → profile_name → hex`
-/// сам покажет самоназвание пира (когда придёт `ProfileUpdate`) или короткий hex.
-/// Плейсхолдер-имя тут перебивало бы самоназвание в UI (см. Contact.displayName).
-fn ensure_contact(engine: &Engine, peer: [u8; 32]) {
-    let added = {
-        let mut store = engine.contacts.lock_safe();
-        if store.contains(&peer) {
-            false
-        } else {
-            let _ = store.add(&peer, "", now());
-            true
-        }
-    };
-    if added {
-        engine.refresh_trusted(); // M3: новый TOFU-контакт → щедрый ingress-бюджет
+/// Гейт входящего сообщения (замена TOFU-автодобавления).
+enum Gate {
+    /// Известный контакт — сообщение идёт в чат как обычно.
+    Contact,
+    /// Заблокирован — тихо дропаем.
+    Blocked,
+    /// Незнакомец — первое сообщение уходит в очередь запросов, не в чат.
+    Stranger,
+}
+
+/// Классифицировать отправителя. ВАЖНО: не держим оба лока одновременно, чтобы
+/// не поймать дедлок с APIs, что лочат contacts+gate последовательно.
+fn gate_of(engine: &Engine, peer: &[u8; 32]) -> Gate {
+    if engine.gate.lock_safe().is_blocked(peer) {
+        Gate::Blocked
+    } else if engine.contacts.lock_safe().contains(peer) {
+        Gate::Contact
+    } else {
+        Gate::Stranger
     }
+}
+
+/// Записать входящий запрос от незнакомца и (если новый) уведомить UI. Превью —
+/// короткая выжимка первого сообщения для осознанного решения. Повторные до
+/// одобрения не копим (анти-DoS).
+fn record_request(engine: &Arc<Engine>, peer: [u8; 32], preview: &str) {
+    let preview: String = preview.chars().take(200).collect();
+    let is_new = engine.gate.lock_safe().upsert_request(&peer, &preview, now()).unwrap_or(false);
+    push_event(engine, serde_json::json!({
+        "type": "contact_request", "peer": hex::encode(peer), "new": is_new,
+    }));
 }
 
 fn push_event(engine: &Engine, json: serde_json::Value) {
@@ -949,16 +1006,20 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
     match ev {
         Event::Presence { peer, online } => {
             if online {
-                ensure_contact(engine, peer);
-                // M2: на коннекте шлём контакту свой профиль (догоняет смену, что была офлайн).
-                let m = engine.load_profile_meta();
-                let hash = hex::decode(&m.avatar_id).unwrap_or_default();
-                let _ = engine.messenger.send_profile_update(&peer, &m.name, &hash);
-                let mut ob = engine.outbox.lock_safe();
-                let c = ob.pending_count();
-                ob.on_online(&peer); // M3: дослать ожидающее пиру
-                if c > 0 {
-                    log::info!("outbox on_online peer={:02x?}: досылка (в очереди {})", &peer[..4], c);
+                // Профиль и досылку — ТОЛЬКО контактам (не светим профиль незнакомцам,
+                // presence сам по себе больше не добавляет в контакты — нужен явный запрос).
+                let is_contact = engine.contacts.lock_safe().contains(&peer);
+                if is_contact {
+                    // M2: на коннекте шлём контакту свой профиль (догоняет смену, что была офлайн).
+                    let m = engine.load_profile_meta();
+                    let hash = hex::decode(&m.avatar_id).unwrap_or_default();
+                    let _ = engine.messenger.send_profile_update(&peer, &m.name, &hash);
+                    let mut ob = engine.outbox.lock_safe();
+                    let c = ob.pending_count();
+                    ob.on_online(&peer); // M3: дослать ожидающее пиру
+                    if c > 0 {
+                        log::info!("outbox on_online peer={:02x?}: досылка (в очереди {})", &peer[..4], c);
+                    }
                 }
             }
             push_event(engine, serde_json::json!({
@@ -966,7 +1027,14 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             }));
         }
         Event::Text { peer, id, text } => {
-            ensure_contact(engine, peer);
+            match gate_of(engine, &peer) {
+                Gate::Blocked => return,
+                Gate::Stranger => {
+                    record_request(engine, peer, &text);
+                    return;
+                }
+                Gate::Contact => {}
+            }
             // Дедуп повторной доставки: офлайн-досылка со стабильным id приходит дважды.
             let dup = engine.messages.lock_safe().contains(&peer, id, false);
             if !dup {
@@ -981,7 +1049,14 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             }
         }
         Event::Media { peer, id, hash, mime, name } => {
-            ensure_contact(engine, peer);
+            match gate_of(engine, &peer) {
+                Gate::Blocked => return,
+                Gate::Stranger => {
+                    record_request(engine, peer, &format!("[{}]", Engine::media_kind(&mime)));
+                    return;
+                }
+                Gate::Contact => {}
+            }
             let dup = engine.messages.lock_safe().contains(&peer, id, false);
             if !dup {
                 let t = now();
@@ -1257,6 +1332,7 @@ impl Engine {
         let db = p2p_core::db::open(&dir).map_err(|e| format!("db: {e}"))?;
         let contacts = ContactStore::open(db.clone(), Some(&dir.join("contacts.json")))
             .map_err(|e| format!("contacts: {e}"))?;
+        let gate = GateStore::open(db.clone()).map_err(|e| format!("gate: {e}"))?;
         let messages = MessageStore::open(db.clone(), Some(&dir.join("messages.json")))
             .map_err(|e| format!("messages: {e}"))?;
         let contact_keys: Vec<[u8; 32]> =
@@ -1299,6 +1375,7 @@ impl Engine {
         let engine = Arc::new(Engine {
             messenger: messenger.clone(),
             contacts: Mutex::new(contacts),
+            gate: Mutex::new(gate),
             messages: Mutex::new(messages),
             outbox: Mutex::new(outbox),
             me_pub,
