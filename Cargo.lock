@@ -5203,6 +5203,8 @@ dependencies = [
  "p2p-group",
  "p2p-messenger",
  "p2p-ygg",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
