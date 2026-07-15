@@ -104,8 +104,17 @@ object Native {
     /** Создать группу (fire-and-forget). Результат — через событие `groups_changed`. */
     external fun groupCreate(sessionPtr: Long, name: String): Boolean
 
-    /** Пригласить контакт в группу (по hex-ключу). */
+    /** Пригласить контакт в группу (по hex-ключу) — карточкой-сообщением. */
     external fun groupInvite(sessionPtr: Long, gid: String, peerHex: String)
+
+    /** Входящие приглашения в группы: JSON [{gid, name, inviter}]. */
+    external fun groupInvites(sessionPtr: Long): String
+
+    /** Принять приглашение в группу (карточка). Fire-and-forget. */
+    external fun acceptGroupInvite(sessionPtr: Long, gid: String)
+
+    /** Отклонить приглашение в группу. Fire-and-forget. */
+    external fun declineGroupInvite(sessionPtr: Long, gid: String)
 
     /** Отправить текст в группу (fire-and-forget). UI добавляет оптимистично. */
     external fun groupSendText(sessionPtr: Long, gid: String, text: String)

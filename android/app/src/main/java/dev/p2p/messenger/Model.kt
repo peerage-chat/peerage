@@ -112,6 +112,17 @@ data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
 data class Group(val gid: String, val name: String, val members: Int, val admin: Boolean = false)
 
+/** Входящее приглашение в группу (карточка на одобрение вместо тихого авто-входа). */
+data class GroupInvite(val gid: String, val name: String, val inviter: String) {
+    companion object {
+        fun fromJson(o: JSONObject) = GroupInvite(
+            gid = o.getString("gid"),
+            name = o.optString("name"),
+            inviter = o.optString("inviter"),
+        )
+    }
+}
+
 /** Пир транспорта (адрес/направление/пинг/трафик) — из снапшота движка. */
 data class NetPeer(
     val key: String,
@@ -276,6 +287,9 @@ class AppModel private constructor() {
 
     // Группы (MLS).
     val groups = mutableStateListOf<Group>()
+
+    /** Входящие приглашения в группы (карточки на одобрение). */
+    val groupInvites = mutableStateListOf<GroupInvite>()
     val groupMessages = mutableStateMapOf<String, SnapshotStateList<GroupMsg>>()
     var currentGroup by mutableStateOf<String?>(null)
 
@@ -638,6 +652,7 @@ class AppModel private constructor() {
         refreshContactsNow()
         refreshRequestsNow()
         refreshGroupsNow()
+        refreshGroupInvitesNow()
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
         migrateSelfNameFromPrefs(dataDir) // разовый перенос имени из старых prefs в движок
@@ -1070,6 +1085,8 @@ class AppModel private constructor() {
             }
             // Гейт: незнакомец постучался — обновить очередь запросов (UI покажет карточку).
             "contact_request" -> refreshRequestsNow()
+            // Приглашение в группу пришло/принято/отклонено — обновить карточки.
+            "group_invites_changed" -> refreshGroupInvitesNow()
             // M2: контакт прислал профиль (имя/аватар) → перечитать список.
             "contacts_changed" -> refreshContactsNow()
             // M2: докачался блоб. Аватар контакта — перечитать контакты; вложение чата —
@@ -1471,6 +1488,28 @@ class AppModel private constructor() {
         }
         groups.clear()
         groups.addAll(list)
+    }
+
+    // ── Приглашения в группы (карточки на одобрение) ───────────────────────
+    fun refreshGroupInvites() = ops.execute { refreshGroupInvitesNow() }
+
+    private fun refreshGroupInvitesNow() {
+        val arr = JSONArray(Native.groupInvites(sessionPtr))
+        val list = (0 until arr.length()).map { GroupInvite.fromJson(arr.getJSONObject(it)) }
+        groupInvites.clear()
+        groupInvites.addAll(list)
+    }
+
+    /** Принять приглашение: вступление завершится по `groups_changed`. */
+    fun acceptGroupInvite(gid: String) = ops.execute {
+        Native.acceptGroupInvite(sessionPtr, gid)
+        refreshGroupInvitesNow()
+    }
+
+    /** Отклонить приглашение (тихо). */
+    fun declineGroupInvite(gid: String) = ops.execute {
+        Native.declineGroupInvite(sessionPtr, gid)
+        refreshGroupInvitesNow()
     }
 
     /** Ключи участников группы (hex, кроме себя) — для экрана управления. */

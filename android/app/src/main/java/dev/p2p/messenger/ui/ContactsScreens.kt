@@ -57,7 +57,8 @@ internal fun ContactsScreen(
         }
         when {
             activeFilter == "channel" -> CenterMessage(stringResource(R.string.channels_soon))
-            model.contacts.isEmpty() && model.groups.isEmpty() && model.contactRequests.isEmpty() ->
+            model.contacts.isEmpty() && model.groups.isEmpty() &&
+                model.contactRequests.isEmpty() && model.groupInvites.isEmpty() ->
                 CenterMessage(stringResource(R.string.contacts_empty))
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 // Гейт: входящие запросы от незнакомцев — карточками наверху (фильтр DM/all).
@@ -73,6 +74,21 @@ internal fun ContactsScreen(
                     }
                     items(model.contactRequests, key = { "req_${it.key}" }) { r ->
                         ContactRequestCard(model, r)
+                    }
+                }
+                // Приглашения в группы — карточками (фильтр Комнаты/all).
+                if (showRoom && model.groupInvites.isNotEmpty()) {
+                    item(key = "ginv_header") {
+                        Text(
+                            stringResource(R.string.group_invites_header, model.groupInvites.size),
+                            color = HoloAccent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = ScreenPad, end = ScreenPad, top = 10.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(model.groupInvites, key = { "ginv_${it.gid}" }) { inv ->
+                        GroupInviteCard(model, inv)
                     }
                 }
                 // Комнаты — наверху, если фильтр позволяет
@@ -193,6 +209,55 @@ private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { model.blockRequest(r.key) }) {
                 Text(stringResource(R.string.req_block), color = HoloError, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+/** Карточка входящего приглашения в группу (вместо тихого авто-входа): аватар-иконка,
+ *  имя группы, кто пригласил, кнопки Принять / Отклонить. */
+@Composable
+private fun GroupInviteCard(model: AppModel, inv: GroupInvite) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = ScreenPad, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(HoloSurface)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SquareAvatar(inv.name.ifBlank { "#" }, size = 40.dp, bg = Color(0xFF0D2A0D)) {
+                Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    inv.name.ifBlank { stringResource(R.string.group_default_name) },
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    stringResource(R.string.group_invite_from, model.peerName(inv.inviter)),
+                    color = HoloSecondary,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = { model.acceptGroupInvite(inv.gid) },
+                colors = ButtonDefaults.buttonColors(containerColor = HoloAccent, contentColor = HoloAccentDark),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+            ) { Text(stringResource(R.string.group_invite_join), fontSize = 13.sp) }
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = { model.declineGroupInvite(inv.gid) }) {
+                Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = 13.sp)
             }
         }
     }

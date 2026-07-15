@@ -184,6 +184,10 @@
     <string name="cd_remove_member">Удалить из группы</string>
     <string name="group_you_removed">Вас удалили из группы</string>
     <string name="group_leave">Выйти из группы</string>
+    <!-- Приглашения в группы карточками -->
+    <string name="group_invites_header">Приглашения · %1$d</string>
+    <string name="group_invite_from">Пригласил %1$s</string>
+    <string name="group_invite_join">Вступить</string>
     <string name="cd_join_call">Войти в звонок</string>
     <string name="cd_leave_call">Выйти из звонка</string>
     <string name="group_system_membership">%1$s обновил(а) состав группы</string>

@@ -192,6 +192,10 @@
     <string name="cd_remove_member">Remove from group</string>
     <string name="group_you_removed">You were removed from the group</string>
     <string name="group_leave">Leave group</string>
+    <!-- Group invites as cards -->
+    <string name="group_invites_header">Group invites · %1$d</string>
+    <string name="group_invite_from">Invited by %1$s</string>
+    <string name="group_invite_join">Join</string>
     <string name="cd_join_call">Join call</string>
     <string name="cd_leave_call">Leave call</string>
     <string name="group_system_membership">%1$s updated the group</string>
