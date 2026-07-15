@@ -34,6 +34,7 @@ fn main() {
     let mut avatar_file: Option<String> = None;
     let mut send_media: Option<String> = None;
     let mut send_text: Option<String> = None;
+    let mut create_group: Option<String> = None;
     let mut adds: Vec<String> = Vec::new();
     let mut rest = args.collect::<Vec<_>>().into_iter();
     while let Some(a) = rest.next() {
@@ -48,6 +49,8 @@ fn main() {
             "--avatar-file" => avatar_file = rest.next(),
             "--send-media" => send_media = rest.next(),
             "--send-text" => send_text = rest.next(),
+            // Создать группу с этим именем и пригласить всех --add (тест инвайт-карточки).
+            "--create-group" => create_group = rest.next(),
             other => eprintln!("неизвестный аргумент: {other}"),
         }
     }
@@ -85,6 +88,34 @@ fn main() {
     }
     use std::io::Write;
     let _ = std::io::stdout().flush();
+
+    // Создать группу и пригласить всех --add (тест инвайт-карточки на клиенте).
+    if let Some(gname) = &create_group {
+        engine.group_create(gname);
+        // Ждём, пока актор создаст группу и она появится в списке (берём её gid).
+        let mut gid_hex = String::new();
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_millis(200));
+            let v: serde_json::Value =
+                serde_json::from_str(&engine.group_list_json()).unwrap_or_default();
+            if let Some(g) = v.as_array().and_then(|a| a.first()) {
+                if let Some(h) = g["gid"].as_str() {
+                    gid_hex = h.to_string();
+                    break;
+                }
+            }
+        }
+        println!("GROUP {gid_hex} {gname}");
+        if let Ok(gid) = hex::decode(&gid_hex) {
+            for h in &adds {
+                if let Some(peer) = hex::decode(h).ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok()) {
+                    engine.group_invite(gid.clone(), peer);
+                    println!("INVITED {h}");
+                }
+            }
+        }
+        let _ = std::io::stdout().flush();
+    }
 
     // Одноразовая отправка картинки первому --add контакту (тест приёма медиа на клиенте).
     let media_peer: Option<[u8; 32]> = adds.first()
