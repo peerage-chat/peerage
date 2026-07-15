@@ -26,6 +26,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 fn dispatch(gm: &mut GroupManager, ev: Event) {
     match ev {
         Event::GroupKeyRequest { peer } => gm.on_key_request(peer),
+        Event::GroupInvite { peer, gid, name } => {
+            gm.on_invite(peer, gid, name);
+        }
         Event::GroupKeyReply { peer, key_package } => {
             gm.on_key_reply(peer, &key_package);
         }
@@ -95,10 +98,16 @@ fn setup_and_join(drop_every: u32) -> Ctx {
 
     let gid = gm_a.create("тест").expect("группа создана");
     gm_a.invite(&gid, b_key);
+    // Приглашение приходит карточкой — B должен ЯВНО его принять (решение владельца).
+    let got_invite = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.invites_json().contains(&hex::encode(&gid))
+    });
+    assert!(got_invite, "B получил приглашение-карточку (drop_every={drop_every})");
+    assert!(gm_b.accept_invite(&gid), "B принял приглашение");
     let joined = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
         a.members(&gid).contains(&b_key) && b.group_ids().contains(&gid)
     });
-    assert!(joined, "инвайт должен довести обе стороны в группу (drop_every={drop_every})");
+    assert!(joined, "после accept инвайт доводит обе стороны в группу (drop_every={drop_every})");
     assert!(gm_b.members(&gid).contains(&a_key), "B видит A в ростере");
     Ctx { gm_a, a_rx, gm_b, b_rx, gid, b_key }
 }
@@ -134,6 +143,36 @@ fn group_media_message_propagates() {
     let mine = ha.as_array().unwrap().iter().find(|m| m["kind"] == "image").unwrap();
     assert_eq!(mine["mine"], true);
     assert_eq!(mine["blob_id"], "abcd1234");
+}
+
+/// Приглашение приходит карточкой и НЕ присоединяет молча: без accept B не в группе;
+/// decline тихо убирает карточку. (Решение владельца 2026-06-28 — инвайт-как-сообщение.)
+#[test]
+fn invite_card_requires_accept_and_decline_clears() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(30), id(31));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
+    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
+    let mut gm_a = GroupManager::new(a_id, Arc::new(a_msgr), tmpdir("a"));
+    let mut gm_b = GroupManager::new(b_id, Arc::new(b_msgr), tmpdir("b"));
+
+    let gid = gm_a.create("тайный клуб").expect("группа создана");
+    gm_a.invite(&gid, b_key);
+
+    // Карточка доехала с именем группы; B при этом НЕ в группе.
+    let got = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.invites_json().contains("тайный клуб")
+    });
+    assert!(got, "B получил карточку приглашения с именем группы");
+    assert!(!gm_b.group_ids().contains(&gid), "без accept B в группу НЕ вступает");
+
+    // Decline тихо убирает карточку; повторный accept уже нечему.
+    assert!(gm_b.decline_invite(&gid), "decline убрал карточку");
+    assert!(!gm_b.invites_json().contains(&hex::encode(&gid)), "карточка снята");
+    assert!(!gm_b.accept_invite(&gid), "после decline принимать нечего");
+    assert!(!gm_b.group_ids().contains(&gid), "B так и не в группе");
 }
 
 /// Имя группы доезжает до вступившего: админ создаёт «тест», после add шлёт имя

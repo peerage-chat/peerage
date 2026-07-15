@@ -94,6 +94,9 @@ pub enum Event {
     GroupKeyRequest { peer: PeerKey },
     /// Контакт прислал свой KeyPackage (для добавления в группу).
     GroupKeyReply { peer: PeerKey, key_package: Vec<u8> },
+    /// Приглашение в группу как сообщение (карточка на одобрение): `peer` — кто зовёт,
+    /// `gid`/`name` — группа. Получатель решает вступать (тогда шлёт KeyPackage).
+    GroupInvite { peer: PeerKey, gid: Vec<u8>, name: String },
     /// Маячок присутствия участника в комнате-звонке (Discord-style).
     RoomPresence { peer: PeerKey, gid: Vec<u8>, flags: u8 },
     /// Отставший участник просит админа заново синхронизировать его в группе (ADR-004).
@@ -516,6 +519,14 @@ impl Messenger {
         Ok(())
     }
 
+    /// Пригласить контакт в группу отдельным сообщением-карточкой — надёжно
+    /// (retry-until-Ack). Получатель решает вступать; тогда шлёт KeyPackage.
+    pub fn send_group_invite(&self, peer: &PeerKey, gid: &[u8], name: &str) -> Result<(), MessengerError> {
+        let (gid, name) = (gid.to_vec(), name.to_string());
+        self.shared.send_reliable(peer, false, move |id| Payload::GroupInvite { id, gid, name })?;
+        Ok(())
+    }
+
     /// Прислать контакту свой KeyPackage — надёжно (retry-until-Ack).
     pub fn send_group_key_reply(&self, peer: &PeerKey, key_package: &[u8]) -> Result<(), MessengerError> {
         let kp = key_package.to_vec();
@@ -740,6 +751,10 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::GroupKeyReply { id, key_package } => {
                 shared.emit(Event::GroupKeyReply { peer: src, key_package });
                 let _ = shared.send(&src, &Payload::Ack { id });
+            }
+            Payload::GroupInvite { id, gid, name } => {
+                shared.emit(Event::GroupInvite { peer: src, gid, name });
+                let _ = shared.send(&src, &Payload::Ack { id }); // гасим ретрай приглашения
             }
             Payload::RoomPresence { gid, flags } => {
                 shared.emit(Event::RoomPresence { peer: src, gid, flags });

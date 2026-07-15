@@ -42,6 +42,49 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
     });
 }
 
+/// Входящие приглашения в группы: JSON [{gid, name, inviter}]. Снапшот движка.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvites<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.group_invites_json())
+    })
+}
+
+/// Принять приглашение в группу (карточка). Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_acceptGroupInvite<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        e.accept_group_invite(gid);
+    });
+}
+
+/// Отклонить приглашение в группу. Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_declineGroupInvite<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        e.decline_group_invite(gid);
+    });
+}
+
 /// Отправить текст в группу. Fire-and-forget.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(

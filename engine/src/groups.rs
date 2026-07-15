@@ -48,9 +48,21 @@ const RESYNC_COOLDOWN: Duration = Duration::from_secs(10);
 /// Не чаще раза в сутки админ ротирует ключ группы (катящийся PCS без лишней churn).
 const REKEY_INTERVAL_SECS: i64 = 24 * 3600;
 
+/// Входящее приглашение в группу, ожидающее решения пользователя (карточка).
+#[derive(Clone)]
+struct PendingInvite {
+    name: String,
+    inviter: [u8; 32],
+}
+
 pub struct GroupManager {
     groups: HashMap<Vec<u8>, Entry>,
     pending: Option<GroupChat>,
+    /// Имя группы для текущего вступления (из принятого инвайта) — чтобы на Welcome
+    /// поставить настоящее название сразу, а не дефолт.
+    pending_join_name: Option<String>,
+    /// Входящие приглашения (gid → кто зовёт + имя), ждут accept/decline. Персистятся.
+    pending_invites: HashMap<Vec<u8>, PendingInvite>,
     invites: HashMap<[u8; 32], Vec<u8>>,
     /// Пиры, для которых текущий KeyPackage-обмен — это RE-ADD (resync, ADR-004),
     /// а не первое приглашение: на `on_key_reply` делаем Remove+Add, не просто Add.
@@ -68,6 +80,8 @@ impl GroupManager {
         let mut m = Self {
             groups: HashMap::new(),
             pending: None,
+            pending_join_name: None,
+            pending_invites: HashMap::new(),
             invites: HashMap::new(),
             resyncing: HashSet::new(),
             resync_last: HashMap::new(),
@@ -76,6 +90,7 @@ impl GroupManager {
             dir,
         };
         m.load_all();
+        m.load_pending_invites();
         m.maybe_rekey_admin_groups();
         m
     }
@@ -234,17 +249,111 @@ impl GroupManager {
         Some(id)
     }
 
-    /// Пригласить контакт в группу (просим его KeyPackage).
+    /// Пригласить контакт в группу карточкой-сообщением (решение владельца 2026-06-28):
+    /// шлём `GroupInvite` с именем группы; получатель сам решает вступать. Запоминаем
+    /// peer→gid, чтобы на его будущий KeyPackage (accept) добавить в нужную группу.
     pub fn invite(&mut self, gid: &[u8], peer: [u8; 32]) {
-        let sent = if let Some(e) = self.groups.get(gid) {
-            e.chat.invite(peer);
-            true
-        } else {
-            false
-        };
-        if sent {
+        if let Some(e) = self.groups.get(gid) {
+            let _ = self.messenger.send_group_invite(&peer, gid, &e.name);
             self.invites.insert(peer, gid.to_vec());
         }
+    }
+
+    // ── Входящие приглашения (карточка на одобрение) ──────────────────────
+
+    fn pending_invites_path(&self) -> PathBuf {
+        self.dir.join("pending_invites.json")
+    }
+
+    fn save_pending_invites(&self) {
+        let map: serde_json::Value = serde_json::json!(self
+            .pending_invites
+            .iter()
+            .map(|(gid, inv)| (
+                hex::encode(gid),
+                serde_json::json!({ "name": inv.name, "inviter": hex::encode(inv.inviter) }),
+            ))
+            .collect::<serde_json::Map<_, _>>());
+        let _ = std::fs::create_dir_all(&self.dir);
+        if let Ok(j) = serde_json::to_vec(&map) {
+            let _ = std::fs::write(self.pending_invites_path(), j);
+        }
+    }
+
+    fn load_pending_invites(&mut self) {
+        let Ok(bytes) = std::fs::read(self.pending_invites_path()) else { return };
+        let Ok(map) = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes) else {
+            return;
+        };
+        for (gid_hex, v) in map {
+            let (Ok(gid), Some(inviter)) = (
+                hex::decode(&gid_hex),
+                v["inviter"].as_str().and_then(crate::parse_key),
+            ) else {
+                continue;
+            };
+            self.pending_invites.insert(gid, PendingInvite {
+                name: v["name"].as_str().unwrap_or("").to_string(),
+                inviter,
+            });
+        }
+    }
+
+    /// Пришло приглашение в группу. Если уже состоим — игнор (это не первый вход).
+    /// Возвращает true, если запись добавлена (UI показать карточку).
+    pub fn on_invite(&mut self, peer: [u8; 32], gid: Vec<u8>, name: String) -> bool {
+        if self.groups.contains_key(&gid) {
+            return false;
+        }
+        self.pending_invites.insert(gid, PendingInvite { name, inviter: peer });
+        self.save_pending_invites();
+        true
+    }
+
+    /// Входящие приглашения как JSON [{gid, name, inviter}].
+    pub fn invites_json(&self) -> String {
+        let arr: Vec<serde_json::Value> = self
+            .pending_invites
+            .iter()
+            .map(|(gid, inv)| serde_json::json!({
+                "gid": hex::encode(gid),
+                "name": inv.name,
+                "inviter": hex::encode(inv.inviter),
+            }))
+            .collect();
+        serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Принять приглашение: создаём pending-участника и шлём KeyPackage пригласившему
+    /// (дальше как обычный join — админ добавит нас, придёт Welcome). Имя группы из
+    /// инвайта запоминаем, чтобы показать сразу. Возвращает true при успехе.
+    pub fn accept_invite(&mut self, gid: &[u8]) -> bool {
+        let Some(inv) = self.pending_invites.remove(gid) else { return false };
+        self.save_pending_invites();
+        if self.pending.is_some() {
+            // Уже идёт другое вступление — вернём инвайт в очередь, попробуем позже.
+            self.pending_invites.insert(gid.to_vec(), inv);
+            self.save_pending_invites();
+            return false;
+        }
+        match GroupChat::pending(&self.identity, self.messenger.clone()) {
+            Ok((pending, kp)) => {
+                let _ = self.messenger.send_group_key_reply(&inv.inviter, &kp);
+                self.pending = Some(pending);
+                self.pending_join_name = Some(inv.name);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Отклонить приглашение (тихо убрать из очереди).
+    pub fn decline_invite(&mut self, gid: &[u8]) -> bool {
+        let removed = self.pending_invites.remove(gid).is_some();
+        if removed {
+            self.save_pending_invites();
+        }
+        removed
     }
 
     /// Отправить текст в группу. Возвращает true при успехе.
@@ -518,7 +627,11 @@ impl GroupManager {
                     return GroupOutcome { gid: Some(id), ..Default::default() };
                 }
                 // Иначе — первое вступление. Мы НЕ админ (админ — пригласивший).
-                self.groups.insert(id.clone(), Entry { chat, name: "Группа".into(), messages: Vec::new(), admin: false });
+                // Имя — из принятого инвайта (иначе дефолт; админ всё равно догонит send_name).
+                let name = self.pending_join_name.take().unwrap_or_else(|| "Группа".into());
+                self.pending_invites.remove(&id);
+                self.save_pending_invites();
+                self.groups.insert(id.clone(), Entry { chat, name, messages: Vec::new(), admin: false });
                 self.save_group(&id);
                 return GroupOutcome { gid: Some(id), joined: true, ..Default::default() };
             }

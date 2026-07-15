@@ -63,6 +63,11 @@ pub enum Payload {
     GroupKeyRequest { id: u64 },
     /// Ответ с KeyPackage (MLS) для добавления в группу. `id` — надёжная доставка.
     GroupKeyReply { id: u64, key_package: Vec<u8> },
+    /// Приглашение в группу как отдельное сообщение (решение владельца 2026-06-28):
+    /// вместо тихого KeyPackage-запроса получатель видит карточку «X зовёт в Y» и сам
+    /// решает вступать. При согласии он шлёт `GroupKeyReply` пригласившему. `id` —
+    /// надёжная доставка; `name` — название группы для карточки.
+    GroupInvite { id: u64, gid: Vec<u8>, name: String },
     /// Маячок присутствия в комнате-звонке (Discord-style): периодический сигнал
     /// «я сейчас в комнате `gid`, A/V-флаги такие». `flags`: bit0 — аудио,
     /// bit1 — видео. Низкочастотный control-plane (не медиа).
@@ -258,6 +263,7 @@ mod tests {
             Payload::Group { id: 5, data: vec![1, 2, 3, 9, 9] },
             Payload::GroupKeyRequest { id: 3 },
             Payload::GroupKeyReply { id: 4, key_package: vec![7, 7, 7] },
+            Payload::GroupInvite { id: 15, gid: vec![1, 2, 3], name: "Группа".into() },
             Payload::RoomPresence { gid: vec![5, 6, 7], flags: 0b11 },
             Payload::GroupResyncRequest { gid: vec![8, 9, 10] },
             Payload::GroupLeaveRequest { gid: vec![11, 12] },

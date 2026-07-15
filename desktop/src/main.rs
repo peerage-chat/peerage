@@ -1071,6 +1071,8 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
         // Resync/leave членства (ADR-004) обслуживает Android-движок; десктоп игнорирует.
         Event::GroupResyncRequest { .. } => {}
         Event::GroupLeaveRequest { .. } => {}
+        // Приглашения-карточки (решение владельца) — на Android-движке; десктоп игнор.
+        Event::GroupInvite { .. } => {}
         // Блобы (M2) реализуются на Android-движке; десктоп пока игнорирует.
         Event::BlobManifest { .. } => {}
         Event::BlobRequest { .. } => {}

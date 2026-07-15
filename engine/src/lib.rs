@@ -47,6 +47,10 @@ impl<T> LockRecover<T> for Mutex<T> {
 pub(crate) enum GroupCmd {
     Create { name: String },
     Invite { gid: Vec<u8>, peer: [u8; 32] },
+    /// Принять входящее приглашение в группу (карточка).
+    AcceptInvite { gid: Vec<u8> },
+    /// Отклонить входящее приглашение.
+    DeclineInvite { gid: Vec<u8> },
     SendText { gid: Vec<u8>, text: String },
     /// Отозвать участника (ADR-004, только админ).
     RemoveMember { gid: Vec<u8>, peer: [u8; 32] },
@@ -140,6 +144,8 @@ struct GroupCache {
     list: String,
     history: HashMap<Vec<u8>, String>,
     members: HashMap<Vec<u8>, String>,
+    /// Входящие приглашения в группы (JSON) — для синхронного чтения из UI.
+    invites: String,
 }
 
 /// Состояние сессии приложения — корень контракта движок↔клиент.
@@ -421,6 +427,22 @@ impl Engine {
 
     pub fn group_invite(&self, gid: Vec<u8>, peer: [u8; 32]) {
         let _ = self.jobs.send(Job::Cmd(GroupCmd::Invite { gid, peer }));
+    }
+
+    /// Входящие приглашения в группы как JSON [{gid, name, inviter}] (из кэша).
+    pub fn group_invites_json(&self) -> String {
+        let s = self.group_cache.lock_safe().invites.clone();
+        if s.is_empty() { "[]".into() } else { s }
+    }
+
+    /// Принять приглашение в группу (карточка). Fire-and-forget через актора.
+    pub fn accept_group_invite(&self, gid: Vec<u8>) {
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::AcceptInvite { gid }));
+    }
+
+    /// Отклонить приглашение в группу. Fire-and-forget.
+    pub fn decline_group_invite(&self, gid: Vec<u8>) {
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::DeclineInvite { gid }));
     }
 
     pub fn group_send_text(&self, gid: Vec<u8>, text: String) {
@@ -1146,6 +1168,13 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             }
         }
         Event::GroupKeyRequest { peer } => groups.on_key_request(peer),
+        Event::GroupInvite { peer, gid, name } => {
+            // Приглашение-карточка: не вступаем молча — кладём в очередь, уведомляем UI.
+            if groups.on_invite(peer, gid, name) {
+                refresh_group_cache(engine, groups);
+                push_event(engine, serde_json::json!({"type": "group_invites_changed"}));
+            }
+        }
         Event::GroupResyncRequest { peer, gid } => groups.on_resync_request(peer, &gid),
         Event::GroupLeaveRequest { peer, gid } => {
             if groups.on_leave_request(peer, &gid) {
@@ -1226,6 +1255,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
 fn refresh_group_cache(engine: &Arc<Engine>, groups: &GroupManager) {
     let mut cache = engine.group_cache.lock_safe();
     cache.list = groups.list_json();
+    cache.invites = groups.invites_json();
     for gid in groups.group_ids() {
         cache.history.insert(gid.clone(), groups.history_json(&gid));
         cache.members.insert(gid.clone(), groups.members_json(&gid));
@@ -1242,6 +1272,19 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
             }
         }
         GroupCmd::Invite { gid, peer } => groups.invite(&gid, peer),
+        GroupCmd::AcceptInvite { gid } => {
+            // KeyPackage ушёл пригласившему; вступление завершится по Welcome (joined).
+            // Карточку убираем из кэша сразу.
+            groups.accept_invite(&gid);
+            refresh_group_cache(engine, groups);
+            push_event(engine, serde_json::json!({"type": "group_invites_changed"}));
+        }
+        GroupCmd::DeclineInvite { gid } => {
+            if groups.decline_invite(&gid) {
+                refresh_group_cache(engine, groups);
+                push_event(engine, serde_json::json!({"type": "group_invites_changed"}));
+            }
+        }
         GroupCmd::SendText { gid, text } => {
             if groups.send_text(&gid, &text) {
                 refresh_group_cache(engine, groups);
