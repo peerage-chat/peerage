@@ -42,9 +42,10 @@
   .src i { font-size: 20px; color: var(--accent); }
 
   /* вертикальная сетка галереи (3 колонки, скролл вниз) */
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 0 var(--space-m) var(--space-s);
-          max-height: 330px; overflow-y: auto; }
-  .shot { aspect-ratio: 1; border-radius: 8px; position: relative; background: var(--avatar); overflow: hidden; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-s);
+          padding: 0 var(--space-m) var(--space-m); max-height: 340px; overflow-y: auto; }
+  .shot { aspect-ratio: 1; border-radius: var(--radius-chip); position: relative; background: var(--avatar);
+          overflow: hidden; }
   .shot .pick { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 11px;
                 border: 2px solid rgba(255,255,255,.9); background: var(--tile-scrim); }
   .shot.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -59,10 +60,16 @@
               align-items: center; justify-content: center; gap: 4px; color: var(--accent); font-size: var(--font-caption); }
   .shot.cam i { font-size: 24px; }
 
-  .sheet-foot { display: flex; align-items: center; justify-content: space-between;
-                padding: var(--space-xs) var(--space-l) var(--space-s); font-size: var(--font-small);
-                color: var(--secondary); }
-  .sheet-foot .all { color: var(--accent); }
+  /* Шапка листа. «Вся галерея» живёт ЗДЕСЬ, а не внизу: рядом с кнопкой отправки
+     мелкая ссылка ловила промахи. Высота 44px — полноценная цель нажатия. */
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; height: 44px;
+                padding: 0 var(--space-m) 0 var(--space-l); }
+  .sheet-head .cnt-t { font-size: var(--font-body); color: var(--secondary); }
+  .sheet-head .cnt-t b { color: var(--on-dark); font-weight: 500; }
+  .sheet-head .all { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 var(--space-m);
+                     border-radius: var(--radius-pill); background: var(--tile); color: var(--accent);
+                     font-size: var(--font-body); }
+  .sheet-head .all i { font-size: 17px; }
 
   /* ── Строка ввода: НА МЕСТЕ ВСЕГДА ── */
   .input-row { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-s);
@@ -88,9 +95,9 @@
 </head>
 <body>
 
-<!-- ─────────── А: лист открыт, чипы размера ВКЛ, выбрано 2 ─────────── -->
+<!-- ─────────── Лист открыт: сетка, чипы размера, выбрано 2 ─────────── -->
 <div class="col">
-<div class="lbl">Вариант А — чип размера на каждом превью</div>
+<div class="lbl">Лист открыт — выбрано 2</div>
 <div class="phone">
   <div class="statusbar">
     <span>12:55</span>
@@ -110,6 +117,10 @@
 
   <div class="sheet">
     <div class="grab"></div>
+    <div class="sheet-head">
+      <span class="cnt-t">Выбрано <b>2</b> · 320 МБ</span>
+      <span class="all"><i class="ti ti-photo"></i>Вся галерея</span>
+    </div>
     <div class="srcs">
       <div class="src"><i class="ti ti-file"></i>Файл</div>
       <div class="src"><i class="ti ti-music"></i>Аудио</div>
@@ -137,10 +148,6 @@
         <span class="pick"></span><span class="sz">1,1 МБ</span></div>
     </div>
 
-    <div class="sheet-foot">
-      <span>Выбрано 2 · 320 МБ</span>
-      <span class="all">Вся галерея</span>
-    </div>
   </div>
 
   <div class="input-row">
@@ -154,67 +161,7 @@
 </div>
 </div>
 
-<!-- ─────────── Б: то же без чипов размера ─────────── -->
-<div class="col">
-<div class="lbl">Вариант Б — без чипов, размер только в итоге</div>
-<div class="phone">
-  <div class="statusbar">
-    <span>12:55</span>
-    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
-  </div>
-  <div class="topbar">
-    <i class="ti ti-arrow-left"></i>
-    <div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
-    <div style="flex:1"><div class="nm">Алиса</div><div class="st">в сети</div></div>
-    <i class="ti ti-phone"></i><i class="ti ti-dots-vertical"></i>
-  </div>
-
-  <div class="chat">
-    <div class="bub in">Скинешь фото со вчера?</div>
-    <div class="bub out">Сейчас</div>
-  </div>
-
-  <div class="sheet">
-    <div class="grab"></div>
-    <div class="srcs">
-      <div class="src"><i class="ti ti-file"></i>Файл</div>
-      <div class="src"><i class="ti ti-music"></i>Аудио</div>
-      <div class="src"><i class="ti ti-map-pin"></i>Место</div>
-      <div class="src"><i class="ti ti-user"></i>Контакт</div>
-    </div>
-
-    <div class="grid">
-      <div class="shot cam"><i class="ti ti-camera"></i>Камера</div>
-      <div class="shot sel" style="background:linear-gradient(150deg,#4a5a6e,#2b3440)"><span class="pick">1</span></div>
-      <div class="shot sel" style="background:linear-gradient(150deg,#6e5a4a,#40342b)">
-        <span class="pick">2</span><span class="dur">0:42</span></div>
-      <div class="shot" style="background:linear-gradient(150deg,#4a6e5a,#2b4034)"><span class="pick"></span></div>
-      <div class="shot" style="background:linear-gradient(150deg,#6e4a5a,#402b34)"><span class="pick"></span></div>
-      <div class="shot" style="background:linear-gradient(150deg,#5a4a6e,#342b40)"><span class="pick"></span></div>
-      <div class="shot" style="background:linear-gradient(150deg,#4a6e6e,#2b4040)">
-        <span class="pick"></span><span class="dur">4:19</span></div>
-      <div class="shot" style="background:linear-gradient(150deg,#6e6e4a,#40402b)"><span class="pick"></span></div>
-      <div class="shot" style="background:linear-gradient(150deg,#4a556e,#2b3140)"><span class="pick"></span></div>
-    </div>
-
-    <div class="sheet-foot">
-      <span>Выбрано 2 · 320 МБ</span>
-      <span class="all">Вся галерея</span>
-    </div>
-  </div>
-
-  <div class="input-row">
-    <div class="pill">
-      <i class="ti ti-paperclip on"></i>
-      <span class="txt">Вот, держи</span>
-      <i class="ti ti-mood-smile"></i>
-    </div>
-    <div class="go"><i class="ti ti-send"></i><span class="cnt">2</span></div>
-  </div>
-</div>
-</div>
-
-<!-- ─────────── В: лист закрыт — обычное состояние чата ─────────── -->
+<!-- ─────────── Лист закрыт — обычное состояние чата ─────────── -->
 <div class="col">
 <div class="lbl">Лист закрыт — та же строка ввода</div>
 <div class="phone">
@@ -254,16 +201,20 @@
   же поле, что и обычное сообщение, — отдельного «поля подписи» нет вообще. Скрепка при открытом листе
   подсвечена акцентом и закрывает его повторным касанием.</p>
 
+  <p style="margin-top:10px"><b>«Вся галерея» переехала в шапку листа</b> и стала кнопкой на 34px в
+  пилюле. Внизу она соседствовала с отправкой — мелкая ссылка в паре десятков пикселей от кнопки,
+  которая необратимо шлёт файлы. Теперь между ними вся сетка.</p>
+
+  <p style="margin-top:10px"><b>Между миниатюрами 8px вместо 4px</b> и радиус 10px: с прежним зазором
+  плитки читались как одна сплошная полоса, а чип размера выглядел принадлежащим соседке.</p>
+
   <p style="margin-top:10px"><b>Кнопка справа меняется по контексту:</b> пусто → микрофон, есть текст или
   выбранные файлы → отправка со счётчиком.</p>
 
-  <p style="margin-top:10px"><b>Про чипы размера — два варианта рядом, выбирать вам.</b> Сравните А и Б.
-  Мой довод за А: в сети без серверов размер решает, поедет вложение сразу или получателю прилетит
-  карточка «скачать» — и узнать об этом лучше <i>до</i> отправки, а не после. Довод против: девять чипов
-  создают шум там, где обычно выбирают глазами, и для фото по 1–3 МБ цифра бесполезна.<br>
-  <b>Компромисс, если А кажется шумным:</b> показывать чип только когда файл крупный (тут это 318 МБ и
-  1,2 ГБ — они янтарные), а мелкие оставлять чистыми. Тогда цифра появляется ровно там, где меняет
-  решение.</p>
+  <p style="margin-top:10px"><b>Чип размера — на каждом превью, в левом нижнем углу.</b> В сети без
+  серверов размер решает, поедет вложение сразу или получателю прилетит карточка «скачать», — знать об
+  этом надо <i>до</i> отправки. Крупные подсвечены янтарным (тут 318 МБ и 1,2 ГБ): цвет выделяет ровно
+  те случаи, где решение меняется.</p>
 
   <p style="margin-top:10px"><b>«Место» и «Контакт» — источники на будущее.</b> Если в v1.0 их не будет,
   ячейки убираются, а не остаются неактивными: правило — нарисованное работает.</p>
