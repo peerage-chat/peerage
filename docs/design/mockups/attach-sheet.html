@@ -46,9 +46,12 @@
      на 390px это даёт максимум площади под сами снимки. Скругления и рамки съедали
      место и превращали сетку в набор карточек. */
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 0;
-          max-height: 344px; overflow-y: auto; }
-  .shot { aspect-ratio: 1; border-radius: 0; position: relative; background: var(--avatar);
-          overflow: hidden; }
+          align-items: start; max-height: 344px; overflow-y: auto; }
+  /* Квадрат через padding-top: 100%, а НЕ aspect-ratio. В гриде элемент по умолчанию
+     растягивается на высоту строки, из-за чего aspect-ratio перестаёт работать: плитка
+     выходила ниже квадрата и обрезала чип размера. Высота из ширины — надёжнее. */
+  .shot { height: 0; padding-top: 100%; border-radius: 0; position: relative;
+          background: var(--avatar); overflow: hidden; }
   .shot .pick { position: absolute; right: 5px; top: 5px; width: 22px; height: 22px; border-radius: 11px;
                 border: 2px solid rgba(255,255,255,.9); background: var(--tile-scrim); }
   .shot.sel { box-shadow: inset 0 0 0 3px var(--accent); }
@@ -59,20 +62,18 @@
   .shot .sz { position: absolute; left: 4px; bottom: 4px; background: var(--chip-scrim); border-radius: var(--radius-badge);
               padding: 1px 5px; font-size: 10px; color: #dfe3e8; }
   .shot .sz.big { color: var(--warn); }
-  .shot.cam { background: linear-gradient(160deg,#33404d,#1d242b); display: flex; flex-direction: column;
-              align-items: center; justify-content: center; gap: 4px; color: var(--accent); font-size: var(--font-caption); }
-  .shot.cam i { font-size: 24px; }
+  /* Камера — живой предпросмотр во всю ширину двух столбцов (пока плашка-заглушка). */
+  .shot.cam { grid-column: span 2; padding-top: calc(50% - 1px); background: linear-gradient(160deg,#33404d,#1d242b); }
+  .shot.cam .lbl-cam { position: absolute; inset: 0; display: flex; flex-direction: column;
+                       align-items: center; justify-content: center; gap: 6px; color: var(--accent);
+                       font-size: var(--font-body); }
+  .shot.cam .lbl-cam i { font-size: 28px; }
 
-  /* Шапка листа. «Вся галерея» живёт ЗДЕСЬ, а не внизу: рядом с кнопкой отправки
-     мелкая ссылка ловила промахи. Высота 44px — полноценная цель нажатия. */
-  .sheet-head { display: flex; align-items: center; justify-content: space-between; height: 44px;
-                padding: 0 var(--space-m) 0 var(--space-l); }
+  /* Шапка листа — только счётчик выбранного. */
+  .sheet-head { display: flex; align-items: center; height: 36px; padding: 0 var(--space-l); }
   .sheet-head .cnt-t { font-size: var(--font-body); color: var(--secondary); }
   .sheet-head .cnt-t b { color: var(--on-dark); font-weight: 500; }
-  .sheet-head .all { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 var(--space-m);
-                     border-radius: var(--radius-pill); background: var(--tile); color: var(--accent);
-                     font-size: var(--font-body); }
-  .sheet-head .all i { font-size: 17px; }
+
 
   /* ── Строка ввода: НА МЕСТЕ ВСЕГДА ── */
   .input-row { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-s);
@@ -122,7 +123,6 @@
     <div class="grab"></div>
     <div class="sheet-head">
       <span class="cnt-t">Выбрано <b>2</b> · 320 МБ</span>
-      <span class="all"><i class="ti ti-photo"></i>Вся галерея</span>
     </div>
     <div class="srcs">
       <div class="src"><i class="ti ti-file"></i>Файл</div>
@@ -132,7 +132,7 @@
     </div>
 
     <div class="grid">
-      <div class="shot cam"><i class="ti ti-camera"></i>Камера</div>
+      <div class="shot cam"><span class="lbl-cam"><i class="ti ti-camera"></i>Камера</span></div>
       <div class="shot sel" style="background:linear-gradient(150deg,#4a5a6e,#2b3440)">
         <span class="pick">1</span><span class="sz">2,4 МБ</span></div>
       <div class="shot sel" style="background:linear-gradient(150deg,#6e5a4a,#40342b)">
@@ -149,6 +149,10 @@
         <span class="pick"></span><span class="sz">2,2 МБ</span></div>
       <div class="shot" style="background:linear-gradient(150deg,#4a556e,#2b3140)">
         <span class="pick"></span><span class="sz">1,1 МБ</span></div>
+      <div class="shot" style="background:linear-gradient(150deg,#6e4a4a,#402b2b)">
+        <span class="pick"></span><span class="sz">4,7 МБ</span></div>
+      <div class="shot" style="background:linear-gradient(150deg,#4a6e4a,#2b402b)">
+        <span class="pick"></span><span class="sz">2,9 МБ</span></div>
     </div>
 
   </div>
@@ -204,9 +208,12 @@
   же поле, что и обычное сообщение, — отдельного «поля подписи» нет вообще. Скрепка при открытом листе
   подсвечена акцентом и закрывает его повторным касанием.</p>
 
-  <p style="margin-top:10px"><b>«Вся галерея» переехала в шапку листа</b> и стала кнопкой на 34px в
-  пилюле. Внизу она соседствовала с отправкой — мелкая ссылка в паре десятков пикселей от кнопки,
-  которая необратимо шлёт файлы. Теперь между ними вся сетка.</p>
+  <p style="margin-top:10px"><b>Кнопки «Вся галерея» нет.</b> Сетка и так прокручивает всю плёнку, а
+  для всего остального есть «Файл». Отдельный вход в системный пикер только добавлял мишень рядом с
+  необратимой отправкой.</p>
+
+  <p style="margin-top:10px"><b>Камера занимает два столбца</b> — там будет живой предпросмотр, а не
+  иконка: снять кадр прямо отсюда должно быть так же быстро, как выбрать готовый.</p>
 
   <p style="margin-top:10px"><b>Сетка — это галерея, а не набор карточек.</b> Зазор 2px одинаковый по
   обеим осям, скруглений нет, боковых полей у сетки нет: плитки идут от края до края листа. На ширине
