@@ -36,6 +36,24 @@ pub enum Payload {
         hash: Vec<u8>,
         mime: String,
         name: String,
+        /// Размер содержимого в байтах. Нужен, чтобы показать карточку «видео, 800 МБ»
+        /// ДО скачивания: сам размер иначе приезжает только с манифестом, т.е. когда
+        /// докачка уже началась.
+        #[serde(default)]
+        size: u64,
+        /// Длительность аудио/видео в миллисекундах (0 — не применимо/неизвестно).
+        #[serde(default)]
+        duration_ms: u32,
+        /// Размеры кадра картинки/видео (0 — неизвестно).
+        #[serde(default)]
+        width: u32,
+        #[serde(default)]
+        height: u32,
+        /// Хэш блоба-МИНИАТЮРЫ (пусто — нет превью). Именно ссылка, а не сами байты:
+        /// превью инлайн раздуло бы медиа-сообщение и сломало размерную
+        /// неразличимость «текст ≡ медиа» (M5). Миниатюра мелкая, качается сразу.
+        #[serde(default, with = "hex_bytes")]
+        thumb: Vec<u8>,
     },
     /// Подтверждение доставки сообщения с данным id (✓✓ в ТЗ).
     Ack { id: u64 },
@@ -291,6 +309,22 @@ mod tests {
         assert_eq!(p, Payload::Unknown);
     }
 
+    /// Медиа-сообщение от старого клиента (без size/duration/thumb) должно
+    /// разбираться, а не отбрасываться: поля добавлены аддитивно.
+    #[test]
+    fn old_media_message_without_new_fields_parses() {
+        let old = r#"{"type":"media","id":7,"hash":"aabb","mime":"image/jpeg","name":"p.jpg"}"#;
+        let p: Payload = serde_json::from_str(old).unwrap();
+        match p {
+            Payload::Media { id, size, duration_ms, width, height, thumb, .. } => {
+                assert_eq!(id, 7);
+                assert_eq!((size, duration_ms, width, height), (0, 0, 0, 0));
+                assert!(thumb.is_empty(), "нет превью — пустой хэш, а не ошибка");
+            }
+            other => panic!("ожидали Media, получили {other:?}"),
+        }
+    }
+
     #[test]
     fn all_payload_types_roundtrip() {
         let a = Identity::generate();
@@ -301,7 +335,15 @@ mod tests {
             Payload::Pong,
             Payload::Ack { id: 7 },
             Payload::Text { id: 1, text: "hi".into() },
-            Payload::Media { id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "p.jpg".into() },
+            Payload::Media {
+                id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "p.jpg".into(),
+                size: 1234, duration_ms: 0, width: 800, height: 600, thumb: vec![9u8; 32],
+            },
+            // Видео с длительностью и без превью — поля опциональны.
+            Payload::Media {
+                id: 3, hash: vec![6u8; 32], mime: "video/mp4".into(), name: "v.mp4".into(),
+                size: 900_000_000, duration_ms: 125_000, width: 1920, height: 1080, thumb: Vec::new(),
+            },
             Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: false },
             Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] },
             Payload::Group { id: 5, data: vec![1, 2, 3, 9, 9] },
@@ -351,9 +393,21 @@ mod tests {
         let sizes = [
             enc(&Payload::Text { id: 1, text: "да".into() }),
             enc(&Payload::Text { id: 1, text: "a".repeat(900) }),
-            enc(&Payload::Media { id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "secret-photo.jpg".into() }),
-            enc(&Payload::Media { id: 3, hash: vec![6u8; 32], mime: "audio/mp4".into(), name: "voice.m4a".into() }),
-            enc(&Payload::Media { id: 4, hash: vec![7u8; 32], mime: "application/pdf".into(), name: "договор-2026.pdf".into() }),
+            enc(&Payload::Media {
+                id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(),
+                name: "secret-photo.jpg".into(), size: 2_400_000,
+                duration_ms: 0, width: 4000, height: 3000, thumb: vec![1u8; 32],
+            }),
+            enc(&Payload::Media {
+                id: 3, hash: vec![6u8; 32], mime: "audio/mp4".into(),
+                name: "voice.m4a".into(), size: 48_000,
+                duration_ms: 7_400, width: 0, height: 0, thumb: Vec::new(),
+            }),
+            enc(&Payload::Media {
+                id: 4, hash: vec![7u8; 32], mime: "application/pdf".into(),
+                name: "договор-2026.pdf".into(), size: 900_000_000,
+                duration_ms: 0, width: 0, height: 0, thumb: Vec::new(),
+            }),
             enc(&Payload::Group { id: 5, data: vec![1u8; 200] }),
         ];
         assert!(

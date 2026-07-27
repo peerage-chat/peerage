@@ -76,6 +76,22 @@ pub(crate) enum Job {
     GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String },
 }
 
+/// До этого размера вложение скачивается автоматически (фото, голосовое — их ждут
+/// сразу). Крупнее — сначала карточка с именем/размером/превью, байты по кнопке:
+/// решение «тянуть ли 800 МБ» принимает получатель, а не отправитель.
+const AUTO_DOWNLOAD_LIMIT: u64 = 2 * 1024 * 1024;
+
+/// Метаданные вложения, известные отправителю (их извлекает клиент: на Android —
+/// `MediaMetadataRetriever`). Нужны, чтобы карточка была информативной до скачивания.
+#[derive(Debug, Clone, Default)]
+pub struct MediaInfo {
+    pub duration_ms: u32,
+    pub width: u32,
+    pub height: u32,
+    /// Байты миниатюры (JPEG). Уйдёт отдельным мелким блобом.
+    pub thumb: Option<Vec<u8>>,
+}
+
 /// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
 /// Не видели маячок дольше — участник считается вышедшим (страховка на вылет/потерю
@@ -272,6 +288,19 @@ impl Engine {
     /// медиа-сообщение со ссылкой на блоб по хэшу (тот же надёжный путь, что текст).
     /// Возвращает id сообщения или None. `name` — исходное имя файла (для не-картинок).
     pub fn send_media(&self, key: &[u8; 32], content: Vec<u8>, mime: &str, name: &str) -> Option<i64> {
+        self.send_media_with(key, content, mime, name, MediaInfo::default())
+    }
+
+    /// То же с метаданными для карточки: длительность, размеры кадра, миниатюра.
+    /// Получатель видит «видео · 12:05 · 800 МБ» с превью ДО скачивания.
+    pub fn send_media_with(
+        &self,
+        key: &[u8; 32],
+        content: Vec<u8>,
+        mime: &str,
+        name: &str,
+        info: MediaInfo,
+    ) -> Option<i64> {
         // Картинки чистим от метаданных (EXIF/GPS) перед отправкой, как аватар.
         let bytes = if mime.starts_with("image/") {
             p2p_blob::scrub::scrub(mime, &content)
@@ -280,12 +309,30 @@ impl Engine {
         };
         let hash = p2p_blob::blob_id(&bytes);
         let kind = Self::media_kind(mime);
-        // Блоб получателю: push-анонс + отдача чанков (если промахнётся — pull по хэшу).
-        self.blob_offer(*key, bytes.clone(), mime.to_string());
+        let size = bytes.len() as u64;
+        // Миниатюру (если есть) сохраняем и пушим всегда — она мелкая, ради неё карточка.
+        let thumb_hash = info.thumb.as_ref().map(|t| {
+            let h = p2p_blob::blob_id(t);
+            self.store_blob(h, t);
+            self.blob_offer(*key, t.clone(), "image/jpeg".to_string());
+            h
+        });
+        // Крупный блоб НЕ пушим: получатель сам запросит его по хэшу, когда решит
+        // скачать. Мелкое (фото/голосовое) отдаём сразу — его ждут немедленно.
+        if size < AUTO_DOWNLOAD_LIMIT {
+            self.blob_offer(*key, bytes.clone(), mime.to_string());
+        }
         // Сохраняем локально, чтобы показывать своё вложение сразу и после рестарта.
         self.store_blob(hash, &bytes);
         let id_hex = hex::encode(hash);
-        match self.messenger.send_media_message(key, &hash, mime, name) {
+        let meta = p2p_messenger::MediaMeta {
+            size,
+            duration_ms: info.duration_ms,
+            width: info.width,
+            height: info.height,
+            thumb: thumb_hash.map(|h| h.to_vec()).unwrap_or_default(),
+        };
+        match self.messenger.send_media_message(key, &hash, mime, name, meta.clone()) {
             Ok(id) => {
                 let t = now();
                 let _ = self.messages.lock_safe().append(key, StoredMessage {
@@ -293,16 +340,40 @@ impl Engine {
                     // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
                     id, mine: true, time: t, status: "sent".into(),
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.into(), name: name.into(),
+                    size, duration_ms: info.duration_ms, width: info.width, height: info.height,
+                    thumb_id: hex::encode(&meta.thumb),
+                    downloaded: true, // своё вложение уже у нас
                     ..Default::default()
                 });
                 // В офлайн-очередь — как текст: если получатель сейчас недоступен,
                 // дошлём при его возвращении/после рестарта. Байты уже сохранены
                 // локально, в очереди лежит только ссылка на них.
-                self.outbox.lock_safe().on_sent_media(key, id, &id_hex, mime, name, t);
+                self.outbox.lock_safe().on_sent_media(
+                    key, id, &id_hex, mime, name,
+                    &p2p_core::outbox::MediaRef {
+                        size,
+                        duration_ms: info.duration_ms,
+                        width: info.width,
+                        height: info.height,
+                        thumb_hex: hex::encode(&meta.thumb),
+                    },
+                    t,
+                );
                 Some(id as i64)
             }
             Err(_) => None,
         }
+    }
+
+    /// Скачать вложение по кнопке (крупное не тянется автоматически). Запрашиваем
+    /// манифест по хэшу — дальше обычная докачка чанков; готовность придёт событием
+    /// `blob_received`. Идемпотентно: если блоб уже есть, ничего не делаем.
+    pub fn download_media(&self, peer: &[u8; 32], blob_id_hex: &str) -> bool {
+        if self.blob_read(blob_id_hex).is_some() {
+            return true; // уже скачано
+        }
+        let Ok(hash) = hex::decode(blob_id_hex.trim()) else { return false };
+        self.messenger.request_blob_manifest(peer, &hash).is_ok()
     }
 
     pub fn connect(&self, key: [u8; 32]) {
@@ -1119,9 +1190,13 @@ fn save_and_notify_blob(engine: &Arc<Engine>, peer: [u8; 32], done: blobs::Compl
     if bumped > 0 {
         engine.refresh_budgets();
     }
+    // Отмечаем вложение скачанным во ВСЕХ чатах: блоб контент-адресный, один и тот
+    // же файл в разных чатах скачан разом. Иначе карточка так и предлагала бы «скачать».
+    let id_hex = hex::encode(done.id);
+    let _ = engine.messages.lock_safe().mark_downloaded(&id_hex);
     push_event(engine, serde_json::json!({
         "type": "blob_received",
-        "id": hex::encode(done.id),
+        "id": id_hex,
         "mime": done.manifest.mime,
         "size": done.manifest.size,
     }));
@@ -1195,7 +1270,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 }));
             }
         }
-        Event::Media { peer, id, hash, mime, name } => {
+        Event::Media { peer, id, hash, mime, name, size, duration_ms, width, height, thumb } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
@@ -1208,20 +1283,32 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             if !dup {
                 let t = now();
                 let id_hex = hex::encode(&hash);
+                let thumb_hex = hex::encode(&thumb);
                 let kind = Engine::media_kind(&mime);
+                let have = engine.blob_read(&id_hex).is_some();
+                // Крупное НЕ тянем молча: показываем карточку (имя/размер/превью), а
+                // байты качаем по кнопке — иначе чужое видео на 800 МБ приедет само.
+                let auto = have || size < AUTO_DOWNLOAD_LIMIT;
                 let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
                     id, mine: false, time: t, status: String::new(),
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.clone(), name: name.clone(),
+                    size, duration_ms, width, height, thumb_id: thumb_hex.clone(),
+                    downloaded: have,
                     ..Default::default()
                 });
-                // Байты вложения: отправитель их push-нул, но если чанк промахнулся —
-                // тянем по хэшу (контент-адрес → авто-дедуп; blob_received перерисует).
-                if engine.blob_read(&id_hex).is_none() {
+                // Миниатюру тянем всегда — она мелкая, ради неё и заведена.
+                if !thumb.is_empty() && engine.blob_read(&thumb_hex).is_none() {
+                    let _ = engine.messenger.request_blob_manifest(&peer, &thumb);
+                }
+                if auto && !have {
                     let _ = engine.messenger.request_blob_manifest(&peer, &hash);
                 }
                 push_event(engine, serde_json::json!({
                     "type": "media", "peer": hex::encode(peer), "id": id, "time": t,
                     "kind": kind, "blob_id": id_hex, "mime": mime, "name": name,
+                    "size": size, "duration_ms": duration_ms,
+                    "width": width, "height": height,
+                    "thumb_id": thumb_hex, "downloaded": have, "auto": auto,
                 }));
             }
         }
@@ -1594,7 +1681,14 @@ impl Engine {
                                 mime: mime.to_string(),
                             });
                         }
-                        let _ = m.resend_media_message(peer, id, &hash, mime, name);
+                        let meta = p2p_messenger::MediaMeta {
+                            size: v["size"].as_u64().unwrap_or(0),
+                            duration_ms: v["duration_ms"].as_u64().unwrap_or(0) as u32,
+                            width: v["width"].as_u64().unwrap_or(0) as u32,
+                            height: v["height"].as_u64().unwrap_or(0) as u32,
+                            thumb: v["thumb"].as_str().and_then(|t| hex::decode(t).ok()).unwrap_or_default(),
+                        };
+                        let _ = m.resend_media_message(peer, id, &hash, mime, name, meta);
                     }
                     _ => {}
                 }),

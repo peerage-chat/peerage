@@ -79,6 +79,12 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             blob_id TEXT    NOT NULL DEFAULT '',
             mime    TEXT    NOT NULL DEFAULT '',
             name    TEXT    NOT NULL DEFAULT '',
+            size        INTEGER NOT NULL DEFAULT 0,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            width       INTEGER NOT NULL DEFAULT 0,
+            height      INTEGER NOT NULL DEFAULT 0,
+            thumb_id    TEXT    NOT NULL DEFAULT '',
+            downloaded  INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (peer, id, mine)
         );
         CREATE INDEX IF NOT EXISTS messages_peer_time ON messages(peer, time);
@@ -119,5 +125,13 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN blob_id TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN mime TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN name TEXT NOT NULL DEFAULT ''", []);
+    // Карточка вложения: размер/длительность/кадр/превью + признак «скачано».
+    // Крупные вложения не тянутся автоматически — сначала карточка, байты по кнопке.
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN size INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN width INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN height INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN thumb_id TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN downloaded INTEGER NOT NULL DEFAULT 0", []);
     Ok(())
 }

@@ -469,6 +469,24 @@ pub struct StoredMessage {
     /// Исходное имя файла вложения (M2; для не-картинок).
     #[serde(default)]
     pub name: String,
+    /// Размер вложения в байтах — показывается в карточке ДО скачивания.
+    #[serde(default)]
+    pub size: u64,
+    /// Длительность аудио/видео в мс (0 — не применимо).
+    #[serde(default)]
+    pub duration_ms: u32,
+    /// Размеры кадра (0 — неизвестно).
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+    /// hex-хэш блоба-миниатюры (пусто — нет превью).
+    #[serde(default)]
+    pub thumb_id: String,
+    /// Скачано ли содержимое. Крупные вложения не тянутся автоматически: сначала
+    /// приходит карточка (имя/размер/превью), байты — по кнопке.
+    #[serde(default)]
+    pub downloaded: bool,
 }
 
 /// SQLite-хранилище сообщений без кэша — каждый вызов делает SQL-запрос.
@@ -524,15 +542,30 @@ impl MessageStore {
 
     pub fn append(&self, peer: &[u8; 32], msg: StoredMessage) -> Result<(), StoreError> {
         db::lock(&self.db).execute(
-            "INSERT OR REPLACE INTO messages (peer, id, mine, text, time, status, kind, blob_id, mime, name)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT OR REPLACE INTO messages
+                 (peer, id, mine, text, time, status, kind, blob_id, mime, name,
+                  size, duration_ms, width, height, thumb_id, downloaded)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             rusqlite::params![
                 peer.as_slice(), msg.id as i64, msg.mine as i64,
                 &msg.text, msg.time, &msg.status,
                 &msg.kind, &msg.blob_id, &msg.mime, &msg.name,
+                msg.size as i64, msg.duration_ms as i64, msg.width as i64, msg.height as i64,
+                &msg.thumb_id, msg.downloaded as i64,
             ],
         )?;
         Ok(())
+    }
+
+    /// Пометить вложение скачанным (байты блоба доехали). Ищем по контент-адресу, а
+    /// не по (peer,id): один и тот же файл может быть в нескольких чатах — дедуп
+    /// контент-адресации означает, что скачан он сразу для всех.
+    pub fn mark_downloaded(&self, blob_id: &str) -> Result<usize, StoreError> {
+        let n = db::lock(&self.db).execute(
+            "UPDATE messages SET downloaded=1 WHERE blob_id=?1",
+            rusqlite::params![blob_id],
+        )?;
+        Ok(n)
     }
 
     pub fn set_status(&self, peer: &[u8; 32], id: u64, status: &str) -> Result<bool, StoreError> {
@@ -558,7 +591,8 @@ impl MessageStore {
     pub fn history(&self, peer: &[u8; 32]) -> Vec<StoredMessage> {
         let conn = db::lock(&self.db);
         let mut stmt = match conn.prepare(
-            "SELECT id, text, mine, time, status, kind, blob_id, mime, name
+            "SELECT id, text, mine, time, status, kind, blob_id, mime, name,
+                    size, duration_ms, width, height, thumb_id, downloaded
              FROM messages WHERE peer=?1 ORDER BY time, id",
         ) {
             Ok(s) => s,
@@ -575,6 +609,12 @@ impl MessageStore {
                 blob_id: row.get(6)?,
                 mime: row.get(7)?,
                 name: row.get(8)?,
+                size: row.get::<_, i64>(9)? as u64,
+                duration_ms: row.get::<_, i64>(10)? as u32,
+                width: row.get::<_, i64>(11)? as u32,
+                height: row.get::<_, i64>(12)? as u32,
+                thumb_id: row.get(13)?,
+                downloaded: row.get::<_, i64>(14)? != 0,
             })
         })
         .and_then(|rows| rows.collect())

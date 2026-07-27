@@ -80,7 +80,20 @@ pub enum Event {
     /// Входящее текстовое сообщение.
     Text { peer: PeerKey, id: u64, text: String },
     /// Входящее медиа-сообщение (M2): ссылка на блоб-вложение по хэшу.
-    Media { peer: PeerKey, id: u64, hash: Vec<u8>, mime: String, name: String },
+    Media {
+        peer: PeerKey,
+        id: u64,
+        hash: Vec<u8>,
+        mime: String,
+        name: String,
+        /// Размер вложения — карточка показывает его ДО скачивания.
+        size: u64,
+        duration_ms: u32,
+        width: u32,
+        height: u32,
+        /// Хэш блоба-миниатюры (пусто — нет превью).
+        thumb: Vec<u8>,
+    },
     /// Пир подтвердил доставку нашего сообщения с данным id (✓✓).
     Ack { peer: PeerKey, id: u64 },
     /// Не удалось доставить наше сообщение за отведённое время (TTL).
@@ -124,6 +137,19 @@ pub enum Event {
     ProfileUpdate { peer: PeerKey, name: String, avatar_hash: Vec<u8> },
     /// Пир запросил манифест нашего блоба по id (pull-по-хэшу).
     BlobManifestRequest { peer: PeerKey, id: Vec<u8> },
+}
+
+/// Метаданные вложения для карточки: их видно ДО скачивания байтов, поэтому
+/// получатель решает осознанно («видео, 12 мин, 800 МБ» вместо «файл»).
+/// `thumb` — хэш блоба-миниатюры (пусто = нет): превью едет отдельным мелким блобом,
+/// инлайн раздуло бы сообщение и сломало размерную неразличимость M5.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MediaMeta {
+    pub size: u64,
+    pub duration_ms: u32,
+    pub width: u32,
+    pub height: u32,
+    pub thumb: Vec<u8>,
 }
 
 /// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
@@ -458,9 +484,23 @@ impl Messenger {
     /// Отправить медиа-СООБЩЕНИЕ чата (M2): ссылка на блоб по хэшу. Надёжно
     /// (retry-until-Ack), как текст; сами байты идут блоб-каналом отдельно.
     /// (Отличать от [`Messenger::send_media`] — realtime-датаграммы звонка.)
-    pub fn send_media_message(&self, peer: &PeerKey, hash: &[u8], mime: &str, name: &str) -> Result<u64, MessengerError> {
+    pub fn send_media_message(
+        &self,
+        peer: &PeerKey,
+        hash: &[u8],
+        mime: &str,
+        name: &str,
+        meta: MediaMeta,
+    ) -> Result<u64, MessengerError> {
         let (hash, mime, name) = (hash.to_vec(), mime.to_string(), name.to_string());
-        self.shared.send_reliable(peer, true, move |id| Payload::Media { id, hash, mime, name })
+        self.shared.send_reliable(peer, true, move |id| Payload::Media {
+            id, hash, mime, name,
+            size: meta.size,
+            duration_ms: meta.duration_ms,
+            width: meta.width,
+            height: meta.height,
+            thumb: meta.thumb.clone(),
+        })
     }
 
     /// Повторно отправить медиа-СООБЩЕНИЕ с тем же id (досылка из офлайн-очереди).
@@ -472,10 +512,17 @@ impl Messenger {
         hash: &[u8],
         mime: &str,
         name: &str,
+        meta: MediaMeta,
     ) -> Result<(), MessengerError> {
         let (hash, mime, name) = (hash.to_vec(), mime.to_string(), name.to_string());
-        self.shared
-            .send_reliable_with_id(peer, id, true, move |id| Payload::Media { id, hash, mime, name })
+        self.shared.send_reliable_with_id(peer, id, true, move |id| Payload::Media {
+            id, hash, mime, name,
+            size: meta.size,
+            duration_ms: meta.duration_ms,
+            width: meta.width,
+            height: meta.height,
+            thumb: meta.thumb.clone(),
+        })
     }
 
     /// Отправить медиа-датаграмму (реалтайм-канал): без Ack/повторов/шифрования
@@ -766,8 +813,10 @@ fn receive_loop(shared: Arc<Shared>) {
                 shared.emit(Event::Text { peer: src, id, text });
                 let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
             }
-            Payload::Media { id, hash, mime, name } => {
-                shared.emit(Event::Media { peer: src, id, hash, mime, name });
+            Payload::Media { id, hash, mime, name, size, duration_ms, width, height, thumb } => {
+                shared.emit(Event::Media {
+                    peer: src, id, hash, mime, name, size, duration_ms, width, height, thumb,
+                });
                 let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
             }
             Payload::Ack { id } => {

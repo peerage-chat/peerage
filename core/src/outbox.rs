@@ -168,6 +168,17 @@ impl OutboxStats {
 /// для текста это UTF-8, для медиа JSON-ссылка на блоб).
 pub type ResendFn = Box<dyn FnMut(&[u8; 32], u64, &str, &[u8]) + Send>;
 
+/// Метаданные вложения, которые кладём в очередь вместе со ссылкой: при досылке
+/// карточка у получателя должна быть такой же, как при первой отправке.
+#[derive(Debug, Clone, Default)]
+pub struct MediaRef {
+    pub size: u64,
+    pub duration_ms: u32,
+    pub width: u32,
+    pub height: u32,
+    pub thumb_hex: String,
+}
+
 pub struct OutboxManager {
     store: OutboxStore,
     send: ResendFn,
@@ -201,6 +212,7 @@ impl OutboxManager {
     /// mime + имя) — сами байты уже лежат в blob-хранилище, дублировать их незачем,
     /// поэтому запись остаётся крошечной. При досылке верхний слой снова предложит
     /// блоб и повторит медиа-сообщение с тем же id.
+    #[allow(clippy::too_many_arguments)]
     pub fn on_sent_media(
         &self,
         peer: &[u8; 32],
@@ -208,9 +220,14 @@ impl OutboxManager {
         blob_id_hex: &str,
         mime: &str,
         name: &str,
+        meta: &MediaRef,
         now: i64,
     ) {
-        let body = serde_json::json!({ "blob": blob_id_hex, "mime": mime, "name": name });
+        let body = serde_json::json!({
+            "blob": blob_id_hex, "mime": mime, "name": name,
+            "size": meta.size, "duration_ms": meta.duration_ms,
+            "width": meta.width, "height": meta.height, "thumb": meta.thumb_hex,
+        });
         let Ok(payload) = serde_json::to_vec(&body) else { return };
         let _ = self.store.enqueue(peer, msg_id, "media", &payload, now);
     }
@@ -478,7 +495,7 @@ mod tests {
     fn media_is_queued_as_reference_and_resent() {
         let (mut m, log) = mgr_with(store());
         m.on_sent(&peer(1), 1, "привет", 10);
-        m.on_sent_media(&peer(1), 2, "ab12cd", "image/jpeg", "photo.jpg", 11);
+        m.on_sent_media(&peer(1), 2, "ab12cd", "image/jpeg", "photo.jpg", &MediaRef::default(), 11);
 
         // Запись компактная — байты картинки в очередь не попали.
         assert!(m.stats().bytes < 200, "в очереди ссылка, а не содержимое файла");
