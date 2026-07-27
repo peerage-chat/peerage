@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — История звонков</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; position: relative; color: var(--on-dark); }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px 14px; background: var(--accent-dark); }
+  .topbar .title { font-size: 20px; font-weight: 500; flex: 1; }
+  .topbar i { font-size: 22px; color: var(--icon-chrome); }
+
+  .tabs { display: flex; gap: var(--space-s); padding: var(--space-m) var(--space-l); }
+  .tab { padding: 6px 14px; border-radius: var(--radius-pill); background: var(--surface); color: var(--secondary);
+         font-size: var(--font-body); }
+  .tab.on { background: var(--accent-badge); color: var(--accent); }
+
+  .day { padding: var(--space-m) var(--space-l) var(--space-xs); font-size: var(--font-caption);
+         letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+  .row { display: flex; align-items: center; gap: var(--space-m); padding: var(--row-v) var(--space-l); }
+  .av { width: 46px; height: 46px; border-radius: var(--radius-avatar); display: flex; align-items: center;
+        justify-content: center; font-size: 18px; font-weight: 500; flex: 0 0 auto; }
+  .meta { flex: 1; min-width: 0; }
+  .name { font-size: var(--font-label); font-weight: 500; display: flex; align-items: center; gap: 5px; }
+  .name i { font-size: 16px; color: var(--verified); }
+  .name.missed { color: var(--error); }
+  .sub { display: flex; align-items: center; gap: 5px; font-size: var(--font-body); color: var(--secondary);
+         margin-top: 1px; }
+  .sub i { font-size: 15px; }
+  .in-ok { color: var(--online); }
+  .out-ok { color: var(--secondary); }
+  .missed { color: var(--error); }
+  .right { display: flex; align-items: center; gap: var(--space-m); flex: 0 0 auto; }
+  .time { font-size: var(--font-small); color: var(--secondary); }
+  .cb { width: 38px; height: 38px; border-radius: 12px; background: var(--surface); color: var(--accent);
+        display: flex; align-items: center; justify-content: center; font-size: 19px; }
+  .cb.join { background: rgba(139,195,74,.14); color: var(--online); width: auto; padding: 0 14px;
+             font-size: var(--font-body); font-weight: 500; gap: 6px; }
+
+  .fab { position: absolute; right: 20px; bottom: 20px; width: 56px; height: 56px; border-radius: 16px;
+         background: var(--accent); display: flex; align-items: center; justify-content: center;
+         font-size: 24px; color: var(--accent-dark); }
+
+  .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-m);
+           padding: 90px var(--space-xxl); text-align: center; }
+  .empty i { font-size: 46px; color: var(--icon-muted); }
+  .empty .t { font-size: var(--font-label); }
+  .empty .h { font-size: var(--font-body); color: var(--secondary); line-height: 1.45; }
+
+  .note { max-width: 390px; color: #8a8f98; font-size: 13px; line-height: 1.5; }
+  .note b { color: #c9ced6; }
+</style>
+</head>
+<body>
+
+<!-- ─────────── Журнал ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Звонки</span>
+  </div>
+
+  <div class="tabs">
+    <div class="tab on">Все</div>
+    <div class="tab">Пропущенные</div>
+  </div>
+
+  <div class="day">Сегодня</div>
+
+  <div class="row">
+    <div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
+    <div class="meta">
+      <div class="name">Алиса <i class="ti ti-rosette-discount-check"></i></div>
+      <div class="sub"><i class="ti ti-arrow-down-left in-ok"></i><span>Входящий · 12:04</span></div>
+    </div>
+    <div class="right"><span class="time">14:20</span><div class="cb"><i class="ti ti-phone"></i></div></div>
+  </div>
+
+  <div class="row">
+    <div class="av" style="background:#2A4034;color:var(--online)"><i class="ti ti-headphones" style="font-size:22px"></i></div>
+    <div class="meta">
+      <div class="name">Секретный клуб</div>
+      <div class="sub"><i class="ti ti-users" style="color:var(--online)"></i><span>Звонок в комнате · 48:12</span></div>
+    </div>
+    <div class="right"><span class="time">13:05</span><div class="cb join"><i class="ti ti-login"></i>Войти</div></div>
+  </div>
+
+  <div class="row">
+    <div class="av" style="background:#2E3A4A;color:#c7d6f0">Б</div>
+    <div class="meta">
+      <div class="name missed">Борис</div>
+      <div class="sub"><i class="ti ti-arrow-down-left missed"></i><span class="missed">Пропущенный</span></div>
+    </div>
+    <div class="right"><span class="time">11:47</span><div class="cb"><i class="ti ti-phone"></i></div></div>
+  </div>
+
+  <div class="day">Вчера</div>
+
+  <div class="row">
+    <div class="av" style="background:#4A2E2E;color:#f0c7c7">2</div>
+    <div class="meta">
+      <div class="name" style="font-family:ui-monospace,monospace;font-size:14px">2cbbb91c8f4a…</div>
+      <div class="sub"><i class="ti ti-arrow-up-right out-ok"></i><span>Исходящий · 3:21</span></div>
+    </div>
+    <div class="right"><span class="time">пн</span><div class="cb"><i class="ti ti-phone"></i></div></div>
+  </div>
+
+  <div class="row">
+    <div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
+    <div class="meta">
+      <div class="name">Алиса <i class="ti ti-rosette-discount-check"></i></div>
+      <div class="sub"><i class="ti ti-arrow-up-right out-ok"></i><span>Не дозвонился</span></div>
+    </div>
+    <div class="right"><span class="time">пн</span><div class="cb"><i class="ti ti-phone"></i></div></div>
+  </div>
+
+  <div style="height:96px"></div>
+  <div class="fab"><i class="ti ti-phone-plus"></i></div>
+</div>
+
+<!-- ─────────── Пусто ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Звонки</span>
+  </div>
+
+  <div class="empty">
+    <i class="ti ti-phone"></i>
+    <div class="t">Звонков пока нет</div>
+    <div class="h">Журнал хранится только на этом устройстве и никуда не отправляется.</div>
+  </div>
+
+  <div style="height:120px"></div>
+  <div class="fab"><i class="ti ti-phone-plus"></i></div>
+</div>
+
+<div class="note">
+  <p><b>Строка = один звонок, а не «последний по контакту».</b> Схлопывание серии в одну строку прячет
+  пропущенные, а именно они здесь важнее всего.</p>
+  <p style="margin-top:10px"><b>Комнаты живут в том же списке.</b> Комната — это постоянный звонок, и
+  правая кнопка у неё не «перезвонить», а <b>Войти</b> (зелёная): звонок может идти прямо сейчас.</p>
+  <p style="margin-top:10px"><b>«Не дозвонился» — отдельный исход,</b> не пропущенный и не состоявшийся.
+  Без него исходящий без ответа выглядит как обычный завершённый звонок с нулевой длительностью.</p>
+  <p style="margin-top:10px"><b>Пустой экран говорит о приватности,</b> а не «здесь ничего нет»: журнал
+  локальный. Это то, что отличает нас от обычного мессенджера, и место сказать об этом — здесь.</p>
+  <p style="margin-top:10px"><b>Требует движка:</b> журнала звонков нет вообще. Нужны хранение записи
+  (кто, направление, исход, длительность, комната) и выдача в UI.</p>
+</div>
+
+</body>
+</html>

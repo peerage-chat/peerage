@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Офлайн-очередь</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; color: var(--on-dark); }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px 14px; background: var(--accent-dark); }
+  .topbar .title { font-size: 20px; font-weight: 500; flex: 1; }
+  .topbar i { font-size: 22px; color: var(--icon-chrome); }
+
+  .lead-card { margin: var(--space-l); background: var(--surface); border-radius: var(--radius-tile);
+               padding: var(--space-l); display: flex; gap: var(--space-m); align-items: flex-start; }
+  .lead-card i { font-size: 22px; color: var(--accent); flex: 0 0 auto; }
+  .lead-card .t { font-size: var(--font-label); font-weight: 500; }
+  .lead-card .h { font-size: var(--font-body); color: var(--secondary); margin-top: 4px; line-height: 1.45; }
+
+  .warn-card { margin: 0 var(--space-l) var(--space-l); background: rgba(230,162,60,.12);
+               border-radius: var(--radius-tile); padding: var(--space-m) var(--space-l);
+               display: flex; gap: var(--space-m); align-items: flex-start; }
+  .warn-card i { font-size: 20px; color: var(--warn); flex: 0 0 auto; }
+  .warn-card .t { font-size: var(--font-body); color: var(--warn); font-weight: 500; }
+  .warn-card .h { font-size: var(--font-small); color: var(--secondary); margin-top: 3px; line-height: 1.45; }
+  .warn-card .off { font-size: var(--font-small); color: var(--accent); margin-top: var(--space-s); display: inline-block; }
+
+  .sect { padding: var(--space-l) var(--space-l) var(--space-xs); font-size: var(--font-caption);
+          letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+  .row { display: flex; align-items: center; gap: var(--space-m); padding: var(--row-v) var(--space-l); }
+  .av-wrap { position: relative; flex: 0 0 auto; }
+  .av { width: 44px; height: 44px; border-radius: var(--radius-avatar); display: flex; align-items: center;
+        justify-content: center; font-size: 17px; font-weight: 500; }
+  .presence { position: absolute; right: -2px; bottom: -2px; width: 13px; height: 13px; background: var(--offline-dot);
+              border: 2px solid var(--bg); border-radius: 5px; }
+  .presence.on { background: var(--online); }
+  .meta { flex: 1; min-width: 0; }
+  .name { font-size: var(--font-label); font-weight: 500; }
+  .sub { font-size: var(--font-body); color: var(--secondary); margin-top: 1px; display: flex;
+         align-items: center; gap: 5px; }
+  .sub i { font-size: 14px; }
+  .right { text-align: right; flex: 0 0 auto; }
+  .cnt { font-size: var(--font-label); font-weight: 500; }
+  .sz { font-size: var(--font-small); color: var(--secondary); }
+  .sending { color: var(--online); }
+
+  .hint { padding: var(--space-xs) var(--space-l) var(--space-m); font-size: var(--font-small);
+          color: var(--secondary); line-height: 1.45; }
+  .danger-row { display: flex; align-items: center; gap: var(--space-m); padding: var(--row-v) var(--space-l);
+                color: var(--error); font-size: var(--font-label); }
+  .danger-row i { font-size: 21px; }
+
+  .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-m);
+           padding: 90px var(--space-xxl); text-align: center; }
+  .empty i { font-size: 46px; color: var(--icon-muted); }
+  .empty .t { font-size: var(--font-label); }
+  .empty .h { font-size: var(--font-body); color: var(--secondary); line-height: 1.45; }
+
+  .note { max-width: 390px; color: #8a8f98; font-size: 13px; line-height: 1.5; }
+  .note b { color: #c9ced6; }
+</style>
+</head>
+<body>
+
+<!-- ─────────── Очередь с предупреждением ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Очередь отправки</span>
+  </div>
+
+  <div class="lead-card">
+    <i class="ti ti-clock-pause"></i>
+    <div>
+      <div class="t">1 248 сообщений ждут</div>
+      <div class="h">Они уйдут сами, как только получатель появится в сети. Сервера, который подержит
+        их за нас, нет — поэтому очередь не чистится ни по сроку, ни по объёму.</div>
+    </div>
+  </div>
+
+  <div class="warn-card">
+    <i class="ti ti-alert-triangle"></i>
+    <div>
+      <div class="t">Очередь разрослась</div>
+      <div class="h">Больше тысячи неотправленных — обычно так бывает, если собеседник давно не
+        появлялся. Место они занимают на этом устройстве.</div>
+      <span class="off">Не напоминать об этом</span>
+    </div>
+  </div>
+
+  <div class="sect">По получателям</div>
+
+  <div class="row">
+    <div class="av-wrap"><div class="av" style="background:#2E3A4A;color:#c7d6f0">Б</div><span class="presence"></span></div>
+    <div class="meta">
+      <div class="name">Борис</div>
+      <div class="sub"><i class="ti ti-clock"></i>не в сети 24 дня</div>
+    </div>
+    <div class="right"><div class="cnt">1 202</div><div class="sz">86 МБ</div></div>
+  </div>
+
+  <div class="row">
+    <div class="av-wrap"><div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div><span class="presence on"></span></div>
+    <div class="meta">
+      <div class="name">Алиса</div>
+      <div class="sub sending"><i class="ti ti-send"></i>отправляется…</div>
+    </div>
+    <div class="right"><div class="cnt">39</div><div class="sz">2,1 МБ</div></div>
+  </div>
+
+  <div class="row">
+    <div class="av-wrap"><div class="av" style="background:#4A2E2E;color:#f0c7c7">2</div><span class="presence"></span></div>
+    <div class="meta">
+      <div class="name" style="font-family:ui-monospace,monospace;font-size:14px">2cbbb91c8f4a…</div>
+      <div class="sub"><i class="ti ti-clock"></i>не в сети 3 дня</div>
+    </div>
+    <div class="right"><div class="cnt">7</div><div class="sz">18 КБ</div></div>
+  </div>
+
+  <div class="sect">Управление</div>
+  <div class="danger-row"><i class="ti ti-trash"></i><span>Очистить очередь Бориса</span></div>
+  <div class="hint">Удаляются <b>ваши</b> сообщения, которые он ещё не получил. Отменить нельзя, и
+    повторить отправку будет нечем.</div>
+  <div style="height:16px"></div>
+</div>
+
+<!-- ─────────── Пусто ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Очередь отправки</span>
+  </div>
+
+  <div class="empty">
+    <i class="ti ti-check"></i>
+    <div class="t">Всё доставлено</div>
+    <div class="h">Сообщения, отправленные пока собеседник офлайн, ждут здесь и уходят сами.</div>
+  </div>
+</div>
+
+<div class="note">
+  <p><b>Предупреждение, а не лимит.</b> Очередь состоит из СОБСТВЕННЫХ сообщений пользователя: молча
+  выкинуть старейшие значит потерять их навсегда. Поэтому порог (1000) только предупреждает — и
+  предупреждение можно выключить прямо отсюда.</p>
+  <p style="margin-top:10px"><b>Группировка по получателям, а не список сообщений.</b> Тысяча строк
+  бесполезна; важно, кому именно не доходит и сколько это весит.</p>
+  <p style="margin-top:10px"><b>«Не в сети 24 дня» объясняет причину.</b> Без этого разросшаяся очередь
+  выглядит как поломка, хотя это ровно то поведение, которое мы обещали: человек вернулся через месяц —
+  получил всё.</p>
+  <p style="margin-top:10px"><b>Очистка — только явная и только поимённая.</b> Кнопки «очистить всё» нет
+  намеренно: одно касание не должно стирать месяц переписки сразу со всеми.</p>
+  <p style="margin-top:10px">Данные уже есть в движке: <code>outbox_stats_json</code>,
+  <code>should_warn</code>, <code>clear_outbox_for</code>. Экрана, который их показывает, нет —
+  карточка в «Сети» ведёт в <code>TODO</code> (<code>NetworkScreen.kt:160</code>).</p>
+</div>
+
+</body>
+</html>

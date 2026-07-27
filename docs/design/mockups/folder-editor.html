@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Папки</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; color: var(--on-dark); }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px 14px; background: var(--accent-dark); }
+  .topbar .title { font-size: 20px; font-weight: 500; flex: 1; }
+  .topbar i { font-size: 22px; color: var(--icon-chrome); }
+  .topbar .done { font-size: var(--font-label); color: var(--accent); font-weight: 500; }
+
+  .sect { padding: var(--space-l) var(--space-l) var(--space-xs); font-size: var(--font-caption);
+          letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+  .row { display: flex; align-items: center; gap: var(--space-m); padding: var(--row-v) var(--space-l);
+         font-size: var(--font-label); }
+  .row .sp { flex: 1; }
+  .row .val { font-size: var(--font-body); color: var(--secondary); }
+  .row i.lead { font-size: 21px; color: var(--icon-muted); }
+  .row i.chev { font-size: 18px; color: var(--icon-muted); }
+  .row.drag i.lead { color: var(--icon-muted); }
+  .hint { padding: var(--space-xs) var(--space-l) var(--space-m); font-size: var(--font-small);
+          color: var(--secondary); line-height: 1.45; }
+
+  /* поле имени + выбор иконки */
+  .field { margin: 0 var(--space-l); display: flex; align-items: center; gap: var(--space-m); }
+  .icon-pick { width: 48px; height: 48px; border-radius: 15px; background: var(--folder-selected); color: var(--accent);
+               display: flex; align-items: center; justify-content: center; font-size: 24px; flex: 0 0 auto; position: relative; }
+  .icon-pick .edit { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; border-radius: 10px;
+                     background: var(--surface); border: 2px solid var(--bg); color: var(--secondary);
+                     display: flex; align-items: center; justify-content: center; font-size: 11px; }
+  .input { flex: 1; height: 48px; border-radius: var(--radius-tile); background: var(--surface); display: flex;
+           align-items: center; padding: 0 var(--space-l); font-size: var(--font-label); }
+  .input.empty { color: var(--secondary); }
+
+  /* чипы-типы */
+  .chips { display: flex; flex-wrap: wrap; gap: var(--space-s); padding: var(--space-s) var(--space-l) var(--space-m); }
+  .chip { padding: 7px 13px; border-radius: var(--radius-pill); background: var(--surface); font-size: var(--font-body);
+          color: var(--secondary); display: flex; align-items: center; gap: 6px; }
+  .chip.on { background: var(--accent-badge); color: var(--accent); }
+  .chip i { font-size: 16px; }
+
+  /* строка чата в списке выбора */
+  .av { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+        font-size: 15px; font-weight: 500; flex: 0 0 auto; }
+  .check { width: 22px; height: 22px; border-radius: 11px; border: 2px solid var(--icon-muted); flex: 0 0 auto; }
+  .check.on { background: var(--accent); border-color: var(--accent); color: var(--accent-dark);
+              display: flex; align-items: center; justify-content: center; font-size: 14px; }
+
+  .counter { margin: var(--space-m) var(--space-l); background: var(--surface); border-radius: var(--radius-tile);
+             padding: var(--space-m) var(--space-l); font-size: var(--font-body); color: var(--secondary);
+             display: flex; align-items: center; gap: var(--space-s); }
+  .counter b { color: var(--on-dark); font-weight: 500; }
+  .counter i { font-size: 18px; color: var(--accent); }
+
+  .rail { display: flex; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .tile { width: 48px; height: 48px; border-radius: 15px; background: var(--surface); display: flex;
+          align-items: center; justify-content: center; color: var(--secondary); font-size: 24px; flex: 0 0 auto; }
+  .tile.active { background: var(--folder-selected); color: var(--accent); }
+
+  .danger { color: var(--error); }
+  .danger i.lead { color: var(--error); }
+  .note { max-width: 390px; color: #8a8f98; font-size: 13px; line-height: 1.5; }
+  .note b { color: #c9ced6; }
+</style>
+</head>
+<body>
+
+<!-- ─────────── Список папок (⋮ → «Папки» / долгий тап по рейлу) ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Папки</span>
+  </div>
+
+  <div class="hint" style="padding-top:var(--space-m)">Папка — это <b>вид</b>, а не коробка: один чат
+    может попадать сразу в несколько. Перетащите, чтобы поменять порядок в рейле.</div>
+
+  <div class="sect">Встроенные</div>
+  <div class="row"><i class="ti ti-messages lead"></i><span class="sp">Все чаты</span><span class="val">12</span></div>
+  <div class="row"><i class="ti ti-message lead"></i><span class="sp">Личные</span><span class="val">7</span></div>
+  <div class="row"><i class="ti ti-headphones lead"></i><span class="sp">Комнаты</span><span class="val">3</span></div>
+  <div class="row"><i class="ti ti-speakerphone lead"></i><span class="sp">Каналы</span><span class="val">2</span></div>
+
+  <div class="sect">Мои</div>
+  <div class="row drag"><i class="ti ti-grip-vertical lead"></i>
+    <div class="icon-pick" style="width:38px;height:38px;font-size:19px;border-radius:12px"><i class="ti ti-briefcase"></i></div>
+    <span class="sp">Работа</span><span class="val">4</span><i class="ti ti-chevron-right chev"></i></div>
+  <div class="row drag"><i class="ti ti-grip-vertical lead"></i>
+    <div class="icon-pick" style="width:38px;height:38px;font-size:19px;border-radius:12px"><i class="ti ti-home"></i></div>
+    <span class="sp">Семья</span><span class="val">3</span><i class="ti ti-chevron-right chev"></i></div>
+
+  <div class="row" style="color:var(--accent)"><i class="ti ti-plus lead" style="color:var(--accent)"></i>
+    <span class="sp">Создать папку</span></div>
+  <div style="height:16px"></div>
+</div>
+
+<!-- ─────────── Редактор папки ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-x"></i>
+    <span class="title">Папка</span>
+    <span class="done">Готово</span>
+  </div>
+
+  <div class="sect">Название и значок</div>
+  <div class="field">
+    <div class="icon-pick"><i class="ti ti-briefcase"></i><span class="edit"><i class="ti ti-pencil"></i></span></div>
+    <div class="input">Работа</div>
+  </div>
+
+  <div class="sect">Включить</div>
+  <div class="chips">
+    <div class="chip on"><i class="ti ti-message"></i>Личные</div>
+    <div class="chip on"><i class="ti ti-users"></i>Группы</div>
+    <div class="chip"><i class="ti ti-headphones"></i>Комнаты</div>
+    <div class="chip"><i class="ti ti-speakerphone"></i>Каналы</div>
+  </div>
+  <div class="row"><i class="ti ti-plus lead" style="color:var(--accent)"></i>
+    <span class="sp" style="color:var(--accent)">Добавить чаты</span></div>
+
+  <div class="row"><div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
+    <span class="sp">Алиса</span><div class="check on"><i class="ti ti-check"></i></div></div>
+  <div class="row"><div class="av" style="background:#2A4034;color:var(--online)"><i class="ti ti-users" style="font-size:19px"></i></div>
+    <span class="sp">Проект</span><div class="check on"><i class="ti ti-check"></i></div></div>
+
+  <div class="sect">Исключить</div>
+  <div class="chips">
+    <div class="chip on"><i class="ti ti-bell-off"></i>Без звука</div>
+    <div class="chip"><i class="ti ti-mail-opened"></i>Прочитанные</div>
+  </div>
+
+  <div class="counter"><i class="ti ti-eye"></i><span>В папку попадает <b>4 чата</b></span></div>
+
+  <div class="row danger"><i class="ti ti-trash lead"></i><span class="sp">Удалить папку</span></div>
+  <div class="hint">Чаты останутся на месте — исчезнет только вид.</div>
+  <div style="height:16px"></div>
+</div>
+
+<div class="note">
+  <p><b>Рейл остаётся рейлом.</b> Редактор открывается из меню и долгим тапом по плитке, а плитка
+  <code>+</code> ведёт прямо в создание новой папки — то, чего сейчас в коде нет
+  (<code>Navigation.kt:66</code>).</p>
+  <p style="margin-top:10px"><b>Живой счётчик обязателен.</b> Правила «включить типы + добавить чаты −
+  исключить» комбинируются неочевидно; без строки «попадает 4 чата» пользователь узнаёт результат
+  только выйдя из редактора.</p>
+  <p style="margin-top:10px"><b>Удаление папки поясняется явно.</b> Папка выглядит как контейнер, и
+  без подписи «чаты останутся» удаление читается как удаление переписок.</p>
+  <p style="margin-top:10px"><b>Требует движка:</b> состав, порядок и значок папок надо где-то хранить.
+  Сейчас список зашит константой в <code>Navigation.kt:36</code>.</p>
+</div>
+
+</body>
+</html>

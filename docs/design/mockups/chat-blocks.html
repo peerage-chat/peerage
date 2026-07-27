@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Блоки сообщений (склейка)</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; color: var(--on-dark); }
+  .cap { padding: 10px 16px; background: var(--surface); font-size: var(--font-small); color: var(--secondary);
+         border-bottom: 1px solid var(--border); }
+  .body { padding: var(--space-m) var(--space-s) var(--space-l); }
+  .day { align-self: center; width: fit-content; margin: var(--space-s) auto var(--space-m); background: var(--surface);
+         border-radius: var(--radius-chip); padding: 3px 12px; font-size: var(--font-small); color: var(--secondary); }
+
+  /* ── Ряд сообщения ──
+     Ключевые числа: между блоками 8px, ВНУТРИ блока 2px. */
+  .m { display: flex; margin-bottom: 8px; }
+  .m.tight { margin-bottom: 2px; }
+  .m.out { justify-content: flex-end; }
+  .m.in { justify-content: flex-start; align-items: flex-end; gap: var(--space-s); }
+
+  .bub { max-width: 78%; padding: 7px 12px 5px; font-size: 14px; line-height: 1.35; position: relative; }
+  .in .bub { background: var(--bubble-in); }
+  .out .bub { background: var(--bubble-out); }
+
+  /* Скругления: 14px везде, кроме «шва» внутри блока — там 5px со стороны отправителя.
+     first = верхнее сообщение блока, mid = середина, last = нижнее, solo = одиночное. */
+  .in .bub.solo  { border-radius: 14px 14px 14px 14px; }
+  .in .bub.first { border-radius: 14px 14px 14px 5px; }
+  .in .bub.mid   { border-radius: 5px 14px 14px 5px; }
+  .in .bub.last  { border-radius: 5px 14px 14px 14px; }
+  .out .bub.solo  { border-radius: 14px 14px 14px 14px; }
+  .out .bub.first { border-radius: 14px 14px 5px 14px; }
+  .out .bub.mid   { border-radius: 14px 5px 5px 14px; }
+  .out .bub.last  { border-radius: 14px 5px 14px 14px; }
+
+  /* Время + галочки — ТОЛЬКО на последнем сообщении блока. */
+  .meta { float: right; margin: 6px 0 0 10px; font-size: 10px; color: rgba(255,255,255,.55);
+          display: flex; align-items: center; gap: 3px; }
+  .meta i { font-size: 13px; }
+  .meta .rd { color: #9fd8ee; }
+
+  /* Аватар в группе — под НИЖНИМ сообщением блока; у остальных пустая распорка. */
+  .av { width: 32px; height: 32px; border-radius: 11px; flex: 0 0 auto; display: flex; align-items: center;
+        justify-content: center; font-size: 13px; font-weight: 500; }
+  .av.hole { background: none; }
+  .sender { font-size: var(--font-small); font-weight: 500; margin-bottom: 2px; }
+
+  .sys { text-align: center; margin: var(--space-m) 0; }
+  .sys span { background: var(--surface); border-radius: var(--radius-chip); padding: 3px 10px;
+              font-size: var(--font-caption); color: var(--secondary); }
+
+  .note { max-width: 390px; color: #8a8f98; font-size: 13px; line-height: 1.5; }
+  .note b { color: #c9ced6; }
+  .note code { color: #b8c4d0; }
+  table { border-collapse: collapse; margin-top: 10px; font-size: 12px; width: 100%; }
+  td, th { border: 1px solid #2a2a2a; padding: 5px 8px; text-align: left; color: #8a8f98; }
+  th { color: #c9ced6; }
+</style>
+</head>
+<body>
+
+<!-- ─────────── DM: склейка своих и чужих ─────────── -->
+<div class="phone">
+  <div class="cap">Личный чат — блоки</div>
+  <div class="body">
+    <div class="day">Сегодня</div>
+
+    <!-- блок входящих из трёх -->
+    <div class="m in tight">
+      <div class="av hole"></div>
+      <div class="bub first">Привет! Ты уже в сети?</div>
+    </div>
+    <div class="m in tight">
+      <div class="av hole"></div>
+      <div class="bub mid">Хотела спросить про завтра</div>
+    </div>
+    <div class="m in">
+      <div class="av hole"></div>
+      <div class="bub last">Во сколько встречаемся?<div class="meta">13:40</div></div>
+    </div>
+
+    <!-- блок своих из двух -->
+    <div class="m out tight">
+      <div class="bub first">Привет</div>
+    </div>
+    <div class="m out">
+      <div class="bub last">В шесть у метро<div class="meta">13:41 <i class="ti ti-checks rd"></i></div></div>
+    </div>
+
+    <!-- одиночное входящее -->
+    <div class="m in">
+      <div class="av hole"></div>
+      <div class="bub solo">Отлично, буду<div class="meta">13:42</div></div>
+    </div>
+
+    <!-- одиночное своё -->
+    <div class="m out">
+      <div class="bub solo">До встречи<div class="meta">13:42 <i class="ti ti-check" style="color:rgba(255,255,255,.55)"></i></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── Групповой чат: аватар под нижним сообщением блока ─────────── -->
+<div class="phone">
+  <div class="cap">Групповой чат — блоки</div>
+  <div class="body">
+    <div class="day">Сегодня</div>
+
+    <div class="sys"><span>Алиса создала комнату</span></div>
+
+    <!-- блок Алисы из трёх: имя сверху, аватар снизу -->
+    <div class="m in tight">
+      <div class="av hole"></div>
+      <div class="bub first">
+        <div class="sender" style="color:#d9a7f0">Алиса</div>
+        Всем привет
+      </div>
+    </div>
+    <div class="m in tight">
+      <div class="av hole"></div>
+      <div class="bub mid">Я закинула файл в чат</div>
+    </div>
+    <div class="m in">
+      <div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
+      <div class="bub last">Гляньте, пожалуйста<div class="meta">14:02</div></div>
+    </div>
+
+    <!-- блок Бориса из двух -->
+    <div class="m in tight">
+      <div class="av hole"></div>
+      <div class="bub first">
+        <div class="sender" style="color:#7fc4f0">Борис</div>
+        Открыл
+      </div>
+    </div>
+    <div class="m in">
+      <div class="av" style="background:#2E3A4A;color:#c7d6f0">Б</div>
+      <div class="bub last">Выглядит нормально<div class="meta">14:05</div></div>
+    </div>
+
+    <!-- свой блок: без имени и аватара -->
+    <div class="m out tight">
+      <div class="bub first">Плюс</div>
+    </div>
+    <div class="m out">
+      <div class="bub last">Завтра допилю<div class="meta">14:06 <i class="ti ti-checks rd"></i></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <p><b>Что такое блок.</b> Подряд идущие сообщения ОДНОГО отправителя, между которыми прошло меньше
+  <b>5 минут</b> и нет чипа даты или системной строки. Смена отправителя, разрыв во времени или любой
+  разделитель — блок закрывается.</p>
+
+  <table>
+    <tr><th>Элемент</th><th>Где показывается</th></tr>
+    <tr><td>Время + галочки</td><td>только на ПОСЛЕДНЕМ сообщении блока</td></tr>
+    <tr><td>Имя отправителя (группы)</td><td>только на ПЕРВОМ</td></tr>
+    <tr><td>Аватар (группы)</td><td>только у ПОСЛЕДНЕГО, выровнен по низу пузыря</td></tr>
+    <tr><td>Отступ между сообщениями</td><td>2px внутри блока, 8px между блоками</td></tr>
+    <tr><td>Скругление «шва»</td><td>5px со стороны отправителя, 14px с остальных</td></tr>
+  </table>
+
+  <p style="margin-top:12px"><b>Вложения из блока не выпадают.</b> Картинка или голосовое склеиваются
+  наравне с текстом — иначе серия фото рассыпается на карточки с повторяющимися аватарками.</p>
+
+  <p style="margin-top:10px"><b>Пустая распорка вместо аватарки</b> (32px) держит левый край блока
+  ровным. Без неё верхние пузыри уезжали бы влево относительно нижнего.</p>
+
+  <p style="margin-top:10px"><b>5 минут — не из Telegram, а из нашей модели.</b> Часы устройств не
+  синхронизированы, время сообщения ставит отправитель; более узкое окно давало бы случайные разрывы
+  блока при расхождении часов.</p>
+</div>
+
+</body>
+</html>

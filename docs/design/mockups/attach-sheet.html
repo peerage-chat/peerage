@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Лист вложений</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .phone { width: 390px; height: 720px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; position: relative; color: var(--on-dark); }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
+  .topbar { display: flex; align-items: center; gap: 12px; padding: 8px 16px 12px; background: var(--accent-dark); }
+  .topbar .av { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center;
+                justify-content: center; font-size: 16px; font-weight: 500; }
+  .topbar .nm { font-size: 17px; font-weight: 500; }
+  .topbar .st { font-size: var(--font-small); color: var(--online); }
+  .topbar i { font-size: 22px; color: var(--icon-chrome); }
+
+  /* затемнённый чат под листом */
+  .chat { padding: var(--space-m) var(--space-s); opacity: .5; }
+  .bub { max-width: 78%; padding: var(--space-s) var(--space-m); border-radius: var(--radius-preview);
+         font-size: 14px; margin-bottom: var(--space-s); }
+  .bub.in { background: var(--bubble-in); }
+  .bub.out { background: var(--bubble-out); margin-left: auto; }
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
+
+  /* ── Лист ── */
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--surface);
+           border-radius: 22px 22px 0 0; padding-bottom: var(--space-l); }
+  .grab { width: 36px; height: 4px; background: var(--icon-muted); border-radius: 2px; margin: var(--space-m) auto var(--space-s); }
+  .sheet-head { display: flex; align-items: center; padding: 0 var(--space-l) var(--space-m); }
+  .sheet-head .t { font-size: var(--font-label); font-weight: 500; flex: 1; }
+  .sheet-head .all { font-size: var(--font-body); color: var(--accent); }
+
+  /* лента галереи */
+  .gal { display: flex; gap: var(--space-s); padding: 0 var(--space-l) var(--space-m); overflow-x: auto; }
+  .shot { width: 104px; height: 132px; border-radius: var(--radius-preview); flex: 0 0 auto; position: relative;
+          background: var(--avatar); overflow: hidden; }
+  .shot .pick { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 11px;
+                border: 2px solid rgba(255,255,255,.85); background: var(--tile-scrim); }
+  .shot.sel .pick { background: var(--accent); border-color: var(--accent); color: var(--accent-dark);
+                    display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .shot.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .shot .dur { position: absolute; right: 6px; bottom: 6px; background: var(--chip-scrim); border-radius: var(--radius-badge);
+               padding: 1px 5px; font-size: 10px; }
+  .shot.cam { background: var(--tile); display: flex; flex-direction: column; align-items: center;
+              justify-content: center; gap: 6px; color: var(--accent); font-size: var(--font-small); }
+  .shot.cam i { font-size: 26px; }
+
+  /* источники */
+  .srcs { display: flex; gap: var(--space-m); padding: 0 var(--space-l) var(--space-m); }
+  .src { flex: 1; background: var(--tile); border-radius: var(--radius-tile); padding: var(--space-m) 0;
+         display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--icon-chrome);
+         font-size: var(--font-small); }
+  .src i { font-size: 23px; color: var(--accent); }
+
+  /* строка подписи + отправка */
+  .send { display: flex; align-items: center; gap: var(--space-s); padding: var(--space-s) var(--space-l) 0;
+          border-top: 1px solid var(--border); padding-top: var(--space-m); }
+  .cap { flex: 1; height: 44px; border-radius: var(--radius-pill); background: var(--bg); display: flex;
+         align-items: center; padding: 0 var(--space-l); color: var(--secondary); font-size: 14px; }
+  .go { width: 44px; height: 44px; border-radius: var(--radius-pill); background: var(--accent);
+        color: var(--accent-dark); display: flex; align-items: center; justify-content: center; font-size: 21px;
+        position: relative; }
+  .go .cnt { position: absolute; right: -3px; top: -3px; min-width: 19px; height: 19px; border-radius: 10px;
+             background: var(--bg); color: var(--accent); border: 2px solid var(--surface); font-size: 11px;
+             font-weight: 500; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+  .note { max-width: 390px; color: #8a8f98; font-size: 13px; line-height: 1.5; }
+  .note b { color: #c9ced6; }
+</style>
+</head>
+<body>
+
+<!-- ─────────── Лист открыт, ничего не выбрано ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
+    <div style="flex:1"><div class="nm">Алиса</div><div class="st">в сети</div></div>
+    <i class="ti ti-phone"></i><i class="ti ti-dots-vertical"></i>
+  </div>
+
+  <div class="chat">
+    <div class="bub in">Скинешь фото со вчера?</div>
+    <div class="bub out">Сейчас</div>
+  </div>
+  <div class="scrim"></div>
+
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><span class="t">Отправить</span><span class="all">Вся галерея</span></div>
+
+    <div class="gal">
+      <div class="shot cam"><i class="ti ti-camera"></i>Камера</div>
+      <div class="shot" style="background:linear-gradient(150deg,#4a5a6e,#2b3440)"><span class="pick"></span></div>
+      <div class="shot" style="background:linear-gradient(150deg,#6e5a4a,#40342b)"><span class="pick"></span><span class="dur">0:42</span></div>
+      <div class="shot" style="background:linear-gradient(150deg,#4a6e5a,#2b4034)"><span class="pick"></span></div>
+      <div class="shot" style="background:linear-gradient(150deg,#6e4a5a,#402b34)"><span class="pick"></span></div>
+    </div>
+
+    <div class="srcs">
+      <div class="src"><i class="ti ti-file"></i>Файл</div>
+      <div class="src"><i class="ti ti-music"></i>Аудио</div>
+      <div class="src"><i class="ti ti-user"></i>Контакт</div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────── Выбрано 2, появилась подпись ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
+    <div style="flex:1"><div class="nm">Алиса</div><div class="st">в сети</div></div>
+    <i class="ti ti-phone"></i><i class="ti ti-dots-vertical"></i>
+  </div>
+
+  <div class="chat">
+    <div class="bub in">Скинешь фото со вчера?</div>
+    <div class="bub out">Сейчас</div>
+  </div>
+  <div class="scrim"></div>
+
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><span class="t">Выбрано 2 · 8,4 МБ</span><span class="all">Вся галерея</span></div>
+
+    <div class="gal">
+      <div class="shot cam"><i class="ti ti-camera"></i>Камера</div>
+      <div class="shot sel" style="background:linear-gradient(150deg,#4a5a6e,#2b3440)"><span class="pick"><i class="ti ti-check"></i></span></div>
+      <div class="shot sel" style="background:linear-gradient(150deg,#6e5a4a,#40342b)"><span class="pick"><i class="ti ti-check"></i></span><span class="dur">0:42</span></div>
+      <div class="shot" style="background:linear-gradient(150deg,#4a6e5a,#2b4034)"><span class="pick"></span></div>
+      <div class="shot" style="background:linear-gradient(150deg,#6e4a5a,#402b34)"><span class="pick"></span></div>
+    </div>
+
+    <div class="srcs">
+      <div class="src"><i class="ti ti-file"></i>Файл</div>
+      <div class="src"><i class="ti ti-music"></i>Аудио</div>
+      <div class="src"><i class="ti ti-user"></i>Контакт</div>
+    </div>
+
+    <div class="send">
+      <div class="cap">Подпись…</div>
+      <div class="go"><i class="ti ti-send"></i><span class="cnt">2</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <p><b>Лист, а не меню.</b> Прежний <code>DropdownMenu</code> на два пункта заставлял выбирать источник
+  вслепую и уводил в системный пикер. Здесь недавние снимки видно сразу, и частый случай («последнее
+  фото») закрывается одним касанием.</p>
+  <p style="margin-top:10px"><b>Строка подписи появляется только с выбором</b> и заменяет собой отдельный
+  экран подтверждения. Счётчик на кнопке отправки показывает, сколько уйдёт.</p>
+  <p style="margin-top:10px"><b>Размер выбранного показан в заголовке</b> («2 · 8,4 МБ») намеренно: у
+  получателя крупное вложение не качается само, и отправителю полезно понимать, что он шлёт карточку,
+  а не байты.</p>
+  <p style="margin-top:10px"><b>«Контакт»</b> — источник на будущее (пересылка ключа контакта). Если в
+  v1.0 его не будет, ячейка убирается, а не остаётся неактивной: правило — нарисованное работает.</p>
+  <p style="margin-top:10px"><b>Подпись требует поля в протоколе.</b> В <code>Payload::Media</code> текста
+  сейчас нет — это работа по движку, отмечена в <code>ui-completion-plan.md</code>.</p>
+</div>
+
+</body>
+</html>

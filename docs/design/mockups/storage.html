@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Хранилище</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; color: var(--on-dark); }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px 14px; background: var(--accent-dark); }
+  .topbar .title { font-size: 20px; font-weight: 500; flex: 1; }
+  .topbar i { font-size: 22px; color: var(--icon-chrome); }
+
+  .total { text-align: center; padding: var(--space-xl) var(--space-l) var(--space-m); }
+  .total .n { font-size: var(--font-huge); font-weight: 500; }
+  .total .s { font-size: var(--font-body); color: var(--secondary); margin-top: 2px; }
+
+  /* полоса состава */
+  .bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 0 var(--space-l); }
+  .bar span { display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: var(--space-m); padding: var(--space-m) var(--space-l) var(--space-s); }
+  .lg { display: flex; align-items: center; gap: 6px; font-size: var(--font-small); color: var(--secondary); }
+  .dot { width: 9px; height: 9px; border-radius: 3px; }
+
+  .sect { padding: var(--space-l) var(--space-l) var(--space-xs); font-size: var(--font-caption);
+          letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+  .row { display: flex; align-items: center; gap: var(--space-m); padding: var(--row-v) var(--space-l);
+         font-size: var(--font-label); }
+  .row i.lead { font-size: 21px; color: var(--icon-muted); }
+  .row .sp { flex: 1; min-width: 0; }
+  .row .val { font-size: var(--font-body); color: var(--secondary); }
+  .row .sub { font-size: var(--font-small); color: var(--secondary); margin-top: 1px; }
+  .row i.chev { font-size: 18px; color: var(--icon-muted); }
+  .av { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+        font-size: 15px; font-weight: 500; flex: 0 0 auto; }
+  .accent { color: var(--accent); }
+  .accent i.lead { color: var(--accent); }
+  .hint { padding: var(--space-xs) var(--space-l) var(--space-m); font-size: var(--font-small);
+          color: var(--secondary); line-height: 1.45; }
+  .warn-card { margin: var(--space-m) var(--space-l); background: rgba(230,162,60,.12); border-radius: var(--radius-tile);
+               padding: var(--space-m) var(--space-l); display: flex; gap: var(--space-m); align-items: flex-start; }
+  .warn-card i { font-size: 20px; color: var(--warn); flex: 0 0 auto; }
+  .warn-card .t { font-size: var(--font-body); color: var(--warn); font-weight: 500; }
+  .warn-card .h { font-size: var(--font-small); color: var(--secondary); margin-top: 3px; line-height: 1.45; }
+  .note { max-width: 390px; color: #8a8f98; font-size: 13px; line-height: 1.5; }
+  .note b { color: #c9ced6; }
+</style>
+</head>
+<body>
+
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Хранилище</span>
+  </div>
+
+  <div class="total">
+    <div class="n">1,84 ГБ</div>
+    <div class="s">занято приложением · свободно 6,2 ГБ</div>
+  </div>
+
+  <div class="bar">
+    <span style="width:58%;background:var(--accent)"></span>
+    <span style="width:22%;background:#7E57C2"></span>
+    <span style="width:12%;background:var(--online)"></span>
+    <span style="width:8%;background:var(--icon-muted)"></span>
+  </div>
+  <div class="legend">
+    <div class="lg"><span class="dot" style="background:var(--accent)"></span>Видео · 1,05 ГБ</div>
+    <div class="lg"><span class="dot" style="background:#7E57C2"></span>Фото · 412 МБ</div>
+    <div class="lg"><span class="dot" style="background:var(--online)"></span>Голосовые · 224 МБ</div>
+    <div class="lg"><span class="dot" style="background:var(--icon-muted)"></span>Переписка · 149 МБ</div>
+  </div>
+
+  <div class="sect">По чатам</div>
+  <div class="row"><div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
+    <div class="sp"><div>Алиса</div><div class="sub">28 файлов</div></div>
+    <span class="val">964 МБ</span><i class="ti ti-chevron-right chev"></i></div>
+  <div class="row"><div class="av" style="background:#2A4034;color:var(--online)"><i class="ti ti-users" style="font-size:19px"></i></div>
+    <div class="sp"><div>Секретный клуб</div><div class="sub">51 файл</div></div>
+    <span class="val">612 МБ</span><i class="ti ti-chevron-right chev"></i></div>
+  <div class="row"><div class="av" style="background:#2E3A4A;color:#c7d6f0">Б</div>
+    <div class="sp"><div>Борис</div><div class="sub">9 файлов</div></div>
+    <span class="val">115 МБ</span><i class="ti ti-chevron-right chev"></i></div>
+
+  <div class="sect">Освободить место</div>
+  <div class="row accent"><i class="ti ti-photo-off lead"></i><span class="sp">Удалить вложения</span>
+    <span class="val">1,69 ГБ</span></div>
+  <div class="hint">Сообщения останутся. Файл можно будет скачать снова, пока он есть у отправителя, —
+    сервера, который хранит копию, нет.</div>
+
+  <div class="sect">Резервная копия данных</div>
+  <div class="warn-card">
+    <i class="ti ti-alert-triangle"></i>
+    <div>
+      <div class="t">Копия не сделана</div>
+      <div class="h">Переписка и контакты живут только на этом устройстве. Потеряете телефон —
+        восстановить будет нечем: ключ возвращает личность, но не историю.</div>
+    </div>
+  </div>
+  <div class="row accent"><i class="ti ti-database-export lead"></i><span class="sp">Сохранить копию в файл</span></div>
+  <div class="row"><i class="ti ti-database-import lead"></i><span class="sp">Восстановить из файла</span></div>
+  <div class="hint">Копия шифруется тем же ключом, что и база на устройстве.</div>
+  <div style="height:16px"></div>
+</div>
+
+<div class="note">
+  <p><b>Полоса состава важнее списка.</b> Вопрос пользователя — «что съело место», и ответ должен
+  читаться за секунду, до всякой прокрутки.</p>
+  <p style="margin-top:10px"><b>«Удалить вложения» не трогает сообщения</b> — и это сказано прямо, вместе
+  с честной оговоркой: повторно скачать получится, только пока файл есть у отправителя. В сети без
+  серверов это не мелкая деталь.</p>
+  <p style="margin-top:10px"><b>Резервная копия ДАННЫХ живёт здесь,</b> отдельно от резервной копии
+  КЛЮЧА (она в онбординге и настройках безопасности). Разделение намеренное: ключ восстанавливает
+  личность, копия данных — переписку. Путать их опасно.</p>
+  <p style="margin-top:10px"><b>Текущий экран</b> (<code>StorageScreen.kt</code>) — времянка на 96 строк
+  с двумя цифрами; здесь описано, чем он становится.</p>
+</div>
+
+</body>
+</html>

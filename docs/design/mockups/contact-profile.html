@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Профиль контакта</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; position: relative; color: var(--on-dark); }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px 14px; background: var(--accent-dark); }
+  .topbar .sp { flex: 1; }
+  .topbar i { font-size: 22px; color: var(--icon-chrome); }
+
+  /* ── Шапка профиля ── */
+  .hero { display: flex; flex-direction: column; align-items: center; padding: var(--space-xxl) var(--space-l) var(--space-l); }
+  .hero .av { width: 96px; height: 96px; border-radius: 26px; display: flex; align-items: center; justify-content: center;
+              font-size: 38px; font-weight: 500; position: relative; }
+  .hero .presence { position: absolute; right: -3px; bottom: -3px; width: 22px; height: 22px; background: var(--online);
+                    border: 3px solid var(--bg); border-radius: 8px; }
+  .hero .nm { margin-top: var(--space-m); font-size: 22px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+  .hero .nm i { font-size: 19px; color: var(--verified); }
+  .hero .st { margin-top: var(--space-xxs); font-size: var(--font-body); color: var(--online); }
+  .hero .addr { margin-top: var(--space-xs); font-size: var(--font-small); color: var(--secondary);
+                font-family: ui-monospace, monospace; }
+
+  /* ── Действия ── */
+  .acts { display: flex; gap: var(--space-m); padding: 0 var(--space-l) var(--space-xl); }
+  .act { flex: 1; background: var(--surface); border-radius: var(--radius-tile); padding: var(--space-m) 0;
+         display: flex; flex-direction: column; align-items: center; gap: 5px; color: var(--accent); }
+  .act i { font-size: 22px; }
+  .act span { font-size: var(--font-small); }
+
+  /* ── Карточки ── */
+  .card { margin: 0 var(--space-l) var(--space-m); background: var(--surface); border-radius: var(--radius-tile);
+          padding: var(--space-l); }
+  .card-head { display: flex; align-items: center; gap: var(--space-s); font-size: var(--font-label); font-weight: 500; }
+  .card-head.ok { color: var(--verified); }
+  .card-head.warn { color: var(--warn); }
+  .hint { margin-top: var(--space-s); font-size: var(--font-small); color: var(--secondary); line-height: 1.45; }
+
+  /* ── Эмодзи-fingerprint 6×2 ── */
+  .fp { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--space-s); margin-top: var(--space-l); }
+  .fp div { aspect-ratio: 1; background: var(--bg); border-radius: var(--radius-chip); display: flex;
+            align-items: center; justify-content: center; font-size: 24px; color: var(--icon-chrome); }
+  .scan { margin-top: var(--space-l); width: 100%; height: 44px; border-radius: var(--radius-button);
+          background: var(--accent); color: var(--accent-dark); font-size: var(--font-label); font-weight: 500;
+          display: flex; align-items: center; justify-content: center; gap: var(--space-s); }
+  .scan.ghost { background: transparent; border: 1px solid var(--border); color: var(--accent); }
+
+  /* ── Ряды-настройки ── */
+  .row { display: flex; align-items: center; gap: var(--space-m); padding: var(--row-v) var(--space-l);
+         font-size: var(--font-label); }
+  .row i.lead { font-size: 21px; color: var(--icon-muted); }
+  .row .sp { flex: 1; }
+  .row .val { font-size: var(--font-body); color: var(--secondary); }
+  .row.danger { color: var(--error); }
+  .row.danger i.lead { color: var(--error); }
+  .sep { height: 1px; background: var(--border); margin: var(--space-s) var(--space-l); }
+  .sect { padding: var(--space-l) var(--space-l) var(--space-xs); font-size: var(--font-caption);
+          letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+  .note { max-width: 390px; color: #8a8f98; font-size: 13px; line-height: 1.5; }
+  .note b { color: #c9ced6; }
+</style>
+</head>
+<body>
+
+<!-- ─────────── Вариант А: контакт ПРОВЕРЕН ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="sp"></span>
+    <i class="ti ti-dots-vertical"></i>
+  </div>
+
+  <div class="hero">
+    <div class="av" style="background:#3A2E4A;color:#d9c7f0">А<span class="presence"></span></div>
+    <div class="nm">Алиса <i class="ti ti-rosette-discount-check"></i></div>
+    <div class="st">в сети</div>
+    <div class="addr">200:857d:d932:42d3…1fe9</div>
+  </div>
+
+  <div class="acts">
+    <div class="act"><i class="ti ti-message"></i><span>Сообщение</span></div>
+    <div class="act"><i class="ti ti-phone"></i><span>Звонок</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head ok"><i class="ti ti-shield-check" style="font-size:20px"></i>Проверен</div>
+    <div class="hint">Ключи сверены лично. Если набор ниже совпадает с тем, что видит Алиса на своём
+      экране, — связь идёт напрямую, без посредника.</div>
+    <div class="fp">
+      <div><i class="ti ti-anchor"></i></div><div><i class="ti ti-bulb"></i></div>
+      <div><i class="ti ti-cactus"></i></div><div><i class="ti ti-cherry"></i></div>
+      <div><i class="ti ti-cloud"></i></div><div><i class="ti ti-diamond"></i></div>
+      <div><i class="ti ti-feather"></i></div><div><i class="ti ti-flame"></i></div>
+      <div><i class="ti ti-ghost"></i></div><div><i class="ti ti-key"></i></div>
+      <div><i class="ti ti-leaf"></i></div><div><i class="ti ti-moon"></i></div>
+    </div>
+    <div class="scan ghost"><i class="ti ti-qrcode"></i>Сверить заново</div>
+  </div>
+
+  <div class="sect">Общее</div>
+  <div class="row"><i class="ti ti-users lead"></i><span class="sp">Общие группы</span><span class="val">2</span>
+    <i class="ti ti-chevron-right" style="font-size:18px;color:var(--icon-muted)"></i></div>
+  <div class="row"><i class="ti ti-photo lead"></i><span class="sp">Вложения</span><span class="val">14</span>
+    <i class="ti ti-chevron-right" style="font-size:18px;color:var(--icon-muted)"></i></div>
+
+  <div class="sep"></div>
+  <div class="row"><i class="ti ti-bell lead"></i><span class="sp">Уведомления</span>
+    <span class="val">Вкл</span></div>
+  <div class="row danger"><i class="ti ti-ban lead"></i><span class="sp">Заблокировать</span></div>
+  <div style="height:16px"></div>
+</div>
+
+<!-- ─────────── Вариант Б: контакт НЕ проверен ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="sp"></span>
+    <i class="ti ti-dots-vertical"></i>
+  </div>
+
+  <div class="hero">
+    <div class="av" style="background:#4A2E2E;color:#f0c7c7">2</div>
+    <div class="nm" style="font-family:ui-monospace,monospace;font-size:18px">2cbbb91c8f4a…</div>
+    <div class="st" style="color:var(--secondary)">не в сети</div>
+    <div class="addr">200:2cbb:b91c:8f4a…70d2</div>
+  </div>
+
+  <div class="acts">
+    <div class="act"><i class="ti ti-message"></i><span>Сообщение</span></div>
+    <div class="act"><i class="ti ti-phone"></i><span>Звонок</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head warn"><i class="ti ti-shield-question" style="font-size:20px"></i>Не проверен</div>
+    <div class="hint">Переписка зашифрована, но никто не подтвердил, что на том конце именно этот человек.
+      Сверьте набор при личной встрече или по видеосвязи.</div>
+    <div class="fp">
+      <div><i class="ti ti-anchor"></i></div><div><i class="ti ti-bulb"></i></div>
+      <div><i class="ti ti-cactus"></i></div><div><i class="ti ti-cherry"></i></div>
+      <div><i class="ti ti-cloud"></i></div><div><i class="ti ti-diamond"></i></div>
+      <div><i class="ti ti-feather"></i></div><div><i class="ti ti-flame"></i></div>
+      <div><i class="ti ti-ghost"></i></div><div><i class="ti ti-key"></i></div>
+      <div><i class="ti ti-leaf"></i></div><div><i class="ti ti-moon"></i></div>
+    </div>
+    <div class="scan"><i class="ti ti-qrcode"></i>Сканировать QR</div>
+  </div>
+
+  <div class="sect">Общее</div>
+  <div class="row"><i class="ti ti-users lead"></i><span class="sp">Общие группы</span><span class="val">нет</span></div>
+  <div class="row"><i class="ti ti-photo lead"></i><span class="sp">Вложения</span><span class="val">нет</span></div>
+
+  <div class="sep"></div>
+  <div class="row"><i class="ti ti-bell lead"></i><span class="sp">Уведомления</span><span class="val">Вкл</span></div>
+  <div class="row danger"><i class="ti ti-ban lead"></i><span class="sp">Заблокировать</span></div>
+  <div style="height:16px"></div>
+</div>
+
+<div class="note">
+  <p><b>Кнопки «Видео» нет намеренно.</b> В <code>app-ui.md</code> она упомянута в списке действий, но
+  там же зафиксировано: в шапке чата — только аудиозвонок, камера включается уже внутри звонка.
+  Два входа с разным поведением путали бы; оставлен один.</p>
+  <p style="margin-top:10px"><b>Иконки в сетке 6×2 — заглушки.</b> Настоящий набор — свой курируемый SVG
+  (рендер байт-в-байт одинаков на всех устройствах, не зависит от системного шрифта). Здесь Tabler
+  показывает только раскладку, размер ячейки и ритм.</p>
+  <p style="margin-top:10px"><b>Имя-заметка редактируется через меню</b> (⋮ → «Изменить имя»), а не полем
+  прямо на экране: профиль — это карточка для чтения и сверки, а не форма. Так же убраны отсюда
+  «удалить контакт» и диагностика скорости — им место в меню и в «Сети» соответственно.</p>
+</div>
+
+</body>
+</html>
