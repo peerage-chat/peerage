@@ -16,6 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod disk;
 pub mod scrub;
 
 /// BLAKE3-хэш (256 бит) — и id блоба, и хэш чанка.
@@ -26,6 +27,11 @@ pub type Hash = [u8; 32];
 /// ДВАЖДЫ (data в payload + весь sealed-конверт), т.е. ×4: 12 КБ → датаграмма ≈
 /// 49 КБ, влезает с запасом. Крупнее не влезало и молча обрезалось на приёме.
 pub const CHUNK_SIZE: usize = 12 * 1024;
+
+/// BLAKE3 куска данных (для проверки чанка против манифеста).
+pub fn hash_of(data: &[u8]) -> Hash {
+    hash(data)
+}
 
 fn hash(data: &[u8]) -> Hash {
     *blake3::hash(data).as_bytes()
@@ -44,6 +50,9 @@ pub struct Limits {
     pub max_size: u64,
     /// Максимум чанков (косвенно ограничивает и память под манифест).
     pub max_chunks: usize,
+    /// С этого размера блоб собирается сразу НА ДИСК, а не в память. Мелкие
+    /// (аватар/картинка) дешевле собрать в RAM — они там же и показываются.
+    pub disk_threshold: u64,
 }
 
 impl Default for Limits {
@@ -55,14 +64,30 @@ impl Default for Limits {
         // RAM, поэтому предел выбран из того, сколько не жалко держать в памяти
         // телефона. Для гигабайтных файлов нужна потоковая сборка на диск (отдельно).
         let max_size = 64 * 1024 * 1024;
-        Self { max_size, max_chunks: (max_size as usize / CHUNK_SIZE) + 1 }
+        Self {
+            max_size,
+            max_chunks: (max_size as usize / CHUNK_SIZE) + 1,
+            disk_threshold: 8 * 1024 * 1024,
+        }
     }
 }
 
 impl Limits {
     /// Лимит под конкретный максимум размера (число чанков выводится).
     pub fn with_max_size(max_size: u64) -> Self {
-        Self { max_size, max_chunks: (max_size as usize / CHUNK_SIZE) + 1 }
+        Self { max_size, ..Default::default() }
+            .with_chunks_for(max_size)
+    }
+
+    fn with_chunks_for(mut self, max_size: u64) -> Self {
+        self.max_chunks = (max_size as usize / CHUNK_SIZE) + 1;
+        self
+    }
+
+    /// Порог сборки на диск (для тестов и настроек хранилища).
+    pub fn with_disk_threshold(mut self, bytes: u64) -> Self {
+        self.disk_threshold = bytes;
+        self
     }
 }
 
@@ -293,6 +318,8 @@ pub enum BlobError {
     Incomplete,
     #[error("собранное содержимое не совпало с id/размером блоба")]
     IdMismatch,
+    #[error("ошибка ввода-вывода при сборке блоба на диск")]
+    Io,
 }
 
 /// Инкрементальная сборка блоба из чанков с проверкой каждого против манифеста.

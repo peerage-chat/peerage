@@ -1009,8 +1009,9 @@ fn event_pump(
     messenger: Arc<Messenger>,
     data_dir: PathBuf,
 ) {
+    let blob_dir = data_dir.join("blobs");
     let mut groups = GroupManager::new(identity, messenger.clone(), data_dir);
-    let mut blobs = blobs::BlobManager::new(messenger.clone(), p2p_blob::Limits::default());
+    let mut blobs = blobs::BlobManager::new(messenger.clone(), p2p_blob::Limits::default(), blob_dir);
     {
         let ob = engine.outbox.lock_safe();
         log::info!("outbox on_start: pending={} (до prune+досылки)", ob.pending_count());
@@ -1087,7 +1088,13 @@ fn event_pump(
 fn read_blob_at(dir: &Path, id_hex: &str) -> Option<Vec<u8>> {
     // Санитизация: только валидный hex → чистое имя файла (без traversal).
     let clean = hex::encode(hex::decode(id_hex.trim()).ok()?);
-    let raw = std::fs::read(dir.join(clean)).ok()?;
+    let path = dir.join(clean);
+    // Крупные блобы лежат в чанкованном формате (собраны потоково на диск), мелкие —
+    // одним запечатанным буфером. Различаем по магии в заголовке.
+    if p2p_blob::disk::read_header(&path).is_some() {
+        return p2p_blob::disk::read_all(&path, |b| p2p_core::vault::open(b).ok());
+    }
+    let raw = std::fs::read(path).ok()?;
     p2p_core::vault::open(&raw).ok()
 }
 
@@ -1100,7 +1107,12 @@ fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
 
 /// Сохранить принятый блоб и уведомить UI (`blob_received`).
 fn save_and_notify_blob(engine: &Arc<Engine>, peer: [u8; 32], done: blobs::Completed) {
-    save_blob(engine, done.id, &done.content);
+    match &done.data {
+        // Мелкий блоб собран в памяти — сохраняем как раньше (один запечатанный файл).
+        blobs::CompletedData::InMemory(content) => save_blob(engine, done.id, content),
+        // Крупный уже лежит на диске в чанкованном виде — писать нечего.
+        blobs::CompletedData::OnDisk(_) => {}
+    }
     // M3, репутация: пир потратил на нас свой трафик, отдав блоб целиком → растим
     // его бюджет. Не-контакту счётчик не двигается (анти-Sybil, см. budget.rs).
     let bumped = engine.contacts.lock_safe().bump_helpful(&peer).unwrap_or(0);

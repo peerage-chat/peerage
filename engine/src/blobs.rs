@@ -11,6 +11,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use std::path::PathBuf;
+
+use p2p_blob::disk::DiskAssembler;
 use p2p_blob::{Hash, Limits, Manifest, ManifestAssembler, ManifestPart, Reassembler};
 use p2p_messenger::{Messenger, PeerKey};
 
@@ -21,18 +24,35 @@ const REREQUEST_AFTER: Duration = Duration::from_millis(150);
 pub struct Completed {
     pub id: Hash,
     pub manifest: Manifest,
-    pub content: Vec<u8>,
+    /// Где лежит содержимое. Крупный блоб собирается сразу на диск и в память НЕ
+    /// поднимается — иначе файл на N МБ стоил бы N МБ RAM.
+    pub data: CompletedData,
+}
+
+pub enum CompletedData {
+    /// Мелкий блоб (картинка/аватар/голосовое) — собран в памяти, ещё не сохранён.
+    InMemory(Vec<u8>),
+    /// Крупный — уже записан по этому пути в чанкованном зашифрованном формате.
+    OnDisk(PathBuf),
+}
+
+/// Куда складываем приходящие чанки.
+enum Sink {
+    Ram(Reassembler),
+    Disk(DiskAssembler),
 }
 
 struct Incoming {
     peer: PeerKey,
-    re: Reassembler,
+    sink: Sink,
     last_req: Instant,
 }
 
 pub struct BlobManager {
     messenger: Arc<Messenger>,
     limits: Limits,
+    /// Куда складывать блобы, собираемые сразу на диск (крупные).
+    blob_dir: PathBuf,
     /// Блобы, которые мы отдаём: id → (manifest, чанки по порядку).
     outgoing: HashMap<Hash, (Manifest, Vec<Vec<u8>>)>,
     /// Блобы, которые мы качаем: id → состояние докачки.
@@ -46,10 +66,11 @@ fn to_id(bytes: &[u8]) -> Option<Hash> {
 }
 
 impl BlobManager {
-    pub fn new(messenger: Arc<Messenger>, limits: Limits) -> Self {
+    pub fn new(messenger: Arc<Messenger>, limits: Limits, blob_dir: PathBuf) -> Self {
         Self {
             messenger,
             limits,
+            blob_dir,
             outgoing: HashMap::new(),
             incoming: HashMap::new(),
             partial_manifests: HashMap::new(),
@@ -108,14 +129,31 @@ impl BlobManager {
 
     /// Общий старт докачки по готовому манифесту (пришёл целиком или собран из частей).
     fn start_download(&mut self, peer: PeerKey, manifest: Manifest) -> Option<Completed> {
-        let re = Reassembler::new(manifest, &self.limits).ok()?;
-        let id = re.manifest().id;
-        if re.is_complete() {
-            let manifest = re.manifest().clone();
-            return re.finish().ok().map(|content| Completed { id, manifest, content });
+        if manifest.validate(&self.limits).is_err() {
+            return None;
         }
-        let missing = re.missing();
-        self.incoming.insert(id, Incoming { peer, re, last_req: Instant::now() });
+        let id = manifest.id;
+        // Крупный блоб собираем СРАЗУ НА ДИСК: держать его целиком в RAM нельзя.
+        let sink = if manifest.size >= self.limits.disk_threshold {
+            let path = self.blob_dir.join(hex::encode(id));
+            Sink::Disk(DiskAssembler::create(manifest, &path).ok()?)
+        } else {
+            let re = Reassembler::new(manifest, &self.limits).ok()?;
+            if re.is_complete() {
+                // Пустой блоб — готов сразу.
+                let manifest = re.manifest().clone();
+                return re
+                    .finish()
+                    .ok()
+                    .map(|content| Completed { id, manifest, data: CompletedData::InMemory(content) });
+            }
+            Sink::Ram(re)
+        };
+        let missing = match &sink {
+            Sink::Ram(r) => r.missing(),
+            Sink::Disk(d) => d.missing(),
+        };
+        self.incoming.insert(id, Incoming { peer, sink, last_req: Instant::now() });
         for index in missing {
             let _ = self.messenger.send_blob_request(&peer, &id, index as u32);
         }
@@ -161,15 +199,37 @@ impl BlobManager {
     pub fn on_chunk(&mut self, id_bytes: &[u8], index: u32, data: &[u8]) -> Option<Completed> {
         let id = to_id(id_bytes)?;
         let inc = self.incoming.get_mut(&id)?;
-        if inc.re.add(index as usize, data).is_err() {
-            return None; // чужой/битый чанк — игнор
+        let complete = match &mut inc.sink {
+            Sink::Ram(re) => {
+                if re.add(index as usize, data).is_err() {
+                    return None; // чужой/битый чанк — игнор
+                }
+                re.is_complete()
+            }
+            Sink::Disk(d) => {
+                // Шифруем чанк тем же at-rest ключом, что и остальные данные, и сразу
+                // пишем на диск — в памяти он не задерживается.
+                if d.add(index as usize, data, p2p_core::vault::seal).is_err() {
+                    return None;
+                }
+                d.is_complete()
+            }
+        };
+        if !complete {
+            return None;
         }
-        if inc.re.is_complete() {
-            let inc = self.incoming.remove(&id)?;
-            let manifest = inc.re.manifest().clone();
-            return inc.re.finish().ok().map(|content| Completed { id, manifest, content });
+        let inc = self.incoming.remove(&id)?;
+        match inc.sink {
+            Sink::Ram(re) => {
+                let manifest = re.manifest().clone();
+                re.finish().ok().map(|content| Completed { id, manifest, data: CompletedData::InMemory(content) })
+            }
+            Sink::Disk(d) => {
+                let manifest = d.manifest().clone();
+                let path = d.finish().ok()?;
+                Some(Completed { id, manifest, data: CompletedData::OnDisk(path) })
+            }
         }
-        None
     }
 
     /// Периодический тик: переспросить застрявшие (потерянные) чанки. Зовётся
@@ -181,8 +241,11 @@ impl BlobManager {
                 continue;
             }
             inc.last_req = now;
-            let id = inc.re.manifest().id;
-            for index in inc.re.missing() {
+            let (id, missing) = match &inc.sink {
+                Sink::Ram(r) => (r.manifest().id, r.missing()),
+                Sink::Disk(d) => (d.manifest().id, d.missing()),
+            };
+            for index in missing {
                 let _ = self.messenger.send_blob_request(&inc.peer, &id, index as u32);
             }
         }
