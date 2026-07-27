@@ -11,7 +11,7 @@
   body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
          gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
   .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
-           overflow: hidden; color: var(--on-dark); }
+           overflow: hidden; color: var(--on-dark); position: relative; }
   .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
                background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
   .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px 14px; background: var(--accent-dark); }
@@ -62,6 +62,39 @@
   .empty i { font-size: 46px; color: var(--icon-muted); }
   .empty .t { font-size: var(--font-label); }
   .empty .h { font-size: var(--font-body); color: var(--secondary); line-height: 1.45; }
+
+  /* ── Диалоги ── */
+  .dim { position: absolute; inset: 0; background: rgba(0,0,0,.6); }
+  .dlg { position: absolute; left: var(--space-l); right: var(--space-l); top: 50%; transform: translateY(-50%);
+         background: var(--surface); border-radius: 18px; padding: var(--space-xl); }
+  .dlg .t { font-size: 17px; font-weight: 500; }
+  .dlg .h { font-size: var(--font-body); color: var(--secondary); margin-top: var(--space-s); line-height: 1.5; }
+  .dlg .acts { display: flex; justify-content: flex-end; gap: var(--space-xl); margin-top: var(--space-xl);
+               font-size: var(--font-label); font-weight: 500; }
+  .dlg .acts .cancel { color: var(--secondary); }
+  .dlg .acts .ok { color: var(--error); }
+  .dlg .acts .ok.hold { color: var(--icon-muted); }
+  .sum { margin-top: var(--space-m); background: var(--bg); border-radius: var(--radius-tile);
+         padding: var(--space-m) var(--space-l); font-size: var(--font-body); }
+  .sum div { display: flex; justify-content: space-between; padding: 2px 0; color: var(--secondary); }
+  .sum b { color: var(--on-dark); font-weight: 500; }
+  /* финальное подтверждение — удержанием, а не тапом */
+  .hold-btn { margin-top: var(--space-l); height: 46px; border-radius: var(--radius-button); background: var(--bg);
+              display: flex; align-items: center; justify-content: center; gap: var(--space-s);
+              font-size: var(--font-label); font-weight: 500; color: var(--error); position: relative;
+              overflow: hidden; }
+  .hold-btn .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 38%; background: rgba(229,57,53,.2); }
+  .hold-btn span, .hold-btn i { position: relative; }
+  /* контекстное меню по долгому тапу */
+  .ctx { position: absolute; left: 60px; width: 230px; background: var(--surface); border: 1px solid var(--border);
+         border-radius: 12px; overflow: hidden; }
+  .ctx .it { display: flex; align-items: center; gap: var(--space-m); padding: 12px var(--space-l);
+             font-size: var(--font-body); }
+  .ctx .it i { font-size: 19px; color: var(--secondary); }
+  .ctx .it.danger { color: var(--error); }
+  .ctx .it.danger i { color: var(--error); }
+  .ctx .sep { height: 1px; background: var(--border); }
+  .row.pressed { background: var(--folder-selected); }
 
   .note { max-width: 390px; color: #8a8f98; font-size: 13px; line-height: 1.5; }
   .note b { color: #c9ced6; }
@@ -128,9 +161,11 @@
     <div class="right"><div class="cnt">7</div><div class="sz">18 КБ</div></div>
   </div>
 
+  <div class="hint" style="padding-top:var(--space-s)">Долгий тап по получателю — очистить его очередь.</div>
+
   <div class="sect">Управление</div>
-  <div class="danger-row"><i class="ti ti-trash"></i><span>Очистить очередь Бориса</span></div>
-  <div class="hint">Удаляются <b>ваши</b> сообщения, которые он ещё не получил. Отменить нельзя, и
+  <div class="danger-row"><i class="ti ti-trash"></i><span>Очистить всё</span></div>
+  <div class="hint">Удаляются <b>ваши</b> сообщения, которые ещё не дошли ни до кого. Отменить нельзя, и
     повторить отправку будет нечем.</div>
   <div style="height:16px"></div>
 </div>
@@ -153,6 +188,126 @@
   </div>
 </div>
 
+
+<!-- ─────────── Долгий тап по получателю ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Очередь отправки</span>
+  </div>
+
+  <div class="sect">По получателям</div>
+
+  <div class="row pressed">
+    <div class="av-wrap"><div class="av" style="background:#2E3A4A;color:#c7d6f0">Б</div><span class="presence"></span></div>
+    <div class="meta">
+      <div class="name">Борис</div>
+      <div class="sub"><i class="ti ti-clock"></i>не в сети 24 дня</div>
+    </div>
+    <div class="right"><div class="cnt">1 202</div><div class="sz">86 МБ</div></div>
+  </div>
+
+  <div class="ctx" style="top:196px">
+    <div class="it"><i class="ti ti-message"></i>Открыть чат</div>
+    <div class="it"><i class="ti ti-user"></i>Профиль</div>
+    <div class="sep"></div>
+    <div class="it danger"><i class="ti ti-trash"></i>Очистить очередь</div>
+  </div>
+
+  <div class="row" style="opacity:.35">
+    <div class="av-wrap"><div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div><span class="presence on"></span></div>
+    <div class="meta"><div class="name">Алиса</div><div class="sub sending"><i class="ti ti-send"></i>отправляется…</div></div>
+    <div class="right"><div class="cnt">39</div><div class="sz">2,1 МБ</div></div>
+  </div>
+  <div style="height:220px"></div>
+</div>
+
+<!-- ─────────── Подтверждение по одному получателю ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Очередь отправки</span>
+  </div>
+  <div class="sect">По получателям</div>
+  <div class="row">
+    <div class="av-wrap"><div class="av" style="background:#2E3A4A;color:#c7d6f0">Б</div><span class="presence"></span></div>
+    <div class="meta"><div class="name">Борис</div><div class="sub"><i class="ti ti-clock"></i>не в сети 24 дня</div></div>
+    <div class="right"><div class="cnt">1 202</div><div class="sz">86 МБ</div></div>
+  </div>
+  <div style="height:300px"></div>
+
+  <div class="dim"></div>
+  <div class="dlg">
+    <div class="t">Очистить очередь Бориса?</div>
+    <div class="h">Это <b>ваши</b> сообщения, которые он ещё не получил. Восстановить или отправить
+      заново будет нечем — копии нигде нет.</div>
+    <div class="sum">
+      <div><span>Сообщений</span><b>1 202</b></div>
+      <div><span>Объём</span><b>86 МБ</b></div>
+      <div><span>Самое старое</span><b>24 дня назад</b></div>
+    </div>
+    <div class="acts"><span class="cancel">Отмена</span><span class="ok">Очистить</span></div>
+  </div>
+</div>
+
+<!-- ─────────── «Очистить всё»: шаг 1 и шаг 2 ─────────── -->
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Очередь отправки</span>
+  </div>
+  <div class="sect">Управление</div>
+  <div class="danger-row"><i class="ti ti-trash"></i><span>Очистить всё</span></div>
+  <div style="height:300px"></div>
+
+  <div class="dim"></div>
+  <div class="dlg">
+    <div class="t">Очистить всю очередь?</div>
+    <div class="h">Ждут доставки <b>3 получателя</b>. Всё, что они не успели получить, пропадёт
+      безвозвратно.</div>
+    <div class="sum">
+      <div><span>Борис</span><b>1 202 · 86 МБ</b></div>
+      <div><span>Алиса</span><b>39 · 2,1 МБ</b></div>
+      <div><span>2cbbb91c8f4a…</span><b>7 · 18 КБ</b></div>
+    </div>
+    <div class="acts"><span class="cancel">Отмена</span><span class="ok">Далее</span></div>
+  </div>
+</div>
+
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <span class="title">Очередь отправки</span>
+  </div>
+  <div class="sect">Управление</div>
+  <div class="danger-row"><i class="ti ti-trash"></i><span>Очистить всё</span></div>
+  <div style="height:300px"></div>
+
+  <div class="dim"></div>
+  <div class="dlg">
+    <div class="t">1 248 сообщений будут потеряны</div>
+    <div class="h">Отмены не будет. Удерживайте кнопку, чтобы подтвердить.</div>
+    <div class="hold-btn"><span class="fill"></span><i class="ti ti-trash"></i><span>Удерживайте…</span></div>
+    <div class="acts"><span class="cancel">Отмена</span></div>
+  </div>
+</div>
+
 <div class="note">
   <p><b>Предупреждение, а не лимит.</b> Очередь состоит из СОБСТВЕННЫХ сообщений пользователя: молча
   выкинуть старейшие значит потерять их навсегда. Поэтому порог (1000) только предупреждает — и
@@ -162,8 +317,14 @@
   <p style="margin-top:10px"><b>«Не в сети 24 дня» объясняет причину.</b> Без этого разросшаяся очередь
   выглядит как поломка, хотя это ровно то поведение, которое мы обещали: человек вернулся через месяц —
   получил всё.</p>
-  <p style="margin-top:10px"><b>Очистка — только явная и только поимённая.</b> Кнопки «очистить всё» нет
-  намеренно: одно касание не должно стирать месяц переписки сразу со всеми.</p>
+  <p style="margin-top:10px"><b>Очистка по одному — долгим тапом.</b> Строка получателя не носит на себе
+  кнопку удаления: список читают, а не чистят. Долгий тап открывает меню (чат · профиль · очистить),
+  дальше — подтверждение с точными числами, включая возраст самого старого сообщения.</p>
+
+  <p style="margin-top:10px"><b>«Очистить всё» — в два шага.</b> Первый показывает, у кого именно и
+  сколько пропадёт: сумма «1 248» ничего не значит, пока не видно, что 1 202 из них — Борису.
+  Второй требует <b>удержания</b>, а не тапа: случайно удержать нельзя, а промахнуться по кнопке
+  «Удалить» в подтверждении — можно.</p>
   <p style="margin-top:10px">Данные уже есть в движке: <code>outbox_stats_json</code>,
   <code>should_warn</code>, <code>clear_outbox_for</code>. Экрана, который их показывает, нет —
   карточка в «Сети» ведёт в <code>TODO</code> (<code>NetworkScreen.kt:160</code>).</p>

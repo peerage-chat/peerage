@@ -27,8 +27,9 @@
   .hero .nm { margin-top: var(--space-m); font-size: 22px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
   .hero .nm i { font-size: 19px; color: var(--verified); }
   .hero .st { margin-top: var(--space-xxs); font-size: var(--font-body); color: var(--online); }
-  .hero .addr { margin-top: var(--space-xs); font-size: var(--font-small); color: var(--secondary);
-                font-family: ui-monospace, monospace; }
+  .hero .addr { margin-top: var(--space-s); font-size: var(--font-small); color: var(--secondary);
+                font-family: ui-monospace, monospace; display: flex; align-items: center; gap: 6px; }
+  .hero .addr i { font-size: 15px; color: var(--accent); }
 
   /* ── Действия ── */
   .acts { display: flex; gap: var(--space-m); padding: 0 var(--space-l) var(--space-xl); }
@@ -88,7 +89,7 @@
     <div class="av" style="background:#3A2E4A;color:#d9c7f0">А<span class="presence"></span></div>
     <div class="nm">Алиса <i class="ti ti-rosette-discount-check"></i></div>
     <div class="st">в сети</div>
-    <div class="addr">200:857d:d932:42d3…1fe9</div>
+    <div class="addr">200:857d:d932:42d3:2bd4:691f:bd1d:1fe9<i class="ti ti-copy"></i></div>
   </div>
 
   <div class="acts">
@@ -141,7 +142,7 @@
     <div class="av" style="background:#4A2E2E;color:#f0c7c7">2</div>
     <div class="nm" style="font-family:ui-monospace,monospace;font-size:18px">2cbbb91c8f4a…</div>
     <div class="st" style="color:var(--secondary)">не в сети</div>
-    <div class="addr">200:2cbb:b91c:8f4a…70d2</div>
+    <div class="addr">200:2cbb:b91c:8f4a:19e0:4c37:a5b2:70d2<i class="ti ti-copy"></i></div>
   </div>
 
   <div class="acts">
@@ -181,6 +182,9 @@
   <p style="margin-top:10px"><b>Иконки в сетке 6×2 — заглушки.</b> Настоящий набор — свой курируемый SVG
   (рендер байт-в-байт одинаков на всех устройствах, не зависит от системного шрифта). Здесь Tabler
   показывает только раскладку, размер ячейки и ритм.</p>
+  <p style="margin-top:10px"><b>Адрес показан целиком.</b> Сокращение с многоточием экономило строку, но
+  адрес — то, что сверяют и диктуют; половина адреса для этого бесполезна. 39 символов моноширинным
+  помещаются в строку на 390px, рядом — копирование.</p>
   <p style="margin-top:10px"><b>Имя-заметка редактируется через меню</b> (⋮ → «Изменить имя»), а не полем
   прямо на экране: профиль — это карточка для чтения и сверки, а не форма. Так же убраны отсюда
   «удалить контакт» и диагностика скорости — им место в меню и в «Сети» соответственно.</p>

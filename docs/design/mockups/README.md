@@ -32,12 +32,12 @@
 | [`home.html`](home.html) | Главная (Чаты) | реализован в Compose |
 | [`chat.html`](chat.html) | Личный чат (DM) | северная звезда; 1.0 строит подмножество (см. [ADR-006](../../adr/ADR-006-chat-extensibility.md)) |
 | [`onboarding.html`](onboarding.html) | Онбординг (4 экрана: приветствие/профиль/ключ/разрешения) | согласован; реализация M4 |
-| [`chat-blocks.html`](chat-blocks.html) | Склейка подряд идущих сообщений (DM + группы) | на согласовании |
-| [`attach-sheet.html`](attach-sheet.html) | Лист вложений (галерея/камера/файл + подпись) | на согласовании |
-| [`contact-profile.html`](contact-profile.html) | Профиль контакта (проверен / не проверен) | на согласовании |
-| [`folder-editor.html`](folder-editor.html) | Список папок + редактор папки | на согласовании |
-| [`calls.html`](calls.html) | История звонков (журнал + пусто) | на согласовании |
-| [`storage.html`](storage.html) | Хранилище (состав, по чатам, копия данных) | на согласовании |
-| [`outbox.html`](outbox.html) | Офлайн-очередь (по получателям + пусто) | на согласовании |
+| [`chat-blocks.html`](chat-blocks.html) | Склейка подряд идущих сообщений (DM + группы) | согласован |
+| [`attach-sheet.html`](attach-sheet.html) | Лист вложений (галерея/камера/файл + подпись) | согласован |
+| [`contact-profile.html`](contact-profile.html) | Профиль контакта (проверен / не проверен) | согласован |
+| [`folder-editor.html`](folder-editor.html) | Список папок + редактор папки | согласован |
+| [`calls.html`](calls.html) | История звонков (журнал + пусто) | согласован |
+| [`storage.html`](storage.html) | Хранилище (состав, по чатам, копия данных) | согласован |
+| [`outbox.html`](outbox.html) | Офлайн-очередь (по получателям + пусто) | согласован |
 
 Порядок реализации и границы этапа — [`ui-completion-plan.md`](../ui-completion-plan.md).
