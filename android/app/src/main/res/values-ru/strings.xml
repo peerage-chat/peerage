@@ -125,6 +125,11 @@
     <string name="contacts_empty_title">Нет контактов</string>
     <string name="contacts_empty_hint">Добавьте собеседника по ключу или QR — кнопкой вверху</string>
     <string name="channels_soon">Каналы — скоро</string>
+    <!-- Предупреждение о разросшейся очереди (ничего не удаляется, это только уведомление) -->
+    <string name="outbox_warn">%1$d сообщений ещё ждут доставки. Они сохранены — получатели получат их, когда выйдут в сеть.</string>
+    <string name="settings_notifications">УВЕДОМЛЕНИЯ</string>
+    <string name="settings_outbox_warn">Предупреждать о росте очереди</string>
+    <string name="settings_outbox_warn_hint">Сообщения не удаляются — это только уведомление</string>
     <!-- Запросы в контакты (гейт вместо TOFU-автодобавления) -->
     <string name="requests_header">Запросы · %1$d</string>
     <string name="req_accept">Принять</string>

@@ -427,6 +427,25 @@ impl Engine {
         ok
     }
 
+    /// Снимок офлайн-очереди для UI: `{pending, bytes, peers, warn}`. Ничего не
+    /// удаляем автоматически — по `warn` клиент показывает предупреждение, а решение
+    /// (подождать или сбросить очередь) остаётся за пользователем.
+    pub fn outbox_stats_json(&self) -> String {
+        let s = self.outbox.lock_safe().stats();
+        serde_json::json!({
+            "pending": s.pending,
+            "bytes": s.bytes,
+            "peers": s.peers,
+            "warn": s.should_warn(),
+        })
+        .to_string()
+    }
+
+    /// Сбросить очередь недоставленного конкретному пиру (явное действие пользователя).
+    pub fn clear_outbox_for(&self, key: &[u8; 32]) -> usize {
+        self.outbox.lock_safe().clear_peer(key)
+    }
+
     pub fn is_online(&self, key: &[u8; 32]) -> bool {
         self.messenger.is_online(key)
     }

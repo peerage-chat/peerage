@@ -111,14 +111,13 @@ impl OutboxStore {
         Ok(())
     }
 
-    /// Ограничить очередь пира сверху: удалить самые СТАРЫЕ сверх `cap` (анти-DoS на
-    /// хранилище — пир, офлайн навсегда, не копит бесконечно). Возвращает удалённых.
-    pub fn trim_peer(&self, peer: &[u8; 32], cap: usize) -> Result<usize, StoreError> {
+    /// Удалить всю очередь пира — например, когда пользователь сам решил её сбросить
+    /// по предупреждению о разросшейся очереди. Возвращает число удалённых.
+    /// (Автоматического вытеснения НЕТ: свои сообщения не выбрасываем молча.)
+    pub fn clear_peer(&self, peer: &[u8; 32]) -> Result<usize, StoreError> {
         let n = db::lock(&self.db).execute(
-            "DELETE FROM outbox WHERE peer = ?1 AND id NOT IN (
-                 SELECT id FROM outbox WHERE peer = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2
-             )",
-            rusqlite::params![peer.as_slice(), cap as i64],
+            "DELETE FROM outbox WHERE peer = ?1",
+            rusqlite::params![peer.as_slice()],
         )?;
         Ok(n)
     }
@@ -138,10 +137,28 @@ impl OutboxStore {
     }
 }
 
-/// Максимум ожидающих на одного пира по умолчанию (анти-DoS хранилища). Реальные
-/// cap/TTL берутся из [`crate::budget::Tier`] пира; контактам срок НЕ ограничен —
-/// объём держит cap, вытесняя старейшие.
-pub const OUTBOX_PEER_CAP: usize = 500;
+/// Порог, с которого UI показывает предупреждение «очередь разрослась» (число
+/// ожидающих сообщений). НЕ лимит: ничего не удаляется, пользователь лишь узнаёт,
+/// что кому-то накопилось много недоставленного, и сам решает, что делать.
+pub const OUTBOX_WARN_PENDING: usize = 1000;
+
+/// Снимок офлайн-очереди для UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OutboxStats {
+    /// Сколько сообщений ждёт доставки.
+    pub pending: usize,
+    /// Сколько байт они занимают (только тела сообщений).
+    pub bytes: usize,
+    /// Скольким разным получателям.
+    pub peers: usize,
+}
+
+impl OutboxStats {
+    /// Стоит ли предупредить пользователя о разросшейся очереди.
+    pub fn should_warn(&self) -> bool {
+        self.pending >= OUTBOX_WARN_PENDING
+    }
+}
 
 /// Оркестратор офлайн-очереди: персистит исходящий текст, снимает по Ack, досылает
 /// при возвращении пира и на старте, чистит по TTL. Отправку делает через
@@ -164,11 +181,27 @@ impl OutboxManager {
         Self { store, send, tier_of }
     }
 
-    /// Запомнить отправленный текст (на случай, если не дойдёт). Держит очередь пира
-    /// в пределах бюджета его тира (анти-DoS хранилища).
+    /// Запомнить отправленный текст (на случай, если не дойдёт).
+    ///
+    /// НИЧЕГО НЕ ВЫТЕСНЯЕМ: очередь состоит из СОБСТВЕННЫХ сообщений пользователя, и
+    /// удалить их — значит соврать задним числом (они уже показаны как отправленные).
+    /// Раньше здесь стоял cap с выбрасыванием старейших, т.е. терялось начало
+    /// разговора. Объём не страшен: в очереди только тексты (сотни байт), гигабайт —
+    /// это миллионы сообщений. Разрастание — повод ПРЕДУПРЕДИТЬ (см. [`Self::stats`]),
+    /// а не молча удалять.
     pub fn on_sent(&self, peer: &[u8; 32], msg_id: u64, text: &str, now: i64) {
         let _ = self.store.enqueue(peer, msg_id, "text", text.as_bytes(), now);
-        let _ = self.store.trim_peer(peer, (self.tier_of)(peer).outbox_cap());
+    }
+
+    /// Снимок очереди для UI: сколько ждёт и сколько занимает. По нему клиент решает,
+    /// показывать ли предупреждение о разросшейся очереди.
+    pub fn stats(&self) -> OutboxStats {
+        let entries = self.store.pending_all().unwrap_or_default();
+        let bytes: usize = entries.iter().map(|e| e.payload.len()).sum();
+        let mut peers: Vec<[u8; 32]> = entries.iter().map(|e| e.peer).collect();
+        peers.sort_unstable();
+        peers.dedup();
+        OutboxStats { pending: entries.len(), bytes, peers: peers.len() }
     }
 
     /// Доставка подтверждена (Ack) — снять из очереди.
@@ -179,6 +212,11 @@ impl OutboxManager {
     /// Число ожидающих записей (диагностика).
     pub fn pending_count(&self) -> i64 {
         self.store.count().unwrap_or(-1)
+    }
+
+    /// Сбросить очередь пира по явному решению пользователя. Возвращает удалённых.
+    pub fn clear_peer(&self, peer: &[u8; 32]) -> usize {
+        self.store.clear_peer(peer).unwrap_or(0)
     }
 
     /// Пир вышел в онлайн — дослать всё ожидающее ему (тем же msg_id).
@@ -322,20 +360,17 @@ mod tests {
         assert_eq!(s.pending_for(&peer(9)).unwrap()[0].payload, blob);
     }
 
+    /// Сброс очереди пира — только по явной команде (кнопка по предупреждению),
+    /// и только его: чужие очереди не трогаем.
     #[test]
-    fn trim_peer_keeps_newest_cap() {
+    fn clear_peer_removes_only_that_peer() {
         let s = store();
         for i in 0..5 {
             s.enqueue(&peer(1), i as u64, "text", format!("m{i}").as_bytes(), i).unwrap();
         }
-        s.enqueue(&peer(2), 99, "text", b"other", 0).unwrap(); // другой пир не трогаем
-        let dropped = s.trim_peer(&peer(1), 2).unwrap();
-        assert_eq!(dropped, 3);
-        let left = s.pending_for(&peer(1)).unwrap();
-        assert_eq!(left.len(), 2);
-        // остались 2 самых свежих (created_at 3 и 4)
-        assert_eq!(left[0].payload, b"m3");
-        assert_eq!(left[1].payload, b"m4");
+        s.enqueue(&peer(2), 99, "text", b"other", 0).unwrap();
+        assert_eq!(s.clear_peer(&peer(1)).unwrap(), 5);
+        assert!(s.pending_for(&peer(1)).unwrap().is_empty());
         assert_eq!(s.pending_for(&peer(2)).unwrap().len(), 1);
     }
 
@@ -403,15 +438,33 @@ mod tests {
         assert!(!resent_after(Tier::Blocked, 0), "заблокированному не храним вовсе");
     }
 
-    /// Объём очереди тоже градуирован: незнакомец не забивает хранилище.
+    /// Свои сообщения НЕ вытесняются: сколько написал — столько и ждёт доставки.
+    /// (Раньше тут стоял cap, выбрасывавший начало разговора.)
     #[test]
-    fn peer_cap_follows_tier() {
-        let s = store();
-        let (m, _log) = mgr_with_tier(s, Tier::Stranger);
-        let cap = Tier::Stranger.outbox_cap();
-        for i in 0..(cap + 20) {
-            m.on_sent(&peer(1), i as u64, "spam", 100);
+    fn own_messages_are_never_evicted() {
+        let (m, _log) = mgr_with(store());
+        let n = 2_000; // заведомо больше любого прежнего cap
+        for i in 0..n {
+            m.on_sent(&peer(1), i as u64, "письмо", 100);
         }
-        assert_eq!(m.pending_count() as usize, cap, "очередь обрезана до бюджета тира");
+        assert_eq!(m.pending_count() as usize, n, "ни одно своё сообщение не потеряно");
+    }
+
+    /// Разрастание очереди — повод предупредить, а не удалять.
+    #[test]
+    fn stats_report_growth_and_warn_threshold() {
+        let (m, _log) = mgr_with(store());
+        m.on_sent(&peer(1), 1, "раз", 10);
+        m.on_sent(&peer(2), 2, "два", 10);
+        let s = m.stats();
+        assert_eq!(s.pending, 2);
+        assert_eq!(s.peers, 2, "считаем и получателей");
+        assert!(s.bytes > 0);
+        assert!(!s.should_warn(), "две штуки — не повод для плашки");
+
+        for i in 0..OUTBOX_WARN_PENDING {
+            m.on_sent(&peer(3), 100 + i as u64, "много", 10);
+        }
+        assert!(m.stats().should_warn(), "после порога предупреждаем");
     }
 }

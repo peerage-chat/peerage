@@ -335,9 +335,33 @@ class AppModel private constructor() {
             ?.edit()?.putBoolean("tech_info", showTechInfo)?.apply()
     }
 
+    /** Предупреждать о разросшейся очереди недоставленного (вкл по умолчанию).
+     *  Сообщения при этом НЕ удаляются — это только уведомление. Тумблер в ⚙️. */
+    var warnOutboxGrowth by mutableStateOf(true)
+        private set
+
+    fun toggleOutboxWarning() {
+        warnOutboxGrowth = !warnOutboxGrowth
+        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("warn_outbox", warnOutboxGrowth)?.apply()
+    }
+
+    /** Сколько сообщений ждёт доставки и надо ли предупредить (из движка). */
+    var outboxPending by mutableStateOf(0)
+        private set
+    var outboxWarn by mutableStateOf(false)
+        private set
+
+    private fun refreshOutboxStats() {
+        val o = runCatching { JSONObject(Native.outboxStats(sessionPtr)) }.getOrNull() ?: return
+        outboxPending = o.optInt("pending", 0)
+        outboxWarn = o.optBoolean("warn", false)
+    }
+
     private fun loadSettings() {
         val prefs = appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE) ?: return
         showTechInfo = prefs.getBoolean("tech_info", false)
+        warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
         val key = prefs.getString("video_quality", null) ?: return
         videoQuality = VideoQuality.presets.find { it.key == key } ?: VideoQuality.default
     }
@@ -736,6 +760,9 @@ class AppModel private constructor() {
                     if (benchRecv) {
                         benchRecvMbps = JSONObject(Native.benchRecvStats(sessionPtr)).optDouble("mbps", 0.0)
                     }
+                    // Очередь недоставленного: раз в ~10 тиков хватает (ничего не
+                    // теряется, это только повод показать предупреждение).
+                    if (tick % 10 == 0L) refreshOutboxStats()
                     // Снапшот стата сети — только на переднем плане (экран «Сеть»).
                     if (foreground) {
                         val o = JSONObject(Native.netStats(sessionPtr))

@@ -58,11 +58,6 @@ impl Tier {
         (cap * k, refill * k)
     }
 
-    /// Объём офлайн-очереди с учётом заслуг.
-    pub fn outbox_cap_with_reputation(self, helpful: u32) -> usize {
-        (self.outbox_cap() as f64 * reputation_boost(self, helpful)) as usize
-    }
-
     /// Бюджет ingress: `(burst, пакетов/сек)`. Для [`Tier::Stranger`] это параметры
     /// ОБЩЕЙ корзины класса, а не персональной.
     pub fn ingress(self) -> (f64, f64) {
@@ -77,20 +72,12 @@ impl Tier {
         }
     }
 
-    /// Сколько сообщений офлайн-очереди храним для этого пира (анти-DoS хранилища).
-    pub fn outbox_cap(self) -> usize {
-        match self {
-            Tier::Blocked => 0,
-            Tier::Stranger => 50,
-            Tier::Contact => 500,
-            Tier::Verified => 1000,
-        }
-    }
-
-    /// Сколько держим недоставленное. `None` — без срока: объём и так ограничен
-    /// [`Tier::outbox_cap`], а серверa, который сохранит сообщение за нас, у нас НЕТ.
-    /// Выбрасывать по времени значит молча терять письмо человеку, который уехал на
-    /// месяц, — в serverless это не «протухло», а «потеряно навсегда».
+    /// Сколько держим недоставленное. `None` — без срока.
+    ///
+    /// Очередь состоит из СОБСТВЕННЫХ сообщений пользователя, поэтому её не режем ни
+    /// по объёму, ни (для контактов) по времени: сервера, который сохранит письмо за
+    /// нас, нет, и «протухло» здесь означает «потеряно навсегда». О разросшейся
+    /// очереди UI ПРЕДУПРЕЖДАЕТ (`OutboxStats::should_warn`), решение — за человеком.
     pub fn outbox_ttl_secs(self) -> Option<i64> {
         const DAY: i64 = 24 * 3600;
         match self {
@@ -115,7 +102,6 @@ mod tests {
     #[test]
     fn blocked_gets_nothing() {
         assert_eq!(Tier::Blocked.ingress(), (0.0, 0.0));
-        assert_eq!(Tier::Blocked.outbox_cap(), 0);
         assert_eq!(Tier::Blocked.outbox_ttl_secs(), Some(0));
         assert!(Tier::Blocked.is_blocked());
     }
@@ -130,7 +116,6 @@ mod tests {
             let (lo, hi) = (pair[0], pair[1]);
             assert!(hi.ingress().0 > lo.ingress().0, "burst: {hi:?} должен быть щедрее {lo:?}");
             assert!(hi.ingress().1 > lo.ingress().1, "refill: {hi:?} должен быть щедрее {lo:?}");
-            assert!(hi.outbox_cap() > lo.outbox_cap(), "cap: {hi:?} должен быть щедрее {lo:?}");
             assert!(keep(hi) >= keep(lo), "срок хранения: {hi:?} не должен быть меньше {lo:?}");
         }
     }
@@ -163,8 +148,6 @@ mod tests {
         assert!(full > some);
         assert_eq!(full, base * REPUTATION_MAX_BOOST, "потолок = MAX_BOOST");
         assert_eq!(over, full, "сверх потолка бюджет не растёт");
-        // Объём очереди растёт так же.
-        assert!(Tier::Contact.outbox_cap_with_reputation(REPUTATION_FULL_AT) > Tier::Contact.outbox_cap());
     }
 
     /// АНТИ-SYBIL: заслуги не работают до гейта. Иначе 1000 сгенерированных ключей,

@@ -45,6 +45,28 @@ internal fun ContactsScreen(
     val showRoom = activeFilter == "all" || activeFilter == "room"
 
     Column(Modifier.fillMaxSize()) {
+        // Очередь недоставленного разрослась. НИЧЕГО не удаляем — сообщения ждут
+        // доставки; просто предупреждаем, чтобы человек знал (тумблер в Настройках).
+        if (model.outboxWarn && model.warnOutboxGrowth) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = ScreenPad, vertical = 6.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF3A2F12))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("⚠", color = Color(0xFFF6C453), fontSize = 15.sp)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    stringResource(R.string.outbox_warn, model.outboxPending),
+                    color = Color(0xFFF6C453),
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
         // Счётчик пиров переехал в шапку (PeerIndicator). Здесь — только бенч-замер
         // приёма, пока он активен (диагностика; запуск — долгим тапом по индикатору).
         if (model.benchRecv) {

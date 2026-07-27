@@ -133,6 +133,11 @@
     <string name="contacts_empty_title">No contacts</string>
     <string name="contacts_empty_hint">Add a peer by key or QR — using the button above</string>
     <string name="channels_soon">Channels — soon</string>
+    <!-- Offline queue growth warning (nothing is ever deleted, this is just a notice) -->
+    <string name="outbox_warn">%1$d messages are still waiting to be delivered. They are kept — recipients will get them once online.</string>
+    <string name="settings_notifications">NOTIFICATIONS</string>
+    <string name="settings_outbox_warn">Warn about a growing outbox</string>
+    <string name="settings_outbox_warn_hint">Messages are never deleted — this only shows a notice</string>
     <!-- Contact requests (gate instead of TOFU auto-add) -->
     <string name="requests_header">Requests · %1$d</string>
     <string name="req_accept">Accept</string>

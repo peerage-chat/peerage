@@ -373,6 +373,34 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_addContact<'local>(
     })
 }
 
+/// Снимок офлайн-очереди: JSON {pending, bytes, peers, warn}. По `warn` клиент
+/// показывает предупреждение о разросшейся очереди (ничего не удаляется само).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_outboxStats<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        ret(&env, &e.outbox_stats_json())
+    })
+}
+
+/// Сбросить очередь недоставленного пиру (явное действие пользователя).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_clearOutboxFor<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        parse_key(&jstr(&mut env, &key_hex)).map(|k| e.clear_outbox_for(&k) as jint).unwrap_or(0)
+    })
+}
+
 /// Список контактов как JSON-массив.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_listContacts<'local>(

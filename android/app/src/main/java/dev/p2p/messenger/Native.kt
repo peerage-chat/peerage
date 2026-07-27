@@ -67,6 +67,13 @@ object Native {
     /** Контакты как JSON-массив. */
     external fun listContacts(sessionPtr: Long): String
 
+    /** Снимок офлайн-очереди: JSON {pending, bytes, peers, warn}. Ничего не удаляется
+     *  само — по `warn` показываем предупреждение, решение за пользователем. */
+    external fun outboxStats(sessionPtr: Long): String
+
+    /** Сбросить очередь недоставленного пиру (явное действие). Возвращает удалённых. */
+    external fun clearOutboxFor(sessionPtr: Long, keyHex: String): Int
+
     /** История переписки с пиром как JSON-массив. */
     external fun history(sessionPtr: Long, keyHex: String): String
 
