@@ -62,8 +62,9 @@
   .shot .sz { position: absolute; left: 4px; bottom: 4px; background: var(--chip-scrim); border-radius: var(--radius-badge);
               padding: 1px 5px; font-size: 10px; color: #dfe3e8; }
   .shot .sz.big { color: var(--warn); }
-  /* Камера — живой предпросмотр во всю ширину двух столбцов (пока плашка-заглушка). */
-  .shot.cam { grid-column: span 2; padding-top: calc(50% - 1px); background: linear-gradient(160deg,#33404d,#1d242b); }
+  /* Камера — обычная плитка. Живой предпросмотр вместо иконки (и, возможно, плитка
+     на два столбца) — задел на будущее, см. ui-completion-plan.md. */
+  .shot.cam { background: linear-gradient(160deg,#33404d,#1d242b); }
   .shot.cam .lbl-cam { position: absolute; inset: 0; display: flex; flex-direction: column;
                        align-items: center; justify-content: center; gap: 6px; color: var(--accent);
                        font-size: var(--font-body); }
@@ -151,8 +152,6 @@
         <span class="pick"></span><span class="sz">1,1 МБ</span></div>
       <div class="shot" style="background:linear-gradient(150deg,#6e4a4a,#402b2b)">
         <span class="pick"></span><span class="sz">4,7 МБ</span></div>
-      <div class="shot" style="background:linear-gradient(150deg,#4a6e4a,#2b402b)">
-        <span class="pick"></span><span class="sz">2,9 МБ</span></div>
     </div>
 
   </div>
@@ -212,8 +211,9 @@
   для всего остального есть «Файл». Отдельный вход в системный пикер только добавлял мишень рядом с
   необратимой отправкой.</p>
 
-  <p style="margin-top:10px"><b>Камера занимает два столбца</b> — там будет живой предпросмотр, а не
-  иконка: снять кадр прямо отсюда должно быть так же быстро, как выбрать готовый.</p>
+  <p style="margin-top:10px"><b>Камера — обычная плитка.</b> На будущее: живой предпросмотр вместо
+  иконки и, возможно, плитка пошире — чтобы снять кадр отсюда было так же быстро, как выбрать готовый.
+  В v1.0 не входит.</p>
 
   <p style="margin-top:10px"><b>Сетка — это галерея, а не набор карточек.</b> Зазор 2px одинаковый по
   обеим осям, скруглений нет, боковых полей у сетки нет: плитки идут от края до края листа. На ширине
