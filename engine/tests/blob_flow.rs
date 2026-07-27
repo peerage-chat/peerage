@@ -48,6 +48,14 @@ fn transfer(content: &[u8], drop_every: u32) -> Completed {
                         return done;
                     }
                 }
+                // Манифест теперь едет частями (снят потолок 4 МБ).
+                Event::BlobManifestPart { peer, id, mime, size, part, total, hashes } => {
+                    if let Some(done) =
+                        b.on_manifest_part(peer, &id, &mime, size, part, total, &hashes)
+                    {
+                        return done;
+                    }
+                }
                 Event::BlobChunk { id, index, data, .. } => {
                     if let Some(done) = b.on_chunk(&id, index, &data) {
                         return done;

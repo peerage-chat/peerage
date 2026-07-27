@@ -106,6 +106,16 @@ pub enum Event {
     GroupLeaveRequest { peer: PeerKey, gid: Vec<u8> },
     /// Анонс блоба: пришёл манифест (JSON) — можно начинать докачку (M2).
     BlobManifest { peer: PeerKey, manifest: String },
+    /// Часть манифеста крупного блоба (список хэшей не влезает в одну датаграмму).
+    BlobManifestPart {
+        peer: PeerKey,
+        id: Vec<u8>,
+        mime: String,
+        size: u64,
+        part: u32,
+        total: u32,
+        hashes: Vec<u8>,
+    },
     /// Пир запросил чанк нашего блоба.
     BlobRequest { peer: PeerKey, id: Vec<u8>, index: u32 },
     /// Пришёл чанк блоба, который мы качаем.
@@ -572,6 +582,30 @@ impl Messenger {
         self.shared.send(peer, &Payload::BlobManifest { manifest: manifest.to_string() })
     }
 
+    /// Отправить ЧАСТЬ манифеста крупного блоба (список хэшей не влезает в одну
+    /// датаграмму). Fire-and-forget: потерянную часть получатель перезапросит вместе
+    /// с недостающими чанками, как и всё остальное в блоб-протоколе.
+    #[allow(clippy::too_many_arguments)]
+    pub fn send_blob_manifest_part(
+        &self,
+        peer: &PeerKey,
+        id: &[u8],
+        mime: &str,
+        size: u64,
+        part: u32,
+        total: u32,
+        hashes: &[u8],
+    ) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::BlobManifestPart {
+            id: id.to_vec(),
+            mime: mime.to_string(),
+            size,
+            part,
+            total,
+            hashes: hashes.to_vec(),
+        })
+    }
+
     /// Рассылка обновления профиля (M2): самоназвание + хэш аватара. Fire-and-forget
     /// (идемпотентно, повторяется на коннекте).
     pub fn send_profile_update(&self, peer: &PeerKey, name: &str, avatar_hash: &[u8]) -> Result<(), MessengerError> {
@@ -792,6 +826,9 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::BlobManifest { manifest } => {
                 shared.emit(Event::BlobManifest { peer: src, manifest });
+            }
+            Payload::BlobManifestPart { id, mime, size, part, total, hashes } => {
+                shared.emit(Event::BlobManifestPart { peer: src, id, mime, size, part, total, hashes });
             }
             Payload::BlobRequest { id, index } => {
                 shared.emit(Event::BlobRequest { peer: src, id, index });

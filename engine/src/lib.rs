@@ -1306,6 +1306,13 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 save_and_notify_blob(engine, peer, done);
             }
         }
+        Event::BlobManifestPart { peer, id, mime, size, part, total, hashes } => {
+            if let Some(done) =
+                blobs.on_manifest_part(peer, &id, &mime, size, part, total, &hashes)
+            {
+                save_and_notify_blob(engine, peer, done);
+            }
+        }
         Event::BlobRequest { peer, id, index } => blobs.on_request(&id, index, peer),
         Event::BlobChunk { peer, id, index, data } => {
             if let Some(done) = blobs.on_chunk(&id, index, &data) {

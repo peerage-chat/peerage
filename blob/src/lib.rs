@@ -48,11 +48,13 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        // 4 MiB: с запасом на аватарки/картинки/голосовые. Предел выбран так, чтобы и
-        // МАНИФЕСТ влезал в одну датаграмму: 4 МБ / 12 КБ ≈ 342 чанка × 32 Б → ~22 КБ
-        // hex-манифеста, конверт ~44 КБ < 65535. Более крупные блобы потребуют
-        // чанкования самого манифеста (бэклог).
-        let max_size = 4 * 1024 * 1024;
+        // 64 MiB. Прежний потолок 4 МБ держался тем, что манифест ехал ОДНИМ пакетом;
+        // теперь он режется на части ([`Manifest::split`]), и это ограничение снято.
+        //
+        // Оставшийся ограничитель — ПАМЯТЬ: [`Reassembler`] собирает блоб целиком в
+        // RAM, поэтому предел выбран из того, сколько не жалко держать в памяти
+        // телефона. Для гигабайтных файлов нужна потоковая сборка на диск (отдельно).
+        let max_size = 64 * 1024 * 1024;
         Self { max_size, max_chunks: (max_size as usize / CHUNK_SIZE) + 1 }
     }
 }
@@ -150,6 +152,113 @@ impl Manifest {
     /// Разобрать из JSON.
     pub fn from_json(s: &str) -> Result<Manifest, BlobError> {
         serde_json::from_str(s).map_err(|_| BlobError::BadManifest)
+    }
+
+    /// Нарезать манифест на части, каждая из которых влезает в одну датаграмму.
+    /// Раньше манифест ехал ОДНИМ пакетом, и это ограничивало блоб 4 МБ: список
+    /// хэшей рос линейно с размером файла и упирался в 65535.
+    pub fn split(&self) -> Vec<ManifestPart> {
+        if self.chunks.is_empty() {
+            return vec![ManifestPart {
+                id: self.id,
+                mime: self.mime.clone(),
+                size: self.size,
+                part: 0,
+                total: 1,
+                hashes: Vec::new(),
+            }];
+        }
+        let groups: Vec<&[Hash]> = self.chunks.chunks(HASHES_PER_PART).collect();
+        let total = groups.len() as u32;
+        groups
+            .into_iter()
+            .enumerate()
+            .map(|(i, g)| ManifestPart {
+                id: self.id,
+                mime: self.mime.clone(),
+                size: self.size,
+                part: i as u32,
+                total,
+                hashes: g.to_vec(),
+            })
+            .collect()
+    }
+}
+
+/// Сколько хэшей чанков кладём в одну часть манифеста. 300 × 32 Б = 9.6 КБ сырых →
+/// после hex-кодирования (×2 в payload и ×2 в конверте) ≈ 40 КБ < 65535.
+pub const HASHES_PER_PART: usize = 300;
+
+/// Часть манифеста: метаданные блоба + кусок списка хэшей. Метаданные дублируются в
+/// каждой части намеренно — получатель может проверить лимиты и отказаться от
+/// докачки, не дожидаясь всех частей.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManifestPart {
+    pub id: Hash,
+    pub mime: String,
+    pub size: u64,
+    pub part: u32,
+    pub total: u32,
+    pub hashes: Vec<Hash>,
+}
+
+/// Сборщик манифеста из частей. Живёт у получателя между приходом первой части и
+/// полного комплекта; проверяет согласованность (один id/size/total у всех частей).
+#[derive(Debug)]
+pub struct ManifestAssembler {
+    id: Hash,
+    mime: String,
+    size: u64,
+    total: u32,
+    parts: Vec<Option<Vec<Hash>>>,
+    have: usize,
+}
+
+impl ManifestAssembler {
+    /// Начать сборку по первой пришедшей части.
+    pub fn new(first: &ManifestPart) -> Result<Self, BlobError> {
+        if first.total == 0 || first.part >= first.total {
+            return Err(BlobError::BadManifest);
+        }
+        let mut a = ManifestAssembler {
+            id: first.id,
+            mime: first.mime.clone(),
+            size: first.size,
+            total: first.total,
+            parts: vec![None; first.total as usize],
+            have: 0,
+        };
+        a.add(first)?;
+        Ok(a)
+    }
+
+    /// Принять часть. Части от другого блоба или с иным разбиением отвергаются.
+    pub fn add(&mut self, p: &ManifestPart) -> Result<(), BlobError> {
+        if p.id != self.id || p.size != self.size || p.total != self.total {
+            return Err(BlobError::BadManifest);
+        }
+        let idx = p.part as usize;
+        if idx >= self.parts.len() {
+            return Err(BlobError::BadIndex);
+        }
+        if self.parts[idx].is_none() {
+            self.parts[idx] = Some(p.hashes.clone());
+            self.have += 1;
+        }
+        Ok(())
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.have == self.parts.len()
+    }
+
+    /// Собрать манифест, когда пришли все части.
+    pub fn finish(&self) -> Option<Manifest> {
+        if !self.is_complete() {
+            return None;
+        }
+        let chunks: Vec<Hash> = self.parts.iter().flat_map(|p| p.clone().unwrap_or_default()).collect();
+        Some(Manifest { mime: self.mime.clone(), size: self.size, id: self.id, chunks })
     }
 }
 
@@ -356,5 +465,53 @@ mod tests {
         let (manifest, chunks) = build(&data(10, 1), "x/y");
         let mut r = Reassembler::new(manifest, &Limits::default()).unwrap();
         assert_eq!(r.add(5, &chunks[0]), Err(BlobError::BadIndex));
+    }
+
+    /// Манифест крупного блоба режется на части и собирается обратно байт-в-байт.
+    /// Именно это снимало прежний потолок 4 МБ (список хэшей не влезал в датаграмму).
+    #[test]
+    fn manifest_splits_and_reassembles() {
+        // Столько чанков, что хэши заведомо не влезли бы в один пакет.
+        let big = CHUNK_SIZE * (HASHES_PER_PART * 2 + 5);
+        let limits = Limits::with_max_size(big as u64);
+        let (manifest, _) = build(&data(big, 3), "video/mp4");
+
+        let parts = manifest.split();
+        assert!(parts.len() > 2, "манифест должен разбиться на несколько частей");
+        assert!(parts.iter().all(|p| p.hashes.len() <= HASHES_PER_PART));
+
+        let mut asm = ManifestAssembler::new(&parts[0]).unwrap();
+        for p in &parts[1..] {
+            assert!(!asm.is_complete());
+            asm.add(p).unwrap();
+        }
+        assert!(asm.is_complete());
+        let got = asm.finish().unwrap();
+        assert_eq!(got, manifest, "собранный манифест совпадает с исходным");
+        got.validate(&limits).expect("собранный манифест валиден");
+    }
+
+    /// Части приходят по сети в произвольном порядке и могут дублироваться.
+    #[test]
+    fn manifest_parts_tolerate_reorder_and_duplicates() {
+        let (manifest, _) = build(&data(CHUNK_SIZE * (HASHES_PER_PART + 3), 7), "x/y");
+        let parts = manifest.split();
+        let mut asm = ManifestAssembler::new(&parts[parts.len() - 1]).unwrap();
+        for p in parts.iter().rev() {
+            asm.add(p).unwrap();
+            asm.add(p).unwrap(); // дубль не должен ломать счётчик
+        }
+        assert!(asm.is_complete());
+        assert_eq!(asm.finish().unwrap(), manifest);
+    }
+
+    /// Часть от ЧУЖОГО блоба (или с иным разбиением) отвергается — иначе можно было бы
+    /// подмешать чужие хэши в собираемый манифест.
+    #[test]
+    fn foreign_manifest_part_rejected() {
+        let (m1, _) = build(&data(CHUNK_SIZE * 2, 1), "x/y");
+        let (m2, _) = build(&data(CHUNK_SIZE * 2, 2), "x/y");
+        let mut asm = ManifestAssembler::new(&m1.split()[0]).unwrap();
+        assert_eq!(asm.add(&m2.split()[0]), Err(BlobError::BadManifest));
     }
 }

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use p2p_blob::{Hash, Limits, Manifest, Reassembler};
+use p2p_blob::{Hash, Limits, Manifest, ManifestAssembler, ManifestPart, Reassembler};
 use p2p_messenger::{Messenger, PeerKey};
 
 /// Переспрашивать недостающие чанки не чаще этого (лечение потерь без флуда).
@@ -37,6 +37,8 @@ pub struct BlobManager {
     outgoing: HashMap<Hash, (Manifest, Vec<Vec<u8>>)>,
     /// Блобы, которые мы качаем: id → состояние докачки.
     incoming: HashMap<Hash, Incoming>,
+    /// Манифесты крупных блобов, которые ещё собираются из частей: id → сборщик.
+    partial_manifests: HashMap<Hash, ManifestAssembler>,
 }
 
 fn to_id(bytes: &[u8]) -> Option<Hash> {
@@ -45,27 +47,70 @@ fn to_id(bytes: &[u8]) -> Option<Hash> {
 
 impl BlobManager {
     pub fn new(messenger: Arc<Messenger>, limits: Limits) -> Self {
-        Self { messenger, limits, outgoing: HashMap::new(), incoming: HashMap::new() }
+        Self {
+            messenger,
+            limits,
+            outgoing: HashMap::new(),
+            incoming: HashMap::new(),
+            partial_manifests: HashMap::new(),
+        }
     }
 
-    /// Предложить блоб пиру: нарезать, запомнить для отдачи, отправить манифест.
-    /// Возвращает id блоба (контент-адрес).
-    pub fn offer(&mut self, peer: PeerKey, content: &[u8], mime: &str) -> Hash {
-        let (manifest, chunks) = p2p_blob::build(content, mime);
-        let id = manifest.id;
-        let _ = self.messenger.send_blob_manifest(&peer, &manifest.to_json());
-        self.outgoing.insert(id, (manifest, chunks));
-        id
+    /// Пришла ЧАСТЬ манифеста. Возвращает `Some`, если блоб оказался пустым и уже
+    /// собран; докачка стартует, как только собраны все части.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_manifest_part(
+        &mut self,
+        peer: PeerKey,
+        id_bytes: &[u8],
+        mime: &str,
+        size: u64,
+        part: u32,
+        total: u32,
+        hashes: &[u8],
+    ) -> Option<Completed> {
+        let id = to_id(id_bytes)?;
+        if hashes.len() % 32 != 0 {
+            return None; // битая часть — молча игнорируем
+        }
+        // Отсекаем великанов ДО накопления частей: иначе злоумышленник заставил бы
+        // держать в памяти список хэшей блоба, который мы всё равно не примем.
+        if size > self.limits.max_size {
+            return None;
+        }
+        let p = ManifestPart {
+            id,
+            mime: mime.to_string(),
+            size,
+            part,
+            total,
+            hashes: hashes.chunks(32).filter_map(|c| <[u8; 32]>::try_from(c).ok()).collect(),
+        };
+        // Уже качаем этот блоб — части больше не нужны (мог прийти дубль).
+        if self.incoming.contains_key(&id) {
+            return None;
+        }
+        let done = match self.partial_manifests.get_mut(&id) {
+            Some(asm) => asm.add(&p).is_ok() && asm.is_complete(),
+            None => {
+                let asm = ManifestAssembler::new(&p).ok()?;
+                let complete = asm.is_complete();
+                self.partial_manifests.insert(id, asm);
+                complete
+            }
+        };
+        if !done {
+            return None;
+        }
+        let manifest = self.partial_manifests.remove(&id)?.finish()?;
+        self.start_download(peer, manifest)
     }
 
-    /// Пришёл манифест — начать докачку. Возвращает `Some`, если блоб пустой (0
-    /// чанков) и уже «готов». Невалидный/превышающий лимиты манифест игнорируется.
-    pub fn on_manifest(&mut self, peer: PeerKey, manifest_json: &str) -> Option<Completed> {
-        let manifest = Manifest::from_json(manifest_json).ok()?;
+    /// Общий старт докачки по готовому манифесту (пришёл целиком или собран из частей).
+    fn start_download(&mut self, peer: PeerKey, manifest: Manifest) -> Option<Completed> {
         let re = Reassembler::new(manifest, &self.limits).ok()?;
         let id = re.manifest().id;
         if re.is_complete() {
-            // Пустой блоб — собираем сразу.
             let manifest = re.manifest().clone();
             return re.finish().ok().map(|content| Completed { id, manifest, content });
         }
@@ -75,6 +120,30 @@ impl BlobManager {
             let _ = self.messenger.send_blob_request(&peer, &id, index as u32);
         }
         None
+    }
+
+    /// Предложить блоб пиру: нарезать, запомнить для отдачи, отправить манифест.
+    /// Возвращает id блоба (контент-адрес).
+    pub fn offer(&mut self, peer: PeerKey, content: &[u8], mime: &str) -> Hash {
+        let (manifest, chunks) = p2p_blob::build(content, mime);
+        let id = manifest.id;
+        // Манифест едет ЧАСТЯМИ: у крупного блоба список хэшей не влезает в одну
+        // датаграмму (это и держало прежний потолок 4 МБ). Мелкий блоб = одна часть.
+        for p in manifest.split() {
+            let hashes: Vec<u8> = p.hashes.iter().flat_map(|h| h.iter().copied()).collect();
+            let _ = self.messenger.send_blob_manifest_part(
+                &peer, &p.id, &p.mime, p.size, p.part, p.total, &hashes,
+            );
+        }
+        self.outgoing.insert(id, (manifest, chunks));
+        id
+    }
+
+    /// Пришёл манифест — начать докачку. Возвращает `Some`, если блоб пустой (0
+    /// чанков) и уже «готов». Невалидный/превышающий лимиты манифест игнорируется.
+    pub fn on_manifest(&mut self, peer: PeerKey, manifest_json: &str) -> Option<Completed> {
+        let manifest = Manifest::from_json(manifest_json).ok()?;
+        self.start_download(peer, manifest)
     }
 
     /// Пир запросил чанк нашего блоба — отдать, если он у нас есть.

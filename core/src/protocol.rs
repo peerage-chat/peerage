@@ -82,6 +82,21 @@ pub enum Payload {
     /// Анонс блоба (M2): манифест (JSON) — план докачки. Получатель качает чанки
     /// запросами `BlobRequest`. `manifest` непрозрачен для core (парсит слой blob).
     BlobManifest { manifest: String },
+    /// Часть манифеста крупного блоба. Список хэшей чанков растёт линейно с размером
+    /// файла и одним пакетом перестаёт влезать в датаграмму (это и держало потолок
+    /// 4 МБ), поэтому манифест едет частями. Метаданные (`mime`/`size`) дублируются
+    /// в каждой части: получатель может проверить лимиты и отказаться, не дожидаясь
+    /// всех частей. `hashes` — сырые BLAKE3 чанков (кратно 32), hex на проводе.
+    BlobManifestPart {
+        #[serde(with = "hex_bytes")]
+        id: Vec<u8>,
+        mime: String,
+        size: u64,
+        part: u32,
+        total: u32,
+        #[serde(with = "hex_bytes")]
+        hashes: Vec<u8>,
+    },
     /// Запрос чанка блоба по id (BLAKE3) и индексу (получатель-драйвен pull).
     BlobRequest {
         #[serde(with = "hex_bytes")]
@@ -297,6 +312,10 @@ mod tests {
             Payload::GroupResyncRequest { gid: vec![8, 9, 10] },
             Payload::GroupLeaveRequest { gid: vec![11, 12] },
             Payload::BlobManifest { manifest: "{}".into() },
+            Payload::BlobManifestPart {
+                id: vec![1u8; 32], mime: "video/mp4".into(), size: 12345,
+                part: 2, total: 7, hashes: vec![9u8; 64],
+            },
             Payload::BlobRequest { id: vec![1u8; 32], index: 2 },
             Payload::BlobChunk { id: vec![2u8; 32], index: 3, data: vec![9, 8, 7] },
             Payload::ProfileUpdate { name: "Алиса".into(), avatar_hash: vec![3u8; 32] },
