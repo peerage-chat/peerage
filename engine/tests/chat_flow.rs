@@ -126,7 +126,9 @@ fn offline_message_survives_sender_restart() {
     drop(a1);
 
     // B возвращается ПЕРВЫМ (чтобы досылка on_start сразу попала в живой эндпоинт).
-    let b2 = start(&net, b_id, tmpdir("b2"));
+    // ВАЖНО: на СВОЁМ каталоге — иначе это «новый B», для которого A незнакомец, и
+    // догнанное сообщение уйдёт в гейт «запрос в контакты», а не в чат (см. gate.rs).
+    let b2 = start(&net, b_id, b_dir);
     let a2 = start(&net, a_id, a_dir); // держим A2 живым (иначе досылка не уйдёт)
 
     let texts = poll_texts(&b2, 1, Duration::from_secs(12));
