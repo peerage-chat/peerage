@@ -197,6 +197,8 @@
     <string name="status_sent">sent</string>
     <string name="status_sending">sending</string>
     <string name="status_queued">queued</string>
+    <!-- Short label next to the clock: recipient is offline, message waits in queue -->
+    <string name="status_queued_label">waiting</string>
 
     <!-- ── Date chips ──────────────────────────────────────────────────── -->
     <string name="date_today">Today</string>

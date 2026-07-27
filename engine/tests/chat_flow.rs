@@ -93,6 +93,50 @@ fn sender_restart_no_false_dedup() {
     assert_eq!(texts, vec!["second"], "второе сообщение после рестарта показано");
 }
 
+/// Честный статус: пока сообщение ждёт доставки, оно НЕ помечается как ошибка.
+/// Раньше по истечении in-memory ретраев в БД писалось "failed", и после
+/// перезапуска ждущее в очереди сообщение показывалось красным «!».
+#[test]
+fn undelivered_message_is_queued_not_failed() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(7), id(8));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    // Короткий message_ttl: штатные 5 минут в тесте не подождать.
+    let cfg = p2p_messenger::Config {
+        message_ttl: Duration::from_secs(2),
+        retry_interval: Duration::from_millis(200),
+        ..p2p_messenger::Config::default()
+    };
+    let a = Engine::start_with_transport_cfg(tmpdir("a"), a_id, net.endpoint(a_key), cfg)
+        .unwrap()
+        .engine;
+    a.add_contact(&b_key, "B"); // B вообще не поднимаем — доставки не будет
+
+    let msg_id = a.send_text(&b_key, "в пустоту").expect("поставлено в очередь");
+    let status_of = |e: &Engine| -> String {
+        let h: serde_json::Value = serde_json::from_str(&e.history_json(&b_key)).unwrap();
+        h.as_array()
+            .and_then(|arr| arr.iter().find(|m| m["id"].as_i64() == Some(msg_id)))
+            .and_then(|m| m["status"].as_str().map(str::to_string))
+            .unwrap_or_default()
+    };
+
+    // Ждём, пока in-memory ретраи выдохнутся (message_ttl) и придёт Undelivered.
+    // Изначально статус "sent" (отдано в сеть, подтверждения нет).
+    assert_eq!(status_of(&a), "sent", "сразу после отправки — ✓, не ✓✓");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while status_of(&a) == "sent" && Instant::now() < deadline {
+        while a.poll_event().is_some() {}
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let st = status_of(&a);
+    assert_ne!(st, "failed", "ждущее в очереди сообщение — не ошибка");
+    assert_eq!(st, "queued", "после выдохшихся ретраев — «ждёт в очереди»");
+    a.shutdown();
+    let _ = a_key;
+}
+
 /// РЕГРЕССИЯ (баг «не пережила рестарт»): A шлёт, пока B офлайн; A перезапускается
 /// (in-memory pending теряется, остаётся только персистентный outbox); B возвращается
 /// → сообщение догоняется из outbox on_start.

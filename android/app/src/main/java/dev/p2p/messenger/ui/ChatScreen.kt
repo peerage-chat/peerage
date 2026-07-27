@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.EmojiEmotions
@@ -528,7 +529,12 @@ internal fun ImageViewer(bytes: ByteArray, onClose: () -> Unit) {
     }
 }
 
-/** Галочка статуса доставки исходящего сообщения. */
+/** Статус доставки исходящего сообщения — честно, без приукрашивания.
+ *
+ *  `queued` (получатель офлайн, сообщение ждёт в очереди) намеренно отличается от
+ *  `pending` (уходит прямо сейчас) НЕ только иконкой, но и подписью: раньше оба
+ *  рисовались одинаковыми часами, и «ждёт неделю» выглядело как «сейчас отправится».
+ *  Галочка `sent` — доставка НЕ подтверждена; ✓✓ ставится только по Ack. */
 @Composable
 internal fun StatusTick(status: String) {
     val tint = Color.White.copy(alpha = 0.7f)
@@ -536,7 +542,20 @@ internal fun StatusTick(status: String) {
         "delivered" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_delivered), tint = tint, modifier = Modifier.size(13.dp))
         "sent" -> Icon(Icons.Filled.Done, stringResource(R.string.status_sent), tint = tint, modifier = Modifier.size(13.dp))
         "pending" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_sending), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
-        "queued" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_queued), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+        "queued" -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.status_queued_label),
+                color = tint.copy(alpha = 0.7f),
+                fontSize = 9.sp,
+            )
+            Spacer(Modifier.width(2.dp))
+            Icon(
+                Icons.Filled.CloudQueue,
+                stringResource(R.string.status_queued),
+                tint = tint.copy(alpha = 0.7f),
+                modifier = Modifier.size(12.dp),
+            )
+        }
         "failed" -> Text("!", color = HoloError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }

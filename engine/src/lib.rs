@@ -289,6 +289,8 @@ impl Engine {
             Ok(id) => {
                 let t = now();
                 let _ = self.messages.lock_safe().append(key, StoredMessage {
+                    // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
+                    // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
                     id, mine: true, time: t, status: "sent".into(),
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.into(), name: name.into(),
                     ..Default::default()
@@ -1217,7 +1219,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             push_event(engine, serde_json::json!({"type": "ack", "peer": hex::encode(peer), "id": id}));
         }
         Event::Undelivered { peer, id } => {
-            let _ = engine.messages.lock_safe().set_status(&peer, id, "failed");
+            // "queued", а НЕ "failed": ретраи в памяти кончились, но сообщение лежит в
+            // персистентной офлайн-очереди и уйдёт, когда получатель появится. Раньше
+            // в БД писалось "failed" (в UI при этом рисовался часами "queued"), и после
+            // перезапуска ждущее доставки сообщение показывалось красным «!».
+            let _ = engine.messages.lock_safe().set_status(&peer, id, "queued");
             push_event(engine, serde_json::json!({"type": "undelivered", "peer": hex::encode(peer), "id": id}));
         }
         Event::RoomInvite { peer, room_id, audio, video } => push_event(engine, serde_json::json!({
@@ -1464,7 +1470,7 @@ impl Engine {
         for uri in public_peer_uris() {
             let _ = node.add_peer(uri);
         }
-        Self::start_inner(dir, identity, Arc::new(node), address)
+        Self::start_inner(dir, identity, Arc::new(node), address, p2p_messenger::Config::default())
     }
 
     /// Поднять движок поверх ПРОИЗВОЛЬНОГО транспорта (loopback в интеграционных
@@ -1475,9 +1481,20 @@ impl Engine {
         identity: Identity,
         transport: Arc<dyn p2p_messenger::Transport>,
     ) -> Result<StartOk, String> {
+        Self::start_with_transport_cfg(dir, identity, transport, p2p_messenger::Config::default())
+    }
+
+    /// То же, но с явным [`p2p_messenger::Config`] — нужен тестам, которые проверяют
+    /// поведение по таймаутам (штатный `message_ttl` = 5 минут, столько не подождать).
+    pub fn start_with_transport_cfg(
+        dir: PathBuf,
+        identity: Identity,
+        transport: Arc<dyn p2p_messenger::Transport>,
+        cfg: p2p_messenger::Config,
+    ) -> Result<StartOk, String> {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let address = transport.address();
-        Self::start_inner(dir, identity, transport, address)
+        Self::start_inner(dir, identity, transport, address, cfg)
     }
 
     /// Общая сборка движка поверх готового транспорта (реального или loopback).
@@ -1486,6 +1503,7 @@ impl Engine {
         identity: Identity,
         transport: Arc<dyn p2p_messenger::Transport>,
         address: String,
+        cfg: p2p_messenger::Config,
     ) -> Result<StartOk, String> {
         let me_pub = identity.public_key_bytes();
         let db = p2p_core::db::open(&dir).map_err(|e| format!("db: {e}"))?;
@@ -1500,7 +1518,7 @@ impl Engine {
         let identity_for_groups = identity.clone();
         let identity_for_engine = identity.clone();
         let (messenger, rx) =
-            Messenger::start_with_transport(identity, transport, p2p_messenger::Config::default());
+            Messenger::start_with_transport(identity, transport, cfg);
         let messenger = Arc::new(messenger);
         // Тиры зальём ниже, после создания Engine (единая логика — refresh_budgets).
         for k in &contact_keys {
