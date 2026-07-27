@@ -75,6 +75,12 @@ fn image_message_delivers_and_blob_pulls() {
                 assert_eq!(b_bytes, a_bytes, "B подтянул очищенные байты A");
                 assert_eq!(b_mime, "image/jpeg");
                 assert_eq!(b_name, "photo.jpg");
+
+                // M3, репутация: A потратил на нас трафик, отдав блоб → у B заслуги A
+                // выросли (это и повышает бюджет ресурсов, см. budget::reputation_boost).
+                let helpful = helpful_of(&b, &a_key);
+                assert!(helpful > 0, "отдавший блоб получает заслугу, было {helpful}");
+
                 a.shutdown();
                 b.shutdown();
                 return;
@@ -83,4 +89,14 @@ fn image_message_delivers_and_blob_pulls() {
         assert!(Instant::now() < deadline, "B не получил картинку за 10с");
         std::thread::sleep(Duration::from_millis(30));
     }
+}
+
+/// Счётчик заслуг пира из списка контактов.
+fn helpful_of(engine: &Engine, peer: &[u8; 32]) -> u64 {
+    let hex_key = hex::encode(peer);
+    let v: serde_json::Value = serde_json::from_str(&engine.contacts_json()).unwrap();
+    v.as_array()
+        .and_then(|a| a.iter().find(|c| c["key"] == hex_key))
+        .and_then(|c| c["helpful"].as_u64())
+        .unwrap_or(0)
 }

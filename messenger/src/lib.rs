@@ -188,10 +188,10 @@ struct Shared {
     running: AtomicBool,
     tx: Sender<Event>,
     media_tx: Mutex<Option<SyncSender<MediaPacket>>>,
-    /// Тир доверия пиров — единый бюджет ресурсов (M3). Кого тут нет, тот
-    /// [`Tier::Stranger`] (общая корзина класса, анти-Sybil). Обновляется движком
-    /// (`set_peer_tiers`) при смене контактов/блок-листа.
-    tiers: Mutex<std::collections::HashMap<PeerKey, Tier>>,
+    /// Бюджет пиров (M3): тир доверия + счётчик заслуг. Кого тут нет, тот
+    /// [`Tier::Stranger`] с нулевыми заслугами (общая корзина класса, анти-Sybil).
+    /// Обновляется движком (`set_peer_tiers`) при смене контактов/блок-листа/репутации.
+    tiers: Mutex<std::collections::HashMap<PeerKey, (Tier, u32)>>,
 }
 
 impl Shared {
@@ -368,11 +368,12 @@ impl Messenger {
         self.shared.identity.public_key_bytes()
     }
 
-    /// Залить тиры доверия пиров (единый бюджет M3): контакты, сверенные контакты и
-    /// заблокированные. Кого нет в списке — [`Tier::Stranger`]. Зовётся движком при
-    /// старте и любой смене контактов/блок-листа.
-    pub fn set_peer_tiers(&self, tiers: &[(PeerKey, Tier)]) {
-        *self.shared.tiers.lock().unwrap() = tiers.iter().copied().collect();
+    /// Залить бюджеты пиров (M3): тир доверия + заслуги (`helpful`). Кого нет в
+    /// списке — [`Tier::Stranger`] без заслуг. Зовётся движком при старте и любой
+    /// смене контактов/блок-листа/репутации.
+    pub fn set_peer_tiers(&self, tiers: &[(PeerKey, Tier, u32)]) {
+        *self.shared.tiers.lock().unwrap() =
+            tiers.iter().map(|(k, t, h)| (*k, (*t, *h))).collect();
     }
 
     /// Адрес Yggdrasil нашего узла.
@@ -627,14 +628,16 @@ fn receive_loop(shared: Arc<Shared>) {
         }
         // Ingress rate-limit по источнику (до расшифровки). Превышение → дроп.
         let now = Instant::now();
-        // Тир источника — единый бюджет (M3): блок режется здесь, ДО расшифровки.
-        let tier = shared.tiers.lock().unwrap().get(&src).copied().unwrap_or_default();
+        // Бюджет источника (M3): блок режется здесь, ДО расшифровки; заслуженный
+        // контакт получает повышенный лимит.
+        let (tier, helpful) =
+            shared.tiers.lock().unwrap().get(&src).copied().unwrap_or((Tier::default(), 0));
         let allowed = if tier.is_blocked() {
             false // заблокированный не тратит наше крипто ни на одном канале
         } else if buf[0] == CHAN_MEDIA {
             media_rl.allow(&src, now)
         } else {
-            chat_rl.allow(&src, tier, now)
+            chat_rl.allow_with_reputation(&src, tier, helpful, now)
         };
         if !allowed {
             dropped = dropped.wrapping_add(1);

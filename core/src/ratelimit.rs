@@ -111,12 +111,24 @@ impl TieredRateLimiter {
         }
     }
 
-    /// Принять пакет от `src` с бюджетом его тира.
+    /// Принять пакет от `src` с бюджетом его тира (без учёта заслуг).
     pub fn allow(&mut self, src: &[u8; 32], tier: Tier, now: Instant) -> bool {
-        let (cap, refill) = tier.ingress();
+        self.allow_with_reputation(src, tier, 0, now)
+    }
+
+    /// То же, но с репутацией пира: заслуженный контакт получает бóльший бюджет
+    /// (см. [`crate::budget::reputation_boost`] — чужим бонус не даётся, анти-Sybil).
+    pub fn allow_with_reputation(
+        &mut self,
+        src: &[u8; 32],
+        tier: Tier,
+        helpful: u32,
+        now: Instant,
+    ) -> bool {
         if tier.is_blocked() {
             return false; // заблокированный не получает даже расшифровки
         }
+        let (cap, refill) = tier.ingress_with_reputation(helpful);
         // Чужие — общая корзина класса (персональных бакетов им не заводим, иначе
         // Sybil получил бы бюджет пропорционально числу сгенерированных ключей).
         let b = if tier == Tier::Stranger {

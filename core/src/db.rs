@@ -64,7 +64,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             added        INTEGER NOT NULL,
             verified     INTEGER NOT NULL DEFAULT 0,
             profile_name TEXT NOT NULL DEFAULT '',
-            avatar_id    TEXT NOT NULL DEFAULT ''
+            avatar_id    TEXT NOT NULL DEFAULT '',
+            helpful      INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS messages (
@@ -107,6 +108,9 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     ")?;
     // Миграция для установок с outbox без msg_id (идемпотентно: дубль-колонка → игнор).
     let _ = conn.execute("ALTER TABLE outbox ADD COLUMN msg_id INTEGER NOT NULL DEFAULT 0", []);
+    // Репутация (M3): счётчик «полезных дел» пира — отданных нам блобов. Влияет на
+    // бюджет ресурсов (см. p2p_core::budget). Идемпотентно.
+    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN helpful INTEGER NOT NULL DEFAULT 0", []);
     // Профиль контакта (M2): самоназвание + хэш аватара (идемпотентно).
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN profile_name TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN avatar_id TEXT NOT NULL DEFAULT ''", []);

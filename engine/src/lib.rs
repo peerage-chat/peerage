@@ -333,13 +333,15 @@ impl Engine {
     fn refresh_budgets(&self) {
         // ВАЖНО: не держим оба лока разом (contacts+gate) — иначе гонка порядка
         // захвата с API гейта = дедлок. Снимаем контакты, отпускаем, затем блоки.
-        let mut tiers: Vec<([u8; 32], Tier)> = self
+        let mut tiers: Vec<([u8; 32], Tier, u32)> = self
             .contacts
             .lock_safe()
             .list()
             .iter()
             .filter_map(|c| {
-                parse_key(&c.key).map(|k| (k, if c.verified { Tier::Verified } else { Tier::Contact }))
+                parse_key(&c.key).map(|k| {
+                    (k, if c.verified { Tier::Verified } else { Tier::Contact }, c.helpful)
+                })
             })
             .collect();
         let blocked: Vec<[u8; 32]> = self
@@ -350,11 +352,11 @@ impl Engine {
             .filter_map(|h| parse_key(h))
             .collect();
         // Блок сильнее контакта: если пир и там и там — он заблокирован.
-        tiers.retain(|(k, _)| !blocked.contains(k));
-        tiers.extend(blocked.into_iter().map(|k| (k, Tier::Blocked)));
+        tiers.retain(|(k, _, _)| !blocked.contains(k));
+        tiers.extend(blocked.into_iter().map(|k| (k, Tier::Blocked, 0)));
         self.messenger.set_peer_tiers(&tiers);
         // Тот же бюджет — офлайн-очереди (cap/TTL хранения).
-        *self.tier_cache.lock_safe() = tiers.into_iter().collect();
+        *self.tier_cache.lock_safe() = tiers.into_iter().map(|(k, t, _)| (k, t)).collect();
     }
 
     pub fn contacts_json(&self) -> String {
@@ -1026,8 +1028,14 @@ fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
 }
 
 /// Сохранить принятый блоб и уведомить UI (`blob_received`).
-fn save_and_notify_blob(engine: &Arc<Engine>, done: blobs::Completed) {
+fn save_and_notify_blob(engine: &Arc<Engine>, peer: [u8; 32], done: blobs::Completed) {
     save_blob(engine, done.id, &done.content);
+    // M3, репутация: пир потратил на нас свой трафик, отдав блоб целиком → растим
+    // его бюджет. Не-контакту счётчик не двигается (анти-Sybil, см. budget.rs).
+    let bumped = engine.contacts.lock_safe().bump_helpful(&peer).unwrap_or(0);
+    if bumped > 0 {
+        engine.refresh_budgets();
+    }
     push_event(engine, serde_json::json!({
         "type": "blob_received",
         "id": hex::encode(done.id),
@@ -1220,13 +1228,13 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         // UI (сохранён на диск, доступен через blob_read).
         Event::BlobManifest { peer, manifest } => {
             if let Some(done) = blobs.on_manifest(peer, &manifest) {
-                save_and_notify_blob(engine, done);
+                save_and_notify_blob(engine, peer, done);
             }
         }
         Event::BlobRequest { peer, id, index } => blobs.on_request(&id, index, peer),
-        Event::BlobChunk { id, index, data, .. } => {
+        Event::BlobChunk { peer, id, index, data } => {
             if let Some(done) = blobs.on_chunk(&id, index, &data) {
-                save_and_notify_blob(engine, done);
+                save_and_notify_blob(engine, peer, done);
             }
         }
         // M2 профиль: контакт прислал самоназвание + хэш аватара.

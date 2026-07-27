@@ -106,6 +106,10 @@ pub struct Contact {
     /// hex-хэш аватара контакта (M2). Байты тянутся блобом по хэшу; показ — blob_read.
     #[serde(default)]
     pub avatar_id: String,
+    /// Репутация (M3): счётчик «полезных дел» — сколько раз пир потратил на нас свой
+    /// трафик, полностью отдав блоб. Повышает его бюджет ресурсов (`budget::Tier`).
+    #[serde(default)]
+    pub helpful: u32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -139,7 +143,7 @@ impl ContactStore {
     fn load_cache(&mut self) -> Result<(), StoreError> {
         let conn = db::lock(&self.db);
         let mut stmt = conn.prepare(
-            "SELECT key, name, fingerprint, added, verified, profile_name, avatar_id FROM contacts",
+            "SELECT key, name, fingerprint, added, verified, profile_name, avatar_id, helpful FROM contacts",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -150,10 +154,11 @@ impl ContactStore {
                 row.get::<_, i64>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
             ))
         })?;
         for row in rows {
-            let (kb, name, fp, added, ver, profile_name, avatar_id) = row?;
+            let (kb, name, fp, added, ver, profile_name, avatar_id, helpful) = row?;
             if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
                 self.cache.insert(key, Contact {
                     key: hex::encode(key),
@@ -163,6 +168,7 @@ impl ContactStore {
                     verified: ver != 0,
                     profile_name,
                     avatar_id,
+                    helpful: helpful.max(0) as u32,
                 });
             }
         }
@@ -208,6 +214,7 @@ impl ContactStore {
             verified: false,
             profile_name: String::new(),
             avatar_id: String::new(),
+            helpful: 0,
         };
         db::lock(&self.db).execute(
             "INSERT OR IGNORE INTO contacts (key, name, fingerprint, added, verified)
@@ -273,6 +280,20 @@ impl ContactStore {
             }
             None => Ok(false),
         }
+    }
+
+    /// Засчитать пиру «полезное дело» (M3, репутация): он потратил на нас свой трафик,
+    /// полностью отдав блоб. Растит его бюджет ресурсов (см. `budget::reputation_boost`).
+    /// Для не-контакта ничего не делает — заслуги копятся только после гейта (анти-Sybil).
+    pub fn bump_helpful(&mut self, key: &[u8; 32]) -> Result<u32, StoreError> {
+        let Some(c) = self.cache.get_mut(key) else { return Ok(0) };
+        c.helpful = c.helpful.saturating_add(1);
+        let n = c.helpful;
+        db::lock(&self.db).execute(
+            "UPDATE contacts SET helpful=?1 WHERE key=?2",
+            rusqlite::params![n as i64, key.as_slice()],
+        )?;
+        Ok(n)
     }
 
     pub fn remove(&mut self, key: &[u8; 32]) -> Result<bool, StoreError> {
@@ -690,6 +711,23 @@ mod tests {
         store.append(&peer, StoredMessage { id: 1, text: "x".into(), mine: true, time: 0, status: "".into(), ..Default::default() }).unwrap();
         store.clear(&peer).unwrap();
         assert!(store.history(&peer).is_empty());
+    }
+
+    /// Репутация копится только у контактов и переживает переоткрытие.
+    #[test]
+    fn helpful_counter_persists_and_ignores_unknown() {
+        let k = key();
+        let shared = db();
+        let mut s = ContactStore::open(shared.clone(), None).unwrap();
+        s.add(&k, "Helper", 0).unwrap();
+        assert_eq!(s.get(&k).unwrap().helpful, 0);
+        assert_eq!(s.bump_helpful(&k).unwrap(), 1);
+        assert_eq!(s.bump_helpful(&k).unwrap(), 2);
+        // Не-контакт заслуг не копит (анти-Sybil: бонус только после гейта).
+        assert_eq!(s.bump_helpful(&key()).unwrap(), 0);
+
+        let s2 = ContactStore::open(shared, None).unwrap();
+        assert_eq!(s2.get(&k).unwrap().helpful, 2, "репутация пережила переоткрытие");
     }
 
     #[test]
