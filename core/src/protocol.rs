@@ -164,14 +164,43 @@ pub enum ProtocolError {
     BadPadding,
 }
 
-/// Размерный бакет паддинга (M5) по типу payload: текст DM/группы добиваем до 4 КБ
-/// (прячем длину сообщения по размеру), мелкий control/keepalive — только префикс
-/// длины (0), чтобы не амплифицировать частые пакеты.
-const TEXT_BUCKET: usize = 4096;
+/// Размерные бакеты паддинга (M5, анти-трафик-анализ). Наблюдатель меша видит только
+/// РАЗМЕР шифртекста, поэтому цель — сделать классы сообщений неразличимыми ВНУТРИ
+/// бакета, не раздувая частые пакеты.
+///
+/// * [`CONTROL_BUCKET`] — мелкий control: ack/ping/pong/маячок присутствия И
+///   приглашение-отклонение звонка. Ключевое: «начался звонок» неотличимо от
+///   «пришёл ack» — оба ровно 256 Б.
+/// * [`APP_BUCKET`] — прикладные сообщения: текст, медиа-ссылка, MLS-группа,
+///   приглашение в группу, профиль. Ключевое: картинка/файл/голосовое неотличимы
+///   от текста, а длина текста скрыта в пределах бакета.
+/// * [`CHUNK_BUCKET`] — тело блоба: последний (короткий) чанк добивается до полного,
+///   иначе точный размер файла утекал бы остатком `size mod CHUNK_SIZE`.
+///
+/// Границы (в threat-model честно): скрыт РАЗМЕР, но не тайминг, не число пакетов и
+/// не байт канала (chat/media) — см. `docs/protocol-spec.md`.
+const CONTROL_BUCKET: usize = 256;
+const APP_BUCKET: usize = 4096;
+/// Чанк блоба 12 КБ → hex удваивает (~24.6 КБ JSON). Бакет с запасом на JSON-оверхед;
+/// конверт (hex шифртекста ≈ ×2) остаётся заметно ниже датаграммы 65535 — на это есть
+/// тест `padded_blob_chunk_fits_datagram`.
+const CHUNK_BUCKET: usize = 25 * 1024;
+
 fn bucket_for(payload: &Payload) -> usize {
     match payload {
-        Payload::Text { .. } | Payload::Group { .. } => TEXT_BUCKET,
-        _ => 0,
+        // Прикладные: текст и медиа обязаны быть в ОДНОМ бакете (DoD M5).
+        Payload::Text { .. }
+        | Payload::Media { .. }
+        | Payload::Group { .. }
+        | Payload::GroupInvite { .. }
+        | Payload::GroupKeyReply { .. }
+        | Payload::ProfileUpdate { .. }
+        | Payload::BlobManifest { .. } => APP_BUCKET,
+        // Тело блоба: прячем остаток последнего чанка.
+        Payload::BlobChunk { .. } => CHUNK_BUCKET,
+        // Всё остальное — мелкий и/или частый control (в т.ч. RoomInvite/RoomDecline:
+        // так факт звонка не выдаётся размером пакета).
+        _ => CONTROL_BUCKET,
     }
 }
 
@@ -290,6 +319,57 @@ mod tests {
         // Расшифровка по-прежнему работает.
         let (_, p) = decode(&b, &short).unwrap();
         assert!(matches!(p, Payload::Text { text, .. } if text == "да"));
+    }
+
+    /// DoD M5: размеры НА ПРОВОДЕ не различают текст / медиа / звонок.
+    #[test]
+    fn text_media_and_call_are_indistinguishable_by_size() {
+        let a = Identity::generate();
+        let b = Identity::generate();
+        let enc = |p: &Payload| encode(&a, &b.public_key_bytes(), p, 0).unwrap().len();
+
+        // Прикладной класс: текст (короткий/длинный), картинка, голосовое, файл, группа.
+        let sizes = [
+            enc(&Payload::Text { id: 1, text: "да".into() }),
+            enc(&Payload::Text { id: 1, text: "a".repeat(900) }),
+            enc(&Payload::Media { id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "secret-photo.jpg".into() }),
+            enc(&Payload::Media { id: 3, hash: vec![6u8; 32], mime: "audio/mp4".into(), name: "voice.m4a".into() }),
+            enc(&Payload::Media { id: 4, hash: vec![7u8; 32], mime: "application/pdf".into(), name: "договор-2026.pdf".into() }),
+            enc(&Payload::Group { id: 5, data: vec![1u8; 200] }),
+        ];
+        assert!(
+            sizes.iter().all(|s| *s == sizes[0]),
+            "текст/картинка/голосовое/файл/группа должны быть одного размера, получено {sizes:?}"
+        );
+
+        // Control-класс: начало звонка неотличимо от ack/ping/маячка присутствия.
+        let ctl = [
+            enc(&Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: true }),
+            enc(&Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] }),
+            enc(&Payload::Ack { id: 13 }),
+            enc(&Payload::Ping),
+            enc(&Payload::RoomPresence { gid: vec![9u8; 16], flags: 0b11 }),
+        ];
+        assert!(
+            ctl.iter().all(|s| *s == ctl[0]),
+            "звонок должен быть неотличим от ack/ping/присутствия, получено {ctl:?}"
+        );
+    }
+
+    /// Последний (короткий) чанк блоба добивается до полного — иначе точный размер
+    /// файла утекал бы остатком. И при этом конверт обязан влезать в датаграмму.
+    #[test]
+    fn padded_blob_chunk_fits_datagram() {
+        let a = Identity::generate();
+        let b = Identity::generate();
+        let enc = |data: Vec<u8>| {
+            encode(&a, &b.public_key_bytes(), &Payload::BlobChunk { id: vec![1u8; 32], index: 0, data }, 0).unwrap()
+        };
+        let full = enc(vec![9u8; 12 * 1024]); // полный чанк
+        let tail = enc(vec![9u8; 37]); // куцый хвост файла
+        assert_eq!(full.len(), tail.len(), "хвостовой чанк неотличим от полного");
+        // Датаграмма транспорта — 65535; конверт с hex-оверхедом обязан влезать.
+        assert!(full.len() < 65535, "чанк с паддингом не влезает в датаграмму: {}", full.len());
     }
 
     #[test]
