@@ -196,6 +196,52 @@ internal fun dayKey(ts: Long): Long {
     return c.get(java.util.Calendar.YEAR) * 1000L + c.get(java.util.Calendar.DAY_OF_YEAR)
 }
 
+// ── Склейка сообщений в блоки (docs/design/mockups/chat-blocks.html) ────────
+// Блок — подряд идущие сообщения ОДНОГО отправителя внутри окна времени, без
+// разделителей между ними. Внутри блока сообщения стоят вплотную и «сшиваются»
+// уменьшенным радиусом со стороны отправителя.
+
+/** Окно склейки, секунды. Часы устройств не синхронизированы (время ставит
+ *  отправитель), поэтому окно нарочно широкое: узкое рвало бы блок на расхождении. */
+internal const val BLOCK_WINDOW_SEC = 300L
+
+/** Положение сообщения в блоке. */
+internal enum class BlockPos { Solo, First, Mid, Last }
+
+/** Продолжает ли сообщение блок предыдущего: тот же отправитель, тот же день,
+ *  разрыв меньше окна. Системные строки блок разрывают (передавайте `null`). */
+internal fun continuesBlock(prevSender: String?, prevTime: Long, sender: String, time: Long): Boolean =
+    prevSender == sender && time - prevTime < BLOCK_WINDOW_SEC && dayKey(prevTime) == dayKey(time)
+
+internal fun blockPos(withPrev: Boolean, withNext: Boolean): BlockPos = when {
+    !withPrev && !withNext -> BlockPos.Solo
+    !withPrev -> BlockPos.First
+    withNext -> BlockPos.Mid
+    else -> BlockPos.Last
+}
+
+/** Отступ ПОД сообщением: внутри блока — хайрлайн, между блоками — обычный шаг. */
+internal fun blockGap(pos: BlockPos) =
+    if (pos == BlockPos.First || pos == BlockPos.Mid) Tokens.Space.xxs else Tokens.Space.s
+
+/** Резерв места под время в правом-нижнем углу пузыря: время не участвует в потоке
+ *  текста, поэтому текст обязан оставить ему ширину, иначе они наложатся.
+ *  У своих сообщений шире — там ещё галочка статуса. */
+internal fun bubbleTimeReserve(mine: Boolean) = if (mine) 52.dp else 34.dp
+
+/** Форма пузыря: «шов» внутри блока — со стороны отправителя. */
+internal fun bubbleShape(mine: Boolean, pos: BlockPos): RoundedCornerShape {
+    val r = Tokens.Radius.preview // 14 — свободные углы
+    val seam = 5.dp // сшитые углы внутри блока
+    val topSeam = pos == BlockPos.Mid || pos == BlockPos.Last
+    val bottomSeam = pos == BlockPos.Mid || pos == BlockPos.First
+    return if (mine) {
+        RoundedCornerShape(r, if (topSeam) seam else r, if (bottomSeam) seam else r, r)
+    } else {
+        RoundedCornerShape(if (topSeam) seam else r, r, r, if (bottomSeam) seam else r)
+    }
+}
+
 /** Локализованная метка дня для чипа-разделителя: Сегодня / Вчера / «d MMMM». */
 @Composable
 internal fun dayLabel(ts: Long): String {

@@ -34,6 +34,7 @@
 | [`onboarding.html`](onboarding.html) | Онбординг (4 экрана: приветствие/профиль/ключ/разрешения) | согласован; реализация M4 |
 | [`chat-blocks.html`](chat-blocks.html) | Склейка подряд идущих сообщений (DM + группы) | согласован |
 | [`attach-sheet.html`](attach-sheet.html) | Лист вложений (галерея/камера/файл + подпись) | согласован |
+| [`emoji-panel.html`](emoji-panel.html) | Панель эмодзи (недавние, категории, забой) | на согласовании |
 | [`contact-profile.html`](contact-profile.html) | Профиль контакта (проверен / не проверен) | согласован |
 | [`folder-editor.html`](folder-editor.html) | Список папок + редактор папки | согласован |
 | [`calls.html`](calls.html) | История звонков (журнал + пусто) | согласован |

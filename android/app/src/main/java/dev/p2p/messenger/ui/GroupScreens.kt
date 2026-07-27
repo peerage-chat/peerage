@@ -129,8 +129,18 @@ internal fun GroupChatScreen(model: AppModel) {
             ) {
                 itemsIndexed(msgs) { i, m ->
                     val prev = msgs.getOrNull(i - 1)
+                    val next = msgs.getOrNull(i + 1)
                     if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
-                    GroupMessageRow(model, m)
+                    // Склейка блоков. Системная строка — разделитель: у неё нет
+                    // отправителя, поэтому соседние сообщения в один блок не сходятся.
+                    val who = { g: GroupMsg -> if (g.system) null else g.sender }
+                    val pos = blockPos(
+                        withPrev = prev != null && !m.system &&
+                            continuesBlock(who(prev), prev.time, m.sender, m.time),
+                        withNext = next != null && !m.system && !next.system &&
+                            continuesBlock(m.sender, m.time, next.sender, next.time),
+                    )
+                    GroupMessageRow(model, m, pos)
                 }
             }
             MessageInput(
@@ -246,7 +256,7 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
 
 /** Строка группового сообщения: системная / своя / входящая (имя цветом + аватар). */
 @Composable
-internal fun GroupMessageRow(model: AppModel, m: GroupMsg) {
+internal fun GroupMessageRow(model: AppModel, m: GroupMsg, pos: BlockPos = BlockPos.Solo) {
     when {
         m.system -> {
             val who = groupSenderName(model, m.sender)
@@ -264,20 +274,35 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg) {
                 }
             }
         }
-        m.mine -> Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.End) {
-            GroupBubble(m, model, true, m.time)
+        m.mine -> Row(Modifier.fillMaxWidth().padding(bottom = blockGap(pos)), horizontalArrangement = Arrangement.End) {
+            GroupBubble(m, model, true, m.time, pos = pos)
         }
-        // Входящее: аватар выровнен по НИЗУ пузыря (Telegram-style), имя — ВНУТРИ пузыря.
+        // Входящее: аватар — ТОЛЬКО у нижнего сообщения блока (Telegram-style), у
+        // остальных на его месте пустая распорка, чтобы левый край блока не гулял.
+        // Имя отправителя — только на ПЕРВОМ сообщении блока, внутри пузыря.
         else -> Row(
-            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            Modifier.fillMaxWidth().padding(bottom = blockGap(pos)),
             horizontalArrangement = Arrangement.Start,
             verticalAlignment = Alignment.Bottom,
         ) {
             val who = groupSenderName(model, m.sender)
             val online = model.online[m.sender] == true
-            SquareAvatar(who, size = 32.dp, online = online)
+            val avatarBottom = pos == BlockPos.Solo || pos == BlockPos.Last
+            if (avatarBottom) {
+                SquareAvatar(who, size = 32.dp, online = online)
+            } else {
+                Spacer(Modifier.width(32.dp))
+            }
             Spacer(Modifier.width(8.dp))
-            GroupBubble(m, model, false, m.time, senderName = who, senderColor = nameColor(m.sender))
+            GroupBubble(
+                m,
+                model,
+                false,
+                m.time,
+                senderName = if (pos == BlockPos.Solo || pos == BlockPos.First) who else null,
+                senderColor = nameColor(m.sender),
+                pos = pos,
+            )
         }
     }
 }
@@ -292,12 +317,13 @@ internal fun GroupBubble(
     time: Long,
     senderName: String? = null,
     senderColor: Color = Color.White,
+    pos: BlockPos = BlockPos.Solo,
 ) {
     // M2: байты вложения из реактивного кэша (появятся по докачке блоба без рефреша).
     val blobBytes = if (m.blobId.isNotEmpty()) model.mediaBlobs[m.blobId] else null
     var viewer by remember { mutableStateOf(false) }
     Box(
-        Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(14.dp))
+        Modifier.widthIn(max = 280.dp).clip(bubbleShape(mine, pos))
             .background(if (mine) BubbleOut else BubbleIn).padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Column {
@@ -309,7 +335,7 @@ internal fun GroupBubble(
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(end = 40.dp),
+                    modifier = Modifier.padding(end = bubbleTimeReserve(false)),
                 )
             }
             when (m.kind) {
@@ -317,7 +343,7 @@ internal fun GroupBubble(
                 "voice" -> VoiceAttachment(blobBytes)
                 "file" -> FileAttachment(m.name, blobBytes)
                 // Текст резервирует справа место под время → время оверлеем без наложения.
-                else -> Text(m.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = 40.dp))
+                else -> Text(m.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = bubbleTimeReserve(false)))
             }
         }
         if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }

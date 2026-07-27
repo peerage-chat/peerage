@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Панель эмодзи</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .col { display: flex; flex-direction: column; gap: 10px; }
+  .lbl { color: #c9ced6; font-size: 13px; font-weight: 500; }
+  .phone { width: 390px; height: 760px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; position: relative; color: var(--on-dark); display: flex; flex-direction: column; }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; flex: 0 0 auto; }
+  .topbar { display: flex; align-items: center; gap: 12px; padding: 8px 16px 12px; background: var(--accent-dark); flex: 0 0 auto; }
+  .topbar .av { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center;
+                justify-content: center; font-size: 16px; font-weight: 500; }
+  .topbar .nm { font-size: 17px; font-weight: 500; }
+  .topbar .st { font-size: var(--font-small); color: var(--online); }
+  .topbar i { font-size: 22px; color: var(--icon-chrome); }
+
+  .chat { flex: 1; min-height: 0; padding: var(--space-m) var(--space-s); overflow: hidden; }
+  .bub { max-width: 78%; padding: 7px 12px 6px; border-radius: var(--radius-preview); font-size: 14px;
+         margin-bottom: var(--space-s); position: relative; }
+  .bub.in { background: var(--bubble-in); }
+  .bub.out { background: var(--bubble-out); margin-left: auto; }
+  .bub .meta { position: absolute; right: 12px; bottom: 5px; font-size: 11px; color: rgba(255,255,255,.55); }
+  .tgap { display: inline-block; width: 34px; }
+
+  /* ── Панель: выезжает из строки ввода, как лист вложений ── */
+  .panel { flex: 0 0 auto; background: var(--surface); border-radius: 18px 18px 0 0; }
+  .grab { width: 36px; height: 4px; background: var(--icon-muted); border-radius: 2px; margin: var(--space-s) auto; }
+
+  .sect { padding: var(--space-s) var(--space-l) var(--space-xs); font-size: var(--font-caption);
+          letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+
+  /* сетка эмодзи: 8 в ряд, зазора почти нет — цель нажатия задаёт сама ячейка */
+  .grid { display: grid; grid-template-columns: repeat(8, 1fr); padding: 0 var(--space-s);
+          max-height: 268px; overflow-y: auto; }
+  .grid span { height: 44px; display: flex; align-items: center; justify-content: center; font-size: 25px;
+               line-height: 1; }
+
+  /* нижний ряд категорий + забой */
+  .cats { display: flex; align-items: center; gap: 2px; padding: var(--space-xs) var(--space-s);
+          border-top: 1px solid var(--border); }
+  .cat { flex: 1; height: 38px; display: flex; align-items: center; justify-content: center; font-size: 20px;
+         color: var(--icon-muted); border-radius: var(--radius-chip); }
+  .cat.on { color: var(--accent); background: var(--folder-selected); }
+  .cats .del { width: 44px; flex: 0 0 auto; color: var(--secondary); font-size: 21px; display: flex;
+               align-items: center; justify-content: center; }
+
+  /* ── Строка ввода — всегда на месте ── */
+  .input-row { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-s);
+               padding: var(--space-s) var(--space-m) var(--space-m); background: var(--bg); }
+  .pill { flex: 1; height: 44px; border-radius: var(--radius-pill); background: var(--surface); display: flex;
+          align-items: center; gap: var(--space-m); padding: 0 var(--space-m); }
+  .pill i { font-size: 21px; color: var(--icon-muted); }
+  .pill i.on { color: var(--accent); }
+  .pill .txt { flex: 1; font-size: 14px; color: var(--on-dark); }
+  .pill .ph { flex: 1; font-size: 14px; color: var(--secondary); }
+  .pill .caret { width: 1px; height: 18px; background: var(--accent); }
+  .go { width: 44px; height: 44px; border-radius: var(--radius-pill); background: var(--accent);
+        color: var(--accent-dark); display: flex; align-items: center; justify-content: center; font-size: 21px;
+        flex: 0 0 auto; }
+
+  .note { max-width: 400px; color: #8a8f98; font-size: 13px; line-height: 1.5; }
+  .note b { color: #c9ced6; }
+  .note code { color: #b8c4d0; }
+</style>
+</head>
+<body>
+
+<div class="col">
+<div class="lbl">Панель открыта — «Недавние» + смайлы</div>
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
+    <div style="flex:1"><div class="nm">Алиса</div><div class="st">в сети</div></div>
+    <i class="ti ti-phone"></i><i class="ti ti-dots-vertical"></i>
+  </div>
+
+  <div class="chat">
+    <div class="bub in">Во сколько встречаемся?<span class="tgap"></span><span class="meta">13:40</span></div>
+    <div class="bub out">В шесть у метро<span class="tgap"></span><span class="meta">13:41</span></div>
+  </div>
+
+  <div class="panel">
+    <div class="grab"></div>
+
+    <div class="sect">Недавние</div>
+    <div class="grid" style="max-height:44px">
+      <span>👍</span><span>❤️</span><span>😂</span><span>🔥</span><span>🙏</span><span>😅</span><span>👌</span><span>🎉</span>
+    </div>
+
+    <div class="sect">Смайлы и люди</div>
+    <div class="grid">
+      <span>😀</span><span>😃</span><span>😄</span><span>😁</span><span>😆</span><span>😅</span><span>🤣</span><span>😂</span>
+      <span>🙂</span><span>🙃</span><span>😉</span><span>😊</span><span>😇</span><span>🥰</span><span>😍</span><span>🤩</span>
+      <span>😘</span><span>😗</span><span>😚</span><span>😙</span><span>😋</span><span>😛</span><span>😜</span><span>🤪</span>
+      <span>🤨</span><span>🧐</span><span>🤓</span><span>😎</span><span>🥸</span><span>🤯</span><span>😴</span><span>🤔</span>
+    </div>
+
+    <div class="cats">
+      <span class="cat"><i class="ti ti-clock"></i></span>
+      <span class="cat on"><i class="ti ti-mood-smile"></i></span>
+      <span class="cat"><i class="ti ti-dog"></i></span>
+      <span class="cat"><i class="ti ti-apple"></i></span>
+      <span class="cat"><i class="ti ti-ball-football"></i></span>
+      <span class="cat"><i class="ti ti-car"></i></span>
+      <span class="cat"><i class="ti ti-bulb"></i></span>
+      <span class="cat"><i class="ti ti-math-symbols"></i></span>
+      <span class="del"><i class="ti ti-backspace"></i></span>
+    </div>
+  </div>
+
+  <div class="input-row">
+    <div class="pill">
+      <i class="ti ti-paperclip"></i>
+      <span class="txt">Договорились 👍<span class="caret"></span></span>
+      <i class="ti ti-mood-smile on"></i>
+    </div>
+    <div class="go"><i class="ti ti-send"></i></div>
+  </div>
+</div>
+</div>
+
+<div class="col">
+<div class="lbl">Панель закрыта — та же строка ввода</div>
+<div class="phone">
+  <div class="statusbar">
+    <span>12:55</span>
+    <span style="display:flex;gap:6px;align-items:center"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+  <div class="topbar">
+    <i class="ti ti-arrow-left"></i>
+    <div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
+    <div style="flex:1"><div class="nm">Алиса</div><div class="st">в сети</div></div>
+    <i class="ti ti-phone"></i><i class="ti ti-dots-vertical"></i>
+  </div>
+
+  <div class="chat">
+    <div class="bub in">Во сколько встречаемся?<span class="tgap"></span><span class="meta">13:40</span></div>
+    <div class="bub out">В шесть у метро<span class="tgap"></span><span class="meta">13:41</span></div>
+    <div class="bub out">Договорились 👍<span class="tgap"></span><span class="meta">13:42</span></div>
+  </div>
+
+  <div class="input-row">
+    <div class="pill">
+      <i class="ti ti-paperclip"></i>
+      <span class="ph">Сообщение…</span>
+      <i class="ti ti-mood-smile"></i>
+    </div>
+    <div class="go"><i class="ti ti-microphone"></i></div>
+  </div>
+</div>
+</div>
+
+<div class="note">
+  <p><b>Панель ведёт себя как лист вложений:</b> выезжает из строки ввода, сама строка остаётся на месте,
+  иконка-смайл подсвечена акцентом и закрывает панель повторным касанием. Один приём на оба вложения и
+  эмодзи — не два разных поведения у соседних иконок в одном поле.</p>
+
+  <p style="margin-top:10px"><b>Ячейка 44px, зазора между ними нет.</b> Цель нажатия задаёт сама ячейка;
+  видимые отступы тут только уменьшили бы число эмодзи на экран.</p>
+
+  <p style="margin-top:10px"><b>«Недавние» сверху отдельной строкой.</b> Реально используют десяток
+  символов, и они должны быть под большим пальцем сразу, без выбора категории.</p>
+
+  <p style="margin-top:10px"><b>Категории — снизу, забой в том же ряду справа.</b> Внизу до них дотягивается
+  палец, и они не уезжают при прокрутке сетки. Забой нужен, потому что системная клавиатура в этот момент
+  скрыта, а эмодзи часто ставят подряд и промахиваются.</p>
+
+  <p style="margin-top:10px"><b>Эмодзи здесь — обычные системные символы,</b> они едут в тексте сообщения
+  и ничего к протоколу не добавляют. Их НЕ надо путать с эмодзи-fingerprint: там свой курируемый SVG-набор
+  ровно потому, что системные рендерятся по-разному на разных устройствах и сверка ключа ломается. В чате
+  такой проблемы нет — если у собеседника смайл выглядит иначе, ничего не сломается.</p>
+
+  <p style="margin-top:10px"><b>Тон кожи и поиск по эмодзи в v1.0 не входят</b> — оба требуют своей
+  раскладки и данных; вернёмся к ним после.</p>
+
+  <p style="margin-top:10px">Заменяет заглушку <code>ChatScreen.kt:304</code> — сейчас иконка-смайл
+  нарисована и не делает ничего.</p>
+</div>
+
+</body>
+</html>

@@ -161,8 +161,15 @@ internal fun ChatScreen(model: AppModel) {
             item { E2EBanner() }
             itemsIndexed(msgs) { i, m ->
                 val prev = msgs.getOrNull(i - 1)
+                val next = msgs.getOrNull(i + 1)
                 if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
-                MessageBubble(m, model)
+                // Склейка блоков: в DM «отправитель» — это сторона (я/собеседник).
+                val side = { msg: Message -> if (msg.mine) "me" else "peer" }
+                val pos = blockPos(
+                    withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time),
+                    withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time),
+                )
+                MessageBubble(m, model, pos)
             }
         }
         MessageInput(
@@ -343,16 +350,16 @@ internal fun PillIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun MessageBubble(m: Message, model: AppModel) {
+internal fun MessageBubble(m: Message, model: AppModel, pos: BlockPos = BlockPos.Solo) {
     // M2: байты вложения из реактивного кэша (появятся по докачке без рефреша).
     val blobBytes = if (m.blobId.isNotEmpty()) model.mediaBlobs[m.blobId] else null
     var viewer by remember { mutableStateOf(false) }
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        Modifier.fillMaxWidth().padding(bottom = blockGap(pos)),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
         Box(
-            Modifier.widthIn(max = 290.dp).clip(RoundedCornerShape(14.dp))
+            Modifier.widthIn(max = 290.dp).clip(bubbleShape(m.mine, pos))
                 .background(if (m.mine) BubbleOut else BubbleIn)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
@@ -370,7 +377,7 @@ internal fun MessageBubble(m: Message, model: AppModel) {
                         m.text,
                         color = Color.White,
                         fontSize = 15.sp,
-                        modifier = Modifier.padding(end = if (m.mine) 52.dp else 40.dp),
+                        modifier = Modifier.padding(end = bubbleTimeReserve(m.mine)),
                     )
                 }
             }
@@ -633,20 +640,16 @@ internal fun StatusTick(status: String) {
         "delivered" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_delivered), tint = tint, modifier = Modifier.size(13.dp))
         "sent" -> Icon(Icons.Filled.Done, stringResource(R.string.status_sent), tint = tint, modifier = Modifier.size(13.dp))
         "pending" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_sending), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
-        "queued" -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                stringResource(R.string.status_queued_label),
-                color = tint.copy(alpha = 0.7f),
-                fontSize = 9.sp,
-            )
-            Spacer(Modifier.width(2.dp))
-            Icon(
-                Icons.Filled.CloudQueue,
-                stringResource(R.string.status_queued),
-                tint = tint.copy(alpha = 0.7f),
-                modifier = Modifier.size(12.dp),
-            )
-        }
+        // Только значок, без слова: строка времени в пузыре имеет фиксированный
+        // резерв места (см. bubbleTimeReserve), а слово его переполняло и наезжало
+        // на короткий текст. Расшифровка статуса — в описании для screen reader и
+        // на экране очереди отправки.
+        "queued" -> Icon(
+            Icons.Filled.CloudQueue,
+            stringResource(R.string.status_queued),
+            tint = tint.copy(alpha = 0.7f),
+            modifier = Modifier.size(12.dp),
+        )
         "failed" -> Text("!", color = HoloError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }

@@ -191,7 +191,6 @@
     <string name="status_sending">отправляется</string>
     <string name="status_queued">ожидание</string>
     <!-- Короткая подпись у часов: получатель офлайн, сообщение ждёт в очереди -->
-    <string name="status_queued_label">ждёт</string>
 
     <!-- ── Чипы дат ────────────────────────────────────────────────────── -->
     <string name="date_today">Сегодня</string>
