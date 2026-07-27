@@ -8,6 +8,7 @@
 //! Хранит непрозрачные `(payload_type, payload)` — кодирование выбирает верхний слой
 //! (движок): что именно сериализуется в `payload`, здесь не важно.
 
+use crate::budget::Tier;
 use crate::db::{self, Db};
 use crate::store::StoreError;
 
@@ -137,9 +138,11 @@ impl OutboxStore {
     }
 }
 
-/// TTL офлайн-очереди — 7 дней. Старше — выбрасываем (не досылаем вечно).
+/// TTL офлайн-очереди по умолчанию (пир без известного тира) — 7 дней.
+/// Реальные cap/TTL берутся из [`crate::budget::Tier`] пира: доверенному храним
+/// дольше и больше, незнакомцу — чуть-чуть, заблокированному — ничего.
 pub const OUTBOX_TTL_SECS: i64 = 7 * 24 * 3600;
-/// Максимум ожидающих на одного пира (анти-DoS хранилища): старейшие сверх — прочь.
+/// Максимум ожидающих на одного пира по умолчанию (анти-DoS хранилища).
 pub const OUTBOX_PEER_CAP: usize = 500;
 
 /// Оркестратор офлайн-очереди: персистит исходящий текст, снимает по Ack, досылает
@@ -149,18 +152,25 @@ pub const OUTBOX_PEER_CAP: usize = 500;
 pub struct OutboxManager {
     store: OutboxStore,
     send: Box<dyn FnMut(&[u8; 32], u64, &str) + Send>,
+    /// Тир пира — единый бюджет (M3). Задаёт, сколько и как долго хранить.
+    /// Движок отдаёт актуальный тир из контактов/блок-листа.
+    tier_of: Box<dyn Fn(&[u8; 32]) -> Tier + Send>,
 }
 
 impl OutboxManager {
-    pub fn new(store: OutboxStore, send: Box<dyn FnMut(&[u8; 32], u64, &str) + Send>) -> Self {
-        Self { store, send }
+    pub fn new(
+        store: OutboxStore,
+        send: Box<dyn FnMut(&[u8; 32], u64, &str) + Send>,
+        tier_of: Box<dyn Fn(&[u8; 32]) -> Tier + Send>,
+    ) -> Self {
+        Self { store, send, tier_of }
     }
 
     /// Запомнить отправленный текст (на случай, если не дойдёт). Держит очередь пира
-    /// в пределах [`OUTBOX_PEER_CAP`] (анти-DoS хранилища).
+    /// в пределах бюджета его тира (анти-DoS хранилища).
     pub fn on_sent(&self, peer: &[u8; 32], msg_id: u64, text: &str, now: i64) {
         let _ = self.store.enqueue(peer, msg_id, "text", text.as_bytes(), now);
-        let _ = self.store.trim_peer(peer, OUTBOX_PEER_CAP);
+        let _ = self.store.trim_peer(peer, (self.tier_of)(peer).outbox_cap());
     }
 
     /// Доставка подтверждена (Ack) — снять из очереди.
@@ -180,12 +190,20 @@ impl OutboxManager {
         }
     }
 
-    /// Старт приложения: выбросить протухшее (>TTL) и дослать оставшееся.
+    /// Старт приложения: выбросить протухшее и дослать оставшееся. TTL — per-peer по
+    /// тиру: доверенному держим дольше, незнакомцу сутки, заблокированному ничего.
     pub fn on_start(&mut self, now: i64) {
-        let _ = self.store.prune_older_than(now - OUTBOX_TTL_SECS);
-        if let Ok(entries) = self.store.pending_all() {
-            self.resend(entries);
+        let Ok(entries) = self.store.pending_all() else { return };
+        let mut alive = Vec::with_capacity(entries.len());
+        for e in entries {
+            let ttl = (self.tier_of)(&e.peer).outbox_ttl_secs();
+            if now.saturating_sub(e.created_at) > ttl {
+                let _ = self.store.remove(e.id); // протухло по бюджету этого пира
+            } else {
+                alive.push(e);
+            }
         }
+        self.resend(alive);
     }
 
     fn resend(&mut self, entries: Vec<OutboxEntry>) {
@@ -212,13 +230,19 @@ mod tests {
     type Log = Arc<Mutex<Vec<([u8; 32], u64, String)>>>;
 
     /// Менеджер над свежим стором + журнал вызовов отправки (записывающий callback).
+    /// Все пиры — `Contact` (историческое поведение: cap 500 / TTL 7 дней).
     fn mgr_with(store: OutboxStore) -> (OutboxManager, Log) {
+        mgr_with_tier(store, Tier::Contact)
+    }
+
+    /// То же, но с заданным тиром для ВСЕХ пиров — для проверки градуировки бюджета.
+    fn mgr_with_tier(store: OutboxStore, tier: Tier) -> (OutboxManager, Log) {
         let log: Log = Arc::new(Mutex::new(Vec::new()));
         let l2 = log.clone();
         let send = Box::new(move |p: &[u8; 32], id: u64, t: &str| {
             l2.lock().unwrap().push((*p, id, t.to_string()));
         });
-        (OutboxManager::new(store, send), log)
+        (OutboxManager::new(store, send, Box::new(move |_| tier)), log)
     }
 
     fn peer(n: u8) -> [u8; 32] {
@@ -351,5 +375,36 @@ mod tests {
         m.on_start(now);
         // old (created_at 0 < now-TTL) выброшено; дослан только fresh.
         assert_eq!(*log.lock().unwrap(), vec![(peer(1), 2, "fresh".to_string())]);
+    }
+
+    /// M3: срок хранения — из бюджета тира. Одна и та же запись переживает старт у
+    /// контакта, но выбрасывается у незнакомца (сутки) и у заблокированного (0).
+    #[test]
+    fn start_ttl_follows_peer_tier() {
+        let age = 3 * 24 * 3600; // 3 дня — больше суток, меньше недели
+        let fresh_for = |tier: Tier| {
+            let s = store();
+            s.enqueue(&peer(1), 1, "text", b"msg", 0).unwrap();
+            let (mut m, log) = mgr_with_tier(s, tier);
+            m.on_start(age);
+            let resent = !log.lock().unwrap().is_empty();
+            resent
+        };
+        assert!(fresh_for(Tier::Verified), "сверенному храним дольше всех");
+        assert!(fresh_for(Tier::Contact), "контакту — неделю");
+        assert!(!fresh_for(Tier::Stranger), "незнакомцу — сутки, 3 дня уже протухли");
+        assert!(!fresh_for(Tier::Blocked), "заблокированному не храним вовсе");
+    }
+
+    /// Объём очереди тоже градуирован: незнакомец не забивает хранилище.
+    #[test]
+    fn peer_cap_follows_tier() {
+        let s = store();
+        let (m, _log) = mgr_with_tier(s, Tier::Stranger);
+        let cap = Tier::Stranger.outbox_cap();
+        for i in 0..(cap + 20) {
+            m.on_sent(&peer(1), i as u64, "spam", 100);
+        }
+        assert_eq!(m.pending_count() as usize, cap, "очередь обрезана до бюджета тира");
     }
 }

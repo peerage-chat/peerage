@@ -170,6 +170,9 @@ pub struct Engine {
     blob_dir: PathBuf,
     /// Персистентная офлайн-очередь исходящих (M3): досылка после офлайна/рестарта.
     outbox: Mutex<p2p_core::outbox::OutboxManager>,
+    /// Единый бюджет (M3): тир каждого известного пира. Читают ingress-лимитер
+    /// (через messenger) и офлайн-очередь (через замыкание) — одна точка истины.
+    tier_cache: Arc<Mutex<HashMap<[u8; 32], Tier>>>,
 }
 
 /// Свой профиль на диске (M2): самоназвание + аватар (id блоба + mime). Не секрет —
@@ -308,7 +311,7 @@ impl Engine {
         } else {
             name.to_string()
         };
-        // ВАЖНО: гард лока из scrutinee `match` живёт до конца всех арм → refresh_trusted
+        // ВАЖНО: гард лока из scrutinee `match` живёт до конца всех арм → refresh_budgets
         // (лочит contacts) внутри арма = повторный лок того же мьютекса = дедлок. Поэтому
         // снимаем результат в переменную (гард освобождается на `;`), затем match.
         let outcome = self.contacts.lock_safe().add(key, &name, now());
@@ -350,6 +353,8 @@ impl Engine {
         tiers.retain(|(k, _)| !blocked.contains(k));
         tiers.extend(blocked.into_iter().map(|k| (k, Tier::Blocked)));
         self.messenger.set_peer_tiers(&tiers);
+        // Тот же бюджет — офлайн-очереди (cap/TTL хранения).
+        *self.tier_cache.lock_safe() = tiers.into_iter().collect();
     }
 
     pub fn contacts_json(&self) -> String {
@@ -1438,13 +1443,27 @@ impl Engine {
             });
         }
 
+        // Кэш тиров — общий для ingress-лимитера и офлайн-очереди (единый бюджет M3).
+        // Нужен здесь, потому что очередь создаётся раньше Engine и не может на него
+        // ссылаться; `refresh_budgets` держит кэш в актуальном состоянии.
+        let tier_cache: Arc<Mutex<HashMap<[u8; 32], Tier>>> = Arc::new(Mutex::new(HashMap::new()));
+
         // Офлайн-очередь (M3): досылку делает messenger.resend_text (тот же id → дедуп).
         let outbox = {
             let m = messenger.clone();
+            let tc = tier_cache.clone();
             p2p_core::outbox::OutboxManager::new(
                 p2p_core::outbox::OutboxStore::new(db.clone()),
                 Box::new(move |peer, id, text| {
                     let _ = m.resend_text(peer, id, text);
+                }),
+                // Cap/TTL очереди — из того же бюджета, что и ingress (единая точка).
+                Box::new(move |peer| {
+                    tc.lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .get(peer)
+                        .copied()
+                        .unwrap_or_default()
                 }),
             )
         };
@@ -1464,6 +1483,7 @@ impl Engine {
             rooms: Mutex::new(RoomState::default()),
             bench: Mutex::new(None),
             blob_dir: dir.join("blobs"),
+            tier_cache,
         });
 
         // Единый бюджет (M3): тиры контактов/блок-листа в ingress-лимитер. Делаем
