@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -135,6 +136,7 @@ internal fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
             Triple(Icons.Filled.Call, stringResource(R.string.menu_calls), Screen.Calls),
             Triple(Icons.Filled.Share, stringResource(R.string.menu_network), Screen.Network),
             Triple(Icons.Filled.Lock, stringResource(R.string.menu_saved), Screen.Saved),
+            Triple(Icons.Filled.Storage, stringResource(R.string.menu_storage), Screen.Storage),
         ).forEach { (icon, label, dest) -> DrawerItem(icon, label) { navigate(dest) } }
         HorizontalDivider(color = HoloBorder, modifier = Modifier.padding(vertical = 4.dp))
         DrawerItem(Icons.Filled.Settings, stringResource(R.string.menu_settings)) { navigate(Screen.Settings) }

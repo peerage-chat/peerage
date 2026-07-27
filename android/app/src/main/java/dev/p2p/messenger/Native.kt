@@ -74,6 +74,12 @@ object Native {
     /** Сбросить очередь недоставленного пиру (явное действие). Возвращает удалённых. */
     external fun clearOutboxFor(sessionPtr: Long, keyHex: String): Int
 
+    /** Что занимает место: JSON {blobs, blob_bytes, outbox_pending, outbox_bytes}. */
+    external fun storageStats(sessionPtr: Long): String
+
+    /** Удалить все сохранённые вложения. Возвращает освобождённые байты. */
+    external fun clearBlobs(sessionPtr: Long): Long
+
     /** История переписки с пиром как JSON-массив. */
     external fun history(sessionPtr: Long, keyHex: String): String
 

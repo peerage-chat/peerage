@@ -358,6 +358,30 @@ class AppModel private constructor() {
         outboxWarn = o.optBoolean("warn", false)
     }
 
+    // ── Хранилище (простой экран; нормальный дизайн — позже) ──────────────────
+    var storageBlobs by mutableStateOf(0L)
+        private set
+    var storageBlobBytes by mutableStateOf(0L)
+        private set
+    var storageOutboxPending by mutableStateOf(0L)
+        private set
+
+    fun refreshStorage() = ops.execute {
+        val o = runCatching { JSONObject(Native.storageStats(sessionPtr)) }.getOrNull() ?: return@execute
+        storageBlobs = o.optLong("blobs", 0)
+        storageBlobBytes = o.optLong("blob_bytes", 0)
+        storageOutboxPending = o.optLong("outbox_pending", 0)
+    }
+
+    /** Удалить сохранённые вложения. История и ссылки остаются — байты можно
+     *  скачать у собеседника заново (блобы контент-адресные). */
+    fun clearAttachments() = ops.execute {
+        Native.clearBlobs(sessionPtr)
+        mediaBlobs.clear()
+        contactAvatars.clear()
+        refreshStorage()
+    }
+
     private fun loadSettings() {
         val prefs = appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE) ?: return
         showTechInfo = prefs.getBoolean("tech_info", false)

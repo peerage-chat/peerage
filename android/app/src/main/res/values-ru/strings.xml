@@ -89,6 +89,18 @@
     <string name="menu_calls">Звонки</string>
     <string name="menu_network">Сеть</string>
     <string name="menu_saved">Сохранённое</string>
+    <string name="menu_storage">Хранилище</string>
+    <!-- Экран хранилища (пока сознательно простой) -->
+    <string name="storage_attachments">ВЛОЖЕНИЯ</string>
+    <string name="storage_files">%1$d файлов</string>
+    <string name="storage_attachments_hint">Фото, файлы и голосовые, которые вы отправили или получили. Очистка не удаляет сообщения — файлы можно скачать у отправителя заново.</string>
+    <string name="storage_queue">ОЧЕРЕДЬ НЕДОСТАВЛЕННОГО</string>
+    <string name="storage_queue_pending">%1$d сообщений ждут доставки</string>
+    <string name="storage_queue_hint">Хранятся до доставки — ничего не удаляется автоматически.</string>
+    <string name="storage_clear_attachments">Очистить вложения</string>
+    <string name="storage_clear_confirm">Удалить скачанные вложения? Сообщения останутся; файлы можно будет скачать заново, пока они есть у отправителя.</string>
+    <string name="storage_clear_ok">Очистить</string>
+    <string name="common_cancel">Отмена</string>
     <string name="menu_settings">Настройки</string>
 
     <!-- ── Шапки экранов ───────────────────────────────────────────────── -->

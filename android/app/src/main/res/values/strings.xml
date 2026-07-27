@@ -97,6 +97,18 @@
     <string name="menu_calls">Calls</string>
     <string name="menu_network">Network</string>
     <string name="menu_saved">Saved</string>
+    <string name="menu_storage">Storage</string>
+    <!-- Storage screen (deliberately simple for now) -->
+    <string name="storage_attachments">ATTACHMENTS</string>
+    <string name="storage_files">%1$d files</string>
+    <string name="storage_attachments_hint">Photos, files and voice messages you sent or received. Clearing them does not delete messages — the files can be downloaded from the sender again.</string>
+    <string name="storage_queue">UNDELIVERED QUEUE</string>
+    <string name="storage_queue_pending">%1$d messages waiting</string>
+    <string name="storage_queue_hint">Kept until delivered — nothing is removed automatically.</string>
+    <string name="storage_clear_attachments">Clear attachments</string>
+    <string name="storage_clear_confirm">Delete downloaded attachments? Messages stay; files can be downloaded again while the sender still has them.</string>
+    <string name="storage_clear_ok">Clear</string>
+    <string name="common_cancel">Cancel</string>
     <string name="menu_settings">Settings</string>
 
     <!-- ── Top bars ────────────────────────────────────────────────────── -->

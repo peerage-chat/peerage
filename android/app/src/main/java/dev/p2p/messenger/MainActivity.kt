@@ -128,7 +128,7 @@ internal fun CenterMessage(text: String) {
     }
 }
 
-internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat }
+internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage }
 
 /** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
  *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
@@ -233,6 +233,7 @@ private fun CompactShell(model: AppModel) {
                             BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
                         }
                         Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = { screen = Screen.Contacts })
+                        Screen.Storage -> TopBar(stringResource(R.string.menu_storage), onBack = { screen = Screen.Contacts })
                         Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = { screen = Screen.Contacts })
                     }
                     // ── Рейл папок: только на главном экране ────────────────────────
@@ -290,6 +291,7 @@ private fun CompactShell(model: AppModel) {
                             Screen.Calls -> CallsScreen()
                             Screen.Network -> NetworkScreen(model) { screen = Screen.Me }
                             Screen.Saved -> SavedScreen()
+                            Screen.Storage -> StorageScreen(model)
                             Screen.Search -> SearchScreen(
                                 model,
                                 onOpenDm = {
