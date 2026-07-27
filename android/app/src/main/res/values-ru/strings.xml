@@ -179,6 +179,7 @@
     <string name="chat_voice">Голосовое</string>
     <string name="chat_file">Файл</string>
     <string name="chat_recording">Запись…</string>
+    <string name="chat_download">Скачать</string>
     <string name="chat_downloading">Загрузка…</string>
     <string name="attach_photo">Фото</string>
     <string name="attach_file">Файл</string>

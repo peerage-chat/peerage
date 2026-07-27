@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
@@ -195,7 +196,10 @@ private fun sendUriAttachment(
         val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
         val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
         val name = displayName(ctx, uri) ?: fallbackName
-        model.sendMedia(key, bytes, mime, name)
+        // Метаданные (длительность/кадр/превью) вытаскиваем здесь: движок медиа не
+        // декодирует, а получателю нужна информативная карточка ДО скачивания.
+        val meta = MediaMeta.extract(ctx, uri, mime, bytes)
+        model.sendMediaWithMeta(key, bytes, mime, name, meta)
     }
 }
 
@@ -352,16 +356,23 @@ internal fun MessageBubble(m: Message, model: AppModel) {
                 .background(if (m.mine) BubbleOut else BubbleIn)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
-            when (m.kind) {
-                "image" -> ImageAttachment(blobBytes) { viewer = true }
-                "voice" -> VoiceAttachment(blobBytes)
-                "file" -> FileAttachment(m.name, blobBytes)
-                else -> Text(
-                    m.text,
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    modifier = Modifier.padding(end = if (m.mine) 52.dp else 40.dp),
-                )
+            when {
+                // Крупное вложение не тянется автоматически: сначала карточка с тем,
+                // что известно из сообщения (имя/размер/длительность/превью), байты —
+                // по кнопке. Решает получатель, а не отправитель.
+                !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text" ->
+                    PendingAttachmentCard(m, model)
+                else -> when (m.kind) {
+                    "image" -> ImageAttachment(blobBytes) { viewer = true }
+                    "voice" -> VoiceAttachment(blobBytes)
+                    "file" -> FileAttachment(m.name, blobBytes)
+                    else -> Text(
+                        m.text,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(end = if (m.mine) 52.dp else 40.dp),
+                    )
+                }
             }
             Row(
                 Modifier.align(Alignment.BottomEnd),
@@ -502,6 +513,78 @@ private fun openWithSystem(ctx: android.content.Context, name: String, bytes: By
             .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         ctx.startActivity(intent)
     }
+}
+
+/** Компактная карточка ещё НЕ скачанного вложения: превью (если прислали), имя,
+ *  тип·длительность·размер и кнопка загрузки.
+ *
+ *  Смысл — решение принимает получатель: пока он не нажал, байты не качаются, то есть
+ *  чужое видео на 800 МБ не съедает его трафик само. Всё показанное здесь приходит в
+ *  самом сообщении, до единого байта содержимого. */
+@Composable
+private fun PendingAttachmentCard(m: Message, model: AppModel) {
+    val thumb = if (m.thumbId.isNotEmpty()) model.mediaBlobs[m.thumbId] else null
+    var requested by remember(m.blobId) { mutableStateOf(false) }
+    Row(
+        Modifier.padding(end = 44.dp).widthIn(min = 180.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.25f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            val bmp = remember(thumb) {
+                thumb?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
+            }
+            if (bmp != null) {
+                Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else {
+                Icon(kindIcon(m.kind), null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f, fill = false)) {
+            Text(
+                m.name.ifBlank { stringResource(R.string.chat_file) },
+                color = Color.White,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                buildList {
+                    if (m.durationMs > 0) add(fmtDuration(m.durationMs))
+                    if (m.size > 0) add(fmtSizeLong(m.size))
+                }.joinToString(" · "),
+                color = HoloSecondary,
+                fontSize = 11.sp,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        if (requested) {
+            CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+        } else {
+            IconButton(onClick = {
+                requested = true
+                model.currentChat?.let { model.downloadMedia(it, m.blobId) }
+            }) {
+                Icon(Icons.Filled.Download, stringResource(R.string.chat_download), tint = HoloAccent)
+            }
+        }
+    }
+}
+
+private fun kindIcon(kind: String) = when (kind) {
+    "image" -> Icons.Filled.Image
+    "voice" -> Icons.Filled.Mic
+    else -> Icons.Filled.AttachFile
+}
+
+private fun fmtSizeLong(bytes: Long): String = when {
+    bytes >= 1_048_576L * 1024 -> "%.1f GB".format(bytes / (1_048_576.0 * 1024))
+    bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
+    bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
 }
 
 private fun fmtSize(bytes: Int): String = when {

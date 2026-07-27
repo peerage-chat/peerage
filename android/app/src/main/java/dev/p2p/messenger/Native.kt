@@ -48,6 +48,23 @@ object Native {
     /** Отправить медиа-вложение (M2): scrub + блоб + медиа-сообщение. id (>=0) или -1. */
     external fun sendMedia(sessionPtr: Long, keyHex: String, content: ByteArray, mime: String, name: String): Long
 
+    /** То же + метаданные для карточки: длительность, размеры кадра, миниатюра (JPEG,
+     *  можно пустой массив). Крупное вложение получатель качает по кнопке. */
+    external fun sendMediaWithMeta(
+        sessionPtr: Long,
+        keyHex: String,
+        content: ByteArray,
+        mime: String,
+        name: String,
+        durationMs: Int,
+        width: Int,
+        height: Int,
+        thumb: ByteArray,
+    ): Long
+
+    /** Скачать вложение по кнопке. Готовность придёт событием `blob_received`. */
+    external fun downloadMedia(sessionPtr: Long, peerHex: String, blobIdHex: String): Boolean
+
     /** Держать фоновое соединение с пиром. */
     external fun connect(sessionPtr: Long, keyHex: String)
 

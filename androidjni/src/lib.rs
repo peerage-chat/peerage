@@ -272,6 +272,60 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMedia<'local>(
     })
 }
 
+/// Отправить вложение с метаданными для карточки: длительность, размеры кадра и
+/// миниатюра (JPEG-байты, можно пустой массив). Их извлекает клиент — движок сам
+/// декодировать медиа не умеет.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+    content: JByteArray<'local>,
+    mime: JString<'local>,
+    name: JString<'local>,
+    duration_ms: jint,
+    width: jint,
+    height: jint,
+    thumb: JByteArray<'local>,
+) -> jlong {
+    jni_safe!(-1, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return -1 };
+        let bytes = env.convert_byte_array(&content).unwrap_or_default();
+        if bytes.is_empty() { return -1; }
+        let mime = jstr(&mut env, &mime);
+        let name = jstr(&mut env, &name);
+        let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
+        let info = p2p_engine::MediaInfo {
+            duration_ms: duration_ms.max(0) as u32,
+            width: width.max(0) as u32,
+            height: height.max(0) as u32,
+            thumb: (!thumb_bytes.is_empty()).then_some(thumb_bytes),
+        };
+        e.send_media_with(&key, bytes, &mime, &name, info).unwrap_or(-1)
+    })
+}
+
+/// Скачать вложение по кнопке (крупное не тянется автоматически). Готовность придёт
+/// событием `blob_received`.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_downloadMedia<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    peer_hex: JString<'local>,
+    blob_id_hex: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let Some(peer) = parse_key(&jstr(&mut env, &peer_hex)) else { return JNI_FALSE };
+        let id = jstr(&mut env, &blob_id_hex);
+        if e.download_media(&peer, &id) { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
 /// Инициировать/держать соединение с пиром (фоновый коннект).
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_connect<'local>(

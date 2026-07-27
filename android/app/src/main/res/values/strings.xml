@@ -187,6 +187,7 @@
     <string name="chat_voice">Voice</string>
     <string name="chat_file">File</string>
     <string name="chat_recording">Recording…</string>
+    <string name="chat_download">Download</string>
     <string name="chat_downloading">Downloading…</string>
     <string name="attach_photo">Photo</string>
     <string name="attach_file">File</string>

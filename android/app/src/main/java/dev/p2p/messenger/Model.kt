@@ -105,6 +105,16 @@ data class Message(
     val mime: String = "",
     /** Исходное имя файла вложения (M2). */
     val name: String = "",
+    /** Размер вложения в байтах — виден в карточке ДО скачивания. */
+    val size: Long = 0,
+    /** Длительность аудио/видео в мс (0 — не применимо). */
+    val durationMs: Int = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    /** hex-хэш блоба-миниатюры (пусто — нет превью). */
+    val thumbId: String = "",
+    /** Скачано ли содержимое. Крупное не тянется само — сначала карточка. */
+    val downloaded: Boolean = false,
 )
 
 /** Идентичность пользователя (своя «визитка»). */
@@ -949,6 +959,12 @@ class AppModel private constructor() {
             Message(
                 o.getLong("id"), o.optString("text"), o.getBoolean("mine"), o.getLong("time"), o.optString("status"),
                 o.optString("kind", "text"), o.optString("blob_id"), o.optString("mime"), o.optString("name"),
+                size = o.optLong("size", 0),
+                durationMs = o.optInt("duration_ms", 0),
+                width = o.optInt("width", 0),
+                height = o.optInt("height", 0),
+                thumbId = o.optString("thumb_id"),
+                downloaded = o.optBoolean("downloaded", false),
             )
         }.toMutableList()
         // Queued messages (отрицательные localId) не сохраняются в БД — добавляем их обратно.
@@ -986,6 +1002,28 @@ class AppModel private constructor() {
         if (Native.sendMedia(sessionPtr, key, content, mime, name) >= 0 && currentChat == key) {
             loadHistory(key)
         }
+    }
+
+    /** Отправить вложение с метаданными для карточки (длительность/кадр/превью).
+     *  Их извлекает клиент — движок медиа не декодирует. */
+    fun sendMediaWithMeta(
+        key: String,
+        content: ByteArray,
+        mime: String,
+        name: String,
+        meta: MediaMeta,
+    ) = ops.execute {
+        val id = Native.sendMediaWithMeta(
+            sessionPtr, key, content, mime, name,
+            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0),
+        )
+        if (id >= 0 && currentChat == key) loadHistory(key)
+    }
+
+    /** Скачать вложение по кнопке (крупное не тянется автоматически).
+     *  Готовность придёт событием `blob_received` — история перечитается. */
+    fun downloadMedia(peer: String, blobId: String) = ops.execute {
+        Native.downloadMedia(sessionPtr, peer, blobId)
     }
 
     fun addContact(key: String, name: String) = ops.execute {
@@ -1071,8 +1109,16 @@ class AppModel private constructor() {
                         o.getLong("id"), "", mine = false, time = o.getLong("time"), status = "",
                         kind = o.optString("kind", "file"), blobId = o.optString("blob_id"),
                         mime = o.optString("mime"), name = o.optString("name"),
+                        size = o.optLong("size", 0),
+                        durationMs = o.optInt("duration_ms", 0),
+                        width = o.optInt("width", 0),
+                        height = o.optInt("height", 0),
+                        thumbId = o.optString("thumb_id"),
+                        downloaded = o.optBoolean("downloaded", false),
                     ),
                 )
+                // Миниатюра приходит отдельным мелким блобом — подтянем, если уже есть.
+                o.optString("thumb_id").takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
                 if (currentChat != peer) unread[peer] = (unread[peer] ?: 0) + 1
             }
             "ack" -> updateStatus(o.getString("peer"), o.getLong("id"), "delivered")
