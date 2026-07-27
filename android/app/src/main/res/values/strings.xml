@@ -109,6 +109,9 @@
     <string name="storage_clear_confirm">Delete downloaded attachments? Messages stay; files can be downloaded again while the sender still has them.</string>
     <string name="storage_clear_ok">Clear</string>
     <string name="common_cancel">Cancel</string>
+    <string name="size_b">%1$d B</string>
+    <string name="size_kb">%1$s KB</string>
+    <string name="size_mb">%1$s MB</string>
     <string name="menu_settings">Settings</string>
 
     <!-- ── Top bars ────────────────────────────────────────────────────── -->

@@ -101,6 +101,9 @@
     <string name="storage_clear_confirm">Удалить скачанные вложения? Сообщения останутся; файлы можно будет скачать заново, пока они есть у отправителя.</string>
     <string name="storage_clear_ok">Очистить</string>
     <string name="common_cancel">Отмена</string>
+    <string name="size_b">%1$d Б</string>
+    <string name="size_kb">%1$s КБ</string>
+    <string name="size_mb">%1$s МБ</string>
     <string name="menu_settings">Настройки</string>
 
     <!-- ── Шапки экранов ───────────────────────────────────────────────── -->

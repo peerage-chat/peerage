@@ -87,9 +87,10 @@ private fun StorageRow(label: String, value: String) {
     }
 }
 
-/** Байты в человеческий вид (КБ/МБ) — без внешних зависимостей. */
+/** Байты в человеческий вид. Единицы — из ресурсов (в англ. локали были бы «Б»). */
+@Composable
 private fun formatBytes(b: Long): String = when {
-    b >= 1024L * 1024 -> "%.1f МБ".format(b / (1024.0 * 1024))
-    b >= 1024 -> "%.0f КБ".format(b / 1024.0)
-    else -> "$b Б"
+    b >= 1024L * 1024 -> stringResource(R.string.size_mb, "%.1f".format(b / (1024.0 * 1024)))
+    b >= 1024 -> stringResource(R.string.size_kb, "%.0f".format(b / 1024.0))
+    else -> stringResource(R.string.size_b, b)
 }
