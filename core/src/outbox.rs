@@ -138,11 +138,9 @@ impl OutboxStore {
     }
 }
 
-/// TTL офлайн-очереди по умолчанию (пир без известного тира) — 7 дней.
-/// Реальные cap/TTL берутся из [`crate::budget::Tier`] пира: доверенному храним
-/// дольше и больше, незнакомцу — чуть-чуть, заблокированному — ничего.
-pub const OUTBOX_TTL_SECS: i64 = 7 * 24 * 3600;
-/// Максимум ожидающих на одного пира по умолчанию (анти-DoS хранилища).
+/// Максимум ожидающих на одного пира по умолчанию (анти-DoS хранилища). Реальные
+/// cap/TTL берутся из [`crate::budget::Tier`] пира; контактам срок НЕ ограничен —
+/// объём держит cap, вытесняя старейшие.
 pub const OUTBOX_PEER_CAP: usize = 500;
 
 /// Оркестратор офлайн-очереди: персистит исходящий текст, снимает по Ack, досылает
@@ -196,11 +194,18 @@ impl OutboxManager {
         let Ok(entries) = self.store.pending_all() else { return };
         let mut alive = Vec::with_capacity(entries.len());
         for e in entries {
-            let ttl = (self.tier_of)(&e.peer).outbox_ttl_secs();
-            if now.saturating_sub(e.created_at) > ttl {
-                let _ = self.store.remove(e.id); // протухло по бюджету этого пира
-            } else {
-                alive.push(e);
+            let tier = (self.tier_of)(&e.peer);
+            // Заблокированному не досылаем вообще — это решение пользователя, а не срок.
+            if tier.is_blocked() {
+                let _ = self.store.remove(e.id);
+                continue;
+            }
+            // None = без срока (контакты): держим, пока влезает в cap.
+            match tier.outbox_ttl_secs() {
+                Some(ttl) if now.saturating_sub(e.created_at) > ttl => {
+                    let _ = self.store.remove(e.id);
+                }
+                _ => alive.push(e),
             }
         }
         self.resend(alive);
@@ -364,25 +369,27 @@ mod tests {
         assert_eq!(*log.lock().unwrap(), vec![(peer(1), 1, "to1".to_string())]);
     }
 
+    /// Прунинг по сроку остался только у тиров со сроком (незнакомец): старое
+    /// выбрасывается, свежее досылается.
     #[test]
     fn manager_start_prunes_expired_and_resends_rest() {
         let s = store();
-        // Протухшее (старше TTL) и свежее.
+        let ttl = Tier::Stranger.outbox_ttl_secs().expect("у незнакомца срок есть");
         s.enqueue(&peer(1), 1, "text", b"old", 0).unwrap();
-        let now = OUTBOX_TTL_SECS + 1000;
+        let now = ttl + 1000;
         s.enqueue(&peer(1), 2, "text", b"fresh", now - 10).unwrap();
-        let (mut m, log) = mgr_with(s);
+        let (mut m, log) = mgr_with_tier(s, Tier::Stranger);
         m.on_start(now);
-        // old (created_at 0 < now-TTL) выброшено; дослан только fresh.
         assert_eq!(*log.lock().unwrap(), vec![(peer(1), 2, "fresh".to_string())]);
     }
 
-    /// M3: срок хранения — из бюджета тира. Одна и та же запись переживает старт у
-    /// контакта, но выбрасывается у незнакомца (сутки) и у заблокированного (0).
+    /// M3: срок хранения — из бюджета тира. Контакту НЕ истекает (сервера, который
+    /// сохранит за нас, нет — иначе уехавший на месяц молча теряет сообщение);
+    /// незнакомцу сутки, заблокированному — ничего.
     #[test]
     fn start_ttl_follows_peer_tier() {
-        let age = 3 * 24 * 3600; // 3 дня — больше суток, меньше недели
-        let fresh_for = |tier: Tier| {
+        let month = 30 * 24 * 3600; // «человек вернулся через месяц»
+        let resent_after = |tier: Tier, age: i64| {
             let s = store();
             s.enqueue(&peer(1), 1, "text", b"msg", 0).unwrap();
             let (mut m, log) = mgr_with_tier(s, tier);
@@ -390,10 +397,10 @@ mod tests {
             let resent = !log.lock().unwrap().is_empty();
             resent
         };
-        assert!(fresh_for(Tier::Verified), "сверенному храним дольше всех");
-        assert!(fresh_for(Tier::Contact), "контакту — неделю");
-        assert!(!fresh_for(Tier::Stranger), "незнакомцу — сутки, 3 дня уже протухли");
-        assert!(!fresh_for(Tier::Blocked), "заблокированному не храним вовсе");
+        assert!(resent_after(Tier::Verified, month), "сверенному храним бессрочно");
+        assert!(resent_after(Tier::Contact, month), "контакт вернулся через месяц — сообщение ждёт");
+        assert!(!resent_after(Tier::Stranger, month), "незнакомцу — сутки");
+        assert!(!resent_after(Tier::Blocked, 0), "заблокированному не храним вовсе");
     }
 
     /// Объём очереди тоже градуирован: незнакомец не забивает хранилище.

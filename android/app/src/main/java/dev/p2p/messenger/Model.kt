@@ -195,10 +195,6 @@ class AppModel private constructor() {
          *  процесс, поэтому модель должна переживать пересоздание Activity (иначе
          *  утекают второй узел и дублирующие poll/ticker-циклы → потеря событий). */
         val instance: AppModel by lazy { AppModel() }
-
-        // TTL офлайн-очереди исходящих сообщений.
-        // TODO: вынести в настройки приложения (v0.3+)
-        private const val OFFLINE_QUEUE_TTL_SECS = 7L * 24 * 3600
     }
 
     var me by mutableStateOf<Me?>(null)
@@ -1155,16 +1151,17 @@ class AppModel private constructor() {
     private fun loadOfflineQueue() {
         val f = queueFile ?: return
         if (!f.exists()) return
-        val cutoff = System.currentTimeMillis() / 1000 - OFFLINE_QUEUE_TTL_SECS
         try {
             val json = JSONObject(f.readText())
             synchronized(queueLock) {
                 json.keys().forEach { peer ->
                     val arr = json.getJSONArray(peer)
-                    val msgs = (0 until arr.length()).mapNotNull { i ->
+                    // Срок хранения НЕ ограничиваем: сервера, который сохранит письмо
+                    // за нас, нет — собеседник может вернуться через месяц и обязан
+                    // его получить. Объём держит бюджет пира в движке (Tier.outbox_cap).
+                    val msgs = (0 until arr.length()).map { i ->
                         val o = arr.getJSONObject(i)
-                        val ts = o.getLong("ts")
-                        if (ts > cutoff) Pair(o.getString("text"), ts) else null
+                        Pair(o.getString("text"), o.getLong("ts"))
                     }
                     if (msgs.isNotEmpty()) offlineQueueMap[peer] = msgs.toMutableList()
                 }
