@@ -153,6 +153,11 @@ fn main() {
             }
             sent_media = true;
         }
+        // Входящие события движка (текст/медиа/запросы/блобы) — чтобы двухузловой
+        // живой прогон на РЕАЛЬНОМ меше был наблюдаем без Android-клиента.
+        while let Some(ev) = engine.poll_event() {
+            println!("EVENT {ev}");
+        }
         println!("CONTACTS {}", engine.contacts_json());
         let _ = std::io::stdout().flush();
     }
