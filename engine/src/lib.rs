@@ -290,9 +290,13 @@ impl Engine {
                 let t = now();
                 let _ = self.messages.lock_safe().append(key, StoredMessage {
                     id, mine: true, time: t, status: "sent".into(),
-                    kind: kind.into(), blob_id: id_hex, mime: mime.into(), name: name.into(),
+                    kind: kind.into(), blob_id: id_hex.clone(), mime: mime.into(), name: name.into(),
                     ..Default::default()
                 });
+                // В офлайн-очередь — как текст: если получатель сейчас недоступен,
+                // дошлём при его возвращении/после рестарта. Байты уже сохранены
+                // локально, в очереди лежит только ссылка на них.
+                self.outbox.lock_safe().on_sent_media(key, id, &id_hex, mime, name, t);
                 Some(id as i64)
             }
             Err(_) => None,
@@ -446,6 +450,46 @@ impl Engine {
         self.outbox.lock_safe().clear_peer(key)
     }
 
+    /// Что занимает место: вложения (блобы) и очередь недоставленного.
+    /// JSON `{blobs, blob_bytes, outbox_pending, outbox_bytes}`.
+    pub fn storage_stats_json(&self) -> String {
+        let (mut blobs, mut blob_bytes) = (0u64, 0u64);
+        if let Ok(rd) = std::fs::read_dir(&self.blob_dir) {
+            for e in rd.flatten() {
+                if let Ok(meta) = e.metadata() {
+                    if meta.is_file() {
+                        blobs += 1;
+                        blob_bytes += meta.len();
+                    }
+                }
+            }
+        }
+        let ob = self.outbox.lock_safe().stats();
+        serde_json::json!({
+            "blobs": blobs,
+            "blob_bytes": blob_bytes,
+            "outbox_pending": ob.pending,
+            "outbox_bytes": ob.bytes,
+        })
+        .to_string()
+    }
+
+    /// Удалить ВСЕ сохранённые вложения (явное действие пользователя). Не трогает
+    /// историю сообщений: ссылки остаются, и байты можно скачать у собеседника
+    /// заново — блобы контент-адресные. Возвращает освобождённые байты.
+    pub fn clear_blobs(&self) -> u64 {
+        let mut freed = 0u64;
+        if let Ok(rd) = std::fs::read_dir(&self.blob_dir) {
+            for e in rd.flatten() {
+                let Ok(meta) = e.metadata() else { continue };
+                if meta.is_file() && std::fs::remove_file(e.path()).is_ok() {
+                    freed += meta.len();
+                }
+            }
+        }
+        freed
+    }
+
     pub fn is_online(&self, key: &[u8; 32]) -> bool {
         self.messenger.is_online(key)
     }
@@ -541,10 +585,7 @@ impl Engine {
     /// Прочитать сохранённый блоб по hex-id (принятый или свой отправленный).
     /// Расшифровывает at-rest (`vault::open`).
     pub fn blob_read(&self, id_hex: &str) -> Option<Vec<u8>> {
-        // Санитизация: только валидный hex → чистое имя файла (без traversal).
-        let clean = hex::encode(hex::decode(id_hex.trim()).ok()?);
-        let raw = std::fs::read(self.blob_dir.join(clean)).ok()?;
-        p2p_core::vault::open(&raw).ok()
+        read_blob_at(&self.blob_dir, id_hex)
     }
 
     // — Свой профиль (M2): имя + аватар (контент-адресный блоб). Хранится в
@@ -1039,6 +1080,15 @@ fn event_pump(
     }
 }
 
+/// Прочитать блоб из каталога по hex-id. Свободная функция — нужна и офлайн-очереди
+/// (её колбэк живёт вне `Engine`), и самому движку.
+fn read_blob_at(dir: &Path, id_hex: &str) -> Option<Vec<u8>> {
+    // Санитизация: только валидный hex → чистое имя файла (без traversal).
+    let clean = hex::encode(hex::decode(id_hex.trim()).ok()?);
+    let raw = std::fs::read(dir.join(clean)).ok()?;
+    p2p_core::vault::open(&raw).ok()
+}
+
 /// Сохранить блоб на диск по hex-id (принятый или свой отправленный).
 /// Шифрует at-rest (`vault::seal`) — как сообщения/группы.
 fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
@@ -1475,14 +1525,41 @@ impl Engine {
         // ссылаться; `refresh_budgets` держит кэш в актуальном состоянии.
         let tier_cache: Arc<Mutex<HashMap<[u8; 32], Tier>>> = Arc::new(Mutex::new(HashMap::new()));
 
-        // Офлайн-очередь (M3): досылку делает messenger.resend_text (тот же id → дедуп).
+        // Офлайн-очередь (M3): досылка с ТЕМ ЖЕ id → получатель дедуплицирует.
         let outbox = {
             let m = messenger.clone();
             let tc = tier_cache.clone();
+            let blobs_dir = dir.join("blobs");
+            let resend_jobs = job_tx.clone();
             p2p_core::outbox::OutboxManager::new(
                 p2p_core::outbox::OutboxStore::new(db.clone()),
-                Box::new(move |peer, id, text| {
-                    let _ = m.resend_text(peer, id, text);
+                Box::new(move |peer, id, kind, payload| match kind {
+                    "text" => {
+                        if let Ok(text) = std::str::from_utf8(payload) {
+                            let _ = m.resend_text(peer, id, text);
+                        }
+                    }
+                    // Вложение: заново предлагаем блоб (байты лежат у нас) и повторяем
+                    // ссылку. Если блоба уже нет на диске — досылать нечего, пропускаем.
+                    "media" => {
+                        let Ok(v) = serde_json::from_slice::<serde_json::Value>(payload) else { return };
+                        let (Some(blob_hex), Some(mime), Some(name)) = (
+                            v["blob"].as_str(),
+                            v["mime"].as_str(),
+                            v["name"].as_str(),
+                        ) else { return };
+                        let Ok(hash) = hex::decode(blob_hex) else { return };
+                        // Блоб предлагаем через актора (BlobManager живёт в его потоке).
+                        if let Some(bytes) = read_blob_at(&blobs_dir, blob_hex) {
+                            let _ = resend_jobs.send(Job::BlobOffer {
+                                peer: *peer,
+                                content: bytes,
+                                mime: mime.to_string(),
+                            });
+                        }
+                        let _ = m.resend_media_message(peer, id, &hash, mime, name);
+                    }
+                    _ => {}
                 }),
                 // Cap/TTL очереди — из того же бюджета, что и ingress (единая точка).
                 Box::new(move |peer| {

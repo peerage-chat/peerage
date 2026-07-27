@@ -401,6 +401,31 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_clearOutboxFor<'local>(
     })
 }
 
+/// Что занимает место: JSON {blobs, blob_bytes, outbox_pending, outbox_bytes}.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_storageStats<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        ret(&env, &e.storage_stats_json())
+    })
+}
+
+/// Удалить все сохранённые вложения (явное действие). Возвращает освобождённые байты.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_clearBlobs<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jlong {
+    jni_safe!(0, {
+        unsafe { engine(session_ptr) }.map(|e| e.clear_blobs() as jlong).unwrap_or(0)
+    })
+}
+
 /// Список контактов как JSON-массив.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_listContacts<'local>(

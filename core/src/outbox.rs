@@ -164,9 +164,13 @@ impl OutboxStats {
 /// при возвращении пира и на старте, чистит по TTL. Отправку делает через
 /// callback (в движке = `Messenger::resend_text`), поэтому вся логика тестируема без
 /// сети. Досылка — с тем же `msg_id`, так что получатель дедуплицирует (нет дублей).
+/// Что досылать: тип payload + его тело (кодирование выбирает верхний слой —
+/// для текста это UTF-8, для медиа JSON-ссылка на блоб).
+pub type ResendFn = Box<dyn FnMut(&[u8; 32], u64, &str, &[u8]) + Send>;
+
 pub struct OutboxManager {
     store: OutboxStore,
-    send: Box<dyn FnMut(&[u8; 32], u64, &str) + Send>,
+    send: ResendFn,
     /// Тир пира — единый бюджет (M3). Задаёт, сколько и как долго хранить.
     /// Движок отдаёт актуальный тир из контактов/блок-листа.
     tier_of: Box<dyn Fn(&[u8; 32]) -> Tier + Send>,
@@ -175,7 +179,7 @@ pub struct OutboxManager {
 impl OutboxManager {
     pub fn new(
         store: OutboxStore,
-        send: Box<dyn FnMut(&[u8; 32], u64, &str) + Send>,
+        send: ResendFn,
         tier_of: Box<dyn Fn(&[u8; 32]) -> Tier + Send>,
     ) -> Self {
         Self { store, send, tier_of }
@@ -191,6 +195,24 @@ impl OutboxManager {
     /// а не молча удалять.
     pub fn on_sent(&self, peer: &[u8; 32], msg_id: u64, text: &str, now: i64) {
         let _ = self.store.enqueue(peer, msg_id, "text", text.as_bytes(), now);
+    }
+
+    /// Запомнить отправленное ВЛОЖЕНИЕ. В очередь кладём только ССЫЛКУ (хэш блоба +
+    /// mime + имя) — сами байты уже лежат в blob-хранилище, дублировать их незачем,
+    /// поэтому запись остаётся крошечной. При досылке верхний слой снова предложит
+    /// блоб и повторит медиа-сообщение с тем же id.
+    pub fn on_sent_media(
+        &self,
+        peer: &[u8; 32],
+        msg_id: u64,
+        blob_id_hex: &str,
+        mime: &str,
+        name: &str,
+        now: i64,
+    ) {
+        let body = serde_json::json!({ "blob": blob_id_hex, "mime": mime, "name": name });
+        let Ok(payload) = serde_json::to_vec(&body) else { return };
+        let _ = self.store.enqueue(peer, msg_id, "media", &payload, now);
     }
 
     /// Снимок очереди для UI: сколько ждёт и сколько занимает. По нему клиент решает,
@@ -249,13 +271,12 @@ impl OutboxManager {
         self.resend(alive);
     }
 
+    /// Досылка: тип payload передаём наверх как есть — там знают, как его отправить
+    /// (текст → Text, медиа → повторный blob_offer + ссылка). Неизвестные типы просто
+    /// проходят мимо, поэтому старые записи не роняют досылку после апгрейда.
     fn resend(&mut self, entries: Vec<OutboxEntry>) {
         for e in entries {
-            if e.payload_type == "text" {
-                if let Ok(text) = String::from_utf8(e.payload) {
-                    (self.send)(&e.peer, e.msg_id, &text);
-                }
-            }
+            (self.send)(&e.peer, e.msg_id, &e.payload_type, &e.payload);
         }
     }
 }
@@ -282,8 +303,9 @@ mod tests {
     fn mgr_with_tier(store: OutboxStore, tier: Tier) -> (OutboxManager, Log) {
         let log: Log = Arc::new(Mutex::new(Vec::new()));
         let l2 = log.clone();
-        let send = Box::new(move |p: &[u8; 32], id: u64, t: &str| {
-            l2.lock().unwrap().push((*p, id, t.to_string()));
+        // В журнал пишем тело как строку — тестам хватает (текст и JSON-ссылка медиа).
+        let send = Box::new(move |p: &[u8; 32], id: u64, _kind: &str, body: &[u8]| {
+            l2.lock().unwrap().push((*p, id, String::from_utf8_lossy(body).into_owned()));
         });
         (OutboxManager::new(store, send, Box::new(move |_| tier)), log)
     }
@@ -448,6 +470,24 @@ mod tests {
             m.on_sent(&peer(1), i as u64, "письмо", 100);
         }
         assert_eq!(m.pending_count() as usize, n, "ни одно своё сообщение не потеряно");
+    }
+
+    /// Вложение тоже переживает офлайн: в очередь кладём ССЫЛКУ на блоб (не байты),
+    /// и при возвращении пира она досылается вместе с текстом.
+    #[test]
+    fn media_is_queued_as_reference_and_resent() {
+        let (mut m, log) = mgr_with(store());
+        m.on_sent(&peer(1), 1, "привет", 10);
+        m.on_sent_media(&peer(1), 2, "ab12cd", "image/jpeg", "photo.jpg", 11);
+
+        // Запись компактная — байты картинки в очередь не попали.
+        assert!(m.stats().bytes < 200, "в очереди ссылка, а не содержимое файла");
+
+        m.on_online(&peer(1));
+        let sent = log.lock().unwrap().clone();
+        assert_eq!(sent.len(), 2, "дослано и текстовое, и вложение");
+        assert!(sent[1].2.contains("ab12cd"), "ссылка на блоб доехала: {:?}", sent[1]);
+        assert!(sent[1].2.contains("photo.jpg"));
     }
 
     /// Разрастание очереди — повод предупредить, а не удалять.

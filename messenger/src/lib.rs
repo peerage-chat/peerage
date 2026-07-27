@@ -453,6 +453,21 @@ impl Messenger {
         self.shared.send_reliable(peer, true, move |id| Payload::Media { id, hash, mime, name })
     }
 
+    /// Повторно отправить медиа-СООБЩЕНИЕ с тем же id (досылка из офлайн-очереди).
+    /// Стабильный id → получатель дедуплицирует, дублей в чате не будет.
+    pub fn resend_media_message(
+        &self,
+        peer: &PeerKey,
+        id: u64,
+        hash: &[u8],
+        mime: &str,
+        name: &str,
+    ) -> Result<(), MessengerError> {
+        let (hash, mime, name) = (hash.to_vec(), mime.to_string(), name.to_string());
+        self.shared
+            .send_reliable_with_id(peer, id, true, move |id| Payload::Media { id, hash, mime, name })
+    }
+
     /// Отправить медиа-датаграмму (реалтайм-канал): без Ack/повторов/шифрования
     /// приложения — конфиденциальность даёт E2E-шифрование транспорта Yggdrasil.
     /// Собирается в стековый буфер без аллокаций кучи.
