@@ -3,6 +3,7 @@
 //! Содержит платформо-независимую логику: идентичность, криптографию,
 //! сетевой протокол. Используется и Desktop (Tauri), и Android (через JNI).
 
+pub mod budget;
 pub mod crypto;
 pub mod db;
 pub mod identity;

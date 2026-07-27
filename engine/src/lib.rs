@@ -20,6 +20,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use p2p_core::budget::Tier;
 use p2p_core::settings::AudioSettings;
 use p2p_core::store::{ContactStore, GateStore, MessageStore, Profile, StoredMessage};
 use p2p_core::Identity;
@@ -314,7 +315,7 @@ impl Engine {
         match outcome {
             Ok(p2p_core::store::AddOutcome::Added) => {
                 spawn_connect(self.messenger.clone(), *key);
-                self.refresh_trusted(); // M3: контакт → щедрый ingress-бюджет
+                self.refresh_budgets(); // M3: контакт → щедрый ingress-бюджет
                 "added"
             }
             Ok(p2p_core::store::AddOutcome::AlreadyKnown) => "known",
@@ -322,11 +323,33 @@ impl Engine {
         }
     }
 
-    /// Пере-залить множество доверенных ключей в мессенджер (градуированный лимит M3).
-    fn refresh_trusted(&self) {
-        let keys: Vec<[u8; 32]> =
-            self.contacts.lock_safe().list().iter().filter_map(|c| parse_key(&c.key)).collect();
-        self.messenger.set_trusted(&keys);
+    /// Пере-залить тиры доверия в мессенджер — единый бюджет ресурсов (M3).
+    /// Источник истины: контакты (сверенный fingerprint → `Verified`) и блок-лист
+    /// гейта (`Blocked` — режется на ingress, ДО расшифровки). Кого нет — `Stranger`
+    /// (общая корзина класса, анти-Sybil). Зовётся при любой смене того или другого.
+    fn refresh_budgets(&self) {
+        // ВАЖНО: не держим оба лока разом (contacts+gate) — иначе гонка порядка
+        // захвата с API гейта = дедлок. Снимаем контакты, отпускаем, затем блоки.
+        let mut tiers: Vec<([u8; 32], Tier)> = self
+            .contacts
+            .lock_safe()
+            .list()
+            .iter()
+            .filter_map(|c| {
+                parse_key(&c.key).map(|k| (k, if c.verified { Tier::Verified } else { Tier::Contact }))
+            })
+            .collect();
+        let blocked: Vec<[u8; 32]> = self
+            .gate
+            .lock_safe()
+            .list_blocked()
+            .iter()
+            .filter_map(|h| parse_key(h))
+            .collect();
+        // Блок сильнее контакта: если пир и там и там — он заблокирован.
+        tiers.retain(|(k, _)| !blocked.contains(k));
+        tiers.extend(blocked.into_iter().map(|k| (k, Tier::Blocked)));
+        self.messenger.set_peer_tiers(&tiers);
     }
 
     pub fn contacts_json(&self) -> String {
@@ -347,7 +370,7 @@ impl Engine {
 
     pub fn remove_contact(&self, key: &[u8; 32]) {
         let _ = self.contacts.lock_safe().remove(key);
-        self.refresh_trusted();
+        self.refresh_budgets();
     }
 
     // — Гейт контактов (замена TOFU-автодобавления) —
@@ -365,7 +388,7 @@ impl Engine {
         }
         // Пустое локальное имя → покажется самоназвание пира или hex (см. Contact.displayName).
         let _ = self.contacts.lock_safe().add(key, "", now());
-        self.refresh_trusted();
+        self.refresh_budgets();
         spawn_connect(self.messenger.clone(), *key);
         let m = self.load_profile_meta();
         let hash = hex::decode(&m.avatar_id).unwrap_or_default();
@@ -383,12 +406,18 @@ impl Engine {
     pub fn block_contact(&self, key: &[u8; 32]) -> bool {
         let _ = self.gate.lock_safe().block(key, now());
         let _ = self.contacts.lock_safe().remove(key);
-        self.refresh_trusted();
+        self.refresh_budgets();
         true
     }
 
     pub fn unblock_contact(&self, key: &[u8; 32]) -> bool {
-        self.gate.lock_safe().unblock(key).unwrap_or(false)
+        let ok = self.gate.lock_safe().unblock(key).unwrap_or(false);
+        // ОБЯЗАТЕЛЬНО: снять Tier::Blocked в ingress-лимитере, иначе пир остаётся
+        // отрезанным ДО расшифровки и разблокировка ничего не меняет.
+        if ok {
+            self.refresh_budgets();
+        }
+        ok
     }
 
     pub fn is_online(&self, key: &[u8; 32]) -> bool {
@@ -1391,7 +1420,7 @@ impl Engine {
         let (messenger, rx) =
             Messenger::start_with_transport(identity, transport, p2p_messenger::Config::default());
         let messenger = Arc::new(messenger);
-        messenger.set_trusted(&contact_keys); // M3: контакты → щедрый ingress-бюджет
+        // Тиры зальём ниже, после создания Engine (единая логика — refresh_budgets).
         for k in &contact_keys {
             spawn_connect(messenger.clone(), *k);
         }
@@ -1436,6 +1465,11 @@ impl Engine {
             bench: Mutex::new(None),
             blob_dir: dir.join("blobs"),
         });
+
+        // Единый бюджет (M3): тиры контактов/блок-листа в ingress-лимитер. Делаем
+        // ДО запуска приёмного цикла — иначе первые пакеты заблокированного пира
+        // успели бы пройти расшифровку.
+        engine.refresh_budgets();
 
         let pump_engine = engine.clone();
         let groups_dir = dir.clone();

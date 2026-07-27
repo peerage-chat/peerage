@@ -14,6 +14,8 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use crate::budget::Tier;
+
 /// Бакет одного источника: дробные токены + момент последней дозаправки.
 #[derive(Clone, Copy)]
 struct Bucket {
@@ -74,44 +76,59 @@ impl RateLimiter {
     }
 }
 
-/// Градуированный лимитер по доверию (M3, анти-Sybil). Доверенные (контакты) —
-/// ЩЕДРЫЙ per-source бюджет; чужие (не в доверенном множестве) черпают из ОДНОЙ
-/// общей мелкой корзины на весь класс: нагенерил 1000 ключей → все делят одну
-/// корзину, Sybil обнулён. Флаг `trusted` передаёт вызывающий (мессенджер сверяет
-/// src с набором контактов) — сам лимитер остаётся чистым.
+/// Градуированный лимитер по доверию (M3, анти-Sybil). Лимиты берутся из ЕДИНОГО
+/// источника — [`Tier`] (см. `crate::budget`), а не из локальных констант:
+/// * [`Tier::Blocked`] — отказ сразу, пир не тратит наше крипто;
+/// * [`Tier::Stranger`] — ОДНА общая мелкая корзина на весь класс: нагенерил 1000
+///   ключей → все делят её, Sybil обнулён;
+/// * [`Tier::Contact`] / [`Tier::Verified`] — персональные бакеты, тем щедрее, чем
+///   выше доверие.
+///
+/// Тир источника передаёт вызывающий (мессенджер знает контакты и блок-лист) — сам
+/// лимитер остаётся чистой, тестируемой логикой.
 pub struct TieredRateLimiter {
-    trusted: RateLimiter,
+    /// Персональные бакеты доверенных тиров (ключ — (тир, пир) неявно: ёмкость
+    /// назначается при первом пакете по тиру этого пира).
+    personal: HashMap<[u8; 32], Bucket>,
+    /// Общая корзина класса «чужие».
     stranger: Bucket,
-    stranger_cap: f64,
-    stranger_refill: f64,
+    idle_evict: Duration,
+}
+
+impl Default for TieredRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TieredRateLimiter {
-    pub fn new(
-        trusted_cap: f64,
-        trusted_refill: f64,
-        stranger_cap: f64,
-        stranger_refill: f64,
-    ) -> TieredRateLimiter {
+    pub fn new() -> TieredRateLimiter {
+        let (cap, _) = Tier::Stranger.ingress();
         TieredRateLimiter {
-            trusted: RateLimiter::new(trusted_cap, trusted_refill),
-            stranger: Bucket { tokens: stranger_cap.max(1.0), last: Instant::now() },
-            stranger_cap: stranger_cap.max(1.0),
-            stranger_refill: stranger_refill.max(0.0001),
+            personal: HashMap::new(),
+            stranger: Bucket { tokens: cap, last: Instant::now() },
+            idle_evict: Duration::from_secs(120),
         }
     }
 
-    /// Принять пакет от `src`. `trusted` — известен ли src как контакт.
-    pub fn allow(&mut self, src: &[u8; 32], trusted: bool, now: Instant) -> bool {
-        if trusted {
-            return self.trusted.allow(src, now);
+    /// Принять пакет от `src` с бюджетом его тира.
+    pub fn allow(&mut self, src: &[u8; 32], tier: Tier, now: Instant) -> bool {
+        let (cap, refill) = tier.ingress();
+        if tier.is_blocked() {
+            return false; // заблокированный не получает даже расшифровки
         }
-        // Общая корзина всех чужих.
-        let elapsed = now.saturating_duration_since(self.stranger.last).as_secs_f64();
-        self.stranger.tokens = (self.stranger.tokens + elapsed * self.stranger_refill).min(self.stranger_cap);
-        self.stranger.last = now;
-        if self.stranger.tokens >= 1.0 {
-            self.stranger.tokens -= 1.0;
+        // Чужие — общая корзина класса (персональных бакетов им не заводим, иначе
+        // Sybil получил бы бюджет пропорционально числу сгенерированных ключей).
+        let b = if tier == Tier::Stranger {
+            &mut self.stranger
+        } else {
+            self.personal.entry(*src).or_insert(Bucket { tokens: cap, last: now })
+        };
+        let elapsed = now.saturating_duration_since(b.last).as_secs_f64();
+        b.tokens = (b.tokens + elapsed * refill).min(cap);
+        b.last = now;
+        if b.tokens >= 1.0 {
+            b.tokens -= 1.0;
             true
         } else {
             false
@@ -119,7 +136,8 @@ impl TieredRateLimiter {
     }
 
     pub fn evict_idle(&mut self, now: Instant) {
-        self.trusted.evict_idle(now);
+        let idle = self.idle_evict;
+        self.personal.retain(|_, b| now.saturating_duration_since(b.last) < idle);
     }
 }
 
@@ -188,39 +206,68 @@ mod tests {
 
     // ── TieredRateLimiter (анти-Sybil) ────────────────────────────────────────
 
+    /// Sybil: чужие ключи РАЗНЫЕ, но черпают из одной корзины класса.
     #[test]
     fn strangers_share_one_bucket_anti_sybil() {
-        // Общая корзина на 3, чужие ключи РАЗНЫЕ — но делят одну корзину.
-        let mut t = TieredRateLimiter::new(100.0, 100.0, 3.0, 0.001);
+        let mut t = TieredRateLimiter::new();
         let now = Instant::now();
-        assert!(t.allow(&key(1), false, now));
-        assert!(t.allow(&key(2), false, now));
-        assert!(t.allow(&key(3), false, now));
-        // Четвёртый чужой (ещё один новый ключ) — отказ: корзина класса исчерпана.
-        assert!(!t.allow(&key(4), false, now));
+        let burst = Tier::Stranger.ingress().0 as usize;
+        // Выжираем корзину класса РАЗНЫМИ ключами (каждый пакет — новый «пир»).
+        for i in 0..burst {
+            assert!(t.allow(&key(i as u8), Tier::Stranger, now), "пакет {i} в пределах корзины");
+        }
+        // Ещё один свежесгенерированный ключ бюджета уже не получает.
+        assert!(!t.allow(&key(200), Tier::Stranger, now), "Sybil не расширяет бюджет класса");
     }
 
     #[test]
-    fn trusted_get_generous_independent_buckets() {
-        let mut t = TieredRateLimiter::new(5.0, 0.001, 1.0, 0.001);
+    fn trusted_get_personal_buckets() {
+        let mut t = TieredRateLimiter::new();
         let now = Instant::now();
-        // Доверенный источник — свой щедрый бюджет (5), независимо от чужой корзины.
-        for _ in 0..5 {
-            assert!(t.allow(&key(1), true, now));
+        let burst = Tier::Contact.ingress().0 as usize;
+        for _ in 0..burst {
+            assert!(t.allow(&key(1), Tier::Contact, now));
         }
-        assert!(!t.allow(&key(1), true, now)); // его бюджет исчерпан
-        // Другой доверенный — свой отдельный бюджет.
-        assert!(t.allow(&key(2), true, now));
+        assert!(!t.allow(&key(1), Tier::Contact, now), "свой бюджет исчерпан");
+        // Другой контакт — отдельный бакет, чужое исчерпание его не задевает.
+        assert!(t.allow(&key(2), Tier::Contact, now));
     }
 
     #[test]
     fn trusted_unaffected_by_stranger_flood() {
-        let mut t = TieredRateLimiter::new(5.0, 0.001, 1.0, 0.001);
+        let mut t = TieredRateLimiter::new();
         let now = Instant::now();
-        // Чужие выжрали свою корзину...
-        assert!(t.allow(&key(9), false, now));
-        assert!(!t.allow(&key(8), false, now));
-        // ...но контакт по-прежнему проходит (разные тиры).
-        assert!(t.allow(&key(1), true, now));
+        // Чужие выжрали общую корзину...
+        while t.allow(&key(9), Tier::Stranger, now) {}
+        // ...контакт и сверенный контакт по-прежнему проходят.
+        assert!(t.allow(&key(1), Tier::Contact, now));
+        assert!(t.allow(&key(2), Tier::Verified, now));
+    }
+
+    /// Заблокированный не проходит ВООБЩЕ — значит не тратит наше крипто.
+    #[test]
+    fn blocked_is_denied_before_crypto() {
+        let mut t = TieredRateLimiter::new();
+        let now = Instant::now();
+        for _ in 0..10 {
+            assert!(!t.allow(&key(5), Tier::Blocked, now));
+        }
+        // И блок не «съедает» чужую корзину: класс чужих не затронут.
+        assert!(t.allow(&key(6), Tier::Stranger, now));
+    }
+
+    /// Сверенный вживую получает больше контакта — градуировка реально работает.
+    #[test]
+    fn verified_gets_more_than_contact() {
+        let mut t = TieredRateLimiter::new();
+        let now = Instant::now();
+        let mut count = |k: u8, tier: Tier| {
+            let mut n = 0;
+            while t.allow(&key(k), tier, now) {
+                n += 1;
+            }
+            n
+        };
+        assert!(count(1, Tier::Verified) > count(2, Tier::Contact));
     }
 }

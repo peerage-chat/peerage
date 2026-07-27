@@ -22,6 +22,7 @@ use p2p_core::media::{
     parse_media, write_media_header, CHAN_CHAT, CHAN_MEDIA, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN,
 };
 use p2p_core::protocol::{decode, encode, Payload, ProtocolError};
+use p2p_core::budget::Tier;
 use p2p_core::ratelimit::{RateLimiter, TieredRateLimiter};
 use p2p_core::Identity;
 use p2p_ygg::{Node, YggError};
@@ -187,9 +188,10 @@ struct Shared {
     running: AtomicBool,
     tx: Sender<Event>,
     media_tx: Mutex<Option<SyncSender<MediaPacket>>>,
-    /// Доверенные ключи (контакты) — для градуированного ingress-лимита (M3). Чужие
-    /// делят одну корзину. Обновляется движком (`set_trusted`) при смене контактов.
-    trusted: Mutex<std::collections::HashSet<PeerKey>>,
+    /// Тир доверия пиров — единый бюджет ресурсов (M3). Кого тут нет, тот
+    /// [`Tier::Stranger`] (общая корзина класса, анти-Sybil). Обновляется движком
+    /// (`set_peer_tiers`) при смене контактов/блок-листа.
+    tiers: Mutex<std::collections::HashMap<PeerKey, Tier>>,
 }
 
 impl Shared {
@@ -345,7 +347,7 @@ impl Messenger {
             running: AtomicBool::new(true),
             tx,
             media_tx: Mutex::new(None),
-            trusted: Mutex::new(std::collections::HashSet::new()),
+            tiers: Mutex::new(std::collections::HashMap::new()),
         });
         let s1 = shared.clone();
         let rx_thread = thread::spawn(move || receive_loop(s1));
@@ -366,10 +368,11 @@ impl Messenger {
         self.shared.identity.public_key_bytes()
     }
 
-    /// Обновить множество доверенных ключей (контактов) для градуированного
-    /// ingress-лимита (M3). Зовётся движком при старте и смене контактов.
-    pub fn set_trusted(&self, keys: &[PeerKey]) {
-        *self.shared.trusted.lock().unwrap() = keys.iter().copied().collect();
+    /// Залить тиры доверия пиров (единый бюджет M3): контакты, сверенные контакты и
+    /// заблокированные. Кого нет в списке — [`Tier::Stranger`]. Зовётся движком при
+    /// старте и любой смене контактов/блок-листа.
+    pub fn set_peer_tiers(&self, tiers: &[(PeerKey, Tier)]) {
+        *self.shared.tiers.lock().unwrap() = tiers.iter().copied().collect();
     }
 
     /// Адрес Yggdrasil нашего узла.
@@ -606,10 +609,11 @@ fn receive_loop(shared: Arc<Shared>) {
     //  · control/сообщения (CHAN_CHAT) — строгий бюджет (спам-вектор);
     //  · медиа (CHAN_MEDIA) — щедрый (звонок легитимно высокочастотен: ~50 ауд/с +
     //    видео), но абсурдный флуд (>~600/с устойчиво) всё равно режется.
-    // M3: control/сообщения градуированы по доверию — контакты щедро (60/30 на
-    // источник), чужие делят ОДНУ мелкую корзину (30 всплеск, 10/с на весь класс) →
-    // Sybil из 1000 ключей не расширяет бюджет. Медиа — щедрый per-source (звонок).
-    let mut chat_rl = TieredRateLimiter::new(60.0, 30.0, 30.0, 10.0);
+    // M3: бюджет градуирован по доверию, конкретные числа — в ЕДИНОМ источнике
+    // `p2p_core::budget::Tier` (сверенный > контакт > чужой; чужие делят одну корзину
+    // класса → Sybil из 1000 ключей не расширяет бюджет; заблокированный режется до
+    // расшифровки). Медиа — щедрый per-source (звонок легитимно высокочастотен).
+    let mut chat_rl = TieredRateLimiter::new();
     let mut media_rl = RateLimiter::new(1200.0, 600.0);
     let mut pkt_count: u64 = 0;
     let mut dropped: u64 = 0;
@@ -623,11 +627,14 @@ fn receive_loop(shared: Arc<Shared>) {
         }
         // Ingress rate-limit по источнику (до расшифровки). Превышение → дроп.
         let now = Instant::now();
-        let allowed = if buf[0] == CHAN_MEDIA {
+        // Тир источника — единый бюджет (M3): блок режется здесь, ДО расшифровки.
+        let tier = shared.tiers.lock().unwrap().get(&src).copied().unwrap_or_default();
+        let allowed = if tier.is_blocked() {
+            false // заблокированный не тратит наше крипто ни на одном канале
+        } else if buf[0] == CHAN_MEDIA {
             media_rl.allow(&src, now)
         } else {
-            let trusted = shared.trusted.lock().unwrap().contains(&src);
-            chat_rl.allow(&src, trusted, now)
+            chat_rl.allow(&src, tier, now)
         };
         if !allowed {
             dropped = dropped.wrapping_add(1);

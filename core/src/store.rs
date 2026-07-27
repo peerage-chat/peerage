@@ -400,6 +400,12 @@ impl GateStore {
         self.blocked.contains(key)
     }
 
+    /// Все заблокированные ключи (hex) — для единого бюджета: заблокированный
+    /// режется на ingress ещё до расшифровки (см. `p2p_core::budget::Tier`).
+    pub fn list_blocked(&self) -> Vec<String> {
+        self.blocked.iter().map(hex::encode).collect()
+    }
+
     /// Заблокировать пира: будущие сообщения тихо дропаются. Снимает висящий запрос.
     pub fn block(&mut self, key: &[u8; 32], time: i64) -> Result<(), StoreError> {
         db::lock(&self.db).execute(
