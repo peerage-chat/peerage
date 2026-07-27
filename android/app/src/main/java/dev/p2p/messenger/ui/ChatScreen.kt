@@ -525,6 +525,15 @@ private fun openWithSystem(ctx: android.content.Context, name: String, bytes: By
 private fun PendingAttachmentCard(m: Message, model: AppModel) {
     val thumb = if (m.thumbId.isNotEmpty()) model.mediaBlobs[m.thumbId] else null
     var requested by remember(m.blobId) { mutableStateOf(false) }
+    // Если за это время файл не пришёл (пир ушёл офлайн, пакеты потерялись), ВОЗВРАЩАЕМ
+    // кнопку. Иначе одно неудачное нажатие оставляло вечный спиннер без возможности
+    // повторить — именно это и случилось на живом прогоне.
+    LaunchedEffect(requested) {
+        if (requested) {
+            kotlinx.coroutines.delay(25_000)
+            requested = false
+        }
+    }
     Row(
         Modifier.padding(end = 44.dp).widthIn(min = 180.dp),
         verticalAlignment = Alignment.CenterVertically,
