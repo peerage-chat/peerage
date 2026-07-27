@@ -65,6 +65,9 @@ object Native {
     /** Скачать вложение по кнопке. Готовность придёт событием `blob_received`. */
     external fun downloadMedia(sessionPtr: Long, peerHex: String, blobIdHex: String): Boolean
 
+    /** Заказанные докачки (JSON-массив hex-id) — переживают перезапуск. */
+    external fun wantedBlobs(sessionPtr: Long): String
+
     /** Держать фоновое соединение с пиром. */
     external fun connect(sessionPtr: Long, keyHex: String)
 

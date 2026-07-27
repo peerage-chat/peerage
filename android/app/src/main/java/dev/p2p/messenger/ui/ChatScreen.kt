@@ -524,16 +524,9 @@ private fun openWithSystem(ctx: android.content.Context, name: String, bytes: By
 @Composable
 private fun PendingAttachmentCard(m: Message, model: AppModel) {
     val thumb = if (m.thumbId.isNotEmpty()) model.mediaBlobs[m.thumbId] else null
-    var requested by remember(m.blobId) { mutableStateOf(false) }
-    // Если за это время файл не пришёл (пир ушёл офлайн, пакеты потерялись), ВОЗВРАЩАЕМ
-    // кнопку. Иначе одно неудачное нажатие оставляло вечный спиннер без возможности
-    // повторить — именно это и случилось на живом прогоне.
-    LaunchedEffect(requested) {
-        if (requested) {
-            kotlinx.coroutines.delay(25_000)
-            requested = false
-        }
-    }
+    // Состояние докачки живёт в движке, а не в этом composable: заказ персистентный,
+    // продолжается сам при появлении пира и переживает перезапуск. Отсюда — только показ.
+    val progress = model.downloads[m.blobId]
     Row(
         Modifier.padding(end = 44.dp).widthIn(min = 180.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -570,13 +563,19 @@ private fun PendingAttachmentCard(m: Message, model: AppModel) {
             )
         }
         Spacer(Modifier.width(8.dp))
-        if (requested) {
-            CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-        } else {
-            IconButton(onClick = {
-                requested = true
-                model.currentChat?.let { model.downloadMedia(it, m.blobId) }
-            }) {
+        when {
+            // Заказано, но чанки ещё не пошли (пир офлайн / едет манифест) — крутилка.
+            progress == AppModel.DOWNLOAD_INIT ->
+                CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+            // Пошли байты — тот же кружок, но заполняется: видно, что и насколько идёт.
+            progress != null ->
+                CircularProgressIndicator(
+                    progress = progress,
+                    color = HoloAccent,
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                )
+            else -> IconButton(onClick = { model.currentChat?.let { model.downloadMedia(it, m.blobId) } }) {
                 Icon(Icons.Filled.Download, stringResource(R.string.chat_download), tint = HoloAccent)
             }
         }

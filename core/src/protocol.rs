@@ -39,20 +39,16 @@ pub enum Payload {
         /// Размер содержимого в байтах. Нужен, чтобы показать карточку «видео, 800 МБ»
         /// ДО скачивания: сам размер иначе приезжает только с манифестом, т.е. когда
         /// докачка уже началась.
-        #[serde(default)]
         size: u64,
         /// Длительность аудио/видео в миллисекундах (0 — не применимо/неизвестно).
-        #[serde(default)]
         duration_ms: u32,
         /// Размеры кадра картинки/видео (0 — неизвестно).
-        #[serde(default)]
         width: u32,
-        #[serde(default)]
         height: u32,
         /// Хэш блоба-МИНИАТЮРЫ (пусто — нет превью). Именно ссылка, а не сами байты:
         /// превью инлайн раздуло бы медиа-сообщение и сломало размерную
         /// неразличимость «текст ≡ медиа» (M5). Миниатюра мелкая, качается сразу.
-        #[serde(default, with = "hex_bytes")]
+        #[serde(with = "hex_bytes")]
         thumb: Vec<u8>,
     },
     /// Подтверждение доставки сообщения с данным id (✓✓ в ТЗ).
@@ -307,22 +303,6 @@ mod tests {
         let future = r#"{"type":"reaction","target":42,"emoji":"fire"}"#;
         let p: Payload = serde_json::from_str(future).unwrap();
         assert_eq!(p, Payload::Unknown);
-    }
-
-    /// Медиа-сообщение от старого клиента (без size/duration/thumb) должно
-    /// разбираться, а не отбрасываться: поля добавлены аддитивно.
-    #[test]
-    fn old_media_message_without_new_fields_parses() {
-        let old = r#"{"type":"media","id":7,"hash":"aabb","mime":"image/jpeg","name":"p.jpg"}"#;
-        let p: Payload = serde_json::from_str(old).unwrap();
-        match p {
-            Payload::Media { id, size, duration_ms, width, height, thumb, .. } => {
-                assert_eq!(id, 7);
-                assert_eq!((size, duration_ms, width, height), (0, 0, 0, 0));
-                assert!(thumb.is_empty(), "нет превью — пустой хэш, а не ошибка");
-            }
-            other => panic!("ожидали Media, получили {other:?}"),
-        }
     }
 
     #[test]

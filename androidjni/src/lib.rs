@@ -326,6 +326,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_downloadMedia<'local>(
     })
 }
 
+/// Заказанные пользователем докачки (hex-id) — переживают перезапуск.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_wantedBlobs<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.wanted_json())
+    })
+}
+
 /// Инициировать/держать соединение с пиром (фоновый коннект).
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_connect<'local>(

@@ -111,6 +111,15 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             key     BLOB    PRIMARY KEY,
             blocked INTEGER NOT NULL
         );
+
+        -- Запрошенные пользователем вложения («скачать»). Намерение персистентно:
+        -- пир может быть офлайн — докачка продолжится сама, когда он появится, и
+        -- переживёт перезапуск. Следить за пиром вручную пользователь не должен.
+        CREATE TABLE IF NOT EXISTS wanted_blobs (
+            blob_id    TEXT PRIMARY KEY,
+            peer       BLOB NOT NULL,
+            requested  INTEGER NOT NULL
+        );
     ")?;
     // Миграция для установок с outbox без msg_id (идемпотентно: дубль-колонка → игнор).
     let _ = conn.execute("ALTER TABLE outbox ADD COLUMN msg_id INTEGER NOT NULL DEFAULT 0", []);

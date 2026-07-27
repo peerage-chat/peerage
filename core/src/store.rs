@@ -306,6 +306,80 @@ impl ContactStore {
     }
 }
 
+// ---- Запрошенные вложения («скачать») --------------------------------------
+
+/// Намерение скачать вложение: пользователь нажал «скачать», и мы обязаны довести
+/// это до конца САМИ — дождаться пира, пережить перезапуск. Следить, когда
+/// собеседник появится в сети, — не работа пользователя.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WantedBlob {
+    pub blob_id: String,
+    pub peer: [u8; 32],
+    pub requested: i64,
+}
+
+/// SQLite-список запрошенных вложений.
+pub struct WantedStore {
+    db: Db,
+}
+
+impl WantedStore {
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+
+    /// Запомнить намерение (идемпотентно: повторное «скачать» ничего не портит).
+    pub fn add(&self, blob_id: &str, peer: &[u8; 32], now: i64) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "INSERT OR REPLACE INTO wanted_blobs (blob_id, peer, requested) VALUES (?1, ?2, ?3)",
+            rusqlite::params![blob_id, peer.as_slice(), now],
+        )?;
+        Ok(())
+    }
+
+    /// Снять намерение (блоб пришёл или пользователь передумал).
+    pub fn remove(&self, blob_id: &str) -> Result<(), StoreError> {
+        db::lock(&self.db)
+            .execute("DELETE FROM wanted_blobs WHERE blob_id=?1", rusqlite::params![blob_id])?;
+        Ok(())
+    }
+
+    /// Что мы ждём от конкретного пира (он появился в сети — пора продолжить).
+    pub fn for_peer(&self, peer: &[u8; 32]) -> Vec<WantedBlob> {
+        self.query(Some(peer))
+    }
+
+    /// Всё запрошенное (на старте приложения).
+    pub fn all(&self) -> Vec<WantedBlob> {
+        self.query(None)
+    }
+
+    fn query(&self, peer: Option<&[u8; 32]>) -> Vec<WantedBlob> {
+        let conn = db::lock(&self.db);
+        let map = |row: &rusqlite::Row| -> rusqlite::Result<WantedBlob> {
+            let p: Vec<u8> = row.get(1)?;
+            Ok(WantedBlob {
+                blob_id: row.get(0)?,
+                peer: <[u8; 32]>::try_from(p.as_slice()).unwrap_or([0u8; 32]),
+                requested: row.get(2)?,
+            })
+        };
+        const COLS: &str = "SELECT blob_id, peer, requested FROM wanted_blobs";
+        match peer {
+            Some(p) => conn
+                .prepare(&format!("{COLS} WHERE peer=?1"))
+                .and_then(|mut s| {
+                    s.query_map(rusqlite::params![p.as_slice()], map)?.collect::<Result<Vec<_>, _>>()
+                })
+                .unwrap_or_default(),
+            None => conn
+                .prepare(COLS)
+                .and_then(|mut s| s.query_map([], map)?.collect::<Result<Vec<_>, _>>())
+                .unwrap_or_default(),
+        }
+    }
+}
+
 // ---- Гейт контактов: входящие запросы + блок-лист (анти-abuse) --------------
 
 /// Входящий «запрос в контакты» от незнакомца. Первое сообщение приходит НЕ в чат,

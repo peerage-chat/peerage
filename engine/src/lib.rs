@@ -81,6 +81,10 @@ pub(crate) enum Job {
 /// решение «тянуть ли 800 МБ» принимает получатель, а не отправитель.
 const AUTO_DOWNLOAD_LIMIT: u64 = 2 * 1024 * 1024;
 
+/// На сколько поднимаем ingress-бюджет пира после явного «скачать». Продлевается
+/// каждым новым запросом, поэтому длинная докачка не обрывается на середине.
+const BLOB_BOOST_FOR: Duration = Duration::from_secs(120);
+
 /// Метаданные вложения, известные отправителю (их извлекает клиент: на Android —
 /// `MediaMetadataRetriever`). Нужны, чтобы карточка была информативной до скачивания.
 #[derive(Debug, Clone, Default)]
@@ -186,6 +190,8 @@ pub struct Engine {
     blob_dir: PathBuf,
     /// Персистентная офлайн-очередь исходящих (M3): досылка после офлайна/рестарта.
     outbox: Mutex<p2p_core::outbox::OutboxManager>,
+    /// Запрошенные пользователем вложения — докачиваем сами, когда пир в сети.
+    wanted: Mutex<p2p_core::store::WantedStore>,
     /// Единый бюджет (M3): тир каждого известного пира. Читают ingress-лимитер
     /// (через messenger) и офлайн-очередь (через замыкание) — одна точка истины.
     tier_cache: Arc<Mutex<HashMap<[u8; 32], Tier>>>,
@@ -373,7 +379,47 @@ impl Engine {
             return true; // уже скачано
         }
         let Ok(hash) = hex::decode(blob_id_hex.trim()) else { return false };
+        // Намерение ПЕРСИСТЕНТНО: пир может быть офлайн или уйти посреди докачки —
+        // продолжим сами, когда он вернётся, и переживём перезапуск. Пользователь не
+        // должен сторожить, когда собеседник появится в сети.
+        let _ = self.wanted.lock_safe().add(blob_id_hex, peer, now());
+        // Раз пользователь СAM попросил файл — этот трафик ожидаемый, и резать его
+        // своим же анти-флуд бюджетом бессмысленно (иначе 64 МБ ехали бы полторы
+        // минуты). Поднимаем лимит адресно: только этому пиру и только пока качаем.
+        self.messenger.boost_peer(peer, BLOB_BOOST_FOR);
         self.messenger.request_blob_manifest(peer, &hash).is_ok()
+    }
+
+    /// hex-id вложений, докачка которых заказана пользователем и ещё не закончена.
+    /// UI по ним рисует прогресс вместо кнопки «Скачать» — в том числе после
+    /// перезапуска приложения.
+    pub fn wanted_json(&self) -> String {
+        let ids: Vec<String> = self.wanted.lock_safe().all().into_iter().map(|w| w.blob_id).collect();
+        serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Продолжить всё, что пользователь просил скачать у этого пира (он в сети).
+    /// То же на старте процесса: намерение «скачать» переживает перезапуск.
+    fn resume_all_wanted(&self) {
+        let mut peers: Vec<[u8; 32]> = self.wanted.lock_safe().all().into_iter().map(|w| w.peer).collect();
+        peers.sort();
+        peers.dedup();
+        for p in peers {
+            self.resume_wanted(&p);
+        }
+    }
+
+    fn resume_wanted(&self, peer: &[u8; 32]) {
+        for w in self.wanted.lock_safe().for_peer(peer) {
+            if self.blob_read(&w.blob_id).is_some() {
+                let _ = self.wanted.lock_safe().remove(&w.blob_id);
+                continue;
+            }
+            if let Ok(hash) = hex::decode(&w.blob_id) {
+                self.messenger.boost_peer(peer, BLOB_BOOST_FOR);
+                let _ = self.messenger.request_blob_manifest(peer, &hash);
+            }
+        }
     }
 
     pub fn connect(&self, key: [u8; 32]) {
@@ -1088,6 +1134,7 @@ fn event_pump(
         log::info!("outbox on_start: pending={} (до prune+досылки)", ob.pending_count());
     }
     engine.outbox.lock_safe().on_start(now()); // M3: prune TTL + дослать недоставленное
+    engine.resume_all_wanted(); // докачки, начатые до перезапуска
     refresh_group_cache(&engine, &groups); // прайм кэша
     push_event(&engine, serde_json::json!({"type": "groups_changed"}));
     let mut last_beacon = Instant::now();
@@ -1151,6 +1198,15 @@ fn event_pump(
             beacon_tick(&engine, &groups, &messenger);
         }
         blobs.tick(); // переспросить потерянные чанки докачки (M2)
+        // Прогресс докачки наверх: UI рисует кружок вместо бесконечного спиннера.
+        for (id, done, total) in blobs.take_progress() {
+            push_event(&engine, serde_json::json!({
+                "type": "blob_progress",
+                "id": hex::encode(id),
+                "done": done,
+                "total": total,
+            }));
+        }
     }
 }
 
@@ -1194,6 +1250,7 @@ fn save_and_notify_blob(engine: &Arc<Engine>, peer: [u8; 32], done: blobs::Compl
     // же файл в разных чатах скачан разом. Иначе карточка так и предлагала бы «скачать».
     let id_hex = hex::encode(done.id);
     let _ = engine.messages.lock_safe().mark_downloaded(&id_hex);
+    let _ = engine.wanted.lock_safe().remove(&id_hex); // намерение исполнено
     push_event(engine, serde_json::json!({
         "type": "blob_received",
         "id": id_hex,
@@ -1236,6 +1293,8 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     let m = engine.load_profile_meta();
                     let hash = hex::decode(&m.avatar_id).unwrap_or_default();
                     let _ = engine.messenger.send_profile_update(&peer, &m.name, &hash);
+                    // Продолжаем то, что пользователь просил скачать у этого пира.
+                    engine.resume_wanted(&peer);
                     let mut ob = engine.outbox.lock_safe();
                     let c = ob.pending_count();
                     ob.on_online(&peer); // M3: дослать ожидающее пиру
@@ -1707,6 +1766,7 @@ impl Engine {
             messenger: messenger.clone(),
             contacts: Mutex::new(contacts),
             gate: Mutex::new(gate),
+            wanted: Mutex::new(p2p_core::store::WantedStore::new(db.clone())),
             messages: Mutex::new(messages),
             outbox: Mutex::new(outbox),
             me_pub,

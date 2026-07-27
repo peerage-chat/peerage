@@ -228,6 +228,10 @@ struct Shared {
     /// [`Tier::Stranger`] с нулевыми заслугами (общая корзина класса, анти-Sybil).
     /// Обновляется движком (`set_peer_tiers`) при смене контактов/блок-листа/репутации.
     tiers: Mutex<std::collections::HashMap<PeerKey, (Tier, u32)>>,
+    /// Пиры, которым ВРЕМЕННО поднят ingress-бюджет: пользователь сам запросил у них
+    /// файл, значит этот трафик ожидаемый и резать его своим же анти-флуд лимитом
+    /// незачем. Адресно и на срок — не «поднять лимиты всем».
+    boosted: Mutex<std::collections::HashMap<PeerKey, Instant>>,
 }
 
 impl Shared {
@@ -384,6 +388,7 @@ impl Messenger {
             tx,
             media_tx: Mutex::new(None),
             tiers: Mutex::new(std::collections::HashMap::new()),
+            boosted: Mutex::new(std::collections::HashMap::new()),
         });
         let s1 = shared.clone();
         let rx_thread = thread::spawn(move || receive_loop(s1));
@@ -407,6 +412,12 @@ impl Messenger {
     /// Залить бюджеты пиров (M3): тир доверия + заслуги (`helpful`). Кого нет в
     /// списке — [`Tier::Stranger`] без заслуг. Зовётся движком при старте и любой
     /// смене контактов/блок-листа/репутации.
+    /// Временно поднять ingress-бюджет пира: мы сами запросили у него данные
+    /// (докачка вложения по кнопке). Истекает само — продлевается новыми запросами.
+    pub fn boost_peer(&self, peer: &PeerKey, until: Duration) {
+        self.shared.boosted.lock().unwrap().insert(*peer, Instant::now() + until);
+    }
+
     pub fn set_peer_tiers(&self, tiers: &[(PeerKey, Tier, u32)]) {
         *self.shared.tiers.lock().unwrap() =
             tiers.iter().map(|(k, t, h)| (*k, (*t, *h))).collect();
@@ -728,8 +739,23 @@ fn receive_loop(shared: Arc<Shared>) {
         // контакт получает повышенный лимит.
         let (tier, helpful) =
             shared.tiers.lock().unwrap().get(&src).copied().unwrap_or((Tier::default(), 0));
+        // Мы сами просили у него файл → пропускаем без анти-флуд бюджета (он защищает
+        // от НЕЖДАННОГО потока, а этот поток заказан пользователем).
+        let boosted = {
+            let mut b = shared.boosted.lock().unwrap();
+            match b.get(&src) {
+                Some(until) if *until > now => true,
+                Some(_) => {
+                    b.remove(&src);
+                    false
+                }
+                None => false,
+            }
+        };
         let allowed = if tier.is_blocked() {
             false // заблокированный не тратит наше крипто ни на одном канале
+        } else if boosted {
+            true
         } else if buf[0] == CHAN_MEDIA {
             media_rl.allow(&src, now)
         } else {

@@ -205,6 +205,9 @@ class AppModel private constructor() {
          *  процесс, поэтому модель должна переживать пересоздание Activity (иначе
          *  утекают второй узел и дублирующие poll/ticker-циклы → потеря событий). */
         val instance: AppModel by lazy { AppModel() }
+
+        /** Докачка заказана, но чанки ещё не пошли (пир офлайн / идёт манифест). */
+        const val DOWNLOAD_INIT = -1f
     }
 
     var me by mutableStateOf<Me?>(null)
@@ -707,6 +710,7 @@ class AppModel private constructor() {
         refreshRequestsNow()
         refreshGroupsNow()
         refreshGroupInvitesNow()
+        loadWanted() // докачки, заказанные до перезапуска
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
         migrateSelfNameFromPrefs(dataDir) // разовый перенос имени из старых prefs в движок
@@ -1020,10 +1024,25 @@ class AppModel private constructor() {
         if (id >= 0 && currentChat == key) loadHistory(key)
     }
 
+    /** Заказанные пользователем докачки: blobId → доля 0..1, [DOWNLOAD_INIT] — ждём
+     *  первых чанков (пир может быть офлайн). Движок хранит намерение на диске и сам
+     *  продолжает, когда пир появится, — следить за этим пользователь не должен. */
+    val downloads = mutableStateMapOf<String, Float>()
+
+    /** Подтянуть заказы, пережившие перезапуск (иначе карточка снова звала бы «Скачать»). */
+    private fun loadWanted() {
+        val arr = runCatching { JSONArray(Native.wantedBlobs(sessionPtr)) }.getOrNull() ?: return
+        for (i in 0 until arr.length()) {
+            val id = arr.optString(i)
+            if (id.isNotEmpty() && !downloads.containsKey(id)) downloads[id] = DOWNLOAD_INIT
+        }
+    }
+
     /** Скачать вложение по кнопке (крупное не тянется автоматически).
      *  Готовность придёт событием `blob_received` — история перечитается. */
-    fun downloadMedia(peer: String, blobId: String) = ops.execute {
-        Native.downloadMedia(sessionPtr, peer, blobId)
+    fun downloadMedia(peer: String, blobId: String) {
+        downloads[blobId] = DOWNLOAD_INIT
+        ops.execute { Native.downloadMedia(sessionPtr, peer, blobId) }
     }
 
     fun addContact(key: String, name: String) = ops.execute {
@@ -1184,8 +1203,13 @@ class AppModel private constructor() {
             "contacts_changed" -> refreshContactsNow()
             // M2: докачался блоб. Аватар контакта — перечитать контакты; вложение чата —
             // положить байты в реактивный кэш (пузырь перерисуется).
+            "blob_progress" -> {
+                val total = o.optInt("total", 0)
+                if (total > 0) downloads[o.optString("id")] = o.optInt("done") / total.toFloat()
+            }
             "blob_received" -> {
                 val id = o.optString("id")
+                downloads.remove(id)
                 if (contacts.any { it.avatarId == id }) refreshContactsNow()
                 cacheBlob(id)
             }

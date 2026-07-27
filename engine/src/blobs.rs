@@ -46,6 +46,8 @@ struct Incoming {
     peer: PeerKey,
     sink: Sink,
     last_req: Instant,
+    /// Последний отданный наверх процент — чтобы не сыпать событием на каждый чанк.
+    last_pct: u8,
 }
 
 pub struct BlobManager {
@@ -153,7 +155,7 @@ impl BlobManager {
             Sink::Ram(r) => r.missing(),
             Sink::Disk(d) => d.missing(),
         };
-        self.incoming.insert(id, Incoming { peer, sink, last_req: Instant::now() });
+        self.incoming.insert(id, Incoming { peer, sink, last_req: Instant::now(), last_pct: 0 });
         for index in missing {
             let _ = self.messenger.send_blob_request(&peer, &id, index as u32);
         }
@@ -249,6 +251,28 @@ impl BlobManager {
                 let _ = self.messenger.send_blob_request(&inc.peer, &id, index as u32);
             }
         }
+    }
+
+    /// Прогресс докачек, изменившийся с прошлого опроса: (id, получено, всего).
+    /// Отдаём только при смене процента — UI рисует кружок, ему хватает.
+    pub fn take_progress(&mut self) -> Vec<(Hash, u32, u32)> {
+        let mut out = Vec::new();
+        for (id, inc) in self.incoming.iter_mut() {
+            let (total, missing) = match &inc.sink {
+                Sink::Ram(r) => (r.manifest().chunks.len(), r.missing().len()),
+                Sink::Disk(d) => (d.manifest().chunks.len(), d.missing().len()),
+            };
+            if total == 0 {
+                continue;
+            }
+            let done = total - missing;
+            let pct = (done * 100 / total) as u8;
+            if pct != inc.last_pct {
+                inc.last_pct = pct;
+                out.push((*id, done as u32, total as u32));
+            }
+        }
+        out
     }
 
     /// Забыть отдаваемый блоб (когда доставку можно считать завершённой).
