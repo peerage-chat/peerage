@@ -25,10 +25,7 @@
   .m.out { justify-content: flex-end; }
   .m.in { justify-content: flex-start; align-items: flex-end; gap: var(--space-s); }
 
-  .bub { max-width: 78%; padding: 7px 12px 5px; font-size: 14px; line-height: 1.35; position: relative; }
-  /* Текст занимает свою строку целиком, время уходит ПОД него отдельной строкой —
-     как в chat.html. Обтекание (float) ставило время вровень с текстом, из-за чего
-     короткое сообщение выглядело смещённым вверх относительно рамки. */
+  .bub { max-width: 78%; padding: 7px 12px 6px; font-size: 14px; line-height: 1.35; position: relative; }
   .in .bub { background: var(--bubble-in); }
   .out .bub { background: var(--bubble-out); }
 
@@ -44,10 +41,16 @@
   .out .bub.last  { border-radius: 14px 5px 14px 14px; }
 
   /* Время + галочки — на КАЖДОМ сообщении: время важнее экономии места. */
-  .meta { display: flex; justify-content: flex-end; align-items: center; gap: 3px; margin-top: 2px;
+  /* Время прижато к НИЗУ пузыря и не участвует в потоке текста: текст остаётся
+     вертикально по центру рамки, время сидит в правом-нижнем углу последней строки.
+     Чтобы текст не заезжал под него — инлайн-распорка .tgap той же ширины. */
+  .meta { position: absolute; right: 12px; bottom: 5px; display: flex; align-items: center; gap: 3px;
           font-size: 11px; color: rgba(255,255,255,.55); }
   .meta i { font-size: 14px; }
   .meta .rd { color: #9fd8ee; }
+  .tgap { display: inline-block; }
+  .in .tgap { width: 34px; }        /* только время */
+  .out .tgap { width: 52px; }       /* время + галочки */
 
   /* Аватар в группе — под НИЖНИМ сообщением блока; у остальных пустая распорка. */
   .av { width: 32px; height: 32px; border-radius: 11px; flex: 0 0 auto; display: flex; align-items: center;
@@ -78,34 +81,34 @@
     <!-- блок входящих из трёх -->
     <div class="m in tight">
       <div class="av hole"></div>
-      <div class="bub first">Привет! Ты уже в сети?<div class="meta">13:38</div></div>
+      <div class="bub first">Привет! Ты уже в сети?<span class="tgap"></span><span class="meta">13:38</span></div>
     </div>
     <div class="m in tight">
       <div class="av hole"></div>
-      <div class="bub mid">Хотела спросить про завтра<div class="meta">13:39</div></div>
+      <div class="bub mid">Хотела спросить про завтра<span class="tgap"></span><span class="meta">13:39</span></div>
     </div>
     <div class="m in">
       <div class="av hole"></div>
-      <div class="bub last">Во сколько встречаемся?<div class="meta">13:40</div></div>
+      <div class="bub last">Во сколько встречаемся?<span class="tgap"></span><span class="meta">13:40</span></div>
     </div>
 
     <!-- блок своих из двух -->
     <div class="m out tight">
-      <div class="bub first">Привет<div class="meta">13:41 <i class="ti ti-checks rd"></i></div></div>
+      <div class="bub first">Привет<span class="tgap"></span><span class="meta">13:41 <i class="ti ti-checks rd"></i></span></div>
     </div>
     <div class="m out">
-      <div class="bub last">В шесть у метро<div class="meta">13:41 <i class="ti ti-checks rd"></i></div></div>
+      <div class="bub last">В шесть у метро<span class="tgap"></span><span class="meta">13:41 <i class="ti ti-checks rd"></i></span></div>
     </div>
 
     <!-- одиночное входящее -->
     <div class="m in">
       <div class="av hole"></div>
-      <div class="bub solo">Отлично, буду<div class="meta">13:42</div></div>
+      <div class="bub solo">Отлично, буду<span class="tgap"></span><span class="meta">13:42</span></div>
     </div>
 
     <!-- одиночное своё -->
     <div class="m out">
-      <div class="bub solo">До встречи<div class="meta">13:42 <i class="ti ti-check" style="color:rgba(255,255,255,.55)"></i></div></div>
+      <div class="bub solo">До встречи<span class="tgap"></span><span class="meta">13:42 <i class="ti ti-check" style="color:rgba(255,255,255,.55)"></i></span></div>
     </div>
   </div>
 </div>
@@ -123,16 +126,16 @@
       <div class="av hole"></div>
       <div class="bub first">
         <div class="sender" style="color:#d9a7f0">Алиса</div>
-        Всем привет<div class="meta">14:00</div>
+        Всем привет<span class="tgap"></span><span class="meta">14:00</span>
       </div>
     </div>
     <div class="m in tight">
       <div class="av hole"></div>
-      <div class="bub mid">Я закинула файл в чат<div class="meta">14:01</div></div>
+      <div class="bub mid">Я закинула файл в чат<span class="tgap"></span><span class="meta">14:01</span></div>
     </div>
     <div class="m in">
       <div class="av" style="background:#3A2E4A;color:#d9c7f0">А</div>
-      <div class="bub last">Гляньте, пожалуйста<div class="meta">14:02</div></div>
+      <div class="bub last">Гляньте, пожалуйста<span class="tgap"></span><span class="meta">14:02</span></div>
     </div>
 
     <!-- блок Бориса из двух -->
@@ -140,20 +143,20 @@
       <div class="av hole"></div>
       <div class="bub first">
         <div class="sender" style="color:#7fc4f0">Борис</div>
-        Открыл<div class="meta">14:04</div>
+        Открыл<span class="tgap"></span><span class="meta">14:04</span>
       </div>
     </div>
     <div class="m in">
       <div class="av" style="background:#2E3A4A;color:#c7d6f0">Б</div>
-      <div class="bub last">Выглядит нормально<div class="meta">14:05</div></div>
+      <div class="bub last">Выглядит нормально<span class="tgap"></span><span class="meta">14:05</span></div>
     </div>
 
     <!-- свой блок: без имени и аватара -->
     <div class="m out tight">
-      <div class="bub first">Плюс<div class="meta">14:06 <i class="ti ti-checks rd"></i></div></div>
+      <div class="bub first">Плюс<span class="tgap"></span><span class="meta">14:06 <i class="ti ti-checks rd"></i></span></div>
     </div>
     <div class="m out">
-      <div class="bub last">Завтра допилю<div class="meta">14:06 <i class="ti ti-checks rd"></i></div></div>
+      <div class="bub last">Завтра допилю<span class="tgap"></span><span class="meta">14:06 <i class="ti ti-checks rd"></i></span></div>
     </div>
   </div>
 </div>
@@ -172,9 +175,15 @@
     <tr><td>Скругление «шва»</td><td>5px со стороны отправителя, 14px с остальных</td></tr>
   </table>
 
-  <p style="margin-top:12px"><b>Время — под текстом, а не вровень с ним.</b> Обтекание (как в Telegram)
-  экономит строку, но короткое сообщение из-за него выглядит прижатым к верху рамки: текст оказывается
-  на одном уровне со временем вместо центра. Отдельная строка держит текст по центру пузыря.</p>
+  <p style="margin-top:12px"><b>Время — в правом-нижнем углу последней строки, но НЕ в потоке текста.</b>
+  Оно позиционируется абсолютно у нижней кромки пузыря, а место под него держит невидимая инлайн-распорка
+  (34px для входящих, 52px для своих — там ещё галочки). Так текст остаётся вертикально по центру рамки,
+  а время сидит ниже его базовой линии. Отдельная строка под текстом раздувала бы пузырь, обтекание —
+  поднимало время вровень с текстом; верен третий вариант, он же записан в <code>app-ui.md</code>.</p>
+
+  <p style="margin-top:10px"><b>У медиа-пузырей правило другое:</b> над картинкой время идёт чипом на
+  затемнении в её правом-нижнем углу, у голосового — обычной строкой справа под дорожкой. Распорка там
+  не нужна, потому что текста в потоке нет.</p>
 
   <p style="margin-top:10px"><b>Время показывается на каждом сообщении, а не только на последнем.</b>
   Внутри блока может пройти несколько минут, и «когда именно это было» — то, что переспрашивают чаще

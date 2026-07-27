@@ -35,25 +35,28 @@
   .grab { width: 36px; height: 4px; background: var(--icon-muted); border-radius: 2px; margin: var(--space-s) auto var(--space-s); }
 
   /* источники — компактный ряд под ручкой */
-  .srcs { display: flex; gap: var(--space-s); padding: 0 var(--space-m) var(--space-s); }
+  .srcs { display: flex; gap: var(--space-s); padding: 0 var(--space-m) var(--space-m); }
   .src { flex: 1; background: var(--tile); border-radius: var(--radius-tile); padding: var(--space-s) 0;
          display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--icon-chrome);
          font-size: var(--font-caption); }
   .src i { font-size: 20px; color: var(--accent); }
 
   /* вертикальная сетка галереи (3 колонки, скролл вниз) */
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-s);
-          padding: 0 var(--space-m) var(--space-m); max-height: 340px; overflow-y: auto; }
-  .shot { aspect-ratio: 1; border-radius: var(--radius-chip); position: relative; background: var(--avatar);
+  /* Галерея, а не «карточки»: плитки без скруглений, зазор 2px, во всю ширину листа —
+     на 390px это даёт максимум площади под сами снимки. Скругления и рамки съедали
+     место и превращали сетку в набор карточек. */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 0;
+          max-height: 344px; overflow-y: auto; }
+  .shot { aspect-ratio: 1; border-radius: 0; position: relative; background: var(--avatar);
           overflow: hidden; }
-  .shot .pick { position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 11px;
+  .shot .pick { position: absolute; right: 5px; top: 5px; width: 22px; height: 22px; border-radius: 11px;
                 border: 2px solid rgba(255,255,255,.9); background: var(--tile-scrim); }
-  .shot.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .shot.sel { box-shadow: inset 0 0 0 3px var(--accent); }
   .shot.sel .pick { background: var(--accent); border-color: var(--accent); color: var(--accent-dark);
                     display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
-  .shot .dur { position: absolute; right: 5px; bottom: 5px; background: var(--chip-scrim); border-radius: var(--radius-badge);
+  .shot .dur { position: absolute; right: 4px; bottom: 4px; background: var(--chip-scrim); border-radius: var(--radius-badge);
                padding: 1px 5px; font-size: 10px; }
-  .shot .sz { position: absolute; left: 5px; bottom: 5px; background: var(--chip-scrim); border-radius: var(--radius-badge);
+  .shot .sz { position: absolute; left: 4px; bottom: 4px; background: var(--chip-scrim); border-radius: var(--radius-badge);
               padding: 1px 5px; font-size: 10px; color: #dfe3e8; }
   .shot .sz.big { color: var(--warn); }
   .shot.cam { background: linear-gradient(160deg,#33404d,#1d242b); display: flex; flex-direction: column;
@@ -205,8 +208,10 @@
   пилюле. Внизу она соседствовала с отправкой — мелкая ссылка в паре десятков пикселей от кнопки,
   которая необратимо шлёт файлы. Теперь между ними вся сетка.</p>
 
-  <p style="margin-top:10px"><b>Между миниатюрами 8px вместо 4px</b> и радиус 10px: с прежним зазором
-  плитки читались как одна сплошная полоса, а чип размера выглядел принадлежащим соседке.</p>
+  <p style="margin-top:10px"><b>Сетка — это галерея, а не набор карточек.</b> Зазор 2px одинаковый по
+  обеим осям, скруглений нет, боковых полей у сетки нет: плитки идут от края до края листа. На ширине
+  390px каждый лишний пиксель отступа отнимается у самих снимков, а различать соседние кадры помогает
+  их собственное содержимое, не рамка. Выделение — внутренняя обводка 3px, она не сдвигает соседей.</p>
 
   <p style="margin-top:10px"><b>Кнопка справа меняется по контексту:</b> пусто → микрофон, есть текст или
   выбранные файлы → отправка со счётчиком.</p>
