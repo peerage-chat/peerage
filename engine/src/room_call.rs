@@ -391,11 +391,13 @@ impl RoomCallEngine {
     /// считает скорость (kbps) по дельте между опросами. Для тех-инфо чипа.
     pub fn traffic_json(&self) -> String {
         let rx = self.rx_bytes.lock().unwrap();
-        let mut m = serde_json::Map::new();
+        let mut m: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
         for (k, v) in rx.iter() {
-            m.insert(hex::encode(k), serde_json::json!(v));
+            m.insert(hex::encode(k), *v);
         }
-        m.insert("self".into(), serde_json::json!(self.tx_bytes.load(Ordering::Relaxed)));
+        // Ключ "self" — свой исходящий трафик: клиенту он нужен рядом с чужими,
+        // чтобы показать ↓/↑ одной строкой.
+        m.insert("self".into(), self.tx_bytes.load(Ordering::Relaxed));
         serde_json::to_string(&m).unwrap_or_else(|_| "{}".into())
     }
 

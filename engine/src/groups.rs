@@ -17,7 +17,8 @@ fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct GMsg {
     pub text: String,
     pub mine: bool,
@@ -32,6 +33,30 @@ pub struct GMsg {
     pub blob_id: String,
     pub mime: String,
     pub name: String,
+}
+
+/// Строка списка групп для клиента.
+#[derive(serde::Serialize)]
+struct GroupRow {
+    gid: String,
+    name: String,
+    members: usize,
+    admin: bool,
+}
+
+/// Приглашение на диске (gid — ключ карты, поэтому в теле его нет).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredInvite {
+    name: String,
+    inviter: String,
+}
+
+/// Карточка приглашения в группу для клиента.
+#[derive(serde::Serialize)]
+struct GroupInviteDto {
+    gid: String,
+    name: String,
+    inviter: String,
 }
 
 struct Entry {
@@ -181,17 +206,9 @@ impl GroupManager {
 
     fn save_msgs(&self, id: &[u8]) {
         let Some(e) = self.groups.get(id) else { return };
-        let arr: Vec<serde_json::Value> = e
-            .messages
-            .iter()
-            .map(|m| serde_json::json!({
-                "mine": m.mine, "text": m.text, "time": m.time,
-                "sender": m.sender, "system": m.system,
-                "kind": m.kind, "blob_id": m.blob_id, "mime": m.mime, "name": m.name,
-            }))
-            .collect();
         let _ = std::fs::create_dir_all(&self.dir);
-        if let Ok(j) = serde_json::to_vec(&arr) {
+        // На диск — тот же тип, что и клиенту: одна схема, один источник правды.
+        if let Ok(j) = serde_json::to_vec(&e.messages) {
             let _ = std::fs::write(self.msgs_path(id), p2p_core::vault::seal(&j));
         }
     }
@@ -199,24 +216,9 @@ impl GroupManager {
     fn load_msgs(&self, id: &[u8]) -> Vec<GMsg> {
         let Ok(raw) = std::fs::read(self.msgs_path(id)) else { return Vec::new() };
         let Ok(bytes) = p2p_core::vault::open(&raw) else { return Vec::new() };
-        let Ok(arr) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) else {
-            return Vec::new();
-        };
-        arr.iter()
-            .filter_map(|v| {
-                Some(GMsg {
-                    mine: v["mine"].as_bool()?,
-                    text: v["text"].as_str().unwrap_or("").to_string(),
-                    time: v["time"].as_i64().unwrap_or(0),
-                    sender: v["sender"].as_str().unwrap_or("").to_string(),
-                    system: v["system"].as_bool().unwrap_or(false),
-                    kind: v["kind"].as_str().unwrap_or("").to_string(),
-                    blob_id: v["blob_id"].as_str().unwrap_or("").to_string(),
-                    mime: v["mime"].as_str().unwrap_or("").to_string(),
-                    name: v["name"].as_str().unwrap_or("").to_string(),
-                })
-            })
-            .collect()
+        // Читаем тем же типом, которым писали. Битый файл — пустая история, а не
+        // паника: своя же история не повод ронять приложение.
+        serde_json::from_slice::<Vec<GMsg>>(&bytes).unwrap_or_default()
     }
 
     fn load_all(&mut self) {
@@ -266,14 +268,17 @@ impl GroupManager {
     }
 
     fn save_pending_invites(&self) {
-        let map: serde_json::Value = serde_json::json!(self
+        // На диск — та же карточка, что уходит клиенту, только без gid (он в ключе).
+        let map: HashMap<String, StoredInvite> = self
             .pending_invites
             .iter()
-            .map(|(gid, inv)| (
-                hex::encode(gid),
-                serde_json::json!({ "name": inv.name, "inviter": hex::encode(inv.inviter) }),
-            ))
-            .collect::<serde_json::Map<_, _>>());
+            .map(|(gid, inv)| {
+                (
+                    hex::encode(gid),
+                    StoredInvite { name: inv.name.clone(), inviter: hex::encode(inv.inviter) },
+                )
+            })
+            .collect();
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_vec(&map) {
             let _ = std::fs::write(self.pending_invites_path(), j);
@@ -282,20 +287,16 @@ impl GroupManager {
 
     fn load_pending_invites(&mut self) {
         let Ok(bytes) = std::fs::read(self.pending_invites_path()) else { return };
-        let Ok(map) = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes) else {
+        let Ok(map) = serde_json::from_slice::<HashMap<String, StoredInvite>>(&bytes) else {
             return;
         };
         for (gid_hex, v) in map {
-            let (Ok(gid), Some(inviter)) = (
-                hex::decode(&gid_hex),
-                v["inviter"].as_str().and_then(crate::parse_key),
-            ) else {
+            // Битую запись пропускаем молча: приглашение — не то, ради чего стоит
+            // ронять загрузку остальных.
+            let (Ok(gid), Some(inviter)) = (hex::decode(&gid_hex), crate::parse_key(&v.inviter)) else {
                 continue;
             };
-            self.pending_invites.insert(gid, PendingInvite {
-                name: v["name"].as_str().unwrap_or("").to_string(),
-                inviter,
-            });
+            self.pending_invites.insert(gid, PendingInvite { name: v.name, inviter });
         }
     }
 
@@ -312,14 +313,14 @@ impl GroupManager {
 
     /// Входящие приглашения как JSON [{gid, name, inviter}].
     pub fn invites_json(&self) -> String {
-        let arr: Vec<serde_json::Value> = self
+        let arr: Vec<GroupInviteDto> = self
             .pending_invites
             .iter()
-            .map(|(gid, inv)| serde_json::json!({
-                "gid": hex::encode(gid),
-                "name": inv.name,
-                "inviter": hex::encode(inv.inviter),
-            }))
+            .map(|(gid, inv)| GroupInviteDto {
+                gid: hex::encode(gid),
+                name: inv.name.clone(),
+                inviter: hex::encode(inv.inviter),
+            })
             .collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
@@ -445,31 +446,23 @@ impl GroupManager {
     }
 
     pub fn list_json(&self) -> String {
-        let arr: Vec<serde_json::Value> = self
+        let arr = self
             .groups
             .iter()
-            .map(|(id, e)| serde_json::json!({
-                "gid": hex::encode(id),
-                "name": e.name,
-                "members": e.chat.member_count(),
-                "admin": e.admin,
-            }))
-            .collect();
+            .map(|(id, e)| GroupRow {
+                gid: hex::encode(id),
+                name: e.name.clone(),
+                members: e.chat.member_count(),
+                admin: e.admin,
+            })
+            .collect::<Vec<GroupRow>>();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
     pub fn history_json(&self, gid: &[u8]) -> String {
         let Some(e) = self.groups.get(gid) else { return "[]".into() };
-        let arr: Vec<serde_json::Value> = e
-            .messages
-            .iter()
-            .map(|m| serde_json::json!({
-                "text": m.text, "mine": m.mine, "time": m.time,
-                "sender": m.sender, "system": m.system,
-                "kind": m.kind, "blob_id": m.blob_id, "mime": m.mime, "name": m.name,
-            }))
-            .collect();
-        serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
+        // Схема истории — сам тип GMsg: и для клиента, и для файла на диске одна.
+        serde_json::to_string(&e.messages).unwrap_or_else(|_| "[]".into())
     }
 
     /// Ключи участников (hex) — для группового звонка.

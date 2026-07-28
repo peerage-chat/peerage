@@ -9,6 +9,7 @@
 //! устройства (см. `net.rs`, тесты презенса ниже).
 
 pub mod blobs;
+pub mod dto;
 pub mod groups;
 pub mod net;
 pub mod room_call;
@@ -673,30 +674,28 @@ impl Engine {
     /// (подождать или сбросить очередь) остаётся за пользователем.
     pub fn outbox_stats_json(&self) -> String {
         let s = self.outbox.lock_safe().stats();
-        serde_json::json!({
-            "pending": s.pending,
-            "bytes": s.bytes,
-            "peers": s.peers,
-            "warn": s.should_warn(),
-        })
-        .to_string()
+        let dto = dto::OutboxStats {
+            pending: s.pending,
+            bytes: s.bytes,
+            peers: s.peers,
+            warn: s.should_warn(),
+        };
+        serde_json::to_string(&dto).unwrap_or_else(|_| "{}".into())
     }
 
     /// Очередь по получателям: `[{peer, count, bytes, oldest}]`. Сумма «ждёт 1248»
     /// ничего не говорит, пока не видно, что 1202 из них — одному человеку.
     pub fn outbox_by_peer_json(&self) -> String {
-        let rows: Vec<serde_json::Value> = self
+        let rows: Vec<dto::OutboxPeer> = self
             .outbox
             .lock_safe()
             .per_peer()
             .into_iter()
-            .map(|(peer, count, bytes, oldest)| {
-                serde_json::json!({
-                    "peer": hex::encode(peer),
-                    "count": count,
-                    "bytes": bytes,
-                    "oldest": oldest,
-                })
+            .map(|(peer, count, bytes, oldest)| dto::OutboxPeer {
+                peer: hex::encode(peer),
+                count,
+                bytes,
+                oldest,
             })
             .collect();
         serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
@@ -744,22 +743,21 @@ impl Engine {
             e.0 += 1;
             e.1 += len;
         }
-        let mut chats: Vec<serde_json::Value> = by_peer
+        let mut chats: Vec<dto::ChatStorage> = by_peer
             .into_iter()
-            .map(|(p, (files, bytes))| {
-                serde_json::json!({ "peer": hex::encode(p), "files": files, "bytes": bytes })
-            })
+            .map(|(p, (files, bytes))| dto::ChatStorage { peer: hex::encode(p), files, bytes })
             .collect();
-        chats.sort_by_key(|v| std::cmp::Reverse(v["bytes"].as_u64().unwrap_or(0)));
-        serde_json::json!({
-            "blobs": blobs,
-            "blob_bytes": blob_bytes,
-            "outbox_pending": ob.pending,
-            "outbox_bytes": ob.bytes,
-            "by_kind": by_kind,
-            "chats": chats,
-        })
-        .to_string()
+        // Самый тяжёлый чат первым — с него и начнут чистить.
+        chats.sort_by_key(|c| std::cmp::Reverse(c.bytes));
+        let dto = dto::StorageStats {
+            blobs,
+            blob_bytes,
+            outbox_pending: ob.pending,
+            outbox_bytes: ob.bytes,
+            by_kind,
+            chats,
+        };
+        serde_json::to_string(&dto).unwrap_or_else(|_| "{}".into())
     }
 
     /// Удалить ВСЕ сохранённые вложения (явное действие пользователя). Не трогает
@@ -1149,20 +1147,18 @@ impl Engine {
 
     /// Журнал звонков для UI: `[{peer, gid, incoming, outcome, started, duration}]`.
     pub fn calls_json(&self, limit: usize) -> String {
-        let rows: Vec<serde_json::Value> = self
+        let rows: Vec<dto::CallEntry> = self
             .calls
             .lock_safe()
             .list(limit)
             .into_iter()
-            .map(|c| {
-                serde_json::json!({
-                    "peer": hex::encode(c.peer),
-                    "gid": hex::encode(&c.gid),
-                    "incoming": c.incoming,
-                    "outcome": c.outcome,
-                    "started": c.started,
-                    "duration": c.duration,
-                })
+            .map(|c| dto::CallEntry {
+                peer: hex::encode(c.peer),
+                gid: hex::encode(&c.gid),
+                incoming: c.incoming,
+                outcome: c.outcome,
+                started: c.started,
+                duration: c.duration,
             })
             .collect();
         serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
@@ -1291,10 +1287,13 @@ impl Engine {
                 let bytes = st.bytes.load(Ordering::Relaxed);
                 let pkts = st.pkts.load(Ordering::Relaxed);
                 let secs = st.start.elapsed().as_secs_f64().max(0.001);
-                serde_json::json!({
-                    "pkts": pkts, "bytes": bytes, "secs": secs,
-                    "mbps": bytes as f64 * 8.0 / 1e6 / secs,
-                }).to_string()
+                let dto = dto::BenchRecv {
+                    pkts,
+                    bytes,
+                    secs,
+                    mbps: bytes as f64 * 8.0 / 1e6 / secs,
+                };
+                serde_json::to_string(&dto).unwrap_or_else(|_| "{}".into())
             }
             None => "{}".into(),
         }
@@ -1315,10 +1314,13 @@ impl Engine {
             }
         }
         let secs = t0.elapsed().as_secs_f64().max(0.001);
-        serde_json::json!({
-            "sent_pkts": sent_pkts, "sent_bytes": sent_bytes, "secs": secs,
-            "mbps": sent_bytes as f64 * 8.0 / 1e6 / secs,
-        }).to_string()
+        let dto = dto::BenchResult {
+            sent_pkts,
+            sent_bytes,
+            secs,
+            mbps: sent_bytes as f64 * 8.0 / 1e6 / secs,
+        };
+        serde_json::to_string(&dto).unwrap_or_else(|_| "{}".into())
     }
 }
 
@@ -1332,23 +1334,25 @@ fn av_flags(audio: bool, video: bool) -> u8 {
 }
 
 fn room_members_json(live: Vec<([u8; 32], u8)>) -> String {
-    let arr: Vec<serde_json::Value> = live
+    let arr: Vec<dto::RoomMember> = live
         .into_iter()
-        .map(|(p, f)| serde_json::json!({
-            "peer": hex::encode(p), "audio": f & 0b01 != 0, "video": f & 0b10 != 0,
-        }))
+        .map(|(p, f)| dto::RoomMember {
+            peer: hex::encode(p),
+            audio: f & 0b01 != 0,
+            video: f & 0b10 != 0,
+        })
         .collect();
     serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
 }
 
 fn call_params(audio: &AudioSettings) -> String {
-    serde_json::json!({
-        "call_id": 0,
-        "sample_rate": audio.sample_rate,
-        "channels": audio.channels,
-        "frame_len": audio.interleaved_len(),
-    })
-    .to_string()
+    let dto = dto::CallParams {
+        call_id: 0,
+        sample_rate: audio.sample_rate,
+        channels: audio.channels,
+        frame_len: audio.interleaved_len(),
+    };
+    serde_json::to_string(&dto).unwrap_or_else(|_| "{}".into())
 }
 
 fn public_peer_uris() -> impl Iterator<Item = &'static str> {
@@ -1388,13 +1392,13 @@ fn gate_of(engine: &Engine, peer: &[u8; 32]) -> Gate {
 fn record_request(engine: &Arc<Engine>, peer: [u8; 32], preview: &str) {
     let preview: String = preview.chars().take(200).collect();
     let is_new = engine.gate.lock_safe().upsert_request(&peer, &preview, now()).unwrap_or(false);
-    push_event(engine, serde_json::json!({
-        "type": "contact_request", "peer": hex::encode(peer), "new": is_new,
-    }));
+    push_event(engine, dto::UiEvent::ContactRequest { peer: hex::encode(peer), new: is_new });
 }
 
-fn push_event(engine: &Engine, json: serde_json::Value) {
-    engine.events.lock_safe().push_back(json.to_string());
+/// Положить событие в очередь для клиента. Принимает ТИП, а не свободный JSON:
+/// форма события фиксируется `dto::UiEvent` и проверяется компилятором.
+fn push_event(engine: &Engine, ev: dto::UiEvent) {
+    engine.events.lock_safe().push_back(ev.to_json());
 }
 
 /// Поток event_pump = групповой актор: владеет [`GroupManager`] (GroupChat !Send),
@@ -1416,7 +1420,7 @@ fn event_pump(
     engine.outbox.lock_safe().on_start(now()); // M3: prune TTL + дослать недоставленное
     engine.resume_all_wanted(); // докачки, начатые до перезапуска
     refresh_group_cache(&engine, &groups); // прайм кэша
-    push_event(&engine, serde_json::json!({"type": "groups_changed"}));
+    push_event(&engine, dto::UiEvent::GroupsChanged);
     let mut last_beacon = Instant::now();
     loop {
         match job_rx.recv_timeout(Duration::from_millis(500)) {
@@ -1450,7 +1454,7 @@ fn event_pump(
                         }
                     }
                     engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(&gid));
-                    push_event(&engine, serde_json::json!({"type": "group_msg", "gid": hex::encode(&gid), "mine": true}));
+                    push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
                 }
             }
             Ok(Job::GroupMediaFile { gid, path, mime, name, caption }) => {
@@ -1471,7 +1475,7 @@ fn event_pump(
                         }
                     }
                     engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(&gid));
-                    push_event(&engine, serde_json::json!({"type": "group_msg", "gid": hex::encode(&gid), "mine": true}));
+                    push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
                 }
             }
             Ok(Job::Beacon) => {
@@ -1504,12 +1508,11 @@ fn event_pump(
         blobs.tick(); // переспросить потерянные чанки докачки (M2)
         // Прогресс докачки наверх: UI рисует кружок вместо бесконечного спиннера.
         for (id, done, total) in blobs.take_progress() {
-            push_event(&engine, serde_json::json!({
-                "type": "blob_progress",
-                "id": hex::encode(id),
-                "done": done,
-                "total": total,
-            }));
+            push_event(&engine, dto::UiEvent::BlobProgress {
+                id: hex::encode(id),
+                done,
+                total,
+            });
         }
     }
 }
@@ -1555,12 +1558,11 @@ fn save_and_notify_blob(engine: &Arc<Engine>, peer: [u8; 32], done: blobs::Compl
     let id_hex = hex::encode(done.id);
     let _ = engine.messages.lock_safe().mark_downloaded(&id_hex);
     let _ = engine.wanted.lock_safe().remove(&id_hex); // намерение исполнено
-    push_event(engine, serde_json::json!({
-        "type": "blob_received",
-        "id": id_hex,
-        "mime": done.manifest.mime,
-        "size": done.manifest.size,
-    }));
+    push_event(engine, dto::UiEvent::BlobReceived {
+        id: id_hex,
+        mime: done.manifest.mime,
+        size: done.manifest.size,
+    });
 }
 
 /// Разослать маячок присутствия членам всех наших комнат и подчистить протухших.
@@ -1607,9 +1609,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     }
                 }
             }
-            push_event(engine, serde_json::json!({
-                "type": "presence", "peer": hex::encode(peer), "online": online,
-            }));
+            push_event(engine, dto::UiEvent::Presence { peer: hex::encode(peer), online });
         }
         Event::Text { peer, id, text } => {
             match gate_of(engine, &peer) {
@@ -1628,9 +1628,12 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     id, text: text.clone(), mine: false, time: t, status: String::new(),
                     ..Default::default()
                 });
-                push_event(engine, serde_json::json!({
-                    "type": "text", "peer": hex::encode(peer), "id": id, "text": text, "time": t,
-                }));
+                push_event(engine, dto::UiEvent::Text {
+                    peer: hex::encode(peer),
+                    id,
+                    text,
+                    time: t,
+                });
             }
         }
         Event::Media { peer, id, hash, mime, name, size, duration_ms, width, height, caption, thumb } => {
@@ -1667,19 +1670,28 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 if auto && !have {
                     let _ = engine.messenger.request_blob_manifest(&peer, &hash);
                 }
-                push_event(engine, serde_json::json!({
-                    "type": "media", "peer": hex::encode(peer), "id": id, "time": t,
-                    "kind": kind, "blob_id": id_hex, "mime": mime, "name": name,
-                    "size": size, "duration_ms": duration_ms,
-                    "width": width, "height": height,
-                    "thumb_id": thumb_hex, "downloaded": have, "auto": auto,
-                }));
+                push_event(engine, dto::UiEvent::Media {
+                    peer: hex::encode(peer),
+                    id,
+                    time: t,
+                    kind: kind.to_string(),
+                    blob_id: id_hex,
+                    mime,
+                    name,
+                    size,
+                    duration_ms,
+                    width,
+                    height,
+                    thumb_id: thumb_hex,
+                    downloaded: have,
+                    auto,
+                });
             }
         }
         Event::Ack { peer, id } => {
             let _ = engine.messages.lock_safe().set_status(&peer, id, "delivered");
             engine.outbox.lock_safe().on_ack(&peer, id); // M3: снять из очереди
-            push_event(engine, serde_json::json!({"type": "ack", "peer": hex::encode(peer), "id": id}));
+            push_event(engine, dto::UiEvent::Ack { peer: hex::encode(peer), id });
         }
         Event::Undelivered { peer, id } => {
             // "queued", а НЕ "failed": ретраи в памяти кончились, но сообщение лежит в
@@ -1687,20 +1699,23 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             // в БД писалось "failed" (в UI при этом рисовался часами "queued"), и после
             // перезапуска ждущее доставки сообщение показывалось красным «!».
             let _ = engine.messages.lock_safe().set_status(&peer, id, "queued");
-            push_event(engine, serde_json::json!({"type": "undelivered", "peer": hex::encode(peer), "id": id}));
+            push_event(engine, dto::UiEvent::Undelivered { peer: hex::encode(peer), id });
         }
         Event::RoomInvite { peer, room_id, audio, video } => {
             // Заводим сразу как пропущенный: если пользователь ответит, исход
             // поднимется в room_join_dm, если откажется — в room_decline_dm.
             engine.begin_call(&peer, &room_id, true, "missed");
-            push_event(engine, serde_json::json!({
-                "type": "room_invite", "peer": hex::encode(peer),
-                "room_id": hex::encode(&room_id), "audio": audio, "video": video,
-            }));
+            push_event(engine, dto::UiEvent::RoomInvite {
+                peer: hex::encode(peer),
+                room_id: hex::encode(&room_id),
+                audio,
+                video,
+            });
         }
-        Event::RoomDecline { peer, room_id } => push_event(engine, serde_json::json!({
-            "type": "room_decline", "peer": hex::encode(peer), "room_id": hex::encode(&room_id),
-        })),
+        Event::RoomDecline { peer, room_id } => push_event(engine, dto::UiEvent::RoomDecline {
+            peer: hex::encode(peer),
+            room_id: hex::encode(&room_id),
+        }),
         Event::Group { peer, data } => {
             let out = groups.on_group(&data);
             if let Some(gid) = &out.gid {
@@ -1709,47 +1724,44 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     // а не live-messages. Без этого полученное сообщение пропадает при
                     // переоткрытии чата (отображается только live-событием).
                     engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(gid));
-                    let mut ev = serde_json::json!({
-                        "type": "group_msg",
-                        "gid": hex::encode(gid),
-                        "text": out.text.clone().unwrap_or_default(),
-                        "sender": out.sender.clone().unwrap_or_default(),
-                        "system": out.system,
-                    });
                     // M2: медиа-поля + докачка блоба по хэшу от отправителя, если промах.
                     if let Some(m) = &out.media {
-                        ev["kind"] = m.kind.clone().into();
-                        ev["blob_id"] = m.blob_id.clone().into();
-                        ev["mime"] = m.mime.clone().into();
-                        ev["name"] = m.name.clone().into();
                         if engine.blob_read(&m.blob_id).is_none() {
                             if let Ok(h) = hex::decode(&m.blob_id) {
                                 let _ = engine.messenger.request_blob_manifest(&peer, &h);
                             }
                         }
                     }
-                    push_event(engine, ev);
+                    push_event(engine, dto::UiEvent::GroupMsg {
+                        gid: hex::encode(gid),
+                        mine: false,
+                        text: Some(out.text.clone().unwrap_or_default()),
+                        sender: Some(out.sender.clone().unwrap_or_default()),
+                        system: Some(out.system),
+                        kind: out.media.as_ref().map(|m| m.kind.clone()),
+                        blob_id: out.media.as_ref().map(|m| m.blob_id.clone()),
+                        mime: out.media.as_ref().map(|m| m.mime.clone()),
+                        name: out.media.as_ref().map(|m| m.name.clone()),
+                    });
                 }
             }
             if out.joined {
                 refresh_group_cache(engine, groups);
-                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+                push_event(engine, dto::UiEvent::GroupsChanged);
             }
             if out.renamed {
                 // Имя группы пришло от админа — обновляем кэш списка и уведомляем UI.
                 refresh_group_cache(engine, groups);
-                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+                push_event(engine, dto::UiEvent::GroupsChanged);
             }
             if out.removed {
                 // ADR-004: нас отозвали — обновляем кэш и уведомляем UI отдельным
                 // событием (чтобы показать «вы удалены» и закрыть экран группы).
                 refresh_group_cache(engine, groups);
                 if let Some(gid) = &out.gid {
-                    push_event(engine, serde_json::json!({
-                        "type": "group_removed", "gid": hex::encode(gid),
-                    }));
+                    push_event(engine, dto::UiEvent::GroupRemoved { gid: hex::encode(gid) });
                 }
-                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+                push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }
         Event::GroupKeyRequest { peer } => groups.on_key_request(peer),
@@ -1757,14 +1769,14 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             // Приглашение-карточка: не вступаем молча — кладём в очередь, уведомляем UI.
             if groups.on_invite(peer, gid, name) {
                 refresh_group_cache(engine, groups);
-                push_event(engine, serde_json::json!({"type": "group_invites_changed"}));
+                push_event(engine, dto::UiEvent::GroupInvitesChanged);
             }
         }
         Event::GroupResyncRequest { peer, gid } => groups.on_resync_request(peer, &gid),
         Event::GroupLeaveRequest { peer, gid } => {
             if groups.on_leave_request(peer, &gid) {
                 refresh_group_cache(engine, groups);
-                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+                push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }
         // M2 блобы: докачка получателем + отдача чанков. Событие blob_received →
@@ -1800,7 +1812,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 if !avatar_id.is_empty() && engine.blob_read(&avatar_id).is_none() {
                     let _ = engine.messenger.request_blob_manifest(&peer, &avatar_hash);
                 }
-                push_event(engine, serde_json::json!({"type": "contacts_changed"}));
+                push_event(engine, dto::UiEvent::ContactsChanged);
             }
         }
         // M2 pull-по-хэшу: пир просит манифест нашего блоба (пока — аватар).
@@ -1819,7 +1831,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         Event::GroupKeyReply { peer, key_package } => {
             if groups.on_key_reply(peer, &key_package) {
                 refresh_group_cache(engine, groups);
-                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+                push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }
         Event::RoomPresence { peer, gid, flags } => {
@@ -1842,10 +1854,12 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     engine.calls.lock_safe().set_outcome(id, "answered");
                 }
             }
-            push_event(engine, serde_json::json!({
-                "type": "room_presence", "gid": hex::encode(&gid),
-                "peer": hex::encode(peer), "flags": flags, "left": left,
-            }));
+            push_event(engine, dto::UiEvent::RoomPresence {
+                gid: hex::encode(&gid),
+                peer: hex::encode(peer),
+                flags,
+                left,
+            });
             engine.sync_room_members();
         }
     }
@@ -1868,7 +1882,7 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
         GroupCmd::Create { name } => {
             if groups.create(&name).is_some() {
                 refresh_group_cache(engine, groups);
-                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+                push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }
         GroupCmd::Invite { gid, peer } => groups.invite(&gid, peer),
@@ -1877,12 +1891,12 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
             // Карточку убираем из кэша сразу.
             groups.accept_invite(&gid);
             refresh_group_cache(engine, groups);
-            push_event(engine, serde_json::json!({"type": "group_invites_changed"}));
+            push_event(engine, dto::UiEvent::GroupInvitesChanged);
         }
         GroupCmd::DeclineInvite { gid } => {
             if groups.decline_invite(&gid) {
                 refresh_group_cache(engine, groups);
-                push_event(engine, serde_json::json!({"type": "group_invites_changed"}));
+                push_event(engine, dto::UiEvent::GroupInvitesChanged);
             }
         }
         GroupCmd::SendText { gid, text } => {
@@ -1894,7 +1908,7 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
             if groups.remove_member(&gid, peer) {
                 refresh_group_cache(engine, groups);
                 engine.sync_room_members(); // SEC-2: отозванного убрать и из звонка
-                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+                push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }
         GroupCmd::Rekey { gid } => {
@@ -1908,7 +1922,7 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
             if groups.leave(&gid) {
                 refresh_group_cache(engine, groups);
                 engine.sync_room_members();
-                push_event(engine, serde_json::json!({"type": "groups_changed"}));
+                push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }
     }

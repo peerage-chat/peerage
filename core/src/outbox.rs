@@ -171,6 +171,22 @@ pub type ResendFn = Box<dyn FnMut(&[u8; 32], u64, &str, &[u8]) + Send>;
 /// Метаданные вложения, которые кладём в очередь вместе со ссылкой: при досылке
 /// карточка у получателя должна быть такой же, как при первой отправке.
 #[derive(Debug, Clone, Default)]
+/// Тело медиа-записи в очереди. Формат СВОЙ, не протокольный: он читается только
+/// нами же при досылке, но схема всё равно должна жить в типе, а не в литерале.
+#[derive(serde::Serialize)]
+struct QueuedMedia<'a> {
+    blob: &'a str,
+    mime: &'a str,
+    name: &'a str,
+    size: u64,
+    duration_ms: u32,
+    caption: &'a str,
+    width: u32,
+    height: u32,
+    thumb: &'a str,
+}
+
+#[derive(Default)]
 pub struct MediaRef {
     pub size: u64,
     pub duration_ms: u32,
@@ -225,11 +241,17 @@ impl OutboxManager {
         meta: &MediaRef,
         now: i64,
     ) {
-        let body = serde_json::json!({
-            "blob": blob_id_hex, "mime": mime, "name": name,
-            "size": meta.size, "duration_ms": meta.duration_ms, "caption": meta.caption,
-            "width": meta.width, "height": meta.height, "thumb": meta.thumb_hex,
-        });
+        let body = QueuedMedia {
+            blob: blob_id_hex,
+            mime,
+            name,
+            size: meta.size,
+            duration_ms: meta.duration_ms,
+            caption: &meta.caption,
+            width: meta.width,
+            height: meta.height,
+            thumb: &meta.thumb_hex,
+        };
         let Ok(payload) = serde_json::to_vec(&body) else { return };
         let _ = self.store.enqueue(peer, msg_id, "media", &payload, now);
     }
