@@ -454,6 +454,26 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_outboxStats<'local>(
     })
 }
 
+/// Визуальный отпечаток ключа (hex, 12 байт) — сверка глазами по сетке знаков.
+/// Пустой `key_hex` — свой отпечаток.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_visualFingerprint<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, ""), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
+        let hex_str = jstr(&mut env, &key_hex);
+        let out = match parse_key(&hex_str) {
+            Some(key) => e.visual_fingerprint(&key),
+            None => e.visual_fingerprint_self(),
+        };
+        ret(&env, &out)
+    })
+}
+
 /// Очередь по получателям (JSON-массив) для экрана очереди отправки.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_outboxByPeer<'local>(

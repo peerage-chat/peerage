@@ -390,7 +390,13 @@ internal fun MeScreen(model: AppModel) {
         }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(FormGap)) {
             FieldLabel(stringResource(R.string.me_fingerprint_label))
-            Text(me.fingerprint, color = HoloAccent, fontSize = 16.sp)
+            FingerprintGrid(model.visualFingerprint(), Modifier.padding(vertical = 4.dp))
+            Text(
+                stringResource(R.string.fp_self_hint),
+                color = HoloSecondary,
+                fontSize = 11.sp,
+            )
+            Text(me.fingerprint, color = HoloAccent, fontSize = 13.sp)
             FieldLabel(stringResource(R.string.me_address_label))
             Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
             FieldLabel(stringResource(R.string.me_pubkey_label))
@@ -438,13 +444,17 @@ internal fun InfoScreen(model: AppModel, onDeleted: () -> Unit) {
                 fontSize = 11.sp,
             )
         }
-        FieldLabel("FINGERPRINT")
-        Text(c.fingerprint, color = HoloAccent, fontSize = 15.sp)
+        // Сверка глазами: знаки рисует само приложение, поэтому картинка одинакова
+        // на любом устройстве. Слова BIP39 оставлены рядом — их удобно диктовать
+        // голосом, когда сверяются по видеосвязи.
+        FieldLabel(stringResource(R.string.fp_label))
+        FingerprintGrid(model.visualFingerprint(key), Modifier.padding(vertical = 4.dp))
         Text(
-            stringResource(R.string.info_verify_hint),
+            stringResource(R.string.fp_hint, c.displayName),
             color = HoloSecondary,
             fontSize = 11.sp,
         )
+        Text(c.fingerprint, color = HoloAccent, fontSize = 13.sp)
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (c.verified) {
                 Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(18.dp))

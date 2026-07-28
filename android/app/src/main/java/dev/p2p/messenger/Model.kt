@@ -464,6 +464,15 @@ class AppModel private constructor() {
         refreshStorage()
     }
 
+    /** Визуальные отпечатки ключей (hex) — кэш, чтобы не дёргать JNI на рекомпозицию. */
+    private val fpCache = mutableMapOf<String, String>()
+
+    /** Отпечаток для сверки глазами. Пустой ключ — свой. Считает движок (одна
+     *  реализация на все клиенты), UI только рисует. */
+    fun visualFingerprint(key: String = ""): String = fpCache.getOrPut(key) {
+        if (sessionPtr == 0L) "" else runCatching { Native.visualFingerprint(sessionPtr, key) }.getOrDefault("")
+    }
+
     // ── Пользовательские папки ──────────────────────────────────────────────
     val folders = mutableStateListOf<Folder>()
 

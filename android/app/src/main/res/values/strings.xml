@@ -432,4 +432,7 @@
     <string name="folder_delete_ok">Delete</string>
     <string name="common_save">Save</string>
     <string name="folder_edit_title">Folder</string>
+    <string name="fp_label">FINGERPRINT (verify in person)</string>
+    <string name="fp_hint">If this set matches what %1$s sees on their screen, the connection is direct — nobody in between.</string>
+    <string name="fp_self_hint">Show this to your contact so they can compare it with what they see for you.</string>
 </resources>

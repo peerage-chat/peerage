@@ -204,6 +204,35 @@ pub fn fingerprint_words(public_key: &[u8; 32]) -> [&'static str; FINGERPRINT_WO
     words
 }
 
+/// Сколько знаков в визуальном отпечатке (сетка 6×2 в UI).
+pub const VISUAL_FP_LEN: usize = 12;
+
+/// Версия НАБОРА знаков и правила отображения. Сверка идёт глазами по картинке,
+/// поэтому смена набора обязана менять и сам отпечаток: иначе двое с разными
+/// версиями приложения увидят разные картинки для одного ключа и решат, что их
+/// подслушивают. Домен-сепаратор ниже включает версию — бампнули набор, старые
+/// сверки честно инвалидируются.
+pub const VISUAL_FP_VERSION: u8 = 1;
+
+/// Визуальный отпечаток публичного ключа: 12 байт = 12 знаков по 8 бит = 96 бит
+/// энтропии (столько же, сколько у 8 слов BIP39 с их 88 битами, и заметно больше,
+/// чем у коротких «эмодзи-хешей» на 4-6 символов).
+///
+/// НЕ секрет — выводится из ПУБЛИЧНОГО ключа и служит для сверки «та ли это связь».
+/// Не путать с сид-фразой (она восстанавливает личность и секретна).
+pub fn visual_fingerprint(public_key: &[u8; 32]) -> [u8; VISUAL_FP_LEN] {
+    // Домен-сепаратор с версией: тот же ключ в другой роли (или в другой версии
+    // набора) обязан давать другой отпечаток.
+    let mut hasher = Sha256::new();
+    hasher.update(b"p2p-visual-fingerprint-v");
+    hasher.update([VISUAL_FP_VERSION]);
+    hasher.update(public_key);
+    let hash = hasher.finalize();
+    let mut out = [0u8; VISUAL_FP_LEN];
+    out.copy_from_slice(&hash[..VISUAL_FP_LEN]);
+    out
+}
+
 /// Извлечь 11-битный индекс №`word_index` из big-endian битового потока.
 fn extract_11_bits(bytes: &[u8], word_index: usize) -> u16 {
     let start_bit = word_index * 11;
@@ -268,6 +297,26 @@ mod tests {
         // Разные идентичности → разные под-ключи для того же домена.
         let other = Identity::from_seed(&[6u8; 32]).unwrap();
         assert_ne!(a1, other.derive_subkey("dev.p2p.blob-at-rest.v1"));
+    }
+
+    #[test]
+    fn visual_fingerprint_is_stable_and_key_dependent() {
+        let a = Identity::generate();
+        let b = Identity::generate();
+        let fa = visual_fingerprint(&a.public_key_bytes());
+        assert_eq!(fa, visual_fingerprint(&a.public_key_bytes()), "детерминирован");
+        assert_ne!(fa, visual_fingerprint(&b.public_key_bytes()), "зависит от ключа");
+        assert_eq!(fa.len(), VISUAL_FP_LEN);
+    }
+
+    /// Отпечаток обязан отличаться от «просто SHA-256 ключа»: домен-сепаратор
+    /// с версией — то, что позволит сменить набор знаков, не сломав доверие молча.
+    #[test]
+    fn visual_fingerprint_is_domain_separated() {
+        let id = Identity::generate();
+        let pk = id.public_key_bytes();
+        let plain = Sha256::digest(pk);
+        assert_ne!(&visual_fingerprint(&pk)[..], &plain[..VISUAL_FP_LEN]);
     }
 
     #[test]

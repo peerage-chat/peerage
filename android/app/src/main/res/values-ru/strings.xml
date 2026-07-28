@@ -424,4 +424,7 @@
     <string name="folder_delete_ok">Удалить</string>
     <string name="common_save">Сохранить</string>
     <string name="folder_edit_title">Папка</string>
+    <string name="fp_label">ОТПЕЧАТОК (сверить лично)</string>
+    <string name="fp_hint">Если набор совпадает с тем, что видит %1$s на своём экране, — связь идёт напрямую, без посредника.</string>
+    <string name="fp_self_hint">Покажите собеседнику, чтобы он сравнил с тем, что видит у себя.</string>
 </resources>

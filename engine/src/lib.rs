@@ -252,6 +252,16 @@ impl Engine {
         self.me_pub
     }
 
+    /// Визуальный отпечаток ключа для сверки глазами: 12 байт в hex.
+    /// Пусто, если ключ не разобрать. Свой — [`visual_fingerprint_self`].
+    pub fn visual_fingerprint(&self, key: &[u8; 32]) -> String {
+        hex::encode(p2p_core::identity::visual_fingerprint(key))
+    }
+
+    pub fn visual_fingerprint_self(&self) -> String {
+        hex::encode(p2p_core::identity::visual_fingerprint(&self.me_pub))
+    }
+
     /// Секретная сид-фраза (24 слова BIP39) — по запросу пользователя (онбординг M4
     /// «Показать фразу»). СЕКРЕТ: показывать только на FLAG_SECURE-экране.
     pub fn seed_phrase(&self) -> String {

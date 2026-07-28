@@ -65,6 +65,9 @@ object Native {
     /** Скачать вложение по кнопке. Готовность придёт событием `blob_received`. */
     external fun downloadMedia(sessionPtr: Long, peerHex: String, blobIdHex: String): Boolean
 
+    /** Визуальный отпечаток ключа (hex, 12 байт). Пустой ключ — свой отпечаток. */
+    external fun visualFingerprint(sessionPtr: Long, keyHex: String): String
+
     /** Очередь отправки по получателям (JSON-массив). */
     external fun outboxByPeer(sessionPtr: Long): String
 
