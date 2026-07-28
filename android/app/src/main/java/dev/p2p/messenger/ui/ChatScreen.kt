@@ -5,6 +5,14 @@ package dev.p2p.messenger.ui
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -124,6 +133,9 @@ internal fun ChatScreen(model: AppModel) {
     val scope = rememberCoroutineScope()
     // Держим прокрутку у последнего сообщения при появлении новых.
     LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+    // Порог анимации: всё, что было в чате на момент открытия, показываем сразу.
+    // Анимировать историю при входе — мельтешение; анимируем только НОВОЕ.
+    val appearFrom = remember(key) { msgs.lastOrNull()?.id ?: Long.MIN_VALUE }
 
     // Произвольный файл (любой mime) → sendMedia (kind file/voice по mime в движке).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -181,7 +193,7 @@ internal fun ChatScreen(model: AppModel) {
                     withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time),
                     withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time),
                 )
-                MessageBubble(m, model, pos)
+                MessageBubble(m, model, pos, animate = m.id > appearFrom)
             }
         }
         MessageInput(
@@ -301,7 +313,13 @@ internal fun MessageInput(
     var picked by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
 
     Column(Modifier.fillMaxWidth().background(HoloBg)) {
-        if (attachOpen) {
+        // Панель ВЫЕЗЖАЕТ из строки ввода: движение объясняет, откуда она взялась.
+        // Появление «из ниоткуда» читается как подмена экрана.
+        AnimatedVisibility(
+            visible = attachOpen,
+            enter = slideInVertically(tween(Tokens.Anim.normal)) { it } + fadeIn(tween(Tokens.Anim.normal)),
+            exit = slideOutVertically(tween(Tokens.Anim.normal)) { it } + fadeOut(tween(Tokens.Anim.fast)),
+        ) {
             AttachSheet(
                 selected = picked,
                 onToggle = { g ->
@@ -316,7 +334,11 @@ internal fun MessageInput(
                 onPickAudio = onPickAudio,
             )
         }
-        if (emojiOpen) {
+        AnimatedVisibility(
+            visible = emojiOpen,
+            enter = slideInVertically(tween(Tokens.Anim.normal)) { it } + fadeIn(tween(Tokens.Anim.normal)),
+            exit = slideOutVertically(tween(Tokens.Anim.normal)) { it } + fadeOut(tween(Tokens.Anim.fast)),
+        ) {
             EmojiPanel(
                 recent = model?.recentEmoji ?: emptyList(),
                 onPick = { e ->
@@ -420,12 +442,14 @@ internal fun MessageInput(
                 contentAlignment = Alignment.Center,
             ) {
                 val send = hasText || hasPicked
-                Icon(
-                    if (send) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
-                    stringResource(if (send) R.string.common_send else R.string.chat_voice),
-                    tint = if (recording) Color.White else HoloAccentDark,
-                    modifier = Modifier.size(20.dp),
-                )
+                Crossfade(send, animationSpec = tween(Tokens.Anim.fast), label = "send") { s ->
+                    Icon(
+                        if (s) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
+                        stringResource(if (s) R.string.common_send else R.string.chat_voice),
+                        tint = if (recording) Color.White else HoloAccentDark,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 // Счётчик того, сколько файлов уйдёт этим нажатием.
                 if (hasPicked) {
                     Text(
@@ -461,12 +485,29 @@ internal fun PillIcon(icon: ImageVector, desc: String, tint: Color = HoloSeconda
 }
 
 @Composable
-internal fun MessageBubble(m: Message, model: AppModel, pos: BlockPos = BlockPos.Solo) {
+internal fun MessageBubble(
+    m: Message,
+    model: AppModel,
+    pos: BlockPos = BlockPos.Solo,
+    animate: Boolean = false,
+) {
     // M2: байты вложения из реактивного кэша (появятся по докачке без рефреша).
     val blobBytes = if (m.blobId.isNotEmpty()) model.mediaBlobs[m.blobId] else null
     var viewer by remember { mutableStateOf(false) }
+    // Новое сообщение всплывает снизу: видно, что оно ПРИШЛО, а не было всегда.
+    var shown by remember(m.id) { mutableStateOf(!animate) }
+    LaunchedEffect(m.id) { shown = true }
+    val appear by animateFloatAsState(
+        if (shown) 1f else 0f,
+        animationSpec = tween(Tokens.Anim.normal),
+        label = "bubble",
+    )
     Row(
-        Modifier.fillMaxWidth().padding(bottom = blockGap(pos)),
+        Modifier.fillMaxWidth().padding(bottom = blockGap(pos))
+            .graphicsLayer {
+                alpha = appear
+                translationY = (1f - appear) * 24f
+            },
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
         Box(
@@ -474,22 +515,23 @@ internal fun MessageBubble(m: Message, model: AppModel, pos: BlockPos = BlockPos
                 .background(if (m.mine) BubbleOut else BubbleIn)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
-            when {
-                // Крупное вложение не тянется автоматически: сначала карточка с тем,
-                // что известно из сообщения (имя/размер/длительность/превью), байты —
-                // по кнопке. Решает получатель, а не отправитель.
-                !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text" ->
-                    PendingAttachmentCard(m, model)
-                else -> when (m.kind) {
-                    "image" -> ImageAttachment(blobBytes) { viewer = true }
-                    "voice" -> VoiceAttachment(blobBytes)
-                    "file" -> FileAttachment(m.name, blobBytes)
-                    else -> Text(
-                        m.text,
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        modifier = Modifier.padding(end = bubbleTimeReserve(m.mine)),
-                    )
+            // Карточка «скачать» превращается в готовое вложение — это подмена
+            // содержимого прямо под пальцем, поэтому переход плавный.
+            val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
+            Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
+                when {
+                    isPending -> PendingAttachmentCard(m, model)
+                    else -> when (m.kind) {
+                        "image" -> ImageAttachment(blobBytes) { viewer = true }
+                        "voice" -> VoiceAttachment(blobBytes)
+                        "file" -> FileAttachment(m.name, blobBytes)
+                        else -> Text(
+                            m.text,
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            modifier = Modifier.padding(end = bubbleTimeReserve(m.mine)),
+                        )
+                    }
                 }
             }
             Row(
@@ -681,20 +723,24 @@ private fun PendingAttachmentCard(m: Message, model: AppModel) {
             )
         }
         Spacer(Modifier.width(8.dp))
-        when {
-            // Заказано, но чанки ещё не пошли (пир офлайн / едет манифест) — крутилка.
-            progress == AppModel.DOWNLOAD_INIT ->
-                CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-            // Пошли байты — тот же кружок, но заполняется: видно, что и насколько идёт.
-            progress != null ->
-                CircularProgressIndicator(
-                    progress = progress,
-                    color = HoloAccent,
-                    modifier = Modifier.size(22.dp),
-                    strokeWidth = 2.dp,
-                )
-            else -> IconButton(onClick = { model.currentChat?.let { model.downloadMedia(it, m.blobId) } }) {
-                Icon(Icons.Filled.Download, stringResource(R.string.chat_download), tint = HoloAccent)
+        // Кнопка → крутилка → кружок прогресса: три состояния одного действия,
+        // поэтому подменяются затуханием, а не морганием.
+        Crossfade(progress, animationSpec = tween(Tokens.Anim.fast), label = "dl") { progress ->
+            when {
+                // Заказано, но чанки ещё не пошли (пир офлайн / едет манифест) — крутилка.
+                progress == AppModel.DOWNLOAD_INIT ->
+                    CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                // Пошли байты — тот же кружок, но заполняется: видно, что и насколько идёт.
+                progress != null ->
+                    CircularProgressIndicator(
+                        progress = progress,
+                        color = HoloAccent,
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                    )
+                else -> IconButton(onClick = { model.currentChat?.let { model.downloadMedia(it, m.blobId) } }) {
+                    Icon(Icons.Filled.Download, stringResource(R.string.chat_download), tint = HoloAccent)
+                }
             }
         }
     }

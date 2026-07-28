@@ -2,6 +2,8 @@
 
 package dev.p2p.messenger.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -84,10 +86,15 @@ internal fun FolderRail(
 
 @Composable
 internal fun FolderTile(icon: ImageVector, label: String, selected: Boolean, badge: Int, onClick: () -> Unit) {
+    // Подсветка активной папки переезжает плавно — иначе рейл «прыгает» цветом.
+    val bg by animateColorAsState(
+        if (selected) FolderSelected else HoloSurface,
+        animationSpec = tween(Tokens.Anim.fast),
+        label = "folderBg",
+    )
     Box(Modifier.size(48.dp).clickable { onClick() }, contentAlignment = Alignment.BottomEnd) {
         Box(
-            Modifier.size(48.dp).clip(RoundedCornerShape(15.dp))
-                .background(if (selected) FolderSelected else HoloSurface),
+            Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(bg),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
