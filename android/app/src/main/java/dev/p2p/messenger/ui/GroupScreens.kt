@@ -47,12 +47,16 @@ private fun sendGroupUriAttachment(
     uri: android.net.Uri,
     scope: kotlinx.coroutines.CoroutineScope,
     fallbackName: String,
+    caption: String = "",
 ) {
     scope.launch(Dispatchers.IO) {
+        // Групповое вложение пока идёт ЧЕРЕЗ ПАМЯТЬ: движок пушит байты каждому
+        // участнику отдельно, и потоковая отдача там ещё не заведена. Для крупного
+        // файла в группе это ограничение — оно записано в плане.
         val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
         val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
         val name = displayName(ctx, uri) ?: fallbackName
-        model.sendGroupMedia(gid, bytes, mime, name)
+        model.sendGroupMedia(gid, bytes, mime, name, caption)
     }
 }
 
@@ -159,11 +163,19 @@ internal fun GroupChatScreen(model: AppModel) {
                 onPickFile = { filePicker.launch(arrayOf("*/*")) },
                 onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
                 onCamera = openCamera,
-                onSendAttachments = { list, _ ->
-                    // Подписи в группах пока нет: групповое медиа идёт своим путём
-                    // (AppMsg в MLS), и поле подписи туда ещё не заведено.
-                    list.forEach { g ->
-                        sendGroupUriAttachment(ctx, model, gid, g.uri, scope, if (g.isVideo) "video.mp4" else "photo.jpg")
+                onSendAttachments = { list, caption ->
+                    // Подпись — только на первом вложении, как в DM: серия из пяти
+                    // фото с одной подписью на каждом читалась бы как спам.
+                    list.forEachIndexed { i, g ->
+                        sendGroupUriAttachment(
+                            ctx,
+                            model,
+                            gid,
+                            g.uri,
+                            scope,
+                            if (g.isVideo) "video.mp4" else "photo.jpg",
+                            caption = if (i == 0) caption else "",
+                        )
                     }
                 },
                 recording = recording,
@@ -363,6 +375,16 @@ internal fun GroupBubble(
                 "file" -> FileAttachment(m.name, blobBytes)
                 // Текст резервирует справа место под время → время оверлеем без наложения.
                 else -> Text(m.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = bubbleTimeReserve(false)))
+            }
+            // Подпись к вложению — в том же пузыре под содержимым: она пришла ОДНИМ
+            // сообщением с файлом, значит и показывается как его часть.
+            if (m.kind != "text" && m.text.isNotEmpty()) {
+                Text(
+                    m.text,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(top = 6.dp, end = bubbleTimeReserve(false)),
+                )
             }
         }
         if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }

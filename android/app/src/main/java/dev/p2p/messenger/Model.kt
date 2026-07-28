@@ -1957,8 +1957,14 @@ class AppModel private constructor() {
     /** Отправить вложение в группу (M2): движок чистит картинку, шлёт блоб всем
      *  участникам + MLS-ссылку. Своё сообщение подтянется перечитыванием истории
      *  (event group_msg mine=true), т.к. blob_id считается от очищенных байт в движке. */
-    fun sendGroupMedia(gid: String, content: ByteArray, mime: String, name: String) = ops.execute {
-        Native.groupSendMedia(sessionPtr, gid, content, mime, name)
+    fun sendGroupMedia(
+        gid: String,
+        content: ByteArray,
+        mime: String,
+        name: String,
+        caption: String = "",
+    ) = ops.execute {
+        Native.groupSendMedia(sessionPtr, gid, content, mime, name, caption)
     }
 
     // ── Диагностика: тест пропускной способности ─────────────────────────────

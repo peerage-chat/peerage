@@ -75,7 +75,7 @@ pub(crate) enum Job {
     BlobOfferFile { peer: [u8; 32], path: PathBuf, manifest: p2p_blob::Manifest },
     /// Отправить медиа-вложение в группу (M2): scrub → сохранить → MLS-ссылка всем +
     /// push блоба каждому участнику. В одном Job (нужны и группы, и BlobManager).
-    GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String },
+    GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String, caption: String },
 }
 
 /// До этого размера вложение скачивается автоматически (фото, голосовое — их ждут
@@ -836,8 +836,15 @@ impl Engine {
 
     /// Отправить медиа-вложение в группу (M2). Fire-and-forget: движок чистит
     /// картинку, сохраняет блоб, шлёт MLS-ссылку всем и пушит байты каждому.
-    pub fn group_send_media(&self, gid: Vec<u8>, content: Vec<u8>, mime: String, name: String) {
-        let _ = self.jobs.send(Job::GroupMedia { gid, content, mime, name });
+    pub fn group_send_media(
+        &self,
+        gid: Vec<u8>,
+        content: Vec<u8>,
+        mime: String,
+        name: String,
+        caption: String,
+    ) {
+        let _ = self.jobs.send(Job::GroupMedia { gid, content, mime, name, caption });
     }
 
     /// Отозвать участника из группы (ADR-004, только админ). Fire-and-forget.
@@ -1409,7 +1416,7 @@ fn event_pump(
                 save_blob(&engine, p2p_blob::blob_id(&content), &content);
                 blobs.offer(peer, &content, &mime);
             }
-            Ok(Job::GroupMedia { gid, content, mime, name }) => {
+            Ok(Job::GroupMedia { gid, content, mime, name, caption }) => {
                 // Картинки чистим (scrub), считаем контент-адрес, сохраняем локально.
                 let bytes = if mime.starts_with("image/") {
                     p2p_blob::scrub::scrub(&mime, &content)
@@ -1421,7 +1428,7 @@ fn event_pump(
                 let kind = Engine::media_kind(&mime);
                 save_blob(&engine, hash, &bytes);
                 // MLS-сообщение со ссылкой всем + push байтов каждому участнику.
-                if groups.send_media(&gid, kind, &id_hex, &mime, &name) {
+                if groups.send_media(&gid, kind, &id_hex, &mime, &name, &caption) {
                     for m in groups.members(&gid) {
                         if m != engine.me_pub {
                             blobs.offer(m, &bytes, &mime);

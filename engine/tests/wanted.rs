@@ -75,7 +75,13 @@ fn explicit_download_completes_and_clears_intent() {
         assert!(Instant::now() < deadline, "заказанное вложение не доехало за 30с");
         std::thread::sleep(Duration::from_millis(30));
     }
-    assert!(wanted(&b).is_empty(), "заказ снят по факту получения");
+    // Ждём снятия заказа, а не проверяем мгновенный снимок: блоб становится читаемым
+    // на шаг раньше, чем движок вычёркивает намерение, и голая проверка здесь гоночна.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !wanted(&b).is_empty() {
+        assert!(Instant::now() < deadline, "заказ не снят после получения");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 
     a.shutdown();
     b.shutdown();

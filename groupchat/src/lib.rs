@@ -27,7 +27,16 @@ enum AppMsg {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "media")]
-    Media { kind: String, hash: String, mime: String, name: String },
+    Media {
+        kind: String,
+        hash: String,
+        mime: String,
+        name: String,
+        /// Подпись к вложению. Внутри того же сообщения, а не отдельным текстом:
+        /// иначе «фото с подписью» — два MLS-сообщения подряд, и наблюдатель узнаёт
+        /// их по характерной паре (то же соображение, что и в DM, см. protocol-spec).
+        caption: String,
+    },
     /// Служебное: имя группы. Админ шлёт его новому участнику после add, чтобы тот
     /// увидел настоящее название, а не дефолт (в UI не показывается как сообщение).
     #[serde(rename = "name")]
@@ -38,8 +47,15 @@ enum AppMsg {
 pub enum Inbound {
     /// Прикладное сообщение: отправитель + текст.
     Message { sender: PeerKey, text: String },
-    /// Медиа-сообщение (M2): отправитель + ссылка на блоб по хэшу.
-    Media { sender: PeerKey, kind: String, hash: String, mime: String, name: String },
+    /// Медиа-сообщение (M2): отправитель + ссылка на блоб по хэшу + подпись.
+    Media {
+        sender: PeerKey,
+        kind: String,
+        hash: String,
+        mime: String,
+        name: String,
+        caption: String,
+    },
     /// Имя группы (служебное): верхний слой обновляет название, без показа в чате.
     Name { name: String },
     /// Изменён состав группы (применён Commit), его применил actor.
@@ -51,6 +67,19 @@ pub enum Inbound {
     NeedsResync,
     /// Нечего показывать (вступление по Welcome, ротация ключа, служебное).
     None,
+}
+
+/// Обрезать подпись до `MAX_CAPTION` БАЙТ по границе символа — как в DM. Групповое
+/// тело шифруется MLS и едет тем же `CHAN_CHAT`, поэтому потолок общий.
+fn truncate_caption(s: &str) -> String {
+    if s.len() <= p2p_core::protocol::MAX_CAPTION {
+        return s.to_string();
+    }
+    let mut end = p2p_core::protocol::MAX_CAPTION;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
 }
 
 fn to_key(id: Vec<u8>) -> PeerKey {
@@ -148,10 +177,19 @@ impl GroupChat {
 
     /// Отправить медиа-сообщение (M2): ссылка на блоб по хэшу. Байты блоба идут
     /// отдельно (движок пушит их каждому участнику). `hash` — hex.
-    pub fn send_media(&mut self, kind: &str, hash: &str, mime: &str, name: &str) -> Result<(), GroupChatError> {
+    pub fn send_media(
+        &mut self,
+        kind: &str,
+        hash: &str,
+        mime: &str,
+        name: &str,
+        caption: &str,
+    ) -> Result<(), GroupChatError> {
         self.send_app(&AppMsg::Media {
             kind: kind.to_string(), hash: hash.to_string(),
             mime: mime.to_string(), name: name.to_string(),
+            // Режем здесь, а не в UI: за размер шифруемого тела отвечает этот слой.
+            caption: truncate_caption(caption),
         })
     }
 
@@ -185,8 +223,8 @@ impl GroupChat {
                 // M2: тело — JSON-envelope (текст/медиа); старое сырое-UTF-8 → текст.
                 Ok(match serde_json::from_slice::<AppMsg>(&body) {
                     Ok(AppMsg::Text { text }) => Inbound::Message { sender, text },
-                    Ok(AppMsg::Media { kind, hash, mime, name }) => {
-                        Inbound::Media { sender, kind, hash, mime, name }
+                    Ok(AppMsg::Media { kind, hash, mime, name, caption }) => {
+                        Inbound::Media { sender, kind, hash, mime, name, caption: truncate_caption(&caption) }
                     }
                     Ok(AppMsg::Name { name }) => Inbound::Name { name },
                     Err(_) => Inbound::Message { sender, text: String::from_utf8_lossy(&body).into_owned() },

@@ -398,14 +398,24 @@ impl GroupManager {
     /// Отправить медиа-вложение в группу (M2): MLS-сообщение со ссылкой на блоб.
     /// Байты блоба пушит вызывающий (engine) каждому участнику отдельно. Двигает
     /// sending-ratchet → save_group (как send_text). Возвращает участников для push.
-    pub fn send_media(&mut self, gid: &[u8], kind: &str, blob_id: &str, mime: &str, name: &str) -> bool {
+    pub fn send_media(
+        &mut self,
+        gid: &[u8],
+        kind: &str,
+        blob_id: &str,
+        mime: &str,
+        name: &str,
+        caption: &str,
+    ) -> bool {
         let Some(e) = self.groups.get_mut(gid) else { return false };
-        if e.chat.send_media(kind, blob_id, mime, name).is_err() {
+        if e.chat.send_media(kind, blob_id, mime, name, caption).is_err() {
             return false;
         }
         let me = hex::encode(self.identity.public_key_bytes());
         e.messages.push(GMsg {
             mine: true, time: now(), sender: me,
+            // Подпись живёт в `text`: у медиа это поле свободно, как и в DM.
+            text: caption.to_string(),
             kind: kind.into(), blob_id: blob_id.into(), mime: mime.into(), name: name.into(),
             ..Default::default()
         });
@@ -540,11 +550,12 @@ impl GroupManager {
                         sender: Some(sender_hex), ..Default::default()
                     }
                 }
-                Some(Ok(Inbound::Media { sender, kind, hash, mime, name })) => {
+                Some(Ok(Inbound::Media { sender, kind, hash, mime, name, caption })) => {
                     let sender_hex = hex::encode(sender);
                     if let Some(e) = self.groups.get_mut(&gid) {
                         e.messages.push(GMsg {
                             mine: false, time: now(), sender: sender_hex.clone(),
+                            text: caption,
                             kind: kind.clone(), blob_id: hash.clone(), mime: mime.clone(), name: name.clone(),
                             ..Default::default()
                         });

@@ -123,7 +123,7 @@ fn invite_join_flow_over_loopback() {
 #[test]
 fn group_media_message_propagates() {
     let mut ctx = setup_and_join(0);
-    assert!(ctx.gm_a.send_media(&ctx.gid, "image", "abcd1234", "image/jpeg", "photo.jpg"));
+    assert!(ctx.gm_a.send_media(&ctx.gid, "image", "abcd1234", "image/jpeg", "photo.jpg", "подпись в группе"));
 
     let field = |gm: &GroupManager, gid: &[u8], key: &str| -> Option<String> {
         let h: serde_json::Value = serde_json::from_str(&gm.history_json(gid)).ok()?;
@@ -137,6 +137,8 @@ fn group_media_message_propagates() {
     assert!(got, "B получил групповое медиа-сообщение");
     assert_eq!(field(&ctx.gm_b, &ctx.gid, "mime").as_deref(), Some("image/jpeg"));
     assert_eq!(field(&ctx.gm_b, &ctx.gid, "name").as_deref(), Some("photo.jpg"));
+    // Подпись едет ВНУТРИ того же MLS-сообщения, а не отдельным текстом следом.
+    assert_eq!(field(&ctx.gm_b, &ctx.gid, "text").as_deref(), Some("подпись в группе"));
 
     // У A своё сообщение тоже записано как медиа (mine).
     let ha: serde_json::Value = serde_json::from_str(&ctx.gm_a.history_json(&ctx.gid)).unwrap();

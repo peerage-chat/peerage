@@ -193,7 +193,14 @@ object Native {
     external fun groupSendText(sessionPtr: Long, gid: String, text: String)
 
     /** Отправить медиа-вложение в группу (M2): scrub + блоб всем + MLS-ссылка. */
-    external fun groupSendMedia(sessionPtr: Long, gid: String, content: ByteArray, mime: String, name: String)
+    external fun groupSendMedia(
+        sessionPtr: Long,
+        gid: String,
+        content: ByteArray,
+        mime: String,
+        name: String,
+        caption: String,
+    )
 
     /** Отозвать участника группы по hex-ключу (ADR-004, только админ). */
     external fun groupRemoveMember(sessionPtr: Long, gid: String, peerHex: String)
