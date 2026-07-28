@@ -364,4 +364,10 @@
     <string name="emoji_cat_travel">Travel and places</string>
     <string name="emoji_cat_objects">Objects</string>
     <string name="emoji_cat_symbols">Symbols</string>
+    <string name="attach_audio">Audio</string>
+    <string name="attach_camera">Camera</string>
+    <string name="attach_selected">Selected %1$d · %2$s</string>
+    <string name="attach_need_gallery">To show your recent photos here, the app needs access to the gallery. Files can still be sent through the picker above.</string>
+    <string name="attach_allow">Allow</string>
+    <string name="attach_gallery_denied">Gallery access denied</string>
 </resources>

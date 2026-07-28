@@ -4,7 +4,6 @@ package dev.p2p.messenger.ui
 
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -126,13 +125,24 @@ internal fun ChatScreen(model: AppModel) {
     // Держим прокрутку у последнего сообщения при появлении новых.
     LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
 
-    // M2: картинка → чтение байт в IO → sendMedia (scrub+блоб+сообщение в движке).
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { sendUriAttachment(ctx, model, key, it, scope, "image.jpg") }
-    }
-    // M2: произвольный файл (любой mime) → sendMedia (kind file/voice по mime в движке).
+    // Произвольный файл (любой mime) → sendMedia (kind file/voice по mime в движке).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { sendUriAttachment(ctx, model, key, it, scope, "file") }
+    }
+    val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { sendUriAttachment(ctx, model, key, it, scope, "audio") }
+    }
+    // Камера: снимок уходит тем же путём, что и выбранный из галереи.
+    val camUri = remember { mutableStateOf<android.net.Uri?>(null) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if (ok) camUri.value?.let { sendUriAttachment(ctx, model, key, it, scope, "photo.jpg") }
+    }
+    val camPerm = rememberPermissionRunner()
+    val openCamera = {
+        camPerm(arrayOf(Manifest.permission.CAMERA), R.string.perm_denied_camera) {
+            camUri.value = newCameraUri(ctx)
+            camUri.value?.let { camera.launch(it) }
+        }
     }
 
     // Голосовые (M2): held-to-record. RECORD_AUDIO спрашиваем при первой попытке.
@@ -177,8 +187,14 @@ internal fun ChatScreen(model: AppModel) {
         MessageInput(
             value = input,
             onChange = { input = it },
-            onPickImage = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
             onPickFile = { filePicker.launch(arrayOf("*/*")) },
+            onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
+            onCamera = openCamera,
+            onSendAttachments = { list ->
+                list.forEach { g ->
+                    sendUriAttachment(ctx, model, key, g.uri, scope, if (g.isVideo) "video.mp4" else "photo.jpg")
+                }
+            },
             recording = recording,
             onVoiceStart = startVoice,
             onVoiceStop = stopVoice,
@@ -192,6 +208,13 @@ internal fun ChatScreen(model: AppModel) {
         )
     }
 }
+
+/** Файл для снимка с камеры в кэше приложения + content:// через FileProvider. */
+internal fun newCameraUri(ctx: android.content.Context): android.net.Uri? = runCatching {
+    val dir = java.io.File(ctx.cacheDir, "camera").apply { mkdirs() }
+    val f = java.io.File(dir, "shot-${System.currentTimeMillis()}.jpg")
+    androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+}.getOrNull()
 
 /** Прочитать содержимое uri (байты + mime + имя) в IO и отправить как вложение (M2). */
 private fun sendUriAttachment(
@@ -252,8 +275,10 @@ internal fun DateChip(label: String) {
 internal fun MessageInput(
     value: String,
     onChange: (String) -> Unit,
-    onPickImage: () -> Unit = {},
     onPickFile: () -> Unit = {},
+    onPickAudio: () -> Unit = {},
+    onCamera: () -> Unit = {},
+    onSendAttachments: (List<GalleryItem>) -> Unit = {},
     recording: Boolean = false,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
@@ -272,8 +297,25 @@ internal fun MessageInput(
         onChange(v.text)
     }
     var emojiOpen by remember { mutableStateOf(false) }
+    var attachOpen by remember { mutableStateOf(false) }
+    var picked by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
 
     Column(Modifier.fillMaxWidth().background(HoloBg)) {
+        if (attachOpen) {
+            AttachSheet(
+                selected = picked,
+                onToggle = { g ->
+                    picked = if (picked.any { it.uri == g.uri }) {
+                        picked.filterNot { it.uri == g.uri }
+                    } else {
+                        picked + g
+                    }
+                },
+                onCamera = onCamera,
+                onPickFile = onPickFile,
+                onPickAudio = onPickAudio,
+            )
+        }
         if (emojiOpen) {
             EmojiPanel(
                 recent = model?.recentEmoji ?: emptyList(),
@@ -308,28 +350,15 @@ internal fun MessageInput(
                 Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(HoloSurface),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Скрепка → меню «Фото / Файл» (M2).
-                Box {
-                    var attachOpen by remember { mutableStateOf(false) }
-                    PillIcon(Icons.Filled.AttachFile, stringResource(R.string.cd_attach)) { attachOpen = true }
-                    DropdownMenu(expanded = attachOpen, onDismissRequest = { attachOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.attach_photo)) },
-                            leadingIcon = { Icon(Icons.Filled.Image, null) },
-                            onClick = {
-                                attachOpen = false
-                                onPickImage()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.attach_file)) },
-                            leadingIcon = { Icon(Icons.Filled.AttachFile, null) },
-                            onClick = {
-                                attachOpen = false
-                                onPickFile()
-                            },
-                        )
-                    }
+                // Скрепка выдвигает лист вложений из этой же строки; эмодзи ведёт
+                // себя так же. Активная подсвечена акцентом, повторный тап закрывает.
+                PillIcon(
+                    Icons.Filled.AttachFile,
+                    stringResource(R.string.cd_attach),
+                    tint = if (attachOpen) HoloAccent else HoloSecondary,
+                ) {
+                    attachOpen = !attachOpen
+                    if (attachOpen) emojiOpen = false
                 }
                 BasicTextField(
                     value = field,
@@ -357,13 +386,24 @@ internal fun MessageInput(
                     Icons.Filled.EmojiEmotions,
                     stringResource(R.string.cd_emoji),
                     tint = if (emojiOpen) HoloAccent else HoloSecondary,
-                ) { emojiOpen = !emojiOpen }
+                ) {
+                    emojiOpen = !emojiOpen
+                    if (emojiOpen) attachOpen = false
+                }
             }
             Spacer(Modifier.width(8.dp))
             // Отправка (есть текст) / голосовое удержанием (поле пустое).
             val hasText = value.isNotBlank()
-            val btnMod = if (hasText) {
-                Modifier.clickable { onSend() }
+            val hasPicked = picked.isNotEmpty()
+            val btnMod = if (hasText || hasPicked) {
+                Modifier.clickable {
+                    if (hasPicked) {
+                        onSendAttachments(picked)
+                        picked = emptyList()
+                        attachOpen = false
+                    }
+                    if (hasText) onSend()
+                }
             } else {
                 // Held-to-record: запись на нажатии, отправка на отпускании.
                 Modifier.pointerInput(Unit) {
@@ -379,12 +419,23 @@ internal fun MessageInput(
                     .background(if (recording) HoloError else HoloAccent).size(44.dp).then(btnMod),
                 contentAlignment = Alignment.Center,
             ) {
+                val send = hasText || hasPicked
                 Icon(
-                    if (hasText) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
-                    stringResource(if (hasText) R.string.common_send else R.string.chat_voice),
+                    if (send) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
+                    stringResource(if (send) R.string.common_send else R.string.chat_voice),
                     tint = if (recording) Color.White else HoloAccentDark,
                     modifier = Modifier.size(20.dp),
                 )
+                // Счётчик того, сколько файлов уйдёт этим нажатием.
+                if (hasPicked) {
+                    Text(
+                        "${picked.size}",
+                        color = HoloAccentDark,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 5.dp),
+                    )
+                }
             }
         }
     }
@@ -655,7 +706,7 @@ private fun kindIcon(kind: String) = when (kind) {
     else -> Icons.Filled.AttachFile
 }
 
-private fun fmtSizeLong(bytes: Long): String = when {
+internal fun fmtSizeLong(bytes: Long): String = when {
     bytes >= 1_048_576L * 1024 -> "%.1f GB".format(bytes / (1_048_576.0 * 1024))
     bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
     bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
@@ -668,7 +719,7 @@ private fun fmtSize(bytes: Int): String = when {
     else -> "$bytes B"
 }
 
-private fun fmtDuration(ms: Int): String {
+internal fun fmtDuration(ms: Int): String {
     val s = ms / 1000
     return "%d:%02d".format(s / 60, s % 60)
 }

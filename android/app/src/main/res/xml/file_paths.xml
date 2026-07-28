@@ -2,4 +2,6 @@
 <!-- FileProvider (M2): расшариваем только подпапку cache/shared для «открыть вложение». -->
 <paths>
     <cache-path name="shared" path="shared/" />
+    <!-- Снимок с камеры кладём сюда: системная камера пишет в него по content://. -->
+    <cache-path name="camera" path="camera/" />
 </paths>

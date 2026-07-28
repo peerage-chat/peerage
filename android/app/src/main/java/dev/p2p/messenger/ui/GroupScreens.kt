@@ -4,7 +4,6 @@ package dev.p2p.messenger.ui
 
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -86,12 +85,23 @@ internal fun GroupChatScreen(model: AppModel) {
     val scope = rememberCoroutineScope()
     LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
 
-    // M2: вложения в группе — картинка/файл → sendGroupMedia (движок пушит блоб всем).
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { sendGroupUriAttachment(ctx, model, gid, it, scope, "image.jpg") }
-    }
+    // Вложения в группе — тот же лист, что в DM (движок пушит блоб всем участникам).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { sendGroupUriAttachment(ctx, model, gid, it, scope, "file") }
+    }
+    val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { sendGroupUriAttachment(ctx, model, gid, it, scope, "audio") }
+    }
+    val camUri = remember { mutableStateOf<android.net.Uri?>(null) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if (ok) camUri.value?.let { sendGroupUriAttachment(ctx, model, gid, it, scope, "photo.jpg") }
+    }
+    val camPerm = rememberPermissionRunner()
+    val openCamera = {
+        camPerm(arrayOf(Manifest.permission.CAMERA), R.string.perm_denied_camera) {
+            camUri.value = newCameraUri(ctx)
+            camUri.value?.let { camera.launch(it) }
+        }
     }
     // Голосовые в группе: held-to-record.
     val recorder = remember { VoiceRecorder(ctx) }
@@ -146,8 +156,14 @@ internal fun GroupChatScreen(model: AppModel) {
             MessageInput(
                 value = input,
                 onChange = { input = it },
-                onPickImage = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 onPickFile = { filePicker.launch(arrayOf("*/*")) },
+                onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
+                onCamera = openCamera,
+                onSendAttachments = { list ->
+                    list.forEach { g ->
+                        sendGroupUriAttachment(ctx, model, gid, g.uri, scope, if (g.isVideo) "video.mp4" else "photo.jpg")
+                    }
+                },
                 recording = recording,
                 onVoiceStart = startVoice,
                 onVoiceStop = stopVoice,
