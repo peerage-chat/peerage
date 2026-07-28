@@ -190,6 +190,10 @@ pub struct Engine {
     blob_dir: PathBuf,
     /// Персистентная офлайн-очередь исходящих (M3): досылка после офлайна/рестарта.
     outbox: Mutex<p2p_core::outbox::OutboxManager>,
+    /// Журнал звонков (локальный) + id текущего активного звонка и время старта.
+    calls: Mutex<p2p_core::store::CallStore>,
+    /// (id записи, время старта, входящий ли) — активных звонков не бывает больше одного.
+    active_call: Mutex<Option<(i64, i64, bool)>>,
     /// Запрошенные пользователем вложения — докачиваем сами, когда пир в сети.
     wanted: Mutex<p2p_core::store::WantedStore>,
     /// Единый бюджет (M3): тир каждого известного пира. Читают ingress-лимитер
@@ -911,6 +915,10 @@ impl Engine {
     /// Возвращает room_id.
     pub fn room_invite_dm(&self, peer: [u8; 32], audio: bool, video: bool) -> Vec<u8> {
         let room_id = p2p_core::dm_room_id(&self.me_pub, &peer);
+        // Пишем сразу как «не дозвонился»: исход поднимется до answered, когда
+        // собеседник появится в комнате. Иначе оборванная попытка не попала бы в
+        // журнал вовсе — а именно её чаще всего и ищут.
+        self.begin_call(&peer, &room_id, false, "unanswered");
         let _ = self.messenger.send_room_invite(&peer, &room_id, audio, video);
         let flags = av_flags(audio, video);
         {
@@ -925,11 +933,23 @@ impl Engine {
     pub fn room_decline_dm(&self, peer: [u8; 32]) {
         let room_id = p2p_core::dm_room_id(&self.me_pub, &peer);
         let _ = self.messenger.send_room_decline(&peer, &room_id);
+        // «Отклонён» — исход только ВХОДЯЩЕГО: отклонить может лишь принимающая
+        // сторона. Свой же исходящий, который я сам и завершил, отклонённым не был —
+        // он остаётся «не дозвонился».
+        if let Some((id, _, true)) = *self.active_call.lock_safe() {
+            self.calls.lock_safe().set_outcome(id, "declined");
+            *self.active_call.lock_safe() = None;
+        }
     }
 
     /// Принять DM-звонок: войти в комнату с регистрацией dm_peer. Возвращает room_id.
     pub fn room_join_dm(&self, peer: [u8; 32], audio: bool, video: bool) -> Vec<u8> {
         let room_id = p2p_core::dm_room_id(&self.me_pub, &peer);
+        match *self.active_call.lock_safe() {
+            // Входящий, который мы приняли: запись уже заведена на RoomInvite.
+            Some((id, _, _)) => self.calls.lock_safe().set_outcome(id, "answered"),
+            None => self.begin_call(&peer, &room_id, true, "answered"),
+        }
         let flags = av_flags(audio, video);
         {
             let mut rs = self.rooms.lock_safe();
@@ -946,12 +966,87 @@ impl Engine {
     }
 
     pub fn room_leave(&self, gid: Vec<u8>) {
+        self.end_call();
         {
             let mut rs = self.rooms.lock_safe();
             rs.joined.remove(&gid);
             rs.remote.remove(&gid);
         }
         let _ = self.jobs.send(Job::Leave(gid));
+    }
+
+    /// Начать запись о звонке (одна активная за раз — звонков параллельно не бывает).
+    fn begin_call(&self, peer: &[u8; 32], gid: &[u8], incoming: bool, outcome: &str) {
+        let now = now();
+        let id = self.calls.lock_safe().start(peer, gid, incoming, outcome, now);
+        if id >= 0 {
+            *self.active_call.lock_safe() = Some((id, now, incoming));
+        }
+    }
+
+    /// Закрыть активную запись: проставить длительность.
+    fn end_call(&self) {
+        let Some((id, started, _)) = self.active_call.lock_safe().take() else { return };
+        self.calls.lock_safe().finish(id, now() - started);
+    }
+
+    /// Заметка себе («Сохранённое»). Хранится как обычное сообщение в чате с самим
+    /// собой: никуда не отправляется, статусов доставки у неё нет — отправлять некому.
+    /// Отдельное хранилище заводить незачем, история уже умеет всё нужное.
+    pub fn save_note(&self, text: &str) -> Option<i64> {
+        let t = now();
+        let id = t as u64;
+        let me = self.me_pub;
+        self.messages
+            .lock_safe()
+            .append(&me, StoredMessage {
+                id,
+                text: text.to_string(),
+                mine: true,
+                time: t,
+                status: String::new(),
+                ..Default::default()
+            })
+            .ok()?;
+        Some(t)
+    }
+
+    /// Заметки себе, старые первыми (как в чате).
+    pub fn notes_json(&self) -> String {
+        let me = self.me_pub;
+        self.history_json(&me)
+    }
+
+    /// Удалить заметку по её id.
+    pub fn delete_note(&self, id: u64) {
+        let me = self.me_pub;
+        let _ = self.messages.lock_safe().delete_one(&me, id, true);
+    }
+
+    /// Журнал звонков для UI: `[{peer, gid, incoming, outcome, started, duration}]`.
+    pub fn calls_json(&self, limit: usize) -> String {
+        let rows: Vec<serde_json::Value> = self
+            .calls
+            .lock_safe()
+            .list(limit)
+            .into_iter()
+            .map(|c| {
+                serde_json::json!({
+                    "peer": hex::encode(c.peer),
+                    "gid": hex::encode(&c.gid),
+                    "incoming": c.incoming,
+                    "outcome": c.outcome,
+                    "started": c.started,
+                    "duration": c.duration,
+                })
+            })
+            .collect();
+        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Очистить журнал (явное действие пользователя).
+    pub fn clear_calls(&self) {
+        self.calls.lock_safe().clear();
     }
 
     /// Живые участники любой комнаты по маячкам: JSON [{peer,audio,video}].
@@ -1445,10 +1540,15 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             let _ = engine.messages.lock_safe().set_status(&peer, id, "queued");
             push_event(engine, serde_json::json!({"type": "undelivered", "peer": hex::encode(peer), "id": id}));
         }
-        Event::RoomInvite { peer, room_id, audio, video } => push_event(engine, serde_json::json!({
-            "type": "room_invite", "peer": hex::encode(peer),
-            "room_id": hex::encode(&room_id), "audio": audio, "video": video,
-        })),
+        Event::RoomInvite { peer, room_id, audio, video } => {
+            // Заводим сразу как пропущенный: если пользователь ответит, исход
+            // поднимется в room_join_dm, если откажется — в room_decline_dm.
+            engine.begin_call(&peer, &room_id, true, "missed");
+            push_event(engine, serde_json::json!({
+                "type": "room_invite", "peer": hex::encode(peer),
+                "room_id": hex::encode(&room_id), "audio": audio, "video": video,
+            }));
+        }
         Event::RoomDecline { peer, room_id } => push_event(engine, serde_json::json!({
             "type": "room_decline", "peer": hex::encode(peer), "room_id": hex::encode(&room_id),
         })),
@@ -1583,6 +1683,14 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     }
                 } else {
                     rs.remote.entry(gid.clone()).or_default().insert(peer, (Instant::now(), flags));
+                }
+            }
+            // Собеседник появился в комнате — значит наш исходящий звонок
+            // состоялся. Без этого «позвонил и поговорил» осталось бы в журнале
+            // как «не дозвонился».
+            if !left {
+                if let Some((id, _, _)) = *engine.active_call.lock_safe() {
+                    engine.calls.lock_safe().set_outcome(id, "answered");
                 }
             }
             push_event(engine, serde_json::json!({
@@ -1828,6 +1936,8 @@ impl Engine {
             contacts: Mutex::new(contacts),
             gate: Mutex::new(gate),
             wanted: Mutex::new(p2p_core::store::WantedStore::new(db.clone())),
+            calls: Mutex::new(p2p_core::store::CallStore::new(db.clone())),
+            active_call: Mutex::new(None),
             messages: Mutex::new(messages),
             outbox: Mutex::new(outbox),
             me_pub,

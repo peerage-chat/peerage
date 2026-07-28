@@ -151,6 +151,9 @@ private fun CompactShell(model: AppModel) {
     var screen by remember { mutableStateOf(Screen.Contacts) }
     // id редактируемой папки (null — создаём новую).
     var editFolder by remember { mutableStateOf<String?>(null) }
+    // Ключ контакта, которого пришли СВЕРЯТЬ сканером (null — обычное добавление).
+    var verifyingPeer by remember { mutableStateOf<String?>(null) }
+    val ctx = LocalContext.current
     // ADR-004: нас отозвали из открытой группы (currentGroup → null) — уходим на список.
     LaunchedEffect(model.currentGroup) {
         if (model.currentGroup == null && (screen == Screen.GroupChat || screen == Screen.AddMember)) {
@@ -174,7 +177,12 @@ private fun CompactShell(model: AppModel) {
             model.dmCallPeer != null -> {}
             drawerState.isOpen -> scope.launch { drawerState.close() }
             else -> screen = when (screen) {
-                Screen.Scanner -> Screen.Add
+                Screen.Scanner -> if (verifyingPeer != null) {
+                    verifyingPeer = null
+                    Screen.Info
+                } else {
+                    Screen.Add
+                }
                 Screen.CreateGroup -> Screen.NewChat
                 Screen.AddMember -> Screen.GroupChat
                 else -> Screen.Contacts
@@ -230,7 +238,13 @@ private fun CompactShell(model: AppModel) {
                         Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = { screen = Screen.Contacts })
                         Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = { screen = Screen.GroupChat })
                         Screen.Settings -> TopBar(stringResource(R.string.menu_settings), onBack = { screen = Screen.Contacts })
-                        Screen.Scanner -> TopBar(stringResource(R.string.title_scan_qr), onBack = { screen = Screen.Add })
+                        Screen.Scanner -> TopBar(
+                            stringResource(if (verifyingPeer != null) R.string.title_verify_qr else R.string.title_scan_qr),
+                            onBack = {
+                                screen = if (verifyingPeer != null) Screen.Info else Screen.Add
+                                verifyingPeer = null
+                            },
+                        )
                         Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = { screen = Screen.Contacts }) {
                             BarIcon(Icons.Filled.PersonAdd, stringResource(R.string.cd_add_contact)) { screen = Screen.Add }
                         }
@@ -276,11 +290,38 @@ private fun CompactShell(model: AppModel) {
                                 onScan = { screen = Screen.Scanner },
                             ) { screen = Screen.Contacts }
                             Screen.Scanner -> QrScannerScreen { key ->
-                                scanResult = key
-                                screen = Screen.Add
+                                val target = verifyingPeer
+                                if (target == null) {
+                                    scanResult = key
+                                    screen = Screen.Add
+                                } else {
+                                    // Сверка: сканируем QR собеседника и сравниваем с
+                                    // ключом, который у нас записан. Совпало — метим
+                                    // проверенным; не совпало — ГРОМКО говорим об этом,
+                                    // это ровно тот случай, ради которого сверка и нужна.
+                                    verifyingPeer = null
+                                    val ok = key.equals(target, ignoreCase = true)
+                                    if (ok && model.contacts.firstOrNull { it.key == target }?.verified != true) {
+                                        model.toggleVerified(target)
+                                    }
+                                    android.widget.Toast.makeText(
+                                        ctx,
+                                        ctx.getString(if (ok) R.string.verify_match else R.string.verify_mismatch),
+                                        if (ok) android.widget.Toast.LENGTH_SHORT else android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                    screen = Screen.Info
+                                }
                             }
                             Screen.Me -> MeScreen(model)
-                            Screen.Info -> InfoScreen(model) { screen = Screen.Contacts }
+                            Screen.Info -> ContactProfileScreen(
+                                model,
+                                onMessage = { screen = Screen.Chat },
+                                onScanQr = {
+                                    verifyingPeer = model.currentChat
+                                    screen = Screen.Scanner
+                                },
+                                onDeleted = { screen = Screen.Contacts },
+                            )
                             Screen.Groups -> GroupsScreen(model) {
                                 model.openGroup(it)
                                 screen = Screen.GroupChat
@@ -302,13 +343,21 @@ private fun CompactShell(model: AppModel) {
                                 model.openChat(it)
                                 screen = Screen.Chat
                             }
-                            Screen.Calls -> CallsScreen()
+                            Screen.Calls -> CallsScreen(
+                                model,
+                                onCallPeer = { model.callDm(it) },
+                                onJoinRoom = {
+                                    model.openGroup(it)
+                                    model.joinRoom(it)
+                                    screen = Screen.GroupChat
+                                },
+                            )
                             Screen.Network -> NetworkScreen(
                                 model,
                                 onMyQr = { screen = Screen.Me },
                                 onOpenOutbox = { screen = Screen.Outbox },
                             )
-                            Screen.Saved -> SavedScreen()
+                            Screen.Saved -> SavedScreen(model)
                             Screen.Storage -> StorageScreen(model)
                             Screen.Folders -> FoldersScreen(model) { id ->
                                 editFolder = id

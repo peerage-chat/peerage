@@ -662,6 +662,16 @@ impl MessageStore {
             .is_ok()
     }
 
+    /// Удалить одно сообщение (нужно «Сохранённому»: заметку выкидывают точечно).
+    pub fn delete_one(&self, peer: &[u8; 32], id: u64, mine: bool) -> Result<(), StoreError> {
+        let conn = db::lock(&self.db);
+        conn.execute(
+            "DELETE FROM messages WHERE peer = ?1 AND id = ?2 AND mine = ?3",
+            rusqlite::params![peer.as_slice(), id as i64, mine as i64],
+        )?;
+        Ok(())
+    }
+
     /// Вложения всех чатов: (пир, blob_id, kind, размер). Нужна экрану «Хранилище»,
     /// чтобы показать, ЧТО занимает место и в каком чате, а не только общую цифру.
     pub fn attachments(&self) -> Vec<([u8; 32], String, String, i64)> {
@@ -734,6 +744,89 @@ fn decode_key(hex_str: &str) -> Result<[u8; 32], StoreError> {
 }
 
 // ---- Тесты -----------------------------------------------------------------
+
+/// Запись журнала звонков.
+#[derive(Debug, Clone)]
+pub struct CallRecord {
+    pub id: i64,
+    pub peer: [u8; 32],
+    /// id комнаты; пусто у личного звонка.
+    pub gid: Vec<u8>,
+    pub incoming: bool,
+    /// answered | missed | declined | unanswered
+    pub outcome: String,
+    pub started: i64,
+    pub duration: i64,
+}
+
+/// Журнал звонков. ЛОКАЛЬНЫЙ: никуда не отправляется и ни с кем не синхронизируется.
+pub struct CallStore {
+    db: Db,
+}
+
+impl CallStore {
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+
+    /// Завести запись о начавшемся звонке. Возвращает её id — по нему исход и
+    /// длительность дописываются позже, когда звонок закончится.
+    pub fn start(&self, peer: &[u8; 32], gid: &[u8], incoming: bool, outcome: &str, now: i64) -> i64 {
+        let conn = db::lock(&self.db);
+        let ok = conn.execute(
+            "INSERT INTO calls (peer, gid, incoming, outcome, started) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![peer.as_slice(), gid, incoming as i64, outcome, now],
+        );
+        if ok.is_err() {
+            return -1;
+        }
+        conn.last_insert_rowid()
+    }
+
+    /// Обновить исход (например «пропущенный» → «отвечен»).
+    pub fn set_outcome(&self, id: i64, outcome: &str) {
+        let conn = db::lock(&self.db);
+        let _ = conn.execute("UPDATE calls SET outcome = ?1 WHERE id = ?2", rusqlite::params![outcome, id]);
+    }
+
+    /// Закрыть звонок: длительность в секундах.
+    pub fn finish(&self, id: i64, duration: i64) {
+        let conn = db::lock(&self.db);
+        let _ = conn.execute(
+            "UPDATE calls SET duration = ?1 WHERE id = ?2",
+            rusqlite::params![duration.max(0), id],
+        );
+    }
+
+    /// Последние записи, свежие первыми.
+    pub fn list(&self, limit: usize) -> Vec<CallRecord> {
+        let conn = db::lock(&self.db);
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT id, peer, gid, incoming, outcome, started, duration              FROM calls ORDER BY started DESC LIMIT ?1",
+        ) else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map([limit as i64], |r| {
+            let peer: Vec<u8> = r.get(1)?;
+            Ok(CallRecord {
+                id: r.get(0)?,
+                peer: <[u8; 32]>::try_from(peer.as_slice()).unwrap_or([0u8; 32]),
+                gid: r.get(2)?,
+                incoming: r.get::<_, i64>(3)? != 0,
+                outcome: r.get(4)?,
+                started: r.get(5)?,
+                duration: r.get(6)?,
+            })
+        });
+        rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    /// Очистить журнал (явное действие пользователя).
+    pub fn clear(&self) {
+        let conn = db::lock(&self.db);
+        let _ = conn.execute("DELETE FROM calls", []);
+    }
+}
 
 #[cfg(test)]
 mod tests {

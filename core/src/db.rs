@@ -112,6 +112,24 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             blocked INTEGER NOT NULL
         );
 
+        -- Журнал звонков. Локальный: наружу не уходит и никем не синхронизируется —
+        -- это то, что отличает нас от обычного мессенджера, и повод сказать об этом
+        -- на пустом экране.
+        --   peer     — собеседник (для комнаты — любой, gid важнее)
+        --   gid      — id комнаты (пусто у личного звонка)
+        --   incoming — 1 входящий
+        --   outcome  — answered | missed | declined | unanswered
+        CREATE TABLE IF NOT EXISTS calls (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer     BLOB    NOT NULL,
+            gid      BLOB    NOT NULL DEFAULT x'',
+            incoming INTEGER NOT NULL,
+            outcome  TEXT    NOT NULL,
+            started  INTEGER NOT NULL,
+            duration INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS calls_started ON calls(started DESC);
+
         -- Запрошенные пользователем вложения («скачать»). Намерение персистентно:
         -- пир может быть офлайн — докачка продолжится сама, когда он появится, и
         -- переживёт перезапуск. Следить за пиром вручную пользователь не должен.

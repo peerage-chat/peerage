@@ -65,6 +65,21 @@ object Native {
     /** Скачать вложение по кнопке. Готовность придёт событием `blob_received`. */
     external fun downloadMedia(sessionPtr: Long, peerHex: String, blobIdHex: String): Boolean
 
+    /** Заметки себе — JSON-история чата с самим собой. */
+    external fun notes(sessionPtr: Long): String
+
+    /** Сохранить заметку себе. Возвращает id (или -1). */
+    external fun saveNote(sessionPtr: Long, text: String): Long
+
+    /** Удалить заметку по id. */
+    external fun deleteNote(sessionPtr: Long, id: Long)
+
+    /** Журнал звонков (JSON-массив, свежие первыми). */
+    external fun callLog(sessionPtr: Long, limit: Int): String
+
+    /** Очистить журнал звонков. */
+    external fun clearCallLog(sessionPtr: Long)
+
     /** Визуальный отпечаток ключа (hex, 12 байт). Пустой ключ — свой отпечаток. */
     external fun visualFingerprint(sessionPtr: Long, keyHex: String): String
 

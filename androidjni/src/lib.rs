@@ -454,6 +454,77 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_outboxStats<'local>(
     })
 }
 
+/// Заметки себе («Сохранённое») — JSON-история чата с самим собой.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_notes<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.notes_json())
+    })
+}
+
+/// Сохранить заметку себе. Возвращает id (или -1).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_saveNote<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    text: JString<'local>,
+) -> jlong {
+    jni_safe!(-1, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
+        let t = jstr(&mut env, &text);
+        e.save_note(&t).unwrap_or(-1)
+    })
+}
+
+/// Удалить заметку по id.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_deleteNote<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    id: jlong,
+) {
+    jni_safe!((), {
+        if let Some(e) = unsafe { engine(session_ptr) } {
+            e.delete_note(id.max(0) as u64);
+        }
+    })
+}
+
+/// Журнал звонков (JSON-массив, свежие первыми).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_callLog<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    limit: jint,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.calls_json(limit.max(0) as usize))
+    })
+}
+
+/// Очистить журнал звонков (явное действие пользователя).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_clearCallLog<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) {
+    jni_safe!((), {
+        if let Some(e) = unsafe { engine(session_ptr) } {
+            e.clear_calls();
+        }
+    })
+}
+
 /// Визуальный отпечаток ключа (hex, 12 байт) — сверка глазами по сетке знаков.
 /// Пустой `key_hex` — свой отпечаток.
 #[no_mangle]

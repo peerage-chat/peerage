@@ -191,6 +191,22 @@ data class Folder(
     val excludeRead: Boolean = false,
 )
 
+/**
+ * Запись журнала звонков. Живёт ТОЛЬКО на этом устройстве: наружу не уходит и ни с кем
+ * не синхронизируется.
+ *
+ * @param outcome answered | missed | declined | unanswered
+ * @param gid id комнаты; пусто у личного звонка
+ */
+data class CallEntry(
+    val peer: String,
+    val gid: String,
+    val incoming: Boolean,
+    val outcome: String,
+    val started: Long,
+    val duration: Long,
+)
+
 /** Строка очереди отправки: кому, сколько ждёт и с какого времени. */
 data class OutboxPeer(val peer: String, val count: Int, val bytes: Long, val oldest: Long)
 
@@ -462,6 +478,62 @@ class AppModel private constructor() {
         mediaBlobs.clear()
         contactAvatars.clear()
         refreshStorage()
+    }
+
+    /** Заметки себе («Сохранённое»), старые первыми. */
+    val notes = mutableStateListOf<Message>()
+
+    fun refreshNotes() = ops.execute {
+        val arr = runCatching { JSONArray(Native.notes(sessionPtr)) }.getOrNull() ?: return@execute
+        val list = (0 until arr.length()).mapNotNull { i ->
+            arr.optJSONObject(i)?.let {
+                Message(
+                    id = it.optLong("id"),
+                    text = it.optString("text"),
+                    mine = true,
+                    time = it.optLong("time"),
+                    status = "",
+                )
+            }
+        }
+        notes.clear()
+        notes.addAll(list)
+    }
+
+    fun saveNote(text: String) = ops.execute {
+        Native.saveNote(sessionPtr, text)
+        refreshNotes()
+    }
+
+    fun deleteNote(id: Long) = ops.execute {
+        Native.deleteNote(sessionPtr, id)
+        refreshNotes()
+    }
+
+    /** Журнал звонков (свежие первыми). */
+    val callLog = mutableStateListOf<CallEntry>()
+
+    fun refreshCallLog() = ops.execute {
+        val arr = runCatching { JSONArray(Native.callLog(sessionPtr, 200)) }.getOrNull() ?: return@execute
+        val list = (0 until arr.length()).mapNotNull { i ->
+            arr.optJSONObject(i)?.let {
+                CallEntry(
+                    peer = it.optString("peer"),
+                    gid = it.optString("gid"),
+                    incoming = it.optBoolean("incoming"),
+                    outcome = it.optString("outcome"),
+                    started = it.optLong("started"),
+                    duration = it.optLong("duration"),
+                )
+            }
+        }
+        callLog.clear()
+        callLog.addAll(list)
+    }
+
+    fun clearCallLog() = ops.execute {
+        Native.clearCallLog(sessionPtr)
+        refreshCallLog()
     }
 
     /** Визуальные отпечатки ключей (hex) — кэш, чтобы не дёргать JNI на рекомпозицию. */
