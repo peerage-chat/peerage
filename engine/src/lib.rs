@@ -76,6 +76,8 @@ pub(crate) enum Job {
     /// Отправить медиа-вложение в группу (M2): scrub → сохранить → MLS-ссылка всем +
     /// push блоба каждому участнику. В одном Job (нужны и группы, и BlobManager).
     GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String, caption: String },
+    /// То же ФАЙЛОМ: манифест считается потоково, чанки читаются с диска.
+    GroupMediaFile { gid: Vec<u8>, path: PathBuf, mime: String, name: String, caption: String },
 }
 
 /// До этого размера вложение скачивается автоматически (фото, голосовое — их ждут
@@ -847,6 +849,19 @@ impl Engine {
         let _ = self.jobs.send(Job::GroupMedia { gid, content, mime, name, caption });
     }
 
+    /// Отправить в группу вложение, лежащее ФАЙЛОМ, не поднимая его в память.
+    /// Fire-and-forget: манифест и своя копия считаются на акторе.
+    pub fn group_send_media_file(
+        &self,
+        gid: Vec<u8>,
+        path: PathBuf,
+        mime: String,
+        name: String,
+        caption: String,
+    ) {
+        let _ = self.jobs.send(Job::GroupMediaFile { gid, path, mime, name, caption });
+    }
+
     /// Отозвать участника из группы (ADR-004, только админ). Fire-and-forget.
     pub fn group_remove_member(&self, gid: Vec<u8>, peer: [u8; 32]) {
         let _ = self.jobs.send(Job::Cmd(GroupCmd::RemoveMember { gid, peer }));
@@ -1432,6 +1447,27 @@ fn event_pump(
                     for m in groups.members(&gid) {
                         if m != engine.me_pub {
                             blobs.offer(m, &bytes, &mime);
+                        }
+                    }
+                    engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(&gid));
+                    push_event(&engine, serde_json::json!({"type": "group_msg", "gid": hex::encode(&gid), "mine": true}));
+                }
+            }
+            Ok(Job::GroupMediaFile { gid, path, mime, name, caption }) => {
+                // Потоковый путь: ни манифест, ни отдача чанков не поднимают файл в
+                // память. Картинки сюда не приходят — им нужен scrub целиком.
+                let Ok(manifest) = p2p_blob::manifest_of_file(&path, mime.clone()) else { continue };
+                let id_hex = hex::encode(manifest.id);
+                let kind = Engine::media_kind(&mime);
+                if engine.blob_read(&id_hex).is_none() {
+                    let _ = engine.store_blob_streamed(&path, &manifest);
+                }
+                if groups.send_media(&gid, kind, &id_hex, &mime, &name, &caption) {
+                    // Участникам отдаём тот же файл: каждый получает манифест и тянет
+                    // чанки сам. Байты при этом ни разу не собираются в памяти.
+                    for m in groups.members(&gid) {
+                        if m != engine.me_pub {
+                            blobs.offer_file(m, manifest.clone(), path.clone());
                         }
                     }
                     engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(&gid));

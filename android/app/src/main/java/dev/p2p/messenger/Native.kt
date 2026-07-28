@@ -202,6 +202,16 @@ object Native {
         caption: String,
     )
 
+    /** Отправить в группу вложение ФАЙЛОМ (потоково). */
+    external fun groupSendMediaFile(
+        sessionPtr: Long,
+        gid: String,
+        path: String,
+        mime: String,
+        name: String,
+        caption: String,
+    )
+
     /** Отозвать участника группы по hex-ключу (ADR-004, только админ). */
     external fun groupRemoveMember(sessionPtr: Long, gid: String, peerHex: String)
 

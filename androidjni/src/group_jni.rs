@@ -123,6 +123,27 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMedia<'local>(
     });
 }
 
+/// Отправить в группу вложение ФАЙЛОМ (потоково). Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMediaFile<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    path: JString<'local>,
+    mime: JString<'local>,
+    name: JString<'local>,
+    caption: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        let path = std::path::PathBuf::from(jstr(&mut env, &path));
+        let (mime, name, caption) = (jstr(&mut env, &mime), jstr(&mut env, &name), jstr(&mut env, &caption));
+        e.group_send_media_file(gid, path, mime, name, caption);
+    });
+}
+
 /// Отозвать участника группы (ADR-004, только админ). Fire-and-forget.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupRemoveMember<'local>(

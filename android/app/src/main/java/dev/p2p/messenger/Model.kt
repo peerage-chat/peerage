@@ -1967,6 +1967,18 @@ class AppModel private constructor() {
         Native.groupSendMedia(sessionPtr, gid, content, mime, name, caption)
     }
 
+    /** Отправить в группу вложение ФАЙЛОМ (потоково). Файл должен пережить отдачу:
+     *  движок читает из него чанки по запросу участников. */
+    fun sendGroupMediaFile(
+        gid: String,
+        path: String,
+        mime: String,
+        name: String,
+        caption: String = "",
+    ) = ops.execute {
+        Native.groupSendMediaFile(sessionPtr, gid, path, mime, name, caption)
+    }
+
     // ── Диагностика: тест пропускной способности ─────────────────────────────
 
     /** Включить режим приёмника бенча (живая скорость в [benchRecvMbps]). */

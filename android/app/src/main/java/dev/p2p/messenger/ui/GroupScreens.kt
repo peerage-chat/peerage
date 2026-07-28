@@ -50,13 +50,17 @@ private fun sendGroupUriAttachment(
     caption: String = "",
 ) {
     scope.launch(Dispatchers.IO) {
-        // Групповое вложение пока идёт ЧЕРЕЗ ПАМЯТЬ: движок пушит байты каждому
-        // участнику отдельно, и потоковая отдача там ещё не заведена. Для крупного
-        // файла в группе это ограничение — оно записано в плане.
-        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
         val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
         val name = displayName(ctx, uri) ?: fallbackName
-        model.sendGroupMedia(gid, bytes, mime, name, caption)
+        // Картинки — через память: им нужен scrub (EXIF/GPS), а он требует файла
+        // целиком. Всё остальное — потоком, как в личке.
+        if (mime.startsWith("image/")) {
+            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
+            model.sendGroupMedia(gid, bytes, mime, name, caption)
+            return@launch
+        }
+        val cached = cacheFromUri(ctx, uri, name) ?: return@launch
+        model.sendGroupMediaFile(gid, cached.absolutePath, mime, name, caption)
     }
 }
 
