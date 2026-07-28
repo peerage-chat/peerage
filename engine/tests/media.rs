@@ -91,6 +91,50 @@ fn image_message_delivers_and_blob_pulls() {
     }
 }
 
+/// Отправка ФАЙЛОМ: движок считает манифест потоково, отдаёт чанки с диска, а
+/// получатель собирает тот же контент-адрес. Плюс подпись едет ВНУТРИ сообщения.
+#[test]
+fn file_attachment_with_caption_delivers() {
+    p2p_core::vault::init_with_key([9u8; 32]);
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(21), id(22));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("fa"));
+    let b = start(&net, b_id, tmpdir("fb"));
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+
+    // 300 КБ — заведомо больше одного чанка и меньше порога автозагрузки.
+    let content: Vec<u8> = (0..300 * 1024).map(|i| (i * 17 ^ 0x3c) as u8).collect();
+    let dir = tmpdir("src");
+    let path = dir.join("clip.bin");
+    std::fs::write(&path, &content).unwrap();
+
+    let info = p2p_engine::MediaInfo { caption: "подпись к файлу".into(), ..Default::default() };
+    a.send_media_file(&b_key, &path, "application/octet-stream", "clip.bin", info)
+        .expect("send_media_file");
+
+    let want_id = hex::encode(p2p_blob::blob_id(&content));
+    // Отправитель сохранил свою копию потоково и читает её обратно байт-в-байт.
+    assert_eq!(a.blob_read(&want_id).as_deref(), Some(&content[..]), "своя копия цела");
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let hist: serde_json::Value = serde_json::from_str(&b.history_json(&a_key)).unwrap();
+        if let Some(m) = hist.as_array().unwrap().iter().find(|m| m["blob_id"] == want_id) {
+            assert_eq!(m["text"], "подпись к файлу", "подпись пришла вместе с файлом");
+            if let Some(bytes) = b.blob_read(&want_id) {
+                assert_eq!(bytes, content, "содержимое доехало байт-в-байт");
+                a.shutdown();
+                b.shutdown();
+                return;
+            }
+        }
+        assert!(Instant::now() < deadline, "файл не доехал за 20с");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
+
 /// Счётчик заслуг пира из списка контактов.
 fn helpful_of(engine: &Engine, peer: &[u8; 32]) -> u64 {
     let hex_key = hex::encode(peer);

@@ -36,6 +36,15 @@ pub enum CompletedData {
     OnDisk(PathBuf),
 }
 
+/// Откуда берём чанки при отдаче.
+enum Source {
+    /// Мелкое (аватар, голосовое, миниатюра) — держим в памяти, так проще.
+    Memory(Vec<Vec<u8>>),
+    /// Крупное — читаем с диска по индексу. Файл на гигабайт не должен стоить
+    /// гигабайта RAM только потому, что мы его отдаём.
+    File(PathBuf),
+}
+
 /// Куда складываем приходящие чанки.
 enum Sink {
     Ram(Reassembler),
@@ -55,8 +64,8 @@ pub struct BlobManager {
     limits: Limits,
     /// Куда складывать блобы, собираемые сразу на диск (крупные).
     blob_dir: PathBuf,
-    /// Блобы, которые мы отдаём: id → (manifest, чанки по порядку).
-    outgoing: HashMap<Hash, (Manifest, Vec<Vec<u8>>)>,
+    /// Блобы, которые мы отдаём: id → манифест + откуда брать чанки.
+    outgoing: HashMap<Hash, (Manifest, Source)>,
     /// Блобы, которые мы качаем: id → состояние докачки.
     incoming: HashMap<Hash, Incoming>,
     /// Манифесты крупных блобов, которые ещё собираются из частей: id → сборщик.
@@ -175,7 +184,21 @@ impl BlobManager {
                 &peer, &p.id, &p.mime, p.size, p.part, p.total, &hashes,
             );
         }
-        self.outgoing.insert(id, (manifest, chunks));
+        self.outgoing.insert(id, (manifest, Source::Memory(chunks)));
+        id
+    }
+
+    /// Предложить пиру блоб, лежащий ФАЙЛОМ: манифест уже посчитан потоково, чанки
+    /// читаются с диска по запросу. Путь к файлу должен пережить отдачу.
+    pub fn offer_file(&mut self, peer: PeerKey, manifest: Manifest, path: PathBuf) -> Hash {
+        let id = manifest.id;
+        for p in manifest.split() {
+            let hashes: Vec<u8> = p.hashes.iter().flat_map(|h| h.iter().copied()).collect();
+            let _ = self.messenger.send_blob_manifest_part(
+                &peer, &p.id, &p.mime, p.size, p.part, p.total, &hashes,
+            );
+        }
+        self.outgoing.insert(id, (manifest, Source::File(path)));
         id
     }
 
@@ -189,9 +212,21 @@ impl BlobManager {
     /// Пир запросил чанк нашего блоба — отдать, если он у нас есть.
     pub fn on_request(&self, id_bytes: &[u8], index: u32, peer: PeerKey) {
         let Some(id) = to_id(id_bytes) else { return };
-        if let Some((_m, chunks)) = self.outgoing.get(&id) {
-            if let Some(chunk) = chunks.get(index as usize) {
-                let _ = self.messenger.send_blob_chunk(&peer, &id, index, chunk);
+        let Some((_m, src)) = self.outgoing.get(&id) else { return };
+        match src {
+            Source::Memory(chunks) => {
+                if let Some(chunk) = chunks.get(index as usize) {
+                    let _ = self.messenger.send_blob_chunk(&peer, &id, index, chunk);
+                }
+            }
+            Source::File(path) => {
+                // Читаем ровно один чанк с диска — так отдача крупного файла не
+                // зависит от его размера по памяти.
+                if let Ok(chunk) = p2p_blob::read_file_chunk(path, index as usize) {
+                    if !chunk.is_empty() {
+                        let _ = self.messenger.send_blob_chunk(&peer, &id, index, &chunk);
+                    }
+                }
             }
         }
     }

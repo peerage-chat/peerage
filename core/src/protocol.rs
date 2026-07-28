@@ -45,6 +45,11 @@ pub enum Payload {
         /// Размеры кадра картинки/видео (0 — неизвестно).
         width: u32,
         height: u32,
+        /// Подпись к вложению. Едет ВНУТРИ медиа-сообщения, а не отдельным
+        /// сообщением: иначе фото с подписью — это два пакета, и наблюдатель видит
+        /// характерную пару вместо одного. Длина ограничена [`MAX_CAPTION`], чтобы
+        /// сообщение оставалось в бакете APP 4 КБ и не выдавало себя размером (M5).
+        caption: String,
         /// Хэш блоба-МИНИАТЮРЫ (пусто — нет превью). Именно ссылка, а не сами байты:
         /// превью инлайн раздуло бы медиа-сообщение и сломало размерную
         /// неразличимость «текст ≡ медиа» (M5). Миниатюра мелкая, качается сразу.
@@ -208,6 +213,11 @@ pub enum ProtocolError {
 ///
 /// Границы (в threat-model честно): скрыт РАЗМЕР, но не тайминг, не число пакетов и
 /// не байт канала (chat/media) — см. `docs/protocol-spec.md`.
+/// Потолок подписи к вложению в БАЙТАХ. Вместе с именем файла и хэшами подпись
+/// обязана умещаться в бакет APP (4 КБ) — иначе медиа-сообщение вылезет в следующий
+/// бакет и станет отличимым от текстового по размеру.
+pub const MAX_CAPTION: usize = 1024;
+
 const CONTROL_BUCKET: usize = 256;
 const APP_BUCKET: usize = 4096;
 /// Чанк блоба 12 КБ → hex удваивает (~24.6 КБ JSON). Бакет с запасом на JSON-оверхед;
@@ -317,12 +327,12 @@ mod tests {
             Payload::Text { id: 1, text: "hi".into() },
             Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "p.jpg".into(),
-                size: 1234, duration_ms: 0, width: 800, height: 600, thumb: vec![9u8; 32],
+                size: 1234, duration_ms: 0, width: 800, height: 600, caption: String::new(), thumb: vec![9u8; 32],
             },
             // Видео с длительностью и без превью — поля опциональны.
             Payload::Media {
                 id: 3, hash: vec![6u8; 32], mime: "video/mp4".into(), name: "v.mp4".into(),
-                size: 900_000_000, duration_ms: 125_000, width: 1920, height: 1080, thumb: Vec::new(),
+                size: 900_000_000, duration_ms: 125_000, width: 1920, height: 1080, caption: String::new(), thumb: Vec::new(),
             },
             Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: false },
             Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] },
@@ -376,17 +386,17 @@ mod tests {
             enc(&Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(),
                 name: "secret-photo.jpg".into(), size: 2_400_000,
-                duration_ms: 0, width: 4000, height: 3000, thumb: vec![1u8; 32],
+                duration_ms: 0, width: 4000, height: 3000, caption: String::new(), thumb: vec![1u8; 32],
             }),
             enc(&Payload::Media {
                 id: 3, hash: vec![6u8; 32], mime: "audio/mp4".into(),
                 name: "voice.m4a".into(), size: 48_000,
-                duration_ms: 7_400, width: 0, height: 0, thumb: Vec::new(),
+                duration_ms: 7_400, width: 0, height: 0, caption: String::new(), thumb: Vec::new(),
             }),
             enc(&Payload::Media {
                 id: 4, hash: vec![7u8; 32], mime: "application/pdf".into(),
                 name: "договор-2026.pdf".into(), size: 900_000_000,
-                duration_ms: 0, width: 0, height: 0, thumb: Vec::new(),
+                duration_ms: 0, width: 0, height: 0, caption: String::new(), thumb: Vec::new(),
             }),
             enc(&Payload::Group { id: 5, data: vec![1u8; 200] }),
         ];

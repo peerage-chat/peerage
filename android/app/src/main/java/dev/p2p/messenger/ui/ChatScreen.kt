@@ -202,9 +202,19 @@ internal fun ChatScreen(model: AppModel) {
             onPickFile = { filePicker.launch(arrayOf("*/*")) },
             onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
             onCamera = openCamera,
-            onSendAttachments = { list ->
-                list.forEach { g ->
-                    sendUriAttachment(ctx, model, key, g.uri, scope, if (g.isVideo) "video.mp4" else "photo.jpg")
+            onSendAttachments = { list, caption ->
+                // Подпись прикрепляем к ПЕРВОМУ вложению: серия из пяти фото с одной
+                // подписью на каждом читалась бы как спам.
+                list.forEachIndexed { i, g ->
+                    sendUriAttachment(
+                        ctx,
+                        model,
+                        key,
+                        g.uri,
+                        scope,
+                        if (g.isVideo) "video.mp4" else "photo.jpg",
+                        caption = if (i == 0) caption else "",
+                    )
                 }
             },
             recording = recording,
@@ -236,17 +246,38 @@ private fun sendUriAttachment(
     uri: android.net.Uri,
     scope: kotlinx.coroutines.CoroutineScope,
     fallbackName: String,
+    caption: String = "",
 ) {
     scope.launch(Dispatchers.IO) {
-        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
         val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
         val name = displayName(ctx, uri) ?: fallbackName
-        // Метаданные (длительность/кадр/превью) вытаскиваем здесь: движок медиа не
-        // декодирует, а получателю нужна информативная карточка ДО скачивания.
-        val meta = MediaMeta.extract(ctx, uri, mime, bytes)
-        model.sendMediaWithMeta(key, bytes, mime, name, meta)
+        // Картинки идут через память: им нужен scrub (EXIF/GPS), а он требует всего
+        // файла целиком. Весят они немного, так что это допустимо.
+        if (mime.startsWith("image/")) {
+            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
+            val meta = MediaMeta.extract(ctx, uri, mime, bytes)
+            model.sendMediaWithMeta(key, bytes, mime, name, meta, caption)
+            return@launch
+        }
+        // Всё остальное — ПОТОКОМ: сначала переливаем content:// в кэш-файл по 64 КБ,
+        // потом движок считает манифест и отдаёт чанки с диска. Видео на гигабайт не
+        // должно стоить гигабайта RAM только потому, что его выбрали в пикере.
+        val cached = cacheFromUri(ctx, uri, name) ?: return@launch
+        val meta = MediaMeta.extract(ctx, uri, mime, ByteArray(0))
+        model.sendMediaFile(key, cached.absolutePath, mime, name, meta, caption)
     }
 }
+
+/** Перелить content:// в файл кэша порциями. Возвращает файл или null. */
+internal fun cacheFromUri(ctx: android.content.Context, uri: android.net.Uri, name: String): java.io.File? =
+    runCatching {
+        val dir = java.io.File(ctx.cacheDir, "outgoing").apply { mkdirs() }
+        val f = java.io.File(dir, "${System.currentTimeMillis()}-$name")
+        ctx.contentResolver.openInputStream(uri)?.use { input ->
+            f.outputStream().use { out -> input.copyTo(out, 64 * 1024) }
+        } ?: return null
+        f
+    }.getOrNull()
 
 /** Человекочитаемое имя файла из content-uri (OpenableColumns.DISPLAY_NAME). */
 internal fun displayName(ctx: android.content.Context, uri: android.net.Uri): String? =
@@ -290,7 +321,7 @@ internal fun MessageInput(
     onPickFile: () -> Unit = {},
     onPickAudio: () -> Unit = {},
     onCamera: () -> Unit = {},
-    onSendAttachments: (List<GalleryItem>) -> Unit = {},
+    onSendAttachments: (List<GalleryItem>, String) -> Unit = { _, _ -> },
     recording: Boolean = false,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
@@ -420,11 +451,16 @@ internal fun MessageInput(
             val btnMod = if (hasText || hasPicked) {
                 Modifier.clickable {
                     if (hasPicked) {
-                        onSendAttachments(picked)
+                        // Текст поля становится ПОДПИСЬЮ вложения, а не отдельным
+                        // сообщением: иначе фото с подписью — это два пакета, и
+                        // наблюдатель узнаёт их по характерной паре (M5).
+                        onSendAttachments(picked, value.trim())
                         picked = emptyList()
                         attachOpen = false
+                        setField(TextFieldValue(""))
+                    } else if (hasText) {
+                        onSend()
                     }
-                    if (hasText) onSend()
                 }
             } else {
                 // Held-to-record: запись на нажатии, отправка на отпускании.
@@ -519,17 +555,30 @@ internal fun MessageBubble(
             // содержимого прямо под пальцем, поэтому переход плавный.
             val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
             Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
-                when {
-                    isPending -> PendingAttachmentCard(m, model)
-                    else -> when (m.kind) {
-                        "image" -> ImageAttachment(blobBytes) { viewer = true }
-                        "voice" -> VoiceAttachment(blobBytes)
-                        "file" -> FileAttachment(m.name, blobBytes)
-                        else -> Text(
+                Column {
+                    when {
+                        isPending -> PendingAttachmentCard(m, model)
+                        else -> when (m.kind) {
+                            "image" -> ImageAttachment(blobBytes) { viewer = true }
+                            "voice" -> VoiceAttachment(blobBytes)
+                            "file" -> FileAttachment(m.name, blobBytes)
+                            else -> Text(
+                                m.text,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                modifier = Modifier.padding(end = bubbleTimeReserve(m.mine)),
+                            )
+                        }
+                    }
+                    // Подпись к вложению — в том же пузыре, под содержимым. Она пришла
+                    // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
+                    if (m.kind != "text" && m.text.isNotEmpty()) {
+                        Text(
                             m.text,
                             color = Color.White,
                             fontSize = 15.sp,
-                            modifier = Modifier.padding(end = bubbleTimeReserve(m.mine)),
+                            modifier = Modifier
+                                .padding(top = 6.dp, end = bubbleTimeReserve(m.mine)),
                         )
                     }
                 }

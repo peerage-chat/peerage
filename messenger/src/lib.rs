@@ -91,6 +91,8 @@ pub enum Event {
         duration_ms: u32,
         width: u32,
         height: u32,
+        /// Подпись к вложению (может быть пустой).
+        caption: String,
         /// Хэш блоба-миниатюры (пусто — нет превью).
         thumb: Vec<u8>,
     },
@@ -150,6 +152,21 @@ pub struct MediaMeta {
     pub width: u32,
     pub height: u32,
     pub thumb: Vec<u8>,
+    /// Подпись к вложению (обрезается до `MAX_CAPTION` на отправке).
+    pub caption: String,
+}
+
+/// Обрезать подпись до `MAX_CAPTION` БАЙТ по границе символа: рвать UTF-8 посередине
+/// нельзя, а считать в символах бессмысленно — в бакет мы упираемся байтами.
+pub(crate) fn truncate_caption(s: &str) -> String {
+    if s.len() <= p2p_core::protocol::MAX_CAPTION {
+        return s.to_string();
+    }
+    let mut end = p2p_core::protocol::MAX_CAPTION;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
 }
 
 /// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
@@ -504,12 +521,16 @@ impl Messenger {
         meta: MediaMeta,
     ) -> Result<u64, MessengerError> {
         let (hash, mime, name) = (hash.to_vec(), mime.to_string(), name.to_string());
+        // Режем подпись здесь, а не в UI: за размер пакета отвечает отправляющий
+        // слой, и обойти его через другой клиент не должно получаться.
+        let caption = truncate_caption(&meta.caption);
         self.shared.send_reliable(peer, true, move |id| Payload::Media {
             id, hash, mime, name,
             size: meta.size,
             duration_ms: meta.duration_ms,
             width: meta.width,
             height: meta.height,
+            caption: caption.clone(),
             thumb: meta.thumb.clone(),
         })
     }
@@ -526,12 +547,14 @@ impl Messenger {
         meta: MediaMeta,
     ) -> Result<(), MessengerError> {
         let (hash, mime, name) = (hash.to_vec(), mime.to_string(), name.to_string());
+        let caption = truncate_caption(&meta.caption);
         self.shared.send_reliable_with_id(peer, id, true, move |id| Payload::Media {
             id, hash, mime, name,
             size: meta.size,
             duration_ms: meta.duration_ms,
             width: meta.width,
             height: meta.height,
+            caption: caption.clone(),
             thumb: meta.thumb.clone(),
         })
     }
@@ -839,9 +862,11 @@ fn receive_loop(shared: Arc<Shared>) {
                 shared.emit(Event::Text { peer: src, id, text });
                 let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
             }
-            Payload::Media { id, hash, mime, name, size, duration_ms, width, height, thumb } => {
+            Payload::Media { id, hash, mime, name, size, duration_ms, width, height, caption, thumb } => {
                 shared.emit(Event::Media {
-                    peer: src, id, hash, mime, name, size, duration_ms, width, height, thumb,
+                    peer: src, id, hash, mime, name, size, duration_ms, width, height,
+                    caption: truncate_caption(&caption),
+                    thumb,
                 });
                 let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
             }

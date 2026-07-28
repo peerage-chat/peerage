@@ -71,6 +71,8 @@ pub(crate) enum Job {
     Leave(Vec<u8>),
     /// Предложить блоб пиру (M2): сохранить локально + анонсировать манифест.
     BlobOffer { peer: [u8; 32], content: Vec<u8>, mime: String },
+    /// Отдать блоб ФАЙЛОМ: манифест посчитан потоково, чанки читаются с диска.
+    BlobOfferFile { peer: [u8; 32], path: PathBuf, manifest: p2p_blob::Manifest },
     /// Отправить медиа-вложение в группу (M2): scrub → сохранить → MLS-ссылка всем +
     /// push блоба каждому участнику. В одном Job (нужны и группы, и BlobManager).
     GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String },
@@ -94,6 +96,9 @@ pub struct MediaInfo {
     pub height: u32,
     /// Байты миниатюры (JPEG). Уйдёт отдельным мелким блобом.
     pub thumb: Option<Vec<u8>>,
+    /// Подпись к вложению. Едет ВНУТРИ медиа-сообщения: фото с подписью не должно
+    /// превращаться в пару пакетов, по которой наблюдатель узнаёт «отправили фото».
+    pub caption: String,
 }
 
 /// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
@@ -351,6 +356,7 @@ impl Engine {
             width: info.width,
             height: info.height,
             thumb: thumb_hash.map(|h| h.to_vec()).unwrap_or_default(),
+            caption: info.caption.clone(),
         };
         match self.messenger.send_media_message(key, &hash, mime, name, meta.clone()) {
             Ok(id) => {
@@ -359,6 +365,9 @@ impl Engine {
                     // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
                     // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
                     id, mine: true, time: t, status: "sent".into(),
+                    // Подпись живёт в `text`: у медиа-сообщения это поле свободно,
+                    // и тогда поиск и история работают с ней как с обычным текстом.
+                    text: info.caption.clone(),
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.into(), name: name.into(),
                     size, duration_ms: info.duration_ms, width: info.width, height: info.height,
                     thumb_id: hex::encode(&meta.thumb),
@@ -376,6 +385,7 @@ impl Engine {
                         width: info.width,
                         height: info.height,
                         thumb_hex: hex::encode(&meta.thumb),
+                        caption: info.caption.clone(),
                     },
                     t,
                 );
@@ -383,6 +393,98 @@ impl Engine {
             }
             Err(_) => None,
         }
+    }
+
+    /// Отправить вложение, лежащее ФАЙЛОМ, не поднимая его в память.
+    ///
+    /// Манифест считается потоково, чанки отдаются чтением с диска по запросу, а своя
+    /// копия кладётся в хранилище блобов тем же потоком. Картинки при этом идут через
+    /// обычный путь в памяти: их надо scrub-ить (EXIF/GPS), а это требует всего файла,
+    /// и весят они немного.
+    pub fn send_media_file(
+        &self,
+        key: &[u8; 32],
+        path: &std::path::Path,
+        mime: &str,
+        name: &str,
+        info: MediaInfo,
+    ) -> Option<i64> {
+        let manifest = p2p_blob::manifest_of_file(path, mime.to_string()).ok()?;
+        let hash = manifest.id;
+        let size = manifest.size;
+        let id_hex = hex::encode(hash);
+        let kind = Self::media_kind(mime);
+
+        // Своя копия — тем же потоком, чанками и зашифрованной at-rest. Без неё
+        // отправитель не сможет ни показать вложение, ни дослать его после рестарта.
+        if self.blob_read(&id_hex).is_none() {
+            self.store_blob_streamed(path, &manifest).ok()?;
+        }
+
+        let thumb_hash = info.thumb.as_ref().map(|t| {
+            let h = p2p_blob::blob_id(t);
+            self.store_blob(h, t);
+            self.blob_offer(*key, t.clone(), "image/jpeg".to_string());
+            h
+        });
+        // Крупное не пушим — получатель запросит сам; мелкое отдаём сразу.
+        if size < AUTO_DOWNLOAD_LIMIT {
+            let _ = self.jobs.send(Job::BlobOfferFile {
+                peer: *key,
+                path: path.to_path_buf(),
+                manifest: manifest.clone(),
+            });
+        }
+        let meta = p2p_messenger::MediaMeta {
+            size,
+            duration_ms: info.duration_ms,
+            width: info.width,
+            height: info.height,
+            thumb: thumb_hash.map(|h| h.to_vec()).unwrap_or_default(),
+            caption: info.caption.clone(),
+        };
+        let id = self.messenger.send_media_message(key, &hash, mime, name, meta.clone()).ok()?;
+        let t = now();
+        let _ = self.messages.lock_safe().append(key, StoredMessage {
+            id, mine: true, time: t, status: "sent".into(),
+            text: info.caption.clone(),
+            kind: kind.into(), blob_id: id_hex.clone(), mime: mime.into(), name: name.into(),
+            size, duration_ms: info.duration_ms, width: info.width, height: info.height,
+            thumb_id: hex::encode(&meta.thumb),
+            downloaded: true,
+            ..Default::default()
+        });
+        self.outbox.lock_safe().on_sent_media(
+            key, id, &id_hex, mime, name,
+            &p2p_core::outbox::MediaRef {
+                size,
+                duration_ms: info.duration_ms,
+                width: info.width,
+                height: info.height,
+                thumb_hex: hex::encode(&meta.thumb),
+                caption: info.caption.clone(),
+            },
+            t,
+        );
+        Some(id as i64)
+    }
+
+    /// Записать свою копию блоба на диск потоково, в том же чанкованном формате, что
+    /// и принятые крупные блобы (каждый чанк зашифрован отдельно).
+    fn store_blob_streamed(
+        &self,
+        src: &std::path::Path,
+        manifest: &p2p_blob::Manifest,
+    ) -> Result<(), p2p_blob::BlobError> {
+        let _ = std::fs::create_dir_all(&self.blob_dir);
+        let dst = self.blob_dir.join(hex::encode(manifest.id));
+        let mut asm = p2p_blob::disk::DiskAssembler::create(manifest.clone(), &dst)?;
+        for i in 0..manifest.chunks.len() {
+            let chunk = p2p_blob::read_file_chunk(src, i).map_err(|_| p2p_blob::BlobError::Io)?;
+            asm.add(i, &chunk, p2p_core::vault::seal)?;
+        }
+        asm.finish()?;
+        Ok(())
     }
 
     /// Скачать вложение по кнопке (крупное не тянется автоматически). Запрашиваем
@@ -1298,6 +1400,9 @@ fn event_pump(
         match job_rx.recv_timeout(Duration::from_millis(500)) {
             Ok(Job::Ev(ev)) => handle_event(&engine, &mut groups, &mut blobs, ev),
             Ok(Job::Cmd(cmd)) => handle_cmd(&engine, &mut groups, cmd),
+            Ok(Job::BlobOfferFile { peer, path, manifest }) => {
+                blobs.offer_file(peer, manifest, path);
+            }
             Ok(Job::BlobOffer { peer, content, mime }) => {
                 // Сохраняем свой блоб локально (чтобы отправитель тоже его показывал)
                 // и анонсируем манифест — докачку ведёт получатель.
@@ -1485,7 +1590,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 }));
             }
         }
-        Event::Media { peer, id, hash, mime, name, size, duration_ms, width, height, thumb } => {
+        Event::Media { peer, id, hash, mime, name, size, duration_ms, width, height, caption, thumb } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
@@ -1506,6 +1611,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 let auto = have || size < AUTO_DOWNLOAD_LIMIT;
                 let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
                     id, mine: false, time: t, status: String::new(),
+                    text: caption.clone(),
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.clone(), name: name.clone(),
                     size, duration_ms, width, height, thumb_id: thumb_hex.clone(),
                     downloaded: have,
@@ -1915,6 +2021,7 @@ impl Engine {
                             width: v["width"].as_u64().unwrap_or(0) as u32,
                             height: v["height"].as_u64().unwrap_or(0) as u32,
                             thumb: v["thumb"].as_str().and_then(|t| hex::decode(t).ok()).unwrap_or_default(),
+                            caption: v["caption"].as_str().unwrap_or_default().to_string(),
                         };
                         let _ = m.resend_media_message(peer, id, &hash, mime, name, meta);
                     }

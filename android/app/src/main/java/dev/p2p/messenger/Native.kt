@@ -60,6 +60,22 @@ object Native {
         width: Int,
         height: Int,
         thumb: ByteArray,
+        caption: String,
+    ): Long
+
+    /** Отправить вложение ФАЙЛОМ: движок считает манифест потоково и отдаёт чанки
+     *  с диска. Для крупного — единственный путь: гигабайт в память не читаем. */
+    external fun sendMediaFile(
+        sessionPtr: Long,
+        peerHex: String,
+        path: String,
+        mime: String,
+        name: String,
+        durationMs: Int,
+        width: Int,
+        height: Int,
+        thumb: ByteArray,
+        caption: String,
     ): Long
 
     /** Скачать вложение по кнопке. Готовность придёт событием `blob_received`. */

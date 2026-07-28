@@ -300,6 +300,56 @@ pub fn build(content: &[u8], mime: impl Into<String>) -> (Manifest, Vec<Vec<u8>>
     (manifest, chunks)
 }
 
+/// Посчитать манифест ФАЙЛА, не поднимая его в память: читаем по одному чанку,
+/// считаем их хэши и общий id потоково. Нужно для отправки крупных вложений —
+/// иначе видео на гигабайт стоило бы гигабайта RAM ещё до первого пакета.
+pub fn manifest_of_file(path: &std::path::Path, mime: impl Into<String>) -> std::io::Result<Manifest> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)?;
+    let mut buf = vec![0u8; CHUNK_SIZE];
+    let mut chunks = Vec::new();
+    let mut total = blake3::Hasher::new();
+    let mut size = 0u64;
+    loop {
+        let mut filled = 0;
+        // read может вернуть меньше запрошенного — добираем до полного чанка, иначе
+        // границы чанков разъедутся с теми, что посчитает получатель.
+        while filled < buf.len() {
+            match f.read(&mut buf[filled..])? {
+                0 => break,
+                n => filled += n,
+            }
+        }
+        if filled == 0 {
+            break;
+        }
+        chunks.push(hash(&buf[..filled]));
+        total.update(&buf[..filled]);
+        size += filled as u64;
+        if filled < buf.len() {
+            break;
+        }
+    }
+    Ok(Manifest { mime: mime.into(), size, id: *total.finalize().as_bytes(), chunks })
+}
+
+/// Прочитать один чанк исходного файла по индексу (для отдачи по запросу).
+pub fn read_file_chunk(path: &std::path::Path, index: usize) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start((index * CHUNK_SIZE) as u64))?;
+    let mut buf = vec![0u8; CHUNK_SIZE];
+    let mut filled = 0;
+    while filled < buf.len() {
+        match f.read(&mut buf[filled..])? {
+            0 => break,
+            n => filled += n,
+        }
+    }
+    buf.truncate(filled);
+    Ok(buf)
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum BlobError {
     #[error("блоб превышает лимит размера")]
@@ -396,6 +446,29 @@ impl Reassembler {
 
 #[cfg(test)]
 mod tests {
+
+    /// Потоковый манифест обязан совпасть с посчитанным по памяти — иначе отправка
+    /// файлом и отправка байтами дали бы РАЗНЫЕ контент-адреса для одного файла.
+    #[test]
+    fn file_manifest_matches_in_memory() {
+        let content: Vec<u8> = (0..CHUNK_SIZE * 2 + 777).map(|i| (i * 31 ^ 0x5a) as u8).collect();
+        let dir = std::env::temp_dir().join(format!("p2p-blobfile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("data.bin");
+        std::fs::write(&path, &content).unwrap();
+
+        let (want, chunks) = build(&content, "application/octet-stream");
+        let got = manifest_of_file(&path, "application/octet-stream").unwrap();
+        assert_eq!(got.id, want.id, "контент-адрес совпал");
+        assert_eq!(got.size, want.size);
+        assert_eq!(got.chunks, want.chunks, "границы и хэши чанков совпали");
+
+        // И чтение по индексу отдаёт ровно те же байты, что лежали бы в памяти.
+        for (i, c) in chunks.iter().enumerate() {
+            assert_eq!(&read_file_chunk(&path, i).unwrap(), c, "чанк {i}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use super::*;
 
     fn data(n: usize, fill: u8) -> Vec<u8> {

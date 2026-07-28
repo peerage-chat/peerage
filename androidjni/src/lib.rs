@@ -289,6 +289,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
     width: jint,
     height: jint,
     thumb: JByteArray<'local>,
+    caption: JString<'local>,
 ) -> jlong {
     jni_safe!(-1, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
@@ -297,14 +298,53 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
         if bytes.is_empty() { return -1; }
         let mime = jstr(&mut env, &mime);
         let name = jstr(&mut env, &name);
+        let caption = jstr(&mut env, &caption);
         let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
         let info = p2p_engine::MediaInfo {
             duration_ms: duration_ms.max(0) as u32,
             width: width.max(0) as u32,
             height: height.max(0) as u32,
             thumb: (!thumb_bytes.is_empty()).then_some(thumb_bytes),
+            caption,
         };
         e.send_media_with(&key, bytes, &mime, &name, info).unwrap_or(-1)
+    })
+}
+
+/// Отправить вложение ФАЙЛОМ: движок считает манифест потоково и отдаёт чанки с
+/// диска. Для крупного это единственный путь — читать гигабайт в память нельзя.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaFile<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+    path: JString<'local>,
+    mime: JString<'local>,
+    name: JString<'local>,
+    duration_ms: jint,
+    width: jint,
+    height: jint,
+    thumb: JByteArray<'local>,
+    caption: JString<'local>,
+) -> jlong {
+    jni_safe!(-1, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return -1 };
+        let path = jstr(&mut env, &path);
+        let mime = jstr(&mut env, &mime);
+        let name = jstr(&mut env, &name);
+        let caption = jstr(&mut env, &caption);
+        let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
+        let info = p2p_engine::MediaInfo {
+            duration_ms: duration_ms.max(0) as u32,
+            width: width.max(0) as u32,
+            height: height.max(0) as u32,
+            thumb: (!thumb_bytes.is_empty()).then_some(thumb_bytes),
+            caption,
+        };
+        e.send_media_file(&key, std::path::Path::new(&path), &mime, &name, info).unwrap_or(-1)
     })
 }
 

@@ -159,7 +159,9 @@ internal fun GroupChatScreen(model: AppModel) {
                 onPickFile = { filePicker.launch(arrayOf("*/*")) },
                 onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
                 onCamera = openCamera,
-                onSendAttachments = { list ->
+                onSendAttachments = { list, _ ->
+                    // Подписи в группах пока нет: групповое медиа идёт своим путём
+                    // (AppMsg в MLS), и поле подписи туда ещё не заведено.
                     list.forEach { g ->
                         sendGroupUriAttachment(ctx, model, gid, g.uri, scope, if (g.isVideo) "video.mp4" else "photo.jpg")
                     }

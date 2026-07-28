@@ -177,6 +177,8 @@ pub struct MediaRef {
     pub width: u32,
     pub height: u32,
     pub thumb_hex: String,
+    /// Подпись — часть сообщения, поэтому обязана пережить офлайн-очередь.
+    pub caption: String,
 }
 
 pub struct OutboxManager {
@@ -225,7 +227,7 @@ impl OutboxManager {
     ) {
         let body = serde_json::json!({
             "blob": blob_id_hex, "mime": mime, "name": name,
-            "size": meta.size, "duration_ms": meta.duration_ms,
+            "size": meta.size, "duration_ms": meta.duration_ms, "caption": meta.caption,
             "width": meta.width, "height": meta.height, "thumb": meta.thumb_hex,
         });
         let Ok(payload) = serde_json::to_vec(&body) else { return };

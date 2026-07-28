@@ -1242,10 +1242,28 @@ class AppModel private constructor() {
         mime: String,
         name: String,
         meta: MediaMeta,
+        caption: String = "",
     ) = ops.execute {
         val id = Native.sendMediaWithMeta(
             sessionPtr, key, content, mime, name,
-            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0),
+            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+        )
+        if (id >= 0 && currentChat == key) loadHistory(key)
+    }
+
+    /** Отправить вложение ФАЙЛОМ (потоково). Файл должен пережить отдачу — движок
+     *  читает из него чанки по запросу получателя. */
+    fun sendMediaFile(
+        key: String,
+        path: String,
+        mime: String,
+        name: String,
+        meta: MediaMeta,
+        caption: String = "",
+    ) = ops.execute {
+        val id = Native.sendMediaFile(
+            sessionPtr, key, path, mime, name,
+            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
         )
         if (id >= 0 && currentChat == key) loadHistory(key)
     }
