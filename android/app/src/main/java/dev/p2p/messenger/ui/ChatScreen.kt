@@ -48,8 +48,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -180,6 +182,7 @@ internal fun ChatScreen(model: AppModel) {
             recording = recording,
             onVoiceStart = startVoice,
             onVoiceStop = stopVoice,
+            model = model,
             onSend = {
                 if (input.isNotBlank()) {
                     model.send(key, input)
@@ -254,99 +257,156 @@ internal fun MessageInput(
     recording: Boolean = false,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
+    model: AppModel? = null,
     onSend: () -> Unit,
 ) {
-    Row(
-        Modifier.fillMaxWidth().background(HoloBg).padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Поле-пилюля: скрепка и эмодзи ВНУТРИ.
-        Row(
-            Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(HoloSurface),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Скрепка → меню «Фото / Файл» (M2).
-            Box {
-                var attachOpen by remember { mutableStateOf(false) }
-                PillIcon(Icons.Filled.AttachFile, stringResource(R.string.cd_attach)) { attachOpen = true }
-                DropdownMenu(expanded = attachOpen, onDismissRequest = { attachOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.attach_photo)) },
-                        leadingIcon = { Icon(Icons.Filled.Image, null) },
-                        onClick = {
-                            attachOpen = false
-                            onPickImage()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.attach_file)) },
-                        leadingIcon = { Icon(Icons.Filled.AttachFile, null) },
-                        onClick = {
-                            attachOpen = false
-                            onPickFile()
-                        },
-                    )
-                }
-            }
-            BasicTextField(
-                value = value,
-                onValueChange = onChange,
-                modifier = Modifier.weight(1f).padding(vertical = 12.dp),
-                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
-                cursorBrush = SolidColor(HoloAccent),
-                maxLines = 4,
-                decorationBox = { inner ->
-                    Box(contentAlignment = Alignment.CenterStart) {
-                        if (value.isEmpty()) {
-                            Text(
-                                stringResource(if (recording) R.string.chat_recording else R.string.chat_input_hint),
-                                color = if (recording) HoloError else HoloSecondary,
-                                fontSize = 15.sp,
-                            )
-                        }
-                        inner()
+    // Поле держим как TextFieldValue: панели эмодзи нужна ПОЗИЦИЯ КУРСОРА, иначе
+    // символ всегда падал бы в конец, даже если человек правит середину строки.
+    var field by remember { mutableStateOf(TextFieldValue(value)) }
+    if (field.text != value) {
+        // Внешнее изменение (очистка после отправки) — синхронизируем, курсор в конец.
+        field = TextFieldValue(value, TextRange(value.length))
+    }
+    val setField = { v: TextFieldValue ->
+        field = v
+        onChange(v.text)
+    }
+    var emojiOpen by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth().background(HoloBg)) {
+        if (emojiOpen) {
+            EmojiPanel(
+                recent = model?.recentEmoji ?: emptyList(),
+                onPick = { e ->
+                    val start = field.selection.start
+                    val end = field.selection.end
+                    val text = field.text.take(start) + e + field.text.substring(end)
+                    setField(TextFieldValue(text, TextRange(start + e.length)))
+                    model?.useEmoji(e)
+                },
+                onBackspace = {
+                    val end = field.selection.end
+                    if (field.selection.length > 0) {
+                        val text = field.text.take(field.selection.start) + field.text.substring(end)
+                        setField(TextFieldValue(text, TextRange(field.selection.start)))
+                    } else if (end > 0) {
+                        // Удаляем ГРАФЕМУ, а не char: эмодзи — суррогатная пара, часто с
+                        // модификаторами; посимвольный забой рвал бы их на половинки.
+                        val from = graphemeStart(field.text, end)
+                        val text = field.text.take(from) + field.text.substring(end)
+                        setField(TextFieldValue(text, TextRange(from)))
                     }
                 },
             )
-            PillIcon(Icons.Filled.EmojiEmotions, stringResource(R.string.cd_emoji)) { /* TODO: эмодзи */ }
         }
-        Spacer(Modifier.width(8.dp))
-        // Отправка (есть текст) / голосовое удержанием (поле пустое).
-        val hasText = value.isNotBlank()
-        val btnMod = if (hasText) {
-            Modifier.clickable { onSend() }
-        } else {
-            // Held-to-record: запись на нажатии, отправка на отпускании.
-            Modifier.pointerInput(Unit) {
-                detectTapGestures(onPress = {
-                    onVoiceStart()
-                    tryAwaitRelease()
-                    onVoiceStop()
-                })
-            }
-        }
-        Box(
-            Modifier.clip(RoundedCornerShape(percent = 30))
-                .background(if (recording) HoloError else HoloAccent).size(44.dp).then(btnMod),
-            contentAlignment = Alignment.Center,
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                if (hasText) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
-                stringResource(if (hasText) R.string.common_send else R.string.chat_voice),
-                tint = if (recording) Color.White else HoloAccentDark,
-                modifier = Modifier.size(20.dp),
-            )
+            // Поле-пилюля: скрепка и эмодзи ВНУТРИ.
+            Row(
+                Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(HoloSurface),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Скрепка → меню «Фото / Файл» (M2).
+                Box {
+                    var attachOpen by remember { mutableStateOf(false) }
+                    PillIcon(Icons.Filled.AttachFile, stringResource(R.string.cd_attach)) { attachOpen = true }
+                    DropdownMenu(expanded = attachOpen, onDismissRequest = { attachOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.attach_photo)) },
+                            leadingIcon = { Icon(Icons.Filled.Image, null) },
+                            onClick = {
+                                attachOpen = false
+                                onPickImage()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.attach_file)) },
+                            leadingIcon = { Icon(Icons.Filled.AttachFile, null) },
+                            onClick = {
+                                attachOpen = false
+                                onPickFile()
+                            },
+                        )
+                    }
+                }
+                BasicTextField(
+                    value = field,
+                    onValueChange = setField,
+                    modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                    cursorBrush = SolidColor(HoloAccent),
+                    maxLines = 4,
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (value.isEmpty()) {
+                                Text(
+                                    stringResource(if (recording) R.string.chat_recording else R.string.chat_input_hint),
+                                    color = if (recording) HoloError else HoloSecondary,
+                                    fontSize = 15.sp,
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+                // Скрепка и эмодзи ведут себя одинаково: обе выдвигают панель из этой же
+                // строки, поэтому активная подсвечена акцентом и закрывается повторным тапом.
+                PillIcon(
+                    Icons.Filled.EmojiEmotions,
+                    stringResource(R.string.cd_emoji),
+                    tint = if (emojiOpen) HoloAccent else HoloSecondary,
+                ) { emojiOpen = !emojiOpen }
+            }
+            Spacer(Modifier.width(8.dp))
+            // Отправка (есть текст) / голосовое удержанием (поле пустое).
+            val hasText = value.isNotBlank()
+            val btnMod = if (hasText) {
+                Modifier.clickable { onSend() }
+            } else {
+                // Held-to-record: запись на нажатии, отправка на отпускании.
+                Modifier.pointerInput(Unit) {
+                    detectTapGestures(onPress = {
+                        onVoiceStart()
+                        tryAwaitRelease()
+                        onVoiceStop()
+                    })
+                }
+            }
+            Box(
+                Modifier.clip(RoundedCornerShape(percent = 30))
+                    .background(if (recording) HoloError else HoloAccent).size(44.dp).then(btnMod),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (hasText) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
+                    stringResource(if (hasText) R.string.common_send else R.string.chat_voice),
+                    tint = if (recording) Color.White else HoloAccentDark,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
 
+/** Начало графемы, заканчивающейся в [end]: эмодзи занимает несколько char (суррогатная
+ *  пара, вариационный селектор, ZWJ-последовательность), и забой обязан снимать её
+ *  целиком, иначе в строке остаётся «половина символа». */
+internal fun graphemeStart(text: String, end: Int): Int {
+    val it = java.text.BreakIterator.getCharacterInstance()
+    it.setText(text)
+    val prev = it.preceding(end)
+    return if (prev == java.text.BreakIterator.DONE) 0 else prev
+}
+
 /** Иконка внутри поля-пилюли (44px касание). */
 @Composable
-internal fun PillIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
+internal fun PillIcon(icon: ImageVector, desc: String, tint: Color = HoloSecondary, onClick: () -> Unit) {
     Box(
         Modifier.size(44.dp).clip(RoundedCornerShape(percent = 30)).clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = HoloSecondary, modifier = Modifier.size(22.dp)) }
+    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(22.dp)) }
 }
 
 @Composable

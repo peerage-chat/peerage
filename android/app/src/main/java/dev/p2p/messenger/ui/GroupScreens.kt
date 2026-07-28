@@ -151,6 +151,7 @@ internal fun GroupChatScreen(model: AppModel) {
                 recording = recording,
                 onVoiceStart = startVoice,
                 onVoiceStop = stopVoice,
+                model = model,
                 onSend = {
                     if (input.isNotBlank()) {
                         model.sendGroupText(gid, input)

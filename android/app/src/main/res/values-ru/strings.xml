@@ -347,4 +347,13 @@
     <string name="onb_checking">Проверяем…</string>
     <string name="onb_bad_phrase">Неверная фраза — проверьте 24 слова</string>
     <string name="onb_phrase_placeholder">слово1 слово2 слово3 …</string>
+    <string name="emoji_recent">Недавние</string>
+    <string name="emoji_backspace">Стереть</string>
+    <string name="emoji_cat_smileys">Смайлы и люди</string>
+    <string name="emoji_cat_animals">Животные и природа</string>
+    <string name="emoji_cat_food">Еда и напитки</string>
+    <string name="emoji_cat_activity">Активность</string>
+    <string name="emoji_cat_travel">Путешествия и места</string>
+    <string name="emoji_cat_objects">Предметы</string>
+    <string name="emoji_cat_symbols">Символы</string>
 </resources>

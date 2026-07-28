@@ -208,6 +208,9 @@ class AppModel private constructor() {
 
         /** Докачка заказана, но чанки ещё не пошли (пир офлайн / идёт манифест). */
         const val DOWNLOAD_INIT = -1f
+
+        /** Сколько недавних эмодзи помним (ряд на 8 + запас на вытеснение). */
+        const val RECENT_EMOJI_MAX = 24
     }
 
     var me by mutableStateOf<Me?>(null)
@@ -395,9 +398,22 @@ class AppModel private constructor() {
         refreshStorage()
     }
 
+    /** Недавно использованные эмодзи (первым — самый свежий). Панель показывает их
+     *  сверху: в ходу у человека десяток символов, ради них не должно быть выбора
+     *  категории. Живут в prefs, а не в движке — это предпочтение клиента. */
+    var recentEmoji by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    fun useEmoji(e: String) {
+        recentEmoji = (listOf(e) + recentEmoji.filter { it != e }).take(RECENT_EMOJI_MAX)
+        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)?.edit()
+            ?.putString("recent_emoji", recentEmoji.joinToString(" "))?.apply()
+    }
+
     private fun loadSettings() {
         val prefs = appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE) ?: return
         showTechInfo = prefs.getBoolean("tech_info", false)
+        recentEmoji = prefs.getString("recent_emoji", "")?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
         warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
         val key = prefs.getString("video_quality", null) ?: return
         videoQuality = VideoQuality.presets.find { it.key == key } ?: VideoQuality.default
