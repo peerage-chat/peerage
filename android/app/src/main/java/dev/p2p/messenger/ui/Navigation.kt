@@ -42,10 +42,21 @@ internal val Folders = listOf(
 
 internal fun folderLabel(key: String): Int = Folders.firstOrNull { it.first == key }?.third ?: R.string.nav_chats
 
-/** Рейл папок-иконок (Discord-стиль): активная подсвечена, бейдж непрочитанного
- *  в правом-нижнем углу, `+` создаёт папку (пока заглушка). */
+/** Заголовок Главной: у своей папки — её имя, у встроенной — локализованная подпись. */
 @Composable
-internal fun FolderRail(model: AppModel, activeFilter: String, onFilter: (String) -> Unit) {
+internal fun folderTitle(model: AppModel, key: String): String =
+    model.folderById(key)?.name ?: stringResource(folderLabel(key))
+
+/** Рейл папок-иконок (Discord-стиль): активная подсвечена, бейдж непрочитанного
+ *  в правом-нижнем углу. После встроенных идут свои папки, последней — плитка `+`,
+ *  которая ведёт в управление папками. */
+@Composable
+internal fun FolderRail(
+    model: AppModel,
+    activeFilter: String,
+    onFilter: (String) -> Unit,
+    onManage: () -> Unit = {},
+) {
     val dmUnread = model.unread.values.sum()
     val roomUnread = model.groupPresence.values.sumOf { it.size }
     fun badgeFor(key: String): Int = when (key) {
@@ -63,7 +74,10 @@ internal fun FolderRail(model: AppModel, activeFilter: String, onFilter: (String
         Folders.forEach { (key, icon, labelRes) ->
             FolderTile(icon, stringResource(labelRes), key == activeFilter, badgeFor(key)) { onFilter(key) }
         }
-        FolderTile(TablerIcons.Plus, stringResource(R.string.folder_create), false, 0) { /* TODO: создать папку */ }
+        model.folders.forEach { f ->
+            FolderTile(folderIcon(f.icon), f.name, f.id == activeFilter, 0) { onFilter(f.id) }
+        }
+        FolderTile(TablerIcons.Plus, stringResource(R.string.folder_create), false, 0) { onManage() }
     }
     HorizontalDivider(thickness = 1.dp, color = HoloBorder)
 }

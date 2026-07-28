@@ -78,15 +78,15 @@ internal fun StatusDot(online: Boolean) {
     Box(Modifier.size(10.dp).clip(RoundedCornerShape(percent = 30)).background(if (online) HoloOnline else OfflineDot))
 }
 
-/** Индикатор пиров меша в шапке Главной (⊹ N). Тап → «Сеть» (TODO),
+/** Индикатор пиров меша в шапке Главной (⊹ N). Тап → «Сеть»,
  *  долгий тап — диагностический бенч приёма. */
 @Composable
-internal fun PeerIndicator(peers: Int, onLongPress: () -> Unit = {}) {
+internal fun PeerIndicator(peers: Int, onTap: () -> Unit = {}, onLongPress: () -> Unit = {}) {
     Row(
         Modifier.clip(RoundedCornerShape(8.dp))
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = { /* TODO: экран Сеть */ },
+                    onTap = { onTap() },
                     onLongPress = { onLongPress() },
                 )
             }

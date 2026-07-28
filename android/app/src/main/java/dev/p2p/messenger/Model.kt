@@ -173,6 +173,27 @@ data class GroupMsg(
     val name: String = "",
 )
 
+/**
+ * Пользовательская папка — это ВИД, а не коробка: чат может попадать сразу в
+ * несколько. Живёт в prefs на клиенте: к протоколу отношения не имеет, собеседник
+ * о ней ничего не знает.
+ *
+ * @param types типы чатов целиком ("dm" / "room")
+ * @param chats конкретные чаты (ключ контакта или gid группы)
+ * @param excludeRead прятать те, где нет непрочитанного
+ */
+data class Folder(
+    val id: String,
+    val name: String,
+    val icon: String,
+    val types: Set<String> = emptySet(),
+    val chats: Set<String> = emptySet(),
+    val excludeRead: Boolean = false,
+)
+
+/** Строка очереди отправки: кому, сколько ждёт и с какого времени. */
+data class OutboxPeer(val peer: String, val count: Int, val bytes: Long, val oldest: Long)
+
 /** Входящий DM-звонок (до того как пользователь ответил или отклонил). */
 data class IncomingRoomCall(
     val peer: String,
@@ -382,11 +403,56 @@ class AppModel private constructor() {
     var storageOutboxPending by mutableStateOf(0L)
         private set
 
+    /** Что занимает место, по типам вложения: kind → байты. */
+    var storageByKind by mutableStateOf<List<Pair<String, Long>>>(emptyList())
+        private set
+
+    /** По чатам: (ключ пира, файлов, байт), самый тяжёлый первым. */
+    var storageChats by mutableStateOf<List<Triple<String, Long, Long>>>(emptyList())
+        private set
+
     fun refreshStorage() = ops.execute {
         val o = runCatching { JSONObject(Native.storageStats(sessionPtr)) }.getOrNull() ?: return@execute
         storageBlobs = o.optLong("blobs", 0)
         storageBlobBytes = o.optLong("blob_bytes", 0)
         storageOutboxPending = o.optLong("outbox_pending", 0)
+        val kinds = o.optJSONObject("by_kind")
+        storageByKind = kinds?.keys()?.asSequence()
+            ?.map { it to kinds.optLong(it, 0) }
+            ?.sortedByDescending { it.second }
+            ?.toList() ?: emptyList()
+        val arr = o.optJSONArray("chats") ?: JSONArray()
+        storageChats = (0 until arr.length()).mapNotNull { i ->
+            arr.optJSONObject(i)?.let {
+                Triple(it.optString("peer"), it.optLong("files"), it.optLong("bytes"))
+            }
+        }
+    }
+
+    /** Очередь по получателям: (ключ, сколько ждёт, байт, время самой старой записи). */
+    var outboxByPeer by mutableStateOf<List<OutboxPeer>>(emptyList())
+        private set
+
+    fun refreshOutbox() = ops.execute {
+        val arr = runCatching { JSONArray(Native.outboxByPeer(sessionPtr)) }.getOrNull() ?: return@execute
+        outboxByPeer = (0 until arr.length()).mapNotNull { i ->
+            arr.optJSONObject(i)?.let {
+                OutboxPeer(it.optString("peer"), it.optInt("count"), it.optLong("bytes"), it.optLong("oldest"))
+            }
+        }
+        outboxPending = outboxByPeer.sumOf { it.count }
+    }
+
+    /** Сбросить очередь одному получателю (после подтверждения в UI). */
+    fun clearOutboxFor(peer: String) = ops.execute {
+        Native.clearOutboxFor(sessionPtr, peer)
+        refreshOutbox()
+    }
+
+    /** Сбросить очередь всем (после двойного подтверждения в UI). */
+    fun clearOutboxAll() = ops.execute {
+        Native.clearOutboxAll(sessionPtr)
+        refreshOutbox()
     }
 
     /** Удалить сохранённые вложения. История и ссылки остаются — байты можно
@@ -397,6 +463,68 @@ class AppModel private constructor() {
         contactAvatars.clear()
         refreshStorage()
     }
+
+    // ── Пользовательские папки ──────────────────────────────────────────────
+    val folders = mutableStateListOf<Folder>()
+
+    private fun saveFolders() {
+        val arr = JSONArray()
+        folders.forEach { f ->
+            arr.put(
+                JSONObject()
+                    .put("id", f.id)
+                    .put("name", f.name)
+                    .put("icon", f.icon)
+                    .put("types", JSONArray(f.types.toList()))
+                    .put("chats", JSONArray(f.chats.toList()))
+                    .put("exclude_read", f.excludeRead),
+            )
+        }
+        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putString("folders", arr.toString())?.apply()
+    }
+
+    private fun loadFolders() {
+        val raw = appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+            ?.getString("folders", null) ?: return
+        val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return
+        folders.clear()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            fun strSet(name: String): Set<String> {
+                val a = o.optJSONArray(name) ?: return emptySet()
+                return (0 until a.length()).mapNotNull { a.optString(it).takeIf { s -> s.isNotEmpty() } }.toSet()
+            }
+            folders += Folder(
+                id = o.optString("id"),
+                name = o.optString("name"),
+                icon = o.optString("icon"),
+                types = strSet("types"),
+                chats = strSet("chats"),
+                excludeRead = o.optBoolean("exclude_read", false),
+            )
+        }
+    }
+
+    fun saveFolder(f: Folder) {
+        val i = folders.indexOfFirst { it.id == f.id }
+        if (i >= 0) folders[i] = f else folders += f
+        saveFolders()
+    }
+
+    fun deleteFolder(id: String) {
+        folders.removeAll { it.id == id }
+        saveFolders()
+    }
+
+    fun folderById(id: String): Folder? = folders.firstOrNull { it.id == id }
+
+    /** Попадает ли личный чат в папку. */
+    fun folderHasDm(f: Folder, key: String): Boolean =
+        ("dm" in f.types || key in f.chats) && !(f.excludeRead && (unread[key] ?: 0) == 0)
+
+    /** Попадает ли группа/комната в папку. */
+    fun folderHasGroup(f: Folder, gid: String): Boolean = "room" in f.types || gid in f.chats
 
     /** Недавно использованные эмодзи (первым — самый свежий). Панель показывает их
      *  сверху: в ходу у человека десяток символов, ради них не должно быть выбора
@@ -727,6 +855,7 @@ class AppModel private constructor() {
         refreshGroupsNow()
         refreshGroupInvitesNow()
         loadWanted() // докачки, заказанные до перезапуска
+        loadFolders()
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
         migrateSelfNameFromPrefs(dataDir) // разовый перенос имени из старых prefs в движок

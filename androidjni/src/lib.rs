@@ -454,6 +454,32 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_outboxStats<'local>(
     })
 }
 
+/// Очередь по получателям (JSON-массив) для экрана очереди отправки.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_outboxByPeer<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.outbox_by_peer_json())
+    })
+}
+
+/// Сбросить очередь ВСЕМ (двойное подтверждение — на стороне UI).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_clearOutboxAll<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        e.clear_outbox_all() as jint
+    })
+}
+
 /// Сбросить очередь недоставленного пиру (явное действие пользователя).
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_clearOutboxFor<'local>(

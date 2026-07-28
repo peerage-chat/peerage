@@ -37,7 +37,7 @@ import dev.p2p.messenger.*
 import dev.p2p.messenger.R
 
 @Composable
-internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
+internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit, onOpenOutbox: () -> Unit) {
     val me = model.me ?: return
     val ctx = LocalContext.current
     // Офлайн-очередь = сообщения, ждущие появления получателя (статус "queued").
@@ -157,7 +157,7 @@ internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit) {
         }
 
         // 6. Офлайн-очередь.
-        SurfaceCard(onClick = { /* TODO: экран очереди */ }) {
+        SurfaceCard(onClick = onOpenOutbox) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Schedule, null, tint = HoloAccent, modifier = Modifier.size(26.dp))
                 Spacer(Modifier.width(14.dp))

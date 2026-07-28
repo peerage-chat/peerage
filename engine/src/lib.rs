@@ -564,6 +564,31 @@ impl Engine {
         .to_string()
     }
 
+    /// Очередь по получателям: `[{peer, count, bytes, oldest}]`. Сумма «ждёт 1248»
+    /// ничего не говорит, пока не видно, что 1202 из них — одному человеку.
+    pub fn outbox_by_peer_json(&self) -> String {
+        let rows: Vec<serde_json::Value> = self
+            .outbox
+            .lock_safe()
+            .per_peer()
+            .into_iter()
+            .map(|(peer, count, bytes, oldest)| {
+                serde_json::json!({
+                    "peer": hex::encode(peer),
+                    "count": count,
+                    "bytes": bytes,
+                    "oldest": oldest,
+                })
+            })
+            .collect();
+        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Сбросить очередь ВСЕМ (двойное подтверждение — на стороне UI).
+    pub fn clear_outbox_all(&self) -> usize {
+        self.outbox.lock_safe().clear_all()
+    }
+
     /// Сбросить очередь недоставленного конкретному пиру (явное действие пользователя).
     pub fn clear_outbox_for(&self, key: &[u8; 32]) -> usize {
         self.outbox.lock_safe().clear_peer(key)
@@ -584,11 +609,37 @@ impl Engine {
             }
         }
         let ob = self.outbox.lock_safe().stats();
+        // Разбивка «что съело место»: по типу вложения и по чату. Считаем по РЕАЛЬНЫМ
+        // файлам на диске (сообщение может ссылаться на ещё не скачанный блоб), а один
+        // и тот же блоб в разных чатах не дублируем — он контент-адресный.
+        let mut by_kind: HashMap<String, u64> = HashMap::new();
+        let mut by_peer: HashMap<[u8; 32], (u64, u64)> = HashMap::new();
+        let mut counted: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (peer, blob_id, kind, _size) in self.messages.lock_safe().attachments() {
+            let path = self.blob_dir.join(&blob_id);
+            let Ok(meta) = std::fs::metadata(&path) else { continue };
+            let len = meta.len();
+            if counted.insert(blob_id.clone()) {
+                *by_kind.entry(kind).or_insert(0) += len;
+            }
+            let e = by_peer.entry(peer).or_insert((0, 0));
+            e.0 += 1;
+            e.1 += len;
+        }
+        let mut chats: Vec<serde_json::Value> = by_peer
+            .into_iter()
+            .map(|(p, (files, bytes))| {
+                serde_json::json!({ "peer": hex::encode(p), "files": files, "bytes": bytes })
+            })
+            .collect();
+        chats.sort_by_key(|v| std::cmp::Reverse(v["bytes"].as_u64().unwrap_or(0)));
         serde_json::json!({
             "blobs": blobs,
             "blob_bytes": blob_bytes,
             "outbox_pending": ob.pending,
             "outbox_bytes": ob.bytes,
+            "by_kind": by_kind,
+            "chats": chats,
         })
         .to_string()
     }

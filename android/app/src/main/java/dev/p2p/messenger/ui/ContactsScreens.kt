@@ -41,8 +41,12 @@ internal fun ContactsScreen(
     onOpenDm: (String) -> Unit,
     onOpenGroup: (String) -> Unit,
 ) {
-    val showDm = activeFilter == "all" || activeFilter == "dm"
-    val showRoom = activeFilter == "all" || activeFilter == "room"
+    // Пользовательская папка — это ФИЛЬТР по правилам, встроенные — по типу чата.
+    val folder = model.folderById(activeFilter)
+    val showDm = folder != null || activeFilter == "all" || activeFilter == "dm"
+    val showRoom = folder != null || activeFilter == "all" || activeFilter == "room"
+    val dmList = if (folder == null) model.contacts else model.contacts.filter { model.folderHasDm(folder, it.key) }
+    val groupList = if (folder == null) model.groups else model.groups.filter { model.folderHasGroup(folder, it.gid) }
 
     Column(Modifier.fillMaxSize()) {
         // Очередь недоставленного разрослась. НИЧЕГО не удаляем — сообщения ждут
@@ -115,7 +119,7 @@ internal fun ContactsScreen(
                 }
                 // Комнаты — наверху, если фильтр позволяет
                 if (showRoom) {
-                    items(model.groups, key = { "g_${it.gid}" }) { g ->
+                    items(groupList, key = { "g_${it.gid}" }) { g ->
                         val presenceCount = model.groupPresence[g.gid]?.size ?: 0
                         val inRoom = model.currentRoom == g.gid
                         ListRow(onClick = { onOpenGroup(g.gid) }) {
@@ -142,7 +146,7 @@ internal fun ContactsScreen(
                 }
                 // DM-контакты
                 if (showDm) {
-                    items(model.contacts, key = { "c_${it.key}" }) { c ->
+                    items(dmList, key = { "c_${it.key}" }) { c ->
                         val online = model.online[c.key] == true
                         ListRow(onClick = { onOpenDm(c.key) }) {
                             SquareAvatar(c.displayName, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c.avatarId])

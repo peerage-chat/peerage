@@ -243,6 +243,30 @@ impl OutboxManager {
         OutboxStats { pending: entries.len(), bytes, peers: peers.len() }
     }
 
+    /// Разбивка очереди по получателям: (пир, сколько ждёт, сколько байт, время
+    /// самой старой записи). Экран очереди показывает именно её — сумма «1248»
+    /// бесполезна, пока не видно, кому именно не доходит.
+    pub fn per_peer(&self) -> Vec<([u8; 32], usize, usize, i64)> {
+        let entries = self.store.pending_all().unwrap_or_default();
+        let mut by: std::collections::HashMap<[u8; 32], (usize, usize, i64)> = std::collections::HashMap::new();
+        for e in entries {
+            let slot = by.entry(e.peer).or_insert((0, 0, i64::MAX));
+            slot.0 += 1;
+            slot.1 += e.payload.len();
+            slot.2 = slot.2.min(e.created_at);
+        }
+        let mut out: Vec<_> = by.into_iter().map(|(p, (n, b, t))| (p, n, b, t)).collect();
+        // Самый «тяжёлый» получатель первым: с него и начнут разбираться.
+        out.sort_by(|a, b| b.1.cmp(&a.1));
+        out
+    }
+
+    /// Сбросить очередь ВСЕМ. Явное действие с двойным подтверждением в UI.
+    pub fn clear_all(&self) -> usize {
+        let peers: Vec<[u8; 32]> = self.per_peer().into_iter().map(|(p, ..)| p).collect();
+        peers.iter().map(|p| self.clear_peer(p)).sum()
+    }
+
     /// Доставка подтверждена (Ack) — снять из очереди.
     pub fn on_ack(&self, peer: &[u8; 32], msg_id: u64) {
         let _ = self.store.remove_by_msg(peer, msg_id);

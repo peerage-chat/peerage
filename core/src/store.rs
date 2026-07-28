@@ -662,6 +662,28 @@ impl MessageStore {
             .is_ok()
     }
 
+    /// Вложения всех чатов: (пир, blob_id, kind, размер). Нужна экрану «Хранилище»,
+    /// чтобы показать, ЧТО занимает место и в каком чате, а не только общую цифру.
+    pub fn attachments(&self) -> Vec<([u8; 32], String, String, i64)> {
+        let conn = db::lock(&self.db);
+        let mut stmt = match conn.prepare(
+            "SELECT peer, blob_id, kind, size FROM messages WHERE blob_id <> '' ORDER BY time DESC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = stmt.query_map([], |r| {
+            let peer: Vec<u8> = r.get(0)?;
+            Ok((
+                <[u8; 32]>::try_from(peer.as_slice()).unwrap_or([0u8; 32]),
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        });
+        rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
     pub fn history(&self, peer: &[u8; 32]) -> Vec<StoredMessage> {
         let conn = db::lock(&self.db);
         let mut stmt = match conn.prepare(

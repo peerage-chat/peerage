@@ -128,7 +128,7 @@ internal fun CenterMessage(text: String) {
     }
 }
 
-internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage }
+internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit }
 
 /** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
  *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
@@ -149,6 +149,8 @@ private fun Root(model: AppModel, width: WidthClass) {
 @Composable
 private fun CompactShell(model: AppModel) {
     var screen by remember { mutableStateOf(Screen.Contacts) }
+    // id редактируемой папки (null — создаём новую).
+    var editFolder by remember { mutableStateOf<String?>(null) }
     // ADR-004: нас отозвали из открытой группы (currentGroup → null) — уходим на список.
     LaunchedEffect(model.currentGroup) {
         if (model.currentGroup == null && (screen == Screen.GroupChat || screen == Screen.AddMember)) {
@@ -198,10 +200,14 @@ private fun CompactShell(model: AppModel) {
                     // ── Шапка: конфигурируется по текущему экрану ─────────────────────
                     when (screen) {
                         Screen.Contacts -> TopBar(
-                            if (activeFilter == "all") stringResource(R.string.nav_chats) else stringResource(folderLabel(activeFilter)),
+                            if (activeFilter == "all") stringResource(R.string.nav_chats) else folderTitle(model, activeFilter),
                             onMenu = { scope.launch { drawerState.open() } },
                         ) {
-                            PeerIndicator(model.netPeers) { model.startBenchRecv() }
+                            PeerIndicator(
+                                model.netPeers,
+                                onTap = { screen = Screen.Network },
+                                onLongPress = { model.startBenchRecv() },
+                            )
                             BarIcon(TablerIcons.Search, stringResource(R.string.cd_search)) { screen = Screen.Search }
                         }
                         Screen.Chat -> ChatTopBar(
@@ -234,11 +240,19 @@ private fun CompactShell(model: AppModel) {
                         }
                         Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = { screen = Screen.Contacts })
                         Screen.Storage -> TopBar(stringResource(R.string.menu_storage), onBack = { screen = Screen.Contacts })
+                        Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = { screen = Screen.Network })
+                        Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = { screen = Screen.Contacts })
+                        Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = { screen = Screen.Folders })
                         Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = { screen = Screen.Contacts })
                     }
                     // ── Рейл папок: только на главном экране ────────────────────────
                     if (screen == Screen.Contacts) {
-                        FolderRail(model, activeFilter) { activeFilter = it }
+                        FolderRail(
+                            model,
+                            activeFilter,
+                            onFilter = { activeFilter = it },
+                            onManage = { screen = Screen.Folders },
+                        )
                     }
                     // ── Контент экрана (без шапки) ────────────────────────────────────
                     Box(Modifier.weight(1f)) {
@@ -289,9 +303,22 @@ private fun CompactShell(model: AppModel) {
                                 screen = Screen.Chat
                             }
                             Screen.Calls -> CallsScreen()
-                            Screen.Network -> NetworkScreen(model) { screen = Screen.Me }
+                            Screen.Network -> NetworkScreen(
+                                model,
+                                onMyQr = { screen = Screen.Me },
+                                onOpenOutbox = { screen = Screen.Outbox },
+                            )
                             Screen.Saved -> SavedScreen()
                             Screen.Storage -> StorageScreen(model)
+                            Screen.Folders -> FoldersScreen(model) { id ->
+                                editFolder = id
+                                screen = Screen.FolderEdit
+                            }
+                            Screen.FolderEdit -> FolderEditorScreen(model, editFolder) { screen = Screen.Folders }
+                            Screen.Outbox -> OutboxScreen(model) { peer ->
+                                model.openChat(peer)
+                                screen = Screen.Chat
+                            }
                             Screen.Search -> SearchScreen(
                                 model,
                                 onOpenDm = {

@@ -65,6 +65,12 @@ object Native {
     /** Скачать вложение по кнопке. Готовность придёт событием `blob_received`. */
     external fun downloadMedia(sessionPtr: Long, peerHex: String, blobIdHex: String): Boolean
 
+    /** Очередь отправки по получателям (JSON-массив). */
+    external fun outboxByPeer(sessionPtr: Long): String
+
+    /** Сбросить очередь всем. Возвращает число удалённых записей. */
+    external fun clearOutboxAll(sessionPtr: Long): Int
+
     /** Заказанные докачки (JSON-массив hex-id) — переживают перезапуск. */
     external fun wantedBlobs(sessionPtr: Long): String
 
