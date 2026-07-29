@@ -121,6 +121,9 @@ object Native {
     /** Прочитать сохранённый блоб по hex-id. Пустой массив, если нет. */
     external fun blobRead(sessionPtr: Long, idHex: String): ByteArray
 
+    /** Есть ли блоб локально — без чтения байт (у крупного это гигабайт в память). */
+    external fun blobExists(sessionPtr: Long, idHex: String): Boolean
+
     /** Добавить контакт (TOFU). Возвращает "added" | "known" | "error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
 
@@ -199,6 +202,10 @@ object Native {
         content: ByteArray,
         mime: String,
         name: String,
+        durationMs: Int,
+        width: Int,
+        height: Int,
+        thumb: ByteArray,
         caption: String,
     )
 
@@ -209,6 +216,10 @@ object Native {
         path: String,
         mime: String,
         name: String,
+        durationMs: Int,
+        width: Int,
+        height: Int,
+        thumb: ByteArray,
         caption: String,
     )
 

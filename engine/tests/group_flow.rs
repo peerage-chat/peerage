@@ -9,6 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use p2p_core::Identity;
 use p2p_engine::groups::GroupManager;
+use p2p_engine::MediaBody;
 use p2p_messenger::{loopback::LoopbackNet, Config, Event, Messenger};
 
 fn id(n: u8) -> Identity {
@@ -123,7 +124,17 @@ fn invite_join_flow_over_loopback() {
 #[test]
 fn group_media_message_propagates() {
     let mut ctx = setup_and_join(0);
-    assert!(ctx.gm_a.send_media(&ctx.gid, "image", "abcd1234", "image/jpeg", "photo.jpg", "подпись в группе"));
+    let media = MediaBody {
+        kind: "image".into(),
+        hash: "abcd1234".into(),
+        mime: "image/jpeg".into(),
+        name: "photo.jpg".into(),
+        caption: "подпись в группе".into(),
+        size: 900_000_000,
+        thumb: "beef".into(),
+        ..Default::default()
+    };
+    assert!(ctx.gm_a.send_media(&ctx.gid, &media));
 
     let field = |gm: &GroupManager, gid: &[u8], key: &str| -> Option<String> {
         let h: serde_json::Value = serde_json::from_str(&gm.history_json(gid)).ok()?;
@@ -137,6 +148,22 @@ fn group_media_message_propagates() {
     assert!(got, "B получил групповое медиа-сообщение");
     assert_eq!(field(&ctx.gm_b, &ctx.gid, "mime").as_deref(), Some("image/jpeg"));
     assert_eq!(field(&ctx.gm_b, &ctx.gid, "name").as_deref(), Some("photo.jpg"));
+    // Размер и превью едут В САМОМ сообщении: без них получателю нечего показать
+    // вместо молчаливой докачки, и карточка «скачать» невозможна.
+    let num = |gm: &GroupManager, key: &str| -> Option<u64> {
+        let h: serde_json::Value = serde_json::from_str(&gm.history_json(&ctx.gid)).ok()?;
+        h.as_array()?.iter().find(|m| m["kind"] == "image").and_then(|m| m[key].as_u64())
+    };
+    assert_eq!(num(&ctx.gm_b, "size"), Some(900_000_000));
+    assert_eq!(field(&ctx.gm_b, &ctx.gid, "thumb_id").as_deref(), Some("beef"));
+    // Чужое вложение не считается скачанным, пока байты не приехали.
+    assert_eq!(
+        {
+            let h: serde_json::Value = serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
+            h.as_array().unwrap().iter().find(|m| m["kind"] == "image").unwrap()["downloaded"].as_bool()
+        },
+        Some(false),
+    );
     // Подпись едет ВНУТРИ того же MLS-сообщения, а не отдельным текстом следом.
     assert_eq!(field(&ctx.gm_b, &ctx.gid, "text").as_deref(), Some("подпись в группе"));
 

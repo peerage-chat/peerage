@@ -557,7 +557,15 @@ internal fun MessageBubble(
             Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
                 Column {
                     when {
-                        isPending -> PendingAttachmentCard(m, model)
+                        isPending -> PendingAttachmentCard(
+                            model,
+                            m.kind,
+                            m.name,
+                            m.size,
+                            m.durationMs,
+                            m.thumbId,
+                            m.blobId,
+                        ) { model.currentChat?.let { model.downloadMedia(it, m.blobId) } }
                         else -> when (m.kind) {
                             "image" -> ImageAttachment(blobBytes) { viewer = true }
                             "voice" -> VoiceAttachment(blobBytes)
@@ -731,11 +739,20 @@ private fun openWithSystem(ctx: android.content.Context, name: String, bytes: By
  *  чужое видео на 800 МБ не съедает его трафик само. Всё показанное здесь приходит в
  *  самом сообщении, до единого байта содержимого. */
 @Composable
-private fun PendingAttachmentCard(m: Message, model: AppModel) {
-    val thumb = if (m.thumbId.isNotEmpty()) model.mediaBlobs[m.thumbId] else null
+internal fun PendingAttachmentCard(
+    model: AppModel,
+    kind: String,
+    name: String,
+    size: Long,
+    durationMs: Int,
+    thumbId: String,
+    blobId: String,
+    onDownload: () -> Unit,
+) {
+    val thumb = if (thumbId.isNotEmpty()) model.mediaBlobs[thumbId] else null
     // Состояние докачки живёт в движке, а не в этом composable: заказ персистентный,
     // продолжается сам при появлении пира и переживает перезапуск. Отсюда — только показ.
-    val progress = model.downloads[m.blobId]
+    val progress = model.downloads[blobId]
     Row(
         Modifier.padding(end = 44.dp).widthIn(min = 180.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -750,13 +767,13 @@ private fun PendingAttachmentCard(m: Message, model: AppModel) {
             if (bmp != null) {
                 Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
-                Icon(kindIcon(m.kind), null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+                Icon(kindIcon(kind), null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
             }
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f, fill = false)) {
             Text(
-                m.name.ifBlank { stringResource(R.string.chat_file) },
+                name.ifBlank { stringResource(R.string.chat_file) },
                 color = Color.White,
                 fontSize = 14.sp,
                 maxLines = 1,
@@ -764,8 +781,8 @@ private fun PendingAttachmentCard(m: Message, model: AppModel) {
             )
             Text(
                 buildList {
-                    if (m.durationMs > 0) add(fmtDuration(m.durationMs))
-                    if (m.size > 0) add(fmtSizeLong(m.size))
+                    if (durationMs > 0) add(fmtDuration(durationMs))
+                    if (size > 0) add(fmtSizeLong(size))
                 }.joinToString(" · "),
                 color = HoloSecondary,
                 fontSize = 11.sp,
@@ -787,7 +804,7 @@ private fun PendingAttachmentCard(m: Message, model: AppModel) {
                         modifier = Modifier.size(22.dp),
                         strokeWidth = 2.dp,
                     )
-                else -> IconButton(onClick = { model.currentChat?.let { model.downloadMedia(it, m.blobId) } }) {
+                else -> IconButton(onClick = onDownload) {
                     Icon(Icons.Filled.Download, stringResource(R.string.chat_download), tint = HoloAccent)
                 }
             }

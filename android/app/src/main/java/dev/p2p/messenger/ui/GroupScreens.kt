@@ -5,6 +5,8 @@ package dev.p2p.messenger.ui
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -56,11 +58,14 @@ private fun sendGroupUriAttachment(
         // целиком. Всё остальное — потоком, как в личке.
         if (mime.startsWith("image/")) {
             val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
-            model.sendGroupMedia(gid, bytes, mime, name, caption)
+            model.sendGroupMedia(gid, bytes, mime, name, MediaMeta.extract(ctx, uri, mime, bytes), caption)
             return@launch
         }
+        // Метаданные (длительность/кадр/превью) достаём здесь: без них у участников
+        // будет карточка «скачать» без единой подсказки, что именно им предлагают.
         val cached = cacheFromUri(ctx, uri, name) ?: return@launch
-        model.sendGroupMediaFile(gid, cached.absolutePath, mime, name, caption)
+        val meta = MediaMeta.extract(ctx, uri, mime, ByteArray(0))
+        model.sendGroupMediaFile(gid, cached.absolutePath, mime, name, meta, caption)
     }
 }
 
@@ -373,12 +378,29 @@ internal fun GroupBubble(
                     modifier = Modifier.padding(end = bubbleTimeReserve(false)),
                 )
             }
-            when (m.kind) {
-                "image" -> ImageAttachment(blobBytes) { viewer = true }
-                "voice" -> VoiceAttachment(blobBytes)
-                "file" -> FileAttachment(m.name, blobBytes)
-                // Текст резервирует справа место под время → время оверлеем без наложения.
-                else -> Text(m.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = bubbleTimeReserve(false)))
+            // Крупное вложение в группе не качается само: карточка с именем/размером/
+            // превью и кнопкой — решение принимает получатель, а не тот, кто отправил
+            // видео сразу пятерым (то же правило, что в DM).
+            val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
+            Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
+                when {
+                    isPending -> PendingAttachmentCard(
+                        model,
+                        m.kind,
+                        m.name,
+                        m.size,
+                        m.durationMs,
+                        m.thumbId,
+                        m.blobId,
+                    ) { model.downloadMedia(m.sender, m.blobId) }
+                    else -> when (m.kind) {
+                        "image" -> ImageAttachment(blobBytes) { viewer = true }
+                        "voice" -> VoiceAttachment(blobBytes)
+                        "file" -> FileAttachment(m.name, blobBytes)
+                        // Текст резервирует справа место под время → время оверлеем без наложения.
+                        else -> Text(m.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = bubbleTimeReserve(false)))
+                    }
+                }
             }
             // Подпись к вложению — в том же пузыре под содержимым: она пришла ОДНИМ
             // сообщением с файлом, значит и показывается как его часть.

@@ -48,6 +48,29 @@ class EngineEventTest {
         assertEquals("", ev.text)
     }
 
+    @Test fun group_media_carries_download_card_fields() {
+        // Групповое вложение приезжает вложенным объектом `media` — по нему рисуется
+        // карточка «скачать» ДО загрузки байт (крупное не тянется молча).
+        val json = """
+            {"type":"group_msg","gid":"ff","text":"подпись","sender":"aa","system":false,
+             "media":{"kind":"file","blob_id":"bb","mime":"video/mp4","name":"clip.mp4",
+                      "size":900,"duration_ms":12,"width":1,"height":2,"thumb_id":"cc",
+                      "downloaded":false,"auto":false}}
+        """.trimIndent()
+        val ev = parseEvent(json) as EngineEvent.GroupMsgEv
+        val md = ev.media!!
+        assertEquals("подпись", ev.text)
+        assertEquals("bb", md.blobId)
+        assertEquals(900L, md.size)
+        assertEquals("cc", md.thumbId)
+        assertEquals(false, md.auto)
+    }
+
+    @Test fun group_text_has_no_media_object() {
+        val ev = parseEvent("""{"type":"group_msg","gid":"ff","text":"привет","sender":"aa"}""")
+        assertEquals(null, (ev as EngineEvent.GroupMsgEv).media)
+    }
+
     @Test fun unknown_event_type_is_not_a_crash() {
         // Движок может начать слать событие раньше, чем клиент научится его
         // показывать. Это не повод ронять поток разбора.

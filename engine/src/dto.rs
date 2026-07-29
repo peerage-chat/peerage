@@ -156,32 +156,39 @@ pub enum UiEvent {
         sender: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         system: Option<bool>,
+        /// Вложение: отдельным объектом, а не десятком плоских опций рядом с
+        /// текстовыми полями — набор полей карточки один и тот же, где бы она ни
+        /// показывалась.
         #[serde(skip_serializing_if = "Option::is_none")]
-        kind: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        blob_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        mime: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        name: Option<String>,
+        media: Option<GroupMediaEv>,
     },
+}
+
+/// Вложение группового сообщения в событии. Повторяет поля карточки из DM: имя,
+/// размер, превью — всё известно ДО загрузки байт, иначе нечего показывать вместо
+/// автоматической докачки.
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupMediaEv {
+    pub kind: String,
+    pub blob_id: String,
+    pub mime: String,
+    pub name: String,
+    pub size: u64,
+    pub duration_ms: u32,
+    pub width: u32,
+    pub height: u32,
+    pub thumb_id: String,
+    /// Байты уже лежат локально.
+    pub downloaded: bool,
+    /// Мелкое тянем сразу; крупное ждёт кнопки.
+    pub auto: bool,
 }
 
 impl UiEvent {
     /// Эхо своего группового сообщения: клиент по нему перечитывает историю,
     /// потому что blob_id считается в движке (по очищенным байтам).
     pub fn group_msg_mine(gid: String) -> Self {
-        Self::GroupMsg {
-            gid,
-            mine: true,
-            text: None,
-            sender: None,
-            system: None,
-            kind: None,
-            blob_id: None,
-            mime: None,
-            name: None,
-        }
+        Self::GroupMsg { gid, mine: true, text: None, sender: None, system: None, media: None }
     }
 }
 
@@ -217,6 +224,33 @@ mod tests {
         assert_eq!(
             UiEvent::group_msg_mine("ff".into()).to_json(),
             r#"{"type":"group_msg","gid":"ff","mine":true}"#
+        );
+
+        // Входящее групповое с вложением: карточка приезжает целиком (имя, размер,
+        // превью, auto) — по ней клиент решает, рисовать «скачать» или спиннер.
+        let ev = UiEvent::GroupMsg {
+            gid: "ff".into(),
+            mine: false,
+            text: Some("подпись".into()),
+            sender: Some("aa".into()),
+            system: Some(false),
+            media: Some(GroupMediaEv {
+                kind: "file".into(),
+                blob_id: "bb".into(),
+                mime: "video/mp4".into(),
+                name: "clip.mp4".into(),
+                size: 900,
+                duration_ms: 12,
+                width: 1,
+                height: 2,
+                thumb_id: "cc".into(),
+                downloaded: false,
+                auto: false,
+            }),
+        };
+        assert_eq!(
+            ev.to_json(),
+            r#"{"type":"group_msg","gid":"ff","text":"подпись","sender":"aa","system":false,"media":{"kind":"file","blob_id":"bb","mime":"video/mp4","name":"clip.mp4","size":900,"duration_ms":12,"width":1,"height":2,"thumb_id":"cc","downloaded":false,"auto":false}}"#
         );
     }
 

@@ -140,6 +140,14 @@ data class GroupMsg(
     val blobId: String = "",
     val mime: String = "",
     val name: String = "",
+    /** Метаданные карточки: известны ДО загрузки байт (имя/размер/превью). */
+    val size: Long = 0,
+    val durationMs: Int = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    val thumbId: String = "",
+    /** Байты вложения уже у нас (своё сообщение или докачано). */
+    val downloaded: Boolean = false,
 )
 
 /**
@@ -1365,7 +1373,11 @@ class AppModel private constructor() {
                     // движке — перечитываем историю, чтобы показать верный хэш.
                     if (currentGroup == ev.gid) loadGroupHistory(ev.gid)
                 } else {
-                    if (ev.blobId.isNotEmpty()) cacheBlob(ev.blobId) // M2: подтянуть вложение
+                    val md = ev.media
+                    // Вложение: байты берём из кэша, только если оно уже скачано —
+                    // крупное ждёт кнопки, и тянуть его «на всякий случай» нельзя.
+                    if (md != null && md.downloaded) cacheBlob(md.blobId)
+                    md?.thumbId?.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
                     groupLog(ev.gid).add(
                         GroupMsg(
                             ev.text,
@@ -1373,10 +1385,16 @@ class AppModel private constructor() {
                             time = System.currentTimeMillis() / 1000,
                             sender = ev.sender,
                             system = ev.system,
-                            kind = ev.kind,
-                            blobId = ev.blobId,
-                            mime = ev.mime,
-                            name = ev.name,
+                            kind = md?.kind ?: "text",
+                            blobId = md?.blobId.orEmpty(),
+                            mime = md?.mime.orEmpty(),
+                            name = md?.name.orEmpty(),
+                            size = md?.size ?: 0,
+                            durationMs = md?.durationMs ?: 0,
+                            width = md?.width ?: 0,
+                            height = md?.height ?: 0,
+                            thumbId = md?.thumbId.orEmpty(),
+                            downloaded = md?.downloaded ?: false,
                         ),
                     )
                 }
@@ -1794,10 +1812,24 @@ class AppModel private constructor() {
     }
 
     private fun loadGroupHistory(gid: String) {
+        // Флаг `downloaded` из истории уточняем фактом наличия блоба: своё вложение
+        // и всё скачанное до появления флага иначе показывалось бы карточкой
+        // «скачать». Проверка не читает байты — только наличие файла.
         val list = decodeList<GroupMsgDto>(Native.groupHistory(sessionPtr, gid)).map { it.toModel() }
+            .map {
+                if (!it.downloaded && it.blobId.isNotEmpty() && Native.blobExists(sessionPtr, it.blobId)) {
+                    it.copy(downloaded = true)
+                } else {
+                    it
+                }
+            }
         groupMessages[gid] = list.toMutableStateList()
-        // M2: подтянуть байты уже докачанных вложений (иначе — по blob_received).
-        list.forEach { if (it.blobId.isNotEmpty()) cacheBlob(it.blobId) }
+        // M2: подтянуть байты уже скачанных вложений (иначе — по blob_received);
+        // миниатюры — всегда, на них держится карточка ещё не скачанного.
+        list.forEach {
+            if (it.downloaded && it.blobId.isNotEmpty()) cacheBlob(it.blobId)
+            if (it.thumbId.isNotEmpty()) cacheBlob(it.thumbId)
+        }
     }
 
     private fun groupLog(gid: String): SnapshotStateList<GroupMsg> =
@@ -1827,9 +1859,13 @@ class AppModel private constructor() {
         content: ByteArray,
         mime: String,
         name: String,
+        meta: MediaMeta = MediaMeta(),
         caption: String = "",
     ) = ops.execute {
-        Native.groupSendMedia(sessionPtr, gid, content, mime, name, caption)
+        Native.groupSendMedia(
+            sessionPtr, gid, content, mime, name,
+            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+        )
     }
 
     /** Отправить в группу вложение ФАЙЛОМ (потоково). Файл должен пережить отдачу:
@@ -1839,9 +1875,13 @@ class AppModel private constructor() {
         path: String,
         mime: String,
         name: String,
+        meta: MediaMeta = MediaMeta(),
         caption: String = "",
     ) = ops.execute {
-        Native.groupSendMediaFile(sessionPtr, gid, path, mime, name, caption)
+        Native.groupSendMediaFile(
+            sessionPtr, gid, path, mime, name,
+            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+        )
     }
 
     // ── Диагностика: тест пропускной способности ─────────────────────────────

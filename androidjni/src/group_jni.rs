@@ -2,7 +2,7 @@
 //! движок; read-данные (list/history/members/presence) — снапшоты движка.
 
 use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jboolean, jlong, jstring, JNI_FALSE, JNI_TRUE};
+use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
 use p2p_engine::parse_key;
@@ -101,8 +101,30 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
     });
 }
 
-/// Отправить медиа-вложение в группу (M2): scrub + блоб всем + MLS-ссылка. Fire-and-forget.
+/// Собрать [`p2p_engine::MediaInfo`] из аргументов JNI (длительность/кадр/превью/
+/// подпись). Метаданные извлекает клиент — движок медиа не декодирует.
+fn media_info<'local>(
+    env: &mut JNIEnv<'local>,
+    duration_ms: jint,
+    width: jint,
+    height: jint,
+    thumb: &JByteArray<'local>,
+    caption: &JString<'local>,
+) -> p2p_engine::MediaInfo {
+    let thumb_bytes = env.convert_byte_array(thumb).unwrap_or_default();
+    p2p_engine::MediaInfo {
+        duration_ms: duration_ms.max(0) as u32,
+        width: width.max(0) as u32,
+        height: height.max(0) as u32,
+        thumb: (!thumb_bytes.is_empty()).then_some(thumb_bytes),
+        caption: jstr(env, caption),
+    }
+}
+
+/// Отправить медиа-вложение в группу (M2): scrub + MLS-ссылка всем. Мелкое движок
+/// пушит участникам сразу, крупное они запрашивают сами. Fire-and-forget.
 #[no_mangle]
+#[allow(clippy::too_many_arguments)]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMedia<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -111,6 +133,10 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMedia<'local>(
     content: JByteArray<'local>,
     mime: JString<'local>,
     name: JString<'local>,
+    duration_ms: jint,
+    width: jint,
+    height: jint,
+    thumb: JByteArray<'local>,
     caption: JString<'local>,
 ) {
     jni_safe!((), {
@@ -118,13 +144,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMedia<'local>(
         let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
         let bytes = env.convert_byte_array(&content).unwrap_or_default();
         if bytes.is_empty() { return; }
-        let (mime, name, caption) = (jstr(&mut env, &mime), jstr(&mut env, &name), jstr(&mut env, &caption));
-        e.group_send_media(gid, bytes, mime, name, caption);
+        let (mime, name) = (jstr(&mut env, &mime), jstr(&mut env, &name));
+        let info = media_info(&mut env, duration_ms, width, height, &thumb, &caption);
+        e.group_send_media(gid, bytes, mime, name, info);
     });
 }
 
 /// Отправить в группу вложение ФАЙЛОМ (потоково). Fire-and-forget.
 #[no_mangle]
+#[allow(clippy::too_many_arguments)]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMediaFile<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -133,14 +161,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMediaFile<'local>(
     path: JString<'local>,
     mime: JString<'local>,
     name: JString<'local>,
+    duration_ms: jint,
+    width: jint,
+    height: jint,
+    thumb: JByteArray<'local>,
     caption: JString<'local>,
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
         let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
         let path = std::path::PathBuf::from(jstr(&mut env, &path));
-        let (mime, name, caption) = (jstr(&mut env, &mime), jstr(&mut env, &name), jstr(&mut env, &caption));
-        e.group_send_media_file(gid, path, mime, name, caption);
+        let (mime, name) = (jstr(&mut env, &mime), jstr(&mut env, &name));
+        let info = media_info(&mut env, duration_ms, width, height, &thumb, &caption);
+        e.group_send_media_file(gid, path, mime, name, info);
     });
 }
 

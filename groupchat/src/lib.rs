@@ -27,35 +27,45 @@ enum AppMsg {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "media")]
-    Media {
-        kind: String,
-        hash: String,
-        mime: String,
-        name: String,
-        /// Подпись к вложению. Внутри того же сообщения, а не отдельным текстом:
-        /// иначе «фото с подписью» — два MLS-сообщения подряд, и наблюдатель узнаёт
-        /// их по характерной паре (то же соображение, что и в DM, см. protocol-spec).
-        caption: String,
-    },
+    Media(MediaBody),
     /// Служебное: имя группы. Админ шлёт его новому участнику после add, чтобы тот
     /// увидел настоящее название, а не дефолт (в UI не показывается как сообщение).
     #[serde(rename = "name")]
     Name { name: String },
 }
 
+/// Медиа-вложение группового сообщения: ссылка на блоб плюс всё, что нужно
+/// карточке «скачать» ДО единого байта содержимого — имя, размер, превью.
+///
+/// Размер здесь не для красоты: без него получатель не может решить, тянуть ли
+/// вложение молча, и чужое видео на 800 МБ приезжает само (в DM это решается
+/// такими же полями `MediaMeta`).
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct MediaBody {
+    pub kind: String,
+    /// hex контент-адреса блоба с содержимым.
+    pub hash: String,
+    pub mime: String,
+    pub name: String,
+    /// Подпись к вложению. Внутри того же сообщения, а не отдельным текстом:
+    /// иначе «фото с подписью» — два MLS-сообщения подряд, и наблюдатель узнаёт
+    /// их по характерной паре (то же соображение, что и в DM, см. protocol-spec).
+    pub caption: String,
+    pub size: u64,
+    pub duration_ms: u32,
+    pub width: u32,
+    pub height: u32,
+    /// hex блоба-миниатюры (пусто — нет). Едет отдельным мелким блобом: вшить её
+    /// сюда нельзя — тело раздулось бы и вышло из бакета паддинга (M5).
+    pub thumb: String,
+}
+
 /// Результат обработки входящего группового сообщения — для показа в UI.
 pub enum Inbound {
     /// Прикладное сообщение: отправитель + текст.
     Message { sender: PeerKey, text: String },
-    /// Медиа-сообщение (M2): отправитель + ссылка на блоб по хэшу + подпись.
-    Media {
-        sender: PeerKey,
-        kind: String,
-        hash: String,
-        mime: String,
-        name: String,
-        caption: String,
-    },
+    /// Медиа-сообщение (M2): отправитель + ссылка на блоб с метаданными карточки.
+    Media { sender: PeerKey, media: MediaBody },
     /// Имя группы (служебное): верхний слой обновляет название, без показа в чате.
     Name { name: String },
     /// Изменён состав группы (применён Commit), его применил actor.
@@ -176,21 +186,11 @@ impl GroupChat {
     }
 
     /// Отправить медиа-сообщение (M2): ссылка на блоб по хэшу. Байты блоба идут
-    /// отдельно (движок пушит их каждому участнику). `hash` — hex.
-    pub fn send_media(
-        &mut self,
-        kind: &str,
-        hash: &str,
-        mime: &str,
-        name: &str,
-        caption: &str,
-    ) -> Result<(), GroupChatError> {
-        self.send_app(&AppMsg::Media {
-            kind: kind.to_string(), hash: hash.to_string(),
-            mime: mime.to_string(), name: name.to_string(),
-            // Режем здесь, а не в UI: за размер шифруемого тела отвечает этот слой.
-            caption: truncate_caption(caption),
-        })
+    /// отдельно (движок решает, пушить их или ждать запроса получателя).
+    pub fn send_media(&mut self, media: &MediaBody) -> Result<(), GroupChatError> {
+        // Подпись режем здесь, а не в UI: за размер шифруемого тела отвечает этот слой.
+        let body = MediaBody { caption: truncate_caption(&media.caption), ..media.clone() };
+        self.send_app(&AppMsg::Media(body))
     }
 
     /// Разослать имя группы участникам (служебное). Админ зовёт после добавления
@@ -223,8 +223,10 @@ impl GroupChat {
                 // M2: тело — JSON-envelope (текст/медиа); старое сырое-UTF-8 → текст.
                 Ok(match serde_json::from_slice::<AppMsg>(&body) {
                     Ok(AppMsg::Text { text }) => Inbound::Message { sender, text },
-                    Ok(AppMsg::Media { kind, hash, mime, name, caption }) => {
-                        Inbound::Media { sender, kind, hash, mime, name, caption: truncate_caption(&caption) }
+                    Ok(AppMsg::Media(media)) => {
+                        // Режем и на приёме: отправитель мог быть пропатчен.
+                        let caption = truncate_caption(&media.caption);
+                        Inbound::Media { sender, media: MediaBody { caption, ..media } }
                     }
                     Ok(AppMsg::Name { name }) => Inbound::Name { name },
                     Err(_) => Inbound::Message { sender, text: String::from_utf8_lossy(&body).into_owned() },

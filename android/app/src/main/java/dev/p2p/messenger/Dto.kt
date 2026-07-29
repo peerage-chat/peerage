@@ -92,6 +92,29 @@ internal data class GroupMsgDto(
     @SerialName("blob_id") val blobId: String = "",
     val mime: String = "",
     val name: String = "",
+    val size: Long = 0,
+    @SerialName("duration_ms") val durationMs: Int = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    @SerialName("thumb_id") val thumbId: String = "",
+    val downloaded: Boolean = false,
+)
+
+/** Вложение группового сообщения в событии — отдельным объектом, как в `dto.rs`. */
+@Serializable
+internal data class GroupMediaDto(
+    val kind: String = "file",
+    @SerialName("blob_id") val blobId: String = "",
+    val mime: String = "",
+    val name: String = "",
+    val size: Long = 0,
+    @SerialName("duration_ms") val durationMs: Int = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    @SerialName("thumb_id") val thumbId: String = "",
+    val downloaded: Boolean = false,
+    /** Мелкое качается само; крупное ждёт кнопки. */
+    val auto: Boolean = false,
 )
 
 @Serializable
@@ -237,6 +260,12 @@ internal fun GroupMsgDto.toModel() = GroupMsg(
     blobId = blobId,
     mime = mime,
     name = name,
+    size = size,
+    durationMs = durationMs,
+    width = width,
+    height = height,
+    thumbId = thumbId,
+    downloaded = downloaded,
 )
 
 // ── События ─────────────────────────────────────────────────────────────────
@@ -314,10 +343,7 @@ internal sealed interface EngineEvent {
         val text: String = "",
         val sender: String = "",
         val system: Boolean = false,
-        val kind: String = "text",
-        @SerialName("blob_id") val blobId: String = "",
-        val mime: String = "",
-        val name: String = "",
+        val media: GroupMediaDto? = null,
     ) : EngineEvent
 
     @Serializable

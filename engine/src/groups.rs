@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use p2p_core::Identity;
 use p2p_group::peek_group_id;
-use p2p_groupchat::GroupChat;
+use p2p_groupchat::{GroupChat, MediaBody};
 use p2p_messenger::Messenger;
 
 fn now() -> i64 {
@@ -33,6 +33,15 @@ pub struct GMsg {
     pub blob_id: String,
     pub mime: String,
     pub name: String,
+    /// Метаданные карточки: известны ДО загрузки байт, по ним рисуется «скачать».
+    pub size: u64,
+    pub duration_ms: u32,
+    pub width: u32,
+    pub height: u32,
+    /// hex блоба-миниатюры (пусто — нет).
+    pub thumb_id: String,
+    /// Байты вложения уже у нас (своё сообщение или докачано).
+    pub downloaded: bool,
 }
 
 /// Строка списка групп для клиента.
@@ -399,30 +408,50 @@ impl GroupManager {
     /// Отправить медиа-вложение в группу (M2): MLS-сообщение со ссылкой на блоб.
     /// Байты блоба пушит вызывающий (engine) каждому участнику отдельно. Двигает
     /// sending-ratchet → save_group (как send_text). Возвращает участников для push.
-    pub fn send_media(
-        &mut self,
-        gid: &[u8],
-        kind: &str,
-        blob_id: &str,
-        mime: &str,
-        name: &str,
-        caption: &str,
-    ) -> bool {
+    pub fn send_media(&mut self, gid: &[u8], media: &MediaBody) -> bool {
         let Some(e) = self.groups.get_mut(gid) else { return false };
-        if e.chat.send_media(kind, blob_id, mime, name, caption).is_err() {
+        if e.chat.send_media(media).is_err() {
             return false;
         }
         let me = hex::encode(self.identity.public_key_bytes());
         e.messages.push(GMsg {
             mine: true, time: now(), sender: me,
             // Подпись живёт в `text`: у медиа это поле свободно, как и в DM.
-            text: caption.to_string(),
-            kind: kind.into(), blob_id: blob_id.into(), mime: mime.into(), name: name.into(),
+            text: media.caption.clone(),
+            kind: media.kind.clone(), blob_id: media.hash.clone(),
+            mime: media.mime.clone(), name: media.name.clone(),
+            size: media.size, duration_ms: media.duration_ms,
+            width: media.width, height: media.height,
+            thumb_id: media.thumb.clone(),
+            downloaded: true, // своё вложение уже у нас
             ..Default::default()
         });
         self.save_msgs(gid);
         self.save_group(gid);
         true
+    }
+
+    /// Отметить вложение скачанным во ВСЕХ группах: блоб контент-адресный, один и
+    /// тот же файл в разных чатах скачан разом (как `mark_downloaded` для DM).
+    /// Возвращает gid'ы, где что-то изменилось — верхний слой обновит кэш истории.
+    pub fn mark_downloaded(&mut self, blob_id_hex: &str) -> Vec<Vec<u8>> {
+        let mut touched = Vec::new();
+        for (gid, e) in self.groups.iter_mut() {
+            let mut changed = false;
+            for m in e.messages.iter_mut() {
+                if m.blob_id == blob_id_hex && !m.downloaded {
+                    m.downloaded = true;
+                    changed = true;
+                }
+            }
+            if changed {
+                touched.push(gid.clone());
+            }
+        }
+        for gid in &touched {
+            self.save_msgs(gid);
+        }
+        touched
     }
 
     /// Ротация собственного ключа группы (PCS, ADR-004). Двигает эпоху → save_group.
@@ -543,20 +572,26 @@ impl GroupManager {
                         sender: Some(sender_hex), ..Default::default()
                     }
                 }
-                Some(Ok(Inbound::Media { sender, kind, hash, mime, name, caption })) => {
+                Some(Ok(Inbound::Media { sender, media })) => {
                     let sender_hex = hex::encode(sender);
                     if let Some(e) = self.groups.get_mut(&gid) {
                         e.messages.push(GMsg {
                             mine: false, time: now(), sender: sender_hex.clone(),
-                            text: caption,
-                            kind: kind.clone(), blob_id: hash.clone(), mime: mime.clone(), name: name.clone(),
+                            text: media.caption.clone(),
+                            kind: media.kind.clone(), blob_id: media.hash.clone(),
+                            mime: media.mime.clone(), name: media.name.clone(),
+                            size: media.size, duration_ms: media.duration_ms,
+                            width: media.width, height: media.height,
+                            thumb_id: media.thumb.clone(),
+                            // Скачано ли — решит верхний слой (он знает хранилище блобов).
+                            downloaded: false,
                             ..Default::default()
                         });
                     }
                     self.save_msgs(&gid);
                     GroupOutcome {
                         gid: Some(gid.clone()), sender: Some(sender_hex),
-                        media: Some(GroupMediaRef { kind, blob_id: hash, mime, name }),
+                        media: Some(media),
                         ..Default::default()
                     }
                 }
@@ -722,15 +757,6 @@ pub struct GroupOutcome {
     pub removed: bool,
     /// Имя группы изменилось (пришло от админа) — UI обновить название в списке.
     pub renamed: bool,
-    /// Медиа-сообщение (M2): тип + ссылка на блоб. Пусто → не медиа.
-    pub media: Option<GroupMediaRef>,
-}
-
-/// Ссылка на медиа-вложение группового сообщения (M2).
-#[derive(Clone)]
-pub struct GroupMediaRef {
-    pub kind: String,
-    pub blob_id: String,
-    pub mime: String,
-    pub name: String,
+    /// Медиа-сообщение (M2): ссылка на блоб + метаданные карточки. Пусто → не медиа.
+    pub media: Option<MediaBody>,
 }

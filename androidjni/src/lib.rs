@@ -461,6 +461,22 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_blobRead<'local>(
     }
 }
 
+/// Есть ли блоб локально. Нужен, чтобы понять «скачано ли вложение», не читая его
+/// байты: у крупного файла такая проверка стоила бы гигабайта памяти.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_blobExists<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    id_hex: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let id = jstr(&mut env, &id_hex);
+        if e.blob_exists(&id) { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
 // ── Контакты (TOFU) ─────────────────────────────────────────────────────────
 
 /// Добавить контакт. Возвращает "added" | "known" | "error".
