@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jlleitschuh.gradle.ktlint")
 }
 
@@ -81,6 +82,7 @@ dependencies {
     implementation("androidx.compose.material3:material3-window-size-class")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     // QR-генерация (MeScreen) — ZXing core.
     implementation("com.google.zxing:core:3.5.3")

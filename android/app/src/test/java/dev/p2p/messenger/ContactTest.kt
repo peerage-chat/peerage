@@ -1,15 +1,16 @@
 package dev.p2p.messenger
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Юнит-тесты чистой логики контакта (M2): приоритет имени для показа и разбор JSON
- * движка. Без Android-фреймворка — гоняются на JVM (`./gradlew test`). Ловят рассинхрон
- * имён полей между Rust (`contacts_json`) и Kotlin, а также ошибки в приоритете имени.
+ * Юнит-тесты чистой логики контакта (M2): приоритет имени для показа и разбор
+ * ответов движка. Без Android-фреймворка — гоняются на JVM (`./gradlew test`).
+ *
+ * Разбор проверяется на СЫРОМ JSON, который отдаёт Rust: так тест ловит рассинхрон
+ * имён полей между `dto.rs` и `Dto.kt`, а не просто копирование структуры в себя.
  */
 class ContactTest {
     private val hex = "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
@@ -38,17 +39,15 @@ class ContactTest {
         assertEquals("Заметка", c.displayName)
     }
 
-    // ── fromJson: контракт полей с Rust ──────────────────────────────────────
+    // ── Разбор: контракт полей с Rust ────────────────────────────────────────
 
-    @Test fun fromJson_maps_all_fields() {
-        val o = JSONObject()
-            .put("key", hex)
-            .put("name", "Локальное")
-            .put("fingerprint", "write annual again")
-            .put("verified", true)
-            .put("profile_name", "Алиса")
-            .put("avatar_id", "ab12cd")
-        val c = Contact.fromJson(o)
+    @Test fun contact_json_maps_all_fields() {
+        val json = """
+            [{"key":"$hex","name":"Локальное","fingerprint":"write annual again",
+              "added":1700000000,"verified":true,"profile_name":"Алиса",
+              "avatar_id":"ab12cd","helpful":3}]
+        """.trimIndent()
+        val c = decodeList<ContactDto>(json).single().toModel()
         assertEquals(hex, c.key)
         assertEquals("Локальное", c.name)
         assertEquals("write annual again", c.fingerprint)
@@ -57,10 +56,9 @@ class ContactTest {
         assertEquals("ab12cd", c.avatarId)
     }
 
-    @Test fun fromJson_defaults_when_profile_fields_absent() {
+    @Test fun contact_json_defaults_when_profile_fields_absent() {
         // Старый контакт/движок без M2-полей — не должен падать, поля пустые.
-        val o = JSONObject().put("key", hex).put("name", "Боб")
-        val c = Contact.fromJson(o)
+        val c = decodeList<ContactDto>("""[{"key":"$hex","name":"Боб"}]""").single().toModel()
         assertEquals("Боб", c.name)
         assertEquals("", c.profileName)
         assertEquals("", c.avatarId)
@@ -69,10 +67,17 @@ class ContactTest {
         assertEquals("Боб", c.displayName)
     }
 
-    @Test fun fromJson_contact_with_only_self_name_shows_self_name() {
+    @Test fun contact_json_with_only_self_name_shows_self_name() {
         // Контакт добавлен без локальной заметки, но прислал самоназвание.
-        val o = JSONObject().put("key", hex).put("name", "").put("profile_name", "Charlie")
-        assertEquals("Charlie", Contact.fromJson(o).displayName)
+        val json = """[{"key":"$hex","name":"","profile_name":"Charlie"}]"""
+        assertEquals("Charlie", decodeList<ContactDto>(json).single().toModel().displayName)
+    }
+
+    @Test fun unknown_field_from_newer_engine_does_not_break_parsing() {
+        // Движок может добавить поле раньше, чем клиент про него узнает: старая
+        // сборка обязана продолжать читать список, а не падать на неизвестном ключе.
+        val json = """[{"key":"$hex","name":"Боб","future_field":42}]"""
+        assertEquals("Боб", decodeList<ContactDto>(json).single().name)
     }
 
     @Test fun auto_added_contact_shows_self_name_not_placeholder() {

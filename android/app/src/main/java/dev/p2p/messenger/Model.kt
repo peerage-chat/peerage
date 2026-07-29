@@ -55,20 +55,6 @@ data class Contact(
      *  (docs/architecture: приоритет local → profile_name → hex.) */
     val displayName: String
         get() = name.ifBlank { profileName.ifBlank { key.take(8) } }
-
-    companion object {
-        /** Разобрать один контакт из JSON движка (поля контракта: key/name/fingerprint/
-         *  verified/profile_name/avatar_id). Чистая функция — покрыта юнит-тестом,
-         *  ловит рассинхрон имён полей между Rust и Kotlin. */
-        fun fromJson(o: JSONObject) = Contact(
-            key = o.getString("key"),
-            name = o.getString("name"),
-            fingerprint = o.optString("fingerprint"),
-            verified = o.optBoolean("verified", false),
-            profileName = o.optString("profile_name"),
-            avatarId = o.optString("avatar_id"),
-        )
-    }
 }
 
 /** Входящий «запрос в контакты» от незнакомца (гейт вместо TOFU). Первое сообщение
@@ -81,15 +67,6 @@ data class ContactRequest(
     val time: Long,
 ) {
     val shortKey: String get() = key.take(8)
-
-    companion object {
-        fun fromJson(o: JSONObject) = ContactRequest(
-            key = o.getString("key"),
-            fingerprint = o.optString("fingerprint"),
-            preview = o.optString("preview"),
-            time = o.optLong("time"),
-        )
-    }
 }
 
 data class Message(
@@ -123,15 +100,7 @@ data class Me(val pubkey: String, val address: String, val fingerprint: String)
 data class Group(val gid: String, val name: String, val members: Int, val admin: Boolean = false)
 
 /** Входящее приглашение в группу (карточка на одобрение вместо тихого авто-входа). */
-data class GroupInvite(val gid: String, val name: String, val inviter: String) {
-    companion object {
-        fun fromJson(o: JSONObject) = GroupInvite(
-            gid = o.getString("gid"),
-            name = o.optString("name"),
-            inviter = o.optString("inviter"),
-        )
-    }
-}
+data class GroupInvite(val gid: String, val name: String, val inviter: String)
 
 /** Пир транспорта (адрес/направление/пинг/трафик) — из снапшота движка. */
 data class NetPeer(
@@ -406,9 +375,9 @@ class AppModel private constructor() {
         private set
 
     private fun refreshOutboxStats() {
-        val o = runCatching { JSONObject(Native.outboxStats(sessionPtr)) }.getOrNull() ?: return
-        outboxPending = o.optInt("pending", 0)
-        outboxWarn = o.optBoolean("warn", false)
+        val s = decodeOrNull<OutboxStatsDto>(Native.outboxStats(sessionPtr)) ?: return
+        outboxPending = s.pending
+        outboxWarn = s.warn
     }
 
     // ── Хранилище (простой экран; нормальный дизайн — позже) ──────────────────
@@ -428,21 +397,13 @@ class AppModel private constructor() {
         private set
 
     fun refreshStorage() = ops.execute {
-        val o = runCatching { JSONObject(Native.storageStats(sessionPtr)) }.getOrNull() ?: return@execute
-        storageBlobs = o.optLong("blobs", 0)
-        storageBlobBytes = o.optLong("blob_bytes", 0)
-        storageOutboxPending = o.optLong("outbox_pending", 0)
-        val kinds = o.optJSONObject("by_kind")
-        storageByKind = kinds?.keys()?.asSequence()
-            ?.map { it to kinds.optLong(it, 0) }
-            ?.sortedByDescending { it.second }
-            ?.toList() ?: emptyList()
-        val arr = o.optJSONArray("chats") ?: JSONArray()
-        storageChats = (0 until arr.length()).mapNotNull { i ->
-            arr.optJSONObject(i)?.let {
-                Triple(it.optString("peer"), it.optLong("files"), it.optLong("bytes"))
-            }
-        }
+        val st = decodeOrNull<StorageStatsDto>(Native.storageStats(sessionPtr)) ?: return@execute
+        storageBlobs = st.blobs
+        storageBlobBytes = st.blobBytes
+        storageOutboxPending = st.outboxPending
+        // Самый тяжёлый тип первым — полоса состава читается сверху вниз.
+        storageByKind = st.byKind.toList().sortedByDescending { it.second }
+        storageChats = st.chats.map { Triple(it.peer, it.files, it.bytes) }
     }
 
     /** Очередь по получателям: (ключ, сколько ждёт, байт, время самой старой записи). */
@@ -450,12 +411,8 @@ class AppModel private constructor() {
         private set
 
     fun refreshOutbox() = ops.execute {
-        val arr = runCatching { JSONArray(Native.outboxByPeer(sessionPtr)) }.getOrNull() ?: return@execute
-        outboxByPeer = (0 until arr.length()).mapNotNull { i ->
-            arr.optJSONObject(i)?.let {
-                OutboxPeer(it.optString("peer"), it.optInt("count"), it.optLong("bytes"), it.optLong("oldest"))
-            }
-        }
+        outboxByPeer = decodeList<OutboxPeerDto>(Native.outboxByPeer(sessionPtr))
+            .map { OutboxPeer(it.peer, it.count, it.bytes, it.oldest) }
         outboxPending = outboxByPeer.sumOf { it.count }
     }
 
@@ -484,18 +441,7 @@ class AppModel private constructor() {
     val notes = mutableStateListOf<Message>()
 
     fun refreshNotes() = ops.execute {
-        val arr = runCatching { JSONArray(Native.notes(sessionPtr)) }.getOrNull() ?: return@execute
-        val list = (0 until arr.length()).mapNotNull { i ->
-            arr.optJSONObject(i)?.let {
-                Message(
-                    id = it.optLong("id"),
-                    text = it.optString("text"),
-                    mine = true,
-                    time = it.optLong("time"),
-                    status = "",
-                )
-            }
-        }
+        val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
         notes.clear()
         notes.addAll(list)
     }
@@ -514,19 +460,8 @@ class AppModel private constructor() {
     val callLog = mutableStateListOf<CallEntry>()
 
     fun refreshCallLog() = ops.execute {
-        val arr = runCatching { JSONArray(Native.callLog(sessionPtr, 200)) }.getOrNull() ?: return@execute
-        val list = (0 until arr.length()).mapNotNull { i ->
-            arr.optJSONObject(i)?.let {
-                CallEntry(
-                    peer = it.optString("peer"),
-                    gid = it.optString("gid"),
-                    incoming = it.optBoolean("incoming"),
-                    outcome = it.optString("outcome"),
-                    started = it.optLong("started"),
-                    duration = it.optLong("duration"),
-                )
-            }
-        }
+        val list = decodeList<CallEntryDto>(Native.callLog(sessionPtr, 200))
+            .map { CallEntry(it.peer, it.gid, it.incoming, it.outcome, it.started, it.duration) }
         callLog.clear()
         callLog.addAll(list)
     }
@@ -920,17 +855,13 @@ class AppModel private constructor() {
         loadSettings()
         loadAudioPrefs()
         val vaultKey = VaultKeyManager.getOrCreate(File(dataDir))
-        val json = JSONObject(Native.start(dataDir, vaultKey))
-        if (json.has("error")) {
-            error = json.getString("error")
+        val started = decodeOrNull<StartResultDto>(Native.start(dataDir, vaultKey))
+        if (started == null || started.error != null || started.sessionPtr == 0L) {
+            error = started?.error ?: "engine start failed"
             return
         }
-        sessionPtr = json.getLong("session_ptr")
-        me = Me(
-            pubkey = json.getString("pubkey"),
-            address = json.getString("address"),
-            fingerprint = json.getString("fingerprint"),
-        )
+        sessionPtr = started.sessionPtr
+        me = Me(started.pubkey, started.address, started.fingerprint)
         refreshContactsNow()
         refreshRequestsNow()
         refreshGroupsNow()
@@ -1022,49 +953,37 @@ class AppModel private constructor() {
                         if (nowOnline && wasOnline != true) flushQueueFor(key)
                     }
                     if (benchRecv) {
-                        benchRecvMbps = JSONObject(Native.benchRecvStats(sessionPtr)).optDouble("mbps", 0.0)
+                        benchRecvMbps = decodeOrNull<BenchDto>(Native.benchRecvStats(sessionPtr))?.mbps ?: 0.0
                     }
                     // Очередь недоставленного: раз в ~10 тиков хватает (ничего не
                     // теряется, это только повод показать предупреждение).
                     if (tick % 10 == 0L) refreshOutboxStats()
                     // Снапшот стата сети — только на переднем плане (экран «Сеть»).
                     if (foreground) {
-                        val o = JSONObject(Native.netStats(sessionPtr))
-                        val pa = o.optJSONArray("peers") ?: JSONArray()
-                        val peers = (0 until pa.length()).map { i ->
-                            val p = pa.getJSONObject(i)
-                            NetPeer(
-                                p.optString("key"),
-                                p.optBoolean("inbound"),
-                                p.optBoolean("up"),
-                                p.optDouble("latency_ms"),
-                                p.optLong("rx_rate"),
-                                p.optLong("tx_rate"),
-                                p.optDouble("uptime_s"),
+                        decodeOrNull<NetStatsDto>(Native.netStats(sessionPtr))?.let { n ->
+                            netStats = NetStats(
+                                n.peerCount,
+                                n.tree,
+                                n.pingMs,
+                                n.rxRate,
+                                n.txRate,
+                                n.peers.map {
+                                    NetPeer(it.key, it.inbound, it.up, it.latencyMs, it.rxRate, it.txRate, it.uptimeS)
+                                },
                             )
                         }
-                        netStats = NetStats(
-                            o.optInt("peer_count"),
-                            o.optInt("tree"),
-                            o.optDouble("ping_ms"),
-                            o.optLong("rx_rate"),
-                            o.optLong("tx_rate"),
-                            peers,
-                        )
                     }
                     // Присутствие открытой группы «N уч · M в сети» — агрегат
                     // (ростер ∩ онлайн) считает движок, клиент лишь рендерит.
                     currentGroup?.let { gid ->
-                        val o = JSONObject(Native.groupPresence(sessionPtr, gid))
-                        currentGroupRoster = GroupRoster(o.optInt("total", 1), o.optInt("online", 1))
+                        decodeOrNull<GroupRosterDto>(Native.groupPresence(sessionPtr, gid))?.let {
+                            currentGroupRoster = GroupRoster(it.total, it.online)
+                        }
                     }
                     // Присутствие в комнате: кто сейчас внутри (по свежим маячкам).
                     currentRoom?.let { gid ->
-                        val arr = JSONArray(Native.roomParticipants(sessionPtr, gid))
-                        val list = (0 until arr.length()).map {
-                            val o = arr.getJSONObject(it)
-                            RoomMember(o.getString("peer"), o.optBoolean("audio"), o.optBoolean("video"))
-                        }
+                        val list = decodeList<RoomMemberDto>(Native.roomParticipants(sessionPtr, gid))
+                            .map { RoomMember(it.peer, it.audio, it.video) }
                         // Только при реальном изменении состава/флагов — иначе каждый тик
                         // (2с в звонке) форсит рекомпозицию всего экрана → рывок видео.
                         if (roomMembers != list) {
@@ -1076,11 +995,8 @@ class AppModel private constructor() {
                     // показывает кто уже в комнате до того как мы вошли.
                     groups.forEach { g ->
                         if (g.gid == currentRoom) return@forEach
-                        val arr = JSONArray(Native.roomPresencePeers(sessionPtr, g.gid))
-                        val list = (0 until arr.length()).map {
-                            val o = arr.getJSONObject(it)
-                            RoomMember(o.getString("peer"), o.optBoolean("audio"), o.optBoolean("video"))
-                        }
+                        val list = decodeList<RoomMemberDto>(Native.roomPresencePeers(sessionPtr, g.gid))
+                            .map { RoomMember(it.peer, it.audio, it.video) }
                         if (groupPresence[g.gid] != list) groupPresence[g.gid] = list
                     }
                     // Диагностика + авто-реконнект меша.
@@ -1122,17 +1038,15 @@ class AppModel private constructor() {
             while (running) {
                 if (currentRoom != null && sessionPtr != 0L) {
                     runCatching {
-                        val arr = JSONArray(Native.roomSpeakingPeers(sessionPtr))
-                        val set = (0 until arr.length()).map { arr.getString(it) }.toSet()
+                        val set = decodeList<String>(Native.roomSpeakingPeers(sessionPtr)).toSet()
                         if (speakingPeers != set) speakingPeers = set
                         // Трафик: скорость = дельта байт × 8 / dt.
-                        val tj = JSONObject(Native.roomTrafficJson(sessionPtr))
+                        val tj = decodeOrNull<Map<String, Long>>(Native.roomTrafficJson(sessionPtr)).orEmpty()
                         val now = System.currentTimeMillis()
                         val dt = ((now - prevT).coerceAtLeast(1)) / 1000.0
                         val cur = mutableMapOf<String, Long>()
                         val kbps = mutableMapOf<String, Int>()
-                        tj.keys().forEach { k ->
-                            val b = tj.getLong(k)
+                        tj.forEach { (k, b) ->
                             cur[k] = b
                             val pb = prevBytes[k] ?: b
                             kbps[k] = (((b - pb).coerceAtLeast(0)) * 8 / 1000 / dt).toInt()
@@ -1161,8 +1075,7 @@ class AppModel private constructor() {
     fun refreshContacts() = ops.execute { refreshContactsNow() }
 
     private fun refreshContactsNow() {
-        val arr = JSONArray(Native.listContacts(sessionPtr))
-        val list = (0 until arr.length()).map { Contact.fromJson(arr.getJSONObject(it)) }
+        val list = decodeList<ContactDto>(Native.listContacts(sessionPtr)).map { it.toModel() }
         contacts.clear()
         contacts.addAll(list)
         list.forEach { online.putIfAbsent(it.key, Native.isOnline(sessionPtr, it.key)) }
@@ -1183,20 +1096,9 @@ class AppModel private constructor() {
     }
 
     private fun loadHistory(key: String) {
-        val arr = JSONArray(Native.history(sessionPtr, key))
-        val list = (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            Message(
-                o.getLong("id"), o.optString("text"), o.getBoolean("mine"), o.getLong("time"), o.optString("status"),
-                o.optString("kind", "text"), o.optString("blob_id"), o.optString("mime"), o.optString("name"),
-                size = o.optLong("size", 0),
-                durationMs = o.optInt("duration_ms", 0),
-                width = o.optInt("width", 0),
-                height = o.optInt("height", 0),
-                thumbId = o.optString("thumb_id"),
-                downloaded = o.optBoolean("downloaded", false),
-            )
-        }.toMutableList()
+        val list = decodeList<MessageDto>(Native.history(sessionPtr, key))
+            .map { it.toModel() }
+            .toMutableList()
         // Queued messages (отрицательные localId) не сохраняются в БД — добавляем их обратно.
         synchronized(queueLock) { offlineQueueMap[key]?.toList() ?: emptyList() }
             .forEach { (text, ts) -> list.add(Message(--localMsgId, text, mine = true, time = ts, status = "queued")) }
@@ -1275,9 +1177,7 @@ class AppModel private constructor() {
 
     /** Подтянуть заказы, пережившие перезапуск (иначе карточка снова звала бы «Скачать»). */
     private fun loadWanted() {
-        val arr = runCatching { JSONArray(Native.wantedBlobs(sessionPtr)) }.getOrNull() ?: return
-        for (i in 0 until arr.length()) {
-            val id = arr.optString(i)
+        decodeList<String>(Native.wantedBlobs(sessionPtr)).forEach { id ->
             if (id.isNotEmpty() && !downloads.containsKey(id)) downloads[id] = DOWNLOAD_INIT
         }
     }
@@ -1316,8 +1216,8 @@ class AppModel private constructor() {
     fun refreshRequests() = ops.execute { refreshRequestsNow() }
 
     private fun refreshRequestsNow() {
-        val arr = JSONArray(Native.contactRequests(sessionPtr))
-        val list = (0 until arr.length()).map { ContactRequest.fromJson(arr.getJSONObject(it)) }
+        val list = decodeList<ContactRequestDto>(Native.contactRequests(sessionPtr))
+            .map { ContactRequest(it.key, it.fingerprint, it.preview, it.time) }
             .sortedByDescending { it.time }
         contactRequests.clear()
         contactRequests.addAll(list)
@@ -1347,127 +1247,108 @@ class AppModel private constructor() {
     /** Применить одно событие из ядра. Вызывается из [pollThread] (фон). */
     private fun applyEvent(json: String) {
         if (json.isEmpty()) return
-        val o = JSONObject(json)
-        when (o.getString("type")) {
-            "presence" -> {
-                val peer = o.getString("peer")
-                val wasOnline = online[peer]
-                val nowOnline = o.getBoolean("online")
-                online[peer] = nowOnline
-                if (nowOnline && wasOnline != true) flushQueueFor(peer)
-                if (contacts.none { it.key == peer }) refreshContactsNow()
+        // Разбор по ТИПУ, а не по строковым ключам: набор полей каждого события
+        // зафиксирован в Dto.kt и сверяется компилятором с dto.rs.
+        when (val ev = parseEvent(json)) {
+            is EngineEvent.Presence -> {
+                val wasOnline = online[ev.peer]
+                online[ev.peer] = ev.online
+                if (ev.online && wasOnline != true) flushQueueFor(ev.peer)
+                if (contacts.none { it.key == ev.peer }) refreshContactsNow()
             }
-            "text" -> {
-                val peer = o.getString("peer")
-                if (contacts.none { it.key == peer }) refreshContactsNow()
-                log(peer).add(Message(o.getLong("id"), o.getString("text"), mine = false, time = o.getLong("time"), status = ""))
-                if (currentChat != peer) unread[peer] = (unread[peer] ?: 0) + 1
+            is EngineEvent.Text -> {
+                if (contacts.none { it.key == ev.peer }) refreshContactsNow()
+                log(ev.peer).add(Message(ev.id, ev.text, mine = false, time = ev.time, status = ""))
+                if (currentChat != ev.peer) unread[ev.peer] = (unread[ev.peer] ?: 0) + 1
             }
-            // M2: входящее медиа-сообщение (ссылка на блоб; байты подтянутся блоб-каналом).
-            "media" -> {
-                val peer = o.getString("peer")
-                if (contacts.none { it.key == peer }) refreshContactsNow()
-                log(peer).add(
+            // M2: входящее медиа (ссылка на блоб; байты подтянутся блоб-каналом).
+            is EngineEvent.Media -> {
+                if (contacts.none { it.key == ev.peer }) refreshContactsNow()
+                log(ev.peer).add(
                     Message(
-                        o.getLong("id"), "", mine = false, time = o.getLong("time"), status = "",
-                        kind = o.optString("kind", "file"), blobId = o.optString("blob_id"),
-                        mime = o.optString("mime"), name = o.optString("name"),
-                        size = o.optLong("size", 0),
-                        durationMs = o.optInt("duration_ms", 0),
-                        width = o.optInt("width", 0),
-                        height = o.optInt("height", 0),
-                        thumbId = o.optString("thumb_id"),
-                        downloaded = o.optBoolean("downloaded", false),
+                        id = ev.id, text = "", mine = false, time = ev.time, status = "",
+                        kind = ev.kind, blobId = ev.blobId, mime = ev.mime, name = ev.name,
+                        size = ev.size, durationMs = ev.durationMs,
+                        width = ev.width, height = ev.height,
+                        thumbId = ev.thumbId, downloaded = ev.downloaded,
                     ),
                 )
                 // Миниатюра приходит отдельным мелким блобом — подтянем, если уже есть.
-                o.optString("thumb_id").takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
-                if (currentChat != peer) unread[peer] = (unread[peer] ?: 0) + 1
+                ev.thumbId.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
+                if (currentChat != ev.peer) unread[ev.peer] = (unread[ev.peer] ?: 0) + 1
             }
-            "ack" -> updateStatus(o.getString("peer"), o.getLong("id"), "delivered")
-            "undelivered" -> {
+            is EngineEvent.Ack -> updateStatus(ev.peer, ev.id, "delivered")
+            is EngineEvent.Undelivered -> {
                 // Rust ретраил 5 минут и не смог — передаём в Kotlin-очередь.
                 // Пир появится онлайн → flushQueueFor доставит автоматически.
-                val peer = o.getString("peer")
-                val id = o.getLong("id")
-                val l = messages[peer] ?: return
-                val idx = l.indexOfFirst { it.id == id && it.mine }
+                val l = messages[ev.peer] ?: return
+                val idx = l.indexOfFirst { it.id == ev.id && it.mine }
                 if (idx >= 0) {
                     val msg = l[idx]
                     l[idx] = msg.copy(status = "queued")
-                    enqueueOffline(peer, msg.text, msg.time)
+                    enqueueOffline(ev.peer, msg.text, msg.time)
                 }
             }
-            "room_invite" -> {
-                val peer = o.getString("peer")
-                val roomId = o.getString("room_id")
-                val audio = o.optBoolean("audio", true)
-                val video = o.optBoolean("video", false)
+            is EngineEvent.RoomInvite -> {
                 // Стабильная комната: если мы УЖЕ в этой комнате с этим пиром, он
                 // просто перезашёл — остаёмся в звонке, его возврат отразит presence.
                 // НЕ рвём звонок и не показываем промпт заново (иначе teardown +
                 // каскад decline — это и было «реентри ломает звонок»).
-                if (currentRoom == roomId && dmCallPeer == peer) return
+                if (currentRoom == ev.roomId && dmCallPeer == ev.peer) return
                 val existing = incomingCall
                 // Свободны — обычный входящий. Тот же собеседник перезванивает —
                 // обновляем экран входящего. От другого пира, пока заняты — игнор.
-                if (existing == null || existing.peer == peer) {
-                    incomingCall = IncomingRoomCall(peer, roomId, audio, video)
-                    val callerName = contacts.firstOrNull { it.key == peer }?.displayName
+                if (existing == null || existing.peer == ev.peer) {
+                    incomingCall = IncomingRoomCall(ev.peer, ev.roomId, ev.audio, ev.video)
+                    val callerName = contacts.firstOrNull { it.key == ev.peer }?.displayName
                         ?: appContext?.getString(R.string.common_contact).orEmpty()
                     appContext?.let { IncomingCallReceiver.show(it, callerName) }
                 }
             }
-            "room_decline" -> {
-                val peer = o.getString("peer")
-                if (peer == dmCallPeer) leaveRoom()
+            is EngineEvent.RoomDecline -> {
+                if (ev.peer == dmCallPeer) leaveRoom()
                 // Звонящий сбросил до того как мы ответили — гасим уведомление.
-                if (incomingCall?.peer == peer) {
+                if (incomingCall?.peer == ev.peer) {
                     incomingCall = null
                     appContext?.let { IncomingCallReceiver.cancel(it) }
                 }
             }
-            "room_presence" -> if (o.getString("gid") == currentRoom) {
+            is EngineEvent.RoomPresence -> if (ev.gid == currentRoom) {
                 // Мгновенно отражаем участника, не дожидаясь опроса тикером.
-                val peer = o.getString("peer")
-                if (o.optBoolean("left", false)) {
-                    roomMembers.removeAll { it.peer == peer } // явный выход — убрать сразу
+                if (ev.left) {
+                    roomMembers.removeAll { it.peer == ev.peer } // явный выход — убрать сразу
                 } else {
-                    val flags = o.optInt("flags", 0)
-                    val rm = RoomMember(peer, flags and 0b01 != 0, flags and 0b10 != 0)
-                    val idx = roomMembers.indexOfFirst { it.peer == peer }
+                    val rm = RoomMember(ev.peer, ev.flags and 0b01 != 0, ev.flags and 0b10 != 0)
+                    val idx = roomMembers.indexOfFirst { it.peer == ev.peer }
                     if (idx >= 0) roomMembers[idx] = rm else roomMembers.add(rm)
                 }
             }
-            // Гейт: незнакомец постучался — обновить очередь запросов (UI покажет карточку).
-            "contact_request" -> refreshRequestsNow()
+            // Гейт: незнакомец постучался — обновить очередь запросов (карточка в UI).
+            is EngineEvent.ContactRequestEv -> refreshRequestsNow()
             // Приглашение в группу пришло/принято/отклонено — обновить карточки.
-            "group_invites_changed" -> refreshGroupInvitesNow()
+            EngineEvent.GroupInvitesChanged -> refreshGroupInvitesNow()
             // M2: контакт прислал профиль (имя/аватар) → перечитать список.
-            "contacts_changed" -> refreshContactsNow()
-            // M2: докачался блоб. Аватар контакта — перечитать контакты; вложение чата —
+            EngineEvent.ContactsChanged -> refreshContactsNow()
+            is EngineEvent.BlobProgress -> {
+                if (ev.total > 0) downloads[ev.id] = ev.done / ev.total.toFloat()
+            }
+            // Докачался блоб: аватар контакта — перечитать контакты; вложение чата —
             // положить байты в реактивный кэш (пузырь перерисуется).
-            "blob_progress" -> {
-                val total = o.optInt("total", 0)
-                if (total > 0) downloads[o.optString("id")] = o.optInt("done") / total.toFloat()
+            is EngineEvent.BlobReceived -> {
+                downloads.remove(ev.id)
+                if (contacts.any { it.avatarId == ev.id }) refreshContactsNow()
+                cacheBlob(ev.id)
             }
-            "blob_received" -> {
-                val id = o.optString("id")
-                downloads.remove(id)
-                if (contacts.any { it.avatarId == id }) refreshContactsNow()
-                cacheBlob(id)
-            }
-            "groups_changed" -> {
+            EngineEvent.GroupsChanged -> {
                 refreshGroupsNow()
                 currentGroup?.let {
                     loadGroupHistory(it)
                     loadGroupMembers(it)
                 }
             }
-            "group_removed" -> {
+            is EngineEvent.GroupRemoved -> {
                 // ADR-004: нас отозвали. Если открыт этот чат — выходим и уведомляем.
-                val gid = o.optString("gid")
-                if (currentGroup == gid) currentGroup = null
+                if (currentGroup == ev.gid) currentGroup = null
                 appContext?.let { ctx ->
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         android.widget.Toast.makeText(
@@ -1478,30 +1359,30 @@ class AppModel private constructor() {
                     }
                 }
             }
-            "group_msg" -> {
-                val gid = o.getString("gid")
-                if (o.optBoolean("mine", false)) {
-                    // Своё групповое медиа: blob_id считается от очищенных байт в движке —
-                    // перечитываем историю, чтобы показать вложение с верным хэшем.
-                    if (currentGroup == gid) loadGroupHistory(gid)
+            is EngineEvent.GroupMsgEv -> {
+                if (ev.mine) {
+                    // Своё групповое медиа: blob_id считается от очищенных байт в
+                    // движке — перечитываем историю, чтобы показать верный хэш.
+                    if (currentGroup == ev.gid) loadGroupHistory(ev.gid)
                 } else {
-                    val blobId = o.optString("blob_id")
-                    if (blobId.isNotEmpty()) cacheBlob(blobId) // M2: подтянуть вложение
-                    groupLog(gid).add(
+                    if (ev.blobId.isNotEmpty()) cacheBlob(ev.blobId) // M2: подтянуть вложение
+                    groupLog(ev.gid).add(
                         GroupMsg(
-                            o.optString("text"),
+                            ev.text,
                             mine = false,
                             time = System.currentTimeMillis() / 1000,
-                            sender = o.optString("sender"),
-                            system = o.optBoolean("system", false),
-                            kind = o.optString("kind", "text"),
-                            blobId = blobId,
-                            mime = o.optString("mime"),
-                            name = o.optString("name"),
+                            sender = ev.sender,
+                            system = ev.system,
+                            kind = ev.kind,
+                            blobId = ev.blobId,
+                            mime = ev.mime,
+                            name = ev.name,
                         ),
                     )
                 }
             }
+            // Событие, которого этот клиент ещё не знает: молча пропускаем.
+            EngineEvent.Unknown -> Unit
         }
     }
 
@@ -1649,9 +1530,11 @@ class AppModel private constructor() {
     private fun startRoomAudioSession(ctx: android.content.Context, gid: String) {
         // битрейт/режим из настроек звука (audioBitrate: дефолт 24к=голос при «Авто»);
         // music = Opus Audio-режим на верхней половине диапазона.
-        val p = JSONObject(Native.roomAudioStart(sessionPtr, gid, audioBitrate, audioBitrate >= 32_000))
-        val sr = p.optInt("sample_rate", 48000)
-        val ch = p.optInt("channels", 1)
+        val params = decodeOrNull<CallParamsDto>(
+            Native.roomAudioStart(sessionPtr, gid, audioBitrate, audioBitrate >= 32_000),
+        )
+        val sr = params?.sampleRate?.takeIf { it > 0 } ?: 48_000
+        val ch = params?.channels?.takeIf { it > 0 } ?: 1
         roomAudio = CallAudio(
             ctx,
             { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
@@ -1843,11 +1726,8 @@ class AppModel private constructor() {
     fun refreshGroups() = ops.execute { refreshGroupsNow() }
 
     private fun refreshGroupsNow() {
-        val arr = JSONArray(Native.groupList(sessionPtr))
-        val list = (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            Group(o.getString("gid"), o.getString("name"), o.optInt("members", 1), o.optBoolean("admin", false))
-        }
+        val list = decodeList<GroupRowDto>(Native.groupList(sessionPtr))
+            .map { Group(it.gid, it.name, it.members, it.admin) }
         groups.clear()
         groups.addAll(list)
     }
@@ -1856,8 +1736,8 @@ class AppModel private constructor() {
     fun refreshGroupInvites() = ops.execute { refreshGroupInvitesNow() }
 
     private fun refreshGroupInvitesNow() {
-        val arr = JSONArray(Native.groupInvites(sessionPtr))
-        val list = (0 until arr.length()).map { GroupInvite.fromJson(arr.getJSONObject(it)) }
+        val list = decodeList<GroupInviteDto>(Native.groupInvites(sessionPtr))
+            .map { GroupInvite(it.gid, it.name, it.inviter) }
         groupInvites.clear()
         groupInvites.addAll(list)
     }
@@ -1885,8 +1765,7 @@ class AppModel private constructor() {
         contacts.firstOrNull { it.key == hex }?.displayName ?: (hex.take(8) + "…")
 
     fun loadGroupMembers(gid: String) = ops.execute {
-        val arr = JSONArray(Native.groupMembers(sessionPtr, gid))
-        groupMemberKeys[gid] = (0 until arr.length()).map { arr.getString(it) }
+        groupMemberKeys[gid] = decodeList<String>(Native.groupMembers(sessionPtr, gid))
     }
 
     /** Отозвать участника (ADR-004, только админ). Ростер обновит `groups_changed`. */
@@ -1915,21 +1794,7 @@ class AppModel private constructor() {
     }
 
     private fun loadGroupHistory(gid: String) {
-        val arr = JSONArray(Native.groupHistory(sessionPtr, gid))
-        val list = (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            GroupMsg(
-                o.optString("text"),
-                o.getBoolean("mine"),
-                o.optLong("time", 0),
-                sender = o.optString("sender"),
-                system = o.optBoolean("system", false),
-                kind = o.optString("kind", "text"),
-                blobId = o.optString("blob_id"),
-                mime = o.optString("mime"),
-                name = o.optString("name"),
-            )
-        }
+        val list = decodeList<GroupMsgDto>(Native.groupHistory(sessionPtr, gid)).map { it.toModel() }
         groupMessages[gid] = list.toMutableStateList()
         // M2: подтянуть байты уже докачанных вложений (иначе — по blob_received).
         list.forEach { if (it.blobId.isNotEmpty()) cacheBlob(it.blobId) }
@@ -1991,11 +1856,11 @@ class AppModel private constructor() {
     fun blastBench(peerHex: String) {
         benchResult = appContext?.getString(R.string.bench_sending).orEmpty()
         ops.execute {
-            val r = JSONObject(Native.benchBlast(sessionPtr, peerHex, 30_000))
+            val r = decodeOrNull<BenchDto>(Native.benchBlast(sessionPtr, peerHex, 30_000))
             benchResult = appContext?.getString(
                 R.string.bench_sent,
-                r.optDouble("mbps", 0.0),
-                r.optDouble("sent_bytes", 0.0) / 1e6,
+                r?.mbps ?: 0.0,
+                (r?.sentBytes ?: 0L) / 1e6,
             ).orEmpty()
         }
     }
