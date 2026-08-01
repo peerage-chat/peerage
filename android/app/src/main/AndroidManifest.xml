@@ -73,6 +73,17 @@
             android:exported="false"
             android:foregroundServiceType="microphone|dataSync" />
 
+        <!-- Кнопки уведомлений о чужом потоке трафика и офлайне (ADR-007). -->
+        <receiver
+            android:name=".FloodNotifier"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.p2p.messenger.GO_OFFLINE" />
+                <action android:name="dev.p2p.messenger.GO_ONLINE" />
+                <action android:name="dev.p2p.messenger.ROTATE_ADDRESS" />
+            </intent-filter>
+        </receiver>
+
         <!-- Кнопки «Принять»/«Отклонить» в уведомлении о входящем звонке. -->
         <receiver
             android:name=".IncomingCallReceiver"

@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronRight
@@ -37,7 +38,13 @@ import dev.p2p.messenger.*
 import dev.p2p.messenger.R
 
 @Composable
-internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit, onOpenOutbox: () -> Unit) {
+internal fun NetworkScreen(
+    model: AppModel,
+    onMyQr: () -> Unit,
+    onOpenOutbox: () -> Unit,
+    onFlood: () -> Unit = {},
+    onRotate: () -> Unit = {},
+) {
     val me = model.me ?: return
     val ctx = LocalContext.current
     // Офлайн-очередь = сообщения, ждущие появления получателя (статус "queued").
@@ -47,14 +54,42 @@ internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit, onOpenOutbox: ()
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        // 0. Поток трафика — только когда он есть. Выше статуса: пока идёт флуд,
+        // это самое важное на экране.
+        FloodCard(model, onFlood)
+
         // 1. Статус — ровно, в карточке.
         SurfaceCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(10.dp).clip(RoundedCornerShape(percent = 30)).background(HoloOnline))
+                // Цвет и текст — по фактическому состоянию. «Подключено» при
+                // разорванных соединениях было бы прямой ложью на главном индикаторе.
+                Box(
+                    Modifier.size(10.dp).clip(RoundedCornerShape(percent = 30))
+                        .background(if (model.offline) HoloWarn else HoloOnline),
+                )
                 Spacer(Modifier.width(10.dp))
-                Row {
-                    Text(stringResource(R.string.net_connected_to), color = Color.White, fontSize = 15.sp)
-                    Text("mesh", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                if (model.offline) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.notif_offline_title), color = Color.White, fontSize = 15.sp)
+                        Text(
+                            stringResource(R.string.notif_offline_body),
+                            color = HoloSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        stringResource(R.string.flood_back_online),
+                        color = HoloAccent,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable { model.goOnline() },
+                    )
+                } else {
+                    Row {
+                        Text(stringResource(R.string.net_connected_to), color = Color.White, fontSize = 15.sp)
+                        Text("mesh", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -93,7 +128,28 @@ internal fun NetworkScreen(model: AppModel, onMyQr: () -> Unit, onOpenOutbox: ()
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlineAction(stringResource(R.string.net_my_qr), Icons.Filled.QrCode2, Modifier.weight(1f), onMyQr)
-            OutlineAction(stringResource(R.string.net_share), Icons.Filled.Share, Modifier.weight(1f)) { shareText(ctx, me.pubkey) }
+            OutlineAction(stringResource(R.string.net_share), Icons.Filled.Share, Modifier.weight(1f)) { shareText(ctx, model.myContactCode()) }
+        }
+        // Смена адреса живёт рядом с самим адресом — тут её и ищут.
+        SurfaceCard(onClick = onRotate) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Autorenew, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.net_rotate_row), color = Color.White, fontSize = 15.sp)
+                    Text(
+                        if (model.transportEpoch > 0) {
+                            stringResource(R.string.net_epoch, model.transportEpoch)
+                        } else {
+                            stringResource(R.string.net_rotate_row_desc)
+                        },
+                        color = HoloSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(18.dp))
+            }
         }
 
         // 4. Режим участия — выгоды + цена.

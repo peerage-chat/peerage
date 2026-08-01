@@ -216,6 +216,10 @@ pub struct Engine {
     /// presence: пока контакт не появился, слать некуда, а не узнав нового адреса,
     /// он потеряет с нами связь навсегда.
     rotate_pending: Mutex<std::collections::HashSet<[u8; 32]>>,
+    /// Мы намеренно вне сети: пользователь ушёл в офлайн либо идёт пауза смены
+    /// адреса. Отличается от «нет связи» — это осознанное состояние, и UI обязан
+    /// его показывать.
+    offline: AtomicBool,
     /// Чем поднимать новый узел при смене адреса. По умолчанию — настоящий
     /// Yggdrasil; тесты подставляют loopback, иначе ротацию нельзя прогнать без
     /// реальной сети.
@@ -677,32 +681,14 @@ impl Engine {
 
         // 1. Гасим текущий узел: с этого момента нас нет в сети — ни для флудера,
         //    ни для контактов.
+        self.offline.store(true, Ordering::Relaxed);
         self.messenger.stop_transport();
         // 2. Пауза, за которую старый ключ выпадает из дерева маршрутизации.
         std::thread::sleep(Duration::from_secs(gap_secs));
         // 3. Поднимаемся на новом ключе и возвращаемся в меш.
-        let seed = self.identity.transport_seed(epoch);
-        let factory = self.transport_factory.lock_safe().clone();
-        let node: Arc<dyn p2p_messenger::Transport> = match factory {
-            Some(f) => match f(&seed) {
-                Some(n) => n,
-                None => {
-                    log::error!("смена адреса: фабрика транспорта не дала узел");
-                    return;
-                }
-            },
-            None => match Node::start(&seed) {
-                Ok(n) => {
-                    for uri in public_peer_uris() {
-                        let _ = n.add_peer(uri);
-                    }
-                    Arc::new(n)
-                }
-                Err(e) => {
-                    log::error!("смена адреса: не удалось поднять узел: {e}");
-                    return;
-                }
-            },
+        let Some(node) = self.spawn_node(epoch) else {
+            log::error!("смена адреса: не удалось поднять узел");
+            return;
         };
         let address = node.address();
         self.messenger.swap_transport(node);
@@ -712,13 +698,70 @@ impl Engine {
 
         // 4. Рассылаем объявление. Оно надёжное (retry-until-Ack), а тех, кто сейчас
         //    офлайн, догоняем в `announce_rotation_to` при их возвращении.
+        self.offline.store(false, Ordering::Relaxed);
         let sig = self.identity.sign_transport_rotate(epoch, &tk);
-        *self.rotate_pending.lock_safe() = recipients.iter().copied().collect();
+        // Список «кому ещё не сказали» переживает перезапуск: контакт может
+        // отсутствовать неделями, а не узнав нового адреса, он теряет с нами связь
+        // навсегда. (Грейс-период старого узла отвергнут — он держал бы старый ключ
+        // в сети и отменял весь смысл ротации, см. ADR-007.)
+        self.set_rotate_pending(&recipients);
         for peer in &recipients {
             let _ = self.messenger.send_transport_rotate(peer, epoch, &tk, &sig);
         }
         log::info!("смена адреса завершена: {address} (оповещено {})", recipients.len());
         push_event(self, dto::UiEvent::TransportRotated { address, epoch });
+    }
+
+    /// Поднять узел на транспортном ключе указанной эпохи. Одна точка на две
+    /// операции — смену адреса и возврат из офлайна.
+    fn spawn_node(&self, epoch: u32) -> Option<Arc<dyn p2p_messenger::Transport>> {
+        let seed = self.identity.transport_seed(epoch);
+        let factory = self.transport_factory.lock_safe().clone();
+        match factory {
+            Some(f) => f(&seed),
+            None => match Node::start(&seed) {
+                Ok(n) => {
+                    for uri in public_peer_uris() {
+                        let _ = n.add_peer(uri);
+                    }
+                    Some(Arc::new(n))
+                }
+                Err(e) => {
+                    log::error!("не удалось поднять узел: {e}");
+                    None
+                }
+            },
+        }
+    }
+
+    /// Мы сейчас намеренно вне сети (пользователь ушёл в офлайн или идёт пауза
+    /// смены адреса).
+    pub fn is_offline(&self) -> bool {
+        self.offline.load(Ordering::Relaxed)
+    }
+
+    /// Уйти в офлайн: разорвать соединения. Единственный способ ПРЯМО СЕЙЧАС
+    /// перестать платить за чужой поток — байты перестают доходить до радио, потому
+    /// что доходить больше некуда. Сообщения при этом тоже не приходят: честный
+    /// размен, и он должен быть виден пользователю.
+    pub fn go_offline(&self) {
+        self.offline.store(true, Ordering::Relaxed);
+        self.messenger.stop_transport();
+        log::info!("офлайн: соединения разорваны по запросу пользователя");
+    }
+
+    /// Вернуться в сеть на текущем адресе.
+    pub fn go_online(&self) -> bool {
+        let epoch = self.transport_epoch();
+        match self.spawn_node(epoch) {
+            Some(node) => {
+                self.messenger.swap_transport(node);
+                self.offline.store(false, Ordering::Relaxed);
+                log::info!("онлайн: узел поднят заново (эпоха {epoch})");
+                true
+            }
+            None => false,
+        }
     }
 
     /// Догнать объявлением контакта, который был офлайн в момент смены адреса.
@@ -734,7 +777,35 @@ impl Engine {
         }
         let tk = self.identity.transport_public(epoch);
         let sig = self.identity.sign_transport_rotate(epoch, &tk);
-        let _ = self.messenger.send_transport_rotate(peer, epoch, &tk, &sig);
+        if self.messenger.send_transport_rotate(peer, epoch, &tk, &sig).is_ok() {
+            // Ушло в надёжную отправку — из списка убираем: повторы дальше ведёт
+            // сам мессенджер (retry-until-Ack).
+            let rest: Vec<[u8; 32]> = {
+                let mut p = self.rotate_pending.lock_safe();
+                p.remove(peer);
+                p.iter().copied().collect()
+            };
+            self.set_rotate_pending(&rest);
+        }
+    }
+
+    /// Сохранить список «кому ещё не сообщили новый адрес» (память + диск).
+    fn set_rotate_pending(&self, peers: &[[u8; 32]]) {
+        *self.rotate_pending.lock_safe() = peers.iter().copied().collect();
+        let hexes: Vec<String> = peers.iter().map(hex::encode).collect();
+        if let Ok(v) = serde_json::to_vec(&hexes) {
+            let _ = std::fs::write(self.data_dir.join("rotate_pending.json"), v);
+        }
+    }
+
+    /// Прочитать список с диска (после перезапуска).
+    fn load_rotate_pending(&self) {
+        let list: Vec<String> = std::fs::read(self.data_dir.join("rotate_pending.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        *self.rotate_pending.lock_safe() =
+            list.iter().filter_map(|h| parse_key(h)).collect();
     }
 
     /// Переслать транспорту актуальную карту адресов контактов (ADR-007):
@@ -2484,7 +2555,9 @@ impl Engine {
             data_dir: dir.clone(),
             rotate_pending: Mutex::new(std::collections::HashSet::new()),
             transport_factory: Mutex::new(None),
+            offline: AtomicBool::new(false),
         });
+        engine.load_rotate_pending();
 
         // Единый бюджет (M3): тиры контактов/блок-листа в ingress-лимитер. Делаем
         // ДО запуска приёмного цикла — иначе первые пакеты заблокированного пира

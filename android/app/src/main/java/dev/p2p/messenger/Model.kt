@@ -150,6 +150,25 @@ data class GroupMsg(
     val downloaded: Boolean = false,
 )
 
+/** Источник флуда для UI: сколько отброшено и с каким темпом (ADR-007). */
+data class FloodPeer(
+    val peer: String,
+    val dropped: Long,
+    val pps: Double,
+    /** Уже заблокирован — его пакеты режутся ещё в транспорте, до FFI. */
+    val blocked: Boolean,
+)
+
+/** Ход смены адреса: обратный отсчёт паузы, затем итог. */
+data class RotationState(
+    /** Сколько секунд паузы осталось; 0 — пауза кончилась. */
+    val secondsLeft: Int,
+    /** Скольким контактам уйдёт новый адрес. */
+    val told: Int,
+    /** Новый адрес — приходит событием после подъёма узла. */
+    val newAddress: String = "",
+)
+
 /**
  * Пользовательская папка — это ВИД, а не коробка: чат может попадать сразу в
  * несколько. Живёт в prefs на клиенте: к протоколу отношения не имеет, собеседник
@@ -215,6 +234,20 @@ data class RoomMember(val peer: String, val audio: Boolean, val video: Boolean)
  */
 class AppModel private constructor() {
     companion object {
+        /**
+         * Пауза офлайн при смене адреса, секунды. Зашита, а не настраивается:
+         * величина не про вкус, а про то, за сколько старый ключ выпадает из дерева
+         * маршрутизации. Замерено — хватает ~30 с; 60 взято с запасом.
+         */
+        const val ROTATE_GAP_SECS = 60
+
+        /**
+         * С какого темпа считаем происходящее флудом, достойным уведомления.
+         * Ниже — это шум одиночных отказов (пир не в контактах, пара пакетов),
+         * дёргать им пользователя незачем.
+         */
+        const val FLOOD_NOTIFY_PPS = 20.0
+
         /** Единственный экземпляр на процесс. Нативный узел/потоки тоже одни на
          *  процесс, поэтому модель должна переживать пересоздание Activity (иначе
          *  утекают второй узел и дублирующие poll/ticker-циклы → потеря событий). */
@@ -870,6 +903,7 @@ class AppModel private constructor() {
         }
         sessionPtr = started.sessionPtr
         me = Me(started.pubkey, started.address, started.fingerprint)
+        transportEpoch = Native.transportEpoch(sessionPtr)
         refreshContactsNow()
         refreshRequestsNow()
         refreshGroupsNow()
@@ -959,6 +993,35 @@ class AppModel private constructor() {
                         online[key] = nowOnline
                         // При первом тике (wasOnline=null) или переходе в онлайн — флашим очередь.
                         if (nowOnline && wasOnline != true) flushQueueFor(key)
+                    }
+                    // Флуд и офлайн — дёшево и нужно даже в фоне: пользователь
+                    // платит за чужой поток прямо сейчас.
+                    val wasOffline = offline
+                    offline = Native.isOffline(sessionPtr)
+                    appContext?.let { ctx ->
+                        if (offline && !wasOffline) FloodNotifier.showOffline(ctx)
+                        if (!offline && wasOffline) FloodNotifier.cancelOffline(ctx)
+                    }
+                    val flood = decodeList<FloodPeerDto>(Native.floodPeers(sessionPtr))
+                        .map { FloodPeer(it.peer, it.dropped, it.pps, it.blocked) }
+                    if (floodPeers != flood) {
+                        floodPeers.clear()
+                        floodPeers.addAll(flood)
+                    }
+                    // Уведомление — ОДИН раз на эпизод: иначе оно само станет вторым
+                    // флудом. Эпизод считается законченным, когда поток стих.
+                    val top = flood.maxByOrNull { it.pps }
+                    if (top != null && top.pps >= FLOOD_NOTIFY_PPS) {
+                        if (!floodNotified) {
+                            floodNotified = true
+                            appContext?.let { ctx ->
+                                val who = contacts.firstOrNull { it.key == top.peer }?.displayName
+                                    ?: (top.peer.take(8) + "…")
+                                FloodNotifier.showFlood(ctx, who, top.pps.toInt())
+                            }
+                        }
+                    } else if (flood.isEmpty()) {
+                        floodNotified = false
                     }
                     if (benchRecv) {
                         benchRecvMbps = decodeOrNull<BenchDto>(Native.benchRecvStats(sessionPtr))?.mbps ?: 0.0
@@ -1178,6 +1241,64 @@ class AppModel private constructor() {
         if (id >= 0 && currentChat == key) loadHistory(key)
     }
 
+    // ── Флуд и смена адреса (ADR-007) ────────────────────────────────────────
+
+    /** Кто сейчас заваливает нас трафиком (по убыванию темпа). Пусто — флуда нет. */
+    val floodPeers = mutableStateListOf<FloodPeer>()
+
+    /** Уведомление о текущем эпизоде флуда уже показано. */
+    private var floodNotified = false
+
+    /** Мы намеренно вне сети: кнопка «офлайн» или пауза смены адреса. */
+    var offline by mutableStateOf(false)
+        private set
+
+    /** Эпоха адреса: 0 — адрес ни разу не менялся. */
+    var transportEpoch by mutableStateOf(0)
+        private set
+
+    /** Ход смены адреса: null — не идёт. */
+    var rotation by mutableStateOf<RotationState?>(null)
+        private set
+
+    /** Уйти в офлайн: разорвать соединения. Чужой поток перестаёт тратить трафик —
+     *  ценой того, что и свои сообщения не приходят. */
+    fun goOffline() = ops.execute {
+        Native.goOffline(sessionPtr)
+        offline = true
+    }
+
+    /** Вернуться в сеть на текущем адресе. */
+    fun goOnline() = ops.execute {
+        if (Native.goOnline(sessionPtr)) offline = false
+    }
+
+    /**
+     * Сменить адрес: пауза офлайн [ROTATE_GAP_SECS] секунд, затем подъём на новом
+     * ключе и рассылка подписанного объявления выбранным контактам.
+     *
+     * Пауза обязательна: без неё новый узел наследует маршрутную позицию старого
+     * ключа и поток флудера продолжает приходить (проверено на публичном меше).
+     * Поэтому её не прячем, а показываем обратным отсчётом.
+     */
+    fun rotateAddress(recipients: List<String>) {
+        rotation = RotationState(secondsLeft = ROTATE_GAP_SECS, told = recipients.size)
+        offline = true
+        ops.execute { Native.rotateTransport(sessionPtr, recipients.joinToString(","), ROTATE_GAP_SECS) }
+        // Отсчёт — отдельным потоком: сам движок в это время спит в паузе.
+        Thread {
+            for (left in ROTATE_GAP_SECS - 1 downTo 0) {
+                Thread.sleep(1000)
+                rotation = rotation?.copy(secondsLeft = left)
+            }
+        }.start()
+    }
+
+    /** Убрать итоговую карточку смены адреса. */
+    fun dismissRotation() {
+        rotation = null
+    }
+
     /** Заказанные пользователем докачки: blobId → доля 0..1, [DOWNLOAD_INIT] — ждём
      *  первых чанков (пир может быть офлайн). Движок хранит намерение на диске и сам
      *  продолжает, когда пир появится, — следить за этим пользователь не должен. */
@@ -1341,6 +1462,13 @@ class AppModel private constructor() {
             EngineEvent.GroupInvitesChanged -> refreshGroupInvitesNow()
             // M2: контакт прислал профиль (имя/аватар) → перечитать список.
             EngineEvent.ContactsChanged -> refreshContactsNow()
+            // Адрес сменился: обновляем показ и завершаем карточку хода.
+            is EngineEvent.TransportRotated -> {
+                transportEpoch = ev.epoch
+                offline = false
+                rotation = rotation?.copy(secondsLeft = 0, newAddress = ev.address)
+                me = me?.copy(address = ev.address)
+            }
             is EngineEvent.BlobProgress -> {
                 if (ev.total > 0) downloads[ev.id] = ev.done / ev.total.toFloat()
             }

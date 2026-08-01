@@ -80,6 +80,7 @@
     <string name="common_you">You</string>
     <string name="common_copied">Copied</string>
     <string name="common_contact">Contact</string>
+    <string name="common_done">Done</string>
     <string name="common_menu">Menu</string>
 
     <!-- ── App states ──────────────────────────────────────────────────── -->
@@ -463,4 +464,57 @@
     <string name="calls_outgoing">Outgoing · %1$s</string>
     <string name="saved_hint">Note to self…</string>
     <string name="saved_delete">Delete note?</string>
+
+    <!-- Traffic flood and address rotation (ADR-007) -->
+    <string name="flood_title">You are being flooded</string>
+    <string name="flood_card_body">A stream is coming from %1$d addresses; the app drops it. The content never reaches you, but the mobile data is already spent: foreign packets cannot be stopped on the device.</string>
+    <string name="flood_screen_title">Traffic flood</string>
+    <string name="flood_explain">The app drops these packets before decryption — no CPU, battery or storage is spent, and nothing is shown. But the bytes already reached the radio, and you paid for them. That is how any open network works: whoever knows the address can send.</string>
+    <string name="flood_sources">SOURCES</string>
+    <string name="flood_blocked_tag">blocked</string>
+    <string name="flood_src_dropped">%1$d packets dropped</string>
+    <string name="flood_src_stranger">not a contact · %1$d dropped</string>
+    <string name="flood_pps">pkt/s</string>
+    <string name="flood_what_to_do">WHAT YOU CAN DO</string>
+    <string name="flood_go_offline">Go offline</string>
+    <string name="flood_go_offline_desc">Drop the connections — data stops being spent at once. Messages will not arrive until you return.</string>
+    <string name="flood_rotate">Change address</string>
+    <string name="flood_rotate_desc">The only way to cut the stream and stay online. Contacts are kept — they receive the new address.</string>
+    <string name="flood_offline_btn">Go offline</string>
+    <string name="flood_back_online">Back online</string>
+    <string name="flood_rotate_btn">Change address</string>
+    <string name="flood_footer">Blocked sources are already cut at the lowest level — their packets go no further than the transport.</string>
+
+    <string name="rotate_title">Change address</string>
+    <string name="rotate_explain">Your identity does not change: name, fingerprint, history and groups stay the same. Only the address you are found by changes. Anyone you do not tell will lose contact with you.</string>
+    <string name="rotate_tell_whom">TELL THE NEW ADDRESS TO</string>
+    <string name="rotate_hint_flooder">Source of the flood — unchecked by default</string>
+    <string name="rotate_hint_offline">Will be told when they come online</string>
+    <string name="rotate_selected">Selected %1$d of %2$d</string>
+    <string name="rotate_will_lose">Will keep the old address: %1$s</string>
+    <string name="rotate_how">HOW IT WILL GO</string>
+    <string name="rotate_step_offline">We go offline for exactly %1$d seconds — that is how long the old address takes to disappear from the network. Without the pause the stream keeps coming.</string>
+    <string name="rotate_step_up">We come back up under the new address.</string>
+    <string name="rotate_step_tell">Selected contacts receive a signed notice — nothing to forward by hand.</string>
+    <string name="rotate_btn">Change address</string>
+    <string name="rotate_no_undo">The change cannot be undone: the old address is released immediately.</string>
+    <string name="rotate_wait_body">You are offline. Waiting for the old address to disappear.</string>
+    <string name="rotate_wait_footer">Messages sent to you now will arrive later — the sender retries automatically.</string>
+    <string name="rotate_p_stopped">Old address shut down</string>
+    <string name="rotate_p_pause">Pause — %1$d s left</string>
+    <string name="rotate_p_up">Coming up under the new address</string>
+    <string name="rotate_p_told">Notice to %1$d contacts</string>
+    <string name="rotate_done">Address changed</string>
+    <string name="rotate_if_continues">If the stream continues at the new address too, someone you told knows it.</string>
+    <string name="net_epoch">Address changed %1$d time(s)</string>
+    <string name="net_rotate_row">Change address</string>
+    <string name="net_rotate_row_desc">Cut the stream from whoever learned the old one</string>
+
+    <string name="notif_flood_title">You are being flooded</string>
+    <string name="notif_flood_body">%1$s: %2$d packets/s. The content does not reach you, but data is being spent.</string>
+    <string name="notif_offline_title">You are offline</string>
+    <string name="notif_offline_body">Connections dropped, no data is being spent. Messages will not arrive.</string>
+    <string name="notif_action_offline">Go offline</string>
+    <string name="notif_action_online">Back online</string>
+    <string name="notif_action_rotate">Change address</string>
 </resources>

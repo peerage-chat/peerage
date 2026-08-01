@@ -72,6 +72,7 @@
     <string name="common_you">Вы</string>
     <string name="common_copied">Скопировано</string>
     <string name="common_contact">Контакт</string>
+    <string name="common_done">Готово</string>
     <string name="common_menu">Меню</string>
 
     <!-- ── Состояния приложения ────────────────────────────────────────── -->
@@ -455,4 +456,57 @@
     <string name="calls_outgoing">Исходящий · %1$s</string>
     <string name="saved_hint">Заметка себе…</string>
     <string name="saved_delete">Удалить заметку?</string>
+
+    <!-- Поток трафика и смена адреса (ADR-007) -->
+    <string name="flood_title">Вас заваливают трафиком</string>
+    <string name="flood_card_body">Идёт поток с %1$d адресов; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</string>
+    <string name="flood_screen_title">Поток трафика</string>
+    <string name="flood_explain">Приложение отбрасывает эти пакеты до расшифровки — процессор, батарея и память не тратятся, содержимое не показывается. Но байты уже дошли до радио, и трафик за них списан. Так устроена любая открытая сеть: кто знает адрес, тот может слать.</string>
+    <string name="flood_sources">ИСТОЧНИКИ</string>
+    <string name="flood_blocked_tag">заблокирован</string>
+    <string name="flood_src_dropped">отброшено %1$d пакетов</string>
+    <string name="flood_src_stranger">не в контактах · отброшено %1$d</string>
+    <string name="flood_pps">пкт/с</string>
+    <string name="flood_what_to_do">ЧТО МОЖНО СДЕЛАТЬ</string>
+    <string name="flood_go_offline">Уйти в офлайн</string>
+    <string name="flood_go_offline_desc">Разорвать соединения — трафик перестанет тратиться сразу. Сообщения не будут приходить, пока не вернётесь.</string>
+    <string name="flood_rotate">Сменить адрес</string>
+    <string name="flood_rotate_desc">Единственный способ оборвать поток и остаться в сети. Контакты сохранятся — им уйдёт новый адрес.</string>
+    <string name="flood_offline_btn">В офлайн</string>
+    <string name="flood_back_online">Вернуться в сеть</string>
+    <string name="flood_rotate_btn">Сменить адрес</string>
+    <string name="flood_footer">Заблокированные источники уже режутся на самом низком уровне — дальше приложения их пакеты не идут.</string>
+
+    <string name="rotate_title">Сменить адрес</string>
+    <string name="rotate_explain">Ваша личность не меняется: имя, отпечаток, история и группы останутся прежними. Меняется только адрес, по которому вас находят в сети. Кому вы его не сообщите — потеряет с вами связь.</string>
+    <string name="rotate_tell_whom">СООБЩИТЬ НОВЫЙ АДРЕС</string>
+    <string name="rotate_hint_flooder">Источник потока — снят по умолчанию</string>
+    <string name="rotate_hint_offline">Узнает, когда появится в сети</string>
+    <string name="rotate_selected">Выбрано %1$d из %2$d</string>
+    <string name="rotate_will_lose">Останутся со старым адресом: %1$s</string>
+    <string name="rotate_how">КАК ЭТО ПРОИЗОЙДЁТ</string>
+    <string name="rotate_step_offline">Уйдём в офлайн ровно на %1$d секунд — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</string>
+    <string name="rotate_step_up">Поднимемся под новым адресом.</string>
+    <string name="rotate_step_tell">Выбранным контактам уйдёт подписанное уведомление — вручную ничего пересылать не нужно.</string>
+    <string name="rotate_btn">Сменить адрес</string>
+    <string name="rotate_no_undo">Отменить смену нельзя: старый адрес освобождается сразу.</string>
+    <string name="rotate_wait_body">Вы офлайн. Ждём, пока старый адрес исчезнет из сети.</string>
+    <string name="rotate_wait_footer">Сообщения, отправленные вам сейчас, дойдут позже — отправитель повторит их автоматически.</string>
+    <string name="rotate_p_stopped">Старый адрес погашен</string>
+    <string name="rotate_p_pause">Пауза — осталось %1$d с</string>
+    <string name="rotate_p_up">Подъём под новым адресом</string>
+    <string name="rotate_p_told">Уведомление %1$d контактам</string>
+    <string name="rotate_done">Адрес сменён</string>
+    <string name="rotate_if_continues">Если поток продолжится и по новому адресу — значит его знает кто-то из оповещённых.</string>
+    <string name="net_epoch">Адрес меняли раз: %1$d</string>
+    <string name="net_rotate_row">Сменить адрес</string>
+    <string name="net_rotate_row_desc">Оборвать поток от того, кто узнал старый</string>
+
+    <string name="notif_flood_title">Вас заваливают трафиком</string>
+    <string name="notif_flood_body">%1$s: %2$d пакетов/с. Содержимое не доходит, но трафик расходуется.</string>
+    <string name="notif_offline_title">Вы офлайн</string>
+    <string name="notif_offline_body">Соединения разорваны, трафик не расходуется. Сообщения не приходят.</string>
+    <string name="notif_action_offline">В офлайн</string>
+    <string name="notif_action_online">Вернуться в сеть</string>
+    <string name="notif_action_rotate">Сменить адрес</string>
 </resources>

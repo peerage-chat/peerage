@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Флуд и смена адреса</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .col { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .cap { color: #8a8f96; font-size: 12px; max-width: 390px; text-align: center; line-height: 1.45; }
+  .cap b { color: #cfd8dc; font-weight: 500; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; color: var(--on-dark); }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px 14px; background: var(--accent-dark); }
+  .topbar .title { font-size: 20px; font-weight: 500; flex: 1; }
+  .topbar i { font-size: 22px; color: var(--icon-chrome); }
+
+  .sect { padding: var(--space-l) var(--space-l) var(--space-xs); font-size: var(--font-caption);
+          letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+  .row { display: flex; align-items: center; gap: var(--space-m); padding: var(--row-v) var(--space-l);
+         font-size: var(--font-label); }
+  .row .sp { flex: 1; min-width: 0; }
+  .row .sub { font-size: var(--font-small); color: var(--secondary); margin-top: 2px; line-height: 1.35; }
+  .row i.lead { font-size: 21px; color: var(--icon-muted); }
+  .mono { font-family: ui-monospace, "Roboto Mono", monospace; }
+
+  /* карточка предупреждения */
+  .card { margin: var(--space-m) var(--space-l); border-radius: var(--radius-tile); padding: var(--space-m);
+          border: 1px solid var(--border); background: var(--surface); }
+  .card.warn { border-color: rgba(230,162,60,.45); background: rgba(230,162,60,.08); }
+  .card .hd { display: flex; align-items: center; gap: var(--space-s); font-size: var(--font-label); font-weight: 500; }
+  .card .hd i { font-size: 20px; }
+  .card .tx { font-size: var(--font-body); color: var(--secondary); margin-top: 6px; line-height: 1.45; }
+  .card .tx b { color: #cfd8dc; font-weight: 500; }
+
+  .btns { display: flex; gap: var(--space-s); margin-top: var(--space-m); }
+  .btn { flex: 1; text-align: center; padding: 10px 8px; border-radius: var(--radius-button);
+         font-size: var(--font-body); font-weight: 500; }
+  .btn.pri { background: var(--accent); color: var(--accent-dark); }
+  .btn.sec { border: 1px solid var(--border); color: var(--on-dark); }
+  .btn.danger { border: 1px solid rgba(229,57,53,.5); color: #ef9a9a; }
+  .btn.wide { flex: none; width: 100%; margin: var(--space-m) var(--space-l) 0; }
+  .btn.disabled { opacity: .4; }
+
+  /* список источников флуда */
+  .src { display: flex; align-items: center; gap: var(--space-m); padding: var(--row-v) var(--space-l); }
+  .av { width: 38px; height: 38px; border-radius: var(--radius-avatar); background: var(--avatar);
+        display: flex; align-items: center; justify-content: center; font-size: var(--font-label); }
+  .src .nm { font-size: var(--font-label); }
+  .src .mt { font-size: var(--font-small); color: var(--secondary); margin-top: 2px; }
+  .pps { text-align: right; }
+  .pps .n { font-size: var(--font-label); color: var(--warn); font-weight: 500; }
+  .pps .u { font-size: var(--font-caption); color: var(--secondary); }
+  .tagblk { display: inline-block; font-size: var(--font-caption); color: var(--error);
+            border: 1px solid rgba(229,57,53,.45); border-radius: var(--radius-badge); padding: 1px 6px; margin-left: 6px; }
+
+  /* контакты с чекбоксами */
+  .ck { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--icon-muted);
+        display: flex; align-items: center; justify-content: center; flex: none; }
+  .ck.on { background: var(--accent); border-color: var(--accent); color: var(--accent-dark); }
+  .ck.on i { font-size: 15px; }
+  .ck i { font-size: 15px; }
+  .hint { font-size: var(--font-small); color: var(--warn); margin-top: 2px; }
+
+  .divider { height: 1px; background: var(--border); margin: var(--space-s) 0; }
+  .foot { padding: var(--space-m) var(--space-l) var(--space-xl); font-size: var(--font-small);
+          color: var(--secondary); line-height: 1.45; }
+
+  /* прогресс паузы */
+  .big { text-align: center; padding: 34px var(--space-xl) var(--space-m); }
+  .big .n { font-size: 44px; font-weight: 300; }
+  .big .s { font-size: var(--font-body); color: var(--secondary); margin-top: 8px; line-height: 1.5; }
+  .stepper { padding: var(--space-m) var(--space-xl); }
+  .step { display: flex; gap: var(--space-m); align-items: flex-start; padding: 7px 0; font-size: var(--font-body); }
+  .step i { font-size: 18px; }
+  .step.done i { color: var(--online); }
+  .step.now i { color: var(--accent); }
+  .step.wait { color: var(--secondary); }
+  .step.wait i { color: var(--icon-muted); }
+</style>
+</head>
+<body>
+
+<!-- ── A. Сеть: карточка «вас флудят» ─────────────────────────────────────── -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>12:30</span><span>▮▮▮ ▮</span></div>
+    <div class="topbar"><i class="ti ti-arrow-left"></i><div class="title">Сеть</div></div>
+
+    <div class="card warn">
+      <div class="hd" style="color:var(--warn)"><i class="ti ti-alert-triangle"></i>Вас заваливают трафиком</div>
+      <div class="tx">
+        С двух адресов идёт поток, который приложение отбрасывает. Содержимое до вас
+        не доходит, но <b>мобильный трафик за него уже списан</b>: остановить чужие
+        пакеты на устройстве нельзя.
+      </div>
+      <div class="btns">
+        <div class="btn sec">Подробнее</div>
+        <div class="btn pri">Что делать</div>
+      </div>
+    </div>
+
+    <div class="sect">Мой узел</div>
+    <div class="row">
+      <i class="ti ti-router lead"></i>
+      <div class="sp">
+        <div class="mono" style="font-size:var(--font-body)">200:857d:d932:42d3:2bd4:…</div>
+        <div class="sub">Адрес меняли 1 раз · эпоха 1</div>
+      </div>
+      <i class="ti ti-copy" style="color:var(--icon-muted);font-size:20px"></i>
+    </div>
+    <div class="row">
+      <i class="ti ti-refresh lead"></i>
+      <div class="sp">Сменить адрес<div class="sub">Оборвать поток от того, кто узнал старый</div></div>
+      <i class="ti ti-chevron-right" style="color:var(--icon-muted);font-size:18px"></i>
+    </div>
+
+    <div class="sect">Метрики</div>
+    <div class="row"><i class="ti ti-network lead"></i><div class="sp">Пиры</div><div class="sub">8</div></div>
+    <div class="row"><i class="ti ti-activity lead"></i><div class="sp">Пинг</div><div class="sub">64 мс</div></div>
+    <div class="foot"></div>
+  </div>
+  <div class="cap"><b>A. Сеть.</b> Карточка появляется только когда флуд идёт. Текст не обещает
+    того, чего нет: поток не остановлен, трафик оплачен. Вход в «сменить адрес» живёт
+    здесь же, рядом с самим адресом.</div>
+</div>
+
+<!-- ── B. Экран «Вас заваливают» ──────────────────────────────────────────── -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>12:31</span><span>▮▮▮ ▮</span></div>
+    <div class="topbar"><i class="ti ti-arrow-left"></i><div class="title">Поток трафика</div></div>
+
+    <div class="card">
+      <div class="tx" style="margin-top:0">
+        Приложение отбрасывает эти пакеты <b>до расшифровки</b> — процессор, батарея и
+        память не тратятся, содержимое не показывается. Но байты уже дошли до радио,
+        и трафик за них списан. Так устроена любая открытая сеть: кто знает адрес,
+        тот может слать.
+      </div>
+    </div>
+
+    <div class="sect">Источники</div>
+    <div class="src">
+      <div class="av">М</div>
+      <div class="sp">
+        <div class="nm">Мэллори <span class="tagblk">заблокирован</span></div>
+        <div class="mt">отброшено 184 200 пакетов · с 12:04</div>
+      </div>
+      <div class="pps"><div class="n">420</div><div class="u">пкт/с</div></div>
+    </div>
+    <div class="src">
+      <div class="av" style="color:var(--secondary)"><i class="ti ti-user-question"></i></div>
+      <div class="sp">
+        <div class="nm mono">e903412e…</div>
+        <div class="mt">не в контактах · отброшено 12 900</div>
+      </div>
+      <div class="pps"><div class="n">37</div><div class="u">пкт/с</div></div>
+    </div>
+
+    <div class="sect">Что можно сделать</div>
+    <div class="row">
+      <i class="ti ti-plug-off lead"></i>
+      <div class="sp">Уйти в офлайн
+        <div class="sub">Разорвать соединения — трафик перестанет тратиться сразу.
+          Сообщения не будут приходить, пока не вернётесь.</div>
+      </div>
+    </div>
+    <div class="row">
+      <i class="ti ti-refresh lead"></i>
+      <div class="sp">Сменить адрес
+        <div class="sub">Единственный способ оборвать поток и остаться в сети.
+          Контакты сохранятся — им уйдёт новый адрес.</div>
+      </div>
+    </div>
+    <div class="btns" style="margin:var(--space-m) var(--space-l) 0">
+      <div class="btn sec">В офлайн</div>
+      <div class="btn pri">Сменить адрес</div>
+    </div>
+    <div class="foot">Заблокированные источники уже режутся на самом низком уровне —
+      дальше приложения их пакеты не идут.</div>
+  </div>
+  <div class="cap"><b>B. Детали.</b> Честно объясняет, что защищено (крипто, батарея,
+    содержимое), а что нет (трафик). Два действия — и оба настоящие, без «мы решим за вас».</div>
+</div>
+
+<!-- ── B2. Уведомление ────────────────────────────────────────────────────── -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>12:31</span><span>▮▮▮ ▮</span></div>
+    <div style="background:#0b0b0b;padding:var(--space-xl) var(--space-m) 40px">
+      <div style="font-size:var(--font-caption);color:var(--secondary);padding:0 4px 8px">СЕГОДНЯ</div>
+      <div style="background:#26282c;border-radius:var(--radius-tile);padding:var(--space-m)">
+        <div style="display:flex;align-items:center;gap:8px;font-size:var(--font-caption);color:var(--secondary)">
+          <i class="ti ti-shield-halt" style="font-size:15px;color:var(--warn)"></i>
+          p2p messenger · сейчас
+        </div>
+        <div style="font-size:var(--font-label);font-weight:500;margin-top:6px">Вас заваливают трафиком</div>
+        <div style="font-size:var(--font-body);color:#c7ccd1;margin-top:3px;line-height:1.4">
+          420 пакетов/с от «Мэллори». Содержимое не доходит, но трафик расходуется.
+        </div>
+        <div style="display:flex;gap:var(--space-l);margin-top:var(--space-m);
+                    border-top:1px solid #34373c;padding-top:10px">
+          <div style="flex:1;text-align:center;font-size:var(--font-body);color:var(--accent);font-weight:500">В ОФЛАЙН</div>
+          <div style="flex:1;text-align:center;font-size:var(--font-body);color:var(--accent);font-weight:500">СМЕНИТЬ АДРЕС</div>
+        </div>
+      </div>
+
+      <div style="height:var(--space-m)"></div>
+      <div style="background:#26282c;border-radius:var(--radius-tile);padding:var(--space-m);opacity:.75">
+        <div style="display:flex;align-items:center;gap:8px;font-size:var(--font-caption);color:var(--secondary)">
+          <i class="ti ti-plug-off" style="font-size:15px;color:var(--secondary)"></i>
+          p2p messenger · постоянное
+        </div>
+        <div style="font-size:var(--font-label);font-weight:500;margin-top:6px">Вы офлайн</div>
+        <div style="font-size:var(--font-body);color:#c7ccd1;margin-top:3px;line-height:1.4">
+          Соединения разорваны, трафик не расходуется. Сообщения не приходят.
+        </div>
+        <div style="display:flex;margin-top:var(--space-m);border-top:1px solid #34373c;padding-top:10px">
+          <div style="flex:1;text-align:center;font-size:var(--font-body);color:var(--accent);font-weight:500">ВЕРНУТЬСЯ В СЕТЬ</div>
+        </div>
+      </div>
+    </div>
+    <div class="foot" style="background:var(--bg)">Уведомление приходит один раз на эпизод, не повторяется
+      каждую секунду. Пока пользователь в офлайне — висит постоянное, чтобы состояние
+      «я не получаю сообщения» не оказалось незамеченным.</div>
+  </div>
+  <div class="cap"><b>B2. Уведомления.</b> Флуд тратит деньги пользователя прямо сейчас, поэтому
+    сообщать о нём нужно, не дожидаясь, пока он зайдёт в «Сеть». Действия — те же два, прямо из шторки.</div>
+</div>
+
+<!-- ── C. Смена адреса: выбор получателей ─────────────────────────────────── -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>12:32</span><span>▮▮▮ ▮</span></div>
+    <div class="topbar"><i class="ti ti-arrow-left"></i><div class="title">Сменить адрес</div></div>
+
+    <div class="card">
+      <div class="tx" style="margin-top:0">
+        Ваша <b>личность не меняется</b>: имя, отпечаток, история и группы останутся
+        прежними. Меняется только адрес, по которому вас находят в сети.
+        Кому вы его не сообщите — <b>потеряет с вами связь</b>.
+      </div>
+    </div>
+
+    <div class="sect">Сообщить новый адрес</div>
+    <div class="row">
+      <div class="ck on"><i class="ti ti-check"></i></div>
+      <div class="av">Д</div>
+      <div class="sp">Dave<div class="sub">в сети</div></div>
+    </div>
+    <div class="row">
+      <div class="ck on"><i class="ti ti-check"></i></div>
+      <div class="av">C</div>
+      <div class="sp">Carol<div class="sub">была 3 дня назад</div>
+        <div class="hint">Узнает, когда появится в сети</div></div>
+    </div>
+    <div class="row">
+      <div class="ck"></div>
+      <div class="av">М</div>
+      <div class="sp">Мэллори<div class="sub">заблокирован</div>
+        <div class="hint">Источник потока — снят по умолчанию</div></div>
+    </div>
+    <div class="divider"></div>
+    <div class="row">
+      <i class="ti ti-users lead"></i>
+      <div class="sp">Выбрано 2 из 3<div class="sub">Мэллори останется со старым адресом</div></div>
+    </div>
+
+    <div class="sect">Как это произойдёт</div>
+    <div class="stepper">
+      <div class="step wait"><i class="ti ti-plug-off"></i><div>Уйдём в офлайн ровно на 60 секунд —
+        за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</div></div>
+      <div class="step wait"><i class="ti ti-refresh"></i><div>Поднимемся под новым адресом.</div></div>
+      <div class="step wait"><i class="ti ti-send"></i><div>Выбранным контактам уйдёт подписанное
+        уведомление — вручную ничего пересылать не нужно.</div></div>
+    </div>
+
+    <div class="btn pri wide">Сменить адрес</div>
+    <div class="foot">Отменить смену нельзя: старый адрес освобождается сразу.</div>
+  </div>
+  <div class="cap"><b>C. Выбор получателей.</b> Здесь живёт главный смысл: адрес меняется
+    для всех, но узнают о нём только отмеченные. Источник флуда снят заранее — но галочку
+    видно, решение остаётся за пользователем.</div>
+</div>
+
+<!-- ── D. Пауза и итог ────────────────────────────────────────────────────── -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>12:33</span><span>▮▮▮ ▮</span></div>
+    <div class="topbar"><div class="title">Смена адреса</div></div>
+
+    <div class="big">
+      <div class="n mono">0:47</div>
+      <div class="s">Вы офлайн. Ждём, пока старый адрес<br>исчезнет из сети.</div>
+    </div>
+    <div class="stepper">
+      <div class="step done"><i class="ti ti-circle-check"></i><div>Старый адрес погашен</div></div>
+      <div class="step now"><i class="ti ti-loader"></i><div>Пауза — 47 с осталось</div></div>
+      <div class="step wait"><i class="ti ti-circle"></i><div>Подъём под новым адресом</div></div>
+      <div class="step wait"><i class="ti ti-circle"></i><div>Уведомление 2 контактам</div></div>
+    </div>
+    <div class="foot">Сообщения, отправленные вам сейчас, дойдут позже — отправитель
+      повторит их автоматически.</div>
+
+    <div class="divider" style="margin:var(--space-l) 0"></div>
+
+    <div class="card">
+      <div class="hd" style="color:var(--online)"><i class="ti ti-circle-check"></i>Адрес сменён</div>
+      <div class="tx">
+        Новый адрес: <b class="mono">203:1d5e:c838:1dd:…</b><br>
+        Оповещены: <b>Dave</b>. <b>Carol</b> была офлайн — узнает, когда появится.
+        Мэллори остался со старым адресом.
+      </div>
+      <div class="btns"><div class="btn sec">Показать QR</div><div class="btn pri">Готово</div></div>
+    </div>
+    <div class="foot" style="padding-top:0">Если поток продолжится и по новому адресу —
+      значит его знает кто-то из оповещённых.</div>
+  </div>
+  <div class="cap"><b>D. Пауза и итог.</b> Пауза не прячется: пользователю сказано, что он
+    офлайн и почему. В итоге видно, кто оповещён, а кто узнает позже — и подсказка,
+    что делать, если поток вернётся.</div>
+</div>
+
+</body>
+</html>

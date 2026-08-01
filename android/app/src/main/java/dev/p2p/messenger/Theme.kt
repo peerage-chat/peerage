@@ -16,6 +16,8 @@ val HoloSecondary = Tokens.Colors.secondary
 val HoloOnline = Tokens.Colors.online
 val HoloVerified = Tokens.Colors.verified
 val HoloError = Tokens.Colors.error
+val HoloWarn = Tokens.Colors.warn
+val HoloIconMuted = Tokens.Colors.iconMuted
 
 private val Scheme = darkColorScheme(
     primary = HoloAccent,

@@ -498,6 +498,90 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_addContact<'local>(
     })
 }
 
+/// Кто сейчас флудит: JSON `[{peer, dropped, pps, blocked}]`, по убыванию темпа.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_floodPeers<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.flood_json())
+    })
+}
+
+/// Текущая эпоха адреса (0 — адрес совпадает с ключом личности).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_transportEpoch<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        e.transport_epoch() as jint
+    })
+}
+
+/// Сменить адрес: гашение узла → пауза офлайн → подъём на новом ключе → рассылка
+/// подписанного объявления перечисленным контактам (hex через запятую).
+/// Fire-and-forget: операция долгая (пауза!), результат придёт событием.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_rotateTransport<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    recipients_csv: JString<'local>,
+    gap_secs: jint,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let csv = jstr(&mut env, &recipients_csv);
+        let recipients: Vec<[u8; 32]> =
+            csv.split(',').map(str::trim).filter(|s| !s.is_empty()).filter_map(parse_key).collect();
+        e.rotate_transport(recipients, gap_secs.max(0) as u64);
+    });
+}
+
+/// Уйти в офлайн (разорвать соединения) — перестать платить за чужой поток.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_goOffline<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) {
+    jni_safe!((), {
+        if let Some(e) = unsafe { engine(session_ptr) } { e.go_offline(); }
+    });
+}
+
+/// Вернуться в сеть на текущем адресе.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_goOnline<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        if e.go_online() { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
+/// Мы намеренно вне сети (офлайн по кнопке или пауза смены адреса).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_isOffline<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        if e.is_offline() { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
 /// Строка для своего QR/«скопировать ключ»: личность, а после смены адреса — ещё и
 /// подписанная привязка к текущему адресу.
 #[no_mangle]

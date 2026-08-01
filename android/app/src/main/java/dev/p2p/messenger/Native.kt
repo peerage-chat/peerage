@@ -128,6 +128,25 @@ object Native {
      *  `личность:эпоха:адрес:подпись` (ADR-007). Возвращает "added"|"known"|"error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
 
+    /** Кто сейчас флудит: JSON [{peer, dropped, pps, blocked}], по убыванию темпа. */
+    external fun floodPeers(sessionPtr: Long): String
+
+    /** Текущая эпоха адреса (0 — адрес совпадает с ключом личности). */
+    external fun transportEpoch(sessionPtr: Long): Int
+
+    /** Сменить адрес: пауза офлайн + подъём на новом ключе + рассылка объявления
+     *  перечисленным контактам (hex через запятую). Долгая операция, fire-and-forget. */
+    external fun rotateTransport(sessionPtr: Long, recipientsCsv: String, gapSecs: Int)
+
+    /** Уйти в офлайн — перестать платить за чужой поток прямо сейчас. */
+    external fun goOffline(sessionPtr: Long)
+
+    /** Вернуться в сеть на текущем адресе. */
+    external fun goOnline(sessionPtr: Long): Boolean
+
+    /** Мы намеренно вне сети (кнопка «офлайн» или пауза смены адреса). */
+    external fun isOffline(sessionPtr: Long): Boolean
+
     /** Свой код обмена для QR: hex личности, а после смены адреса — с подписанной
      *  привязкой к текущему адресу (иначе по коду до нас не достучатся). */
     external fun myContactCode(sessionPtr: Long): String

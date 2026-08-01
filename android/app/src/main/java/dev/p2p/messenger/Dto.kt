@@ -157,6 +157,15 @@ internal data class StorageStatsDto(
     val chats: List<ChatStorageDto> = emptyList(),
 )
 
+/** Источник флуда: сколько его пакетов отброшено и с каким темпом. */
+@Serializable
+internal data class FloodPeerDto(
+    val peer: String = "",
+    val dropped: Long = 0,
+    val pps: Double = 0.0,
+    val blocked: Boolean = false,
+)
+
 @Serializable
 internal data class CallEntryDto(
     val peer: String = "",
@@ -367,6 +376,11 @@ internal sealed interface EngineEvent {
         val flags: Int = 0,
         val left: Boolean = false,
     ) : EngineEvent
+
+    /** Наш адрес сменился: личность прежняя, меняется только адрес. */
+    @Serializable
+    @SerialName("transport_rotated")
+    data class TransportRotated(val address: String, val epoch: Int) : EngineEvent
 
     @Serializable
     @SerialName("blob_received")

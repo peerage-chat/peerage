@@ -128,7 +128,7 @@ internal fun CenterMessage(text: String) {
     }
 }
 
-internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit }
+internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit, Flood, RotateAddress }
 
 /** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
  *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
@@ -148,7 +148,13 @@ private fun Root(model: AppModel, width: WidthClass) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CompactShell(model: AppModel) {
-    var screen by remember { mutableStateOf(Screen.Contacts) }
+    val activity = LocalContext.current as? android.app.Activity
+    // Кнопка «Сменить адрес» в уведомлении о флуде открывает сразу нужный экран:
+    // человек уже принял решение, незачем заставлять его искать пункт меню.
+    var screen by remember {
+        val fromNotif = activity?.intent?.getBooleanExtra(FloodNotifier.EXTRA_OPEN_ROTATE, false) == true
+        mutableStateOf(if (fromNotif) Screen.RotateAddress else Screen.Contacts)
+    }
     // id редактируемой папки (null — создаём новую).
     var editFolder by remember { mutableStateOf<String?>(null) }
     // Ключ контакта, которого пришли СВЕРЯТЬ сканером (null — обычное добавление).
@@ -252,6 +258,8 @@ private fun CompactShell(model: AppModel) {
                         Screen.Network -> TopBar(stringResource(R.string.menu_network), onBack = { screen = Screen.Contacts }) {
                             BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
                         }
+                        Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = { screen = Screen.Network })
+                        Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = { screen = Screen.Flood })
                         Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = { screen = Screen.Contacts })
                         Screen.Storage -> TopBar(stringResource(R.string.menu_storage), onBack = { screen = Screen.Contacts })
                         Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = { screen = Screen.Network })
@@ -359,7 +367,20 @@ private fun CompactShell(model: AppModel) {
                                 model,
                                 onMyQr = { screen = Screen.Me },
                                 onOpenOutbox = { screen = Screen.Outbox },
+                                onFlood = { screen = Screen.Flood },
+                                onRotate = { screen = Screen.RotateAddress },
                             )
+                            Screen.Flood -> FloodScreen(model) { screen = Screen.RotateAddress }
+                            // Пока идёт смена адреса, экран выбора подменяется ходом
+                            // операции: пользователь минуту офлайн и должен видеть, почему.
+                            Screen.RotateAddress -> if (model.rotation != null) {
+                                // Ход операции живёт на том же экране: уводить человека
+                                // в другое место в момент, когда он на минуту офлайн,
+                                // — ровно тогда, когда он хочет видеть, что происходит.
+                                RotationProgress(model) { screen = Screen.Network }
+                            } else {
+                                RotateAddressScreen(model) {}
+                            }
                             Screen.Saved -> SavedScreen(model)
                             Screen.Storage -> StorageScreen(model)
                             Screen.Folders -> FoldersScreen(model) { id ->
