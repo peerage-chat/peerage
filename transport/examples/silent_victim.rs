@@ -69,13 +69,11 @@ fn main() {
     println!("A шлёт 5 пкт/с, приложение B молчит. Ждём до {limit}с…");
     let start = Instant::now();
     let payload = vec![0x41u8; 500];
-    let mut announced = false;
     while start.elapsed() < Duration::from_secs(limit) {
         let _ = a.write(&b_key, &payload);
         thread::sleep(Duration::from_millis(200));
         let n = got.load(Ordering::Relaxed);
-        if n > 0 && !announced {
-            announced = true;
+        if n > 0 {
             println!(
                 ">>> первая доставка через {:.1}с (пакетов: {n})",
                 start.elapsed().as_secs_f64(),
@@ -89,7 +87,7 @@ fn main() {
             );
             break;
         }
-        if start.elapsed().as_secs() % 15 == 0 && !announced {
+        if start.elapsed().as_secs() % 15 == 0 {
             println!("    {:>3}с: доставлено {n}", start.elapsed().as_secs());
             thread::sleep(Duration::from_millis(900));
         }
