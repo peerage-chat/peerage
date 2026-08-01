@@ -271,6 +271,18 @@ class AppModel private constructor() {
 
     fun revealSeedPhrase() = ops.execute { revealedPhrase = Native.seedPhrase(sessionPtr) }
 
+    /** Записал ли пользователь резервную копию ключа (M4). Локальный факт, не
+     *  секрет: без него человек не узнает, что личность держится на одной фразе. */
+    var keyBackupDone by mutableStateOf(false)
+        private set
+
+    /** Отметить, что фраза записана (нажал «Записал»). */
+    fun markKeyBackupDone() {
+        keyBackupDone = true
+        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("key_backup_done", true)?.apply()
+    }
+
     fun clearRevealedPhrase() {
         revealedPhrase = null
     }
@@ -904,6 +916,9 @@ class AppModel private constructor() {
         sessionPtr = started.sessionPtr
         me = Me(started.pubkey, started.address, started.fingerprint)
         transportEpoch = Native.transportEpoch(sessionPtr)
+        keyBackupDone = appContext
+            ?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+            ?.getBoolean("key_backup_done", false) ?: false
         refreshContactsNow()
         refreshRequestsNow()
         refreshGroupsNow()

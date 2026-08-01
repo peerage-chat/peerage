@@ -128,7 +128,7 @@ internal fun CenterMessage(text: String) {
     }
 }
 
-internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit, Flood, RotateAddress }
+internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit, Flood, RotateAddress, EditProfile }
 
 /** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
  *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
@@ -258,6 +258,7 @@ private fun CompactShell(model: AppModel) {
                         Screen.Network -> TopBar(stringResource(R.string.menu_network), onBack = { screen = Screen.Contacts }) {
                             BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
                         }
+                        Screen.EditProfile -> TopBar(stringResource(R.string.settings_edit_profile), onBack = { screen = Screen.Settings })
                         Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = { screen = Screen.Network })
                         Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = { screen = Screen.Flood })
                         Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = { screen = Screen.Contacts })
@@ -349,7 +350,14 @@ private fun CompactShell(model: AppModel) {
                                 },
                             )
                             Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
-                            Screen.Settings -> SettingsScreen(model)
+                            Screen.Settings -> SettingsScreen(
+                                model,
+                                onEditProfile = { screen = Screen.EditProfile },
+                                onMyQr = { screen = Screen.Me },
+                                onNetwork = { screen = Screen.Network },
+                                onStorage = { screen = Screen.Storage },
+                                onContacts = { screen = Screen.ContactList },
+                            )
                             Screen.ContactList -> ContactListScreen(model) {
                                 model.openChat(it)
                                 screen = Screen.Chat
@@ -381,6 +389,7 @@ private fun CompactShell(model: AppModel) {
                             } else {
                                 RotateAddressScreen(model) {}
                             }
+                            Screen.EditProfile -> EditProfileScreen(model) { screen = Screen.Settings }
                             Screen.Saved -> SavedScreen(model)
                             Screen.Storage -> StorageScreen(model)
                             Screen.Folders -> FoldersScreen(model) { id ->

@@ -509,4 +509,25 @@
     <string name="notif_action_offline">В офлайн</string>
     <string name="notif_action_online">Вернуться в сеть</string>
     <string name="notif_action_rotate">Сменить адрес</string>
+
+    <!-- Настройки (M4) -->
+    <string name="settings_privacy">КОНФИДЕНЦИАЛЬНОСТЬ</string>
+    <string name="settings_privacy_none">Метаданные не раскрываем</string>
+    <string name="settings_privacy_none_desc">Отчёты о прочтении и индикатор набора не отправляются вовсе — здесь нечего выключать.</string>
+    <string name="settings_privacy_presence">Статус «в сети» контакты видят: он следует из keepalive, которым держится доставка.</string>
+    <string name="settings_security">БЕЗОПАСНОСТЬ</string>
+    <string name="settings_key_backup">Резервная копия ключа</string>
+    <string name="settings_key_backup_done">Сделана</string>
+    <string name="settings_key_backup_todo">Не сделана — личность держится на 24 словах</string>
+    <string name="settings_at_rest">Шифрование данных</string>
+    <string name="settings_at_rest_keystore">Ключ в Android Keystore (аппаратный, где есть)</string>
+    <string name="settings_verified">Проверенные контакты</string>
+    <string name="settings_verified_count">%1$d из %2$d сверены лично</string>
+    <string name="settings_media_net">МЕДИА И СЕТЬ</string>
+    <string name="settings_net_battery">Сеть и батарея</string>
+    <string name="settings_no_name">Без имени</string>
+    <string name="settings_tap_avatar">Нажмите на аватар, чтобы сменить</string>
+    <string name="settings_your_name">ВАШЕ ИМЯ</string>
+    <string name="settings_name_hint">Так вас увидят контакты. Имя уходит только им.</string>
+    <string name="settings_edit_profile">Профиль</string>
 </resources>

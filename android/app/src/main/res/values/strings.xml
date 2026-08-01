@@ -517,4 +517,25 @@
     <string name="notif_action_offline">Go offline</string>
     <string name="notif_action_online">Back online</string>
     <string name="notif_action_rotate">Change address</string>
+
+    <!-- Settings (M4) -->
+    <string name="settings_privacy">PRIVACY</string>
+    <string name="settings_privacy_none">No metadata is revealed</string>
+    <string name="settings_privacy_none_desc">Read receipts and typing indicators are never sent — there is nothing here to switch off.</string>
+    <string name="settings_privacy_presence">Contacts do see your online status: it follows from the keepalive that delivery relies on.</string>
+    <string name="settings_security">SECURITY</string>
+    <string name="settings_key_backup">Key backup</string>
+    <string name="settings_key_backup_done">Done</string>
+    <string name="settings_key_backup_todo">Not done — your identity rests on 24 words</string>
+    <string name="settings_at_rest">Data encryption</string>
+    <string name="settings_at_rest_keystore">Key in Android Keystore (hardware-backed where available)</string>
+    <string name="settings_verified">Verified contacts</string>
+    <string name="settings_verified_count">%1$d of %2$d verified in person</string>
+    <string name="settings_media_net">MEDIA AND NETWORK</string>
+    <string name="settings_net_battery">Network and battery</string>
+    <string name="settings_no_name">No name</string>
+    <string name="settings_tap_avatar">Tap the avatar to change it</string>
+    <string name="settings_your_name">YOUR NAME</string>
+    <string name="settings_name_hint">This is what contacts see. The name goes to them only.</string>
+    <string name="settings_edit_profile">Profile</string>
 </resources>

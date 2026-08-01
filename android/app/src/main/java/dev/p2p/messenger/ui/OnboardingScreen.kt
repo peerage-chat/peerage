@@ -57,7 +57,7 @@ private val WarnText = Color(0xFFE8C98A)
 /** FLAG_SECURE на окно, пока композабл в композиции (блокирует скриншот/запись экрана
  *  и превью в «недавних»). Ставим на экранах с секретом — сид-фраза. */
 @Composable
-private fun SecureFlag() {
+internal fun SecureFlag() {
     val ctx = LocalContext.current
     DisposableEffect(Unit) {
         val window = (ctx as? Activity)?.window
@@ -329,6 +329,7 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
             desc = stringResource(R.string.onb_phrase_sub),
             primary = stringResource(R.string.onb_wrote_down),
             onPrimary = {
+                model.markKeyBackupDone()
                 model.clearRevealedPhrase()
                 onDone()
             },
@@ -379,7 +380,7 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
 /** Сетка 24 слов сид-фразы: два столбца по 12, каждое пронумеровано. `phrase` = null —
  *  ещё грузится (читается через ops). */
 @Composable
-private fun ColumnScope.PhraseGrid(phrase: String?) {
+internal fun ColumnScope.PhraseGrid(phrase: String?) {
     val words = phrase?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
     if (words.size < 24) {
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
