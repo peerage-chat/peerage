@@ -530,4 +530,11 @@
     <string name="settings_your_name">ВАШЕ ИМЯ</string>
     <string name="settings_name_hint">Так вас увидят контакты. Имя уходит только им.</string>
     <string name="settings_edit_profile">Профиль</string>
+
+    <string name="settings_app_lock">Блокировка приложения</string>
+    <string name="settings_app_lock_desc">Спрашивать биометрию или PIN устройства при возврате</string>
+    <string name="settings_app_lock_no_device">Сначала поставьте блокировку экрана в настройках телефона</string>
+    <string name="lock_title">Приложение заблокировано</string>
+    <string name="lock_subtitle">Подтвердите, что это вы</string>
+    <string name="lock_unlock">Разблокировать</string>
 </resources>

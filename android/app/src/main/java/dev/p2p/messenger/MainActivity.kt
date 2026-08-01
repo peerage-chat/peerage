@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         model.appContext = applicationContext
+        AppLock.load(applicationContext)
         // Разрешения НЕ просим здесь: во время онбординга системный диалог не нужен.
         // Запрашиваются в App() после гейта (onboarded) — см. requestCorePermissions.
         val dataDir = filesDir.absolutePath
@@ -56,12 +57,40 @@ class MainActivity : ComponentActivity() {
                 WindowWidthSizeClass.Medium -> WidthClass.Medium
                 else -> WidthClass.Compact
             }
-            P2PTheme { App(model, dataDir, width) }
+            P2PTheme {
+                // Замок рисуется ПОВЕРХ и вместо содержимого: под ним не должно
+                // мелькать ни списка чатов, ни превью сообщений.
+                if (AppLock.locked) {
+                    LockScreen { askCredential() }
+                } else {
+                    App(model, dataDir, width)
+                }
+            }
         }
+    }
+
+    /** Запрос системного подтверждения личности (биометрия/PIN устройства). */
+    private fun askCredential() {
+        val intent = AppLock.credentialIntent(this)
+        if (intent == null) {
+            // Экран блокировки на устройстве сняли, пока приложение было в фоне:
+            // подтверждать нечем, держать пользователя взаперти бессмысленно.
+            AppLock.unlock()
+            return
+        }
+        credentialLauncher.launch(intent)
+    }
+
+    private val credentialLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+    ) { res ->
+        if (res.resultCode == RESULT_OK) AppLock.unlock()
     }
 
     override fun onStart() {
         super.onStart()
+        AppLock.onForeground()
+        if (AppLock.locked) askCredential()
         model.foreground = true
         // Поднимаем mesh-узел при выходе на передний план (в т.ч. после кнопки
         // «Отключить» в уведомлении): держим процесс/сеть живыми при погасшем экране.
@@ -70,8 +99,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        AppLock.onBackground()
+        // При включённой блокировке прячем и снимок в «недавних»: иначе переписка
+        // видна любому, кто открыл список задач, — замок в такой паре бесполезен.
+        if (AppLock.enabled) {
+            window.setFlags(
+                android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                android.view.WindowManager.LayoutParams.FLAG_SECURE,
+            )
+        }
         // В фоне троттлим поллинг (см. AppModel) — меньше пробуждений CPU.
         model.foreground = false
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Снимаем FLAG_SECURE, только когда содержимое уже разблокировано.
+        if (!AppLock.locked) {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 }
 

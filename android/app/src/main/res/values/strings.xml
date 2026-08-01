@@ -538,4 +538,11 @@
     <string name="settings_your_name">YOUR NAME</string>
     <string name="settings_name_hint">This is what contacts see. The name goes to them only.</string>
     <string name="settings_edit_profile">Profile</string>
+
+    <string name="settings_app_lock">App lock</string>
+    <string name="settings_app_lock_desc">Ask for biometrics or the device PIN when you come back</string>
+    <string name="settings_app_lock_no_device">Set a screen lock in the phone settings first</string>
+    <string name="lock_title">App is locked</string>
+    <string name="lock_subtitle">Confirm it is you</string>
+    <string name="lock_unlock">Unlock</string>
 </resources>

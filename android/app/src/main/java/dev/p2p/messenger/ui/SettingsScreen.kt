@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -105,8 +106,34 @@ internal fun SettingsScreen(
             },
             valueColor = if (model.keyBackupDone) HoloOnline else HoloWarn,
         ) { showPhrase = true }
+        // Блокировка: подтверждение — системное (биометрия/PIN устройства), своего
+        // секрета мы не храним. Без экрана блокировки на устройстве включать нечего.
+        val ctx = LocalContext.current
+        val deviceSecure = remember { AppLock.deviceSecure(ctx) }
+        SurfaceCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Lock, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_app_lock), color = Color.White, fontSize = 15.sp)
+                    Text(
+                        stringResource(
+                            if (deviceSecure) R.string.settings_app_lock_desc else R.string.settings_app_lock_no_device,
+                        ),
+                        color = if (deviceSecure) HoloSecondary else HoloWarn,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Switch(
+                    checked = AppLock.enabled,
+                    enabled = deviceSecure,
+                    onCheckedChange = { AppLock.setEnabled(ctx, it) },
+                )
+            }
+        }
         SettingRow(
-            Icons.Filled.Lock,
+            Icons.Filled.Shield,
             stringResource(R.string.settings_at_rest),
             stringResource(R.string.settings_at_rest_keystore),
         )
@@ -338,5 +365,28 @@ internal fun EditProfileScreen(model: AppModel, onDone: () -> Unit) {
             model.updateSelfName(name.trim())
             onDone()
         }
+    }
+}
+
+/** Экран замка: ничего лишнего, только повод и кнопка подтверждения. */
+@Composable
+internal fun LockScreen(onUnlock: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().background(HoloBg).padding(ScreenPad),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Filled.Lock, null, tint = HoloAccent, modifier = Modifier.size(56.dp))
+        Spacer(Modifier.height(20.dp))
+        Text(
+            stringResource(R.string.lock_title),
+            color = Color.White,
+            fontSize = 19.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(stringResource(R.string.lock_subtitle), color = HoloSecondary, fontSize = 13.sp)
+        Spacer(Modifier.height(28.dp))
+        AccentButton(stringResource(R.string.lock_unlock), onClick = onUnlock)
     }
 }
