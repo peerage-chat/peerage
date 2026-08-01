@@ -157,6 +157,34 @@ internal data class StorageStatsDto(
     val chats: List<ChatStorageDto> = emptyList(),
 )
 
+/**
+ * Состав резервной копии данных: и оценка ДО создания, и итог после (что реально
+ * добавлено при восстановлении). Один тип на оба случая — цифры те же самые.
+ */
+@Serializable
+internal data class BackupStatsDto(
+    val contacts: Long = 0,
+    val messages: Long = 0,
+    val notes: Long = 0,
+    val calls: Long = 0,
+    val attachments: Long = 0,
+    @SerialName("attachment_bytes") val attachmentBytes: Long = 0,
+    /** Вложения крупнее лимита кадра — в копию не попадут (говорим числом). */
+    @SerialName("skipped_big") val skippedBig: Long = 0,
+    /** Непусто — операция не удалась, текст показывается пользователю. */
+    val error: String = "",
+)
+
+/** Что положить в копию. Поля совпадают с `p2p_engine::backup::Parts`. */
+@Serializable
+internal data class BackupPartsDto(
+    val contacts: Boolean = true,
+    val messages: Boolean = true,
+    val notes: Boolean = true,
+    val calls: Boolean = false,
+    val attachments: Boolean = false,
+)
+
 /** Источник флуда: сколько его пакетов отброшено и с каким темпом. */
 @Serializable
 internal data class FloodPeerDto(

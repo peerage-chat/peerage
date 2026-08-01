@@ -258,6 +258,37 @@ impl ContactStore {
         Ok(AddOutcome::Added)
     }
 
+    /// Вставить контакт целиком из резервной копии.
+    ///
+    /// Существующий НЕ перезаписывается: локальная запись новее той, что в копии, —
+    /// восстановление не должно откатывать переименование или (тем более) снимать
+    /// верификацию. Возвращает true, если контакт действительно добавлен.
+    ///
+    /// Транспортный ключ (адрес, ADR-007) намеренно **не** переносится: он мог
+    /// протухнуть за время, пока копия лежала, а слать на мёртвый адрес хуже, чем на
+    /// ключ личности — с него связь восстановится сама при первом же объявлении.
+    pub fn import_contact(&mut self, c: &Contact) -> Result<bool, StoreError> {
+        let key = decode_key(&c.key)?;
+        if self.cache.contains_key(&key) {
+            return Ok(false);
+        }
+        db::lock(&self.db).execute(
+            "INSERT OR IGNORE INTO contacts
+                 (key, name, fingerprint, added, verified, profile_name, avatar_id, helpful)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                key.as_slice(), &c.name, &c.fingerprint, c.added, c.verified as i64,
+                &c.profile_name, &c.avatar_id, c.helpful as i64,
+            ],
+        )?;
+        self.cache.insert(key, Contact {
+            transport_key: String::new(),
+            transport_epoch: 0,
+            ..c.clone()
+        });
+        Ok(true)
+    }
+
     pub fn get(&self, key: &[u8; 32]) -> Option<&Contact> {
         self.cache.get(key)
     }
@@ -811,6 +842,76 @@ impl MessageStore {
         )?;
         Ok(())
     }
+
+    /// Сколько сообщений всего (для оценки объёма копии до её создания).
+    pub fn count(&self) -> u64 {
+        db::lock(&self.db)
+            .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get::<_, i64>(0))
+            .unwrap_or(0) as u64
+    }
+
+    /// Страница истории ВСЕХ чатов для резервной копии: `(rowid, пир, сообщение)`.
+    ///
+    /// Постранично и по `rowid`, а не «все сразу»: переписка бывает в сотни тысяч
+    /// строк, и держать её в памяти целиком на телефоне нельзя. `rowid` растёт
+    /// монотонно, поэтому курсор переживает вставки во время обхода.
+    pub fn export_page(&self, after: i64, limit: usize) -> Vec<(i64, [u8; 32], StoredMessage)> {
+        let conn = db::lock(&self.db);
+        let mut stmt = match conn.prepare(
+            "SELECT rowid, peer, id, text, mine, time, status, kind, blob_id, mime, name,
+                    size, duration_ms, width, height, thumb_id, downloaded
+             FROM messages WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map(rusqlite::params![after, limit as i64], |row| {
+            let peer: Vec<u8> = row.get(1)?;
+            Ok((
+                row.get::<_, i64>(0)?,
+                <[u8; 32]>::try_from(peer.as_slice()).unwrap_or([0u8; 32]),
+                StoredMessage {
+                    id: row.get::<_, i64>(2)? as u64,
+                    text: row.get(3)?,
+                    mine: row.get::<_, i64>(4)? != 0,
+                    time: row.get(5)?,
+                    status: row.get(6)?,
+                    kind: row.get(7)?,
+                    blob_id: row.get(8)?,
+                    mime: row.get(9)?,
+                    name: row.get(10)?,
+                    size: row.get::<_, i64>(11)? as u64,
+                    duration_ms: row.get::<_, i64>(12)? as u32,
+                    width: row.get::<_, i64>(13)? as u32,
+                    height: row.get::<_, i64>(14)? as u32,
+                    thumb_id: row.get(15)?,
+                    downloaded: row.get::<_, i64>(16)? != 0,
+                },
+            ))
+        })
+        .and_then(|rows| rows.collect())
+        .unwrap_or_default()
+    }
+
+    /// Вставить сообщение из копии, НЕ трогая уже существующее (`INSERT OR IGNORE`).
+    ///
+    /// Восстановление — слияние, а не замена: то, что пришло после снятия копии,
+    /// новее и потерять его нельзя. Ключ (пир, id, mine) один и тот же на обоих
+    /// концах, поэтому повторный импорт того же файла ничего не задваивает.
+    pub fn import_message(&self, peer: &[u8; 32], m: &StoredMessage) -> Result<bool, StoreError> {
+        let n = db::lock(&self.db).execute(
+            "INSERT OR IGNORE INTO messages
+                 (peer, id, mine, text, time, status, kind, blob_id, mime, name,
+                  size, duration_ms, width, height, thumb_id, downloaded)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            rusqlite::params![
+                peer.as_slice(), m.id as i64, m.mine as i64, &m.text, m.time, &m.status,
+                &m.kind, &m.blob_id, &m.mime, &m.name, m.size as i64, m.duration_ms as i64,
+                m.width as i64, m.height as i64, &m.thumb_id, m.downloaded as i64,
+            ],
+        )?;
+        Ok(n > 0)
+    }
 }
 
 // ---- Утилиты ---------------------------------------------------------------
@@ -896,6 +997,38 @@ impl CallStore {
             })
         });
         rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    /// Сколько записей всего (оценка объёма копии).
+    pub fn count(&self) -> u64 {
+        db::lock(&self.db)
+            .query_row("SELECT COUNT(*) FROM calls", [], |r| r.get::<_, i64>(0))
+            .unwrap_or(0) as u64
+    }
+
+    /// Вставить запись из резервной копии. Дедуп по (пир, момент начала): `id`
+    /// автоинкрементный и на другом устройстве другой, поэтому по нему сверять
+    /// нельзя — повторный импорт задвоил бы журнал.
+    pub fn import_row(&self, c: &CallRecord) -> bool {
+        let conn = db::lock(&self.db);
+        let dup: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM calls WHERE peer = ?1 AND started = ?2",
+                rusqlite::params![c.peer.as_slice(), c.started],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if dup > 0 {
+            return false;
+        }
+        conn.execute(
+            "INSERT INTO calls (peer, gid, incoming, outcome, started, duration)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                c.peer.as_slice(), &c.gid, c.incoming as i64, &c.outcome, c.started, c.duration,
+            ],
+        )
+        .is_ok()
     }
 
     /// Очистить журнал (явное действие пользователя).

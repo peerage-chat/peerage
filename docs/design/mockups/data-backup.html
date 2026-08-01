@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Резервная копия данных</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 24px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .col { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .cap { color: #8a8f96; font-size: 12px; max-width: 390px; text-align: center; line-height: 1.45; }
+  .cap b { color: #cfd8dc; font-weight: 500; }
+  .phone { width: 390px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+           overflow: hidden; color: var(--on-dark); }
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 6px;
+               background: var(--accent-dark); font-size: var(--font-body); color: #cfd8dc; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px 14px; background: var(--accent-dark); }
+  .topbar .title { font-size: 20px; font-weight: 500; flex: 1; }
+  .topbar i { font-size: 22px; color: var(--icon-chrome); }
+
+  .sect { padding: var(--space-l) var(--space-l) var(--space-xs); font-size: var(--font-caption);
+          letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+  .row { display: flex; align-items: center; gap: var(--space-m); padding: var(--row-v) var(--space-l);
+         font-size: var(--font-label); }
+  .row .sp { flex: 1; min-width: 0; }
+  .row .sub { font-size: var(--font-small); color: var(--secondary); margin-top: 2px; line-height: 1.35; }
+  .row i.lead { font-size: 21px; color: var(--icon-muted); }
+  .row .size { font-size: var(--font-body); color: var(--secondary); }
+
+  .ck { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--icon-muted);
+        display: flex; align-items: center; justify-content: center; flex: none; }
+  .ck.on { background: var(--accent); border-color: var(--accent); color: var(--accent-dark); }
+  .ck i { font-size: 15px; }
+
+  .card { margin: var(--space-m) var(--space-l); border-radius: var(--radius-tile); padding: var(--space-m);
+          border: 1px solid var(--border); background: var(--surface); }
+  .card.warn { border-color: rgba(230,162,60,.45); background: rgba(230,162,60,.08); }
+  .card .hd { display: flex; align-items: center; gap: var(--space-s); font-size: var(--font-label); font-weight: 500; }
+  .card .hd i { font-size: 20px; }
+  .card .tx { font-size: var(--font-body); color: var(--secondary); margin-top: 6px; line-height: 1.45; }
+  .card .tx b { color: #cfd8dc; font-weight: 500; }
+  .card.warn .hd { color: var(--warn); }
+
+  .total { display: flex; align-items: baseline; justify-content: space-between;
+           padding: var(--space-m) var(--space-l) 0; }
+  .total .n { font-size: 26px; font-weight: 500; }
+  .total .l { font-size: var(--font-body); color: var(--secondary); }
+
+  .field { margin: var(--space-s) var(--space-l); border-bottom: 1px solid var(--border); padding: 8px 0; }
+  .field .lbl { font-size: var(--font-caption); letter-spacing: .06em; text-transform: uppercase;
+                color: var(--secondary); }
+  .field .val { font-size: var(--font-label); margin-top: 5px; letter-spacing: .18em; }
+  .field .val.ph { color: #5a6169; letter-spacing: normal; }
+
+  .btn { text-align: center; padding: 12px 8px; border-radius: var(--radius-button);
+         font-size: var(--font-body); font-weight: 500; margin: var(--space-m) var(--space-l) 0; }
+  .btn.pri { background: var(--accent); color: var(--accent-dark); }
+  .btn.sec { border: 1px solid var(--border); color: var(--on-dark); }
+  .btn.disabled { opacity: .4; }
+  .note { padding: var(--space-xs) var(--space-l) 0; font-size: var(--font-small); color: var(--secondary);
+          line-height: 1.4; }
+
+  .prog { padding: 60px var(--space-l) 0; text-align: center; }
+  .prog .big { font-size: 22px; font-weight: 500; }
+  .prog .sub { font-size: var(--font-body); color: var(--secondary); margin-top: 8px; line-height: 1.5; }
+  .bar { height: 4px; border-radius: 2px; background: var(--surface); margin: 22px var(--space-l) 0; overflow: hidden; }
+  .bar > div { height: 100%; width: 62%; background: var(--accent); }
+  .done i { font-size: 46px; color: var(--online); }
+</style>
+</head>
+<body>
+
+<!-- 1. Состав копии -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span><i class="ti ti-wifi"></i> <i class="ti ti-battery-3"></i></span></div>
+    <div class="topbar"><i class="ti ti-arrow-left"></i><div class="title">Копия данных</div></div>
+
+    <div class="card">
+      <div class="hd"><i class="ti ti-archive"></i> Что это</div>
+      <div class="tx">Копия <b>переписки</b>, а не личности. Ключ (24 слова) хранится
+        отдельно: ключ возвращает, кем вас видит сеть, копия — что вы читали.</div>
+    </div>
+
+    <div class="sect">Что положить в копию</div>
+
+    <div class="row">
+      <div class="ck on"><i class="ti ti-check"></i></div>
+      <i class="ti ti-users lead"></i>
+      <div class="sp"><div>Контакты</div><div class="sub">12 · с аватарами</div></div>
+    </div>
+    <div class="row">
+      <div class="ck on"><i class="ti ti-check"></i></div>
+      <i class="ti ti-message lead"></i>
+      <div class="sp"><div>Переписка</div><div class="sub">3 418 сообщений</div></div>
+    </div>
+    <div class="row">
+      <div class="ck on"><i class="ti ti-check"></i></div>
+      <i class="ti ti-notes lead"></i>
+      <div class="sp"><div>Заметки себе</div><div class="sub">27</div></div>
+    </div>
+    <div class="row">
+      <div class="ck"><i></i></div>
+      <i class="ti ti-phone lead"></i>
+      <div class="sp"><div>Журнал звонков</div><div class="sub">64 записи · никуда не уходит с устройства</div></div>
+    </div>
+    <div class="row">
+      <div class="ck"><i></i></div>
+      <i class="ti ti-photo lead"></i>
+      <div class="sp"><div>Вложения</div><div class="sub">143 файла · 8 крупнее 15 МБ не войдут</div></div>
+      <div class="size">610 МБ</div>
+    </div>
+
+    <div class="total"><span class="l">Размер копии</span><span class="n">44 МБ</span></div>
+    <div class="note">Без вложений. Крупные файлы качаются у собеседника заново — они
+      адресуются по содержимому.</div>
+
+    <div class="card warn">
+      <div class="hd"><i class="ti ti-users-group"></i> Группы не входят</div>
+      <div class="tx">Копия возвращает то, что <b>читать</b>, а не то, <b>чем расшифровывать</b>.
+        Восстановленное состояние группы устарело бы и сломало её для всех — после
+        восстановления в группы приглашают заново.</div>
+    </div>
+
+    <div class="btn pri">Далее</div>
+    <div class="btn sec">Восстановить из копии</div>
+    <div style="height:20px"></div>
+  </div>
+  <div class="cap"><b>1. Состав.</b> Первым — что это и чем отличается от копии ключа:
+    иначе пользователь решит, что сохранил всё, и потеряет личность. Части с цифрами:
+    выбор «класть ли вложения» делается по размеру, а не вслепую. Звонки выключены по
+    умолчанию — журнал локальный, и вынос его в облако должен быть решением.</div>
+</div>
+
+<!-- 2. Пароль -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span><i class="ti ti-wifi"></i> <i class="ti ti-battery-3"></i></span></div>
+    <div class="topbar"><i class="ti ti-arrow-left"></i><div class="title">Пароль копии</div></div>
+
+    <div class="card">
+      <div class="hd"><i class="ti ti-lock"></i> Отдельный пароль</div>
+      <div class="tx">Файл уедет с телефона — в облако, на карту, на чужой компьютер.
+        Ключ этого устройства там недоступен, поэтому копия закрывается <b>паролем</b>,
+        и открыть её можно где угодно.</div>
+    </div>
+
+    <div class="field"><div class="lbl">Пароль копии</div><div class="val">••••••••••</div></div>
+    <div class="field"><div class="lbl">Ещё раз</div><div class="val ph">повторите пароль</div></div>
+
+    <div class="note">Забытый пароль не восстанавливается: копия будет мёртвым файлом.
+      Так и задумано — лазейка для вас была бы лазейкой для любого, кто найдёт файл.</div>
+
+    <div class="btn pri disabled">Создать копию</div>
+    <div class="note" style="padding-top:12px">Дальше система спросит, куда сохранить файл.</div>
+  </div>
+  <div class="cap"><b>2. Пароль.</b> Два поля с подписями (урок прошлого экрана: два
+    безымянных поля неразличимы). Кнопка неактивна, пока пароли не совпали.</div>
+</div>
+
+<!-- 3. Процесс + итог -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span><i class="ti ti-wifi"></i> <i class="ti ti-battery-3"></i></span></div>
+    <div class="topbar"><div class="title">Копия данных</div></div>
+    <div class="prog">
+      <div class="big">Собираем копию</div>
+      <div class="sub">Переписка · 2 140 из 3 418</div>
+    </div>
+    <div class="bar"><div></div></div>
+    <div class="note" style="padding-top:18px; text-align:center">Не закрывайте экран.
+      Шифрование пароля занимает около секунды — это намеренно: столько же оно займёт
+      у того, кто станет перебирать.</div>
+    <div style="height:120px"></div>
+  </div>
+  <div class="cap"><b>3. Процесс.</b> Показываем, ЧТО именно идёт сейчас, а не «подождите»:
+    на гигабайте вложений полоса без подписи выглядит зависшей.</div>
+</div>
+
+<!-- 4. Восстановление -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span><i class="ti ti-wifi"></i> <i class="ti ti-battery-3"></i></span></div>
+    <div class="topbar"><i class="ti ti-arrow-left"></i><div class="title">Восстановление</div></div>
+
+    <div class="card">
+      <div class="hd"><i class="ti ti-file-import"></i> копия-2026-08-01.p2pbak</div>
+      <div class="tx">44 МБ · создана 1 августа</div>
+    </div>
+
+    <div class="field"><div class="lbl">Пароль копии</div><div class="val">••••••••••</div></div>
+
+    <div class="card">
+      <div class="hd"><i class="ti ti-git-merge"></i> Данные сольются</div>
+      <div class="tx">Ничего не удаляется: то, что пришло после копии, останется на месте.
+        Повторное восстановление того же файла ничего не задвоит.</div>
+    </div>
+
+    <div class="btn pri">Восстановить</div>
+    <div style="height:20px"></div>
+  </div>
+  <div class="cap"><b>4. Восстановление.</b> Прямо сказано, что это слияние, а не
+    замена, — иначе человек боится нажать, думая, что потеряет новое.</div>
+</div>
+
+<!-- 5. Итог -->
+<div class="col">
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span><i class="ti ti-wifi"></i> <i class="ti ti-battery-3"></i></span></div>
+    <div class="topbar"><div class="title">Готово</div></div>
+    <div class="prog done">
+      <i class="ti ti-circle-check"></i>
+      <div class="big" style="margin-top:14px">Восстановлено</div>
+      <div class="sub">12 контактов · 3 418 сообщений · 27 заметок<br>143 вложения</div>
+    </div>
+    <div class="card warn" style="margin-top:26px">
+      <div class="hd"><i class="ti ti-users-group"></i> Группы придётся вернуть вручную</div>
+      <div class="tx">Попросите участников пригласить вас заново — переписка групп
+        останется видна, но новые сообщения придут только после приглашения.</div>
+    </div>
+    <div class="btn pri">Готово</div>
+    <div style="height:20px"></div>
+  </div>
+  <div class="cap"><b>5. Итог.</b> Цифры именно ДОБАВЛЕННОГО (а не «в файле было»),
+    иначе повторный импорт выглядел бы как успешный, ничего не сделав.</div>
+</div>
+
+</body>
+</html>

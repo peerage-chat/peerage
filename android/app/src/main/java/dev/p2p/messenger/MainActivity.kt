@@ -189,7 +189,7 @@ internal fun CenterMessage(text: String) {
     }
 }
 
-internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit, Flood, RotateAddress, EditProfile, VaultLevel }
+internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit, Flood, RotateAddress, EditProfile, VaultLevel, Backup }
 
 /** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
  *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
@@ -328,6 +328,7 @@ private fun CompactShell(model: AppModel) {
                         Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = { screen = Screen.Flood })
                         Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = { screen = Screen.Contacts })
                         Screen.Storage -> TopBar(stringResource(R.string.menu_storage), onBack = { screen = Screen.Contacts })
+                        Screen.Backup -> TopBar(stringResource(R.string.backup_title), onBack = { screen = Screen.Storage })
                         Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = { screen = Screen.Network })
                         Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = { screen = Screen.Contacts })
                         Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = { screen = Screen.Folders })
@@ -459,7 +460,8 @@ private fun CompactShell(model: AppModel) {
                             Screen.EditProfile -> EditProfileScreen(model) { screen = Screen.Settings }
                             Screen.VaultLevel -> VaultLevelScreen(model, dataDir) { screen = Screen.Settings }
                             Screen.Saved -> SavedScreen(model)
-                            Screen.Storage -> StorageScreen(model)
+                            Screen.Storage -> StorageScreen(model) { screen = Screen.Backup }
+                            Screen.Backup -> BackupScreen(model) { screen = Screen.Storage }
                             Screen.Folders -> FoldersScreen(model) { id ->
                                 editFolder = id
                                 screen = Screen.FolderEdit

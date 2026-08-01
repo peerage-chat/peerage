@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.HideImage
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -30,7 +31,7 @@ import dev.p2p.messenger.R
  * скачать заново получится лишь пока файл есть у отправителя.
  */
 @Composable
-internal fun StorageScreen(model: AppModel) {
+internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
     var confirm by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { model.refreshStorage() }
 
@@ -128,26 +129,51 @@ internal fun StorageScreen(model: AppModel) {
 
         // Резервная копия ДАННЫХ — не путать с копией КЛЮЧА: ключ возвращает личность,
         // копия данных — переписку. Разделение намеренное.
+        //
+        // Пока копии не было — янтарь и объяснение цены бездействия. После неё —
+        // нейтральный тон и дата: тревожить дальше не за что, а дата отвечает на
+        // единственный оставшийся вопрос «насколько она свежая».
+        val hasBackup = model.dataBackupAt > 0
+        val accentColor = if (hasBackup) HoloOnline else WarnColor
         ScreenSectionLabel(stringResource(R.string.storage_backup))
         Row(
             Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = Tokens.Space.s)
                 .clip(RoundedCornerShape(Tokens.Radius.tile))
-                .background(WarnColor.copy(alpha = 0.12f)).padding(Tokens.Space.l),
+                .background(accentColor.copy(alpha = 0.12f))
+                .clickable { onBackup() }
+                .padding(Tokens.Space.l),
         ) {
-            Icon(Icons.Filled.Warning, null, tint = WarnColor, modifier = Modifier.size(20.dp))
+            Icon(
+                if (hasBackup) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+                null,
+                tint = accentColor,
+                modifier = Modifier.size(20.dp),
+            )
             Spacer(Modifier.width(Tokens.Space.m))
             Column {
                 Text(
-                    stringResource(R.string.storage_backup_none),
-                    color = WarnColor,
+                    if (hasBackup) {
+                        stringResource(R.string.storage_backup_done, fmtDay(model.dataBackupAt))
+                    } else {
+                        stringResource(R.string.storage_backup_none)
+                    },
+                    color = accentColor,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
                 Text(
-                    stringResource(R.string.storage_backup_hint),
+                    stringResource(
+                        if (hasBackup) R.string.storage_backup_done_hint else R.string.storage_backup_hint,
+                    ),
                     color = HoloSecondary,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(top = 3.dp),
+                )
+                Text(
+                    stringResource(R.string.storage_backup_open),
+                    color = HoloAccent,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
         }
@@ -191,6 +217,11 @@ private fun KindLegend(kinds: List<Pair<String, Long>>) {
         }
     }
 }
+
+/** Дата «1 августа 2026» — человеку важен возраст копии, а не время суток. */
+private fun fmtDay(ts: Long): String =
+    java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault())
+        .format(java.util.Date(ts * 1000))
 
 private fun kindColor(kind: String): Color = when (kind) {
     "image" -> Tokens.Colors.accent

@@ -128,6 +128,15 @@ object Native {
      *  `личность:эпоха:адрес:подпись` (ADR-007). Возвращает "added"|"known"|"error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
 
+    /** Что и сколько войдёт в резервную копию данных (JSON BackupStatsDto). */
+    external fun backupEstimate(sessionPtr: Long): String
+
+    /** Создать копию в файл. Долгая операция — только с фонового потока. */
+    external fun backupExport(sessionPtr: Long, path: String, partsJson: String, password: String): String
+
+    /** Восстановить из копии. Возвращает JSON ДОБАВЛЕННОГО или {"error":...}. */
+    external fun backupImport(sessionPtr: Long, path: String, password: String): String
+
     /** Ключ хранилища из пароля (Argon2id в ядре). Долгая операция — с фонового
      *  потока. Пустой массив при ошибке. */
     external fun deriveVaultKey(password: String, salt: ByteArray): ByteArray

@@ -534,6 +534,62 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_newVaultSalt<'local>(
     })
 }
 
+/// Что и сколько войдёт в резервную копию: JSON `{contacts, messages, notes, calls,
+/// attachments, attachment_bytes, skipped_big}`. Считает по базе — с фонового потока.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_backupEstimate<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        ret(&env, &e.backup_estimate_json())
+    })
+}
+
+/// Создать резервную копию данных в файл `path`, зашифровав `password`.
+/// `partsJson` — что положить: `{"contacts":true,"messages":true,...}`.
+/// Возвращает JSON статистики или `{"error":"..."}`. Долгая операция (KDF + вложения).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_backupExport<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    path: JString<'local>,
+    parts_json: JString<'local>,
+    password: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "{\"error\":\"внутренняя ошибка\"}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else {
+            return ret(&env, "{\"error\":\"движок не запущен\"}");
+        };
+        let path = jstr(&mut env, &path);
+        let parts = jstr(&mut env, &parts_json);
+        let pass = jstr(&mut env, &password);
+        ret(&env, &e.backup_export_json(&path, &parts, &pass))
+    })
+}
+
+/// Восстановить из копии `path`. Возвращает JSON ДОБАВЛЕННОГО или `{"error":"..."}`.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_backupImport<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    path: JString<'local>,
+    password: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "{\"error\":\"внутренняя ошибка\"}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else {
+            return ret(&env, "{\"error\":\"движок не запущен\"}");
+        };
+        let path = jstr(&mut env, &path);
+        let pass = jstr(&mut env, &password);
+        ret(&env, &e.backup_import_json(&path, &pass))
+    })
+}
+
 /// Кто сейчас флудит: JSON `[{peer, dropped, pps, blocked}]`, по убыванию темпа.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_floodPeers<'local>(

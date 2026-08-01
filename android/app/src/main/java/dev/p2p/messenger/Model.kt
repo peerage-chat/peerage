@@ -459,6 +459,61 @@ class AppModel private constructor() {
         storageChats = st.chats.map { Triple(it.peer, it.files, it.bytes) }
     }
 
+    // ── Резервная копия ДАННЫХ (M4) ───────────────────────────────────────────
+    // Не путать с копией КЛЮЧА ([revealSeedPhrase]): ключ возвращает личность, копия
+    // данных — переписку.
+
+    /** Когда сделана последняя копия данных (unix-секунды); 0 — не делалась.
+     *  Локальный факт, как и [keyBackupDone]: сам файл мы после сохранения не видим
+     *  (он у пользователя), а сказать «копии нет» после её создания — врать. */
+    var dataBackupAt by mutableStateOf(0L)
+        private set
+
+    private fun markDataBackupDone() {
+        val now = System.currentTimeMillis() / 1000
+        dataBackupAt = now
+        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putLong("data_backup_at", now)?.apply()
+    }
+
+    /** Что и сколько войдёт в копию. Считается по базе, поэтому через [ops]. */
+    internal var backupEstimate by mutableStateOf(BackupStatsDto())
+        private set
+
+    fun refreshBackupEstimate() = ops.execute {
+        backupEstimate = decodeOrNull<BackupStatsDto>(Native.backupEstimate(sessionPtr))
+            ?: BackupStatsDto()
+    }
+
+    /**
+     * Создать копию в файл `path`. **Блокирующая** (Argon2id ~секунда плюс вложения) —
+     * звать с фонового потока; UI на это время показывает прогресс.
+     */
+    internal fun exportBackupBlocking(path: String, parts: BackupPartsDto, password: String): BackupStatsDto {
+        // encodeDefaults ОБЯЗАТЕЛЕН: по умолчанию kotlinx не пишет поля, равные
+        // дефолту, и в движок уезжал пустой {} — то есть «ничего не класть».
+        val wire = kotlinx.serialization.json.Json { encodeDefaults = true }
+        val json = wire.encodeToString(BackupPartsDto.serializer(), parts)
+        val out = Native.backupExport(sessionPtr, path, json, password)
+        val stats = decodeOrNull<BackupStatsDto>(out)
+            ?: BackupStatsDto(error = "не удалось создать копию")
+        if (stats.error.isEmpty()) markDataBackupDone()
+        return stats
+    }
+
+    /** Восстановить из копии. Возвращает ДОБАВЛЕННОЕ (не «что было в файле»). */
+    internal fun importBackupBlocking(path: String, password: String): BackupStatsDto {
+        val out = Native.backupImport(sessionPtr, path, password)
+        val stats = decodeOrNull<BackupStatsDto>(out)
+            ?: BackupStatsDto(error = "не удалось прочитать копию")
+        if (stats.error.isEmpty()) {
+            // Контакты и чаты поменялись — перечитываем то, что уже на экране.
+            refreshContacts()
+            refreshStorage()
+        }
+        return stats
+    }
+
     /** Очередь по получателям: (ключ, сколько ждёт, байт, время самой старой записи). */
     var outboxByPeer by mutableStateOf<List<OutboxPeer>>(emptyList())
         private set
@@ -922,9 +977,10 @@ class AppModel private constructor() {
         sessionPtr = started.sessionPtr
         me = Me(started.pubkey, started.address, started.fingerprint)
         transportEpoch = Native.transportEpoch(sessionPtr)
-        keyBackupDone = appContext
+        val prefs = appContext
             ?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
-            ?.getBoolean("key_backup_done", false) ?: false
+        keyBackupDone = prefs?.getBoolean("key_backup_done", false) ?: false
+        dataBackupAt = prefs?.getLong("data_backup_at", 0L) ?: 0L
         refreshContactsNow()
         refreshRequestsNow()
         refreshGroupsNow()
