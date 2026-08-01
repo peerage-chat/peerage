@@ -251,7 +251,10 @@ struct Pending {
 
 struct Shared {
     identity: Identity,
-    node: Arc<dyn Transport>,
+    /// Транспорт под замком: узел ЗАМЕНЯЕМ на ходу при смене адреса (ADR-007).
+    /// Читатели берут снимок (`node()`), поэтому замена не рвёт ни одну операцию:
+    /// приёмный цикл проснётся ошибкой на погашенном узле и переключится на новый.
+    node: std::sync::RwLock<Arc<dyn Transport>>,
     cfg: Config,
     peers: Mutex<HashMap<PeerKey, PeerState>>,
     pending: Mutex<HashMap<u64, Pending>>,
@@ -267,11 +270,19 @@ struct Shared {
     /// файл, значит этот трафик ожидаемый и резать его своим же анти-флуд лимитом
     /// незачем. Адресно и на срок — не «поднять лимиты всем».
     boosted: Mutex<std::collections::HashMap<PeerKey, Instant>>,
+    /// Что сейчас реально заблокировано в транспорте (адреса). Нужно, чтобы при
+    /// смене адреса или снятии блока убрать прежнюю запись.
+    blocked_at_transport: Mutex<std::collections::HashSet<PeerKey>>,
     /// Адреса контактов (ADR-007): ключ ЛИЧНОСТИ → текущий ТРАНСПОРТНЫЙ ключ.
     /// Кого тут нет — эпоха 0, адрес совпадает с личностью (как было до разделения).
     /// Наполняет движок из стора контактов при старте и после каждого принятого
     /// объявления о смене адреса.
     transports: Mutex<std::collections::HashMap<PeerKey, PeerKey>>,
+    /// Обратная карта: адрес → личность. Приёмный слой видит только адрес, а тир
+    /// доверия и блок-лист заведены на личность — без этой карты контакт после
+    /// смены адреса стал бы для бюджета «незнакомцем», а заблокированный ушёл бы
+    /// из-под блока, просто сменив ключ.
+    identities: Mutex<std::collections::HashMap<PeerKey, PeerKey>>,
     /// Кто и насколько интенсивно долбится в нас сверх бюджета. Нужен, чтобы
     /// пользователю можно было СКАЗАТЬ, что его флудят: остановить поток на
     /// устройстве нельзя (threat-model N8), но молчать об этом — худший вариант.
@@ -316,6 +327,18 @@ impl Shared {
         let _ = self.tx.send(ev);
     }
 
+    /// Текущий транспорт. Клонируем Arc и сразу отпускаем замок: держать его на
+    /// время блокирующего `read` нельзя — замена узла встала бы намертво.
+    /// Личность за этим адресом. Неизвестный адрес — сам себе личность (эпоха 0
+    /// либо незнакомец).
+    fn identity_of(&self, src: &PeerKey) -> PeerKey {
+        self.identities.lock().unwrap().get(src).copied().unwrap_or(*src)
+    }
+
+    fn node(&self) -> Arc<dyn Transport> {
+        self.node.read().unwrap().clone()
+    }
+
     /// Куда физически слать пиру: его транспортный ключ, если он объявлял смену
     /// адреса, иначе сам ключ личности (ADR-007, эпоха 0).
     fn transport_of(&self, peer: &PeerKey) -> PeerKey {
@@ -332,7 +355,7 @@ impl Shared {
         let mut dg = Vec::with_capacity(1 + body.len());
         dg.push(CHAN_CHAT);
         dg.extend_from_slice(&body);
-        self.node.write(&self.transport_of(peer), &dg)?;
+        self.node().write(&self.transport_of(peer), &dg)?;
         Ok(())
     }
 
@@ -452,7 +475,7 @@ impl Messenger {
         let (tx, rx) = mpsc::channel();
         let shared = Arc::new(Shared {
             identity,
-            node,
+            node: std::sync::RwLock::new(node),
             cfg,
             peers: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
@@ -469,7 +492,9 @@ impl Messenger {
             media_tx: Mutex::new(None),
             tiers: Mutex::new(std::collections::HashMap::new()),
             boosted: Mutex::new(std::collections::HashMap::new()),
+            blocked_at_transport: Mutex::new(std::collections::HashSet::new()),
             transports: Mutex::new(std::collections::HashMap::new()),
+            identities: Mutex::new(std::collections::HashMap::new()),
             flood: Mutex::new(std::collections::HashMap::new()),
         });
         let s1 = shared.clone();
@@ -512,35 +537,71 @@ impl Messenger {
         v
     }
 
+    /// Погасить текущий транспорт, НЕ останавливая мессенджер: приёмный цикл
+    /// переживает это и ждёт нового узла. Первая половина смены адреса — между
+    /// гашением и подъёмом нового обязана быть пауза офлайн (ADR-007).
+    pub fn stop_transport(&self) {
+        self.shared.node().stop();
+    }
+
+    /// Заменить транспорт на ходу — смена нашего адреса (ADR-007).
+    ///
+    /// Старый узел гасится вызывающим: между гашением и подъёмом нового ОБЯЗАНА
+    /// быть пауза офлайн, иначе новый узел унаследует маршрутную позицию старого
+    /// ключа и поток флудера продолжит приходить (проверено на публичном меше).
+    /// Приёмный цикл переживает замену сам.
+    pub fn swap_transport(&self, node: Arc<dyn Transport>) {
+        *self.shared.node.write().unwrap() = node;
+    }
+
     /// Обновить карту адресов контактов (ADR-007): личность → транспортный ключ.
     /// Список полный: чего в нём нет, то считается эпохой 0 (адрес = личность).
     pub fn set_peer_transports(&self, map: &[(PeerKey, PeerKey)]) {
         *self.shared.transports.lock().unwrap() = map.iter().copied().collect();
+        *self.shared.identities.lock().unwrap() = map.iter().map(|(ik, tk)| (*tk, *ik)).collect();
+        // Блокировки заведены на личность, а транспорт режет по адресу: после смены
+        // адреса блок надо переставить, иначе заблокированный вернётся под новым
+        // ключом.
+        self.apply_transport_blocks();
+    }
+
+    /// Переставить ранний дроп (libygg) на АКТУАЛЬНЫЕ адреса заблокированных.
+    /// Снимаем прежние — иначе за брошенными ключами копился бы мусор, а
+    /// разблокированный остался бы отрезан там, где прикладной слой его не видит.
+    fn apply_transport_blocks(&self) {
+        let blocked_ids: Vec<PeerKey> = self
+            .shared
+            .tiers
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, (t, _))| t.is_blocked())
+            .map(|(k, _)| *k)
+            .collect();
+        let want: std::collections::HashSet<PeerKey> =
+            blocked_ids.iter().map(|ik| self.shared.transport_of(ik)).collect();
+        let node = self.shared.node();
+        let mut applied = self.shared.blocked_at_transport.lock().unwrap();
+        for stale in applied.difference(&want) {
+            node.unblock(stale);
+        }
+        for k in want.difference(&applied) {
+            node.block(k);
+        }
+        *applied = want;
     }
 
     pub fn set_peer_tiers(&self, tiers: &[(PeerKey, Tier, u32)]) {
-        let mut map = self.shared.tiers.lock().unwrap();
-        let was_blocked: Vec<PeerKey> =
-            map.iter().filter(|(_, (t, _))| t.is_blocked()).map(|(k, _)| *k).collect();
-        *map = tiers.iter().map(|(k, t, h)| (*k, (*t, *h))).collect();
+        *self.shared.tiers.lock().unwrap() =
+            tiers.iter().map(|(k, t, h)| (*k, (*t, *h))).collect();
         // Блокировку дублируем в транспорт: там пакет отбрасывается ещё до
-        // пересечения FFI, не тратя копирование и разбор заголовка. Снятие тоже
-        // проводим явно — иначе разблокированный пир остался бы отрезан в libygg,
-        // где прикладной слой его уже не видит.
-        let now_blocked: Vec<PeerKey> =
-            tiers.iter().filter(|(_, t, _)| t.is_blocked()).map(|(k, _, _)| *k).collect();
-        drop(map);
-        for k in &now_blocked {
-            self.shared.node.block(k);
-        }
-        for k in was_blocked.iter().filter(|k| !now_blocked.contains(k)) {
-            self.shared.node.unblock(k);
-        }
+        // пересечения FFI, не тратя копирование и разбор заголовка.
+        self.apply_transport_blocks();
     }
 
     /// Адрес Yggdrasil нашего узла.
     pub fn address(&self) -> String {
-        self.shared.node.address()
+        self.shared.node().address()
     }
 
     /// Онлайн ли пир (по последнему трафику / keepalive).
@@ -550,29 +611,29 @@ impl Messenger {
 
     /// Число прямых пиров транспорта (для индикатора сети).
     pub fn net_peers(&self) -> i32 {
-        self.shared.node.peer_count()
+        self.shared.node().peer_count()
     }
 
     /// Число узлов в дереве маршрутизации транспорта.
     pub fn net_tree(&self) -> i32 {
-        self.shared.node.tree_count()
+        self.shared.node().tree_count()
     }
 
     /// JSON-массив пиров транспорта (адрес/направление/пинг/трафик) для стата сети.
     pub fn net_peers_json(&self) -> String {
-        self.shared.node.peers_json()
+        self.shared.node().peers_json()
     }
 
     /// Повторно добавить пир по URI: обходит внутренний backoff Yggdrasil и
     /// форсирует немедленную попытку реконнекта (например, после флика WiFi).
     pub fn add_peer(&self, uri: &str) {
-        let _ = self.shared.node.add_peer(uri);
+        let _ = self.shared.node().add_peer(uri);
     }
 
     /// Остановить мессенджер: останавливает транспортный узел и фоновые потоки.
     pub fn shutdown(&self) {
         self.shared.running.store(false, Ordering::Relaxed);
-        self.shared.node.stop();
+        self.shared.node().stop();
     }
 
     /// Установить сессию: шлём `Hello`, пока пир не станет онлайн (двунаправленный
@@ -699,7 +760,7 @@ impl Messenger {
         let mut buf = vec![0u8; total];
         write_media_header(&mut buf, track, seq, ts);
         buf[MEDIA_HEADER_LEN..total].copy_from_slice(payload);
-        if let Err(e) = self.shared.node.write(&self.shared.transport_of(peer), &buf) {
+        if let Err(e) = self.shared.node().write(&self.shared.transport_of(peer), &buf) {
             log::warn!("p2p-media: node.write failed for track={} len={}: {:?}", track, total, e);
             return Err(MessengerError::Transport(e));
         }
@@ -907,9 +968,21 @@ fn receive_loop(shared: Arc<Shared>) {
     let mut pkt_count: u64 = 0;
     let mut dropped: u64 = 0;
     loop {
-        let (n, src) = match shared.node.read(&mut buf) {
+        // Снимок берём КАЖДУЮ итерацию: при смене адреса узел заменяется, и цикл
+        // обязан продолжить работу на новом — иначе после ротации приём молча
+        // умирает, а приложение выглядит «в сети, но ничего не приходит».
+        let node = shared.node();
+        let (n, src) = match node.read(&mut buf) {
             Ok(v) => v,
-            Err(_) => return, // узел остановлен
+            Err(_) => {
+                if !shared.running.load(Ordering::Relaxed) {
+                    return; // штатная остановка мессенджера
+                }
+                // Узел погашен ротацией (или ещё не поднят во время паузы офлайн) —
+                // ждём появления нового и пробуем снова.
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
         };
         if n == 0 {
             continue;
@@ -918,16 +991,19 @@ fn receive_loop(shared: Arc<Shared>) {
         let now = Instant::now();
         // Бюджет источника (M3): блок режется здесь, ДО расшифровки; заслуженный
         // контакт получает повышенный лимит.
+        // Тир ищем по ЛИЧНОСТИ за этим адресом: иначе контакт, сменивший адрес,
+        // разжаловался бы в незнакомцы, а заблокированный вышел бы из-под блока.
+        let sender_id = shared.identity_of(&src);
         let (tier, helpful) =
-            shared.tiers.lock().unwrap().get(&src).copied().unwrap_or((Tier::default(), 0));
+            shared.tiers.lock().unwrap().get(&sender_id).copied().unwrap_or((Tier::default(), 0));
         // Мы сами просили у него файл → пропускаем без анти-флуд бюджета (он защищает
         // от НЕЖДАННОГО потока, а этот поток заказан пользователем).
         let boosted = {
             let mut b = shared.boosted.lock().unwrap();
-            match b.get(&src) {
+            match b.get(&sender_id) {
                 Some(until) if *until > now => true,
                 Some(_) => {
-                    b.remove(&src);
+                    b.remove(&sender_id);
                     false
                 }
                 None => false,
@@ -944,7 +1020,7 @@ fn receive_loop(shared: Arc<Shared>) {
         };
         if !allowed {
             dropped = dropped.wrapping_add(1);
-            note_flood(&shared, &src, now);
+            note_flood(&shared, &sender_id, now);
             // Логируем редко, чтобы лог сам не стал амплификацией флуда.
             if dropped % 512 == 1 {
                 log::warn!(
@@ -1042,88 +1118,88 @@ fn receive_loop(shared: Arc<Shared>) {
         match payload {
             Payload::Hello => {}
             Payload::Text { id, text } => {
-                shared.emit(Event::Text { peer: src, id, text });
-                let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
+                shared.emit(Event::Text { peer: peer_id, id, text });
+                let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }
             Payload::Media { id, hash, mime, name, size, duration_ms, width, height, caption, thumb } => {
                 shared.emit(Event::Media {
-                    peer: src, id, hash, mime, name, size, duration_ms, width, height,
+                    peer: peer_id, id, hash, mime, name, size, duration_ms, width, height,
                     caption: truncate_caption(&caption),
                     thumb,
                 });
-                let _ = shared.send(&src, &Payload::Ack { id }); // ✓✓ доставлено
+                let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }
             Payload::Ack { id } => {
                 // Снимаем pending только если ack пришёл от того, КОМУ слали (анти-
                 // спуфинг). Событие Ack в UI — лишь для DM (notify); группы молчат.
                 let acked = {
                     let mut pending = shared.pending.lock().unwrap();
-                    if pending.get(&id).map(|p| p.peer) == Some(src) {
+                    if pending.get(&id).map(|p| p.peer) == Some(peer_id) {
                         pending.remove(&id).map(|p| p.notify)
                     } else {
                         None
                     }
                 };
                 if acked == Some(true) {
-                    shared.emit(Event::Ack { peer: src, id });
+                    shared.emit(Event::Ack { peer: peer_id, id });
                 }
             }
             Payload::Ping => {
-                let _ = shared.send(&src, &Payload::Pong);
+                let _ = shared.send(&peer_id, &Payload::Pong);
             }
             Payload::Pong => {}
             Payload::RoomInvite { id, room_id, audio, video } => {
-                shared.emit(Event::RoomInvite { peer: src, room_id, audio, video });
-                let _ = shared.send(&src, &Payload::Ack { id }); // гасим ретрай инвайта
+                shared.emit(Event::RoomInvite { peer: peer_id, room_id, audio, video });
+                let _ = shared.send(&peer_id, &Payload::Ack { id }); // гасим ретрай инвайта
             }
             Payload::RoomDecline { id, room_id } => {
-                shared.emit(Event::RoomDecline { peer: src, room_id });
-                let _ = shared.send(&src, &Payload::Ack { id });
+                shared.emit(Event::RoomDecline { peer: peer_id, room_id });
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::Group { id, data } => {
-                log::debug!("group recv id={} from={:02x?} len={}", id, &src[..4], data.len());
-                shared.emit(Event::Group { peer: src, data });
+                log::debug!("group recv id={} from={:02x?} len={}", id, &peer_id[..4], data.len());
+                shared.emit(Event::Group { peer: peer_id, data });
                 // ✓ доставлено — гасим повтор у отправителя (дубли отсеет MLS).
-                let _ = shared.send(&src, &Payload::Ack { id });
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::GroupKeyRequest { id } => {
-                shared.emit(Event::GroupKeyRequest { peer: src });
-                let _ = shared.send(&src, &Payload::Ack { id }); // гасим ретрай инвайта
+                shared.emit(Event::GroupKeyRequest { peer: peer_id });
+                let _ = shared.send(&peer_id, &Payload::Ack { id }); // гасим ретрай инвайта
             }
             Payload::GroupKeyReply { id, key_package } => {
-                shared.emit(Event::GroupKeyReply { peer: src, key_package });
-                let _ = shared.send(&src, &Payload::Ack { id });
+                shared.emit(Event::GroupKeyReply { peer: peer_id, key_package });
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::GroupInvite { id, gid, name } => {
-                shared.emit(Event::GroupInvite { peer: src, gid, name });
-                let _ = shared.send(&src, &Payload::Ack { id }); // гасим ретрай приглашения
+                shared.emit(Event::GroupInvite { peer: peer_id, gid, name });
+                let _ = shared.send(&peer_id, &Payload::Ack { id }); // гасим ретрай приглашения
             }
             Payload::RoomPresence { gid, flags } => {
-                shared.emit(Event::RoomPresence { peer: src, gid, flags });
+                shared.emit(Event::RoomPresence { peer: peer_id, gid, flags });
             }
             Payload::GroupResyncRequest { gid } => {
-                shared.emit(Event::GroupResyncRequest { peer: src, gid });
+                shared.emit(Event::GroupResyncRequest { peer: peer_id, gid });
             }
             Payload::GroupLeaveRequest { gid } => {
-                shared.emit(Event::GroupLeaveRequest { peer: src, gid });
+                shared.emit(Event::GroupLeaveRequest { peer: peer_id, gid });
             }
             Payload::BlobManifest { manifest } => {
-                shared.emit(Event::BlobManifest { peer: src, manifest });
+                shared.emit(Event::BlobManifest { peer: peer_id, manifest });
             }
             Payload::BlobManifestPart { id, mime, size, part, total, hashes } => {
-                shared.emit(Event::BlobManifestPart { peer: src, id, mime, size, part, total, hashes });
+                shared.emit(Event::BlobManifestPart { peer: peer_id, id, mime, size, part, total, hashes });
             }
             Payload::BlobRequest { id, index } => {
-                shared.emit(Event::BlobRequest { peer: src, id, index });
+                shared.emit(Event::BlobRequest { peer: peer_id, id, index });
             }
             Payload::BlobChunk { id, index, data } => {
-                shared.emit(Event::BlobChunk { peer: src, id, index, data });
+                shared.emit(Event::BlobChunk { peer: peer_id, id, index, data });
             }
             Payload::ProfileUpdate { name, avatar_hash } => {
-                shared.emit(Event::ProfileUpdate { peer: src, name, avatar_hash });
+                shared.emit(Event::ProfileUpdate { peer: peer_id, name, avatar_hash });
             }
             Payload::BlobManifestRequest { id } => {
-                shared.emit(Event::BlobManifestRequest { peer: src, id });
+                shared.emit(Event::BlobManifestRequest { peer: peer_id, id });
             }
             // Контакт сменил адрес (ADR-007). Подпись здесь уже проверена выше —
             // без этого пакет не прошёл бы анти-спуфинг, — но решение «принять и

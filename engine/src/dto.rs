@@ -156,6 +156,9 @@ pub enum UiEvent {
     RoomDecline { peer: String, room_id: String },
     RoomPresence { gid: String, peer: String, flags: u8, left: bool },
     BlobReceived { id: String, mime: String, size: u64 },
+    /// Наш адрес сменился (ADR-007): новый адрес Yggdrasil и номер эпохи. Личность
+    /// при этом прежняя — контакты, верификации и группы не затронуты.
+    TransportRotated { address: String, epoch: u32 },
     BlobProgress { id: String, done: u32, total: u32 },
     /// Групповое сообщение. Форма одна на два случая — эхо своего (`mine`) и
     /// входящее: клиент различает их по `mine`, а не по набору полей.

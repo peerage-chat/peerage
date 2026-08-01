@@ -1,9 +1,10 @@
-//! Приём смены адреса контактом (ADR-007, точки 2–4): личность прежняя, адрес новый.
+//! Смена адреса (ADR-007): личность прежняя, адрес новый.
 //!
-//! Проверяем ровно приёмную сторону — она уже полностью собрана: подпись под
-//! объявлением, анти-спуфинг с разделёнными ключами, запись в стор, обновление
-//! карты адресов. Сама команда «сменить свой адрес» (перезапуск узла с паузой
-//! офлайн и выборочной рассылкой) — следующий шаг, здесь её нет.
+//! Покрыты обе стороны: приём чужого объявления (подпись, анти-спуфинг с
+//! разделёнными ключами, запись в стор) и собственная ротация движком — гашение
+//! узла, пауза офлайн, подъём на новом ключе, выборочная рассылка. Ключевая
+//! проверка последней — что после смены адреса СВЯЗЬ С КОНТАКТОМ ЖИВА: иначе
+//! ротация лечит флуд ценой потери всех собеседников.
 //!
 //! Прогон из WSL: LD_LIBRARY_PATH=ygg/libygg.
 
@@ -88,6 +89,96 @@ fn contact_rotation_moves_address_but_keeps_identity() {
     let c = v.as_array().unwrap().iter().find(|c| c["key"] == hex::encode(a_key)).unwrap();
     assert_eq!(c["name"], "Алиса", "смена адреса не трогает контакт");
     assert_eq!(c["transport_epoch"], 1);
+
+    b.shutdown();
+}
+
+/// Полный цикл своей ротации: движок гасит узел, поднимается на новом адресе,
+/// оповещает выбранный контакт — и переписка с ним продолжается.
+#[test]
+fn own_rotation_keeps_the_contact_reachable() {
+    let net = LoopbackNet::new();
+    let alice = id(66);
+    let bob_id = id(67);
+    let (a_key, b_key) = (alice.public_key_bytes(), bob_id.public_key_bytes());
+
+    let a = Engine::start_with_transport(tmpdir("a3"), alice.clone(), net.endpoint(a_key))
+        .unwrap()
+        .engine;
+    let b = Engine::start_with_transport(tmpdir("b3"), bob_id, net.endpoint(b_key)).unwrap().engine;
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Алиса");
+
+    // Ротация поднимает узел на новом ключе; на loopback это новая точка сети.
+    let net_for_factory = net.clone();
+    a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
+        let key = p2p_core::Identity::from_seed(seed).ok()?.public_key_bytes();
+        Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn p2p_messenger::Transport>)
+    }));
+
+    assert_eq!(a.transport_epoch(), 0, "до ротации живём на ключе личности");
+    // Пауза 0: здесь проверяется механизм, а не выпадение ключа из дерева — оно
+    // свойство настоящего меша и измерено отдельным стендом (flood_pubmesh).
+    a.rotate_transport(vec![b_key], 0);
+
+    // Боб узнал новый адрес Алисы, и это адрес эпохи 1.
+    let tk1 = alice.transport_public(1);
+    assert!(
+        wait(20, || transport_of(&b, &a_key) == hex::encode(tk1)),
+        "Боб должен получить новый адрес, получено {:?}",
+        transport_of(&b, &a_key),
+    );
+    assert!(wait(5, || a.transport_epoch() == 1), "эпоха сохранена на диске");
+
+    // Главное: связь жива в обе стороны. Боб шлёт на НОВЫЙ адрес (он его знает),
+    // Алиса отвечает — её сообщения тоже доходят.
+    b.send_text(&a_key, "ты сменила адрес?");
+    assert!(
+        wait(20, || a.history_json(&b_key).contains("ты сменила адрес?")),
+        "сообщение на новый адрес должно дойти: {}",
+        a.history_json(&b_key),
+    );
+    a.send_text(&b_key, "да, флудера отрезала");
+    assert!(
+        wait(20, || b.history_json(&a_key).contains("флудера отрезала")),
+        "ответ с нового адреса должен дойти: {}",
+        b.history_json(&a_key),
+    );
+
+    a.shutdown();
+    b.shutdown();
+}
+
+/// Заблокированный не должен выходить из-под блока сменой адреса: объявление от
+/// него не применяется, а его сообщения с нового ключа не доходят.
+#[test]
+fn blocked_contact_cannot_escape_by_rotating() {
+    let net = LoopbackNet::new();
+    let mallory = id(68);
+    let bob_id = id(69);
+    let (m_key, b_key) = (mallory.public_key_bytes(), bob_id.public_key_bytes());
+
+    let b = Engine::start_with_transport(tmpdir("b4"), bob_id, net.endpoint(b_key)).unwrap().engine;
+    b.add_contact(&m_key, "Мэллори");
+    b.block_contact(&m_key);
+
+    // Мэллори «переезжает» на новый адрес и объявляет об этом.
+    let tk1 = mallory.transport_public(1);
+    let (m_msgr, _rx) =
+        Messenger::start_with_transport(mallory.clone(), net.endpoint(tk1), Config::default());
+    let sig = mallory.sign_transport_rotate(1, &tk1);
+    let _ = m_msgr.send_transport_rotate(&b_key, 1, &tk1, &sig);
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(transport_of(&b, &m_key), "", "адрес заблокированного не записывается");
+
+    // И само сообщение с нового адреса до приложения не доходит.
+    let _ = m_msgr.send_text(&b_key, "я вернулся");
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(
+        !b.history_json(&m_key).contains("я вернулся"),
+        "блок должен пережить смену адреса: {}",
+        b.history_json(&m_key),
+    );
 
     b.shutdown();
 }

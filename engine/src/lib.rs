@@ -210,7 +210,21 @@ pub struct Engine {
     /// Единый бюджет (M3): тир каждого известного пира. Читают ingress-лимитер
     /// (через messenger) и офлайн-очередь (через замыкание) — одна точка истины.
     tier_cache: Arc<Mutex<HashMap<[u8; 32], Tier>>>,
+    /// Каталог данных: нужен смене адреса (ADR-007), которая хранит свою эпоху.
+    data_dir: PathBuf,
+    /// Кому ещё не доехало объявление о смене адреса (был офлайн). Догоняем по
+    /// presence: пока контакт не появился, слать некуда, а не узнав нового адреса,
+    /// он потеряет с нами связь навсегда.
+    rotate_pending: Mutex<std::collections::HashSet<[u8; 32]>>,
+    /// Чем поднимать новый узел при смене адреса. По умолчанию — настоящий
+    /// Yggdrasil; тесты подставляют loopback, иначе ротацию нельзя прогнать без
+    /// реальной сети.
+    transport_factory: Mutex<Option<TransportFactory>>,
 }
+
+/// Создатель транспорта из seed узла: `None` — не удалось поднять.
+pub type TransportFactory =
+    Arc<dyn Fn(&[u8; 32]) -> Option<Arc<dyn p2p_messenger::Transport>> + Send + Sync>;
 
 /// Свой профиль на диске (M2): самоназвание + аватар (id блоба + mime). Не секрет —
 /// уходит контактам; хранится plaintext в profile_meta.json.
@@ -575,6 +589,108 @@ impl Engine {
     /// Источник истины: контакты (сверенный fingerprint → `Verified`) и блок-лист
     /// гейта (`Blocked` — режется на ingress, ДО расшифровки). Кого нет — `Stranger`
     /// (общая корзина класса, анти-Sybil). Зовётся при любой смене того или другого.
+    // ── Смена своего адреса (ADR-007) ───────────────────────────────────────
+
+    /// Подменить способ поднятия узла (тесты гоняют ротацию на loopback-транспорте,
+    /// без настоящей сети).
+    pub fn set_transport_factory(&self, f: TransportFactory) {
+        *self.transport_factory.lock_safe() = Some(f);
+    }
+
+    /// Текущая эпоха нашего адреса. 0 — адрес совпадает с ключом личности.
+    pub fn transport_epoch(&self) -> u32 {
+        load_transport_epoch(&self.data_dir)
+    }
+
+    /// Сменить свой адрес: погасить узел, **выждать паузу офлайн**, подняться на
+    /// новом транспортном ключе и разослать подписанное объявление ВЫБРАННЫМ
+    /// контактам.
+    ///
+    /// Пауза — не осторожность, а условие работоспособности: при мгновенном
+    /// перезаходе новый узел наследует маршрутную позицию старого ключа, и поток
+    /// флудера продолжает приходить (замерено на публичном меше, 88 % от базы).
+    /// После ~30 с офлайна старый ключ выпадает из дерева, и слать на него
+    /// становится некуда.
+    ///
+    /// `recipients` — кому сообщить новый адрес; кого в списке нет, тот останется
+    /// со старым и потеряет с нами связь. Это и есть ответ на «контакт слил мой
+    /// адрес»: ротируем и не говорим ему.
+    ///
+    /// Долгая (пауза!) и однопоточная операция — уходит в отдельный поток,
+    /// вызывающий не блокируется. Личность, история, группы и верификации не
+    /// затрагиваются вовсе.
+    pub fn rotate_transport(self: &Arc<Self>, recipients: Vec<[u8; 32]>, gap_secs: u64) {
+        let engine = self.clone();
+        std::thread::spawn(move || engine.rotate_transport_blocking(recipients, gap_secs));
+    }
+
+    fn rotate_transport_blocking(self: &Arc<Self>, recipients: Vec<[u8; 32]>, gap_secs: u64) {
+        let epoch = self.transport_epoch().saturating_add(1);
+        let tk = self.identity.transport_public(epoch);
+        log::info!("смена адреса: эпоха {epoch}, пауза офлайн {gap_secs}с");
+
+        // 1. Гасим текущий узел: с этого момента нас нет в сети — ни для флудера,
+        //    ни для контактов.
+        self.messenger.stop_transport();
+        // 2. Пауза, за которую старый ключ выпадает из дерева маршрутизации.
+        std::thread::sleep(Duration::from_secs(gap_secs));
+        // 3. Поднимаемся на новом ключе и возвращаемся в меш.
+        let seed = self.identity.transport_seed(epoch);
+        let factory = self.transport_factory.lock_safe().clone();
+        let node: Arc<dyn p2p_messenger::Transport> = match factory {
+            Some(f) => match f(&seed) {
+                Some(n) => n,
+                None => {
+                    log::error!("смена адреса: фабрика транспорта не дала узел");
+                    return;
+                }
+            },
+            None => match Node::start(&seed) {
+                Ok(n) => {
+                    for uri in public_peer_uris() {
+                        let _ = n.add_peer(uri);
+                    }
+                    Arc::new(n)
+                }
+                Err(e) => {
+                    log::error!("смена адреса: не удалось поднять узел: {e}");
+                    return;
+                }
+            },
+        };
+        let address = node.address();
+        self.messenger.swap_transport(node);
+        // Эпоху фиксируем ТОЛЬКО после успешного подъёма: иначе перезапуск после
+        // сбоя искал бы нас по адресу, на котором никто не слушает.
+        save_transport_epoch(&self.data_dir, epoch);
+
+        // 4. Рассылаем объявление. Оно надёжное (retry-until-Ack), а тех, кто сейчас
+        //    офлайн, догоняем в `announce_rotation_to` при их возвращении.
+        let sig = self.identity.sign_transport_rotate(epoch, &tk);
+        *self.rotate_pending.lock_safe() = recipients.iter().copied().collect();
+        for peer in &recipients {
+            let _ = self.messenger.send_transport_rotate(peer, epoch, &tk, &sig);
+        }
+        log::info!("смена адреса завершена: {address} (оповещено {})", recipients.len());
+        push_event(self, dto::UiEvent::TransportRotated { address, epoch });
+    }
+
+    /// Догнать объявлением контакта, который был офлайн в момент смены адреса.
+    /// Зовётся по presence: пока он не появился, слать некуда, а как появился —
+    /// он обязан узнать новый адрес, иначе связь с ним оборвётся навсегда.
+    fn announce_rotation_to(&self, peer: &[u8; 32]) {
+        if !self.rotate_pending.lock_safe().contains(peer) {
+            return;
+        }
+        let epoch = self.transport_epoch();
+        if epoch == 0 {
+            return;
+        }
+        let tk = self.identity.transport_public(epoch);
+        let sig = self.identity.sign_transport_rotate(epoch, &tk);
+        let _ = self.messenger.send_transport_rotate(peer, epoch, &tk, &sig);
+    }
+
     /// Переслать транспорту актуальную карту адресов контактов (ADR-007):
     /// личность → её текущий транспортный ключ. Зовётся при старте и после каждого
     /// принятого объявления о смене адреса — без этого сообщения продолжали бы
@@ -1408,6 +1524,33 @@ fn call_params(audio: &AudioSettings) -> String {
     serde_json::to_string(&dto).unwrap_or_else(|_| "{}".into())
 }
 
+/// Своя эпоха адреса (ADR-007) — простой JSON рядом с профилем. Отдельно от
+/// `profile_meta.json`: тот уходит контактам, а это чисто локальная величина.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct TransportMeta {
+    #[serde(default)]
+    epoch: u32,
+}
+
+fn transport_meta_path(dir: &Path) -> PathBuf {
+    dir.join("transport.json")
+}
+
+/// Текущая эпоха адреса. Нет файла = 0, то есть адрес совпадает с ключом личности.
+fn load_transport_epoch(dir: &Path) -> u32 {
+    std::fs::read(transport_meta_path(dir))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<TransportMeta>(&b).ok())
+        .map(|m| m.epoch)
+        .unwrap_or(0)
+}
+
+fn save_transport_epoch(dir: &Path, epoch: u32) {
+    if let Ok(v) = serde_json::to_vec(&TransportMeta { epoch }) {
+        let _ = std::fs::write(transport_meta_path(dir), v);
+    }
+}
+
 fn public_peer_uris() -> impl Iterator<Item = &'static str> {
     PUBLIC_PEERS
         .lines()
@@ -1725,6 +1868,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 }
             }
             push_event(engine, dto::UiEvent::Presence { peer: hex::encode(peer), online });
+            // ADR-007: контакт вернулся, а объявление о смене нашего адреса до него
+            // не доехало — досылаем сейчас.
+            if online {
+                engine.announce_rotation_to(&peer);
+            }
         }
         Event::Text { peer, id, text } => {
             match gate_of(engine, &peer) {
@@ -1964,6 +2112,12 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             ) else {
                 return;
             };
+            // Заблокированному новый адрес не записываем: мы не хотим ни слать ему,
+            // ни следовать за ним. Механизм это и так вытянет (тир ищется по
+            // личности), но лишний шаг за тем, кого отрезали, тут ни к чему.
+            if matches!(gate_of(engine, &peer), Gate::Blocked) {
+                return;
+            }
             let applied = engine
                 .contacts
                 .lock_safe()
@@ -2125,7 +2279,11 @@ impl Engine {
             }
             Err(e) => return Err(e.to_string()),
         };
-        let node = Node::start(&identity.seed()).map_err(|e| e.to_string())?;
+        // ADR-007: узел поднимается на ТРАНСПОРТНОМ ключе текущей эпохи. Эпоха 0 —
+        // это сам ключ личности, поэтому у тех, кто адрес не менял, ничего не
+        // меняется.
+        let epoch = load_transport_epoch(&dir);
+        let node = Node::start(&identity.transport_seed(epoch)).map_err(|e| e.to_string())?;
         let address = node.address();
         for uri in public_peer_uris() {
             let _ = node.add_peer(uri);
@@ -2277,6 +2435,9 @@ impl Engine {
             bench: Mutex::new(None),
             blob_dir: dir.join("blobs"),
             tier_cache,
+            data_dir: dir.clone(),
+            rotate_pending: Mutex::new(std::collections::HashSet::new()),
+            transport_factory: Mutex::new(None),
         });
 
         // Единый бюджет (M3): тиры контактов/блок-листа в ingress-лимитер. Делаем
