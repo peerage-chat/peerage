@@ -613,4 +613,6 @@
 
     <string name="storage_backup_done">Data backup from %1$s</string>
     <string name="storage_backup_done_hint">The file is in your hands — keep it away from the phone. The fresher the backup, the less you lose.</string>
+
+    <string name="backup_verify_again">Contact verification is not restored: a file can be handed to you, and «verified» means the fingerprint was checked in person. Verify again after restoring.</string>
 </resources>

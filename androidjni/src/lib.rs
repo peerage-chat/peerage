@@ -507,12 +507,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_deriveVaultKey<'local>(
     _class: JClass<'local>,
     password: JString<'local>,
     salt: JByteArray<'local>,
+    profile: jint,
 ) -> JByteArray<'local> {
     let empty = env.new_byte_array(0).unwrap();
     jni_safe!(env.new_byte_array(0).unwrap(), {
         let pass = jstr(&mut env, &password);
         let salt_bytes = env.convert_byte_array(&salt).unwrap_or_default();
-        match p2p_core::kdf::derive_key(&pass, &salt_bytes) {
+        match p2p_core::kdf::derive_key_with(profile.max(0) as u8, &pass, &salt_bytes) {
             Ok(key) => env.byte_array_from_slice(&key).unwrap_or(empty),
             Err(e) => {
                 log::warn!("derive_vault_key: {e}");
@@ -520,6 +521,16 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_deriveVaultKey<'local>(
             }
         }
     })
+}
+
+/// Номер профиля стоимости KDF для НОВЫХ файлов. Живёт в ядре, а не в Kotlin:
+/// иначе при повышении стоимости пришлось бы помнить про две константы.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_currentKdfProfile<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jint {
+    p2p_core::kdf::CURRENT_PROFILE as jint
 }
 
 /// Свежая случайная соль для KDF (16 байт).

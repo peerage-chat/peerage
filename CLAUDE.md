@@ -29,6 +29,8 @@ Android Jetpack Compose. GPL-3.0. Цель — v1.0 под грант NLnet/NGI 
 - **Есть точные макеты — реализуй по ним 1-в-1**, не по текстовому описанию.
 - **Однодевайсные вещи** (цвет/размер/раскладка) проверяй сам скриншотом эмулятора
   перед «готово»; двух-девайсный тест — только для сетевых/медийных.
+- Rust-тесты: `scripts/test-all.sh` из WSL (сам ставит `--test-threads=1`,
+  `LD_LIBRARY_PATH` и исключает несобираемый desktop).
 - `./gradlew ktlintFormat` перед коммитом Kotlin. Rust-части Android — через WSL
   (`scripts/rebuild-p2p-android.sh <ABI>`; при изменении ygg.go FFI — `build-android-libs.sh`).
 - Коммиты — по-русски, с `Co-Authored-By`. Коммитить/пушить только по просьбе.

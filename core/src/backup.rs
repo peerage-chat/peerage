@@ -14,9 +14,15 @@
 //! **Формат** (потоковый, кадрами — чтобы не держать гигабайты вложений в памяти):
 //!
 //! ```text
-//! "P2PBAK" | version u8 | reserved u8 | salt[16]
+//! "P2PBAK" | version u8 | kdf_profile u8 | salt[16]
 //! кадр*:   len u32 LE | nonce[24] | ciphertext(XChaCha20-Poly1305)
 //! ```
+//!
+//! `kdf_profile` — номер профиля стоимости Argon2id ([`crate::kdf::Profile`]).
+//! Он лежит В ФАЙЛЕ, потому что стоимость обязана расти вслед за железом, а ключ,
+//! выведенный другими параметрами, — другой ключ: без записанного профиля первое же
+//! повышение сделало бы все ранее снятые копии нечитаемыми, и человек увидел бы
+//! «неверный пароль» там, где пароль верный.
 //!
 //! Открытый текст кадра — `[kind u8][payload]`: `0` — JSON-запись, `1` — блоб
 //! (`[id_len u8][id][bytes]`), `2` — конец.
@@ -58,7 +64,7 @@ pub enum BackupError {
     Truncated,
     #[error("ввод-вывод: {0}")]
     Io(String),
-    #[error("kdf: {0}")]
+    #[error("{0}")]
     Kdf(String),
     #[error("разбор записи: {0}")]
     Parse(String),
@@ -78,8 +84,9 @@ pub enum Frame {
     Blob { id: String, data: Vec<u8> },
 }
 
-fn cipher(password: &str, salt: &[u8]) -> Result<XChaCha20Poly1305, BackupError> {
-    let key = crate::kdf::derive_key(password, salt).map_err(|e| BackupError::Kdf(e.to_string()))?;
+fn cipher(profile: u8, password: &str, salt: &[u8]) -> Result<XChaCha20Poly1305, BackupError> {
+    let key = crate::kdf::derive_key_with(profile, password, salt)
+        .map_err(|e| BackupError::Kdf(e.to_string()))?;
     Ok(XChaCha20Poly1305::new(Key::from_slice(&key)))
 }
 
@@ -96,9 +103,9 @@ impl<W: Write> Writer<W> {
     pub fn create(mut out: W, password: &str) -> Result<Self, BackupError> {
         let salt = crate::kdf::new_salt();
         out.write_all(MAGIC)?;
-        out.write_all(&[VERSION, 0])?;
+        out.write_all(&[VERSION, crate::kdf::CURRENT_PROFILE])?;
         out.write_all(&salt)?;
-        let cipher = cipher(password, &salt)?;
+        let cipher = cipher(crate::kdf::CURRENT_PROFILE, password, &salt)?;
         Ok(Writer { out, cipher, idx: 0 })
     }
 
@@ -172,7 +179,9 @@ impl<R: Read> Reader<R> {
         }
         let mut salt = [0u8; crate::kdf::SALT_LEN];
         inp.read_exact(&mut salt).map_err(|_| BackupError::Truncated)?;
-        let cipher = cipher(password, &salt)?;
+        // Профиль берём ИЗ ФАЙЛА, а не текущий: старые копии обязаны открываться
+        // после повышения стоимости.
+        let cipher = cipher(head[7], password, &salt)?;
         Ok(Reader { inp, cipher, idx: 0, done: false })
     }
 
@@ -282,6 +291,22 @@ mod tests {
         buf[6] = VERSION + 1;
         r = Reader::open(&buf[..], "пароль");
         assert!(matches!(r, Err(BackupError::Version(_))));
+    }
+
+    /// Профиль KDF обязан ехать в файле: копия, снятая сегодня, должна открываться
+    /// и после того, как мы поднимем стоимость перебора для новых файлов.
+    #[test]
+    fn header_carries_kdf_profile_and_unknown_one_is_a_clear_error() {
+        let buf = write_sample("пароль");
+        assert_eq!(buf[7], crate::kdf::CURRENT_PROFILE, "профиль записан в заголовок");
+
+        // Файл из будущего: отказ с внятным текстом, а не «неверный пароль».
+        let mut future = buf.clone();
+        future[7] = 200;
+        match Reader::open(&future[..], "пароль") {
+            Err(BackupError::Kdf(msg)) => assert!(msg.contains("200"), "текст ошибки: {msg}"),
+            other => panic!("ожидался отказ по профилю, получено {:?}", other.err()),
+        }
     }
 
     #[test]

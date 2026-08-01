@@ -490,10 +490,9 @@ class AppModel private constructor() {
      * звать с фонового потока; UI на это время показывает прогресс.
      */
     internal fun exportBackupBlocking(path: String, parts: BackupPartsDto, password: String): BackupStatsDto {
-        // encodeDefaults ОБЯЗАТЕЛЕН: по умолчанию kotlinx не пишет поля, равные
-        // дефолту, и в движок уезжал пустой {} — то есть «ничего не класть».
-        val wire = kotlinx.serialization.json.Json { encodeDefaults = true }
-        val json = wire.encodeToString(BackupPartsDto.serializer(), parts)
+        // Только через WireJson: см. его док — иначе поля с дефолтными значениями
+        // молча не доедут до движка.
+        val json = WireJson.encodeToString(BackupPartsDto.serializer(), parts)
         val out = Native.backupExport(sessionPtr, path, json, password)
         val stats = decodeOrNull<BackupStatsDto>(out)
             ?: BackupStatsDto(error = "не удалось создать копию")

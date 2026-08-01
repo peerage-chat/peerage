@@ -381,6 +381,14 @@ private fun RestoreStep(
             stringResource(R.string.backup_merge_text),
         )
 
+        // Сказать ДО нажатия, а не после: иначе человек решит, что верификация
+        // потерялась из-за сбоя, и перестанет доверять восстановлению.
+        Text(
+            stringResource(R.string.backup_verify_again),
+            color = HoloWarn,
+            fontSize = 12.sp,
+        )
+
         AccentButton(stringResource(R.string.backup_restore_go), Modifier.fillMaxWidth()) {
             if (file != null && password.isNotEmpty()) onGo()
         }
@@ -425,6 +433,11 @@ private fun DoneStep(stats: BackupStatsDto?, restoring: Boolean, onDone: () -> U
                     stringResource(R.string.backup_after_groups_title),
                     stringResource(R.string.backup_after_groups_text),
                     warn = true,
+                )
+                Text(
+                    stringResource(R.string.backup_verify_again),
+                    color = HoloSecondary,
+                    fontSize = 12.sp,
                 )
             }
         }

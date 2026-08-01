@@ -86,6 +86,27 @@ fn export_import_restores_conversation_on_a_clean_device() {
 }
 
 #[test]
+fn restore_does_not_grant_verification() {
+    // Файл могли подсунуть: «вот твоя копия, вот пароль». Верификация означает
+    // «я сверил отпечаток вживую» — из файла это утверждение не восстанавливается,
+    // иначе чужой ключ приезжал бы сразу с высшим доверием и без плашки в UI.
+    let net = LoopbackNet::new();
+    let peer = id(98).public_key_bytes();
+    let a = start(&net, id(97), tmpdir("ver-src"));
+    fill(&a, &peer);
+    a.set_verified(&peer, true); // у источника контакт сверен вживую
+
+    let file = tmpdir("ver").join("copy.p2pbak");
+    a.backup_export(&file, all(), "пк").unwrap();
+
+    let b = start(&net, id(99), tmpdir("ver-dst"));
+    b.backup_import(&file, "пк").unwrap();
+    let contacts: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
+    assert_eq!(contacts[0]["key"], hex::encode(peer), "контакт восстановлен");
+    assert_eq!(contacts[0]["verified"], false, "но сверять его нужно заново");
+}
+
+#[test]
 fn only_selected_parts_are_included() {
     let net = LoopbackNet::new();
     let peer = id(85).public_key_bytes();

@@ -138,8 +138,14 @@ object Native {
     external fun backupImport(sessionPtr: Long, path: String, password: String): String
 
     /** Ключ хранилища из пароля (Argon2id в ядре). Долгая операция — с фонового
-     *  потока. Пустой массив при ошибке. */
-    external fun deriveVaultKey(password: String, salt: ByteArray): ByteArray
+     *  потока. Пустой массив при ошибке.
+     *
+     *  `profile` — номер профиля стоимости ИЗ ФАЙЛА (vault.meta): параметры KDF
+     *  растут со временем, а ключ с другими параметрами — другой ключ. */
+    external fun deriveVaultKey(password: String, salt: ByteArray, profile: Int): ByteArray
+
+    /** Профиль стоимости для НОВЫХ файлов (источник истины — ядро). */
+    external fun currentKdfProfile(): Int
 
     /** Свежая соль для KDF (16 байт). */
     external fun newVaultSalt(): ByteArray
