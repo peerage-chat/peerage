@@ -142,6 +142,28 @@ pub enum Payload {
         #[serde(with = "hex_bytes")]
         avatar_hash: Vec<u8>,
     },
+    /// Объявление о смене АДРЕСА (ADR-007): «моя личность прежняя, слать теперь сюда».
+    ///
+    /// Адрес Yggdrasil = функция ключа узла, поэтому оборвать чужой флуд можно только
+    /// сменой ключа. Чтобы это не стоило личности, транспортный ключ отделён от неё:
+    /// здесь едет новый транспортный ключ, номер эпохи и подпись **ключом личности**.
+    ///
+    /// Получатель принимает объявление, только если подпись сходится с уже известной
+    /// ему личностью отправителя, а эпоха строго новее последней известной
+    /// (`ContactStore::apply_transport_rotate`). Без первого условия это вектор
+    /// захвата контакта, без второго — переигрывание старого адреса.
+    ///
+    /// `id` — чтобы объявление шло надёжным путём (retry-until-Ack + офлайн-очередь):
+    /// контакт, отсутствовавший в момент смены, обязан узнать новый адрес по
+    /// возвращении, иначе связь с ним теряется навсегда.
+    TransportRotate {
+        id: u64,
+        epoch: u32,
+        #[serde(with = "hex_bytes")]
+        transport_pub: Vec<u8>,
+        #[serde(with = "hex_bytes")]
+        sig: Vec<u8>,
+    },
     /// Запрос манифеста блоба по id (BLAKE3) — pull-по-хэшу (аватар / ленивые картинки).
     /// Ответ — `BlobManifest`. Делает блобы запрашиваемыми, а не только push-анонсом.
     BlobManifestRequest {
@@ -234,6 +256,11 @@ fn bucket_for(payload: &Payload) -> usize {
         | Payload::GroupInvite { .. }
         | Payload::GroupKeyReply { .. }
         | Payload::ProfileUpdate { .. }
+        // Смена адреса (ADR-007) не влезает в CONTROL: одна только подпись 64 Б,
+        // плюс ключ — с бакетом 256 Б это несовместимо. Прячем среди прикладных:
+        // на проводе объявление неотличимо от обычного текста или картинки, что
+        // даже лучше control-класса — флудер не видит момент ротации.
+        | Payload::TransportRotate { .. }
         | Payload::BlobManifest { .. } => APP_BUCKET,
         // Тело блоба: прячем остаток последнего чанка.
         Payload::BlobChunk { .. } => CHUNK_BUCKET,
@@ -304,6 +331,42 @@ mod tests {
 
         assert_eq!(from, alice.public_key_bytes());
         assert_eq!(decoded, payload);
+    }
+
+    /// Объявление о смене адреса переживает шифрование целиком и проверяется у
+    /// получателя ключом ЛИЧНОСТИ отправителя — то есть подписью, а не тем, откуда
+    /// пакет пришёл. Иначе смена адреса не отличалась бы от захвата контакта.
+    #[test]
+    fn transport_rotate_roundtrip_and_verifies_by_identity() {
+        let alice = Identity::generate();
+        let bob = Identity::generate();
+        let tk = alice.transport_public(5);
+        let sig = alice.sign_transport_rotate(5, &tk);
+        let payload = Payload::TransportRotate {
+            id: 77,
+            epoch: 5,
+            transport_pub: tk.to_vec(),
+            sig: sig.to_vec(),
+        };
+
+        let datagram = encode(&alice, &bob.public_key_bytes(), &payload, 0).unwrap();
+        let (from, decoded) = decode(&bob, &datagram).unwrap();
+        assert_eq!(from, alice.public_key_bytes());
+        assert_eq!(decoded, payload);
+
+        let Payload::TransportRotate { epoch, transport_pub, sig, .. } = decoded else {
+            panic!("не тот вариант");
+        };
+        let tp = <[u8; 32]>::try_from(transport_pub.as_slice()).unwrap();
+        let sg = <[u8; 64]>::try_from(sig.as_slice()).unwrap();
+        assert!(crate::identity::verify_transport_rotate(&from, epoch, &tp, &sg));
+        // Тот же пакет, приписанный другой личности, не проходит.
+        assert!(!crate::identity::verify_transport_rotate(
+            &bob.public_key_bytes(),
+            epoch,
+            &tp,
+            &sg
+        ));
     }
 
     #[test]
@@ -399,10 +462,17 @@ mod tests {
                 duration_ms: 0, width: 0, height: 0, caption: String::new(), thumb: Vec::new(),
             }),
             enc(&Payload::Group { id: 5, data: vec![1u8; 200] }),
+            // Смена адреса (ADR-007) едет здесь же: подпись 64 Б не влезает в
+            // control-бакет, зато среди прикладных объявление неотличимо от
+            // обычного сообщения — флудер не видит по проводу, что жертва прямо
+            // сейчас уходит на новый адрес.
+            enc(&Payload::TransportRotate {
+                id: 14, epoch: 7, transport_pub: vec![3u8; 32], sig: vec![4u8; 64],
+            }),
         ];
         assert!(
             sizes.iter().all(|s| *s == sizes[0]),
-            "текст/картинка/голосовое/файл/группа должны быть одного размера, получено {sizes:?}"
+            "текст/картинка/голосовое/файл/группа/смена-адреса должны быть одного размера, получено {sizes:?}"
         );
 
         // Control-класс: начало звонка неотличимо от ack/ping/маячка присутствия.

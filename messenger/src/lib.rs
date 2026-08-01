@@ -152,6 +152,11 @@ pub enum Event {
     ProfileUpdate { peer: PeerKey, name: String, avatar_hash: Vec<u8> },
     /// Пир запросил манифест нашего блоба по id (pull-по-хэшу).
     BlobManifestRequest { peer: PeerKey, id: Vec<u8> },
+    /// Контакт объявил СМЕНУ АДРЕСА (ADR-007): личность прежняя (`peer`), адрес
+    /// теперь `transport_pub`. Подпись уже проверена приёмным слоем (иначе пакет не
+    /// прошёл бы анти-спуфинг), но применять её должен верхний слой: монотонность
+    /// эпохи и запись в стор — его зона.
+    TransportRotate { peer: PeerKey, epoch: u32, transport_pub: Vec<u8>, sig: Vec<u8> },
 }
 
 /// Метаданные вложения для карточки: их видно ДО скачивания байтов, поэтому
@@ -262,6 +267,11 @@ struct Shared {
     /// файл, значит этот трафик ожидаемый и резать его своим же анти-флуд лимитом
     /// незачем. Адресно и на срок — не «поднять лимиты всем».
     boosted: Mutex<std::collections::HashMap<PeerKey, Instant>>,
+    /// Адреса контактов (ADR-007): ключ ЛИЧНОСТИ → текущий ТРАНСПОРТНЫЙ ключ.
+    /// Кого тут нет — эпоха 0, адрес совпадает с личностью (как было до разделения).
+    /// Наполняет движок из стора контактов при старте и после каждого принятого
+    /// объявления о смене адреса.
+    transports: Mutex<std::collections::HashMap<PeerKey, PeerKey>>,
     /// Кто и насколько интенсивно долбится в нас сверх бюджета. Нужен, чтобы
     /// пользователю можно было СКАЗАТЬ, что его флудят: остановить поток на
     /// устройстве нельзя (threat-model N8), но молчать об этом — худший вариант.
@@ -306,13 +316,23 @@ impl Shared {
         let _ = self.tx.send(ev);
     }
 
+    /// Куда физически слать пиру: его транспортный ключ, если он объявлял смену
+    /// адреса, иначе сам ключ личности (ADR-007, эпоха 0).
+    fn transport_of(&self, peer: &PeerKey) -> PeerKey {
+        self.transports.lock().unwrap().get(peer).copied().unwrap_or(*peer)
+    }
+
     fn send(&self, peer: &PeerKey, payload: &Payload) -> Result<(), MessengerError> {
+        // ВАЖНО: шифруем ключу ЛИЧНОСТИ, а отправляем на текущий АДРЕС. Это разные
+        // ключи с ADR-007, и путать их нельзя: зашифруешь адресу — получатель не
+        // расшифрует (у него другой Box-ключ), пошлёшь личности — пакет уйдёт на
+        // покинутый адрес.
         let body = encode(&self.identity, peer, payload, Self::now_unix())?;
         // Префикс канала чата (демукс с медиа на приёме).
         let mut dg = Vec::with_capacity(1 + body.len());
         dg.push(CHAN_CHAT);
         dg.extend_from_slice(&body);
-        self.node.write(peer, &dg)?;
+        self.node.write(&self.transport_of(peer), &dg)?;
         Ok(())
     }
 
@@ -449,6 +469,7 @@ impl Messenger {
             media_tx: Mutex::new(None),
             tiers: Mutex::new(std::collections::HashMap::new()),
             boosted: Mutex::new(std::collections::HashMap::new()),
+            transports: Mutex::new(std::collections::HashMap::new()),
             flood: Mutex::new(std::collections::HashMap::new()),
         });
         let s1 = shared.clone();
@@ -489,6 +510,12 @@ impl Messenger {
             .collect();
         v.sort_by(|a, b| b.pps.total_cmp(&a.pps).then(b.dropped.cmp(&a.dropped)));
         v
+    }
+
+    /// Обновить карту адресов контактов (ADR-007): личность → транспортный ключ.
+    /// Список полный: чего в нём нет, то считается эпохой 0 (адрес = личность).
+    pub fn set_peer_transports(&self, map: &[(PeerKey, PeerKey)]) {
+        *self.shared.transports.lock().unwrap() = map.iter().copied().collect();
     }
 
     pub fn set_peer_tiers(&self, tiers: &[(PeerKey, Tier, u32)]) {
@@ -573,6 +600,30 @@ impl Messenger {
         self.shared.send_reliable(peer, true, move |id| Payload::Text { id, text })
     }
 
+    /// Объявить контакту смену своего АДРЕСА (ADR-007). Надёжно, как текст:
+    /// контакт, отсутствовавший в момент смены, обязан узнать новый адрес по
+    /// возвращении — иначе связь с ним рвётся навсегда.
+    ///
+    /// `sig` строит владелец личности ([`p2p_core::Identity::sign_transport_rotate`]):
+    /// подпись — единственное, что связывает старую личность с новым адресом.
+    /// `notify=false` — это служебное объявление, в UI как «доставлено сообщение»
+    /// оно показываться не должно.
+    pub fn send_transport_rotate(
+        &self,
+        peer: &PeerKey,
+        epoch: u32,
+        transport_pub: &[u8; 32],
+        sig: &[u8; 64],
+    ) -> Result<u64, MessengerError> {
+        let (tp, sg) = (transport_pub.to_vec(), sig.to_vec());
+        self.shared.send_reliable(peer, false, move |id| Payload::TransportRotate {
+            id,
+            epoch,
+            transport_pub: tp,
+            sig: sg,
+        })
+    }
+
     /// Пере-отправить текст с ТЕМ ЖЕ `id` (офлайн-досылка): получатель дедуплицирует
     /// по (peer, id), поэтому дублей нет. Используется [`p2p_core`]-очередью через движок.
     pub fn resend_text(&self, peer: &PeerKey, id: u64, text: &str) -> Result<(), MessengerError> {
@@ -648,7 +699,7 @@ impl Messenger {
         let mut buf = vec![0u8; total];
         write_media_header(&mut buf, track, seq, ts);
         buf[MEDIA_HEADER_LEN..total].copy_from_slice(payload);
-        if let Err(e) = self.shared.node.write(peer, &buf) {
+        if let Err(e) = self.shared.node.write(&self.shared.transport_of(peer), &buf) {
             log::warn!("p2p-media: node.write failed for track={} len={}: {:?}", track, total, e);
             return Err(MessengerError::Transport(e));
         }
@@ -954,14 +1005,38 @@ fn receive_loop(shared: Arc<Shared>) {
             Ok(v) => v,
             Err(_) => continue, // не наш конверт / не расшифровать
         };
-        // Анти-спуфинг: ключ в конверте обязан совпадать с источником транспорта.
-        if from != src {
+        // Анти-спуфинг с учётом разделения личности и адреса (ADR-007).
+        //
+        // Раньше правило было простым: `from == src`. С разделением ключей адрес
+        // (src) больше не обязан совпадать с личностью (from), поэтому проверяем
+        // ПРИВЯЗКУ. Принять пакет можно в трёх случаях:
+        //   * from == src — эпоха 0 или незнакомец (в точности прежнее правило);
+        //   * src — известный нам адрес этой личности (связка подтверждена ранее
+        //     принятым подписанным объявлением);
+        //   * это само объявление о смене адреса, и его подпись связывает
+        //     from → src (самоподтверждающийся случай, иначе новый адрес
+        //     невозможно узнать: он приходит уже С нового адреса).
+        // Без такой проверки любой узел мог бы прислать конверт с чужим `from`.
+        let bound = from == src || shared.transport_of(&from) == src;
+        let self_authenticating = matches!(
+            &payload,
+            Payload::TransportRotate { epoch, transport_pub, sig, .. }
+                if transport_pub.as_slice() == src.as_slice()
+                    && <[u8; 64]>::try_from(sig.as_slice())
+                        .map(|s| p2p_core::identity::verify_transport_rotate(&from, *epoch, &src, &s))
+                        .unwrap_or(false)
+        );
+        if !bound && !self_authenticating {
             continue;
         }
+        // Дальше пир везде идентифицируется ЛИЧНОСТЬЮ (`from`), а не адресом:
+        // контакты, история, бюджет и события завязаны на неё, и после смены
+        // адреса эта связь обязана сохраниться.
+        let peer_id = from;
 
         // Любой трафик от пира = он онлайн.
-        if shared.mark_seen(&src) {
-            shared.emit(Event::Presence { peer: src, online: true });
+        if shared.mark_seen(&peer_id) {
+            shared.emit(Event::Presence { peer: peer_id, online: true });
         }
 
         match payload {
@@ -1049,6 +1124,19 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::BlobManifestRequest { id } => {
                 shared.emit(Event::BlobManifestRequest { peer: src, id });
+            }
+            // Контакт сменил адрес (ADR-007). Подпись здесь уже проверена выше —
+            // без этого пакет не прошёл бы анти-спуфинг, — но решение «принять и
+            // запомнить» принимает верхний слой: только он знает, какая эпоха уже
+            // известна, и он же перезапишет стор и карту адресов.
+            Payload::TransportRotate { id, epoch, transport_pub, sig } => {
+                shared.emit(Event::TransportRotate {
+                    peer: peer_id,
+                    epoch,
+                    transport_pub,
+                    sig,
+                });
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             // Forward-compat (ADR-006): будущий тип, который этот клиент не знает —
             // молча игнорируем (Ack не шлём, отправитель погасит ретрай по TTL).

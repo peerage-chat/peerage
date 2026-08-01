@@ -124,6 +124,46 @@ impl Identity {
         blake3::derive_key(context, &self.signing.to_bytes())
     }
 
+    // ── Транспортный ключ (ADR-007) ─────────────────────────────────────────
+    //
+    // Адрес Yggdrasil = функция ключа узла, поэтому «сменить адрес» = «сменить
+    // ключ». Раньше это означало сменить ЛИЧНОСТЬ: тот же ed25519 — и fingerprint,
+    // и MLS-credential, и запись в контактах. Здесь личность (IK) отделена от
+    // транспортного ключа (TK): IK не меняется никогда, TK — расходник по эпохам.
+    //
+    // Зачем это нужно: ротация адреса — единственная мера, реально обрывающая
+    // чужой флуд (проверено на публичном меше, ADR-007), но она обязана стоить
+    // дёшево. Здесь она стоит рассылки одного подписанного объявления.
+
+    /// Seed транспортного ключа для эпохи `epoch` (узел Yggdrasil поднимается на нём).
+    ///
+    /// **Эпоха 0 — сама идентичность** (`TK_0 == IK`): пока пользователь не менял
+    /// адрес, всё в точности как раньше, миграция не нужна. Дальше — доменный
+    /// под-ключ, то есть детерминированно из того же seed: восстановление из
+    /// мнемоники продолжает работать (seed + номер эпохи → тот же адрес), отдельный
+    /// секрет хранить не надо.
+    pub fn transport_seed(&self, epoch: u32) -> [u8; SEED_LEN] {
+        if epoch == 0 {
+            return self.seed();
+        }
+        self.derive_subkey(&format!("dev.p2p.transport.v1/{epoch}"))
+    }
+
+    /// Публичный транспортный ключ эпохи — то, что видит сеть как наш адрес.
+    pub fn transport_public(&self, epoch: u32) -> [u8; 32] {
+        SigningKey::from_bytes(&self.transport_seed(epoch)).verifying_key().to_bytes()
+    }
+
+    /// Подписать объявление «мой новый адрес — вот этот» ключом ЛИЧНОСТИ.
+    ///
+    /// Подпись обязательна: без неё объявление превращается в вектор захвата
+    /// («привет, я новый адрес Алисы»). Домен в подписываемых байтах не даёт
+    /// переиспользовать её в другом контексте, номер эпохи — переиграть старую.
+    pub fn sign_transport_rotate(&self, epoch: u32, transport_pub: &[u8; 32]) -> [u8; 64] {
+        use ed25519_dalek::Signer;
+        self.signing.sign(&rotate_msg(epoch, transport_pub)).to_bytes()
+    }
+
     /// Fingerprint — 8 слов BIP39 из SHA-256(публичный ключ).
     pub fn fingerprint_words(&self) -> [&'static str; FINGERPRINT_WORDS] {
         fingerprint_words(&self.public_key_bytes())
@@ -133,6 +173,38 @@ impl Identity {
     pub fn fingerprint(&self) -> String {
         self.fingerprint_words().join(" ")
     }
+}
+
+/// Домен подписи объявления о смене адреса. Входит в подписываемые байты, чтобы
+/// подпись из одного контекста не годилась в другом (SEC-5, доменное разделение).
+const ROTATE_DOMAIN: &[u8] = b"dev.p2p.transport-rotate.v1";
+
+/// Байты, которые подписывает владелец личности при смене адреса.
+fn rotate_msg(epoch: u32, transport_pub: &[u8; 32]) -> Vec<u8> {
+    let mut m = Vec::with_capacity(ROTATE_DOMAIN.len() + 4 + 32);
+    m.extend_from_slice(ROTATE_DOMAIN);
+    m.extend_from_slice(&epoch.to_be_bytes());
+    m.extend_from_slice(transport_pub);
+    m
+}
+
+/// Проверить объявление о смене адреса: действительно ли владелец `identity_pub`
+/// заявил, что его адрес теперь `transport_pub` в эпохе `epoch`.
+///
+/// Это единственное, что связывает личность с новым адресом, поэтому проверка
+/// обязана быть строгой: сломанная подпись, чужая личность или подменённый номер
+/// эпохи — всё это `false`. Монотонность эпохи проверяет вызывающий: здесь нет
+/// знания о том, какая эпоха уже известна.
+pub fn verify_transport_rotate(
+    identity_pub: &[u8; 32],
+    epoch: u32,
+    transport_pub: &[u8; 32],
+    sig: &[u8; 64],
+) -> bool {
+    use ed25519_dalek::Verifier;
+    let Ok(vk) = VerifyingKey::from_bytes(identity_pub) else { return false };
+    vk.verify(&rotate_msg(epoch, transport_pub), &ed25519_dalek::Signature::from_bytes(sig))
+        .is_ok()
 }
 
 /// Вывод адреса Yggdrasil из публичного ключа ed25519.
@@ -297,6 +369,55 @@ mod tests {
         // Разные идентичности → разные под-ключи для того же домена.
         let other = Identity::from_seed(&[6u8; 32]).unwrap();
         assert_ne!(a1, other.derive_subkey("dev.p2p.blob-at-rest.v1"));
+    }
+
+    #[test]
+    fn transport_epoch_zero_is_the_identity_itself() {
+        // Обратная совместимость: пока адрес не меняли, узел поднимается на том же
+        // ключе, что и раньше. Иначе существующие установки «переехали» бы молча.
+        let id = Identity::from_seed(&[7u8; 32]).unwrap();
+        assert_eq!(id.transport_seed(0), id.seed());
+        assert_eq!(id.transport_public(0), id.public_key_bytes());
+    }
+
+    #[test]
+    fn transport_keys_differ_per_epoch_and_survive_restore() {
+        let id = Identity::from_seed(&[7u8; 32]).unwrap();
+        let (t1, t2) = (id.transport_public(1), id.transport_public(2));
+        assert_ne!(t1, id.public_key_bytes(), "новая эпоха — новый адрес");
+        assert_ne!(t1, t2, "разные эпохи не пересекаются");
+        // Детерминизм: восстановление из той же мнемоники даёт тот же адрес эпохи,
+        // поэтому отдельный секрет для транспорта хранить не нужно.
+        let restored = Identity::from_seed(&id.seed()).unwrap();
+        assert_eq!(restored.transport_public(1), t1);
+        // Чужая личность — чужие транспортные ключи.
+        let other = Identity::from_seed(&[8u8; 32]).unwrap();
+        assert_ne!(other.transport_public(1), t1);
+    }
+
+    #[test]
+    fn rotate_announcement_verifies_only_for_its_author_epoch_and_key() {
+        let alice = Identity::from_seed(&[9u8; 32]).unwrap();
+        let mallory = Identity::from_seed(&[10u8; 32]).unwrap();
+        let tk = alice.transport_public(3);
+        let sig = alice.sign_transport_rotate(3, &tk);
+
+        assert!(verify_transport_rotate(&alice.public_key_bytes(), 3, &tk, &sig));
+        // Чужая личность не может выдать свой адрес за адрес Алисы — иначе
+        // объявление становилось бы вектором захвата контакта.
+        assert!(!verify_transport_rotate(&mallory.public_key_bytes(), 3, &tk, &sig));
+        // Ни номер эпохи, ни объявляемый ключ подменить нельзя: оба под подписью.
+        assert!(!verify_transport_rotate(&alice.public_key_bytes(), 4, &tk, &sig));
+        assert!(!verify_transport_rotate(
+            &alice.public_key_bytes(),
+            3,
+            &mallory.transport_public(3),
+            &sig,
+        ));
+        // Битая подпись — не «почти верно», а нет.
+        let mut broken = sig;
+        broken[0] ^= 1;
+        assert!(!verify_transport_rotate(&alice.public_key_bytes(), 3, &tk, &broken));
     }
 
     #[test]

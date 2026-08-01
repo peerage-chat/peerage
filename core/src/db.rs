@@ -147,6 +147,17 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     // Профиль контакта (M2): самоназвание + хэш аватара (идемпотентно).
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN profile_name TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN avatar_id TEXT NOT NULL DEFAULT ''", []);
+    // ADR-007: адрес контакта отделён от его личности. Пусто = эпоха 0, то есть
+    // адрес совпадает с ключом личности (как было до разделения) — существующие
+    // записи мигрировать не нужно.
+    let _ = conn.execute(
+        "ALTER TABLE contacts ADD COLUMN transport_key TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE contacts ADD COLUMN transport_epoch INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
     // Медиа-сообщения (M2): тип + ссылка на блоб вложения (идемпотентно).
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'", []);
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN blob_id TEXT NOT NULL DEFAULT ''", []);

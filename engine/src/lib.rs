@@ -575,6 +575,26 @@ impl Engine {
     /// Источник истины: контакты (сверенный fingerprint → `Verified`) и блок-лист
     /// гейта (`Blocked` — режется на ingress, ДО расшифровки). Кого нет — `Stranger`
     /// (общая корзина класса, анти-Sybil). Зовётся при любой смене того или другого.
+    /// Переслать транспорту актуальную карту адресов контактов (ADR-007):
+    /// личность → её текущий транспортный ключ. Зовётся при старте и после каждого
+    /// принятого объявления о смене адреса — без этого сообщения продолжали бы
+    /// уходить на покинутый ключ.
+    fn refresh_transports(&self) {
+        let map: Vec<([u8; 32], [u8; 32])> = self
+            .contacts
+            .lock_safe()
+            .list()
+            .iter()
+            .filter(|c| !c.transport_key.is_empty())
+            .filter_map(|c| {
+                let ik = parse_key(&c.key)?;
+                let tk = parse_key(&c.transport_key)?;
+                Some((ik, tk))
+            })
+            .collect();
+        self.messenger.set_peer_transports(&map);
+    }
+
     fn refresh_budgets(&self) {
         // ВАЖНО: не держим оба лока разом (contacts+gate) — иначе гонка порядка
         // захвата с API гейта = дедлок. Снимаем контакты, отпускаем, затем блоки.
@@ -1933,6 +1953,31 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 push_event(engine, dto::UiEvent::ContactsChanged);
             }
         }
+        // ADR-007: контакт сменил адрес. Применяем ТОЛЬКО через стор — там и
+        // проверка подписи ключом личности, и монотонность эпохи. Приняли —
+        // немедленно обновляем карту адресов, иначе следующее сообщение уйдёт на
+        // покинутый ключ.
+        Event::TransportRotate { peer, epoch, transport_pub, sig } => {
+            let (Ok(tp), Ok(sg)) = (
+                <[u8; 32]>::try_from(transport_pub.as_slice()),
+                <[u8; 64]>::try_from(sig.as_slice()),
+            ) else {
+                return;
+            };
+            let applied = engine
+                .contacts
+                .lock_safe()
+                .apply_transport_rotate(&peer, epoch, &tp, &sg)
+                .unwrap_or(false);
+            if applied {
+                log::info!(
+                    "контакт {:02x?}… сменил адрес (эпоха {epoch})",
+                    &peer[..4],
+                );
+                engine.refresh_transports();
+                push_event(engine, dto::UiEvent::ContactsChanged);
+            }
+        }
         // M2 pull-по-хэшу: пир просит манифест нашего блоба (пока — аватар).
         Event::BlobManifestRequest { peer, id } => {
             // Отдаём ЛЮБОЙ сохранённый у нас блоб по хэшу (аватар / вложение чата или
@@ -2238,6 +2283,9 @@ impl Engine {
         // ДО запуска приёмного цикла — иначе первые пакеты заблокированного пира
         // успели бы пройти расшифровку.
         engine.refresh_budgets();
+        // ADR-007: адреса контактов, сменивших ключ. Тоже до приёмного цикла —
+        // иначе первые исходящие ушли бы на покинутые адреса.
+        engine.refresh_transports();
 
         let pump_engine = engine.clone();
         let groups_dir = dir.clone();

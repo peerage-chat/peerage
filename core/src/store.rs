@@ -110,6 +110,30 @@ pub struct Contact {
     /// трафик, полностью отдав блоб. Повышает его бюджет ресурсов (`budget::Tier`).
     #[serde(default)]
     pub helpful: u32,
+    /// hex ТРАНСПОРТНОГО ключа контакта — адреса, по которому он сейчас доступен
+    /// (ADR-007). Пусто = эпоха 0, адрес совпадает с ключом личности.
+    ///
+    /// Личность (`key`) не меняется никогда: на ней fingerprint, верификация и
+    /// членство в группах. Адрес — расходник: контакт может сменить его, чтобы
+    /// оборвать чужой флуд, и прислать подписанное объявление.
+    #[serde(default)]
+    pub transport_key: String,
+    /// Номер эпохи адреса. Растёт строго — старое объявление не переиграет новое.
+    #[serde(default)]
+    pub transport_epoch: u32,
+}
+
+impl Contact {
+    /// Куда слать: транспортный ключ, если контакт объявлял смену адреса, иначе
+    /// ключ личности (эпоха 0). Одна точка правды — чтобы «слать по личности»
+    /// не размазалось по коду и не пережило первую же ротацию.
+    pub fn transport_or_identity(&self) -> String {
+        if self.transport_key.is_empty() {
+            self.key.clone()
+        } else {
+            self.transport_key.clone()
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -143,7 +167,8 @@ impl ContactStore {
     fn load_cache(&mut self) -> Result<(), StoreError> {
         let conn = db::lock(&self.db);
         let mut stmt = conn.prepare(
-            "SELECT key, name, fingerprint, added, verified, profile_name, avatar_id, helpful FROM contacts",
+            "SELECT key, name, fingerprint, added, verified, profile_name, avatar_id, helpful, \
+             transport_key, transport_epoch FROM contacts",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -155,10 +180,12 @@ impl ContactStore {
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
                 row.get::<_, i64>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, i64>(9)?,
             ))
         })?;
         for row in rows {
-            let (kb, name, fp, added, ver, profile_name, avatar_id, helpful) = row?;
+            let (kb, name, fp, added, ver, profile_name, avatar_id, helpful, tk, tepoch) = row?;
             if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
                 self.cache.insert(key, Contact {
                     key: hex::encode(key),
@@ -169,6 +196,8 @@ impl ContactStore {
                     profile_name,
                     avatar_id,
                     helpful: helpful.max(0) as u32,
+                    transport_key: tk,
+                    transport_epoch: tepoch.max(0) as u32,
                 });
             }
         }
@@ -215,6 +244,10 @@ impl ContactStore {
             profile_name: String::new(),
             avatar_id: String::new(),
             helpful: 0,
+            // Новый контакт живёт в эпохе 0: адрес = ключ личности, пока он сам не
+            // объявит смену (ADR-007).
+            transport_key: String::new(),
+            transport_epoch: 0,
         };
         db::lock(&self.db).execute(
             "INSERT OR IGNORE INTO contacts (key, name, fingerprint, added, verified)
@@ -263,6 +296,50 @@ impl ContactStore {
             }
             None => Ok(false),
         }
+    }
+
+    /// Применить объявление контакта о смене адреса (ADR-007).
+    ///
+    /// Возвращает `true`, только если объявление принято. Три условия, и все
+    /// обязательны:
+    ///   * контакт известен — смена адреса имеет смысл лишь для того, чью личность
+    ///     мы уже знаем; для незнакомца объявление ничем не подкреплено;
+    ///   * подпись проверяется ключом ЛИЧНОСТИ контакта — иначе «привет, я новый
+    ///     адрес Алисы» станет способом увести переписку;
+    ///   * эпоха строго новее известной — иначе перехваченное старое объявление
+    ///     можно переиграть и вернуть жертву на брошенный (возможно, флудимый) адрес.
+    pub fn apply_transport_rotate(
+        &mut self,
+        key: &[u8; 32],
+        epoch: u32,
+        transport_pub: &[u8; 32],
+        sig: &[u8; 64],
+    ) -> Result<bool, StoreError> {
+        let Some(c) = self.cache.get_mut(key) else { return Ok(false) };
+        if epoch <= c.transport_epoch {
+            return Ok(false);
+        }
+        if !crate::identity::verify_transport_rotate(key, epoch, transport_pub, sig) {
+            return Ok(false);
+        }
+        c.transport_key = hex::encode(transport_pub);
+        c.transport_epoch = epoch;
+        db::lock(&self.db).execute(
+            "UPDATE contacts SET transport_key=?1, transport_epoch=?2 WHERE key=?3",
+            rusqlite::params![&c.transport_key, epoch as i64, key.as_slice()],
+        )?;
+        Ok(true)
+    }
+
+    /// Куда слать этому контакту: его текущий транспортный ключ (адрес). Для эпохи 0
+    /// это сам ключ личности. `None` — контакт неизвестен.
+    pub fn transport_of(&self, key: &[u8; 32]) -> Option<[u8; 32]> {
+        let c = self.cache.get(key)?;
+        if c.transport_key.is_empty() {
+            return Some(*key);
+        }
+        let raw = hex::decode(&c.transport_key).ok()?;
+        <[u8; 32]>::try_from(raw.as_slice()).ok()
     }
 
     /// Обновить профиль контакта (M2): его самоназвание + hex-хэш аватара (из
@@ -916,6 +993,58 @@ mod tests {
         let s2 = ContactStore::open(shared, None).unwrap();
         assert_eq!(s2.get(&k).unwrap().profile_name, "TheirName");
         assert_eq!(s2.get(&k).unwrap().avatar_id, "ab12");
+    }
+
+    #[test]
+    fn transport_rotate_applies_persists_and_resists_replay() {
+        use crate::Identity;
+        let alice = Identity::from_seed(&[31u8; 32]).unwrap();
+        let k = alice.public_key_bytes();
+        let shared = db();
+        let mut store = ContactStore::open(shared.clone(), None).unwrap();
+        store.add(&k, "Алиса", 0).unwrap();
+
+        // Эпоха 0: адрес совпадает с личностью — старые записи так и живут.
+        assert_eq!(store.transport_of(&k), Some(k));
+        assert_eq!(store.get(&k).unwrap().transport_epoch, 0);
+
+        // Подписанное объявление принимается, адрес меняется.
+        let tk1 = alice.transport_public(1);
+        let sig1 = alice.sign_transport_rotate(1, &tk1);
+        assert!(store.apply_transport_rotate(&k, 1, &tk1, &sig1).unwrap());
+        assert_eq!(store.transport_of(&k), Some(tk1));
+
+        // Повтор той же (и более старой) эпохи отвергается: иначе перехваченное
+        // объявление вернуло бы жертву на брошенный адрес.
+        assert!(!store.apply_transport_rotate(&k, 1, &tk1, &sig1).unwrap());
+        let tk0_sig = alice.sign_transport_rotate(0, &k);
+        assert!(!store.apply_transport_rotate(&k, 0, &k, &tk0_sig).unwrap());
+        assert_eq!(store.transport_of(&k), Some(tk1), "адрес не откатился");
+
+        // Чужая подпись не проходит, даже с новой эпохой.
+        let mallory = Identity::from_seed(&[32u8; 32]).unwrap();
+        let fake = mallory.transport_public(2);
+        let fake_sig = mallory.sign_transport_rotate(2, &fake);
+        assert!(!store.apply_transport_rotate(&k, 2, &fake, &fake_sig).unwrap());
+        assert_eq!(store.transport_of(&k), Some(tk1), "захват адреса не прошёл");
+
+        // Персист через переоткрытие: адрес и эпоха переживают перезапуск.
+        let s2 = ContactStore::open(shared, None).unwrap();
+        assert_eq!(s2.transport_of(&k), Some(tk1));
+        assert_eq!(s2.get(&k).unwrap().transport_epoch, 1);
+    }
+
+    #[test]
+    fn transport_rotate_ignores_unknown_contact() {
+        // Для незнакомца объявление ничем не подкреплено: его личность мы не знаем,
+        // а значит и «смена адреса» — просто чужой ключ.
+        let stranger = crate::Identity::from_seed(&[33u8; 32]).unwrap();
+        let k = stranger.public_key_bytes();
+        let tk = stranger.transport_public(1);
+        let sig = stranger.sign_transport_rotate(1, &tk);
+        let mut store = ContactStore::open(db(), None).unwrap();
+        assert!(!store.apply_transport_rotate(&k, 1, &tk, &sig).unwrap());
+        assert_eq!(store.transport_of(&k), None);
     }
 
     #[test]
