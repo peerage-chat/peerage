@@ -125,6 +125,21 @@ class MainActivity : ComponentActivity() {
 internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
     // Инициализация ядра на фоне; опрос событий/тикер статуса model запускает сам
     // на выделенных потоках (см. AppModel — UI ничего нативного не вызывает напрямую).
+    // Уровень at-rest с паролем: движок не стартует, пока ключ не отперт. Показывать
+    // пустой мессенджер вместо запроса — врать про состояние данных.
+    val needsPassword = remember { VaultKeyManager.needsPassword(java.io.File(dataDir)) }
+    var vaultOpen by remember { mutableStateOf(!needsPassword) }
+    if (!vaultOpen) {
+        val scope = rememberCoroutineScope()
+        VaultUnlockScreen { password, done ->
+            scope.launch(Dispatchers.IO) {
+                val ok = model.start(dataDir, password)
+                done(ok)
+                if (ok) vaultOpen = true
+            }
+        }
+        return
+    }
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { model.start(dataDir) }
     }
@@ -174,7 +189,7 @@ internal fun CenterMessage(text: String) {
     }
 }
 
-internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit, Flood, RotateAddress, EditProfile }
+internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit, Flood, RotateAddress, EditProfile, VaultLevel }
 
 /** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
  *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
@@ -197,6 +212,9 @@ private fun CompactShell(model: AppModel) {
     val activity = LocalContext.current as? android.app.Activity
     // Кнопка «Сменить адрес» в уведомлении о флуде открывает сразу нужный экран:
     // человек уже принял решение, незачем заставлять его искать пункт меню.
+    // Каталог данных — тот же, что при старте движка; берём из контекста, чтобы не
+    // тащить его параметром через оболочку.
+    val dataDir = LocalContext.current.filesDir.absolutePath
     var screen by remember {
         val fromNotif = activity?.intent?.getBooleanExtra(FloodNotifier.EXTRA_OPEN_ROTATE, false) == true
         mutableStateOf(if (fromNotif) Screen.RotateAddress else Screen.Contacts)
@@ -305,6 +323,7 @@ private fun CompactShell(model: AppModel) {
                             BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
                         }
                         Screen.EditProfile -> TopBar(stringResource(R.string.settings_edit_profile), onBack = { screen = Screen.Settings })
+                        Screen.VaultLevel -> TopBar(stringResource(R.string.settings_at_rest), onBack = { screen = Screen.Settings })
                         Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = { screen = Screen.Network })
                         Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = { screen = Screen.Flood })
                         Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = { screen = Screen.Contacts })
@@ -403,6 +422,8 @@ private fun CompactShell(model: AppModel) {
                                 onNetwork = { screen = Screen.Network },
                                 onStorage = { screen = Screen.Storage },
                                 onContacts = { screen = Screen.ContactList },
+                                onVaultLevel = { screen = Screen.VaultLevel },
+                                vaultLevel = VaultKeyManager.level(java.io.File(dataDir)),
                             )
                             Screen.ContactList -> ContactListScreen(model) {
                                 model.openChat(it)
@@ -436,6 +457,7 @@ private fun CompactShell(model: AppModel) {
                                 RotateAddressScreen(model) {}
                             }
                             Screen.EditProfile -> EditProfileScreen(model) { screen = Screen.Settings }
+                            Screen.VaultLevel -> VaultLevelScreen(model, dataDir) { screen = Screen.Settings }
                             Screen.Saved -> SavedScreen(model)
                             Screen.Storage -> StorageScreen(model)
                             Screen.Folders -> FoldersScreen(model) { id ->

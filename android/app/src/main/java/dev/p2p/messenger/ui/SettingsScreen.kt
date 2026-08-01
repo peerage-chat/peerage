@@ -57,6 +57,8 @@ internal fun SettingsScreen(
     onNetwork: () -> Unit = {},
     onStorage: () -> Unit = {},
     onContacts: () -> Unit = {},
+    onVaultLevel: () -> Unit = {},
+    vaultLevel: VaultLevel = VaultLevel.KEYSTORE,
 ) {
     var showPhrase by remember { mutableStateOf(false) }
     if (showPhrase) {
@@ -135,7 +137,14 @@ internal fun SettingsScreen(
         SettingRow(
             Icons.Filled.Shield,
             stringResource(R.string.settings_at_rest),
-            stringResource(R.string.settings_at_rest_keystore),
+            stringResource(
+                when (vaultLevel) {
+                    VaultLevel.KEYSTORE -> R.string.vault_lvl_keystore
+                    VaultLevel.PASSWORD -> R.string.vault_lvl_password
+                    VaultLevel.BOTH -> R.string.vault_lvl_both
+                },
+            ),
+            onClick = onVaultLevel,
         )
         SettingRow(
             Icons.Filled.Verified,
@@ -388,5 +397,209 @@ internal fun LockScreen(onUnlock: () -> Unit) {
         Text(stringResource(R.string.lock_subtitle), color = HoloSecondary, fontSize = 13.sp)
         Spacer(Modifier.height(28.dp))
         AccentButton(stringResource(R.string.lock_unlock), onClick = onUnlock)
+    }
+}
+
+/**
+ * Ввод пароля хранилища при холодном старте (уровни PASSWORD/BOTH).
+ *
+ * Пока пароль не введён, движок не стартует вовсе: данные лежат зашифрованными, и
+ * показывать «пустой мессенджер» вместо запроса было бы враньём про состояние.
+ */
+@Composable
+internal fun VaultUnlockScreen(onSubmit: (String, (Boolean) -> Unit) -> Unit) {
+    var password by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var wrong by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier.fillMaxSize().background(HoloBg).padding(ScreenPad),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Filled.Shield, null, tint = HoloAccent, modifier = Modifier.size(48.dp))
+        Spacer(Modifier.height(18.dp))
+        Text(
+            stringResource(R.string.vault_unlock_title),
+            color = Color.White,
+            fontSize = 19.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.vault_unlock_sub),
+            color = HoloSecondary,
+            fontSize = 13.sp,
+        )
+        Spacer(Modifier.height(22.dp))
+        TextField(
+            password,
+            {
+                password = it
+                wrong = false
+            },
+            Modifier.fillMaxWidth(),
+            colors = inputColors(),
+            singleLine = true,
+            enabled = !busy,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        )
+        if (wrong) {
+            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.vault_wrong), color = HoloError, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(18.dp))
+        if (busy) {
+            // Argon2id считается ~секунду: без индикатора это выглядит зависанием.
+            CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = 12.sp)
+        } else {
+            AccentButton(stringResource(R.string.vault_unlock_btn)) {
+                if (password.isEmpty()) return@AccentButton
+                busy = true
+                onSubmit(password) { ok ->
+                    busy = false
+                    wrong = !ok
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Выбор уровня шифрования данных (at-rest).
+ *
+ * Смена уровня пере-оборачивает тот же ключ хранилища, поэтому переписка не
+ * перешифровывается и ничего не теряется — кроме случая, когда забыт пароль:
+ * об этом сказано прямо, потому что восстановления нет и быть не может.
+ */
+@Composable
+internal fun VaultLevelScreen(model: AppModel, dataDir: String, onDone: () -> Unit) {
+    val dir = java.io.File(dataDir)
+    var target by remember { mutableStateOf(VaultKeyManager.level(dir)) }
+    val current = remember { VaultKeyManager.level(dir) }
+    var oldPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var repeat by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        LevelOption(
+            VaultLevel.KEYSTORE,
+            target,
+            stringResource(R.string.vault_lvl_keystore),
+            stringResource(R.string.vault_lvl_keystore_desc),
+        ) { target = it }
+        LevelOption(
+            VaultLevel.PASSWORD,
+            target,
+            stringResource(R.string.vault_lvl_password),
+            stringResource(R.string.vault_lvl_password_desc),
+        ) { target = it }
+        LevelOption(
+            VaultLevel.BOTH,
+            target,
+            stringResource(R.string.vault_lvl_both),
+            stringResource(R.string.vault_lvl_both_desc),
+        ) { target = it }
+
+        if (current != VaultLevel.KEYSTORE) {
+            FieldLabel(stringResource(R.string.vault_current_password))
+            TextField(
+                oldPassword,
+                { oldPassword = it },
+                Modifier.fillMaxWidth(),
+                colors = inputColors(),
+                singleLine = true,
+                placeholder = { Text(stringResource(R.string.vault_ph_current), color = HoloSecondary) },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            )
+        }
+        if (target != VaultLevel.KEYSTORE) {
+            FieldLabel(stringResource(R.string.vault_new_password))
+            // Плейсхолдеры обязательны: два одинаковых поля подряд без подписи
+            // неразличимы, а пустое выглядит как разделитель, а не как поле.
+            TextField(
+                newPassword,
+                { newPassword = it },
+                Modifier.fillMaxWidth(),
+                colors = inputColors(),
+                singleLine = true,
+                placeholder = { Text(stringResource(R.string.vault_ph_password), color = HoloSecondary) },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            )
+            TextField(
+                repeat,
+                { repeat = it },
+                Modifier.fillMaxWidth(),
+                colors = inputColors(),
+                singleLine = true,
+                placeholder = { Text(stringResource(R.string.vault_ph_repeat), color = HoloSecondary) },
+                isError = repeat.isNotEmpty() && repeat != newPassword,
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            )
+            if (repeat.isNotEmpty() && repeat != newPassword) {
+                Text(stringResource(R.string.vault_mismatch), color = HoloError, fontSize = 12.sp)
+            }
+            Text(stringResource(R.string.vault_no_recovery), color = HoloWarn, fontSize = 12.sp)
+        }
+        if (failed) {
+            Text(stringResource(R.string.vault_change_failed), color = HoloError, fontSize = 13.sp)
+        }
+
+        val ready = when {
+            busy -> false
+            target == VaultLevel.KEYSTORE -> current != VaultLevel.KEYSTORE
+            else -> newPassword.isNotEmpty() && newPassword == repeat
+        }
+        if (busy) {
+            Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = 13.sp)
+        } else {
+            AccentButton(stringResource(R.string.vault_apply)) {
+                if (!ready) return@AccentButton
+                busy = true
+                failed = false
+                scope.launch(Dispatchers.IO) {
+                    val ok = VaultKeyManager.changeLevel(
+                        dir,
+                        target,
+                        oldPassword.ifEmpty { null },
+                        newPassword.ifEmpty { null },
+                    )
+                    busy = false
+                    if (ok) onDone() else failed = true
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LevelOption(
+    value: VaultLevel,
+    selected: VaultLevel,
+    title: String,
+    desc: String,
+    onPick: (VaultLevel) -> Unit,
+) {
+    SurfaceCard(onClick = { onPick(value) }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(
+                selected = selected == value,
+                onClick = { onPick(value) },
+                colors = RadioButtonDefaults.colors(selectedColor = HoloAccent, unselectedColor = HoloSecondary),
+            )
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(title, color = Color.White, fontSize = 15.sp)
+                Text(desc, color = HoloSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+            }
+        }
     }
 }

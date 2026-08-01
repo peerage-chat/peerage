@@ -537,4 +537,25 @@
     <string name="lock_title">Приложение заблокировано</string>
     <string name="lock_subtitle">Подтвердите, что это вы</string>
     <string name="lock_unlock">Разблокировать</string>
+
+    <string name="vault_unlock_title">Данные зашифрованы</string>
+    <string name="vault_unlock_sub">Введите пароль хранилища, чтобы открыть переписку</string>
+    <string name="vault_unlock_btn">Открыть</string>
+    <string name="vault_wrong">Неверный пароль</string>
+    <string name="vault_deriving">Проверяем пароль…</string>
+    <string name="vault_lvl_keystore">Ключ устройства</string>
+    <string name="vault_lvl_keystore_desc">Отпирается автоматически. Снятый дамп памяти телефона бесполезен, но тот, у кого разблокированный телефон, увидит переписку.</string>
+    <string name="vault_lvl_password">Пароль</string>
+    <string name="vault_lvl_password_desc">Спрашивается при запуске. Данные закрыты, даже если телефон разблокирован и попал в чужие руки.</string>
+    <string name="vault_lvl_both">Ключ устройства и пароль</string>
+    <string name="vault_lvl_both_desc">Нужно и это устройство, и пароль. Копия данных, снятая с телефона, бесполезна без пароля.</string>
+    <string name="vault_current_password">ТЕКУЩИЙ ПАРОЛЬ</string>
+    <string name="vault_new_password">НОВЫЙ ПАРОЛЬ (ДВАЖДЫ)</string>
+    <string name="vault_no_recovery">Забытый пароль восстановить нельзя — переписка будет потеряна. Так и задумано: лазейка для вас была бы лазейкой для любого.</string>
+    <string name="vault_apply">Применить</string>
+    <string name="vault_change_failed">Не удалось сменить уровень: проверьте текущий пароль</string>
+    <string name="vault_ph_password">Пароль</string>
+    <string name="vault_ph_repeat">Повторите пароль</string>
+    <string name="vault_ph_current">Текущий пароль</string>
+    <string name="vault_mismatch">Пароли не совпадают</string>
 </resources>

@@ -128,6 +128,13 @@ object Native {
      *  `личность:эпоха:адрес:подпись` (ADR-007). Возвращает "added"|"known"|"error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
 
+    /** Ключ хранилища из пароля (Argon2id в ядре). Долгая операция — с фонового
+     *  потока. Пустой массив при ошибке. */
+    external fun deriveVaultKey(password: String, salt: ByteArray): ByteArray
+
+    /** Свежая соль для KDF (16 байт). */
+    external fun newVaultSalt(): ByteArray
+
     /** Кто сейчас флудит: JSON [{peer, dropped, pps, blocked}], по убыванию темпа. */
     external fun floodPeers(sessionPtr: Long): String
 

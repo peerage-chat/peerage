@@ -545,4 +545,25 @@
     <string name="lock_title">App is locked</string>
     <string name="lock_subtitle">Confirm it is you</string>
     <string name="lock_unlock">Unlock</string>
+
+    <string name="vault_unlock_title">Data is encrypted</string>
+    <string name="vault_unlock_sub">Enter the vault password to open your messages</string>
+    <string name="vault_unlock_btn">Open</string>
+    <string name="vault_wrong">Wrong password</string>
+    <string name="vault_deriving">Checking the password…</string>
+    <string name="vault_lvl_keystore">Device key</string>
+    <string name="vault_lvl_keystore_desc">Unlocks automatically. A dump of the phone storage is useless, but whoever holds the unlocked phone sees your messages.</string>
+    <string name="vault_lvl_password">Password</string>
+    <string name="vault_lvl_password_desc">Asked at startup. Data stays closed even if the phone is unlocked and in someone else\'s hands.</string>
+    <string name="vault_lvl_both">Device key and password</string>
+    <string name="vault_lvl_both_desc">Both this device and the password are required. A copy taken off the phone is useless without the password.</string>
+    <string name="vault_current_password">CURRENT PASSWORD</string>
+    <string name="vault_new_password">NEW PASSWORD (TWICE)</string>
+    <string name="vault_no_recovery">A forgotten password cannot be recovered — the messages will be lost. That is by design: a way in for you is a way in for anyone.</string>
+    <string name="vault_apply">Apply</string>
+    <string name="vault_change_failed">Could not change the level: check the current password</string>
+    <string name="vault_ph_password">Password</string>
+    <string name="vault_ph_repeat">Repeat the password</string>
+    <string name="vault_ph_current">Current password</string>
+    <string name="vault_mismatch">Passwords do not match</string>
 </resources>

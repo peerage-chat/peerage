@@ -22,6 +22,8 @@ serde.workspace = true
 serde_json.workspace = true
 blake3.workspace = true
 chacha20poly1305 = "0.10"
+# Argon2id для уровня at-rest «пароль» (KDF от того, что пользователь ЗНАЕТ).
+argon2 = "0.5"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 # На хосте (тесты, desktop) — обычный bundled SQLite.
 # На Android — включается feature "sqlcipher" из androidjni/Cargo.toml,

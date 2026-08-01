@@ -902,16 +902,22 @@ class AppModel private constructor() {
 
     /** Инициализация ядра. Звать с фонового потока (см. MainActivity).
      *  Идемпотентно: при пересоздании Activity повторно НЕ инициализирует. */
-    fun start(dataDir: String) {
-        if (started) return
+    /**
+     * Инициализация ядра. `password` нужен на уровнях at-rest PASSWORD/BOTH.
+     * Возвращает false, если пароль не подошёл, — вызывающий показывает ошибку, а
+     * не стартует с мусорным ключом (иначе база выглядела бы повреждённой).
+     */
+    fun start(dataDir: String, password: String? = null): Boolean {
+        if (started) return true
+        val vaultKey = runCatching { VaultKeyManager.getOrCreate(File(dataDir), password) }
+            .getOrElse { return false }
         started = true
         loadSettings()
         loadAudioPrefs()
-        val vaultKey = VaultKeyManager.getOrCreate(File(dataDir))
         val started = decodeOrNull<StartResultDto>(Native.start(dataDir, vaultKey))
         if (started == null || started.error != null || started.sessionPtr == 0L) {
             error = started?.error ?: "engine start failed"
-            return
+            return false
         }
         sessionPtr = started.sessionPtr
         me = Me(started.pubkey, started.address, started.fingerprint)
@@ -933,6 +939,7 @@ class AppModel private constructor() {
         restoreQueuedToLog()
         startLoops()
         registerNetworkCallback()
+        return true
     }
 
     /** Разовая миграция (M2): раньше имя жило только в SharedPreferences и не

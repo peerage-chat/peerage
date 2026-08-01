@@ -498,6 +498,42 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_addContact<'local>(
     })
 }
 
+/// Вывести ключ шифрования из пароля (Argon2id) — уровень at-rest «пароль».
+/// Долгая операция (~0.5–1 с на телефоне) — звать с фонового потока. Пустой массив
+/// при ошибке (пустой пароль/неверная соль).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_deriveVaultKey<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    password: JString<'local>,
+    salt: JByteArray<'local>,
+) -> JByteArray<'local> {
+    let empty = env.new_byte_array(0).unwrap();
+    jni_safe!(env.new_byte_array(0).unwrap(), {
+        let pass = jstr(&mut env, &password);
+        let salt_bytes = env.convert_byte_array(&salt).unwrap_or_default();
+        match p2p_core::kdf::derive_key(&pass, &salt_bytes) {
+            Ok(key) => env.byte_array_from_slice(&key).unwrap_or(empty),
+            Err(e) => {
+                log::warn!("derive_vault_key: {e}");
+                empty
+            }
+        }
+    })
+}
+
+/// Свежая случайная соль для KDF (16 байт).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_newVaultSalt<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> JByteArray<'local> {
+    let empty = env.new_byte_array(0).unwrap();
+    jni_safe!(env.new_byte_array(0).unwrap(), {
+        env.byte_array_from_slice(&p2p_core::kdf::new_salt()).unwrap_or(empty)
+    })
+}
+
 /// Кто сейчас флудит: JSON `[{peer, dropped, pps, blocked}]`, по убыванию темпа.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_floodPeers<'local>(

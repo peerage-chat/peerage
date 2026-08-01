@@ -11,16 +11,34 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Управляет 32-байтовым vault-ключом, защищённым Android Keystore.
+ * Уровень защиты ключа хранилища (at-rest, M4).
  *
- * Схема: AES-256-GCM ключ в Keystore (non-extractable, hardware-backed где
- * доступно) оборачивает случайный 32-байтовый vault key. Обёрнутый ключ
- * хранится в vault.key.enc: [12 байт IV][ciphertext+tag].
+ * Разница не в силе шифра — он один и тот же, — а в том, ЧЕМ отпирается ключ:
+ *   * [KEYSTORE] — тем, что есть у устройства. Ключ не покидает защищённое
+ *     железо, снятый дамп файловой системы бесполезен. Но отдаётся приложению по
+ *     запросу, то есть тому, кто держит разблокированный телефон;
+ *   * [PASSWORD] — тем, что человек ЗНАЕТ. Знание не отдаётся автоматически:
+ *     данные остаются шифрованными, пока пароль не введён. Цена — вводить при
+ *     каждом холодном старте, и забытый пароль означает потерю переписки;
+ *   * [BOTH] — нужно и устройство, и знание.
+ */
+enum class VaultLevel { KEYSTORE, PASSWORD, BOTH }
+
+/**
+ * Управляет 32-байтовым vault-ключом.
  *
- * Миграция: если существует старый vault.key (plaintext), он автоматически
- * оборачивается и удаляется. Данные перешифровывать не нужно — vault key те же.
+ * Схема: случайный 32-байтовый vault key оборачивается в зависимости от уровня —
+ * Keystore-ключом (AES-256-GCM, non-extractable), ключом из пароля (Argon2id в
+ * ядре, [Native.deriveVaultKey]) или обоими последовательно. Обёрнутый ключ лежит
+ * в vault.key.enc: [12 байт IV][ciphertext+tag]; уровень и соль — в vault.meta.
+ *
+ * **Смена уровня не перешифровывает данные:** vault key остаётся прежним, меняется
+ * только его обёртка. Иначе каждое переключение переписывало бы всю базу и блобы.
+ *
+ * Миграция: старый plaintext vault.key автоматически оборачивается и удаляется.
  */
 object VaultKeyManager {
+    private const val META_FILE = "vault.meta"
     private const val KEYSTORE_ALIAS = "p2p-vault"
     private const val ENC_FILE = "vault.key.enc"
     private const val OLD_FILE = "vault.key"
@@ -28,27 +46,97 @@ object VaultKeyManager {
     private const val GCM_TAG_BITS = 128
     private const val KEY_LEN = 32
 
-    fun getOrCreate(filesDir: File): ByteArray {
+    /** Текущий уровень (по умолчанию — Keystore, как было до появления выбора). */
+    fun level(filesDir: File): VaultLevel {
+        val meta = File(filesDir, META_FILE)
+        if (!meta.exists()) return VaultLevel.KEYSTORE
+        return runCatching { VaultLevel.valueOf(meta.readText().lineSequence().first().trim()) }
+            .getOrDefault(VaultLevel.KEYSTORE)
+    }
+
+    /** Требуется ли пароль для старта (уровень PASSWORD или BOTH). */
+    fun needsPassword(filesDir: File): Boolean = level(filesDir) != VaultLevel.KEYSTORE
+
+    private fun salt(filesDir: File): ByteArray {
+        val meta = File(filesDir, META_FILE)
+        val line = meta.readText().lineSequence().drop(1).firstOrNull().orEmpty().trim()
+        return line.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    }
+
+    private fun writeMeta(filesDir: File, lvl: VaultLevel, salt: ByteArray) {
+        File(filesDir, META_FILE).writeText(
+            lvl.name + "\n" + salt.joinToString("") { "%02x".format(it) },
+        )
+    }
+
+    /**
+     * Ключ хранилища. `password` нужен на уровнях PASSWORD/BOTH; при неверном
+     * пароле бросает — вызывающий обязан показать «неверный пароль», а не молча
+     * стартовать с мусорным ключом (иначе данные выглядели бы повреждёнными).
+     */
+    fun getOrCreate(filesDir: File, password: String? = null): ByteArray {
         val encFile = File(filesDir, ENC_FILE)
         val oldFile = File(filesDir, OLD_FILE)
-        val keystoreKey = getOrCreateKeystoreKey()
+        val lvl = level(filesDir)
 
         return when {
-            encFile.exists() -> unwrap(encFile.readBytes(), keystoreKey)
+            encFile.exists() -> unwrapAll(encFile.readBytes(), filesDir, lvl, password)
             oldFile.exists() -> {
                 // Миграция: plaintext vault.key → защищённый vault.key.enc
                 val raw = oldFile.readBytes()
                 require(raw.size == KEY_LEN) { "vault.key: wrong size ${raw.size}" }
-                encFile.writeBytes(wrap(raw, keystoreKey))
+                encFile.writeBytes(wrapAll(raw, filesDir, lvl, password))
                 oldFile.delete()
                 raw
             }
             else -> {
                 val raw = ByteArray(KEY_LEN).also { SecureRandom().nextBytes(it) }
-                encFile.writeBytes(wrap(raw, keystoreKey))
+                encFile.writeBytes(wrapAll(raw, filesDir, lvl, password))
                 raw
             }
         }
+    }
+
+    /**
+     * Сменить уровень защиты. Пере-оборачивает ТОТ ЖЕ vault key, поэтому данные
+     * не трогаются. `current` — пароль текущего уровня (если он требуется),
+     * `new` — пароль нового. Возвращает false, если текущий пароль не подошёл.
+     */
+    fun changeLevel(filesDir: File, target: VaultLevel, current: String?, new: String?): Boolean {
+        val raw = runCatching { getOrCreate(filesDir, current) }.getOrNull() ?: return false
+        if (target != VaultLevel.KEYSTORE && new.isNullOrEmpty()) return false
+        val salt = if (target == VaultLevel.KEYSTORE) ByteArray(0) else Native.newVaultSalt()
+        writeMeta(filesDir, target, salt)
+        File(filesDir, ENC_FILE).writeBytes(wrapAll(raw, filesDir, target, new))
+        return true
+    }
+
+    /** Обернуть ключ по уровню: пароль внутри, Keystore снаружи. */
+    private fun wrapAll(raw: ByteArray, filesDir: File, lvl: VaultLevel, password: String?): ByteArray {
+        var data = raw
+        if (lvl != VaultLevel.KEYSTORE) {
+            val kek = Native.deriveVaultKey(password.orEmpty(), salt(filesDir))
+            require(kek.size == KEY_LEN) { "kdf failed" }
+            data = wrap(data, javax.crypto.spec.SecretKeySpec(kek, "AES"))
+        }
+        if (lvl != VaultLevel.PASSWORD) {
+            data = wrap(data, getOrCreateKeystoreKey())
+        }
+        return data
+    }
+
+    /** Развернуть в обратном порядке: сначала Keystore, потом пароль. */
+    private fun unwrapAll(data: ByteArray, filesDir: File, lvl: VaultLevel, password: String?): ByteArray {
+        var out = data
+        if (lvl != VaultLevel.PASSWORD) {
+            out = unwrap(out, getOrCreateKeystoreKey())
+        }
+        if (lvl != VaultLevel.KEYSTORE) {
+            val kek = Native.deriveVaultKey(password.orEmpty(), salt(filesDir))
+            require(kek.size == KEY_LEN) { "kdf failed" }
+            out = unwrap(out, javax.crypto.spec.SecretKeySpec(kek, "AES"))
+        }
+        return out
     }
 
     private fun getOrCreateKeystoreKey(): SecretKey {
