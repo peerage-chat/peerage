@@ -675,6 +675,28 @@ impl Engine {
     /// Снимок офлайн-очереди для UI: `{pending, bytes, peers, warn}`. Ничего не
     /// удаляем автоматически — по `warn` клиент показывает предупреждение, а решение
     /// (подождать или сбросить очередь) остаётся за пользователем.
+    /// Кто сейчас флудит: `[{peer, dropped, pps, blocked}]`, по убыванию темпа.
+    /// Пустой массив — флуда нет.
+    ///
+    /// Остановить чужой поток на устройстве нельзя (threat-model N8): байты уже
+    /// оплачены радио. Но пользователь имеет право знать, почему тает трафик, и
+    /// решить — уйти в офлайн или сменить адрес. Отсюда и снимок.
+    pub fn flood_json(&self) -> String {
+        let tiers = self.tier_cache.lock_safe();
+        let list: Vec<dto::FloodPeer> = self
+            .messenger
+            .flood_stats()
+            .into_iter()
+            .map(|f| dto::FloodPeer {
+                peer: hex::encode(f.peer),
+                dropped: f.dropped,
+                pps: (f.pps * 10.0).round() / 10.0, // десятых хватает, UI не нужен шум
+                blocked: tiers.get(&f.peer).map(|t| t.is_blocked()).unwrap_or(false),
+            })
+            .collect();
+        serde_json::to_string(&list).unwrap_or_else(|_| "[]".into())
+    }
+
     pub fn outbox_stats_json(&self) -> String {
         let s = self.outbox.lock_safe().stats();
         let dto = dto::OutboxStats {

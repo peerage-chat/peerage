@@ -43,6 +43,13 @@ pub trait Transport: Send + Sync {
     fn peers_json(&self) -> String;
     fn add_peer(&self, uri: &str) -> Result<(), YggError>;
     fn stop(&self);
+    /// Отбрасывать пакеты от этого ключа как можно раньше (в транспорте), не
+    /// поднимая их в прикладной слой. Приёмный бюджет режет их и так, но каждый
+    /// пакет до него стоит работы; под флудом она лишняя. По умолчанию — no-op:
+    /// транспорту-двойнику из тестов это не нужно.
+    fn block(&self, _key: &PeerKey) {}
+    /// Снять раннюю блокировку источника. По умолчанию — no-op.
+    fn unblock(&self, _key: &PeerKey) {}
 }
 
 impl Transport for Node {
@@ -66,6 +73,12 @@ impl Transport for Node {
     }
     fn add_peer(&self, uri: &str) -> Result<(), YggError> {
         Node::add_peer(self, uri)
+    }
+    fn block(&self, key: &PeerKey) {
+        Node::block(self, key)
+    }
+    fn unblock(&self, key: &PeerKey) {
+        Node::unblock(self, key)
     }
     fn stop(&self) {
         Node::stop(self)
@@ -249,6 +262,36 @@ struct Shared {
     /// файл, значит этот трафик ожидаемый и резать его своим же анти-флуд лимитом
     /// незачем. Адресно и на срок — не «поднять лимиты всем».
     boosted: Mutex<std::collections::HashMap<PeerKey, Instant>>,
+    /// Кто и насколько интенсивно долбится в нас сверх бюджета. Нужен, чтобы
+    /// пользователю можно было СКАЗАТЬ, что его флудят: остановить поток на
+    /// устройстве нельзя (threat-model N8), но молчать об этом — худший вариант.
+    flood: Mutex<std::collections::HashMap<PeerKey, FloodEntry>>,
+}
+
+/// Учёт отброшенного по одному источнику. `pps` — оценка за последнее окно.
+#[derive(Debug, Clone)]
+struct FloodEntry {
+    dropped: u64,
+    window_start: Instant,
+    in_window: u32,
+    pps: f64,
+    last_seen: Instant,
+}
+
+/// Сколько источников держим в учёте. Больше не нужно: экран показывает верхних,
+/// а неограниченная карта — это вектор роста памяти от Sybil-флуда.
+const FLOOD_CAP: usize = 64;
+/// Простаивающие записи выбрасываем: «долбился час назад» пользователю не новость.
+const FLOOD_IDLE: Duration = Duration::from_secs(120);
+
+/// Интенсивность флуда от одного источника (для UI и диагностики).
+#[derive(Debug, Clone, Copy)]
+pub struct FloodStat {
+    pub peer: PeerKey,
+    /// Всего отброшено пакетов от источника за время жизни процесса.
+    pub dropped: u64,
+    /// Оценка темпа в последнем секундном окне, пакетов/с.
+    pub pps: f64,
 }
 
 impl Shared {
@@ -406,6 +449,7 @@ impl Messenger {
             media_tx: Mutex::new(None),
             tiers: Mutex::new(std::collections::HashMap::new()),
             boosted: Mutex::new(std::collections::HashMap::new()),
+            flood: Mutex::new(std::collections::HashMap::new()),
         });
         let s1 = shared.clone();
         let rx_thread = thread::spawn(move || receive_loop(s1));
@@ -435,9 +479,36 @@ impl Messenger {
         self.shared.boosted.lock().unwrap().insert(*peer, Instant::now() + until);
     }
 
+    /// Кто сейчас флудит: источники с наибольшим отброшенным темпом, по убыванию.
+    /// Пустой список = флуда нет. Читает UI, чтобы честно показать происходящее.
+    pub fn flood_stats(&self) -> Vec<FloodStat> {
+        let map = self.shared.flood.lock().unwrap();
+        let mut v: Vec<FloodStat> = map
+            .iter()
+            .map(|(peer, e)| FloodStat { peer: *peer, dropped: e.dropped, pps: e.pps })
+            .collect();
+        v.sort_by(|a, b| b.pps.total_cmp(&a.pps).then(b.dropped.cmp(&a.dropped)));
+        v
+    }
+
     pub fn set_peer_tiers(&self, tiers: &[(PeerKey, Tier, u32)]) {
-        *self.shared.tiers.lock().unwrap() =
-            tiers.iter().map(|(k, t, h)| (*k, (*t, *h))).collect();
+        let mut map = self.shared.tiers.lock().unwrap();
+        let was_blocked: Vec<PeerKey> =
+            map.iter().filter(|(_, (t, _))| t.is_blocked()).map(|(k, _)| *k).collect();
+        *map = tiers.iter().map(|(k, t, h)| (*k, (*t, *h))).collect();
+        // Блокировку дублируем в транспорт: там пакет отбрасывается ещё до
+        // пересечения FFI, не тратя копирование и разбор заголовка. Снятие тоже
+        // проводим явно — иначе разблокированный пир остался бы отрезан в libygg,
+        // где прикладной слой его уже не видит.
+        let now_blocked: Vec<PeerKey> =
+            tiers.iter().filter(|(_, t, _)| t.is_blocked()).map(|(k, _, _)| *k).collect();
+        drop(map);
+        for k in &now_blocked {
+            self.shared.node.block(k);
+        }
+        for k in was_blocked.iter().filter(|k| !now_blocked.contains(k)) {
+            self.shared.node.unblock(k);
+        }
     }
 
     /// Адрес Yggdrasil нашего узла.
@@ -725,6 +796,42 @@ impl Messenger {
     }
 }
 
+/// Учесть отброшенный пакет от источника: счётчик и оценка темпа за секундное
+/// окно. Карта ограничена по размеру и чистится от простоя — иначе Sybil-флуд
+/// с тысячи ключей растил бы её без предела.
+fn note_flood(shared: &Arc<Shared>, src: &PeerKey, now: Instant) {
+    let mut map = shared.flood.lock().unwrap();
+    let e = map.entry(*src).or_insert(FloodEntry {
+        dropped: 0,
+        window_start: now,
+        in_window: 0,
+        pps: 0.0,
+        last_seen: now,
+    });
+    e.dropped = e.dropped.saturating_add(1);
+    e.in_window = e.in_window.saturating_add(1);
+    e.last_seen = now;
+    let elapsed = now.saturating_duration_since(e.window_start);
+    if elapsed >= Duration::from_secs(1) {
+        e.pps = e.in_window as f64 / elapsed.as_secs_f64();
+        e.in_window = 0;
+        e.window_start = now;
+    }
+    if map.len() > FLOOD_CAP {
+        map.retain(|_, e| now.saturating_duration_since(e.last_seen) < FLOOD_IDLE);
+        while map.len() > FLOOD_CAP {
+            // Выбрасываем самый тихий источник: экран всё равно показывает верхних.
+            if let Some(quietest) =
+                map.iter().min_by(|a, b| a.1.pps.total_cmp(&b.1.pps)).map(|(k, _)| *k)
+            {
+                map.remove(&quietest);
+            } else {
+                break;
+            }
+        }
+    }
+}
+
 fn receive_loop(shared: Arc<Shared>) {
     let mut buf = vec![0u8; 65535];
     // M3: анти-replay для надёжного канала — отпечатки недавних датаграмм.
@@ -786,6 +893,7 @@ fn receive_loop(shared: Arc<Shared>) {
         };
         if !allowed {
             dropped = dropped.wrapping_add(1);
+            note_flood(&shared, &src, now);
             // Логируем редко, чтобы лог сам не стал амплификацией флуда.
             if dropped % 512 == 1 {
                 log::warn!(

@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	iwt "github.com/Arceliar/ironwood/types"
@@ -55,6 +56,35 @@ type node struct {
 	// При переполнении пакет молча дропается — видео запрашивает keyframe само.
 	videoCh chan writeReq
 	stopCh  chan struct{}
+
+	// Чёрный список источников: пакеты от этих ключей отбрасываются ЗДЕСЬ, не
+	// пересекая FFI. Приёмный бюджет в Rust режет их и так, но каждый пакет до
+	// него стоит копирования через границу и разбора заголовка — под флудом это
+	// заметно. Байты с провода это не убирает (см. threat-model N8), убирает
+	// только работу над ними.
+	blockedMu sync.RWMutex
+	blocked   map[[32]byte]struct{}
+	dropped   atomic.Uint64
+	// Буферы чтения: раньше на КАЖДУЮ входящую датаграмму выделялось 64 КБ, что
+	// под флудом превращалось в давление на GC на ровном месте.
+	readPool sync.Pool
+}
+
+// isBlocked — источник в чёрном списке? Дешёвая проверка под RLock; при пустом
+// списке (обычный случай) стоит одну атомарную операцию.
+func (n *node) isBlocked(key []byte) bool {
+	if len(key) != 32 {
+		return false
+	}
+	n.blockedMu.RLock()
+	defer n.blockedMu.RUnlock()
+	if len(n.blocked) == 0 {
+		return false
+	}
+	var k [32]byte
+	copy(k[:], key)
+	_, ok := n.blocked[k]
+	return ok
 }
 
 // isVideoMedia определяет, является ли пакет видео/скрин медиа по первым байтам:
@@ -147,6 +177,8 @@ func ygg_start(seedPtr *C.uint8_t, seedLen C.int) C.uint64_t {
 		reliableCh: make(chan writeReq, 128),
 		videoCh:    make(chan writeReq, 64),
 		stopCh:     make(chan struct{}),
+		blocked:    make(map[[32]byte]struct{}),
+		readPool:   sync.Pool{New: func() any { b := make([]byte, 65535); return &b }},
 	}
 	go writerLoop(n)
 	return C.uint64_t(register(n))
@@ -316,20 +348,76 @@ func ygg_write(h C.uint64_t, dstPub *C.uint8_t, data *C.uint8_t, dataLen C.int) 
 //export ygg_read
 // Блокирующе читает одну датаграмму в out (вместимость outCap). В srcPub (32
 // байта) пишет публичный ключ отправителя. Возвращает число байт или -1.
+//
+// Пакеты от заблокированных источников (ygg_block) отбрасываются здесь и НЕ
+// пересекают FFI: вызывающему они не видны, чтение продолжается со следующего.
 func ygg_read(h C.uint64_t, out *C.uint8_t, outCap C.int, srcPub *C.uint8_t) C.int {
 	n := get(h)
 	if n == nil {
 		return -1
 	}
-	buf := make([]byte, 65535)
-	r, from, err := n.core.ReadFrom(buf)
-	if err != nil {
+	bufp := n.readPool.Get().(*[]byte)
+	defer n.readPool.Put(bufp)
+	buf := *bufp
+	for {
+		r, from, err := n.core.ReadFrom(buf)
+		if err != nil {
+			return -1
+		}
+		a, ok := from.(iwt.Addr)
+		if ok && n.isBlocked([]byte(a)) {
+			n.dropped.Add(1)
+			continue // молча дальше: ни копирования через границу, ни разбора
+		}
+		if ok {
+			copyOut(unsafe.Pointer(srcPub), 32, []byte(a))
+		}
+		return copyOut(unsafe.Pointer(out), outCap, buf[:r])
+	}
+}
+
+//export ygg_block
+// Добавить публичный ключ в чёрный список: его пакеты будут отбрасываться до
+// пересечения FFI. Идемпотентно. Возвращает 0 при успехе, -1 если узла нет.
+func ygg_block(h C.uint64_t, keyPtr *C.uint8_t) C.int {
+	n := get(h)
+	if n == nil {
 		return -1
 	}
-	if a, ok := from.(iwt.Addr); ok {
-		copyOut(unsafe.Pointer(srcPub), 32, []byte(a))
+	key := C.GoBytes(unsafe.Pointer(keyPtr), 32)
+	var k [32]byte
+	copy(k[:], key)
+	n.blockedMu.Lock()
+	n.blocked[k] = struct{}{}
+	n.blockedMu.Unlock()
+	return 0
+}
+
+//export ygg_unblock
+// Убрать ключ из чёрного списка. Идемпотентно.
+func ygg_unblock(h C.uint64_t, keyPtr *C.uint8_t) C.int {
+	n := get(h)
+	if n == nil {
+		return -1
 	}
-	return copyOut(unsafe.Pointer(out), outCap, buf[:r])
+	key := C.GoBytes(unsafe.Pointer(keyPtr), 32)
+	var k [32]byte
+	copy(k[:], key)
+	n.blockedMu.Lock()
+	delete(n.blocked, k)
+	n.blockedMu.Unlock()
+	return 0
+}
+
+//export ygg_dropped
+// Сколько пакетов отброшено чёрным списком за время жизни узла (для диагностики
+// и экрана «вас флудят»). -1 если узла нет.
+func ygg_dropped(h C.uint64_t) C.int64_t {
+	n := get(h)
+	if n == nil {
+		return -1
+	}
+	return C.int64_t(n.dropped.Load())
 }
 
 //export ygg_stop

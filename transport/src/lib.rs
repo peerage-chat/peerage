@@ -30,6 +30,9 @@ mod ffi {
         pub fn ygg_add_peer(h: u64, uri: *const c_char) -> c_int;
         pub fn ygg_write(h: u64, dst_pub: *const u8, data: *const u8, data_len: c_int) -> c_int;
         pub fn ygg_read(h: u64, out: *mut u8, out_cap: c_int, src_pub: *mut u8) -> c_int;
+        pub fn ygg_block(h: u64, key: *const u8) -> c_int;
+        pub fn ygg_unblock(h: u64, key: *const u8) -> c_int;
+        pub fn ygg_dropped(h: u64) -> i64;
         pub fn ygg_stop(h: u64);
     }
 }
@@ -149,6 +152,32 @@ impl Node {
             return Err(YggError::OpFailed);
         }
         Ok(n as usize)
+    }
+
+    /// Отбрасывать пакеты от этого ключа **внутри libygg**, не поднимая их в Rust.
+    ///
+    /// Приёмный бюджет (`p2p_core::budget::Tier`) режет заблокированных и так, но
+    /// каждый пакет до него стоит копирования через FFI и разбора заголовка — под
+    /// флудом это заметная работа впустую. Байты с провода это НЕ убирает
+    /// (threat-model N8), убирает только их обработку. Идемпотентно.
+    pub fn block(&self, key: &[u8; 32]) {
+        unsafe { ffi::ygg_block(self.handle, key.as_ptr()) };
+    }
+
+    /// Снять блокировку источника. Идемпотентно.
+    pub fn unblock(&self, key: &[u8; 32]) {
+        unsafe { ffi::ygg_unblock(self.handle, key.as_ptr()) };
+    }
+
+    /// Сколько пакетов отброшено чёрным списком за время жизни узла (диагностика,
+    /// основа для экрана «вас флудят»).
+    pub fn dropped(&self) -> u64 {
+        let n = unsafe { ffi::ygg_dropped(self.handle) };
+        if n < 0 {
+            0
+        } else {
+            n as u64
+        }
     }
 
     /// Остановить узел Yggdrasil. После этого блокирующий [`read`](Self::read)
