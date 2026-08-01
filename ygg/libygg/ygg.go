@@ -204,7 +204,8 @@ func ygg_peer_count(h C.uint64_t) C.int {
 
 //export ygg_peers_json
 // JSON-массив активных пиров для UI/стата сети:
-// [{key, inbound, up, latency_ms, rx_rate, tx_rate, uptime_s}]. -1 если не влезло.
+// [{key, inbound, up, latency_ms, rx_rate, tx_rate, rx_bytes, tx_bytes, uptime_s}].
+// -1 если не влезло.
 func ygg_peers_json(h C.uint64_t, out *C.char, outCap C.int) C.int {
 	n := get(h)
 	if n == nil {
@@ -217,7 +218,11 @@ func ygg_peers_json(h C.uint64_t, out *C.char, outCap C.int) C.int {
 		LatencyMs float64 `json:"latency_ms"`
 		RxRate    uint64  `json:"rx_rate"`
 		TxRate    uint64  `json:"tx_rate"`
-		UptimeS   float64 `json:"uptime_s"`
+		// Накопительные счётчики: скорости сглажены и на границах измерения
+		// врут, а разница байт между двумя снимками — точная величина.
+		RxBytes uint64  `json:"rx_bytes"`
+		TxBytes uint64  `json:"tx_bytes"`
+		UptimeS float64 `json:"uptime_s"`
 	}
 	peers := n.core.GetPeers()
 	arr := make([]peerJSON, 0, len(peers))
@@ -229,6 +234,8 @@ func ygg_peers_json(h C.uint64_t, out *C.char, outCap C.int) C.int {
 			LatencyMs: float64(p.Latency.Microseconds()) / 1000.0,
 			RxRate:    p.RXRate,
 			TxRate:    p.TXRate,
+			RxBytes:   p.RXBytes,
+			TxBytes:   p.TXBytes,
 			UptimeS:   p.Uptime.Seconds(),
 		})
 	}

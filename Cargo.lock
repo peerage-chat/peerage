@@ -5246,6 +5246,7 @@ name = "p2p-ygg"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
