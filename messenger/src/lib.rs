@@ -1144,10 +1144,12 @@ fn receive_loop(shared: Arc<Shared>) {
                     shared.emit(Event::Ack { peer: peer_id, id });
                 }
             }
-            Payload::Ping => {
-                let _ = shared.send(&peer_id, &Payload::Pong);
+            Payload::Ping { .. } => {
+                // ADR-008: заявка о транзите (`transit`) в 1.0 не читается — её нечем
+                // проверить, а непроверенной заявке цена ноль.
+                let _ = shared.send(&peer_id, &Payload::Pong { transit: None });
             }
-            Payload::Pong => {}
+            Payload::Pong { .. } => {}
             Payload::RoomInvite { id, room_id, audio, video } => {
                 shared.emit(Event::RoomInvite { peer: peer_id, room_id, audio, video });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // гасим ретрай инвайта
@@ -1250,7 +1252,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
             shared.emit(Event::Presence { peer: key, online: false });
         }
         for key in to_ping {
-            let _ = shared.send(&key, &Payload::Ping);
+            let _ = shared.send(&key, &Payload::Ping { transit: None });
         }
 
         // Повтор недоставленных сообщений; отсев по TTL.

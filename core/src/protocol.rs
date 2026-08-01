@@ -18,6 +18,32 @@ use crate::identity::Identity;
 /// Версия формата конверта.
 pub const PROTOCOL_VERSION: u8 = 1;
 
+/// Заявка узла о выполненной транзитной работе — **зарезервировано под ADR-008,
+/// в 1.0 не выдаётся и не проверяется**.
+///
+/// Код открыт (GPL-3.0), поэтому любой может вырезать ретрансляцию, оставив флаг
+/// «я транзитный узел», и получать привилегии (приоритет очереди, длинный TTL) даром.
+/// Единственная защита, которую нельзя обойти правкой своего же кода, — квитанции:
+/// получатель подписывает своим ключом факт «пакет пришёл через узел A», и подделать
+/// эту подпись A не может, не выполнив работу.
+///
+/// **Почему здесь дайджест, а не сами квитанции.** Одна квитанция — подпись 64 Б плюс
+/// ключ; в hex-JSON это ~200 Б, то есть уже одна не влезает в бакет CONTROL 256 Б, а
+/// маячок присутствия обязан быть неотличим по размеру от ack (M5). Поэтому в маячке
+/// едет лишь обязательство: хэш пачки и её размер, — а сами квитанции запрашивает
+/// тот, кому есть смысл проверять. Это же ограничивает и объём вранья: заявленное
+/// число подтверждается только предъявленной пачкой.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransitClaim {
+    /// BLAKE3 пачки квитанций за период.
+    #[serde(with = "hex_bytes")]
+    pub digest: Vec<u8>,
+    /// Сколько квитанций в пачке (заявка; проверяется по предъявлению).
+    pub count: u32,
+    /// Номер расчётного периода — чтобы старую пачку нельзя было предъявить снова.
+    pub epoch: u32,
+}
+
 /// Внутреннее сообщение (шифруется целиком).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -59,9 +85,21 @@ pub enum Payload {
     /// Подтверждение доставки сообщения с данным id (✓✓ в ТЗ).
     Ack { id: u64 },
     /// Keep-alive / проверка присутствия.
-    Ping,
-    /// Ответ на ping.
-    Pong,
+    ///
+    /// `transit` — ЗАРЕЗЕРВИРОВАНО под proof-of-transit (ADR-008); в 1.0 всегда
+    /// `None` и ни на что не влияет. Поле заведено заранее, потому что позже его
+    /// уже некуда будет деть: маячок присутствия обязан оставаться в бакете
+    /// CONTROL 256 Б (M5), а отдельный пакет «я транзитный узел» был бы новым
+    /// различимым классом трафика.
+    Ping {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transit: Option<TransitClaim>,
+    },
+    /// Ответ на ping. `transit` — см. [`Payload::Ping`].
+    Pong {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transit: Option<TransitClaim>,
+    },
     /// Приглашение в голосовую комнату (DM-звонок). room_id = первые 16 байт
     /// SHA-256(min(keyA,keyB) ++ max(keyA,keyB)) — детерминирован для обеих сторон.
     /// `id` — надёжная доставка (retry-until-Ack): Ack шлётся при ДОСТАВКЕ (до ответа
@@ -384,8 +422,8 @@ mod tests {
         let b = Identity::generate();
         for p in [
             Payload::Hello,
-            Payload::Ping,
-            Payload::Pong,
+            Payload::Ping { transit: None },
+            Payload::Pong { transit: None },
             Payload::Ack { id: 7 },
             Payload::Text { id: 1, text: "hi".into() },
             Payload::Media {
@@ -480,13 +518,45 @@ mod tests {
             enc(&Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: true }),
             enc(&Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] }),
             enc(&Payload::Ack { id: 13 }),
-            enc(&Payload::Ping),
+            enc(&Payload::Ping { transit: None }),
             enc(&Payload::RoomPresence { gid: vec![9u8; 16], flags: 0b11 }),
         ];
         assert!(
             ctl.iter().all(|s| *s == ctl[0]),
             "звонок должен быть неотличим от ack/ping/присутствия, получено {ctl:?}"
         );
+    }
+
+    /// Зарезервированное поле proof-of-transit (ADR-008) обязано умещаться в тот же
+    /// бакет CONTROL. Смысл резервирования именно в этом: заполнив поле позже, мы не
+    /// имеем права сделать маячок присутствия отличимым по размеру от ack — иначе
+    /// наблюдатель начнёт видеть, кто в сети, а свойство M5 сломается задним числом.
+    #[test]
+    fn presence_with_transit_claim_stays_in_control_bucket() {
+        let a = Identity::generate();
+        let b = Identity::generate();
+        let enc = |p: &Payload| encode(&a, &b.public_key_bytes(), p, 0).unwrap().len();
+        let claim = TransitClaim { digest: vec![0xab; 32], count: u32::MAX, epoch: u32::MAX };
+        assert_eq!(
+            enc(&Payload::Ping { transit: Some(claim.clone()) }),
+            enc(&Payload::Ack { id: 1 }),
+            "маячок с квитанциями обязан остаться неотличим от ack по размеру"
+        );
+        assert_eq!(
+            enc(&Payload::Pong { transit: Some(claim) }),
+            enc(&Payload::Ack { id: 1 }),
+        );
+    }
+
+    /// Пустое поле не должно менять байты на проводе: 1.0 обязан слать ровно то же,
+    /// что слал до резервирования.
+    #[test]
+    fn empty_transit_field_is_absent_on_the_wire() {
+        let json = serde_json::to_string(&Payload::Ping { transit: None }).unwrap();
+        assert_eq!(json, r#"{"type":"ping"}"#);
+        // И обратно: пакет без поля читается (совместимость в обе стороны).
+        let p: Payload = serde_json::from_str(r#"{"type":"ping"}"#).unwrap();
+        assert_eq!(p, Payload::Ping { transit: None });
     }
 
     /// Последний (короткий) чанк блоба добивается до полного — иначе точный размер
@@ -518,7 +588,7 @@ mod tests {
     fn envelope_is_valid_json_with_expected_fields() {
         let alice = Identity::generate();
         let bob = Identity::generate();
-        let d = encode(&alice, &bob.public_key_bytes(), &Payload::Ping, 123).unwrap();
+        let d = encode(&alice, &bob.public_key_bytes(), &Payload::Ping { transit: None }, 123).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&d).unwrap();
         assert_eq!(v["v"], 1);
         assert_eq!(v["time"], 123);
