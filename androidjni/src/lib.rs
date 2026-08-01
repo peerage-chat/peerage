@@ -490,9 +490,25 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_addContact<'local>(
 ) -> jstring {
     jni_safe!(ret(&env, "error"), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "error") };
-        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "error") };
+        // Принимаем и голый hex личности, и расширенный код обмена с подписанной
+        // привязкой к адресу (ADR-007) — разбирает движок.
+        let code = jstr(&mut env, &key_hex);
         let name = jstr(&mut env, &name);
-        ret(&env, e.add_contact(&key, &name))
+        ret(&env, e.add_contact_code(&code, &name))
+    })
+}
+
+/// Строка для своего QR/«скопировать ключ»: личность, а после смены адреса — ещё и
+/// подписанная привязка к текущему адресу.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_myContactCode<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, ""), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
+        ret(&env, &e.my_contact_code())
     })
 }
 

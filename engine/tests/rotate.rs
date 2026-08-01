@@ -213,3 +213,106 @@ fn forged_rotation_from_another_identity_is_ignored() {
 
     b.shutdown();
 }
+
+/// Групповая переписка переживает смену адреса участником: MLS-ростер ведётся по
+/// личностям, а отправка резолвит адрес — значит после ротации сообщения группы
+/// продолжают доходить, ничего пересоздавать не надо.
+#[test]
+fn group_survives_member_rotation() {
+    let net = LoopbackNet::new();
+    let alice = id(70);
+    let bob_id = id(71);
+    let (a_key, b_key) = (alice.public_key_bytes(), bob_id.public_key_bytes());
+
+    let a = Engine::start_with_transport(tmpdir("a5"), alice.clone(), net.endpoint(a_key))
+        .unwrap()
+        .engine;
+    let b = Engine::start_with_transport(tmpdir("b5"), bob_id, net.endpoint(b_key)).unwrap().engine;
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Алиса");
+
+    // Общая группа: A создаёт, зовёт B, B принимает.
+    assert!(a.group_create("клуб"));
+    assert!(wait(15, || !a.group_list_json().trim_matches(['[', ']', ' ']).is_empty()));
+    let list: serde_json::Value = serde_json::from_str(&a.group_list_json()).unwrap();
+    let gid_hex = list.as_array().unwrap()[0]["gid"].as_str().unwrap().to_string();
+    let gid = hex::decode(&gid_hex).unwrap();
+    a.group_invite(gid.clone(), b_key);
+    assert!(wait(15, || b.group_invites_json().contains(&gid_hex)), "инвайт доехал");
+    b.accept_group_invite(gid.clone());
+    assert!(wait(15, || a.group_members_json(&gid).contains(&hex::encode(b_key))), "B в ростере");
+
+    // A меняет адрес и сообщает об этом B.
+    let net_for_factory = net.clone();
+    a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
+        let key = p2p_core::Identity::from_seed(seed).ok()?.public_key_bytes();
+        Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn p2p_messenger::Transport>)
+    }));
+    a.rotate_transport(vec![b_key], 0);
+    let tk1 = alice.transport_public(1);
+    assert!(
+        wait(20, || transport_of(&b, &a_key) == hex::encode(tk1)),
+        "B узнал новый адрес A",
+    );
+
+    // Групповые сообщения ходят в обе стороны — по новому адресу A.
+    b.group_send_text(gid.clone(), "все на месте?".into());
+    assert!(
+        wait(20, || a.group_history_json(&gid).contains("все на месте?")),
+        "групповое от B должно дойти на новый адрес A: {}",
+        a.group_history_json(&gid),
+    );
+    a.group_send_text(gid.clone(), "да, я тут".into());
+    assert!(
+        wait(20, || b.group_history_json(&gid).contains("да, я тут")),
+        "групповое от A с нового адреса должно дойти: {}",
+        b.group_history_json(&gid),
+    );
+
+    a.shutdown();
+    b.shutdown();
+}
+
+/// Код обмена (QR) после смены адреса несёт подписанную привязку: тот, кто добавит
+/// нас по нему, сразу знает верный адрес и достучится с первого сообщения.
+#[test]
+fn contact_code_carries_signed_address() {
+    let net = LoopbackNet::new();
+    let alice = id(72);
+    let carol_id = id(73);
+    let (a_key, c_key) = (alice.public_key_bytes(), carol_id.public_key_bytes());
+
+    let a = Engine::start_with_transport(tmpdir("a6"), alice.clone(), net.endpoint(a_key))
+        .unwrap()
+        .engine;
+    let c = Engine::start_with_transport(tmpdir("c6"), carol_id, net.endpoint(c_key)).unwrap().engine;
+
+    // До ротации код — это просто hex личности (старые сканеры продолжают работать).
+    assert_eq!(a.my_contact_code(), hex::encode(a_key));
+
+    let net_for_factory = net.clone();
+    a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
+        let key = p2p_core::Identity::from_seed(seed).ok()?.public_key_bytes();
+        Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn p2p_messenger::Transport>)
+    }));
+    a.rotate_transport(vec![], 0); // никого не оповещаем — знакомимся заново по коду
+    assert!(wait(20, || a.transport_epoch() == 1));
+
+    // Кэрол добавляет Алису по коду и сразу знает её текущий адрес.
+    let code = a.my_contact_code();
+    assert!(code.contains(':'), "после ротации код расширенный: {code}");
+    assert_eq!(c.add_contact_code(&code, "Алиса"), "added");
+    assert_eq!(transport_of(&c, &a_key), hex::encode(alice.transport_public(1)));
+
+    // Проверяем главное: сообщение доходит с первой попытки, без «а куда слать».
+    a.add_contact(&c_key, "Кэрол");
+    c.send_text(&a_key, "привет, это Кэрол");
+    assert!(
+        wait(20, || a.history_json(&c_key).contains("привет, это Кэрол")),
+        "по коду обмена должно достучаться: {}",
+        a.history_json(&c_key),
+    );
+
+    a.shutdown();
+    c.shutdown();
+}

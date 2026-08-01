@@ -1197,6 +1197,10 @@ class AppModel private constructor() {
         ops.execute { Native.downloadMedia(sessionPtr, peer, blobId) }
     }
 
+    /** Код для своего QR (ADR-007): личность + подписанный текущий адрес, если он
+     *  менялся. Читается с движка, а не собирается в UI: формат — контракт движка. */
+    fun myContactCode(): String = Native.myContactCode(sessionPtr)
+
     fun addContact(key: String, name: String) = ops.execute {
         val r = Native.addContact(sessionPtr, key, name)
         if (r == "added") refreshContactsNow()

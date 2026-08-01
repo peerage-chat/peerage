@@ -374,7 +374,10 @@ internal fun AddScreen(
 @Composable
 internal fun MeScreen(model: AppModel) {
     val me = model.me ?: return
-    val qr = remember(me.pubkey) { generateQrBitmap(me.pubkey) }
+    // В QR — код обмена, а не голый ключ: после смены адреса по одной лишь
+    // личности до нас не достучаться (ADR-007).
+    val code = remember(me.pubkey) { model.myContactCode() }
+    val qr = remember(code) { generateQrBitmap(code) }
     Column(
         Modifier.verticalScroll(rememberScrollState()).padding(ScreenPad).fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(FormGap),

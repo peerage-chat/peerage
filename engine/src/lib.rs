@@ -564,6 +564,52 @@ impl Engine {
 
     // — Контакты (TOFU) —
     /// Добавить контакт. Возвращает "added" | "known" | "error".
+    /// Строка обмена контактом (QR / «скопировать ключ»).
+    ///
+    /// Пока адрес не менялся — это просто hex личности, ровно как раньше: старые
+    /// коды и сканеры продолжают работать. После смены адреса к личности
+    /// добавляется ПОДПИСАННАЯ привязка к текущему адресу — иначе тот, кто добавит
+    /// нас по такому коду, будет слать на покинутый ключ и не достучится.
+    ///
+    /// Подпись здесь не формальность: код часто пересылают через третьи руки
+    /// (переписка, форум), и без неё посредник мог бы подменить адрес, оставив
+    /// личность.
+    pub fn my_contact_code(&self) -> String {
+        let epoch = self.transport_epoch();
+        if epoch == 0 {
+            return hex::encode(self.me_pub);
+        }
+        let tk = self.identity.transport_public(epoch);
+        let sig = self.identity.sign_transport_rotate(epoch, &tk);
+        format!("{}:{}:{}:{}", hex::encode(self.me_pub), epoch, hex::encode(tk), hex::encode(sig))
+    }
+
+    /// Добавить контакт по коду обмена: либо голый hex личности (как раньше), либо
+    /// расширенная форма `личность:эпоха:адрес:подпись`. Привязку к адресу
+    /// принимаем только с верной подписью — тем же путём, что и объявление о смене
+    /// адреса.
+    pub fn add_contact_code(&self, code: &str, name: &str) -> &'static str {
+        let parts: Vec<&str> = code.trim().split(':').collect();
+        let Some(ik) = parse_key(parts[0]) else { return "error" };
+        let outcome = self.add_contact(&ik, name);
+        if parts.len() == 4 {
+            let epoch = parts[1].parse::<u32>().unwrap_or(0);
+            let tk = parse_key(parts[2]);
+            let sig = hex::decode(parts[3]).ok().and_then(|s| <[u8; 64]>::try_from(s.as_slice()).ok());
+            if let (Some(tk), Some(sig)) = (tk, sig) {
+                let applied = self
+                    .contacts
+                    .lock_safe()
+                    .apply_transport_rotate(&ik, epoch, &tk, &sig)
+                    .unwrap_or(false);
+                if applied {
+                    self.refresh_transports();
+                }
+            }
+        }
+        outcome
+    }
+
     pub fn add_contact(&self, key: &[u8; 32], name: &str) -> &'static str {
         let name = if name.trim().is_empty() {
             format!("{}…", &hex::encode(key)[..8])

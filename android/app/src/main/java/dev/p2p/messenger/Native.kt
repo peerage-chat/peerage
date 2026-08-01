@@ -124,8 +124,13 @@ object Native {
     /** Есть ли блоб локально — без чтения байт (у крупного это гигабайт в память). */
     external fun blobExists(sessionPtr: Long, idHex: String): Boolean
 
-    /** Добавить контакт (TOFU). Возвращает "added" | "known" | "error". */
+    /** Добавить контакт по коду обмена: hex личности либо расширенная форма
+     *  `личность:эпоха:адрес:подпись` (ADR-007). Возвращает "added"|"known"|"error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
+
+    /** Свой код обмена для QR: hex личности, а после смены адреса — с подписанной
+     *  привязкой к текущему адресу (иначе по коду до нас не достучатся). */
+    external fun myContactCode(sessionPtr: Long): String
 
     /** Контакты как JSON-массив. */
     external fun listContacts(sessionPtr: Long): String
