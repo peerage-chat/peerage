@@ -35,6 +35,8 @@ fn main() {
     let mut send_media: Option<String> = None;
     let mut send_text: Option<String> = None;
     let mut create_group: Option<String> = None;
+    let mut group_text: Option<String> = None;
+    let mut group_retract_after: Option<u32> = None;
     let mut adds: Vec<String> = Vec::new();
     let mut rest = args.collect::<Vec<_>>().into_iter();
     while let Some(a) = rest.next() {
@@ -51,6 +53,12 @@ fn main() {
             "--send-text" => send_text = rest.next(),
             // Создать группу с этим именем и пригласить всех --add (тест инвайт-карточки).
             "--create-group" => create_group = rest.next(),
+            // Послать текст в группу, как только в ней появится второй участник.
+            "--group-text" => group_text = rest.next(),
+            // Через столько тиков (2 с) после отправки отозвать своё сообщение.
+            "--group-retract-after" => {
+                group_retract_after = rest.next().and_then(|v| v.parse().ok())
+            }
             other => eprintln!("неизвестный аргумент: {other}"),
         }
     }
@@ -123,6 +131,33 @@ fn main() {
         .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());
     let mut sent_media = false;
 
+    // Групповые действия (ADR-006): дождаться второго участника, послать текст,
+    // потом отозвать его. Печатаем историю группы каждый тик — по ней видно и
+    // входящий ответ (reply_to/reply_sender), и исчезновение отозванного.
+    // Первая группа из списка: свежесозданная или уже существующая с прошлого
+    // запуска (тогда --create-group не нужен — иначе плодились бы дубли).
+    // Список групп наполняет актор в своём потоке, поэтому сразу после старта он
+    // ещё пуст — ждём его появления, иначе групповые действия молча не сработают.
+    let gid_for_actions: Option<Vec<u8>> = {
+        let mut found = None;
+        for _ in 0..25 {
+            let v: serde_json::Value =
+                serde_json::from_str(&engine.group_list_json()).unwrap_or_default();
+            found = v
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|g| g["gid"].as_str())
+                .and_then(|h| hex::decode(h).ok());
+            if found.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        found
+    };
+    let mut group_sent_at: Option<u32> = None;
+    let mut group_retracted = false;
+
     // Крутимся: движок сам обрабатывает входящие (ProfileUpdate/блобы) на своём потоке.
     // Раз в 2с печатаем контакты — видно, подтянулся ли профиль второй стороны.
     let mut ticks = 0;
@@ -159,6 +194,40 @@ fn main() {
             println!("EVENT {ev}");
         }
         println!("CONTACTS {}", engine.contacts_json());
+
+        if let Some(gid) = &gid_for_actions {
+            let hist = engine.group_history_json(gid);
+            println!("GROUPHIST {hist}");
+            let members: serde_json::Value =
+                serde_json::from_str(&engine.group_members_json(gid)).unwrap_or_default();
+            let joined = members.as_array().map(|a| !a.is_empty()).unwrap_or(false);
+
+            // Текст шлём только когда собеседник УЖЕ в группе: иначе MLS-сообщение
+            // уходит в пустой ростер и проверять нечего.
+            if joined && group_sent_at.is_none() {
+                if let Some(t) = &group_text {
+                    engine.group_send_text(gid.clone(), t.clone());
+                    println!("GROUP_SENT {t}");
+                    group_sent_at = Some(ticks);
+                }
+            }
+            // Отзыв своего последнего сообщения — по номеру тика после отправки.
+            if let (Some(sent), Some(after)) = (group_sent_at, group_retract_after) {
+                if !group_retracted && ticks >= sent + after {
+                    let h: serde_json::Value =
+                        serde_json::from_str(&engine.group_history_json(gid)).unwrap_or_default();
+                    let mine_id = h
+                        .as_array()
+                        .and_then(|a| a.iter().rev().find(|m| m["mine"] == true))
+                        .and_then(|m| m["id"].as_u64());
+                    if let Some(id) = mine_id {
+                        engine.group_retract(gid.clone(), vec![id]);
+                        println!("GROUP_RETRACTED {id}");
+                        group_retracted = true;
+                    }
+                }
+            }
+        }
         let _ = std::io::stdout().flush();
     }
 }
