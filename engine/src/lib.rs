@@ -305,11 +305,28 @@ impl Engine {
     // — Сообщения 1:1 —
     /// Отправить текст. Возвращает id (≥0) или None при ошибке.
     pub fn send_text(&self, key: &[u8; 32], text: &str) -> Option<i64> {
-        match self.messenger.send_text(key, text) {
+        self.send_text_reply(key, text, 0, false)
+    }
+
+    /// Отправить текст ответом на сообщение `reply_to` (`reply_mine` — чьё оно у НАС).
+    /// `reply_to = 0` — обычное сообщение.
+    pub fn send_text_reply(
+        &self,
+        key: &[u8; 32],
+        text: &str,
+        reply_to: u64,
+        reply_mine: bool,
+    ) -> Option<i64> {
+        match self.messenger.send_text_reply(key, text, reply_to, reply_mine) {
             Ok(id) => {
                 let t = now();
                 let _ = self.messages.lock_safe().append(key, StoredMessage {
                     id, text: text.to_string(), mine: true, time: t, status: "sent".into(),
+                    reply_to, reply_mine,
+                    // kind заполняем ЯВНО: пустая строка — не «текст», а «неизвестно»,
+                    // и UI рисовал такое сообщение дважды (как содержимое и как
+                    // подпись к вложению).
+                    kind: "text".into(),
                     ..Default::default()
                 });
                 // M3: в офлайн-очередь — если не дойдёт, дошлём при онлайне/рестарте.
@@ -320,6 +337,36 @@ impl Engine {
             }
             Err(_) => None,
         }
+    }
+
+    /// Удалить сообщения ТОЛЬКО У СЕБЯ. `refs` — пары `(id, mine)`; ключ истории —
+    /// именно пара, потому что id посеян временем отправителя и у обеих сторон свой.
+    /// Возвращает, сколько строк удалено.
+    pub fn delete_messages(&self, key: &[u8; 32], refs: &[(u64, bool)]) -> usize {
+        self.messages.lock_safe().delete_many(key, refs).unwrap_or(0)
+    }
+
+    /// Отозвать СВОИ сообщения у собеседника («удалить у всех»): просьба уходит
+    /// надёжно (доедет и после офлайна), локально сообщения удаляются сразу.
+    ///
+    /// Возвращает число отозванных. Чужие сообщения молча пропускаются: отзывать
+    /// чужое нельзя — это не «удалить», а «переписать чужую историю».
+    pub fn retract_messages(&self, key: &[u8; 32], ids: &[u64]) -> usize {
+        let mut sent = 0;
+        for id in ids {
+            if self.messenger.send_retract(key, *id).is_ok() {
+                sent += 1;
+            }
+        }
+        // Из своей очереди тоже убираем: иначе ретрай досылал бы уже отозванное.
+        let ob = self.outbox.lock_safe();
+        for id in ids {
+            ob.on_ack(key, *id);
+        }
+        drop(ob);
+        let refs: Vec<(u64, bool)> = ids.iter().map(|id| (*id, true)).collect();
+        self.delete_messages(key, &refs);
+        sent
     }
 
     /// Тип медиа-сообщения по MIME (M2): картинка → превью, аудио → голосовое-плеер,
@@ -1414,6 +1461,7 @@ impl Engine {
                 mine: true,
                 time: t,
                 status: String::new(),
+                kind: "text".into(),
                 ..Default::default()
             })
             .ok()?;
@@ -1992,7 +2040,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 engine.announce_rotation_to(&peer);
             }
         }
-        Event::Text { peer, id, text } => {
+        Event::Text { peer, id, text, reply_to, reply_mine } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
@@ -2007,6 +2055,8 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 let t = now();
                 let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
                     id, text: text.clone(), mine: false, time: t, status: String::new(),
+                    reply_to, reply_mine,
+                    kind: "text".into(),
                     ..Default::default()
                 });
                 push_event(engine, dto::UiEvent::Text {
@@ -2014,7 +2064,16 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     id,
                     text,
                     time: t,
+                    reply_to,
+                    reply_mine,
                 });
+            }
+        }
+        Event::Retract { peer, target } => {
+            // Удаляем ЕГО сообщение (mine=false): отозвать наше собственное он не может.
+            let n = engine.messages.lock_safe().delete_many(&peer, &[(target, false)]).unwrap_or(0);
+            if n > 0 {
+                push_event(engine, dto::UiEvent::Retracted { peer: hex::encode(peer), id: target });
             }
         }
         Event::Media { peer, id, hash, mime, name, size, duration_ms, width, height, caption, thumb } => {

@@ -128,6 +128,15 @@ object Native {
      *  `личность:эпоха:адрес:подпись` (ADR-007). Возвращает "added"|"known"|"error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
 
+    /** Текст ответом на сообщение (`replyTo` = 0 — обычное). Возвращает id или -1. */
+    external fun sendTextReply(sessionPtr: Long, keyHex: String, text: String, replyTo: Long, replyMine: Boolean): Long
+
+    /** Удалить сообщения у себя. `refsJson` = `[{"id":…,"mine":…}]`. */
+    external fun deleteMessages(sessionPtr: Long, keyHex: String, refsJson: String): Int
+
+    /** Отозвать свои сообщения у собеседника. `idsJson` = `[…]`. */
+    external fun retractMessages(sessionPtr: Long, keyHex: String, idsJson: String): Int
+
     /** Что и сколько войдёт в резервную копию данных (JSON BackupStatsDto). */
     external fun backupEstimate(sessionPtr: Long): String
 

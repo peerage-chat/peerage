@@ -615,4 +615,17 @@
     <string name="storage_backup_done_hint">The file is in your hands — keep it away from the phone. The fresher the backup, the less you lose.</string>
 
     <string name="backup_verify_again">Contact verification is not restored: a file can be handed to you, and «verified» means the fingerprint was checked in person. Verify again after restoring.</string>
+
+    <string name="chat_copy">Copy</string>
+    <string name="chat_copied">Copied</string>
+    <string name="chat_reply">Reply</string>
+    <string name="chat_delete">Delete</string>
+    <string name="chat_delete_title">Delete messages: %1$d</string>
+    <string name="chat_delete_note_all">«For everyone» is a request, not a guarantee: the other side may have read or saved the message earlier.</string>
+    <string name="chat_delete_note_foreign">Messages from others can only be removed on your side — rewriting someone else\'s history is not possible.</string>
+    <string name="chat_delete_for_me">Delete for me</string>
+    <string name="chat_delete_for_all">Delete for everyone</string>
+    <string name="chat_reply_you">You</string>
+    <string name="chat_reply_to_them">Replying to</string>
+    <string name="chat_reply_gone">message deleted</string>
 </resources>

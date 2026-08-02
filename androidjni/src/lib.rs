@@ -249,6 +249,73 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendText<'local>(
     })
 }
 
+/// Отправить текст ОТВЕТОМ на сообщение `replyTo` (`replyMine` — чьё оно у нас).
+/// `replyTo = 0` — обычное сообщение. Возвращает id (≥0) либо -1.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_sendTextReply<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+    text: JString<'local>,
+    reply_to: jlong,
+    reply_mine: jboolean,
+) -> jlong {
+    jni_safe!(-1, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return -1 };
+        let text = jstr(&mut env, &text);
+        e.send_text_reply(&key, &text, reply_to.max(0) as u64, reply_mine != 0).unwrap_or(-1)
+    })
+}
+
+/// Удалить сообщения ТОЛЬКО У СЕБЯ. `refsJson` — `[{"id":123,"mine":true}, …]`.
+/// Возвращает число удалённых.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_deleteMessages<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+    refs_json: JString<'local>,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return 0 };
+        // Разбираем через Value, а не derive: serde как прямая зависимость этому
+        // крейту-маршалингу не нужна, а форма тут ровно одна.
+        let raw: serde_json::Value =
+            serde_json::from_str(&jstr(&mut env, &refs_json)).unwrap_or(serde_json::Value::Null);
+        let refs: Vec<(u64, bool)> = raw
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| Some((v["id"].as_u64()?, v["mine"].as_bool().unwrap_or(false))))
+                    .collect()
+            })
+            .unwrap_or_default();
+        e.delete_messages(&key, &refs) as jint
+    })
+}
+
+/// Отозвать СВОИ сообщения у собеседника («удалить у всех»). `idsJson` — `[123, …]`.
+/// Возвращает число отправленных просьб.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_retractMessages<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+    ids_json: JString<'local>,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return 0 };
+        let ids: Vec<u64> = serde_json::from_str(&jstr(&mut env, &ids_json)).unwrap_or_default();
+        e.retract_messages(&key, &ids) as jint
+    })
+}
+
 /// Отправить медиа-вложение (M2): scrub картинок + блоб + медиа-сообщение.
 /// Возвращает id (≥0) либо -1 при ошибке.
 #[no_mangle]

@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+)
 
 package dev.p2p.messenger.ui
 
@@ -15,7 +18,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,10 +30,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
@@ -71,6 +80,12 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit) {
+    // Выделение забирает верхнюю панель целиком: пока что-то выбрано, «назад» и
+    // профиль не нужны, а нужен выход из режима и действия над выбранным.
+    if (model.selection.isNotEmpty()) {
+        SelectionTopBar(model)
+        return
+    }
     val key = model.currentChat
     val c = key?.let { k -> model.contacts.firstOrNull { it.key == k } }
     val name = c?.displayName ?: stringResource(R.string.chat_default_title)
@@ -287,6 +302,83 @@ internal fun displayName(ctx: android.content.Context, uri: android.net.Uri): St
         }
     }.getOrNull()
 
+/**
+ * Цитата в пузыре. `src == null` — оригинал уже удалён (у себя или отозван): пишем
+ * это прямо, а не рисуем пустую полоску, иначе ответ выглядит сломанным.
+ */
+@Composable
+private fun QuoteBlock(model: AppModel, src: Message?, quotedMine: Boolean) {
+    val who = if (quotedMine) {
+        stringResource(R.string.chat_reply_you)
+    } else {
+        val k = model.currentChat
+        model.contacts.firstOrNull { it.key == k }?.displayName
+            ?: stringResource(R.string.chat_default_title)
+    }
+    Row(
+        Modifier.padding(bottom = 4.dp).heightIn(min = 28.dp)
+            .clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.06f)),
+    ) {
+        Box(Modifier.width(2.dp).heightIn(min = 28.dp).background(HoloAccent))
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp)) {
+            Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Text(
+                src?.let { if (it.text.isNotEmpty()) it.text else it.name.ifEmpty { quoteKind(it.kind) } }
+                    ?: stringResource(R.string.chat_reply_gone),
+                color = HoloSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Как назвать вложение без имени в цитате. */
+@Composable
+private fun quoteKind(kind: String): String = stringResource(
+    when (kind) {
+        "image" -> R.string.storage_kind_image
+        "voice" -> R.string.storage_kind_voice
+        else -> R.string.storage_kind_file
+    },
+)
+
+/** Полоска «отвечаем на …» над полем ввода. */
+@Composable
+private fun ReplyStrip(model: AppModel, m: Message) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(8.dp)).background(HoloSurface).padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(2.dp).height(30.dp).background(HoloAccent))
+        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+            Text(
+                stringResource(
+                    if (m.mine) R.string.chat_reply_you else R.string.chat_reply_to_them,
+                ),
+                color = HoloAccent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                if (m.text.isNotEmpty()) m.text else m.name.ifEmpty { quoteKind(m.kind) },
+                color = HoloSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            Icons.Filled.Close,
+            stringResource(R.string.common_cancel),
+            tint = HoloSecondary,
+            modifier = Modifier.size(20.dp).clickable { model.cancelReply() },
+        )
+    }
+}
+
 /** Системная строка «E2E» в начале переписки. */
 @Composable
 internal fun E2EBanner() {
@@ -300,6 +392,89 @@ internal fun E2EBanner() {
             Spacer(Modifier.width(5.dp))
             Text(stringResource(R.string.chat_e2e_banner), color = HoloSecondary, fontSize = 11.sp)
         }
+    }
+}
+
+/**
+ * Панель действий над выделенными сообщениями.
+ *
+ * Ответ доступен только когда выбрано ОДНО: ответ на пять сообщений сразу — не
+ * действие, а вопрос «на какое из них», и отвечать за пользователя тут нельзя.
+ */
+@Composable
+private fun SelectionTopBar(model: AppModel) {
+    val key = model.currentChat ?: return
+    val ctx = LocalContext.current
+    val sel = model.selection
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    Row(
+        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel)) { model.clearSelection() }
+        Text(
+            sel.size.toString(),
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        if (sel.size == 1) {
+            BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
+                val ref = sel.first()
+                model.messages[key]?.firstOrNull { it.id == ref.id && it.mine == ref.mine }
+                    ?.let { model.startReply(it) }
+            }
+        }
+        BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
+            val text = model.selectedText(key)
+            if (text.isNotEmpty()) {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("p2p", text))
+                android.widget.Toast
+                    .makeText(ctx, R.string.chat_copied, android.widget.Toast.LENGTH_SHORT).show()
+            }
+            model.clearSelection()
+        }
+        BarIcon(Icons.Filled.Delete, stringResource(R.string.chat_delete)) { confirmDelete = true }
+    }
+
+    if (confirmDelete) {
+        val allMine = sel.all { it.mine }
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(stringResource(R.string.chat_delete_title, sel.size)) },
+            // Честно про границу: отзыв — просьба, а не гарантия. Обещать «удалено у
+            // всех» нельзя: собеседник мог прочитать сообщение или снять экран раньше.
+            text = {
+                Text(
+                    stringResource(
+                        if (allMine) R.string.chat_delete_note_all else R.string.chat_delete_note_foreign,
+                    ),
+                )
+            },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    if (allMine) {
+                        TextButton(onClick = {
+                            model.retractSelected(key)
+                            confirmDelete = false
+                        }) { Text(stringResource(R.string.chat_delete_for_all), color = HoloError) }
+                    }
+                    TextButton(onClick = {
+                        model.deleteSelected(key)
+                        confirmDelete = false
+                    }) { Text(stringResource(R.string.chat_delete_for_me), color = HoloError) }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
+                }
+            },
+        )
     }
 }
 
@@ -344,6 +519,9 @@ internal fun MessageInput(
     var picked by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
 
     Column(Modifier.fillMaxWidth().background(HoloBg)) {
+        // Цитата видна ровно там, где человек печатает ответ: иначе легко забыть,
+        // что сообщение уйдёт ответом, и получить «ответ» не на то.
+        model?.replyTarget?.let { ReplyStrip(model, it) }
         // Панель ВЫЕЗЖАЕТ из строки ввода: движение объясняет, откуда она взялась.
         // Появление «из ниоткуда» читается как подмена экрана.
         AnimatedVisibility(
@@ -538,17 +716,35 @@ internal fun MessageBubble(
         animationSpec = tween(Tokens.Anim.normal),
         label = "bubble",
     )
+    val selecting = model.selection.isNotEmpty()
+    val selected = MsgRef(m.id, m.mine) in model.selection
     Row(
         Modifier.fillMaxWidth().padding(bottom = blockGap(pos))
             .graphicsLayer {
                 alpha = appear
                 translationY = (1f - appear) * 24f
-            },
+            }
+            // Подсветка на ВСЮ строку, а не на пузырь: так видно, что выбрано
+            // сообщение целиком, включая вложение и подпись.
+            .background(if (selected) HoloAccent.copy(alpha = 0.16f) else Color.Transparent),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
         Box(
             Modifier.widthIn(max = 290.dp).clip(bubbleShape(m.mine, pos))
                 .background(if (m.mine) BubbleOut else BubbleIn)
+                .then(
+                    if (selected) {
+                        Modifier.border(1.dp, HoloAccent, bubbleShape(m.mine, pos))
+                    } else {
+                        Modifier
+                    },
+                )
+                // Длинный тап — вход в режим выделения; в режиме короткий тап
+                // переключает, а не открывает вложение (иначе выбор был бы ловушкой).
+                .combinedClickable(
+                    onLongClick = { model.toggleSelect(m) },
+                    onClick = { if (selecting) model.toggleSelect(m) },
+                )
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
             // Карточка «скачать» превращается в готовое вложение — это подмена
@@ -556,6 +752,14 @@ internal fun MessageBubble(
             val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
             Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
                 Column {
+                    // Ответ рисуется ССЫЛКОЙ в локальную историю (ADR-006): текст цитаты
+                    // не копируется в сообщение, поэтому удаление оригинала не оставляет
+                    // расходящегося дубля.
+                    if (m.replyTo != 0L) {
+                        val src = model.messages[model.currentChat]
+                            ?.firstOrNull { it.id == m.replyTo && it.mine == m.replyMine }
+                        QuoteBlock(model, src, m.replyMine)
+                    }
                     when {
                         isPending -> PendingAttachmentCard(
                             model,

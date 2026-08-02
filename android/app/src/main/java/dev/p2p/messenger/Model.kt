@@ -92,7 +92,20 @@ data class Message(
     val thumbId: String = "",
     /** Скачано ли содержимое. Крупное не тянется само — сначала карточка. */
     val downloaded: Boolean = false,
+    /** id сообщения, на которое это ответ (0 — обычное). Цитата рисуется из истории
+     *  по ссылке (ADR-006), а не хранится копией текста. */
+    val replyTo: Long = 0,
+    /** Чьё цитируемое сообщение — вместе с [replyTo] даёт ключ строки истории. */
+    val replyMine: Boolean = false,
 )
+
+/**
+ * Ссылка на строку истории: id сообщения + чьё оно. Пара, а не один id: id посеян
+ * временем ОТПРАВИТЕЛЯ, поэтому у моего и чужого сообщения он может совпасть.
+ * Тот же формат читает движок (`deleteMessages`).
+ */
+@kotlinx.serialization.Serializable
+data class MsgRef(val id: Long, val mine: Boolean)
 
 /** Идентичность пользователя (своя «визитка»). */
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
@@ -1247,8 +1260,14 @@ class AppModel private constructor() {
         val list = decodeList<MessageDto>(Native.history(sessionPtr, key))
             .map { it.toModel() }
             .toMutableList()
-        // Queued messages (отрицательные localId) не сохраняются в БД — добавляем их обратно.
+        // Ждущее досылки, которого НЕТ в базе, — добавляем обратно в ленту.
+        //
+        // Проверка «нет в базе» обязательна: при `Undelivered` сообщение остаётся в
+        // истории движка И попадает в эту очередь, поэтому без фильтра каждое
+        // недоставленное рисовалось дважды после перезахода в чат. Сверяем по тексту
+        // и секунде отправки — id у очереди своего нет.
         synchronized(queueLock) { offlineQueueMap[key]?.toList() ?: emptyList() }
+            .filterNot { (text, ts) -> list.any { it.mine && it.text == text && it.time == ts } }
             .forEach { (text, ts) -> list.add(Message(--localMsgId, text, mine = true, time = ts, status = "queued")) }
         messages[key] = list.toMutableStateList()
         // M2: подтянуть байты вложений, которые уже докачаны (иначе — появятся по blob_received).
@@ -1260,20 +1279,120 @@ class AppModel private constructor() {
 
     fun send(key: String, text: String) {
         if (text.isBlank()) return
+        // Цель ответа снимаем СРАЗУ: пользователь уже нажал «отправить», и оставленная
+        // цитата в поле ввода означала бы, что следующее сообщение тоже уйдёт ответом.
+        val reply = replyTarget
+        replyTarget = null
         ops.execute {
             val now = System.currentTimeMillis() / 1000
-            val id = Native.sendText(sessionPtr, key, text)
+            val id = Native.sendTextReply(
+                sessionPtr,
+                key,
+                text,
+                reply?.id ?: 0,
+                reply?.mine ?: false,
+            )
             if (id >= 0) {
                 // "pending" — Rust подтверждение ещё не пришло; сменится на "delivered" по ACK.
-                log(key).add(Message(id, text, mine = true, time = now, status = "pending"))
+                log(key).add(
+                    Message(
+                        id,
+                        text,
+                        mine = true,
+                        time = now,
+                        status = "pending",
+                        replyTo = reply?.id ?: 0,
+                        replyMine = reply?.mine ?: false,
+                    ),
+                )
             } else {
                 // Пир недостижим — кладём в очередь, доставим при появлении онлайн.
                 val localId = --localMsgId
-                log(key).add(Message(localId, text, mine = true, time = now, status = "queued"))
+                log(key).add(
+                    Message(
+                        localId,
+                        text,
+                        mine = true,
+                        time = now,
+                        status = "queued",
+                        replyTo = reply?.id ?: 0,
+                        replyMine = reply?.mine ?: false,
+                    ),
+                )
                 enqueueOffline(key, text, now)
             }
         }
     }
+
+    // ── Действия с сообщением (ADR-006) ───────────────────────────────────────
+
+    /**
+     * Что выделено в открытом чате. Ключ строки истории — ПАРА (id, mine): id посеян
+     * временем отправителя, поэтому у моего и чужого сообщения он может совпасть.
+     */
+    var selection by mutableStateOf<Set<MsgRef>>(emptySet())
+        private set
+
+    /** На какое сообщение отвечаем (null — обычная отправка). */
+    var replyTarget by mutableStateOf<Message?>(null)
+        private set
+
+    fun toggleSelect(m: Message) {
+        val ref = MsgRef(m.id, m.mine)
+        selection = if (ref in selection) selection - ref else selection + ref
+    }
+
+    fun clearSelection() {
+        selection = emptySet()
+    }
+
+    fun startReply(m: Message) {
+        replyTarget = m
+        selection = emptySet()
+    }
+
+    fun cancelReply() {
+        replyTarget = null
+    }
+
+    /** Текст выделенного для буфера обмена: несколько сообщений — с новой строки. */
+    fun selectedText(key: String): String {
+        val sel = selection
+        return (messages[key] ?: emptyList<Message>())
+            .filter { MsgRef(it.id, it.mine) in sel }
+            .joinToString("\n") { if (it.text.isNotEmpty()) it.text else it.name }
+    }
+
+    /** Удалить выделенное только у себя. */
+    fun deleteSelected(key: String) {
+        val refs = selection.toList()
+        if (refs.isEmpty()) return
+        selection = emptySet()
+        val json = WireJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(MsgRef.serializer()), refs)
+        ops.execute {
+            Native.deleteMessages(sessionPtr, key, json)
+            reloadHistory(key)
+        }
+    }
+
+    /** Отозвать выделенные СВОИ сообщения у собеседника. Чужие не трогаем. */
+    fun retractSelected(key: String) {
+        val ids = selection.filter { it.mine }.map { it.id }
+        if (ids.isEmpty()) return
+        selection = emptySet()
+        val json = ids.joinToString(prefix = "[", postfix = "]")
+        ops.execute {
+            Native.retractMessages(sessionPtr, key, json)
+            reloadHistory(key)
+        }
+    }
+
+    /** Перечитать историю чата после удаления/отзыва.
+     *
+     *  Именно [loadHistory], а не «очистить и долить»: он ЗАМЕНЯЕТ список целиком и
+     *  возвращает в ленту неотправленное из офлайн-очереди (его в БД нет). Ручная
+     *  чистка на месте оставляла в ленте старые копии — сообщения задваивались. */
+    private fun reloadHistory(key: String) = loadHistory(key)
 
     /** Отправить вложение (M2): движок чистит картинку (scrub), шлёт блоб + медиа-
      *  сообщение. Хэш блоба считается от ОЧИЩЕННЫХ байт в движке, поэтому своё
@@ -1468,8 +1587,23 @@ class AppModel private constructor() {
             }
             is EngineEvent.Text -> {
                 if (contacts.none { it.key == ev.peer }) refreshContactsNow()
-                log(ev.peer).add(Message(ev.id, ev.text, mine = false, time = ev.time, status = ""))
+                log(ev.peer).add(
+                    Message(
+                        ev.id,
+                        ev.text,
+                        mine = false,
+                        time = ev.time,
+                        status = "",
+                        replyTo = ev.replyTo,
+                        replyMine = ev.replyMine,
+                    ),
+                )
                 if (currentChat != ev.peer) unread[ev.peer] = (unread[ev.peer] ?: 0) + 1
+            }
+            // Собеседник отозвал своё сообщение: движок уже удалил его из истории,
+            // здесь убираем из открытой ленты, чтобы не ждать перезахода в чат.
+            is EngineEvent.Retracted -> {
+                messages[ev.peer]?.removeAll { it.id == ev.id && !it.mine }
             }
             // M2: входящее медиа (ссылка на блоб; байты подтянутся блоб-каналом).
             is EngineEvent.Media -> {

@@ -141,6 +141,11 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     ")?;
     // Миграция для установок с outbox без msg_id (идемпотентно: дубль-колонка → игнор).
     let _ = conn.execute("ALTER TABLE outbox ADD COLUMN msg_id INTEGER NOT NULL DEFAULT 0", []);
+    // Ответ на сообщение (ADR-006, «фича-по-ссылке»): ссылка = (автор, id). Здесь
+    // автор кодируется флагом reply_mine, потому что в DM собеседник всего один.
+    // Идемпотентно: повторный ALTER на существующей колонке игнорируется.
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN reply_to INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE messages ADD COLUMN reply_mine INTEGER NOT NULL DEFAULT 0", []);
     // Репутация (M3): счётчик «полезных дел» пира — отданных нам блобов. Влияет на
     // бюджет ресурсов (см. p2p_core::budget). Идемпотентно.
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN helpful INTEGER NOT NULL DEFAULT 0", []);

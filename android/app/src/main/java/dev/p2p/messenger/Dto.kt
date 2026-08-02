@@ -63,6 +63,8 @@ internal data class MessageDto(
     val name: String = "",
     val size: Long = 0,
     @SerialName("duration_ms") val durationMs: Int = 0,
+    @SerialName("reply_to") val replyTo: Long = 0,
+    @SerialName("reply_mine") val replyMine: Boolean = false,
     val width: Int = 0,
     val height: Int = 0,
     @SerialName("thumb_id") val thumbId: String = "",
@@ -286,12 +288,16 @@ internal fun MessageDto.toModel() = Message(
     mine = mine,
     time = time,
     status = status,
-    kind = kind,
+    // Пустой kind — «неизвестно», а не «вложение»: старые записи с пустым полем
+    // рисовались дважды (как текст и как подпись к вложению).
+    kind = kind.ifEmpty { "text" },
     blobId = blobId,
     mime = mime,
     name = name,
     size = size,
     durationMs = durationMs,
+    replyTo = replyTo,
+    replyMine = replyMine,
     width = width,
     height = height,
     thumbId = thumbId,
@@ -334,7 +340,19 @@ internal sealed interface EngineEvent {
 
     @Serializable
     @SerialName("text")
-    data class Text(val peer: String, val id: Long, val text: String, val time: Long) : EngineEvent
+    data class Text(
+        val peer: String,
+        val id: Long,
+        val text: String,
+        val time: Long,
+        @SerialName("reply_to") val replyTo: Long = 0,
+        @SerialName("reply_mine") val replyMine: Boolean = false,
+    ) : EngineEvent
+
+    /** Собеседник отозвал своё сообщение — строку надо убрать из ленты. */
+    @Serializable
+    @SerialName("retracted")
+    data class Retracted(val peer: String, val id: Long) : EngineEvent
 
     @Serializable
     @SerialName("media")

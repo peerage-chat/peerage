@@ -51,7 +51,27 @@ pub enum Payload {
     /// Рукопожатие при установлении сессии (нужно двунаправленно — см. README).
     Hello,
     /// Текстовое сообщение чата.
-    Text { id: u64, text: String },
+    ///
+    /// `reply_to` — id сообщения, на которое отвечают (0 = обычное сообщение), а
+    /// `reply_mine` — чьё оно **с точки зрения отправителя** (см. ADR-006: ссылка на
+    /// сообщение — пара «автор + id»). Получатель переворачивает флаг: то, что для
+    /// отправителя «моё», для него — «его». Без этого флага ответ на своё и ответ на
+    /// чужое сообщение с одинаковым id были бы неразличимы.
+    Text {
+        id: u64,
+        text: String,
+        #[serde(default)]
+        reply_to: u64,
+        #[serde(default)]
+        reply_mine: bool,
+    },
+    /// Отзыв СВОЕГО ранее отправленного сообщения («удалить у всех»).
+    ///
+    /// `id` — для надёжной доставки (retry-until-Ack), `target` — id отзываемого
+    /// сообщения. Честная граница: это просьба удалить, а не гарантия — получатель
+    /// мог прочитать сообщение раньше, сделать снимок экрана или иметь патченый
+    /// клиент. UI обязан говорить это прямо, а не обещать «удалено у всех».
+    Retract { id: u64, target: u64 },
     /// Медиа-сообщение чата (M2): ссылка на блоб по контент-хэшу. Байты идут отдельно
     /// блоб-каналом (push при отправке + pull-по-хэшу при промахе), сообщение несёт лишь
     /// ссылку → тот же надёжный путь, что и `Text` (id + `Ack`, ретраи, офлайн-очередь,
@@ -362,6 +382,8 @@ mod tests {
         let payload = Payload::Text {
             id: 42,
             text: "привет, как дела?".to_string(),
+            reply_to: 0,
+            reply_mine: false,
         };
 
         let datagram = encode(&alice, &bob.public_key_bytes(), &payload, 1_700_000_000).unwrap();
@@ -425,7 +447,7 @@ mod tests {
             Payload::Ping { transit: None },
             Payload::Pong { transit: None },
             Payload::Ack { id: 7 },
-            Payload::Text { id: 1, text: "hi".into() },
+            Payload::Text { id: 1, text: "hi".into(), reply_to: 0, reply_mine: false },
             Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "p.jpg".into(),
                 size: 1234, duration_ms: 0, width: 800, height: 600, caption: String::new(), thumb: vec![9u8; 32],
@@ -464,8 +486,8 @@ mod tests {
     fn padding_hides_text_length() {
         let a = Identity::generate();
         let b = Identity::generate();
-        let short = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "да".into() }, 0).unwrap();
-        let long = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "a".repeat(500) }, 0).unwrap();
+        let short = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false }, 0).unwrap();
+        let long = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "a".repeat(500), reply_to: 0, reply_mine: false }, 0).unwrap();
         // M5: разные по длине тексты → одинаковый размер датаграммы (бакет скрыл длину).
         assert_eq!(short.len(), long.len(), "паддинг должен скрыть длину текста");
         // Расшифровка по-прежнему работает.
@@ -482,8 +504,8 @@ mod tests {
 
         // Прикладной класс: текст (короткий/длинный), картинка, голосовое, файл, группа.
         let sizes = [
-            enc(&Payload::Text { id: 1, text: "да".into() }),
-            enc(&Payload::Text { id: 1, text: "a".repeat(900) }),
+            enc(&Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false }),
+            enc(&Payload::Text { id: 1, text: "a".repeat(900), reply_to: 0, reply_mine: false }),
             enc(&Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(),
                 name: "secret-photo.jpg".into(), size: 2_400_000,

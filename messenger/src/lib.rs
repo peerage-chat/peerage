@@ -90,8 +90,12 @@ impl Transport for Node {
 pub enum Event {
     /// Изменение онлайн-статуса пира (первый контакт — `online: true`).
     Presence { peer: PeerKey, online: bool },
-    /// Входящее текстовое сообщение.
-    Text { peer: PeerKey, id: u64, text: String },
+    /// Входящее текстовое сообщение. `reply_to` = 0 — обычное; иначе это ответ на
+    /// сообщение с таким id, а `reply_mine` уже ПЕРЕВЁРНУТ под нашу сторону
+    /// (true = отвечают на наше сообщение).
+    Text { peer: PeerKey, id: u64, text: String, reply_to: u64, reply_mine: bool },
+    /// Пир просит удалить своё сообщение `target` («удалить у всех»).
+    Retract { peer: PeerKey, target: u64 },
     /// Входящее медиа-сообщение (M2): ссылка на блоб-вложение по хэшу.
     Media {
         peer: PeerKey,
@@ -656,9 +660,30 @@ impl Messenger {
     /// Отправить текст пиру. Возвращает id; доставка повторяется до `Ack` или TTL
     /// (см. [`Event::Ack`] / [`Event::Undelivered`]).
     pub fn send_text(&self, peer: &PeerKey, text: &str) -> Result<u64, MessengerError> {
+        self.send_text_reply(peer, text, 0, false)
+    }
+
+    /// То же с ответом на сообщение (`reply_to` = 0 — обычное сообщение).
+    /// `reply_mine` — чьё цитируемое сообщение с точки зрения ОТПРАВИТЕЛЯ; получатель
+    /// перевернёт флаг (см. `Payload::Text`).
+    pub fn send_text_reply(
+        &self,
+        peer: &PeerKey,
+        text: &str,
+        reply_to: u64,
+        reply_mine: bool,
+    ) -> Result<u64, MessengerError> {
         let text = text.to_string();
         // DM: notify=true → UI получает Ack/Undelivered (✓✓ / ошибка).
-        self.shared.send_reliable(peer, true, move |id| Payload::Text { id, text })
+        self.shared
+            .send_reliable(peer, true, move |id| Payload::Text { id, text, reply_to, reply_mine })
+    }
+
+    /// Попросить получателя удалить наше сообщение `target` («удалить у всех»).
+    /// Надёжно, как текст: просьба, отправленная в момент, когда собеседник офлайн,
+    /// обязана доехать позже — иначе «удалил» означало бы «удалил, если повезло».
+    pub fn send_retract(&self, peer: &PeerKey, target: u64) -> Result<u64, MessengerError> {
+        self.shared.send_reliable(peer, false, move |id| Payload::Retract { id, target })
     }
 
     /// Объявить контакту смену своего АДРЕСА (ADR-007). Надёжно, как текст:
@@ -689,7 +714,12 @@ impl Messenger {
     /// по (peer, id), поэтому дублей нет. Используется [`p2p_core`]-очередью через движок.
     pub fn resend_text(&self, peer: &PeerKey, id: u64, text: &str) -> Result<(), MessengerError> {
         let text = text.to_string();
-        self.shared.send_reliable_with_id(peer, id, true, move |id| Payload::Text { id, text })
+        self.shared.send_reliable_with_id(peer, id, true, move |id| Payload::Text {
+            id,
+            text,
+            reply_to: 0,
+            reply_mine: false,
+        })
     }
 
     /// Отправить медиа-СООБЩЕНИЕ чата (M2): ссылка на блоб по хэшу. Надёжно
@@ -1117,9 +1147,22 @@ fn receive_loop(shared: Arc<Shared>) {
 
         match payload {
             Payload::Hello => {}
-            Payload::Text { id, text } => {
-                shared.emit(Event::Text { peer: peer_id, id, text });
+            Payload::Text { id, text, reply_to, reply_mine } => {
+                // Флаг «чьё сообщение» приходит с точки зрения ОТПРАВИТЕЛЯ — здесь он
+                // переворачивается: его «моё» для нас «его», и наоборот.
+                shared.emit(Event::Text {
+                    peer: peer_id,
+                    id,
+                    text,
+                    reply_to,
+                    reply_mine: reply_to != 0 && !reply_mine,
+                });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
+            }
+            Payload::Retract { id, target } => {
+                // Отзыв касается сообщения ОТПРАВИТЕЛЯ — чужое удалить нельзя.
+                shared.emit(Event::Retract { peer: peer_id, target });
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::Media { id, hash, mime, name, size, duration_ms, width, height, caption, thumb } => {
                 shared.emit(Event::Media {

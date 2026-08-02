@@ -678,6 +678,15 @@ pub struct StoredMessage {
     /// приходит карточка (имя/размер/превью), байты — по кнопке.
     #[serde(default)]
     pub downloaded: bool,
+    /// id сообщения, на которое это — ответ (0 = обычное сообщение). Ссылка, а не
+    /// копия цитаты (ADR-006): цитата рисуется из локальной истории, поэтому правка
+    /// или удаление оригинала не оставляет расходящегося дубля текста.
+    #[serde(default)]
+    pub reply_to: u64,
+    /// Чьё цитируемое сообщение — наше или собеседника. Вместе с `reply_to` даёт
+    /// полный ключ строки истории `(peer, id, mine)`.
+    #[serde(default)]
+    pub reply_mine: bool,
 }
 
 /// SQLite-хранилище сообщений без кэша — каждый вызов делает SQL-запрос.
@@ -735,14 +744,15 @@ impl MessageStore {
         db::lock(&self.db).execute(
             "INSERT OR REPLACE INTO messages
                  (peer, id, mine, text, time, status, kind, blob_id, mime, name,
-                  size, duration_ms, width, height, thumb_id, downloaded)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                  size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_mine)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             rusqlite::params![
                 peer.as_slice(), msg.id as i64, msg.mine as i64,
                 &msg.text, msg.time, &msg.status,
                 &msg.kind, &msg.blob_id, &msg.mime, &msg.name,
                 msg.size as i64, msg.duration_ms as i64, msg.width as i64, msg.height as i64,
                 &msg.thumb_id, msg.downloaded as i64,
+                msg.reply_to as i64, msg.reply_mine as i64,
             ],
         )?;
         Ok(())
@@ -789,6 +799,24 @@ impl MessageStore {
         Ok(())
     }
 
+    /// Удалить несколько сообщений одним махом. Возвращает, сколько строк удалено.
+    ///
+    /// Именно пачкой, а не циклом `delete_one`: выделение нескольких — обычный
+    /// сценарий, а каждый отдельный `execute` это отдельная транзакция SQLite.
+    pub fn delete_many(&self, peer: &[u8; 32], refs: &[(u64, bool)]) -> Result<usize, StoreError> {
+        let mut conn = db::lock(&self.db);
+        let tx = conn.transaction()?;
+        let mut n = 0;
+        for (id, mine) in refs {
+            n += tx.execute(
+                "DELETE FROM messages WHERE peer = ?1 AND id = ?2 AND mine = ?3",
+                rusqlite::params![peer.as_slice(), *id as i64, *mine as i64],
+            )?;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
     /// Вложения всех чатов: (пир, blob_id, kind, размер). Нужна экрану «Хранилище»,
     /// чтобы показать, ЧТО занимает место и в каком чате, а не только общую цифру.
     pub fn attachments(&self) -> Vec<([u8; 32], String, String, i64)> {
@@ -815,7 +843,7 @@ impl MessageStore {
         let conn = db::lock(&self.db);
         let mut stmt = match conn.prepare(
             "SELECT id, text, mine, time, status, kind, blob_id, mime, name,
-                    size, duration_ms, width, height, thumb_id, downloaded
+                    size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_mine
              FROM messages WHERE peer=?1 ORDER BY time, id",
         ) {
             Ok(s) => s,
@@ -838,6 +866,8 @@ impl MessageStore {
                 height: row.get::<_, i64>(12)? as u32,
                 thumb_id: row.get(13)?,
                 downloaded: row.get::<_, i64>(14)? != 0,
+                reply_to: row.get::<_, i64>(15)? as u64,
+                reply_mine: row.get::<_, i64>(16)? != 0,
             })
         })
         .and_then(|rows| rows.collect())
@@ -868,7 +898,7 @@ impl MessageStore {
         let conn = db::lock(&self.db);
         let mut stmt = match conn.prepare(
             "SELECT rowid, peer, id, text, mine, time, status, kind, blob_id, mime, name,
-                    size, duration_ms, width, height, thumb_id, downloaded
+                    size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_mine
              FROM messages WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
         ) {
             Ok(s) => s,
@@ -895,6 +925,8 @@ impl MessageStore {
                     height: row.get::<_, i64>(14)? as u32,
                     thumb_id: row.get(15)?,
                     downloaded: row.get::<_, i64>(16)? != 0,
+                    reply_to: row.get::<_, i64>(17)? as u64,
+                    reply_mine: row.get::<_, i64>(18)? != 0,
                 },
             ))
         })
@@ -911,12 +943,13 @@ impl MessageStore {
         let n = db::lock(&self.db).execute(
             "INSERT OR IGNORE INTO messages
                  (peer, id, mine, text, time, status, kind, blob_id, mime, name,
-                  size, duration_ms, width, height, thumb_id, downloaded)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                  size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_mine)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             rusqlite::params![
                 peer.as_slice(), m.id as i64, m.mine as i64, &m.text, m.time, &m.status,
                 &m.kind, &m.blob_id, &m.mime, &m.name, m.size as i64, m.duration_ms as i64,
                 m.width as i64, m.height as i64, &m.thumb_id, m.downloaded as i64,
+                m.reply_to as i64, m.reply_mine as i64,
             ],
         )?;
         Ok(n > 0)

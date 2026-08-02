@@ -125,7 +125,17 @@ pub struct CallEntry {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiEvent {
     Presence { peer: String, online: bool },
-    Text { peer: String, id: u64, text: String, time: i64 },
+    Text {
+        peer: String,
+        id: u64,
+        text: String,
+        time: i64,
+        /// Ответ на сообщение с этим id (0 — обычное); `reply_mine` — чьё оно у НАС.
+        #[serde(default)]
+        reply_to: u64,
+        #[serde(default)]
+        reply_mine: bool,
+    },
     Media {
         peer: String,
         id: u64,
@@ -146,6 +156,8 @@ pub enum UiEvent {
         auto: bool,
     },
     Ack { peer: String, id: u64 },
+    /// Собеседник отозвал своё сообщение — строка исчезла из истории.
+    Retracted { peer: String, id: u64 },
     Undelivered { peer: String, id: u64 },
     ContactRequest { peer: String, new: bool },
     ContactsChanged,
