@@ -101,6 +101,71 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
     });
 }
 
+/// Текст в группу ОТВЕТОМ на сообщение `replyTo` автора `replySender` (hex).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendTextReply<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    text: JString<'local>,
+    reply_to: jlong,
+    reply_sender: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        let text = jstr(&mut env, &text);
+        let sender = jstr(&mut env, &reply_sender);
+        e.group_send_text_reply(gid, text, reply_to.max(0) as u64, sender);
+    });
+}
+
+/// Удалить групповые сообщения У СЕБЯ. `refsJson` — `[{"id":…,"sender":"hex"}, …]`.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupDeleteMessages<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    refs_json: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        let raw: serde_json::Value =
+            serde_json::from_str(&jstr(&mut env, &refs_json)).unwrap_or(serde_json::Value::Null);
+        let refs: Vec<(u64, String)> = raw
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| {
+                        Some((v["id"].as_u64()?, v["sender"].as_str().unwrap_or("").to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        e.group_delete_local(gid, refs);
+    });
+}
+
+/// Отозвать СВОИ групповые сообщения у участников. `idsJson` — `[123, …]`.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupRetractMessages<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    ids_json: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        let ids: Vec<u64> = serde_json::from_str(&jstr(&mut env, &ids_json)).unwrap_or_default();
+        e.group_retract(gid, ids);
+    });
+}
+
 /// Собрать [`p2p_engine::MediaInfo`] из аргументов JNI (длительность/кадр/превью/
 /// подпись). Метаданные извлекает клиент — движок медиа не декодирует.
 fn media_info<'local>(

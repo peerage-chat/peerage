@@ -107,6 +107,13 @@ data class Message(
 @kotlinx.serialization.Serializable
 data class MsgRef(val id: Long, val mine: Boolean)
 
+/**
+ * Ссылка на групповое сообщение: id + автор. В группе собеседников много, поэтому
+ * (в отличие от DM) флага «моё/чужое» недостаточно.
+ */
+@kotlinx.serialization.Serializable
+data class GroupMsgRef(val id: Long, val sender: String)
+
 /** Идентичность пользователя (своя «визитка»). */
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
@@ -140,6 +147,12 @@ data class NetStats(
 data class GroupRoster(val total: Int, val online: Int)
 
 data class GroupMsg(
+    /** id в пределах ОТПРАВИТЕЛЯ; вместе с [sender] — ссылка на сообщение
+     *  (ADR-006). 0 — сообщение старого клиента: сослаться не на что. */
+    val id: Long = 0,
+    /** Ссылка ответа: id цитируемого (0 — обычное) и hex его автора. */
+    val replyTo: Long = 0,
+    val replySender: String = "",
     val text: String,
     val mine: Boolean,
     val time: Long,
@@ -1387,6 +1400,24 @@ class AppModel private constructor() {
         }
     }
 
+    /** Удалить выделенные заметки (чат с самим собой). */
+    fun deleteSelectedNotes() {
+        val refs = selection.toList()
+        if (refs.isEmpty()) return
+        selection = emptySet()
+        val key = me?.pubkey ?: return
+        val json = WireJson.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(MsgRef.serializer()),
+            refs,
+        )
+        ops.execute {
+            Native.deleteMessages(sessionPtr, key, json)
+            val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
+            notes.clear()
+            notes.addAll(list)
+        }
+    }
+
     /** Перечитать историю чата после удаления/отзыва.
      *
      *  Именно [loadHistory], а не «очистить и долить»: он ЗАМЕНЯЕТ список целиком и
@@ -1715,6 +1746,14 @@ class AppModel private constructor() {
                     // Своё групповое медиа: blob_id считается от очищенных байт в
                     // движке — перечитываем историю, чтобы показать верный хэш.
                     if (currentGroup == ev.gid) loadGroupHistory(ev.gid)
+                } else if (currentGroup == ev.gid) {
+                    // Чат открыт — перечитываем историю целиком: id и ссылку ответа
+                    // знает движок, а событие их не несёт. Без этого свежее сообщение
+                    // нельзя было бы ни выделить, ни процитировать до перезахода.
+                    val md = ev.media
+                    if (md != null && md.downloaded) cacheBlob(md.blobId)
+                    md?.thumbId?.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
+                    loadGroupHistory(ev.gid)
                 } else {
                     val md = ev.media
                     // Вложение: байты берём из кэша, только если оно уже скачано —
@@ -1723,7 +1762,7 @@ class AppModel private constructor() {
                     md?.thumbId?.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
                     groupLog(ev.gid).add(
                         GroupMsg(
-                            ev.text,
+                            text = ev.text,
                             mine = false,
                             time = System.currentTimeMillis() / 1000,
                             sender = ev.sender,
@@ -1742,6 +1781,8 @@ class AppModel private constructor() {
                     )
                 }
             }
+            // В группе отозвали сообщение — перечитываем ленту целиком.
+            is EngineEvent.GroupRetracted -> loadGroupHistory(ev.gid)
             // Событие, которого этот клиент ещё не знает: молча пропускаем.
             EngineEvent.Unknown -> Unit
         }
@@ -2182,16 +2223,80 @@ class AppModel private constructor() {
 
     fun sendGroupText(gid: String, text: String) {
         if (text.isBlank()) return
-        // Оптимистично показываем своё сообщение сразу; отправка — fire-and-forget.
-        groupLog(gid).add(
-            GroupMsg(
+        val reply = groupReplyTarget
+        groupReplyTarget = null
+        ops.execute {
+            Native.groupSendTextReply(
+                sessionPtr,
+                gid,
                 text,
-                mine = true,
-                time = System.currentTimeMillis() / 1000,
-                sender = me?.pubkey ?: "",
-            ),
+                reply?.id ?: 0,
+                reply?.sender.orEmpty(),
+            )
+            // Ленту перечитает обработчик события от движка: команда исполняется в
+            // потоке-акторе, и сразу после возврата из JNI история ещё старая.
+        }
+    }
+
+    // ── Действия с групповым сообщением (ADR-006) ────────────────────────────
+
+    var groupSelection by mutableStateOf<Set<GroupMsgRef>>(emptySet())
+        private set
+
+    var groupReplyTarget by mutableStateOf<GroupMsg?>(null)
+        private set
+
+    fun toggleGroupSelect(m: GroupMsg) {
+        // Сообщения без id (старый клиент) выбрать нельзя: с ними нечего делать —
+        // ни отозвать, ни ответить, а «удалить у себя» без ссылки не адресуется.
+        if (m.id == 0L) return
+        val ref = GroupMsgRef(m.id, m.sender)
+        groupSelection = if (ref in groupSelection) groupSelection - ref else groupSelection + ref
+    }
+
+    fun clearGroupSelection() {
+        groupSelection = emptySet()
+    }
+
+    fun startGroupReply(m: GroupMsg) {
+        groupReplyTarget = m
+        groupSelection = emptySet()
+    }
+
+    fun cancelGroupReply() {
+        groupReplyTarget = null
+    }
+
+    fun groupSelectedText(gid: String): String {
+        val sel = groupSelection
+        return (groupMessages[gid] ?: emptyList<GroupMsg>())
+            .filter { GroupMsgRef(it.id, it.sender) in sel }
+            .joinToString("\n") { if (it.text.isNotEmpty()) it.text else it.name }
+    }
+
+    fun deleteGroupSelected(gid: String) {
+        val refs = groupSelection.toList()
+        if (refs.isEmpty()) return
+        groupSelection = emptySet()
+        val json = WireJson.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(GroupMsgRef.serializer()),
+            refs,
         )
-        ops.execute { Native.groupSendText(sessionPtr, gid, text) }
+        ops.execute {
+            Native.groupDeleteMessages(sessionPtr, gid, json)
+        }
+    }
+
+    /** Отозвать выделенные СВОИ сообщения у участников. Чужие не трогаем. */
+    fun retractGroupSelected(gid: String) {
+        val mine = me?.pubkey.orEmpty()
+        val ids = groupSelection.filter { it.sender == mine }.map { it.id }
+        if (ids.isEmpty()) return
+        groupSelection = emptySet()
+        val json = ids.joinToString(prefix = "[", postfix = "]")
+        ops.execute {
+            Native.groupRetractMessages(sessionPtr, gid, json)
+        }
     }
 
     /** Отправить вложение в группу (M2): движок чистит картинку, шлёт блоб всем

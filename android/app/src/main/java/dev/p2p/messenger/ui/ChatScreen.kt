@@ -236,6 +236,7 @@ internal fun ChatScreen(model: AppModel) {
             onVoiceStart = startVoice,
             onVoiceStop = stopVoice,
             model = model,
+            replyStrip = { model.replyTarget?.let { ReplyStrip(model, it) } },
             onSend = {
                 if (input.isNotBlank()) {
                     model.send(key, input)
@@ -336,7 +337,7 @@ private fun QuoteBlock(model: AppModel, src: Message?, quotedMine: Boolean) {
 
 /** Как назвать вложение без имени в цитате. */
 @Composable
-private fun quoteKind(kind: String): String = stringResource(
+internal fun quoteKind(kind: String): String = stringResource(
     when (kind) {
         "image" -> R.string.storage_kind_image
         "voice" -> R.string.storage_kind_voice
@@ -346,7 +347,7 @@ private fun quoteKind(kind: String): String = stringResource(
 
 /** Полоска «отвечаем на …» над полем ввода. */
 @Composable
-private fun ReplyStrip(model: AppModel, m: Message) {
+internal fun ReplyStrip(model: AppModel, m: Message) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(8.dp)).background(HoloSurface).padding(8.dp),
@@ -501,6 +502,8 @@ internal fun MessageInput(
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
     model: AppModel? = null,
+    /** Полоска «отвечаем на …» над полем: экран решает, чья цель ответа. */
+    replyStrip: (@Composable () -> Unit)? = null,
     onSend: () -> Unit,
 ) {
     // Поле держим как TextFieldValue: панели эмодзи нужна ПОЗИЦИЯ КУРСОРА, иначе
@@ -521,7 +524,7 @@ internal fun MessageInput(
     Column(Modifier.fillMaxWidth().background(HoloBg)) {
         // Цитата видна ровно там, где человек печатает ответ: иначе легко забыть,
         // что сообщение уйдёт ответом, и получить «ответ» не на то.
-        model?.replyTarget?.let { ReplyStrip(model, it) }
+        replyStrip?.invoke()
         // Панель ВЫЕЗЖАЕТ из строки ввода: движение объясняет, откуда она взялась.
         // Появление «из ниоткуда» читается как подмена экрана.
         AnimatedVisibility(

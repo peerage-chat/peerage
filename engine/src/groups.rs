@@ -17,9 +17,27 @@ fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+/// Идентификатор группового сообщения: время в МИЛЛИсекундах. Уникальность нужна
+/// только в пределах отправителя (ссылка — пара «автор + id»), а секунд не хватало
+/// бы: два сообщения подряд получали бы один id и ответ указывал бы на оба.
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct GMsg {
+    /// Идентификатор в пределах ОТПРАВИТЕЛЯ; вместе с `sender` даёт ссылку на
+    /// сообщение (ADR-006). `0` — сообщение клиента до появления id: на такое
+    /// нельзя ни ответить, ни отозвать, сослаться не на что.
+    #[serde(default)]
+    pub id: u64,
+    /// id цитируемого сообщения (0 — обычное) и hex его автора: в группе
+    /// собеседников много, поэтому одного id мало.
+    #[serde(default)]
+    pub reply_to: u64,
+    #[serde(default)]
+    pub reply_sender: String,
     pub text: String,
     pub mine: bool,
     pub time: i64,
@@ -368,12 +386,33 @@ impl GroupManager {
 
     /// Отправить текст в группу. Возвращает true при успехе.
     pub fn send_text(&mut self, gid: &[u8], text: &str) -> bool {
+        self.send_text_reply(gid, text, 0, "")
+    }
+
+    /// Отправить текст ответом на сообщение `reply_to` автора `reply_sender` (hex).
+    /// `reply_to = 0` — обычное сообщение.
+    pub fn send_text_reply(
+        &mut self,
+        gid: &[u8],
+        text: &str,
+        reply_to: u64,
+        reply_sender: &str,
+    ) -> bool {
         let Some(e) = self.groups.get_mut(gid) else { return false };
-        if e.chat.send_text(text).is_err() {
+        // id посеян временем в миллисекундах: он должен быть уникален только в
+        // пределах отправителя (ссылка — пара «автор + id»).
+        let id = now_ms();
+        if e.chat.send_text_reply(text, id, reply_to, reply_sender).is_err() {
             return false;
         }
         let me = hex::encode(self.identity.public_key_bytes());
         e.messages.push(GMsg {
+            id,
+            reply_to,
+            reply_sender: reply_sender.to_string(),
+            // kind заполняем явно: пустая строка — «неизвестно», и UI рисовал такое
+            // сообщение дважды (как текст и как подпись к вложению).
+            kind: "text".into(),
             text: text.to_string(), mine: true, time: now(), sender: me, ..Default::default()
         });
         self.save_msgs(gid);
@@ -383,6 +422,43 @@ impl GroupManager {
         // удалил тот секрет (forward secrecy) → "secret deleted" → сообщения не доходят.
         self.save_group(gid);
         true
+    }
+
+    /// Отозвать СВОИ сообщения у участников («удалить у всех»). Возвращает, сколько
+    /// просьб отправлено. Чужие молча пропускаются: отзывать чужое — не «удалить», а
+    /// «переписать чужую историю». Сообщения без id (старый клиент) отозвать нельзя.
+    pub fn retract(&mut self, gid: &[u8], ids: &[u64]) -> usize {
+        let me = hex::encode(self.identity.public_key_bytes());
+        let Some(e) = self.groups.get_mut(gid) else { return 0 };
+        let mut sent = 0;
+        for id in ids {
+            if *id == 0 {
+                continue;
+            }
+            let mine = e.messages.iter().any(|m| m.id == *id && m.sender == me);
+            if mine && e.chat.send_retract(*id).is_ok() {
+                sent += 1;
+            }
+        }
+        if sent > 0 {
+            e.messages.retain(|m| !(m.sender == me && ids.contains(&m.id)));
+            // Отправка двигает MLS-ратчет — состояние обязано лечь на диск.
+            self.save_msgs(gid);
+            self.save_group(gid);
+        }
+        sent
+    }
+
+    /// Удалить сообщения ТОЛЬКО У СЕБЯ: пары `(id, автор-hex)`.
+    pub fn delete_local(&mut self, gid: &[u8], refs: &[(u64, String)]) -> usize {
+        let Some(e) = self.groups.get_mut(gid) else { return 0 };
+        let before = e.messages.len();
+        e.messages.retain(|m| !refs.iter().any(|(id, who)| m.id == *id && &m.sender == who));
+        let removed = before - e.messages.len();
+        if removed > 0 {
+            self.save_msgs(gid);
+        }
+        removed
     }
 
     /// Отозвать участника из группы (ADR-004). Только админ. Двигает MLS-состояние
@@ -410,11 +486,14 @@ impl GroupManager {
     /// sending-ratchet → save_group (как send_text). Возвращает участников для push.
     pub fn send_media(&mut self, gid: &[u8], media: &MediaBody) -> bool {
         let Some(e) = self.groups.get_mut(gid) else { return false };
+        let id = now_ms();
+        let media = &MediaBody { id, ..media.clone() };
         if e.chat.send_media(media).is_err() {
             return false;
         }
         let me = hex::encode(self.identity.public_key_bytes());
         e.messages.push(GMsg {
+            id,
             mine: true, time: now(), sender: me,
             // Подпись живёт в `text`: у медиа это поле свободно, как и в DM.
             text: media.caption.clone(),
@@ -558,10 +637,14 @@ impl GroupManager {
         if let Some(gid) = known {
             let inbound = self.groups.get_mut(&gid).map(|e| e.chat.handle(data));
             let outcome = match inbound {
-                Some(Ok(Inbound::Message { sender, text })) => {
+                Some(Ok(Inbound::Message { sender, text, id, reply_to, reply_sender })) => {
                     let sender_hex = hex::encode(sender);
                     if let Some(e) = self.groups.get_mut(&gid) {
                         e.messages.push(GMsg {
+                            id,
+                            reply_to,
+                            reply_sender,
+                            kind: "text".into(),
                             text: text.clone(), mine: false, time: now(),
                             sender: sender_hex.clone(), ..Default::default()
                         });
@@ -572,10 +655,31 @@ impl GroupManager {
                         sender: Some(sender_hex), ..Default::default()
                     }
                 }
+                Some(Ok(Inbound::Retract { sender, target })) => {
+                    // Автор берётся ИЗ MLS, а не из тела: иначе участник мог бы
+                    // стереть чужое сообщение, подставив чужой ключ.
+                    let who = hex::encode(sender);
+                    let removed = if let Some(e) = self.groups.get_mut(&gid) {
+                        let before = e.messages.len();
+                        e.messages.retain(|m| !(m.id == target && m.sender == who && target != 0));
+                        before - e.messages.len()
+                    } else {
+                        0
+                    };
+                    if removed > 0 {
+                        self.save_msgs(&gid);
+                    }
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        retracted: removed > 0,
+                        ..Default::default()
+                    }
+                }
                 Some(Ok(Inbound::Media { sender, media })) => {
                     let sender_hex = hex::encode(sender);
                     if let Some(e) = self.groups.get_mut(&gid) {
                         e.messages.push(GMsg {
+                            id: media.id,
                             mine: false, time: now(), sender: sender_hex.clone(),
                             text: media.caption.clone(),
                             kind: media.kind.clone(), blob_id: media.hash.clone(),
@@ -759,4 +863,6 @@ pub struct GroupOutcome {
     pub renamed: bool,
     /// Медиа-сообщение (M2): ссылка на блоб + метаданные карточки. Пусто → не медиа.
     pub media: Option<MediaBody>,
+    /// Участник отозвал своё сообщение — строка исчезла из истории, UI перечитать.
+    pub retracted: bool,
 }

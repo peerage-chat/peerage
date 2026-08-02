@@ -57,7 +57,11 @@ pub(crate) enum GroupCmd {
     AcceptInvite { gid: Vec<u8> },
     /// Отклонить входящее приглашение.
     DeclineInvite { gid: Vec<u8> },
-    SendText { gid: Vec<u8>, text: String },
+    SendText { gid: Vec<u8>, text: String, reply_to: u64, reply_sender: String },
+    /// Отозвать свои сообщения у участников («удалить у всех»).
+    Retract { gid: Vec<u8>, ids: Vec<u64> },
+    /// Удалить сообщения только у себя: пары `(id, автор-hex)`.
+    DeleteLocal { gid: Vec<u8>, refs: Vec<(u64, String)> },
     /// Отозвать участника (ADR-004, только админ).
     RemoveMember { gid: Vec<u8>, peer: [u8; 32] },
     /// Ротация ключа группы (PCS, ADR-004).
@@ -1157,11 +1161,31 @@ impl Engine {
     }
 
     pub fn group_send_text(&self, gid: Vec<u8>, text: String) {
-        let _ = self.jobs.send(Job::Cmd(GroupCmd::SendText { gid, text }));
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::SendText {
+            gid,
+            text,
+            reply_to: 0,
+            reply_sender: String::new(),
+        }));
     }
 
     /// Отправить медиа-вложение в группу (M2). Fire-and-forget: движок чистит
     /// картинку, сохраняет блоб, шлёт MLS-ссылку всем и пушит байты каждому.
+    /// Текст ответом на сообщение `reply_to` автора `reply_sender` (hex).
+    pub fn group_send_text_reply(&self, gid: Vec<u8>, text: String, reply_to: u64, reply_sender: String) {
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::SendText { gid, text, reply_to, reply_sender }));
+    }
+
+    /// Отозвать СВОИ сообщения в группе у всех участников.
+    pub fn group_retract(&self, gid: Vec<u8>, ids: Vec<u64>) {
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::Retract { gid, ids }));
+    }
+
+    /// Удалить групповые сообщения только у себя.
+    pub fn group_delete_local(&self, gid: Vec<u8>, refs: Vec<(u64, String)>) {
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::DeleteLocal { gid, refs }));
+    }
+
     pub fn group_send_media(
         &self,
         gid: Vec<u8>,
@@ -1812,6 +1836,8 @@ fn event_pump(
                 save_blob(&engine, hash, &bytes);
                 let thumb_hex = push_group_thumb(&engine, &mut blobs, &members, info.thumb.as_deref());
                 let media = MediaBody {
+                    // id проставит слой групп при отправке (он же кладёт его в историю).
+                    id: 0,
                     kind: Engine::media_kind(&mime).into(),
                     hash: id_hex,
                     mime: mime.clone(),
@@ -1849,6 +1875,8 @@ fn event_pump(
                 }
                 let thumb_hex = push_group_thumb(&engine, &mut blobs, &members, info.thumb.as_deref());
                 let media = MediaBody {
+                    // id проставит слой групп при отправке (он же кладёт его в историю).
+                    id: 0,
                     kind: Engine::media_kind(&mime).into(),
                     hash: id_hex,
                     mime: mime.clone(),
@@ -2208,6 +2236,14 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     });
                 }
             }
+            if out.retracted {
+                // Строка исчезла из истории — UI обязан перечитать её целиком, иначе
+                // отозванное останется на экране до перезахода в чат.
+                if let Some(gid) = &out.gid {
+                    engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(gid));
+                    push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(gid) });
+                }
+            }
             if out.joined {
                 refresh_group_cache(engine, groups);
                 push_event(engine, dto::UiEvent::GroupsChanged);
@@ -2393,9 +2429,25 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                 push_event(engine, dto::UiEvent::GroupInvitesChanged);
             }
         }
-        GroupCmd::SendText { gid, text } => {
-            if groups.send_text(&gid, &text) {
+        GroupCmd::SendText { gid, text, reply_to, reply_sender } => {
+            if groups.send_text_reply(&gid, &text, reply_to, &reply_sender) {
                 refresh_group_cache(engine, groups);
+                // Своё сообщение — событием, а не «клиент дорисует сам»: id ему
+                // присваивает этот слой, и без перечитывания истории на него нельзя
+                // было бы ни ответить, ни отозвать.
+                push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(&gid) });
+            }
+        }
+        GroupCmd::Retract { gid, ids } => {
+            if groups.retract(&gid, &ids) > 0 {
+                refresh_group_cache(engine, groups);
+                push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(&gid) });
+            }
+        }
+        GroupCmd::DeleteLocal { gid, refs } => {
+            if groups.delete_local(&gid, &refs) > 0 {
+                refresh_group_cache(engine, groups);
+                push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(&gid) });
             }
         }
         GroupCmd::RemoveMember { gid, peer } => {

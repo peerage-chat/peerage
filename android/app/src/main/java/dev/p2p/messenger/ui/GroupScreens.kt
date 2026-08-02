@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+)
 
 package dev.p2p.messenger.ui
 
@@ -8,7 +11,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,8 +22,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.MoreVert
@@ -169,6 +178,7 @@ internal fun GroupChatScreen(model: AppModel) {
             MessageInput(
                 value = input,
                 onChange = { input = it },
+                replyStrip = { model.groupReplyTarget?.let { GroupReplyStrip(model, it) } },
                 onPickFile = { filePicker.launch(arrayOf("*/*")) },
                 onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
                 onCamera = openCamera,
@@ -217,6 +227,10 @@ internal fun GroupChatScreen(model: AppModel) {
  *  войти/выйти из комнаты · меню. */
 @Composable
 internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit) {
+    if (model.groupSelection.isNotEmpty()) {
+        GroupSelectionTopBar(model)
+        return
+    }
     val gid = model.currentGroup
     val g = gid?.let { model.groups.firstOrNull { it.gid == gid } }
     val name = g?.name ?: stringResource(R.string.group_default_name)
@@ -347,6 +361,148 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg, pos: BlockPos = Block
     }
 }
 
+/**
+ * Действия над выделенными сообщениями группы. Отличие от DM: «удалить у всех»
+ * доступно, только когда все выбранные — НАШИ (автор берётся из MLS, чужое отозвать
+ * нельзя), а ответ — только при одном выбранном.
+ */
+@Composable
+private fun GroupSelectionTopBar(model: AppModel) {
+    val gid = model.currentGroup ?: return
+    val ctx = LocalContext.current
+    val sel = model.groupSelection
+    val mineKey = model.me?.pubkey.orEmpty()
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    Row(
+        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel)) { model.clearGroupSelection() }
+        Text(
+            sel.size.toString(),
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        if (sel.size == 1) {
+            BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
+                val ref = sel.first()
+                model.groupMessages[gid]?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
+                    ?.let { model.startGroupReply(it) }
+            }
+        }
+        BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
+            val text = model.groupSelectedText(gid)
+            if (text.isNotEmpty()) {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("p2p", text))
+                android.widget.Toast
+                    .makeText(ctx, R.string.chat_copied, android.widget.Toast.LENGTH_SHORT).show()
+            }
+            model.clearGroupSelection()
+        }
+        BarIcon(Icons.Filled.Delete, stringResource(R.string.chat_delete)) { confirmDelete = true }
+    }
+
+    if (confirmDelete) {
+        val allMine = sel.all { it.sender == mineKey }
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(stringResource(R.string.chat_delete_title, sel.size)) },
+            text = {
+                Text(
+                    stringResource(
+                        if (allMine) R.string.chat_delete_note_all else R.string.chat_delete_note_foreign,
+                    ),
+                )
+            },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    if (allMine) {
+                        TextButton(onClick = {
+                            model.retractGroupSelected(gid)
+                            confirmDelete = false
+                        }) { Text(stringResource(R.string.chat_delete_for_all), color = HoloError) }
+                    }
+                    TextButton(onClick = {
+                        model.deleteGroupSelected(gid)
+                        confirmDelete = false
+                    }) { Text(stringResource(R.string.chat_delete_for_me), color = HoloError) }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
+                }
+            },
+        )
+    }
+}
+
+/** Полоска «отвечаем на …» над полем ввода группы. */
+@Composable
+private fun GroupReplyStrip(model: AppModel, m: GroupMsg) {
+    val who = if (m.sender == model.me?.pubkey) {
+        stringResource(R.string.chat_reply_you)
+    } else {
+        groupSenderName(model, m.sender)
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(8.dp)).background(HoloSurface).padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(2.dp).height(30.dp).background(HoloAccent))
+        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+            Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Text(
+                m.text.ifEmpty { m.name.ifEmpty { quoteKind(m.kind) } },
+                color = HoloSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            Icons.Filled.Close,
+            stringResource(R.string.common_cancel),
+            tint = HoloSecondary,
+            modifier = Modifier.size(20.dp).clickable { model.cancelGroupReply() },
+        )
+    }
+}
+
+/** Цитата в групповом пузыре: имя автора оригинала + начало текста. */
+@Composable
+private fun GroupQuote(model: AppModel, m: GroupMsg) {
+    val src = model.groupMessages[model.currentGroup]
+        ?.firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
+    val who = if (m.replySender == model.me?.pubkey) {
+        stringResource(R.string.chat_reply_you)
+    } else {
+        groupSenderName(model, m.replySender)
+    }
+    Row(
+        Modifier.padding(bottom = 4.dp).heightIn(min = 28.dp)
+            .clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.06f)),
+    ) {
+        Box(Modifier.width(2.dp).heightIn(min = 28.dp).background(HoloAccent))
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp)) {
+            Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Text(
+                src?.let { it.text.ifEmpty { it.name } } ?: stringResource(R.string.chat_reply_gone),
+                color = HoloSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 /** Пузырь группового сообщения. Имя отправителя (цветом) — встроено сверху внутрь
  *  пузыря; время — в правом нижнем углу (как DM); без галочек. */
 @Composable
@@ -362,11 +518,22 @@ internal fun GroupBubble(
     // M2: байты вложения из реактивного кэша (появятся по докачке блоба без рефреша).
     val blobBytes = if (m.blobId.isNotEmpty()) model.mediaBlobs[m.blobId] else null
     var viewer by remember { mutableStateOf(false) }
+    val selecting = model.groupSelection.isNotEmpty()
+    val selected = GroupMsgRef(m.id, m.sender) in model.groupSelection
     Box(
         Modifier.widthIn(max = 280.dp).clip(bubbleShape(mine, pos))
-            .background(if (mine) BubbleOut else BubbleIn).padding(horizontal = 10.dp, vertical = 6.dp),
+            .background(if (mine) BubbleOut else BubbleIn)
+            .then(
+                if (selected) Modifier.border(1.dp, HoloAccent, bubbleShape(mine, pos)) else Modifier,
+            )
+            .combinedClickable(
+                onLongClick = { model.toggleGroupSelect(m) },
+                onClick = { if (selecting) model.toggleGroupSelect(m) },
+            )
+            .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Column {
+            if (m.replyTo != 0L) GroupQuote(model, m)
             if (senderName != null) {
                 Text(
                     senderName,

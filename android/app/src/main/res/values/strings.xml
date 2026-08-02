@@ -628,4 +628,6 @@
     <string name="chat_reply_you">You</string>
     <string name="chat_reply_to_them">Replying to</string>
     <string name="chat_reply_gone">message deleted</string>
+
+    <string name="saved_delete_note">Notes live only on your device — deleting them changes nothing for anyone else.</string>
 </resources>

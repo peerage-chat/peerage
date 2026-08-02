@@ -25,9 +25,29 @@ pub type PeerKey = [u8; 32];
 #[serde(tag = "t")]
 enum AppMsg {
     #[serde(rename = "text")]
-    Text { text: String },
+    Text {
+        text: String,
+        /// Идентификатор сообщения в пределах ОТПРАВИТЕЛЯ. Ссылка на сообщение —
+        /// пара «автор + id» (ADR-006); у групп автор берётся из MLS, поэтому здесь
+        /// достаточно id. `0` — сообщение старого клиента, на такое нельзя ни
+        /// ответить, ни отозвать: сослаться не на что.
+        #[serde(default)]
+        id: u64,
+        /// id сообщения, на которое отвечают (0 — обычное).
+        #[serde(default)]
+        reply_to: u64,
+        /// hex автора цитируемого сообщения. В группе собеседников много, поэтому
+        /// одного флага «моё/чужое», как в DM, недостаточно.
+        #[serde(default)]
+        reply_sender: String,
+    },
     #[serde(rename = "media")]
     Media(MediaBody),
+    /// Отзыв СВОЕГО сообщения («удалить у всех»). Получатели удаляют строку
+    /// `(отправитель этого пакета, target)` — чужое отозвать нельзя, автор берётся
+    /// из MLS, а не из тела.
+    #[serde(rename = "retract")]
+    Retract { target: u64 },
     /// Служебное: имя группы. Админ шлёт его новому участнику после add, чтобы тот
     /// увидел настоящее название, а не дефолт (в UI не показывается как сообщение).
     #[serde(rename = "name")]
@@ -42,6 +62,9 @@ enum AppMsg {
 /// такими же полями `MediaMeta`).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct MediaBody {
+    /// Идентификатор в пределах отправителя (см. `AppMsg::Text::id`).
+    #[serde(default)]
+    pub id: u64,
     pub kind: String,
     /// hex контент-адреса блоба с содержимым.
     pub hash: String,
@@ -62,8 +85,10 @@ pub struct MediaBody {
 
 /// Результат обработки входящего группового сообщения — для показа в UI.
 pub enum Inbound {
-    /// Прикладное сообщение: отправитель + текст.
-    Message { sender: PeerKey, text: String },
+    /// Прикладное сообщение: отправитель + текст (+ ссылка ответа, ADR-006).
+    Message { sender: PeerKey, text: String, id: u64, reply_to: u64, reply_sender: String },
+    /// Отправитель просит удалить СВОЁ сообщение `target` у всех.
+    Retract { sender: PeerKey, target: u64 },
     /// Медиа-сообщение (M2): отправитель + ссылка на блоб с метаданными карточки.
     Media { sender: PeerKey, media: MediaBody },
     /// Имя группы (служебное): верхний слой обновляет название, без показа в чате.
@@ -181,8 +206,29 @@ impl GroupChat {
     }
 
     /// Отправить текст в группу (рассылается всем текущим участникам).
-    pub fn send_text(&mut self, text: &str) -> Result<(), GroupChatError> {
-        self.send_app(&AppMsg::Text { text: text.to_string() })
+    pub fn send_text(&mut self, text: &str, id: u64) -> Result<(), GroupChatError> {
+        self.send_text_reply(text, id, 0, "")
+    }
+
+    /// То же ответом на сообщение `reply_to` автора `reply_sender` (hex).
+    pub fn send_text_reply(
+        &mut self,
+        text: &str,
+        id: u64,
+        reply_to: u64,
+        reply_sender: &str,
+    ) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::Text {
+            text: text.to_string(),
+            id,
+            reply_to,
+            reply_sender: reply_sender.to_string(),
+        })
+    }
+
+    /// Попросить участников удалить наше сообщение `target` («удалить у всех»).
+    pub fn send_retract(&mut self, target: u64) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::Retract { target })
     }
 
     /// Отправить медиа-сообщение (M2): ссылка на блоб по хэшу. Байты блоба идут
@@ -222,14 +268,24 @@ impl GroupChat {
                 let sender = to_key(sender);
                 // M2: тело — JSON-envelope (текст/медиа); старое сырое-UTF-8 → текст.
                 Ok(match serde_json::from_slice::<AppMsg>(&body) {
-                    Ok(AppMsg::Text { text }) => Inbound::Message { sender, text },
+                    Ok(AppMsg::Text { text, id, reply_to, reply_sender }) => {
+                        Inbound::Message { sender, text, id, reply_to, reply_sender }
+                    }
+                    Ok(AppMsg::Retract { target }) => Inbound::Retract { sender, target },
                     Ok(AppMsg::Media(media)) => {
                         // Режем и на приёме: отправитель мог быть пропатчен.
                         let caption = truncate_caption(&media.caption);
                         Inbound::Media { sender, media: MediaBody { caption, ..media } }
                     }
                     Ok(AppMsg::Name { name }) => Inbound::Name { name },
-                    Err(_) => Inbound::Message { sender, text: String::from_utf8_lossy(&body).into_owned() },
+                    // Сырое UTF-8 — сообщение клиента до M2: id у него нет.
+                    Err(_) => Inbound::Message {
+                        sender,
+                        text: String::from_utf8_lossy(&body).into_owned(),
+                        id: 0,
+                        reply_to: 0,
+                        reply_sender: String::new(),
+                    },
                 })
             }
             Ok(Incoming::MembershipChanged { actor }) => {

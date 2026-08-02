@@ -620,4 +620,6 @@
     <string name="chat_reply_you">Вы</string>
     <string name="chat_reply_to_them">Ответ на сообщение</string>
     <string name="chat_reply_gone">сообщение удалено</string>
+
+    <string name="saved_delete_note">Заметки только у вас — удаление ни у кого больше ничего не меняет.</string>
 </resources>

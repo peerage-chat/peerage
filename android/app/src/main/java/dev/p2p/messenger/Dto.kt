@@ -96,6 +96,9 @@ internal data class GroupInviteDto(
 
 @Serializable
 internal data class GroupMsgDto(
+    val id: Long = 0,
+    @SerialName("reply_to") val replyTo: Long = 0,
+    @SerialName("reply_sender") val replySender: String = "",
     val text: String = "",
     val mine: Boolean = false,
     val time: Long = 0,
@@ -305,12 +308,15 @@ internal fun MessageDto.toModel() = Message(
 )
 
 internal fun GroupMsgDto.toModel() = GroupMsg(
+    id = id,
+    replyTo = replyTo,
+    replySender = replySender,
     text = text,
     mine = mine,
     time = time,
     sender = sender,
     system = system,
-    kind = kind,
+    kind = kind.ifEmpty { "text" }, // пустой kind — «неизвестно», не вложение
     blobId = blobId,
     mime = mime,
     name = name,
@@ -353,6 +359,11 @@ internal sealed interface EngineEvent {
     @Serializable
     @SerialName("retracted")
     data class Retracted(val peer: String, val id: Long) : EngineEvent
+
+    /** В группе кто-то отозвал сообщение — историю перечитать целиком. */
+    @Serializable
+    @SerialName("group_retracted")
+    data class GroupRetracted(val gid: String) : EngineEvent
 
     @Serializable
     @SerialName("media")

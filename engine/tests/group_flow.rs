@@ -257,3 +257,64 @@ fn member_leave_revoked_by_admin() {
     });
     assert!(ok, "после leave: админ A отозвал B из ростера");
 }
+
+/// Действия с групповым сообщением (ADR-006). Ссылка на сообщение в группе — пара
+/// «автор + id»: одного id мало, собеседников много.
+#[test]
+fn group_reply_and_retract() {
+    let mut ctx = setup_and_join(0);
+    let a_hex = hex::encode(id(10).public_key_bytes());
+
+    assert!(ctx.gm_a.send_text(&ctx.gid, "во сколько встречаемся?"));
+    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
+        b.history_json(&ctx.gid).contains("во сколько")
+    });
+    assert!(got, "сообщение дошло до B");
+
+    // B отвечает на сообщение A — ссылка = (автор A, id сообщения).
+    let hist_b: serde_json::Value = serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
+    let first = hist_b.as_array().unwrap().iter().find(|m| m["text"] == "во сколько встречаемся?").unwrap();
+    let target = first["id"].as_u64().expect("у группового сообщения есть id");
+    assert!(target != 0, "id проставлен отправителем");
+    assert!(ctx.gm_b.send_text_reply(&ctx.gid, "в семь", target, &a_hex));
+
+    let replied = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |a, _| {
+        a.history_json(&ctx.gid).contains("в семь")
+    });
+    assert!(replied, "ответ дошёл до A");
+    let hist_a: serde_json::Value = serde_json::from_str(&ctx.gm_a.history_json(&ctx.gid)).unwrap();
+    let reply = hist_a.as_array().unwrap().iter().find(|m| m["text"] == "в семь").unwrap();
+    assert_eq!(reply["reply_to"].as_u64(), Some(target));
+    assert_eq!(reply["reply_sender"], a_hex, "автор цитируемого — тот, на кого отвечали");
+
+    // A отзывает своё сообщение — оно исчезает и у B.
+    assert_eq!(ctx.gm_a.retract(&ctx.gid, &[target]), 1);
+    let gone = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
+        !b.history_json(&ctx.gid).contains("во сколько")
+    });
+    assert!(gone, "отозванное исчезло у участника");
+    assert!(!ctx.gm_a.history_json(&ctx.gid).contains("во сколько"), "и у автора тоже");
+}
+
+/// Отозвать ЧУЖОЕ сообщение нельзя: автор берётся из MLS, а не из тела пакета,
+/// иначе любой участник вычищал бы чужую переписку.
+#[test]
+fn group_retract_ignores_foreign_messages() {
+    let mut ctx = setup_and_join(0);
+    assert!(ctx.gm_a.send_text(&ctx.gid, "сообщение A"));
+    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
+        b.history_json(&ctx.gid).contains("сообщение A")
+    });
+    assert!(got);
+
+    let hist_b: serde_json::Value = serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
+    let foreign = hist_b.as_array().unwrap()[0]["id"].as_u64().unwrap();
+    assert_eq!(ctx.gm_b.retract(&ctx.gid, &[foreign]), 0, "B не отзывает чужое");
+    assert!(ctx.gm_a.history_json(&ctx.gid).contains("сообщение A"), "у автора всё на месте");
+
+    // Удалить у СЕБЯ — можно любое.
+    let a_hex = hex::encode(id(10).public_key_bytes());
+    assert_eq!(ctx.gm_b.delete_local(&ctx.gid, &[(foreign, a_hex)]), 1);
+    assert!(!ctx.gm_b.history_json(&ctx.gid).contains("сообщение A"), "у себя убрано");
+    assert!(ctx.gm_a.history_json(&ctx.gid).contains("сообщение A"), "у автора осталось");
+}

@@ -128,6 +128,15 @@ object Native {
      *  `личность:эпоха:адрес:подпись` (ADR-007). Возвращает "added"|"known"|"error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
 
+    /** Текст в группу ответом на сообщение автора `replySender` (hex). */
+    external fun groupSendTextReply(sessionPtr: Long, gidHex: String, text: String, replyTo: Long, replySender: String)
+
+    /** Удалить групповые сообщения у себя. `refsJson` = `[{"id":…,"sender":"hex"}]`. */
+    external fun groupDeleteMessages(sessionPtr: Long, gidHex: String, refsJson: String)
+
+    /** Отозвать свои групповые сообщения у участников. */
+    external fun groupRetractMessages(sessionPtr: Long, gidHex: String, idsJson: String)
+
     /** Текст ответом на сообщение (`replyTo` = 0 — обычное). Возвращает id или -1. */
     external fun sendTextReply(sessionPtr: Long, keyHex: String, text: String, replyTo: Long, replyMine: Boolean): Long
 

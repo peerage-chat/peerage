@@ -158,6 +158,8 @@ pub enum UiEvent {
     Ack { peer: String, id: u64 },
     /// Собеседник отозвал своё сообщение — строка исчезла из истории.
     Retracted { peer: String, id: u64 },
+    /// В группе кто-то отозвал сообщение — историю нужно перечитать.
+    GroupRetracted { gid: String },
     Undelivered { peer: String, id: u64 },
     ContactRequest { peer: String, new: bool },
     ContactsChanged,
