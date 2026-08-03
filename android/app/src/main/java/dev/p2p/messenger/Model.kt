@@ -124,7 +124,14 @@ data class GroupMsgRef(val id: Long, val sender: String)
 /** Идентичность пользователя (своя «визитка»). */
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
-data class Group(val gid: String, val name: String, val members: Int, val admin: Boolean = false)
+data class Group(
+    val gid: String,
+    val name: String,
+    val members: Int,
+    val admin: Boolean = false,
+    /** Группа восстановлена из копии: история есть, членства нет — только чтение. */
+    val archived: Boolean = false,
+)
 
 /** Входящее приглашение в группу (карточка на одобрение вместо тихого авто-входа). */
 data class GroupInvite(
@@ -2257,7 +2264,7 @@ class AppModel private constructor() {
 
     private fun refreshGroupsNow() {
         val list = decodeList<GroupRowDto>(Native.groupList(sessionPtr))
-            .map { Group(it.gid, it.name, it.members, it.admin) }
+            .map { Group(it.gid, it.name, it.members, it.admin, it.archived) }
         groups.clear()
         groups.addAll(list)
     }

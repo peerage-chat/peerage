@@ -575,8 +575,8 @@
     <string name="backup_n_attachments">%1$d файлов</string>
     <string name="backup_n_attachments_skipped">%1$d файлов · %2$d крупных не войдут</string>
     <string name="backup_big_hint">Крупные файлы в копию не помещаются, но их можно скачать у собеседника заново — они адресуются по содержимому.</string>
-    <string name="backup_groups_title">Группы не входят</string>
-    <string name="backup_groups_text">Копия возвращает то, что читать, а не то, чем расшифровывать. Восстановленное состояние группы устарело бы и сломало её для всех — после восстановления в группы приглашают заново.</string>
+    <string name="backup_groups_title">Членство в группах не входит</string>
+    <string name="backup_groups_text">Переписка групп в копию входит, а ключи — нет: копия возвращает то, что читать, а не то, чем расшифровывать. Восстановленное состояние группы устарело бы и сломало её для всех, поэтому группа откроется на чтение, а писать в неё можно будет после нового приглашения.</string>
     <string name="backup_next">Далее</string>
     <string name="backup_restore">Восстановить из копии</string>
     <string name="backup_pw_title">Отдельный пароль</string>
@@ -624,4 +624,7 @@
     <string name="saved_delete_note">Заметки только у вас — удаление ни у кого больше ничего не меняет.</string>
 
     <string name="group_invite_waiting">Вы согласились — ждём ответа пригласившего. Он придёт, как только тот появится в сети.</string>
+    <string name="backup_part_groups">Групповые чаты</string>
+    <string name="backup_n_group_messages">%1$d сообщений</string>
+    <string name="group_archived">Архив из копии · вы не состоите в этой группе</string>
 </resources>

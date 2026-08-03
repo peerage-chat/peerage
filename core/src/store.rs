@@ -943,6 +943,37 @@ impl MessageStore {
         rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
     }
 
+    /// Запомнить название чата (для групп — имя группы).
+    pub fn set_chat_title(&self, chat: Chat, name: &str) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "INSERT INTO chat_titles (chat, scope, name) VALUES (?1, ?2, ?3)
+             ON CONFLICT(chat, scope) DO UPDATE SET name = excluded.name",
+            rusqlite::params![chat.id(), chat.scope(), name],
+        )?;
+        Ok(())
+    }
+
+    /// Все известные названия чатов заданного вида: `(идентификатор, имя)`.
+    pub fn chat_titles(&self, scope: i64) -> Vec<(Vec<u8>, String)> {
+        let conn = db::lock(&self.db);
+        let mut stmt = match conn.prepare("SELECT chat, name FROM chat_titles WHERE scope=?1") {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map(rusqlite::params![scope], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Забыть название чата (группу удалили у себя).
+    pub fn forget_chat_title(&self, chat: Chat) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "DELETE FROM chat_titles WHERE chat=?1 AND scope=?2",
+            rusqlite::params![chat.id(), chat.scope()],
+        )?;
+        Ok(())
+    }
+
     /// Чаты заданного вида, где встречается этот блоб. Нужно после докачки: сама
     /// пометка ставится разом по контент-адресу, а перерисовать надо ровно те чаты,
     /// где вложение видно.

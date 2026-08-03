@@ -35,6 +35,19 @@ fn all() -> Parts {
     Parts { contacts: true, messages: true, groups: true, notes: true, calls: true, attachments: true }
 }
 
+/// Подождать условия: групповые команды исполняет актор в своём потоке, поэтому
+/// сразу после вызова читать результат рано.
+fn wait(secs: u64, mut cond: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    while std::time::Instant::now() < deadline {
+        if cond() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    cond()
+}
+
 /// Наполнить движок: контакт, переписка, заметка, вложение.
 fn fill(e: &Engine, peer: &[u8; 32]) {
     e.add_contact(peer, "Аня");
@@ -190,33 +203,74 @@ fn wrong_password_does_not_restore_anything() {
     assert!(hist.as_array().unwrap().is_empty(), "ничего не должно просочиться");
 }
 
+/// Граница, которую копия НЕ переходит: членство в группе. MLS-состояние в неё не
+/// входит (устаревший ратчет ломает группу), поэтому восстановленная группа — только
+/// архив: писать в неё нельзя, пока не позовут заново. Если это когда-нибудь
+/// изменится — тест обязан упасть первым.
 #[test]
-fn groups_are_not_promised_by_the_archive() {
-    // Явная фиксация границы: MLS-состояние в копию не входит (устаревший ратчет
-    // ломает группу). Если это когда-нибудь изменится — тест обязан упасть первым.
+fn restored_group_is_read_only() {
     let net = LoopbackNet::new();
     let a = start(&net, id(95), tmpdir("grp-src"));
     assert!(a.group_create("Тестовая"));
-    // Актор создаёт группу в своём потоке — дожидаемся, иначе проверка вырождается
-    // в «пустое не восстановилось из пустого».
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while std::time::Instant::now() < deadline {
-        let list: serde_json::Value = serde_json::from_str(&a.group_list_json()).unwrap();
-        if !list.as_array().unwrap().is_empty() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(30));
-    }
+    assert!(wait(10, || a.group_list_json().contains("Тестовая")), "группа у источника есть");
     let list: serde_json::Value = serde_json::from_str(&a.group_list_json()).unwrap();
-    assert_eq!(list.as_array().unwrap().len(), 1, "группа у источника есть");
     let gid = hex::decode(list[0]["gid"].as_str().unwrap()).unwrap();
-    a.group_send_text(gid, "сообщение в группе".into());
+    a.group_send_text(gid.clone(), "сообщение в группе".into());
+    assert!(wait(5, || a.group_history_json(&gid).contains("сообщение в группе")));
 
     let file = tmpdir("grp").join("copy.p2pbak");
     a.backup_export(&file, all(), "пк").unwrap();
 
     let b = start(&net, id(96), tmpdir("grp-dst"));
     b.backup_import(&file, "пк").unwrap();
-    let groups: serde_json::Value = serde_json::from_str(&b.group_list_json()).unwrap();
-    assert!(groups.as_array().unwrap().is_empty(), "группы не восстанавливаются из копии");
+
+    // Попытка написать в архивную группу ничего не меняет: MLS-состояния нет.
+    b.group_send_text(gid.clone(), "а я всё равно напишу".into());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let hist = b.group_history_json(&gid);
+    assert!(hist.contains("сообщение в группе"), "история из копии на месте");
+    assert!(!hist.contains("а я всё равно напишу"), "в архив писать нельзя: {hist}");
+}
+
+/// Групповая переписка входит в копию и переживает переезд на чистое устройство.
+/// Членство при этом НЕ восстанавливается (MLS-состояние в копию не входит, ADR-004),
+/// поэтому группа приезжает архивом: история читается, писать нельзя — и в списке она
+/// именно так и помечена. Раньше групп в копии не было вовсе: «восстановился — а
+/// групповых чатов нет».
+#[test]
+fn group_history_survives_backup_as_an_archive() {
+    let net = LoopbackNet::new();
+    let a = start(&net, id(87), tmpdir("gsrc"));
+    a.group_create("Поход");
+    // Команды группы исполняет актор в своём потоке — ждём, пока группа появится.
+    assert!(wait(5, || a.group_list_json().contains("Поход")), "группа создана");
+    let list: serde_json::Value = serde_json::from_str(&a.group_list_json()).unwrap();
+    let gid_hex = list[0]["gid"].as_str().expect("gid группы").to_string();
+    let gid = hex::decode(&gid_hex).unwrap();
+    a.group_send_text(gid.clone(), "выходим в семь".into());
+    assert!(
+        wait(5, || a.group_history_json(&gid).contains("выходим в семь")),
+        "сообщение записано в историю"
+    );
+
+    let file = tmpdir("gfile").join("groups.p2pbak");
+    let out = a.backup_export(&file, all(), "пароль").unwrap();
+    assert_eq!(out.group_messages, 1, "групповое сообщение попало в копию");
+
+    // Чистое устройство: ни группы, ни истории.
+    let b = start(&net, id(88), tmpdir("gdst"));
+    let got = b.backup_import(&file, "пароль").unwrap();
+    assert_eq!(got.group_messages, 1);
+
+    let hist = b.group_history_json(&gid);
+    assert!(hist.contains("выходим в семь"), "переписка группы восстановлена: {hist}");
+
+    let list: serde_json::Value = serde_json::from_str(&b.group_list_json()).unwrap();
+    let row = list
+        .as_array()
+        .and_then(|a| a.iter().find(|g| g["gid"] == gid_hex))
+        .expect("группа видна в списке");
+    assert_eq!(row["name"], "Поход", "имя приехало вместе с историей");
+    assert_eq!(row["archived"], true, "мы в ней не состоим — только чтение");
+    assert_eq!(row["members"], 0);
 }

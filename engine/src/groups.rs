@@ -315,6 +315,13 @@ impl GroupManager {
         let _ = self.messages.lock_safe().append(Chat::Group(gid), msg);
     }
 
+    /// Запомнить имя группы рядом с её перепиской. Нужно копии данных: MLS-состояние
+    /// в неё не входит, и после восстановления группа живёт архивом — история есть,
+    /// писать нельзя. Без имени она выглядела бы чатом с шестнадцатеричным id.
+    fn remember_title(&self, gid: &[u8], name: &str) {
+        let _ = self.messages.lock_safe().set_chat_title(Chat::Group(gid), name);
+    }
+
     fn load_all(&mut self) {
         let Ok(bytes) = std::fs::read(self.dir.join("index.json")) else { return };
         let Ok(idx) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else { return };
@@ -328,6 +335,7 @@ impl GroupManager {
                 }
                 self.migrate_msgs_file(&raw);
                 let admin = admins.contains(&raw);
+                self.remember_title(&raw, &name);
                 self.groups.insert(raw, Entry { chat, name, admin });
             }
         }
@@ -341,6 +349,7 @@ impl GroupManager {
         let id = chat.group_id()?;
         // Создатель = админ/секвенсор (ADR-004).
         self.groups.insert(id.clone(), Entry { chat, name: name.to_string(), admin: true });
+        self.remember_title(&id, name);
         self.save_group(&id);
         Some(id)
     }
@@ -862,6 +871,8 @@ impl GroupManager {
                         false
                     };
                     if changed {
+                        let name = self.groups.get(&gid).map(|e| e.name.clone()).unwrap_or_default();
+                        self.remember_title(&gid, &name);
                         self.save_group(&gid); // персист имени в index.json
                     }
                     GroupOutcome { gid: Some(gid.clone()), renamed: changed, ..Default::default() }
@@ -927,6 +938,7 @@ impl GroupManager {
                 let name = self.pending_join_name.take().unwrap_or_else(|| "Группа".into());
                 self.pending_invites.remove(&id);
                 self.save_pending_invites();
+                self.remember_title(&id, &name);
                 self.groups.insert(id.clone(), Entry { chat, name, admin: false });
                 self.save_group(&id);
                 return GroupOutcome { gid: Some(id), joined: true, ..Default::default() };
@@ -997,7 +1009,11 @@ impl GroupManager {
         self.groups.remove(id);
         let _ = std::fs::remove_file(self.group_path(id));
         let _ = std::fs::remove_file(self.msgs_path(id));
-        let _ = self.messages.lock_safe().clear(Chat::Group(id));
+        {
+            let store = self.messages.lock_safe();
+            let _ = store.clear(Chat::Group(id));
+            let _ = store.forget_chat_title(Chat::Group(id));
+        }
         self.save_index();
     }
 }

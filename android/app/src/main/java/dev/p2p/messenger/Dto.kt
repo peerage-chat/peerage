@@ -92,6 +92,8 @@ internal data class GroupRowDto(
     val name: String = "",
     val members: Int = 0,
     val admin: Boolean = false,
+    /** Мы не состоим в группе: история из копии, писать нельзя. */
+    val archived: Boolean = false,
 )
 
 @Serializable
@@ -192,6 +194,7 @@ internal data class StorageStatsDto(
 internal data class BackupStatsDto(
     val contacts: Long = 0,
     val messages: Long = 0,
+    @SerialName("group_messages") val groupMessages: Long = 0,
     val notes: Long = 0,
     val calls: Long = 0,
     val attachments: Long = 0,
@@ -207,6 +210,8 @@ internal data class BackupStatsDto(
 internal data class BackupPartsDto(
     val contacts: Boolean = true,
     val messages: Boolean = true,
+    /** Групповая переписка. Членство не восстанавливается — только история. */
+    val groups: Boolean = true,
     val notes: Boolean = true,
     val calls: Boolean = false,
     val attachments: Boolean = false,

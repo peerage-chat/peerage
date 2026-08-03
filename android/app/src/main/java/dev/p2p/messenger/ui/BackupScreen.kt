@@ -201,6 +201,14 @@ private fun PickParts(
         ) { onParts(parts.copy(messages = it)) }
 
         PartRow(
+            Icons.Filled.Groups,
+            stringResource(R.string.backup_part_groups),
+            stringResource(R.string.backup_n_group_messages, est.groupMessages),
+            null,
+            parts.groups,
+        ) { onParts(parts.copy(groups = it)) }
+
+        PartRow(
             Icons.Filled.Notes,
             stringResource(R.string.backup_part_notes),
             stringResource(R.string.backup_n_notes, est.notes),
@@ -236,7 +244,7 @@ private fun PickParts(
             )
         }
 
-        // Группы: не молчим об отсутствии, иначе человек узнает об этом после потери
+        // Про членство молчать нельзя: иначе человек узнает об этом после потери
         // телефона — в худший возможный момент.
         InfoCard(
             Icons.Filled.Groups,
@@ -245,7 +253,8 @@ private fun PickParts(
             warn = true,
         )
 
-        val any = parts.contacts || parts.messages || parts.notes || parts.calls || parts.attachments
+        val any = parts.contacts || parts.messages || parts.groups ||
+            parts.notes || parts.calls || parts.attachments
         AccentButton(stringResource(R.string.backup_next), Modifier.fillMaxWidth()) {
             if (any) onNext()
         }

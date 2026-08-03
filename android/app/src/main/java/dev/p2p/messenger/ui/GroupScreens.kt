@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -89,7 +90,15 @@ internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
                     Icon(Icons.Filled.Group, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(12.dp))
                     Text(g.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                    Text(stringResource(R.string.members_count, g.members), color = HoloSecondary, fontSize = 12.sp)
+                    Text(
+                        if (g.archived) {
+                            stringResource(R.string.group_archived)
+                        } else {
+                            stringResource(R.string.members_count, g.members)
+                        },
+                        color = HoloSecondary,
+                        fontSize = 12.sp,
+                    )
                 }
             }
         }
@@ -100,6 +109,7 @@ internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
 internal fun GroupChatScreen(model: AppModel) {
     val gid = model.currentGroup ?: return
     val msgs = model.groupMessages[gid] ?: emptyList()
+    val archived = model.groups.firstOrNull { it.gid == gid }?.archived == true
     var input by remember(gid) { mutableStateOf("") }
     var focusedParticipant by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
@@ -179,39 +189,51 @@ internal fun GroupChatScreen(model: AppModel) {
                     GroupMessageRow(model, m, pos)
                 }
             }
-            MessageInput(
-                value = input,
-                onChange = { input = it },
-                replyStrip = { model.groupReplyTarget?.let { GroupReplyStrip(model, it) } },
-                onPickFile = { filePicker.launch(arrayOf("*/*")) },
-                onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
-                onCamera = openCamera,
-                onSendAttachments = { list, caption ->
-                    // Подпись — только на первом вложении, как в DM: серия из пяти
-                    // фото с одной подписью на каждом читалась бы как спам.
-                    list.forEachIndexed { i, g ->
-                        sendGroupUriAttachment(
-                            ctx,
-                            model,
-                            gid,
-                            g.uri,
-                            scope,
-                            if (g.isVideo) "video.mp4" else "photo.jpg",
-                            caption = if (i == 0) caption else "",
-                        )
-                    }
-                },
-                recording = recording,
-                onVoiceStart = startVoice,
-                onVoiceStop = stopVoice,
-                model = model,
-                onSend = {
-                    if (input.isNotBlank()) {
-                        model.sendGroupText(gid, input)
-                        input = ""
-                    }
-                },
-            )
+            if (archived) {
+                // Группа из резервной копии: история есть, MLS-состояния нет (ADR-004).
+                // Показать поле ввода значило бы обещать отправку, которой не будет.
+                Text(
+                    stringResource(R.string.group_archived),
+                    color = HoloSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth().padding(Tokens.Space.m),
+                    textAlign = TextAlign.Center,
+                )
+            } else {
+                MessageInput(
+                    value = input,
+                    onChange = { input = it },
+                    replyStrip = { model.groupReplyTarget?.let { GroupReplyStrip(model, it) } },
+                    onPickFile = { filePicker.launch(arrayOf("*/*")) },
+                    onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
+                    onCamera = openCamera,
+                    onSendAttachments = { list, caption ->
+                        // Подпись — только на первом вложении, как в DM: серия из пяти
+                        // фото с одной подписью на каждом читалась бы как спам.
+                        list.forEachIndexed { i, g ->
+                            sendGroupUriAttachment(
+                                ctx,
+                                model,
+                                gid,
+                                g.uri,
+                                scope,
+                                if (g.isVideo) "video.mp4" else "photo.jpg",
+                                caption = if (i == 0) caption else "",
+                            )
+                        }
+                    },
+                    recording = recording,
+                    onVoiceStart = startVoice,
+                    onVoiceStop = stopVoice,
+                    model = model,
+                    onSend = {
+                        if (input.isNotBlank()) {
+                            model.sendGroupText(gid, input)
+                            input = ""
+                        }
+                    },
+                )
+            }
         }
         focusedParticipant?.let { key ->
             val isMe = key == "me"

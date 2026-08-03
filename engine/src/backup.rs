@@ -95,6 +95,16 @@ enum Rec {
     Contacts { items: Vec<Contact> },
     Messages { items: Vec<MsgRow> },
     Calls { items: Vec<CallRow> },
+    /// Названия групп. Без них восстановленная переписка называлась бы hex-строкой:
+    /// членство в копию не входит, и спросить имя будет не у кого.
+    Chats { items: Vec<ChatRow> },
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChatRow {
+    chat: String,
+    scope: i64,
+    name: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -303,6 +313,20 @@ impl Engine {
             }
         }
 
+        // Имена групп кладём вместе с их перепиской — это часть того же выбора.
+        if parts.groups {
+            let items: Vec<ChatRow> = self
+                .messages
+                .lock_safe()
+                .chat_titles(1)
+                .into_iter()
+                .map(|(gid, name)| ChatRow { chat: hex::encode(gid), scope: 1, name })
+                .collect();
+            if !items.is_empty() {
+                w.json(&Rec::Chats { items })?;
+            }
+        }
+
         if parts.calls {
             let rows: Vec<CallRow> = self
                 .calls
@@ -397,6 +421,16 @@ impl Engine {
                                         stats.messages += 1;
                                     }
                                 }
+                            }
+                        }
+                        Rec::Chats { items: list } => {
+                            let store = self.messages.lock_safe();
+                            for row in &list {
+                                let Ok(raw) = hex::decode(&row.chat) else { continue };
+                                if row.scope != 1 {
+                                    continue;
+                                }
+                                let _ = store.set_chat_title(Chat::Group(&raw), &row.name);
                             }
                         }
                         Rec::Calls { items: list } => {

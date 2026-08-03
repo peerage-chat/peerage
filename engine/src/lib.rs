@@ -119,6 +119,22 @@ pub struct MediaInfo {
 /// одним JSON) нельзя. Остальное клиент дозапрашивает страницами вверх.
 pub const HISTORY_PAGE: usize = 200;
 
+/// Строка списка групп в том виде, в каком её читает клиент. Живёт здесь, потому
+/// что список склеивается из двух источников: ростер MLS (слой групп) и архивные
+/// группы из базы.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct GroupRowJson {
+    gid: String,
+    name: String,
+    #[serde(default)]
+    members: usize,
+    #[serde(default)]
+    admin: bool,
+    /// Мы НЕ состоим в группе: история из копии, отправка недоступна.
+    #[serde(default)]
+    archived: bool,
+}
+
 /// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
 /// Не видели маячок дольше — участник считается вышедшим (страховка на вылет/потерю
@@ -1370,9 +1386,21 @@ impl Engine {
         }
     }
 
+    /// Список групп для клиента: живые (мы в них состоим) плюс АРХИВНЫЕ — те, чья
+    /// переписка есть в базе, а членства нет. Архив появляется после восстановления
+    /// копии: сообщения в неё входят, MLS-состояние — нет (ADR-004), поэтому читать
+    /// такую группу можно, а писать в неё нельзя, пока не позовут заново.
     pub fn group_list_json(&self) -> String {
-        let s = self.group_cache.lock_safe().list.clone();
-        if s.is_empty() { "[]".into() } else { s }
+        let cached = self.group_cache.lock_safe().list.clone();
+        let mut rows: Vec<GroupRowJson> = serde_json::from_str(&cached).unwrap_or_default();
+        let live: std::collections::HashSet<String> = rows.iter().map(|r| r.gid.clone()).collect();
+        for (gid, name) in self.messages.lock_safe().chat_titles(1) {
+            let hex = hex::encode(&gid);
+            if !live.contains(&hex) {
+                rows.push(GroupRowJson { gid: hex, name, members: 0, admin: false, archived: true });
+            }
+        }
+        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
     }
 
     /// Хвост истории группы — из общего хранилища, без кэша: раньше кэш жил в
