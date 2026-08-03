@@ -95,8 +95,15 @@ data class Message(
     /** id сообщения, на которое это ответ (0 — обычное). Цитата рисуется из истории
      *  по ссылке (ADR-006), а не хранится копией текста. */
     val replyTo: Long = 0,
-    /** Чьё цитируемое сообщение — вместе с [replyTo] даёт ключ строки истории. */
-    val replyMine: Boolean = false,
+    /** hex автора: вместе с [id] — ссылка на сообщение. Читается одинаково в личном
+     *  чате и в группе, поэтому «моё/чужое» больше не часть ключа. */
+    val sender: String = "",
+    /** hex автора цитируемого сообщения (пусто — обычное). */
+    val replySender: String = "",
+    /** Системная строка (смена состава группы). */
+    val system: Boolean = false,
+    /** Курсор пагинации: номер строки в базе движка (0 — запись создана локально). */
+    val row: Long = 0,
 )
 
 /**
@@ -1296,6 +1303,13 @@ class AppModel private constructor() {
     private fun log(key: String): SnapshotStateList<Message> =
         messages.getOrPut(key) { mutableListOf<Message>().toMutableStateList() }
 
+    /** hex автора цитируемого сообщения: «моё» — это я, иначе собеседник. */
+    private fun replyAuthor(peerKey: String, reply: Message?): String = when {
+        reply == null -> ""
+        reply.mine -> me?.pubkey.orEmpty()
+        else -> peerKey
+    }
+
     fun send(key: String, text: String) {
         if (text.isBlank()) return
         // Цель ответа снимаем СРАЗУ: пользователь уже нажал «отправить», и оставленная
@@ -1321,7 +1335,8 @@ class AppModel private constructor() {
                         time = now,
                         status = "pending",
                         replyTo = reply?.id ?: 0,
-                        replyMine = reply?.mine ?: false,
+                        sender = me?.pubkey.orEmpty(),
+                        replySender = replyAuthor(key, reply),
                     ),
                 )
             } else {
@@ -1335,7 +1350,8 @@ class AppModel private constructor() {
                         time = now,
                         status = "queued",
                         replyTo = reply?.id ?: 0,
-                        replyMine = reply?.mine ?: false,
+                        sender = me?.pubkey.orEmpty(),
+                        replySender = replyAuthor(key, reply),
                     ),
                 )
                 enqueueOffline(key, text, now)
@@ -1632,7 +1648,16 @@ class AppModel private constructor() {
                         time = ev.time,
                         status = "",
                         replyTo = ev.replyTo,
-                        replyMine = ev.replyMine,
+                        sender = ev.peer,
+                        // На проводе «чьё» едет флагом с точки зрения отправителя, и
+                        // движок его уже перевернул: true здесь значит «моё».
+                        replySender = if (ev.replyTo == 0L) {
+                            ""
+                        } else if (ev.replyMine) {
+                            me?.pubkey.orEmpty()
+                        } else {
+                            ev.peer
+                        },
                     ),
                 )
                 if (currentChat != ev.peer) unread[ev.peer] = (unread[ev.peer] ?: 0) + 1

@@ -641,9 +641,43 @@ impl GateStore {
 
 // ---- История сообщений -----------------------------------------------------
 
+/// Где живёт сообщение. Личный чат и «Сохранённое» — один и тот же вид (во втором
+/// собеседник это ты сам), группа — другой: там авторов много, и строку истории без
+/// явного автора не адресовать.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chat<'a> {
+    Dm(&'a [u8; 32]),
+    Group(&'a [u8]),
+}
+
+impl<'a> Chat<'a> {
+    /// Идентификатор чата в базе: ключ собеседника или gid.
+    pub fn id(self) -> &'a [u8] {
+        match self {
+            Chat::Dm(k) => k.as_slice(),
+            Chat::Group(g) => g,
+        }
+    }
+
+    /// 0 — личный чат, 1 — группа. Хранится отдельно от идентификатора: длина не
+    /// признак, и правило «32 байта значит пир» однажды обернётся группой,
+    /// притворившейся чатом.
+    pub fn scope(self) -> i64 {
+        match self {
+            Chat::Dm(_) => 0,
+            Chat::Group(_) => 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoredMessage {
     pub id: u64,
+    /// hex-ключ автора. Ссылка на сообщение — пара «автор + id» (ADR-006), и в
+    /// личном чате, и в группе она читается одинаково; `mine` рядом — лишь удобный
+    /// для UI ярлык «моё», а не часть ключа.
+    #[serde(default)]
+    pub sender: String,
     pub text: String,
     pub mine: bool,
     pub time: i64,
@@ -683,32 +717,95 @@ pub struct StoredMessage {
     /// или удаление оригинала не оставляет расходящегося дубля текста.
     #[serde(default)]
     pub reply_to: u64,
-    /// Чьё цитируемое сообщение — наше или собеседника. Вместе с `reply_to` даёт
-    /// полный ключ строки истории `(peer, id, mine)`.
+    /// hex-ключ автора цитируемого сообщения (пусто — обычное сообщение).
     #[serde(default)]
-    pub reply_mine: bool,
+    pub reply_sender: String,
+    /// Системная строка (смена состава группы) — рисуется не пузырём.
+    #[serde(default)]
+    pub system: bool,
+    /// Курсор пагинации: номер строки в ЛОКАЛЬНОЙ базе. Только на чтение — при
+    /// записи игнорируется, на другом устройстве он свой.
+    #[serde(default)]
+    pub row: i64,
+}
+
+/// Колонки истории в порядке, который ждёт [`read_msg`]. Один список на все
+/// запросы: разъехавшийся порядок здесь — это молча перепутанные поля.
+const MSG_COLS: &str = "rowid, id, sender, mine, text, time, status, kind, blob_id, mime, name,
+     size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender, system";
+
+fn read_msg(row: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
+    read_msg_offset(row, 0)
+}
+
+/// Вложение из истории: чем занято место и в каком чате.
+#[derive(Debug, Clone)]
+pub struct Attachment {
+    pub chat: Vec<u8>,
+    pub scope: i64,
+    pub blob_id: String,
+    pub kind: String,
+    pub size: i64,
 }
 
 /// SQLite-хранилище сообщений без кэша — каждый вызов делает SQL-запрос.
+/// Личные чаты, «Сохранённое» и группы лежат в ОДНОЙ таблице: разные хранилища
+/// означали бы, что каждая фича чата пишется дважды (и однажды — по-разному).
 pub struct MessageStore {
     db: Db,
 }
 
 impl MessageStore {
-    /// Открыть хранилище. Если `legacy` указывает на существующий messages.json,
-    /// импортирует оттуда данные и переименовывает файл в .bak.
-    pub fn open(db: Db, legacy: Option<&Path>) -> Result<Self, StoreError> {
+    /// Открыть хранилище. `me` нужен, чтобы у старых строк (где автор кодировался
+    /// флагом `mine`) появился явный автор. Если `legacy` указывает на существующий
+    /// messages.json, импортирует оттуда данные и переименовывает файл в .bak.
+    pub fn open(db: Db, legacy: Option<&Path>, me: &[u8; 32]) -> Result<Self, StoreError> {
         let store = MessageStore { db };
+        store.migrate_legacy_table(me)?;
         if let Some(path) = legacy {
             if path.exists() {
-                store.import_json(path)?;
+                store.import_json(path, me)?;
                 let _ = std::fs::rename(path, path.with_extension("json.bak"));
             }
         }
         Ok(store)
     }
 
-    fn import_json(&self, path: &Path) -> Result<(), StoreError> {
+    /// Перелить историю из таблицы `messages` (личные чаты, автор = флаг `mine`) в
+    /// общую `chat_messages` и убрать старую. Разово: после переноса таблицы нет.
+    fn migrate_legacy_table(&self, me: &[u8; 32]) -> Result<(), StoreError> {
+        let conn = db::lock(&self.db);
+        let exists = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
+        if !exists {
+            return Ok(());
+        }
+        let me_hex = hex::encode(me);
+        conn.execute(
+            "INSERT OR IGNORE INTO chat_messages
+                 (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
+                  size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender, system)
+             SELECT peer, 0, id,
+                    CASE mine WHEN 1 THEN ?1 ELSE lower(hex(peer)) END,
+                    mine, text, time, status, kind, blob_id, mime, name,
+                    size, duration_ms, width, height, thumb_id, downloaded, reply_to,
+                    CASE WHEN reply_to = 0 THEN ''
+                         WHEN reply_mine = 1 THEN ?1
+                         ELSE lower(hex(peer)) END,
+                    0
+             FROM messages",
+            rusqlite::params![me_hex],
+        )?;
+        conn.execute("DROP TABLE messages", [])?;
+        Ok(())
+    }
+
+    fn import_json(&self, path: &Path, me: &[u8; 32]) -> Result<(), StoreError> {
         #[derive(Deserialize)]
         struct LegacyFile {
             log: std::collections::BTreeMap<String, Vec<StoredMessage>>,
@@ -723,15 +820,18 @@ impl MessageStore {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
+        let me_hex = hex::encode(me);
         let conn = db::lock(&self.db);
         for (peer_hex, msgs) in &lf.log {
             let peer = match decode_key(peer_hex) { Ok(k) => k, Err(_) => continue };
             for m in msgs {
+                let sender = if m.mine { &me_hex } else { peer_hex };
                 conn.execute(
-                    "INSERT OR IGNORE INTO messages (peer, id, mine, text, time, status)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    "INSERT OR IGNORE INTO chat_messages
+                         (chat, scope, id, sender, mine, text, time, status)
+                     VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7)",
                     rusqlite::params![
-                        peer.as_slice(), m.id as i64, m.mine as i64,
+                        peer.as_slice(), m.id as i64, sender, m.mine as i64,
                         &m.text, m.time, &m.status,
                     ],
                 )?;
@@ -740,144 +840,162 @@ impl MessageStore {
         Ok(())
     }
 
-    pub fn append(&self, peer: &[u8; 32], msg: StoredMessage) -> Result<(), StoreError> {
+    pub fn append(&self, chat: Chat, msg: &StoredMessage) -> Result<(), StoreError> {
         db::lock(&self.db).execute(
-            "INSERT OR REPLACE INTO messages
-                 (peer, id, mine, text, time, status, kind, blob_id, mime, name,
-                  size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_mine)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            "INSERT OR REPLACE INTO chat_messages
+                 (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
+                  size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
+                  system)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                     ?18, ?19, ?20, ?21)",
             rusqlite::params![
-                peer.as_slice(), msg.id as i64, msg.mine as i64,
+                chat.id(), chat.scope(), msg.id as i64, &msg.sender, msg.mine as i64,
                 &msg.text, msg.time, &msg.status,
                 &msg.kind, &msg.blob_id, &msg.mime, &msg.name,
                 msg.size as i64, msg.duration_ms as i64, msg.width as i64, msg.height as i64,
                 &msg.thumb_id, msg.downloaded as i64,
-                msg.reply_to as i64, msg.reply_mine as i64,
+                msg.reply_to as i64, &msg.reply_sender, msg.system as i64,
             ],
         )?;
         Ok(())
     }
 
     /// Пометить вложение скачанным (байты блоба доехали). Ищем по контент-адресу, а
-    /// не по (peer,id): один и тот же файл может быть в нескольких чатах — дедуп
+    /// не по ключу строки: один и тот же файл может быть в нескольких чатах — дедуп
     /// контент-адресации означает, что скачан он сразу для всех.
     pub fn mark_downloaded(&self, blob_id: &str) -> Result<usize, StoreError> {
         let n = db::lock(&self.db).execute(
-            "UPDATE messages SET downloaded=1 WHERE blob_id=?1",
+            "UPDATE chat_messages SET downloaded=1 WHERE blob_id=?1",
             rusqlite::params![blob_id],
         )?;
         Ok(n)
     }
 
-    pub fn set_status(&self, peer: &[u8; 32], id: u64, status: &str) -> Result<bool, StoreError> {
+    /// Статус доставки — только у СВОИХ сообщений (у чужих его не бывает).
+    pub fn set_status(&self, chat: Chat, id: u64, status: &str) -> Result<bool, StoreError> {
         let n = db::lock(&self.db).execute(
-            "UPDATE messages SET status=?1 WHERE peer=?2 AND id=?3 AND mine=1",
-            rusqlite::params![status, peer.as_slice(), id as i64],
+            "UPDATE chat_messages SET status=?1 WHERE chat=?2 AND scope=?3 AND id=?4 AND mine=1",
+            rusqlite::params![status, chat.id(), chat.scope(), id as i64],
         )?;
         Ok(n > 0)
     }
 
-    /// Есть ли уже сообщение (peer, id, mine) — для дедупа повторной доставки
-    /// (офлайн-досылка со стабильным id приходит дважды).
-    pub fn contains(&self, peer: &[u8; 32], id: u64, mine: bool) -> bool {
+    /// Есть ли уже такое сообщение — для дедупа повторной доставки (офлайн-досылка
+    /// со стабильным id приходит дважды).
+    pub fn contains(&self, chat: Chat, sender: &str, id: u64) -> bool {
         db::lock(&self.db)
             .query_row(
-                "SELECT 1 FROM messages WHERE peer=?1 AND id=?2 AND mine=?3",
-                rusqlite::params![peer.as_slice(), id as i64, mine as i64],
+                "SELECT 1 FROM chat_messages WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4",
+                rusqlite::params![chat.id(), chat.scope(), sender, id as i64],
                 |_| Ok(()),
             )
             .is_ok()
     }
 
     /// Удалить одно сообщение (нужно «Сохранённому»: заметку выкидывают точечно).
-    pub fn delete_one(&self, peer: &[u8; 32], id: u64, mine: bool) -> Result<(), StoreError> {
-        let conn = db::lock(&self.db);
-        conn.execute(
-            "DELETE FROM messages WHERE peer = ?1 AND id = ?2 AND mine = ?3",
-            rusqlite::params![peer.as_slice(), id as i64, mine as i64],
+    pub fn delete_one(&self, chat: Chat, sender: &str, id: u64) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "DELETE FROM chat_messages WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4",
+            rusqlite::params![chat.id(), chat.scope(), sender, id as i64],
         )?;
         Ok(())
     }
 
-    /// Удалить несколько сообщений одним махом. Возвращает, сколько строк удалено.
+    /// Удалить несколько сообщений одним махом: `(id, hex автора)`. Возвращает,
+    /// сколько строк удалено.
     ///
     /// Именно пачкой, а не циклом `delete_one`: выделение нескольких — обычный
     /// сценарий, а каждый отдельный `execute` это отдельная транзакция SQLite.
-    pub fn delete_many(&self, peer: &[u8; 32], refs: &[(u64, bool)]) -> Result<usize, StoreError> {
+    pub fn delete_many(&self, chat: Chat, refs: &[(u64, String)]) -> Result<usize, StoreError> {
         let mut conn = db::lock(&self.db);
         let tx = conn.transaction()?;
         let mut n = 0;
-        for (id, mine) in refs {
+        for (id, sender) in refs {
             n += tx.execute(
-                "DELETE FROM messages WHERE peer = ?1 AND id = ?2 AND mine = ?3",
-                rusqlite::params![peer.as_slice(), *id as i64, *mine as i64],
+                "DELETE FROM chat_messages WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4",
+                rusqlite::params![chat.id(), chat.scope(), sender, *id as i64],
             )?;
         }
         tx.commit()?;
         Ok(n)
     }
 
-    /// Вложения всех чатов: (пир, blob_id, kind, размер). Нужна экрану «Хранилище»,
-    /// чтобы показать, ЧТО занимает место и в каком чате, а не только общую цифру.
-    pub fn attachments(&self) -> Vec<([u8; 32], String, String, i64)> {
+    /// Вложения всех чатов. Нужна экрану «Хранилище», чтобы показать, ЧТО занимает
+    /// место и в каком чате, а не только общую цифру.
+    pub fn attachments(&self) -> Vec<Attachment> {
         let conn = db::lock(&self.db);
         let mut stmt = match conn.prepare(
-            "SELECT peer, blob_id, kind, size FROM messages WHERE blob_id <> '' ORDER BY time DESC",
+            "SELECT chat, scope, blob_id, kind, size FROM chat_messages
+             WHERE blob_id <> '' ORDER BY time DESC",
         ) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
         let rows = stmt.query_map([], |r| {
-            let peer: Vec<u8> = r.get(0)?;
-            Ok((
-                <[u8; 32]>::try_from(peer.as_slice()).unwrap_or([0u8; 32]),
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, i64>(3)?,
-            ))
+            Ok(Attachment {
+                chat: r.get(0)?,
+                scope: r.get(1)?,
+                blob_id: r.get(2)?,
+                kind: r.get(3)?,
+                size: r.get(4)?,
+            })
         });
         rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
     }
 
-    pub fn history(&self, peer: &[u8; 32]) -> Vec<StoredMessage> {
+    /// Чаты заданного вида, где встречается этот блоб. Нужно после докачки: сама
+    /// пометка ставится разом по контент-адресу, а перерисовать надо ровно те чаты,
+    /// где вложение видно.
+    pub fn chats_with_blob(&self, scope: i64, blob_id: &str) -> Vec<Vec<u8>> {
         let conn = db::lock(&self.db);
         let mut stmt = match conn.prepare(
-            "SELECT id, text, mine, time, status, kind, blob_id, mime, name,
-                    size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_mine
-             FROM messages WHERE peer=?1 ORDER BY time, id",
+            "SELECT DISTINCT chat FROM chat_messages WHERE scope=?1 AND blob_id=?2",
         ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map(rusqlite::params![scope, blob_id], |r| r.get::<_, Vec<u8>>(0))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Страница истории чата, старые первыми. `before` — курсор `(time, row)` из
+    /// самого верхнего уже показанного сообщения; `None` — самый хвост переписки.
+    ///
+    /// Страницами, а не «весь чат сразу»: переписка бывает в сотни тысяч строк, и
+    /// открытие чата не должно поднимать её в память целиком (и гнать через JNI).
+    /// Курсор двойной, потому что время не уникально: сообщения одной секунды при
+    /// курсоре только по времени либо потерялись бы, либо пришли дважды.
+    pub fn history(&self, chat: Chat, before: Option<(i64, i64)>, limit: usize) -> Vec<StoredMessage> {
+        let conn = db::lock(&self.db);
+        let sql = format!(
+            "SELECT {MSG_COLS} FROM chat_messages
+             WHERE chat=?1 AND scope=?2 AND (?3 = 0 OR (time, rowid) < (?4, ?5))
+             ORDER BY time DESC, rowid DESC LIMIT ?6"
+        );
+        let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        stmt.query_map(rusqlite::params![peer.as_slice()], |row| {
-            Ok(StoredMessage {
-                id: row.get::<_, i64>(0)? as u64,
-                text: row.get(1)?,
-                mine: row.get::<_, i64>(2)? != 0,
-                time: row.get(3)?,
-                status: row.get(4)?,
-                kind: row.get(5)?,
-                blob_id: row.get(6)?,
-                mime: row.get(7)?,
-                name: row.get(8)?,
-                size: row.get::<_, i64>(9)? as u64,
-                duration_ms: row.get::<_, i64>(10)? as u32,
-                width: row.get::<_, i64>(11)? as u32,
-                height: row.get::<_, i64>(12)? as u32,
-                thumb_id: row.get(13)?,
-                downloaded: row.get::<_, i64>(14)? != 0,
-                reply_to: row.get::<_, i64>(15)? as u64,
-                reply_mine: row.get::<_, i64>(16)? != 0,
-            })
-        })
-        .and_then(|rows| rows.collect())
-        .unwrap_or_default()
+        let (has_cursor, t, r) = match before {
+            Some((t, r)) => (1i64, t, r),
+            None => (0i64, 0, 0),
+        };
+        let mut rows: Vec<StoredMessage> = stmt
+            .query_map(
+                rusqlite::params![chat.id(), chat.scope(), has_cursor, t, r, limit as i64],
+                read_msg,
+            )
+            .and_then(|rows| rows.collect())
+            .unwrap_or_default();
+        rows.reverse(); // наружу — как в чате: старые сверху
+        rows
     }
 
-    pub fn clear(&self, peer: &[u8; 32]) -> Result<(), StoreError> {
+    pub fn clear(&self, chat: Chat) -> Result<(), StoreError> {
         db::lock(&self.db).execute(
-            "DELETE FROM messages WHERE peer=?1",
-            rusqlite::params![peer.as_slice()],
+            "DELETE FROM chat_messages WHERE chat=?1 AND scope=?2",
+            rusqlite::params![chat.id(), chat.scope()],
         )?;
         Ok(())
     }
@@ -885,50 +1003,30 @@ impl MessageStore {
     /// Сколько сообщений всего (для оценки объёма копии до её создания).
     pub fn count(&self) -> u64 {
         db::lock(&self.db)
-            .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get::<_, i64>(0))
+            .query_row("SELECT COUNT(*) FROM chat_messages", [], |r| r.get::<_, i64>(0))
             .unwrap_or(0) as u64
     }
 
-    /// Страница истории ВСЕХ чатов для резервной копии: `(rowid, пир, сообщение)`.
+    /// Страница истории ВСЕХ чатов для резервной копии: `(rowid, чат, вид, сообщение)`.
     ///
     /// Постранично и по `rowid`, а не «все сразу»: переписка бывает в сотни тысяч
     /// строк, и держать её в памяти целиком на телефоне нельзя. `rowid` растёт
     /// монотонно, поэтому курсор переживает вставки во время обхода.
-    pub fn export_page(&self, after: i64, limit: usize) -> Vec<(i64, [u8; 32], StoredMessage)> {
+    pub fn export_page(&self, after: i64, limit: usize) -> Vec<(i64, Vec<u8>, i64, StoredMessage)> {
         let conn = db::lock(&self.db);
-        let mut stmt = match conn.prepare(
-            "SELECT rowid, peer, id, text, mine, time, status, kind, blob_id, mime, name,
-                    size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_mine
-             FROM messages WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
-        ) {
+        let sql = format!(
+            "SELECT chat, scope, {MSG_COLS} FROM chat_messages WHERE rowid > ?1 ORDER BY rowid LIMIT ?2"
+        );
+        let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
         stmt.query_map(rusqlite::params![after, limit as i64], |row| {
-            let peer: Vec<u8> = row.get(1)?;
-            Ok((
-                row.get::<_, i64>(0)?,
-                <[u8; 32]>::try_from(peer.as_slice()).unwrap_or([0u8; 32]),
-                StoredMessage {
-                    id: row.get::<_, i64>(2)? as u64,
-                    text: row.get(3)?,
-                    mine: row.get::<_, i64>(4)? != 0,
-                    time: row.get(5)?,
-                    status: row.get(6)?,
-                    kind: row.get(7)?,
-                    blob_id: row.get(8)?,
-                    mime: row.get(9)?,
-                    name: row.get(10)?,
-                    size: row.get::<_, i64>(11)? as u64,
-                    duration_ms: row.get::<_, i64>(12)? as u32,
-                    width: row.get::<_, i64>(13)? as u32,
-                    height: row.get::<_, i64>(14)? as u32,
-                    thumb_id: row.get(15)?,
-                    downloaded: row.get::<_, i64>(16)? != 0,
-                    reply_to: row.get::<_, i64>(17)? as u64,
-                    reply_mine: row.get::<_, i64>(18)? != 0,
-                },
-            ))
+            let chat: Vec<u8> = row.get(0)?;
+            let scope: i64 = row.get(1)?;
+            // Дальше идут MSG_COLS, сдвинутые на две колонки: rowid у них первый.
+            let msg = read_msg_offset(row, 2)?;
+            Ok((msg.row, chat, scope, msg))
         })
         .and_then(|rows| rows.collect())
         .unwrap_or_default()
@@ -937,23 +1035,53 @@ impl MessageStore {
     /// Вставить сообщение из копии, НЕ трогая уже существующее (`INSERT OR IGNORE`).
     ///
     /// Восстановление — слияние, а не замена: то, что пришло после снятия копии,
-    /// новее и потерять его нельзя. Ключ (пир, id, mine) один и тот же на обоих
+    /// новее и потерять его нельзя. Ключ (чат, вид, автор, id) один и тот же на обоих
     /// концах, поэтому повторный импорт того же файла ничего не задваивает.
-    pub fn import_message(&self, peer: &[u8; 32], m: &StoredMessage) -> Result<bool, StoreError> {
+    pub fn import_message(&self, chat: Chat, m: &StoredMessage) -> Result<bool, StoreError> {
         let n = db::lock(&self.db).execute(
-            "INSERT OR IGNORE INTO messages
-                 (peer, id, mine, text, time, status, kind, blob_id, mime, name,
-                  size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_mine)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            "INSERT OR IGNORE INTO chat_messages
+                 (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
+                  size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
+                  system)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                     ?18, ?19, ?20, ?21)",
             rusqlite::params![
-                peer.as_slice(), m.id as i64, m.mine as i64, &m.text, m.time, &m.status,
-                &m.kind, &m.blob_id, &m.mime, &m.name, m.size as i64, m.duration_ms as i64,
-                m.width as i64, m.height as i64, &m.thumb_id, m.downloaded as i64,
-                m.reply_to as i64, m.reply_mine as i64,
+                chat.id(), chat.scope(), m.id as i64, &m.sender, m.mine as i64,
+                &m.text, m.time, &m.status,
+                &m.kind, &m.blob_id, &m.mime, &m.name,
+                m.size as i64, m.duration_ms as i64, m.width as i64, m.height as i64,
+                &m.thumb_id, m.downloaded as i64,
+                m.reply_to as i64, &m.reply_sender, m.system as i64,
             ],
         )?;
         Ok(n > 0)
     }
+}
+
+/// То же, что [`read_msg`], но колонки начинаются не с нуля.
+fn read_msg_offset(row: &rusqlite::Row, off: usize) -> rusqlite::Result<StoredMessage> {
+    Ok(StoredMessage {
+        row: row.get(off)?,
+        id: row.get::<_, i64>(off + 1)? as u64,
+        sender: row.get(off + 2)?,
+        mine: row.get::<_, i64>(off + 3)? != 0,
+        text: row.get(off + 4)?,
+        time: row.get(off + 5)?,
+        status: row.get(off + 6)?,
+        kind: row.get(off + 7)?,
+        blob_id: row.get(off + 8)?,
+        mime: row.get(off + 9)?,
+        name: row.get(off + 10)?,
+        size: row.get::<_, i64>(off + 11)? as u64,
+        duration_ms: row.get::<_, i64>(off + 12)? as u32,
+        width: row.get::<_, i64>(off + 13)? as u32,
+        height: row.get::<_, i64>(off + 14)? as u32,
+        thumb_id: row.get(off + 15)?,
+        downloaded: row.get::<_, i64>(off + 16)? != 0,
+        reply_to: row.get::<_, i64>(off + 17)? as u64,
+        reply_sender: row.get(off + 18)?,
+        system: row.get::<_, i64>(off + 19)? != 0,
+    })
 }
 
 // ---- Утилиты ---------------------------------------------------------------
@@ -1222,17 +1350,21 @@ mod tests {
         assert_eq!(store.transport_of(&k), None);
     }
 
+    /// Сообщение в личном чате: автор проставлен явно, статус меняется у своего.
     #[test]
     fn messages_append_status_history() {
         let peer = key();
-        let store = MessageStore::open(db(), None).unwrap();
-        store.append(&peer, StoredMessage { id: 1, text: "hi".into(), mine: true,  time: 10, status: "sent".into(), ..Default::default() }).unwrap();
-        store.append(&peer, StoredMessage { id: 5, text: "yo".into(), mine: false, time: 11, status: "".into(), ..Default::default() }).unwrap();
-        assert!(store.set_status(&peer, 1, "delivered").unwrap());
+        let me = key();
+        let store = MessageStore::open(db(), None, &me).unwrap();
+        let (me_hex, peer_hex) = (hex::encode(me), hex::encode(peer));
+        store.append(Chat::Dm(&peer), &StoredMessage { id: 1, sender: me_hex.clone(), text: "hi".into(), mine: true,  time: 10, status: "sent".into(), ..Default::default() }).unwrap();
+        store.append(Chat::Dm(&peer), &StoredMessage { id: 5, sender: peer_hex, text: "yo".into(), mine: false, time: 11, status: "".into(), ..Default::default() }).unwrap();
+        assert!(store.set_status(Chat::Dm(&peer), 1, "delivered").unwrap());
 
-        let h = store.history(&peer);
+        let h = store.history(Chat::Dm(&peer), None, 50);
         assert_eq!(h.len(), 2);
         assert_eq!(h[0].status, "delivered");
+        assert_eq!(h[0].sender, me_hex);
         assert_eq!(h[1].text, "yo");
         assert!(!h[1].mine);
     }
@@ -1240,10 +1372,124 @@ mod tests {
     #[test]
     fn messages_clear() {
         let peer = key();
-        let store = MessageStore::open(db(), None).unwrap();
-        store.append(&peer, StoredMessage { id: 1, text: "x".into(), mine: true, time: 0, status: "".into(), ..Default::default() }).unwrap();
-        store.clear(&peer).unwrap();
-        assert!(store.history(&peer).is_empty());
+        let me = key();
+        let store = MessageStore::open(db(), None, &me).unwrap();
+        store.append(Chat::Dm(&peer), &StoredMessage { id: 1, sender: hex::encode(me), text: "x".into(), mine: true, time: 0, status: "".into(), ..Default::default() }).unwrap();
+        store.clear(Chat::Dm(&peer)).unwrap();
+        assert!(store.history(Chat::Dm(&peer), None, 50).is_empty());
+    }
+
+    /// Группа и личный чат не смешиваются, даже если идентификатор совпал: вид
+    /// чата — часть ключа, а не догадка по длине.
+    #[test]
+    fn group_and_dm_histories_are_separate() {
+        let id32 = key();
+        let me = key();
+        let store = MessageStore::open(db(), None, &me).unwrap();
+        let me_hex = hex::encode(me);
+        store.append(Chat::Dm(&id32), &StoredMessage { id: 1, sender: me_hex.clone(), text: "личное".into(), mine: true, time: 1, ..Default::default() }).unwrap();
+        store.append(Chat::Group(&id32), &StoredMessage { id: 1, sender: me_hex.clone(), text: "групповое".into(), mine: true, time: 1, ..Default::default() }).unwrap();
+
+        let dm = store.history(Chat::Dm(&id32), None, 50);
+        let gr = store.history(Chat::Group(&id32), None, 50);
+        assert_eq!(dm.len(), 1);
+        assert_eq!(gr.len(), 1);
+        assert_eq!(dm[0].text, "личное");
+        assert_eq!(gr[0].text, "групповое");
+    }
+
+    /// Разные авторы с одинаковым id — разные сообщения (в группе id уникален лишь
+    /// в пределах отправителя). Раньше ключ был (чат, id, моё) и такое затирало бы.
+    #[test]
+    fn same_id_from_different_senders_coexists() {
+        let gid = vec![7u8; 16];
+        let (me, other) = (key(), key());
+        let store = MessageStore::open(db(), None, &me).unwrap();
+        store.append(Chat::Group(&gid), &StoredMessage { id: 42, sender: hex::encode(me), text: "моё".into(), mine: true, time: 1, ..Default::default() }).unwrap();
+        store.append(Chat::Group(&gid), &StoredMessage { id: 42, sender: hex::encode(other), text: "чужое".into(), mine: false, time: 2, ..Default::default() }).unwrap();
+        assert_eq!(store.history(Chat::Group(&gid), None, 50).len(), 2);
+
+        // Удаление адресуется парой «автор + id» и уносит ровно одно.
+        let n = store.delete_many(Chat::Group(&gid), &[(42, hex::encode(other))]).unwrap();
+        assert_eq!(n, 1);
+        let left = store.history(Chat::Group(&gid), None, 50);
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].text, "моё");
+    }
+
+    /// Пагинация: хвост чата и шаг вверх по курсору. Сообщения одной секунды не
+    /// теряются и не дублируются — курсор двойной, (время, строка).
+    #[test]
+    fn history_pages_from_the_tail_upwards() {
+        let peer = key();
+        let me = key();
+        let store = MessageStore::open(db(), None, &me).unwrap();
+        let me_hex = hex::encode(me);
+        for i in 1..=10u64 {
+            store.append(Chat::Dm(&peer), &StoredMessage {
+                id: i, sender: me_hex.clone(), text: format!("m{i}"), mine: true,
+                time: 100, // ВСЕ в одну секунду — худший случай для курсора
+                ..Default::default()
+            }).unwrap();
+        }
+        let tail = store.history(Chat::Dm(&peer), None, 4);
+        assert_eq!(tail.len(), 4);
+        assert_eq!(tail.last().unwrap().text, "m10", "хвост — самые новые");
+
+        let cur = (tail[0].time, tail[0].row);
+        let prev = store.history(Chat::Dm(&peer), Some(cur), 4);
+        assert_eq!(prev.len(), 4);
+        assert_eq!(prev.last().unwrap().text, "m6", "страница вверх стыкуется без дыр");
+        assert!(prev.iter().all(|m| !tail.iter().any(|t| t.id == m.id)), "и без повторов");
+    }
+
+    /// Переезд со старой таблицы: у сообщений появляется явный автор, а ответы
+    /// («моё/не моё») превращаются в ссылку на конкретного человека. Это данные
+    /// пользователя, поэтому проверяется отдельно от остального.
+    #[test]
+    fn legacy_messages_table_migrates_with_authors() {
+        let (me, peer) = (key(), key());
+        let shared = db();
+        {
+            // Схема ровно та, что была до объединения хранилищ.
+            let conn = crate::db::lock(&shared);
+            conn.execute_batch(
+                "CREATE TABLE messages (
+                    peer BLOB NOT NULL, id INTEGER NOT NULL, mine INTEGER NOT NULL,
+                    text TEXT NOT NULL, time INTEGER NOT NULL, status TEXT NOT NULL DEFAULT '',
+                    kind TEXT NOT NULL DEFAULT 'text', blob_id TEXT NOT NULL DEFAULT '',
+                    mime TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
+                    size INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
+                    width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0,
+                    thumb_id TEXT NOT NULL DEFAULT '', downloaded INTEGER NOT NULL DEFAULT 0,
+                    reply_to INTEGER NOT NULL DEFAULT 0, reply_mine INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (peer, id, mine))",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO messages (peer, id, mine, text, time, status) VALUES (?1, 1, 1, 'моё', 10, 'sent')",
+                rusqlite::params![peer.as_slice()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO messages (peer, id, mine, text, time, reply_to, reply_mine)
+                 VALUES (?1, 2, 0, 'ответ на моё', 11, 1, 1)",
+                rusqlite::params![peer.as_slice()],
+            )
+            .unwrap();
+        }
+
+        let store = MessageStore::open(shared.clone(), None, &me).unwrap();
+        let h = store.history(Chat::Dm(&peer), None, 50);
+        assert_eq!(h.len(), 2, "вся переписка переехала");
+        assert_eq!(h[0].sender, hex::encode(me), "своё сообщение — от меня");
+        assert_eq!(h[1].sender, hex::encode(peer), "чужое — от собеседника");
+        assert_eq!(h[1].reply_to, 1);
+        assert_eq!(h[1].reply_sender, hex::encode(me), "«ответ на моё» стал ссылкой на меня");
+
+        // Старой таблицы больше нет — второй прогон не задваивает историю.
+        let store2 = MessageStore::open(shared, None, &me).unwrap();
+        assert_eq!(store2.history(Chat::Dm(&peer), None, 50).len(), 2);
     }
 
     /// Репутация копится только у контактов и переживает переоткрытие.

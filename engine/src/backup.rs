@@ -27,7 +27,7 @@
 use std::path::Path;
 
 use p2p_core::backup::{BackupError, Frame, Reader, Writer};
-use p2p_core::store::{CallRecord, Contact, StoredMessage};
+use p2p_core::store::{CallRecord, Chat, Contact, StoredMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::{dto, push_event, Engine, LockRecover};
@@ -49,9 +49,14 @@ pub struct Parts {
     /// (мелкие блобы) — без них список контактов выглядит сломанным.
     #[serde(default)]
     pub contacts: bool,
-    /// Переписка (личные чаты; групповая история не входит — см. модуль).
+    /// Переписка личных чатов.
     #[serde(default)]
     pub messages: bool,
+    /// Переписка групп. Отдельным флажком, потому что это чужие сообщения тоже, и
+    /// решение «класть ли их в файл» человек принимает осознанно. Само членство в
+    /// группе не восстанавливается: MLS-состояние в копию не входит (ADR-004).
+    #[serde(default)]
+    pub groups: bool,
     /// Заметки себе («Сохранённое») — это чат с самим собой, поэтому отдельным флагом.
     #[serde(default)]
     pub notes: bool,
@@ -68,6 +73,8 @@ pub struct Parts {
 pub struct Stats {
     pub contacts: u64,
     pub messages: u64,
+    #[serde(default)]
+    pub group_messages: u64,
     pub notes: u64,
     pub calls: u64,
     pub attachments: u64,
@@ -92,7 +99,14 @@ enum Rec {
 
 #[derive(Serialize, Deserialize)]
 struct MsgRow {
-    peer: String,
+    /// hex чата: ключ собеседника или gid группы. `peer` — как это поле звалось в
+    /// копиях до объединения хранилищ; читаем и такие.
+    #[serde(alias = "peer")]
+    chat: String,
+    /// 0 — личный чат (в т.ч. заметки себе), 1 — группа. В старых копиях групп не
+    /// было вовсе, поэтому отсутствие поля значит «личный».
+    #[serde(default)]
+    scope: i64,
     #[serde(flatten)]
     msg: StoredMessage,
 }
@@ -117,16 +131,18 @@ impl Engine {
     pub fn backup_estimate(&self) -> Stats {
         let me = self.me_pub;
         let msgs = self.messages.lock_safe();
-        let (mut messages, mut notes) = (0u64, 0u64);
+        let (mut messages, mut notes, mut group_messages) = (0u64, 0u64, 0u64);
         let mut after = 0i64;
         loop {
             let page = msgs.export_page(after, MSG_BATCH);
             if page.is_empty() {
                 break;
             }
-            for (rowid, peer, _) in &page {
+            for (rowid, chat, scope, _) in &page {
                 after = *rowid;
-                if *peer == me {
+                if *scope == 1 {
+                    group_messages += 1;
+                } else if chat.as_slice() == me.as_slice() {
                     notes += 1;
                 } else {
                     messages += 1;
@@ -155,6 +171,7 @@ impl Engine {
         Stats {
             contacts: self.contacts.lock_safe().list().len() as u64,
             messages,
+            group_messages,
             notes,
             calls: self.calls.lock_safe().count(),
             attachments,
@@ -200,7 +217,7 @@ impl Engine {
             if page.is_empty() {
                 break;
             }
-            for (rowid, _, m) in &page {
+            for (rowid, _, _, m) in &page {
                 after = *rowid;
                 if !m.blob_id.is_empty() {
                     out.push(m.blob_id.clone());
@@ -240,7 +257,7 @@ impl Engine {
             w.json(&Rec::Contacts { items: contacts })?;
         }
 
-        if parts.messages || parts.notes {
+        if parts.messages || parts.notes || parts.groups {
             let me = self.me_pub;
             let mut after = 0i64;
             loop {
@@ -249,16 +266,23 @@ impl Engine {
                     break;
                 }
                 let mut batch = Vec::with_capacity(page.len());
-                for (rowid, peer, m) in page {
+                for (rowid, chat, scope, m) in page {
                     after = rowid;
-                    let is_note = peer == me;
-                    if is_note && !parts.notes {
+                    let is_group = scope == 1;
+                    let is_note = !is_group && chat.as_slice() == me.as_slice();
+                    let wanted = if is_group {
+                        parts.groups
+                    } else if is_note {
+                        parts.notes
+                    } else {
+                        parts.messages
+                    };
+                    if !wanted {
                         continue;
                     }
-                    if !is_note && !parts.messages {
-                        continue;
-                    }
-                    if is_note {
+                    if is_group {
+                        stats.group_messages += 1;
+                    } else if is_note {
                         stats.notes += 1;
                     } else {
                         stats.messages += 1;
@@ -271,7 +295,7 @@ impl Engine {
                             blobs.push(m.thumb_id.clone());
                         }
                     }
-                    batch.push(MsgRow { peer: hex::encode(peer), msg: m });
+                    batch.push(MsgRow { chat: hex::encode(chat), scope, msg: m });
                 }
                 if !batch.is_empty() {
                     w.json(&Rec::Messages { items: batch })?;
@@ -354,11 +378,19 @@ impl Engine {
                         Rec::Messages { items: list } => {
                             let store = self.messages.lock_safe();
                             for row in &list {
-                                let Ok(raw) = hex::decode(&row.peer) else { continue };
+                                let Ok(raw) = hex::decode(&row.chat) else { continue };
+                                if row.scope == 1 {
+                                    // Группа: идентификатор — gid, он одинаков у всех
+                                    // участников и переадресовывать его некуда.
+                                    if store.import_message(Chat::Group(&raw), &row.msg).unwrap_or(false) {
+                                        stats.group_messages += 1;
+                                    }
+                                    continue;
+                                }
                                 let Ok(peer) = <[u8; 32]>::try_from(raw.as_slice()) else { continue };
                                 let is_note = peer == me || Some(peer) == src_me;
                                 let peer = if is_note { me } else { peer };
-                                if store.import_message(&peer, &row.msg).unwrap_or(false) {
+                                if store.import_message(Chat::Dm(&peer), &row.msg).unwrap_or(false) {
                                     if is_note {
                                         stats.notes += 1;
                                     } else {

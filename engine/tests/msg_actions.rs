@@ -60,8 +60,9 @@ fn pair(tag: &str, a_seed: u8, b_seed: u8) -> (Arc<Engine>, Arc<Engine>, [u8; 32
 #[test]
 fn reply_keeps_the_reference_and_flips_the_author_side() {
     // Ссылка на сообщение — пара «автор + id» (ADR-006). На проводе «чьё» едет с
-    // точки зрения отправителя, поэтому у получателя флаг обязан перевернуться:
-    // иначе ответ на СВОЁ и ответ на ЧУЖОЕ с тем же id были бы неразличимы.
+    // точки зрения отправителя, поэтому у получателя оно обязано разрешиться в
+    // ДРУГОГО человека: иначе ответ на СВОЁ и ответ на ЧУЖОЕ с тем же id были бы
+    // неразличимы. В истории хранится сам автор, а не флаг.
     let (a, b, a_key, b_key) = pair("reply", 21, 22);
 
     let first = a.send_text(&b_key, "во сколько встречаемся?").unwrap() as u64;
@@ -75,15 +76,18 @@ fn reply_keeps_the_reference_and_flips_the_author_side() {
     let reply = at_a.iter().find(|m| m["text"] == "в семь").expect("ответ в истории");
     assert_eq!(reply["reply_to"].as_u64(), Some(first));
     assert_eq!(
-        reply["reply_mine"], true,
-        "у Ани цитируемое сообщение — ЕЁ собственное, флаг обязан перевернуться"
+        reply["reply_sender"].as_str(),
+        Some(hex::encode(a_key).as_str()),
+        "у Ани цитируемое сообщение — ЕЁ собственное"
     );
 
-    // И у самого Боба ссылка сохранена как «чужое».
+    // И у самого Боба та же ссылка указывает на Аню.
     let at_b = history(&b, &a_key);
     let own = at_b.iter().find(|m| m["text"] == "в семь").expect("свой ответ");
     assert_eq!(own["reply_to"].as_u64(), Some(first));
-    assert_eq!(own["reply_mine"], false);
+    assert_eq!(own["reply_sender"].as_str(), Some(hex::encode(a_key).as_str()));
+    // Автор самого ответа — Боб, и это видно без всяких флагов.
+    assert_eq!(own["sender"].as_str(), Some(hex::encode(b_key).as_str()));
 }
 
 #[test]

@@ -68,9 +68,19 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             helpful      INTEGER NOT NULL DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS messages (
-            peer    BLOB    NOT NULL,
+        -- Вся переписка одной таблицей: личные чаты, «Сохранённое» и группы. Раньше
+        -- группы жили отдельно (список в памяти + JSON-файл), и каждая фича чата
+        -- писалась дважды — а копия данных о группах не знала вовсе.
+        --   chat   — с кем/где: ключ собеседника (32 Б) или gid группы
+        --   scope  — 0 личный чат (в т.ч. заметки себе), 1 группа
+        --   sender — hex-ключ автора: ссылка на сообщение это пара «автор + id»
+        --            (ADR-006), одинаково читаемая в личном чате и в группе
+        --   mine   — ярлык для UI («моё»), не часть ключа
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            chat    BLOB    NOT NULL,
+            scope   INTEGER NOT NULL DEFAULT 0,
             id      INTEGER NOT NULL,
+            sender  TEXT    NOT NULL DEFAULT '',
             mine    INTEGER NOT NULL,
             text    TEXT    NOT NULL,
             time    INTEGER NOT NULL,
@@ -85,9 +95,16 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             height      INTEGER NOT NULL DEFAULT 0,
             thumb_id    TEXT    NOT NULL DEFAULT '',
             downloaded  INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (peer, id, mine)
+            reply_to     INTEGER NOT NULL DEFAULT 0,
+            reply_sender TEXT    NOT NULL DEFAULT '',
+            system       INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (chat, scope, sender, id)
         );
-        CREATE INDEX IF NOT EXISTS messages_peer_time ON messages(peer, time);
+        -- Порядок в чате и курсор пагинации. Курсор двойной, (time, rowid), но в
+        -- индексе достаточно времени: rowid лежит в каждой записи индекса сам.
+        CREATE INDEX IF NOT EXISTS chat_messages_time ON chat_messages(chat, scope, time);
+        -- Пометка «скачано» ищет строки по контент-адресу вложения, а не по чату.
+        CREATE INDEX IF NOT EXISTS chat_messages_blob ON chat_messages(blob_id);
 
         CREATE TABLE IF NOT EXISTS outbox (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,

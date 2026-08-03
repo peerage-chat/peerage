@@ -759,9 +759,11 @@ internal fun MessageBubble(
                     // не копируется в сообщение, поэтому удаление оригинала не оставляет
                     // расходящегося дубля.
                     if (m.replyTo != 0L) {
+                        // Ключ строки — пара «автор + id»: id посеян временем
+                        // отправителя и у обеих сторон может совпасть.
                         val src = model.messages[model.currentChat]
-                            ?.firstOrNull { it.id == m.replyTo && it.mine == m.replyMine }
-                        QuoteBlock(model, src, m.replyMine)
+                            ?.firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
+                        QuoteBlock(model, src, m.replySender == model.me?.pubkey)
                     }
                     when {
                         isPending -> PendingAttachmentCard(

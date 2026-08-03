@@ -5,13 +5,17 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use p2p_core::store::{Chat, MessageStore, StoredMessage};
 use p2p_core::Identity;
 use p2p_group::peek_group_id;
 use p2p_groupchat::{GroupChat, MediaBody};
 use p2p_messenger::Messenger;
+use serde::{Deserialize, Serialize};
+
+use crate::LockRecover;
 
 fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
@@ -24,42 +28,43 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub struct GMsg {
-    /// Идентификатор в пределах ОТПРАВИТЕЛЯ; вместе с `sender` даёт ссылку на
-    /// сообщение (ADR-006). `0` — сообщение клиента до появления id: на такое
-    /// нельзя ни ответить, ни отозвать, сослаться не на что.
+/// Строка истории группы В СТАРОМ формате (JSON-файл рядом с MLS-состоянием).
+/// Нужна ровно для одного: перелить накопленное в общее хранилище сообщений и
+/// забыть про файл. Новые записи сюда не попадают.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct LegacyGMsg {
     #[serde(default)]
-    pub id: u64,
-    /// id цитируемого сообщения (0 — обычное) и hex его автора: в группе
-    /// собеседников много, поэтому одного id мало.
+    id: u64,
     #[serde(default)]
-    pub reply_to: u64,
+    reply_to: u64,
     #[serde(default)]
-    pub reply_sender: String,
-    pub text: String,
-    pub mine: bool,
-    pub time: i64,
-    /// hex ed25519-pubkey отправителя (для имени/цвета/аватарки в UI).
-    pub sender: String,
-    /// Системное событие (смена состава) — рендерится отдельной строкой.
-    pub system: bool,
-    /// Тип (M2): "text" (по умолчанию) | "image" | "voice" | "file".
-    pub kind: String,
-    /// hex-хэш блоба вложения (M2); пусто для текста.
-    pub blob_id: String,
-    pub mime: String,
-    pub name: String,
-    /// Метаданные карточки: известны ДО загрузки байт, по ним рисуется «скачать».
-    pub size: u64,
-    pub duration_ms: u32,
-    pub width: u32,
-    pub height: u32,
-    /// hex блоба-миниатюры (пусто — нет).
-    pub thumb_id: String,
-    /// Байты вложения уже у нас (своё сообщение или докачано).
-    pub downloaded: bool,
+    reply_sender: String,
+    text: String,
+    mine: bool,
+    time: i64,
+    sender: String,
+    #[serde(default)]
+    system: bool,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    blob_id: String,
+    #[serde(default)]
+    mime: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    size: u64,
+    #[serde(default)]
+    duration_ms: u32,
+    #[serde(default)]
+    width: u32,
+    #[serde(default)]
+    height: u32,
+    #[serde(default)]
+    thumb_id: String,
+    #[serde(default)]
+    downloaded: bool,
 }
 
 /// Строка списка групп для клиента.
@@ -94,7 +99,6 @@ struct GroupInviteDto {
 struct Entry {
     chat: GroupChat,
     name: String,
-    messages: Vec<GMsg>,
     /// Мы — админ/секвенсор этой группы (создатель). Только админ вправе отзывать
     /// участников и коммитить ротацию (ADR-004: избегаем одновременных Commit).
     admin: bool,
@@ -138,6 +142,12 @@ pub struct GroupManager {
     identity: Identity,
     messenger: Arc<Messenger>,
     dir: PathBuf,
+    /// Общее хранилище переписки: личные чаты, «Сохранённое» и группы в одной
+    /// таблице. Своего списка сообщений у группы больше нет — иначе каждая фича
+    /// чата пишется дважды, а копия данных о группах не знает.
+    messages: Arc<Mutex<MessageStore>>,
+    /// hex своего ключа: автор наших сообщений и признак «моё» при чтении.
+    me_hex: String,
 }
 
 /// Как часто повторять принятое, но не завершённое вступление в группу.
@@ -146,8 +156,14 @@ pub struct GroupManager {
 const JOIN_RETRY_EVERY: Duration = Duration::from_secs(20);
 
 impl GroupManager {
-    pub fn new(identity: Identity, messenger: Arc<Messenger>, data_dir: PathBuf) -> Self {
+    pub fn new(
+        identity: Identity,
+        messenger: Arc<Messenger>,
+        data_dir: PathBuf,
+        messages: Arc<Mutex<MessageStore>>,
+    ) -> Self {
         let dir = data_dir.join("groups");
+        let me_hex = hex::encode(identity.public_key_bytes());
         let mut m = Self {
             groups: HashMap::new(),
             pending: None,
@@ -161,6 +177,8 @@ impl GroupManager {
             identity,
             messenger,
             dir,
+            messages,
+            me_hex,
         };
         m.load_all();
         m.load_pending_invites();
@@ -253,21 +271,48 @@ impl GroupManager {
         self.save_index();
     }
 
-    fn save_msgs(&self, id: &[u8]) {
-        let Some(e) = self.groups.get(id) else { return };
-        let _ = std::fs::create_dir_all(&self.dir);
-        // На диск — тот же тип, что и клиенту: одна схема, один источник правды.
-        if let Ok(j) = serde_json::to_vec(&e.messages) {
-            let _ = std::fs::write(self.msgs_path(id), p2p_core::vault::seal(&j));
+    /// Перелить историю группы из старого JSON-файла в общее хранилище и убрать
+    /// файл (переименованием — на случай, если разбор чего-то не понял). Разово:
+    /// на второй запуск файла уже нет.
+    fn migrate_msgs_file(&self, id: &[u8]) {
+        let path = self.msgs_path(id);
+        let Ok(raw) = std::fs::read(&path) else { return };
+        let Ok(bytes) = p2p_core::vault::open(&raw) else { return };
+        // Битый файл — не повод ронять приложение на старте: пропускаем.
+        let old: Vec<LegacyGMsg> = serde_json::from_slice(&bytes).unwrap_or_default();
+        let store = self.messages.lock_safe();
+        for m in &old {
+            let _ = store.import_message(Chat::Group(id), &StoredMessage {
+                id: m.id,
+                sender: m.sender.clone(),
+                text: m.text.clone(),
+                mine: m.mine,
+                time: m.time,
+                status: String::new(),
+                kind: if m.kind.is_empty() { "text".into() } else { m.kind.clone() },
+                blob_id: m.blob_id.clone(),
+                mime: m.mime.clone(),
+                name: m.name.clone(),
+                size: m.size,
+                duration_ms: m.duration_ms,
+                width: m.width,
+                height: m.height,
+                thumb_id: m.thumb_id.clone(),
+                downloaded: m.downloaded,
+                reply_to: m.reply_to,
+                reply_sender: m.reply_sender.clone(),
+                system: m.system,
+                row: 0,
+            });
         }
+        drop(store);
+        log::info!("group {}: история переехала в общее хранилище ({} шт.)", hex::encode(id), old.len());
+        let _ = std::fs::rename(&path, path.with_extension("msgs.bak"));
     }
 
-    fn load_msgs(&self, id: &[u8]) -> Vec<GMsg> {
-        let Ok(raw) = std::fs::read(self.msgs_path(id)) else { return Vec::new() };
-        let Ok(bytes) = p2p_core::vault::open(&raw) else { return Vec::new() };
-        // Читаем тем же типом, которым писали. Битый файл — пустая история, а не
-        // паника: своя же история не повод ронять приложение.
-        serde_json::from_slice::<Vec<GMsg>>(&bytes).unwrap_or_default()
+    /// Записать своё/входящее сообщение группы в общее хранилище.
+    fn put(&self, gid: &[u8], msg: &StoredMessage) {
+        let _ = self.messages.lock_safe().append(Chat::Group(gid), msg);
     }
 
     fn load_all(&mut self) {
@@ -281,9 +326,9 @@ impl GroupManager {
                 for m in chat.members() {
                     crate::spawn_connect(self.messenger.clone(), m);
                 }
-                let messages = self.load_msgs(&raw);
+                self.migrate_msgs_file(&raw);
                 let admin = admins.contains(&raw);
-                self.groups.insert(raw, Entry { chat, name, messages, admin });
+                self.groups.insert(raw, Entry { chat, name, admin });
             }
         }
     }
@@ -295,7 +340,7 @@ impl GroupManager {
         let chat = GroupChat::create(&self.identity, self.messenger.clone()).ok()?;
         let id = chat.group_id()?;
         // Создатель = админ/секвенсор (ADR-004).
-        self.groups.insert(id.clone(), Entry { chat, name: name.to_string(), messages: Vec::new(), admin: true });
+        self.groups.insert(id.clone(), Entry { chat, name: name.to_string(), admin: true });
         self.save_group(&id);
         Some(id)
     }
@@ -519,17 +564,16 @@ impl GroupManager {
         if e.chat.send_text_reply(text, id, reply_to, reply_sender).is_err() {
             return false;
         }
-        let me = hex::encode(self.identity.public_key_bytes());
-        e.messages.push(GMsg {
+        self.put(gid, &StoredMessage {
             id,
             reply_to,
             reply_sender: reply_sender.to_string(),
             // kind заполняем явно: пустая строка — «неизвестно», и UI рисовал такое
             // сообщение дважды (как текст и как подпись к вложению).
             kind: "text".into(),
-            text: text.to_string(), mine: true, time: now(), sender: me, ..Default::default()
+            text: text.to_string(), mine: true, time: now(),
+            sender: self.me_hex.clone(), ..Default::default()
         });
-        self.save_msgs(gid);
         // КРИТИЧНО: отправка двигает MLS sending-ratchet — его надо ПЕРСИСТИТЬ, иначе
         // после рестарта/убийства приложения отправитель грузит старое состояние и
         // шлёт со «старого» поколения → получатель (он-то приём сохраняет) уже
@@ -542,22 +586,26 @@ impl GroupManager {
     /// просьб отправлено. Чужие молча пропускаются: отзывать чужое — не «удалить», а
     /// «переписать чужую историю». Сообщения без id (старый клиент) отозвать нельзя.
     pub fn retract(&mut self, gid: &[u8], ids: &[u64]) -> usize {
-        let me = hex::encode(self.identity.public_key_bytes());
-        let Some(e) = self.groups.get_mut(gid) else { return 0 };
+        let me = self.me_hex.clone();
         let mut sent = 0;
-        for id in ids {
-            if *id == 0 {
-                continue;
-            }
-            let mine = e.messages.iter().any(|m| m.id == *id && m.sender == me);
-            if mine && e.chat.send_retract(*id).is_ok() {
-                sent += 1;
+        let mut gone: Vec<(u64, String)> = Vec::new();
+        {
+            let store = self.messages.lock_safe();
+            let Some(e) = self.groups.get_mut(gid) else { return 0 };
+            for id in ids {
+                if *id == 0 {
+                    continue;
+                }
+                let mine = store.contains(Chat::Group(gid), &me, *id);
+                if mine && e.chat.send_retract(*id).is_ok() {
+                    sent += 1;
+                    gone.push((*id, me.clone()));
+                }
             }
         }
         if sent > 0 {
-            e.messages.retain(|m| !(m.sender == me && ids.contains(&m.id)));
+            let _ = self.messages.lock_safe().delete_many(Chat::Group(gid), &gone);
             // Отправка двигает MLS-ратчет — состояние обязано лечь на диск.
-            self.save_msgs(gid);
             self.save_group(gid);
         }
         sent
@@ -565,14 +613,10 @@ impl GroupManager {
 
     /// Удалить сообщения ТОЛЬКО У СЕБЯ: пары `(id, автор-hex)`.
     pub fn delete_local(&mut self, gid: &[u8], refs: &[(u64, String)]) -> usize {
-        let Some(e) = self.groups.get_mut(gid) else { return 0 };
-        let before = e.messages.len();
-        e.messages.retain(|m| !refs.iter().any(|(id, who)| m.id == *id && &m.sender == who));
-        let removed = before - e.messages.len();
-        if removed > 0 {
-            self.save_msgs(gid);
+        if !self.groups.contains_key(gid) {
+            return 0;
         }
-        removed
+        self.messages.lock_safe().delete_many(Chat::Group(gid), refs).unwrap_or(0)
     }
 
     /// Отозвать участника из группы (ADR-004). Только админ. Двигает MLS-состояние
@@ -586,11 +630,12 @@ impl GroupManager {
         if e.chat.remove_member(peer).is_err() {
             return false;
         }
-        // Системная строка «участник удалён» (актор — удалённый).
-        e.messages.push(GMsg {
-            mine: true, time: now(), sender: hex::encode(peer), system: true, ..Default::default()
+        // Системная строка «участник удалён» (актор — удалённый). id — время в мс:
+        // системные строки одного участника не должны затирать друг друга.
+        self.put(gid, &StoredMessage {
+            id: now_ms(), mine: true, time: now(),
+            sender: hex::encode(peer), system: true, ..Default::default()
         });
-        self.save_msgs(gid);
         self.save_group(gid); // Commit сдвинул эпоху — персистим (инвариант MLS).
         true
     }
@@ -605,10 +650,9 @@ impl GroupManager {
         if e.chat.send_media(media).is_err() {
             return false;
         }
-        let me = hex::encode(self.identity.public_key_bytes());
-        e.messages.push(GMsg {
+        self.put(gid, &StoredMessage {
             id,
-            mine: true, time: now(), sender: me,
+            mine: true, time: now(), sender: self.me_hex.clone(),
             // Подпись живёт в `text`: у медиа это поле свободно, как и в DM.
             text: media.caption.clone(),
             kind: media.kind.clone(), blob_id: media.hash.clone(),
@@ -619,7 +663,6 @@ impl GroupManager {
             downloaded: true, // своё вложение уже у нас
             ..Default::default()
         });
-        self.save_msgs(gid);
         self.save_group(gid);
         true
     }
@@ -628,23 +671,16 @@ impl GroupManager {
     /// тот же файл в разных чатах скачан разом (как `mark_downloaded` для DM).
     /// Возвращает gid'ы, где что-то изменилось — верхний слой обновит кэш истории.
     pub fn mark_downloaded(&mut self, blob_id_hex: &str) -> Vec<Vec<u8>> {
-        let mut touched = Vec::new();
-        for (gid, e) in self.groups.iter_mut() {
-            let mut changed = false;
-            for m in e.messages.iter_mut() {
-                if m.blob_id == blob_id_hex && !m.downloaded {
-                    m.downloaded = true;
-                    changed = true;
-                }
-            }
-            if changed {
-                touched.push(gid.clone());
-            }
-        }
-        for gid in &touched {
-            self.save_msgs(gid);
-        }
-        touched
+        // Саму пометку ставит хранилище — сразу во всех чатах, где есть этот блоб
+        // (он контент-адресный). Здесь остаётся только сказать верхнему слою, какие
+        // группы надо перерисовать.
+        let store = self.messages.lock_safe();
+        let _ = store.mark_downloaded(blob_id_hex);
+        store
+            .chats_with_blob(1, blob_id_hex)
+            .into_iter()
+            .filter(|gid| self.groups.contains_key(gid))
+            .collect()
     }
 
     /// Ротация собственного ключа группы (PCS, ADR-004). Двигает эпоху → save_group.
@@ -681,10 +717,19 @@ impl GroupManager {
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
+    /// Хвост истории группы (последние [`crate::HISTORY_PAGE`]), старые сверху.
+    /// Схема строки — та же `StoredMessage`, что и в личном чате.
     pub fn history_json(&self, gid: &[u8]) -> String {
-        let Some(e) = self.groups.get(gid) else { return "[]".into() };
-        // Схема истории — сам тип GMsg: и для клиента, и для файла на диске одна.
-        serde_json::to_string(&e.messages).unwrap_or_else(|_| "[]".into())
+        self.history_page_json(gid, None)
+    }
+
+    /// Страница истории группы с курсором `(время, строка)` — как в личном чате.
+    pub fn history_page_json(&self, gid: &[u8], before: Option<(i64, i64)>) -> String {
+        if !self.groups.contains_key(gid) {
+            return "[]".into();
+        }
+        let page = self.messages.lock_safe().history(Chat::Group(gid), before, crate::HISTORY_PAGE);
+        serde_json::to_string(&page).unwrap_or_else(|_| "[]".into())
     }
 
     /// Ключи участников (hex) — для группового звонка.
@@ -754,17 +799,14 @@ impl GroupManager {
             let outcome = match inbound {
                 Some(Ok(Inbound::Message { sender, text, id, reply_to, reply_sender })) => {
                     let sender_hex = hex::encode(sender);
-                    if let Some(e) = self.groups.get_mut(&gid) {
-                        e.messages.push(GMsg {
-                            id,
-                            reply_to,
-                            reply_sender,
-                            kind: "text".into(),
-                            text: text.clone(), mine: false, time: now(),
-                            sender: sender_hex.clone(), ..Default::default()
-                        });
-                    }
-                    self.save_msgs(&gid);
+                    self.put(&gid, &StoredMessage {
+                        id,
+                        reply_to,
+                        reply_sender,
+                        kind: "text".into(),
+                        text: text.clone(), mine: false, time: now(),
+                        sender: sender_hex.clone(), ..Default::default()
+                    });
                     GroupOutcome {
                         gid: Some(gid.clone()), text: Some(text),
                         sender: Some(sender_hex), ..Default::default()
@@ -774,16 +816,15 @@ impl GroupManager {
                     // Автор берётся ИЗ MLS, а не из тела: иначе участник мог бы
                     // стереть чужое сообщение, подставив чужой ключ.
                     let who = hex::encode(sender);
-                    let removed = if let Some(e) = self.groups.get_mut(&gid) {
-                        let before = e.messages.len();
-                        e.messages.retain(|m| !(m.id == target && m.sender == who && target != 0));
-                        before - e.messages.len()
-                    } else {
+                    let removed = if target == 0 {
+                        // Сообщение без id (старый клиент) отозвать не за что.
                         0
+                    } else {
+                        self.messages
+                            .lock_safe()
+                            .delete_many(Chat::Group(&gid), &[(target, who)])
+                            .unwrap_or(0)
                     };
-                    if removed > 0 {
-                        self.save_msgs(&gid);
-                    }
                     GroupOutcome {
                         gid: Some(gid.clone()),
                         retracted: removed > 0,
@@ -792,22 +833,19 @@ impl GroupManager {
                 }
                 Some(Ok(Inbound::Media { sender, media })) => {
                     let sender_hex = hex::encode(sender);
-                    if let Some(e) = self.groups.get_mut(&gid) {
-                        e.messages.push(GMsg {
-                            id: media.id,
-                            mine: false, time: now(), sender: sender_hex.clone(),
+                    self.put(&gid, &StoredMessage {
+                        id: media.id,
+                        mine: false, time: now(), sender: sender_hex.clone(),
                             text: media.caption.clone(),
                             kind: media.kind.clone(), blob_id: media.hash.clone(),
                             mime: media.mime.clone(), name: media.name.clone(),
                             size: media.size, duration_ms: media.duration_ms,
                             width: media.width, height: media.height,
                             thumb_id: media.thumb.clone(),
-                            // Скачано ли — решит верхний слой (он знает хранилище блобов).
-                            downloaded: false,
-                            ..Default::default()
-                        });
-                    }
-                    self.save_msgs(&gid);
+                        // Скачано ли — решит верхний слой (он знает хранилище блобов).
+                        downloaded: false,
+                        ..Default::default()
+                    });
                     GroupOutcome {
                         gid: Some(gid.clone()), sender: Some(sender_hex),
                         media: Some(media),
@@ -830,13 +868,11 @@ impl GroupManager {
                 }
                 Some(Ok(Inbound::Membership { actor })) => {
                     let actor_hex = hex::encode(actor);
-                    if let Some(e) = self.groups.get_mut(&gid) {
-                        e.messages.push(GMsg {
-                            mine: false, time: now(), sender: actor_hex.clone(), system: true,
-                            ..Default::default()
-                        });
-                    }
-                    self.save_msgs(&gid);
+                    self.put(&gid, &StoredMessage {
+                        id: now_ms(), mine: false, time: now(),
+                        sender: actor_hex.clone(), system: true,
+                        ..Default::default()
+                    });
                     GroupOutcome {
                         gid: Some(gid.clone()), sender: Some(actor_hex), system: true,
                         ..Default::default()
@@ -891,7 +927,7 @@ impl GroupManager {
                 let name = self.pending_join_name.take().unwrap_or_else(|| "Группа".into());
                 self.pending_invites.remove(&id);
                 self.save_pending_invites();
-                self.groups.insert(id.clone(), Entry { chat, name, messages: Vec::new(), admin: false });
+                self.groups.insert(id.clone(), Entry { chat, name, admin: false });
                 self.save_group(&id);
                 return GroupOutcome { gid: Some(id), joined: true, ..Default::default() };
             }
@@ -961,6 +997,7 @@ impl GroupManager {
         self.groups.remove(id);
         let _ = std::fs::remove_file(self.group_path(id));
         let _ = std::fs::remove_file(self.msgs_path(id));
+        let _ = self.messages.lock_safe().clear(Chat::Group(id));
         self.save_index();
     }
 }

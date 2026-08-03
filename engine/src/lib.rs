@@ -24,7 +24,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use p2p_core::budget::Tier;
 use p2p_core::settings::AudioSettings;
-use p2p_core::store::{ContactStore, GateStore, MessageStore, Profile, StoredMessage};
+use p2p_core::store::{Chat, ContactStore, GateStore, MessageStore, Profile, StoredMessage};
 use p2p_core::Identity;
 /// Реэкспорт: медиа-вложение группового сообщения — часть контракта движка
 /// (клиенты и тесты собирают его, чтобы отправить вложение в группу).
@@ -114,6 +114,11 @@ pub struct MediaInfo {
     pub caption: String,
 }
 
+/// Сколько сообщений отдаётся клиенту за один заход в чат. Переписка бывает
+/// в сотни тысяч строк: поднимать её целиком в память (да ещё гнать через JNI
+/// одним JSON) нельзя. Остальное клиент дозапрашивает страницами вверх.
+pub const HISTORY_PAGE: usize = 200;
+
 /// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
 /// Не видели маячок дольше — участник считается вышедшим (страховка на вылет/потерю
@@ -193,7 +198,9 @@ pub struct Engine {
     contacts: Mutex<ContactStore>,
     /// Гейт контактов (замена TOFU): входящие запросы незнакомцев + блок-лист.
     gate: Mutex<GateStore>,
-    messages: Mutex<MessageStore>,
+    /// Общее хранилище переписки. `Arc`, потому что тем же хранилищем пользуется
+    /// менеджер групп — с объединением истории у групп нет своего.
+    messages: Arc<Mutex<MessageStore>>,
     me_pub: [u8; 32],
     /// Личность для экспорта секретной сид-фразы (M4 key backup). Секрет уже живёт в
     /// messenger; здесь — только для `seed_phrase()` по запросу пользователя.
@@ -326,9 +333,11 @@ impl Engine {
         match self.messenger.send_text_reply(key, text, reply_to, reply_mine) {
             Ok(id) => {
                 let t = now();
-                let _ = self.messages.lock_safe().append(key, StoredMessage {
+                let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
                     id, text: text.to_string(), mine: true, time: t, status: "sent".into(),
-                    reply_to, reply_mine,
+                    sender: self.me_hex(),
+                    reply_to,
+                    reply_sender: self.reply_author(key, reply_to, reply_mine),
                     // kind заполняем ЯВНО: пустая строка — не «текст», а «неизвестно»,
                     // и UI рисовал такое сообщение дважды (как содержимое и как
                     // подпись к вложению).
@@ -349,7 +358,24 @@ impl Engine {
     /// именно пара, потому что id посеян временем отправителя и у обеих сторон свой.
     /// Возвращает, сколько строк удалено.
     pub fn delete_messages(&self, key: &[u8; 32], refs: &[(u64, bool)]) -> usize {
-        self.messages.lock_safe().delete_many(key, refs).unwrap_or(0)
+        let refs: Vec<(u64, String)> =
+            refs.iter().map(|(id, mine)| (*id, self.author_hex(key, *mine))).collect();
+        self.messages.lock_safe().delete_many(Chat::Dm(key), &refs).unwrap_or(0)
+    }
+
+    /// hex автора сообщения в личном чате: своё — мы, чужое — собеседник.
+    fn author_hex(&self, peer: &[u8; 32], mine: bool) -> String {
+        if mine { self.me_hex() } else { hex::encode(peer) }
+    }
+
+    /// hex автора ЦИТИРУЕМОГО сообщения; пусто, если это не ответ.
+    fn reply_author(&self, peer: &[u8; 32], reply_to: u64, reply_mine: bool) -> String {
+        if reply_to == 0 { String::new() } else { self.author_hex(peer, reply_mine) }
+    }
+
+    /// hex своего ключа — автор всех наших сообщений.
+    pub(crate) fn me_hex(&self) -> String {
+        hex::encode(self.me_pub)
     }
 
     /// Отозвать СВОИ сообщения у собеседника («удалить у всех»): просьба уходит
@@ -439,10 +465,10 @@ impl Engine {
         match self.messenger.send_media_message(key, &hash, mime, name, meta.clone()) {
             Ok(id) => {
                 let t = now();
-                let _ = self.messages.lock_safe().append(key, StoredMessage {
+                let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
                     // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
                     // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
-                    id, mine: true, time: t, status: "sent".into(),
+                    id, mine: true, time: t, status: "sent".into(), sender: self.me_hex(),
                     // Подпись живёт в `text`: у медиа-сообщения это поле свободно,
                     // и тогда поиск и история работают с ней как с обычным текстом.
                     text: info.caption.clone(),
@@ -523,8 +549,8 @@ impl Engine {
         };
         let id = self.messenger.send_media_message(key, &hash, mime, name, meta.clone()).ok()?;
         let t = now();
-        let _ = self.messages.lock_safe().append(key, StoredMessage {
-            id, mine: true, time: t, status: "sent".into(),
+        let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
+            id, mine: true, time: t, status: "sent".into(), sender: self.me_hex(),
             text: info.caption.clone(),
             kind: kind.into(), blob_id: id_hex.clone(), mime: mime.into(), name: name.into(),
             size, duration_ms: info.duration_ms, width: info.width, height: info.height,
@@ -915,8 +941,21 @@ impl Engine {
         serde_json::to_string(&self.contacts.lock_safe().list()).unwrap_or_else(|_| "[]".into())
     }
 
+    /// Хвост переписки (последние [`HISTORY_PAGE`] сообщений), старые сверху.
     pub fn history_json(&self, key: &[u8; 32]) -> String {
-        serde_json::to_string(&self.messages.lock_safe().history(key)).unwrap_or_else(|_| "[]".into())
+        self.chat_history_json(Chat::Dm(key), None)
+    }
+
+    /// Страница ВЫШЕ уже показанной: курсор — `(время, строка)` верхнего сообщения
+    /// (поля `time` и `row` первого элемента предыдущей страницы).
+    pub fn history_page_json(&self, key: &[u8; 32], before_time: i64, before_row: i64) -> String {
+        self.chat_history_json(Chat::Dm(key), Some((before_time, before_row)))
+    }
+
+    /// Общий путь для личных чатов, «Сохранённого» и групп — хранилище у них одно.
+    pub(crate) fn chat_history_json(&self, chat: Chat, before: Option<(i64, i64)>) -> String {
+        let page = self.messages.lock_safe().history(chat, before, HISTORY_PAGE);
+        serde_json::to_string(&page).unwrap_or_else(|_| "[]".into())
     }
 
     pub fn set_verified(&self, key: &[u8; 32], verified: bool) {
@@ -1064,7 +1103,9 @@ impl Engine {
         let mut by_kind: HashMap<String, u64> = HashMap::new();
         let mut by_peer: HashMap<[u8; 32], (u64, u64)> = HashMap::new();
         let mut counted: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for (peer, blob_id, kind, _size) in self.messages.lock_safe().attachments() {
+        for a in self.messages.lock_safe().attachments() {
+            let (blob_id, kind) = (a.blob_id, a.kind);
+            let peer = <[u8; 32]>::try_from(a.chat.as_slice()).unwrap_or([0u8; 32]);
             let path = self.blob_dir.join(&blob_id);
             let Ok(meta) = std::fs::metadata(&path) else { continue };
             let len = meta.len();
@@ -1481,8 +1522,9 @@ impl Engine {
         let me = self.me_pub;
         self.messages
             .lock_safe()
-            .append(&me, StoredMessage {
+            .append(Chat::Dm(&me), &StoredMessage {
                 id,
+                sender: self.me_hex(),
                 text: text.to_string(),
                 mine: true,
                 time: t,
@@ -1503,7 +1545,7 @@ impl Engine {
     /// Удалить заметку по её id.
     pub fn delete_note(&self, id: u64) {
         let me = self.me_pub;
-        let _ = self.messages.lock_safe().delete_one(&me, id, true);
+        let _ = self.messages.lock_safe().delete_one(Chat::Dm(&me), &self.me_hex(), id);
     }
 
     /// Журнал звонков для UI: `[{peer, gid, incoming, outcome, started, duration}]`.
@@ -1799,7 +1841,7 @@ fn event_pump(
     data_dir: PathBuf,
 ) {
     let blob_dir = data_dir.join("blobs");
-    let mut groups = GroupManager::new(identity, messenger.clone(), data_dir);
+    let mut groups = GroupManager::new(identity, messenger.clone(), data_dir, engine.messages.clone());
     let mut blobs = blobs::BlobManager::new(messenger.clone(), p2p_blob::Limits::default(), blob_dir);
     {
         let ob = engine.outbox.lock_safe();
@@ -2089,12 +2131,17 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 Gate::Contact => {}
             }
             // Дедуп повторной доставки: офлайн-досылка со стабильным id приходит дважды.
-            let dup = engine.messages.lock_safe().contains(&peer, id, false);
+            let peer_hex = hex::encode(peer);
+            let dup = engine.messages.lock_safe().contains(Chat::Dm(&peer), &peer_hex, id);
             if !dup {
                 let t = now();
-                let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
+                // reply_mine прислан С ТОЧКИ ЗРЕНИЯ ОТПРАВИТЕЛЯ и уже перевёрнут выше,
+                // поэтому «моё» здесь — действительно наше сообщение.
+                let _ = engine.messages.lock_safe().append(Chat::Dm(&peer), &StoredMessage {
                     id, text: text.clone(), mine: false, time: t, status: String::new(),
-                    reply_to, reply_mine,
+                    sender: peer_hex.clone(),
+                    reply_to,
+                    reply_sender: engine.reply_author(&peer, reply_to, reply_mine),
                     kind: "text".into(),
                     ..Default::default()
                 });
@@ -2110,7 +2157,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }
         Event::Retract { peer, target } => {
             // Удаляем ЕГО сообщение (mine=false): отозвать наше собственное он не может.
-            let n = engine.messages.lock_safe().delete_many(&peer, &[(target, false)]).unwrap_or(0);
+            let n = engine
+                .messages
+                .lock_safe()
+                .delete_many(Chat::Dm(&peer), &[(target, hex::encode(peer))])
+                .unwrap_or(0);
             if n > 0 {
                 push_event(engine, dto::UiEvent::Retracted { peer: hex::encode(peer), id: target });
             }
@@ -2124,7 +2175,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 }
                 Gate::Contact => {}
             }
-            let dup = engine.messages.lock_safe().contains(&peer, id, false);
+            let dup = engine.messages.lock_safe().contains(Chat::Dm(&peer), &hex::encode(peer), id);
             if !dup {
                 let t = now();
                 let id_hex = hex::encode(&hash);
@@ -2134,8 +2185,9 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // Крупное НЕ тянем молча: показываем карточку (имя/размер/превью), а
                 // байты качаем по кнопке — иначе чужое видео на 800 МБ приедет само.
                 let auto = have || size < AUTO_DOWNLOAD_LIMIT;
-                let _ = engine.messages.lock_safe().append(&peer, StoredMessage {
+                let _ = engine.messages.lock_safe().append(Chat::Dm(&peer), &StoredMessage {
                     id, mine: false, time: t, status: String::new(),
+                    sender: hex::encode(peer),
                     text: caption.clone(),
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.clone(), name: name.clone(),
                     size, duration_ms, width, height, thumb_id: thumb_hex.clone(),
@@ -2168,7 +2220,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             }
         }
         Event::Ack { peer, id } => {
-            let _ = engine.messages.lock_safe().set_status(&peer, id, "delivered");
+            let _ = engine.messages.lock_safe().set_status(Chat::Dm(&peer), id, "delivered");
             engine.outbox.lock_safe().on_ack(&peer, id); // M3: снять из очереди
             push_event(engine, dto::UiEvent::Ack { peer: hex::encode(peer), id });
         }
@@ -2177,7 +2229,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             // персистентной офлайн-очереди и уйдёт, когда получатель появится. Раньше
             // в БД писалось "failed" (в UI при этом рисовался часами "queued"), и после
             // перезапуска ждущее доставки сообщение показывалось красным «!».
-            let _ = engine.messages.lock_safe().set_status(&peer, id, "queued");
+            let _ = engine.messages.lock_safe().set_status(Chat::Dm(&peer), id, "queued");
             push_event(engine, dto::UiEvent::Undelivered { peer: hex::encode(peer), id });
         }
         Event::RoomInvite { peer, room_id, audio, video } => {
@@ -2577,7 +2629,7 @@ impl Engine {
         let contacts = ContactStore::open(db.clone(), Some(&dir.join("contacts.json")))
             .map_err(|e| format!("contacts: {e}"))?;
         let gate = GateStore::open(db.clone()).map_err(|e| format!("gate: {e}"))?;
-        let messages = MessageStore::open(db.clone(), Some(&dir.join("messages.json")))
+        let messages = MessageStore::open(db.clone(), Some(&dir.join("messages.json")), &me_pub)
             .map_err(|e| format!("messages: {e}"))?;
         let contact_keys: Vec<[u8; 32]> =
             contacts.list().iter().filter_map(|c| parse_key(&c.key)).collect();
@@ -2672,7 +2724,7 @@ impl Engine {
             wanted: Mutex::new(p2p_core::store::WantedStore::new(db.clone())),
             calls: Mutex::new(p2p_core::store::CallStore::new(db.clone())),
             active_call: Mutex::new(None),
-            messages: Mutex::new(messages),
+            messages: Arc::new(Mutex::new(messages)),
             outbox: Mutex::new(outbox),
             me_pub,
             identity: identity_for_engine,

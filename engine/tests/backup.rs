@@ -32,7 +32,7 @@ fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
 }
 
 fn all() -> Parts {
-    Parts { contacts: true, messages: true, notes: true, calls: true, attachments: true }
+    Parts { contacts: true, messages: true, groups: true, notes: true, calls: true, attachments: true }
 }
 
 /// Наполнить движок: контакт, переписка, заметка, вложение.

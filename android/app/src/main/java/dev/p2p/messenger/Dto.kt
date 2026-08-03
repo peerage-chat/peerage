@@ -53,6 +53,8 @@ internal data class ContactDto(
 @Serializable
 internal data class MessageDto(
     val id: Long = 0,
+    /** hex автора: ссылка на сообщение — пара «автор + id» (ADR-006). */
+    val sender: String = "",
     val text: String = "",
     val mine: Boolean = false,
     val time: Long = 0,
@@ -64,7 +66,12 @@ internal data class MessageDto(
     val size: Long = 0,
     @SerialName("duration_ms") val durationMs: Int = 0,
     @SerialName("reply_to") val replyTo: Long = 0,
-    @SerialName("reply_mine") val replyMine: Boolean = false,
+    /** hex автора цитируемого сообщения (пусто — обычное). */
+    @SerialName("reply_sender") val replySender: String = "",
+    /** Системная строка (смена состава группы) — рисуется не пузырём. */
+    val system: Boolean = false,
+    /** Курсор пагинации: номер строки в базе движка. Для догрузки истории вверх. */
+    val row: Long = 0,
     val width: Int = 0,
     val height: Int = 0,
     @SerialName("thumb_id") val thumbId: String = "",
@@ -99,6 +106,8 @@ internal data class GroupInviteDto(
 @Serializable
 internal data class GroupMsgDto(
     val id: Long = 0,
+    /** Курсор пагинации: номер строки в базе движка. */
+    val row: Long = 0,
     @SerialName("reply_to") val replyTo: Long = 0,
     @SerialName("reply_sender") val replySender: String = "",
     val text: String = "",
@@ -302,7 +311,10 @@ internal fun MessageDto.toModel() = Message(
     size = size,
     durationMs = durationMs,
     replyTo = replyTo,
-    replyMine = replyMine,
+    sender = sender,
+    replySender = replySender,
+    system = system,
+    row = row,
     width = width,
     height = height,
     thumbId = thumbId,

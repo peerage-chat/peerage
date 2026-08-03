@@ -4,9 +4,10 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use p2p_core::store::MessageStore;
 use p2p_core::Identity;
 use p2p_engine::groups::GroupManager;
 use p2p_engine::MediaBody;
@@ -21,6 +22,16 @@ fn tmpdir(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("p2p-it-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
+}
+
+/// Менеджер групп со СВОИМ хранилищем сообщений в том же каталоге — как в движке,
+/// где история группы лежит в общей базе рядом с личными чатами. Второй менеджер на
+/// том же каталоге получает ту же базу: так тесты проверяют и перезапуск.
+fn manager(id: Identity, msgr: Arc<Messenger>, dir: PathBuf) -> GroupManager {
+    let me = id.public_key_bytes();
+    let db = p2p_core::db::open(&dir).expect("база");
+    let store = MessageStore::open(db, None, &me).expect("хранилище сообщений");
+    GroupManager::new(id, msgr, dir, Arc::new(Mutex::new(store)))
 }
 
 /// Разослать событие мессенджера соответствующему менеджеру группы (как event_pump).
@@ -94,8 +105,8 @@ fn setup_and_join(drop_every: u32) -> Ctx {
     let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
     let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
-    let mut gm_a = GroupManager::new(a_id, Arc::new(a_msgr), tmpdir("a"));
-    let mut gm_b = GroupManager::new(b_id, Arc::new(b_msgr), tmpdir("b"));
+    let mut gm_a = manager(a_id, Arc::new(a_msgr), tmpdir("a"));
+    let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("b"));
 
     let gid = gm_a.create("тест").expect("группа создана");
     gm_a.invite(&gid, b_key);
@@ -184,8 +195,8 @@ fn invite_card_requires_accept_and_decline_clears() {
     let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
     let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
-    let mut gm_a = GroupManager::new(a_id, Arc::new(a_msgr), tmpdir("a"));
-    let mut gm_b = GroupManager::new(b_id, Arc::new(b_msgr), tmpdir("b"));
+    let mut gm_a = manager(a_id, Arc::new(a_msgr), tmpdir("a"));
+    let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("b"));
 
     let gid = gm_a.create("тайный клуб").expect("группа создана");
     gm_a.invite(&gid, b_key);
@@ -334,8 +345,8 @@ fn sender_restart_keeps_group_working() {
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let a_msgr = Arc::new(a_msgr);
     let a_dir = tmpdir("restart-a");
-    let mut gm_a = GroupManager::new(a_id.clone(), a_msgr.clone(), a_dir.clone());
-    let mut gm_b = GroupManager::new(b_id, Arc::new(b_msgr), tmpdir("restart-b"));
+    let mut gm_a = manager(a_id.clone(), a_msgr.clone(), a_dir.clone());
+    let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("restart-b"));
 
     let gid = gm_a.create("рестарт").expect("группа создана");
     gm_a.invite(&gid, b_key);
@@ -357,7 +368,7 @@ fn sender_restart_keeps_group_working() {
 
     // «Перезапуск приложения»: менеджер групп поднимается заново из того же каталога.
     drop(gm_a);
-    let mut gm_a = GroupManager::new(a_id, a_msgr, a_dir);
+    let mut gm_a = manager(a_id, a_msgr, a_dir);
     assert!(gm_a.group_ids().contains(&gid), "группа поднялась с диска");
 
     assert!(gm_a.send_text(&gid, "после перезапуска"));
@@ -382,8 +393,8 @@ fn accept_survives_offline_inviter() {
     let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
     let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
-    let mut gm_a = GroupManager::new(a_id, Arc::new(a_msgr), tmpdir("off-a"));
-    let mut gm_b = GroupManager::new(b_id, Arc::new(b_msgr), tmpdir("off-b"));
+    let mut gm_a = manager(a_id, Arc::new(a_msgr), tmpdir("off-a"));
+    let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("off-b"));
 
     let gid = gm_a.create("офлайн").expect("группа создана");
     gm_a.invite(&gid, b_key);
@@ -437,8 +448,8 @@ fn join_survives_lost_key_package_and_restart() {
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let b_msgr = Arc::new(b_msgr);
     let b_dir = tmpdir("lost-b");
-    let mut gm_a = GroupManager::new(a_id, Arc::new(a_msgr), tmpdir("lost-a"));
-    let mut gm_b = GroupManager::new(b_id.clone(), b_msgr.clone(), b_dir.clone());
+    let mut gm_a = manager(a_id, Arc::new(a_msgr), tmpdir("lost-a"));
+    let mut gm_b = manager(b_id.clone(), b_msgr.clone(), b_dir.clone());
 
     let gid = gm_a.create("потеря").expect("группа создана");
     gm_a.invite(&gid, b_key);
@@ -457,7 +468,7 @@ fn join_survives_lost_key_package_and_restart() {
     // Перезапуск клиента: состояние вступления в памяти потеряно, на диске — только
     // приглашение с отметкой «принято».
     drop(gm_b);
-    let mut gm_b = GroupManager::new(b_id, b_msgr, b_dir);
+    let mut gm_b = manager(b_id, b_msgr, b_dir);
     assert!(
         gm_b.invites_json().contains("\"waiting\":true"),
         "принятое приглашение пережило перезапуск: {}",
@@ -498,8 +509,8 @@ fn inviter_restart_still_accepts_key_package() {
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let a_msgr = Arc::new(a_msgr);
     let a_dir = tmpdir("re-a");
-    let mut gm_a = GroupManager::new(a_id.clone(), a_msgr.clone(), a_dir.clone());
-    let mut gm_b = GroupManager::new(b_id, Arc::new(b_msgr), tmpdir("re-b"));
+    let mut gm_a = manager(a_id.clone(), a_msgr.clone(), a_dir.clone());
+    let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("re-b"));
 
     let gid = gm_a.create("перезапуск").expect("группа создана");
     gm_a.invite(&gid, b_key);
@@ -509,7 +520,7 @@ fn inviter_restart_still_accepts_key_package() {
 
     // Пригласивший перезапустился ДО того, как приглашённый решился.
     drop(gm_a);
-    let mut gm_a = GroupManager::new(a_id, a_msgr, a_dir);
+    let mut gm_a = manager(a_id, a_msgr, a_dir);
 
     gm_b.accept_invite(&gid);
     assert!(
@@ -518,4 +529,48 @@ fn inviter_restart_still_accepts_key_package() {
         }),
         "KeyPackage узнан и после перезапуска пригласившего"
     );
+}
+
+/// История группы, накопленная в СТАРОМ формате (JSON-файл рядом с MLS-состоянием),
+/// переезжает в общее хранилище при первом запуске — и встаёт в один ряд с новыми
+/// сообщениями. Это переписка пользователя, поэтому проверяется отдельно.
+#[test]
+fn old_group_history_file_migrates_into_the_store() {
+    let net = LoopbackNet::new();
+    let a_id = id(71);
+    let a_key = a_id.public_key_bytes();
+    let (a_msgr, _a_rx) = Messenger::start_with_transport(
+        a_id.clone(),
+        net.endpoint(a_key),
+        Config::default(),
+    );
+    let a_msgr = Arc::new(a_msgr);
+    let dir = tmpdir("migrate-a");
+
+    let gid = {
+        let mut gm = manager(a_id.clone(), a_msgr.clone(), dir.clone());
+        let gid = gm.create("архив").expect("группа создана");
+        gm.send_text(&gid, "новое сообщение");
+        gid
+    };
+
+    // Кладём рядом файл ровно того вида, что писала прошлая версия.
+    let old = serde_json::json!([{
+        "id": 1_700_000_000_000u64,
+        "text": "сообщение из старой версии",
+        "mine": false,
+        "time": 1_700_000_000i64,
+        "sender": hex::encode([9u8; 32]),
+        "kind": "text",
+    }]);
+    let path = dir.join("groups").join(format!("{}.msgs.json", hex::encode(&gid)));
+    std::fs::write(&path, p2p_core::vault::seal(&serde_json::to_vec(&old).unwrap())).unwrap();
+
+    // Перезапуск: менеджер поднимает группу и по дороге переливает файл.
+    let gm2 = manager(a_id, a_msgr, dir.clone());
+    let hist: serde_json::Value = serde_json::from_str(&gm2.history_json(&gid)).unwrap();
+    let texts: Vec<&str> = hist.as_array().unwrap().iter().map(|m| m["text"].as_str().unwrap()).collect();
+    assert!(texts.contains(&"сообщение из старой версии"), "старое переехало: {texts:?}");
+    assert!(texts.contains(&"новое сообщение"), "новое на месте: {texts:?}");
+    assert!(!path.exists(), "файл убран, чтобы не переливать его снова");
 }
