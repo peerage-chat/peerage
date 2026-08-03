@@ -275,15 +275,26 @@ private fun GroupInviteCard(model: AppModel, inv: GroupInvite) {
             }
         }
         Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(
-                onClick = { model.acceptGroupInvite(inv.gid) },
-                colors = ButtonDefaults.buttonColors(containerColor = HoloAccent, contentColor = HoloAccentDark),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-            ) { Text(stringResource(R.string.group_invite_join), fontSize = 13.sp) }
-            Spacer(Modifier.width(8.dp))
-            TextButton(onClick = { model.declineGroupInvite(inv.gid) }) {
-                Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = 13.sp)
+        if (inv.waiting) {
+            // Согласие уже дано, но пригласивший офлайн: карточка остаётся и честно
+            // говорит, чего ждём. Раньше она просто исчезала, и вступление молча
+            // терялось — повторить было нечем.
+            Text(
+                stringResource(R.string.group_invite_waiting),
+                color = HoloSecondary,
+                fontSize = 13.sp,
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { model.acceptGroupInvite(inv.gid) },
+                    colors = ButtonDefaults.buttonColors(containerColor = HoloAccent, contentColor = HoloAccentDark),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                ) { Text(stringResource(R.string.group_invite_join), fontSize = 13.sp) }
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = { model.declineGroupInvite(inv.gid) }) {
+                    Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = 13.sp)
+                }
             }
         }
     }

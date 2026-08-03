@@ -318,3 +318,204 @@ fn group_retract_ignores_foreign_messages() {
     assert!(!ctx.gm_b.history_json(&ctx.gid).contains("сообщение A"), "у себя убрано");
     assert!(ctx.gm_a.history_json(&ctx.gid).contains("сообщение A"), "у автора осталось");
 }
+
+/// Перезапуск ОТПРАВИТЕЛЯ не должен ломать группу.
+///
+/// Найдено на живом меше 2026-08-02: после рестарта сообщения узла переставали
+/// доходить до участника — молча, без ошибок. Сценарий бытовой («закрыл приложение,
+/// потом написал в группу»), поэтому проверяем его на петле.
+#[test]
+fn sender_restart_keeps_group_working() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(30), id(40));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
+    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
+    let a_msgr = Arc::new(a_msgr);
+    let a_dir = tmpdir("restart-a");
+    let mut gm_a = GroupManager::new(a_id.clone(), a_msgr.clone(), a_dir.clone());
+    let mut gm_b = GroupManager::new(b_id, Arc::new(b_msgr), tmpdir("restart-b"));
+
+    let gid = gm_a.create("рестарт").expect("группа создана");
+    gm_a.invite(&gid, b_key);
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.invites_json().contains(&hex::encode(&gid))
+    }));
+    assert!(gm_b.accept_invite(&gid));
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
+        a.members(&gid).contains(&b_key) && b.group_ids().contains(&gid)
+    }));
+
+    assert!(gm_a.send_text(&gid, "до перезапуска"));
+    assert!(
+        pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+            b.history_json(&gid).contains("до перезапуска")
+        }),
+        "обычная отправка работает"
+    );
+
+    // «Перезапуск приложения»: менеджер групп поднимается заново из того же каталога.
+    drop(gm_a);
+    let mut gm_a = GroupManager::new(a_id, a_msgr, a_dir);
+    assert!(gm_a.group_ids().contains(&gid), "группа поднялась с диска");
+
+    assert!(gm_a.send_text(&gid, "после перезапуска"));
+    assert!(
+        pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+            b.history_json(&gid).contains("после перезапуска")
+        }),
+        "после рестарта отправителя сообщение обязано дойти"
+    );
+}
+
+/// Вступление не должно теряться, если пригласивший офлайн в момент «Вступить».
+///
+/// Найдено на живом меше 2026-08-02: карточка исчезала, KeyPackage уходил в никуда,
+/// группа не появлялась НИКОГДА — даже когда пригласивший возвращался. Повторить
+/// было нечем: приглашения в списке уже нет.
+#[test]
+fn accept_survives_offline_inviter() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(50), id(60));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
+    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
+    let mut gm_a = GroupManager::new(a_id, Arc::new(a_msgr), tmpdir("off-a"));
+    let mut gm_b = GroupManager::new(b_id, Arc::new(b_msgr), tmpdir("off-b"));
+
+    let gid = gm_a.create("офлайн").expect("группа создана");
+    gm_a.invite(&gid, b_key);
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.invites_json().contains(&hex::encode(&gid))
+    }));
+
+    // Пригласивший «офлайн»: его события никто не обрабатывает, KeyPackage повисает.
+    gm_b.accept_invite(&gid);
+    for _ in 0..20 {
+        while let Ok(ev) = b_rx.try_recv() {
+            dispatch(&mut gm_b, ev);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!gm_b.group_ids().contains(&gid), "пока он офлайн — вступления нет");
+    assert!(
+        gm_b.invites_json().contains("\"waiting\":true"),
+        "карточка остаётся и честно показывает ожидание: {}",
+        gm_b.invites_json()
+    );
+
+    // Пригласивший вернулся: клиент повторяет KeyPackage сам, без действий человека.
+    gm_b.on_peer_online(a_key);
+    assert!(
+        pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
+            a.members(&gid).contains(&b_key) && b.group_ids().contains(&gid)
+        }),
+        "после возвращения пригласившего вступление доводится до конца"
+    );
+    assert!(!gm_b.invites_json().contains(&hex::encode(&gid)), "карточка снята после вступления");
+}
+
+/// Приняли приглашение, KeyPackage ПОТЕРЯЛСЯ насовсем (пригласивший офлайн дольше,
+/// чем мессенджер повторяет неподтверждённое), да ещё и приложение перезапустили.
+/// Вступление всё равно доводится до конца: повтор висит на маячке и не зависит ни
+/// от presence (пригласивший может не быть контактом), ни от состояния в памяти.
+#[test]
+fn join_survives_lost_key_package_and_restart() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(51), id(61));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    // TTL короткий: недоставленное мессенджер бросает почти сразу — как в жизни
+    // бросает через 5 минут, а пригласивший возвращается через час.
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        message_ttl: Duration::from_millis(200),
+        ..Config::default()
+    };
+    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
+    let b_msgr = Arc::new(b_msgr);
+    let b_dir = tmpdir("lost-b");
+    let mut gm_a = GroupManager::new(a_id, Arc::new(a_msgr), tmpdir("lost-a"));
+    let mut gm_b = GroupManager::new(b_id.clone(), b_msgr.clone(), b_dir.clone());
+
+    let gid = gm_a.create("потеря").expect("группа создана");
+    gm_a.invite(&gid, b_key);
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.invites_json().contains(&hex::encode(&gid))
+    }));
+
+    // Сеть глухая: KeyPackage не дойдёт ни с первой попытки, ни с ретраями — и
+    // протухнет в очереди мессенджера.
+    net.set_drop_every(1);
+    gm_b.accept_invite(&gid);
+    std::thread::sleep(Duration::from_millis(400));
+    while a_rx.try_recv().is_ok() {}
+    assert!(!gm_a.members(&gid).contains(&b_key), "KeyPackage до админа не дошёл");
+
+    // Перезапуск клиента: состояние вступления в памяти потеряно, на диске — только
+    // приглашение с отметкой «принято».
+    drop(gm_b);
+    let mut gm_b = GroupManager::new(b_id, b_msgr, b_dir);
+    assert!(
+        gm_b.invites_json().contains("\"waiting\":true"),
+        "принятое приглашение пережило перезапуск: {}",
+        gm_b.invites_json()
+    );
+
+    // Связь вернулась. Никто не жмёт «Вступить» второй раз — работает маячок.
+    net.set_drop_every(0);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut done = false;
+    while Instant::now() < deadline && !done {
+        gm_b.retry_pending_joins();
+        while let Ok(ev) = a_rx.try_recv() {
+            dispatch(&mut gm_a, ev);
+        }
+        while let Ok(ev) = b_rx.try_recv() {
+            dispatch(&mut gm_b, ev);
+        }
+        done = gm_a.members(&gid).contains(&b_key) && gm_b.group_ids().contains(&gid);
+        if !done {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    assert!(done, "вступление доведено до конца само");
+    assert!(!gm_b.invites_json().contains(&hex::encode(&gid)), "карточка снята после вступления");
+}
+
+/// Вторая половина той же истории: пригласивший ПЕРЕЗАПУСТИЛСЯ, пока приглашённый
+/// думал. Раньше «кого я позвал» жило только в памяти, и пришедший KeyPackage было
+/// не с чем сопоставить — он молча выбрасывался, вступление не завершалось никогда.
+#[test]
+fn inviter_restart_still_accepts_key_package() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(52), id(62));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
+    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
+    let a_msgr = Arc::new(a_msgr);
+    let a_dir = tmpdir("re-a");
+    let mut gm_a = GroupManager::new(a_id.clone(), a_msgr.clone(), a_dir.clone());
+    let mut gm_b = GroupManager::new(b_id, Arc::new(b_msgr), tmpdir("re-b"));
+
+    let gid = gm_a.create("перезапуск").expect("группа создана");
+    gm_a.invite(&gid, b_key);
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.invites_json().contains(&hex::encode(&gid))
+    }));
+
+    // Пригласивший перезапустился ДО того, как приглашённый решился.
+    drop(gm_a);
+    let mut gm_a = GroupManager::new(a_id, a_msgr, a_dir);
+
+    gm_b.accept_invite(&gid);
+    assert!(
+        pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
+            a.members(&gid).contains(&b_key) && b.group_ids().contains(&gid)
+        }),
+        "KeyPackage узнан и после перезапуска пригласившего"
+    );
+}

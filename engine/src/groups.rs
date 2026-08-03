@@ -76,6 +76,9 @@ struct GroupRow {
 struct StoredInvite {
     name: String,
     inviter: String,
+    /// Приглашение уже принято, ждём Welcome от пригласившего.
+    #[serde(default)]
+    accepted: bool,
 }
 
 /// Карточка приглашения в группу для клиента.
@@ -84,6 +87,8 @@ struct GroupInviteDto {
     gid: String,
     name: String,
     inviter: String,
+    /// «Вступить» нажато, ждём ответа пригласившего (он мог быть офлайн).
+    waiting: bool,
 }
 
 struct Entry {
@@ -105,6 +110,10 @@ const REKEY_INTERVAL_SECS: i64 = 24 * 3600;
 struct PendingInvite {
     name: String,
     inviter: [u8; 32],
+    /// «Вступить» уже нажато: KeyPackage отправлен, ждём Welcome. Карточка при этом
+    /// НЕ исчезает — иначе, если пригласивший в этот момент офлайн, вступление
+    /// теряется молча и повторить его нечем.
+    accepted: bool,
 }
 
 pub struct GroupManager {
@@ -121,10 +130,20 @@ pub struct GroupManager {
     resyncing: HashSet<[u8; 32]>,
     /// Троттлинг resync-обслуживания на админе: (peer,gid) → время последнего.
     resync_last: HashMap<([u8; 32], Vec<u8>), Instant>,
+    /// KeyPackage текущего вступления. Повторяем ИМЕННО его: новый сделал бы
+    /// Welcome на прежний нерасшифровываемым (pending-состояние у нас одно).
+    pending_kp: Option<Vec<u8>>,
+    /// Когда последний раз повторяли KeyPackage — троттлинг маячка.
+    last_join_retry: Option<Instant>,
     identity: Identity,
     messenger: Arc<Messenger>,
     dir: PathBuf,
 }
+
+/// Как часто повторять принятое, но не завершённое вступление в группу.
+/// Мессенджер сам повторяет неподтверждённое лишь `message_ttl` (5 минут),
+/// дальше пакет тихо выбрасывается — а пригласивший может вернуться и через сутки.
+const JOIN_RETRY_EVERY: Duration = Duration::from_secs(20);
 
 impl GroupManager {
     pub fn new(identity: Identity, messenger: Arc<Messenger>, data_dir: PathBuf) -> Self {
@@ -137,12 +156,15 @@ impl GroupManager {
             invites: HashMap::new(),
             resyncing: HashSet::new(),
             resync_last: HashMap::new(),
+            pending_kp: None,
+            last_join_retry: None,
             identity,
             messenger,
             dir,
         };
         m.load_all();
         m.load_pending_invites();
+        m.load_sent_invites();
         m.maybe_rekey_admin_groups();
         m
     }
@@ -285,6 +307,34 @@ impl GroupManager {
         if let Some(e) = self.groups.get(gid) {
             let _ = self.messenger.send_group_invite(&peer, gid, &e.name);
             self.invites.insert(peer, gid.to_vec());
+            self.save_sent_invites();
+        }
+    }
+
+    fn sent_invites_path(&self) -> PathBuf {
+        self.dir.join("sent_invites.json")
+    }
+
+    /// Кого и куда мы позвали. Живёт на диске, потому что приглашённый может нажать
+    /// «Вступить» через сутки — а к тому времени мы успеем перезапуститься, и без
+    /// этой записи его KeyPackage будет нечем сопоставить с группой (молча в никуда).
+    fn save_sent_invites(&self) {
+        let map: HashMap<String, String> =
+            self.invites.iter().map(|(p, g)| (hex::encode(p), hex::encode(g))).collect();
+        let _ = std::fs::create_dir_all(&self.dir);
+        if let Ok(j) = serde_json::to_vec(&map) {
+            let _ = std::fs::write(self.sent_invites_path(), j);
+        }
+    }
+
+    fn load_sent_invites(&mut self) {
+        let Ok(bytes) = std::fs::read(self.sent_invites_path()) else { return };
+        let Ok(map) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else { return };
+        for (peer_hex, gid_hex) in map {
+            let (Some(peer), Ok(gid)) = (crate::parse_key(&peer_hex), hex::decode(&gid_hex)) else {
+                continue;
+            };
+            self.invites.insert(peer, gid);
         }
     }
 
@@ -302,7 +352,11 @@ impl GroupManager {
             .map(|(gid, inv)| {
                 (
                     hex::encode(gid),
-                    StoredInvite { name: inv.name.clone(), inviter: hex::encode(inv.inviter) },
+                    StoredInvite {
+                        name: inv.name.clone(),
+                        inviter: hex::encode(inv.inviter),
+                        accepted: inv.accepted,
+                    },
                 )
             })
             .collect();
@@ -323,7 +377,8 @@ impl GroupManager {
             let (Ok(gid), Some(inviter)) = (hex::decode(&gid_hex), crate::parse_key(&v.inviter)) else {
                 continue;
             };
-            self.pending_invites.insert(gid, PendingInvite { name: v.name, inviter });
+            self.pending_invites
+                .insert(gid, PendingInvite { name: v.name, inviter, accepted: v.accepted });
         }
     }
 
@@ -333,7 +388,11 @@ impl GroupManager {
         if self.groups.contains_key(&gid) {
             return false;
         }
-        self.pending_invites.insert(gid, PendingInvite { name, inviter: peer });
+        // Пригласивший мог послать карточку повторно (перезапуск, ретрай). Если мы
+        // уже согласились — согласие сохраняем, иначе «ждём ответа» откатилось бы в
+        // кнопки, а движок перестал бы повторять KeyPackage.
+        let accepted = self.pending_invites.get(&gid).is_some_and(|i| i.accepted);
+        self.pending_invites.insert(gid, PendingInvite { name, inviter: peer, accepted });
         self.save_pending_invites();
         true
     }
@@ -347,6 +406,7 @@ impl GroupManager {
                 gid: hex::encode(gid),
                 name: inv.name.clone(),
                 inviter: hex::encode(inv.inviter),
+                waiting: inv.accepted,
             })
             .collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
@@ -356,23 +416,77 @@ impl GroupManager {
     /// (дальше как обычный join — админ добавит нас, придёт Welcome). Имя группы из
     /// инвайта запоминаем, чтобы показать сразу. Возвращает true при успехе.
     pub fn accept_invite(&mut self, gid: &[u8]) -> bool {
-        let Some(inv) = self.pending_invites.remove(gid) else { return false };
+        let Some(inv) = self.pending_invites.get_mut(gid) else { return false };
+        // Помечаем ПРИНЯТЫМ и оставляем в списке: карточка исчезнет только когда
+        // придёт Welcome. Пригласивший может быть офлайн — тогда мы повторим
+        // отправку KeyPackage, как только он появится (см. `on_peer_online`).
+        inv.accepted = true;
+        let (inviter, name) = (inv.inviter, inv.name.clone());
         self.save_pending_invites();
         if self.pending.is_some() {
-            // Уже идёт другое вступление — вернём инвайт в очередь, попробуем позже.
-            self.pending_invites.insert(gid.to_vec(), inv);
-            self.save_pending_invites();
+            // Уже идёт другое вступление — этим займёмся, когда освободимся.
             return false;
         }
+        self.send_key_package_to(inviter, name)
+    }
+
+    /// Отправить свой KeyPackage пригласившему и начать ожидание Welcome.
+    fn send_key_package_to(&mut self, inviter: [u8; 32], name: String) -> bool {
         match GroupChat::pending(&self.identity, self.messenger.clone()) {
             Ok((pending, kp)) => {
-                let _ = self.messenger.send_group_key_reply(&inv.inviter, &kp);
+                let _ = self.messenger.send_group_key_reply(&inviter, &kp);
                 self.pending = Some(pending);
-                self.pending_join_name = Some(inv.name);
+                self.pending_kp = Some(kp);
+                self.pending_join_name = Some(name);
+                self.last_join_retry = Some(Instant::now());
                 true
             }
             Err(_) => false,
         }
+    }
+
+    /// Повторить принятое, но не завершённое вступление — не чаще `JOIN_RETRY_EVERY`.
+    /// Зовётся с маячка, поэтому НЕ зависит от presence: пригласивший может не быть
+    /// нашим контактом, и тогда событий о его появлении нам никто не пришлёт.
+    pub fn retry_pending_joins(&mut self) {
+        if self.last_join_retry.is_some_and(|t| t.elapsed() < JOIN_RETRY_EVERY) {
+            return;
+        }
+        let waiting = self
+            .pending_invites
+            .iter()
+            .find(|(_, inv)| inv.accepted)
+            .map(|(gid, inv)| (gid.clone(), inv.inviter, inv.name.clone()));
+        let Some((gid, inviter, name)) = waiting else { return };
+        self.last_join_retry = Some(Instant::now());
+        match self.pending_kp.clone() {
+            // Ожидание уже идёт — шлём тот же KeyPackage ещё раз.
+            Some(kp) if self.pending.is_some() => {
+                log::info!("group {}: повторяю KeyPackage пригласившему", hex::encode(&gid));
+                let _ = self.messenger.send_group_key_reply(&inviter, &kp);
+            }
+            // Состояние потеряно (перезапуск приложения) — начинаем вступление заново.
+            _ => {
+                log::info!("group {}: возобновляю вступление после перезапуска", hex::encode(&gid));
+                self.send_key_package_to(inviter, name);
+            }
+        }
+    }
+
+    /// Пир появился в сети: если мы приняли его приглашение, но Welcome так и не
+    /// пришёл (он был офлайн, когда мы нажимали «Вступить»), — повторяем KeyPackage.
+    ///
+    /// Без этого «Вступить» работало только при онлайн-пригласившем, а иначе
+    /// вступление терялось навсегда: карточка снята, повторить нечем.
+    pub fn on_peer_online(&mut self, peer: [u8; 32]) {
+        let waiting =
+            self.pending_invites.values().any(|inv| inv.accepted && inv.inviter == peer);
+        if !waiting {
+            return;
+        }
+        // Ждать до 20 с незачем — адресат заведомо в сети.
+        self.last_join_retry = None;
+        self.retry_pending_joins();
     }
 
     /// Отклонить приглашение (тихо убрать из очереди).
@@ -603,6 +717,7 @@ impl GroupManager {
     /// leaf (Remove), затем добавляем свежим (Add) — участник входит с текущей эпохи.
     pub fn on_key_reply(&mut self, peer: [u8; 32], key_package: &[u8]) -> bool {
         let Some(id) = self.invites.remove(&peer) else { return false };
+        self.save_sent_invites();
         let resync = self.resyncing.remove(&peer);
         let added = self
             .groups
@@ -757,6 +872,8 @@ impl GroupManager {
         });
         if let Some(id) = joined_gid {
             if let Some(chat) = self.pending.take() {
+                self.pending_kp = None;
+                self.last_join_retry = None;
                 for m in chat.members() {
                     crate::spawn_connect(self.messenger.clone(), m);
                 }
@@ -811,6 +928,7 @@ impl GroupManager {
         self.resync_last.insert(key, now);
         let _ = self.messenger.send_group_key_request(&peer);
         self.invites.insert(peer, gid.to_vec());
+        self.save_sent_invites();
         self.resyncing.insert(peer); // on_key_reply сделает Remove+Add, не просто Add
     }
 

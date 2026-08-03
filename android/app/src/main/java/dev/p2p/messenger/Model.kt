@@ -120,7 +120,13 @@ data class Me(val pubkey: String, val address: String, val fingerprint: String)
 data class Group(val gid: String, val name: String, val members: Int, val admin: Boolean = false)
 
 /** Входящее приглашение в группу (карточка на одобрение вместо тихого авто-входа). */
-data class GroupInvite(val gid: String, val name: String, val inviter: String)
+data class GroupInvite(
+    val gid: String,
+    val name: String,
+    val inviter: String,
+    /** Мы уже согласились; ждём, когда пригласивший окажется в сети и ответит. */
+    val waiting: Boolean = false,
+)
 
 /** Пир транспорта (адрес/направление/пинг/трафик) — из снапшота движка. */
 data class NetPeer(
@@ -2139,7 +2145,7 @@ class AppModel private constructor() {
 
     private fun refreshGroupInvitesNow() {
         val list = decodeList<GroupInviteDto>(Native.groupInvites(sessionPtr))
-            .map { GroupInvite(it.gid, it.name, it.inviter) }
+            .map { GroupInvite(it.gid, it.name, it.inviter, it.waiting) }
         groupInvites.clear()
         groupInvites.addAll(list)
     }
@@ -2147,7 +2153,8 @@ class AppModel private constructor() {
     /** Принять приглашение: вступление завершится по `groups_changed`. */
     fun acceptGroupInvite(gid: String) = ops.execute {
         Native.acceptGroupInvite(sessionPtr, gid)
-        refreshGroupInvitesNow()
+        // Состояние карточки («ждём ответа») выставит движок — команду исполняет
+        // актор в своём потоке, и читать сразу после вызова рано.
     }
 
     /** Отклонить приглашение (тихо). */

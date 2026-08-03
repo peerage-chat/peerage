@@ -37,6 +37,7 @@ fn main() {
     let mut create_group: Option<String> = None;
     let mut group_text: Option<String> = None;
     let mut group_retract_after: Option<u32> = None;
+    let mut auto_join = false;
     let mut adds: Vec<String> = Vec::new();
     let mut rest = args.collect::<Vec<_>>().into_iter();
     while let Some(a) = rest.next() {
@@ -55,6 +56,8 @@ fn main() {
             "--create-group" => create_group = rest.next(),
             // Послать текст в группу, как только в ней появится второй участник.
             "--group-text" => group_text = rest.next(),
+            // Принимать входящие приглашения в группы (роль второго участника).
+            "--auto-join" => auto_join = true,
             // Через столько тиков (2 с) после отправки отозвать своё сообщение.
             "--group-retract-after" => {
                 group_retract_after = rest.next().and_then(|v| v.parse().ok())
@@ -192,6 +195,20 @@ fn main() {
         // живой прогон на РЕАЛЬНОМ меше был наблюдаем без Android-клиента.
         while let Some(ev) = engine.poll_event() {
             println!("EVENT {ev}");
+        }
+        if auto_join {
+            let inv: serde_json::Value =
+                serde_json::from_str(&engine.group_invites_json()).unwrap_or_default();
+            for g in inv.as_array().into_iter().flatten() {
+                // waiting — согласие уже дано, повтор ведёт движок сам.
+                if g["waiting"] == true {
+                    continue;
+                }
+                if let Some(h) = g["gid"].as_str().and_then(|h| hex::decode(h).ok()) {
+                    engine.accept_group_invite(h.clone());
+                    println!("JOINED {}", hex::encode(&h));
+                }
+            }
         }
         println!("CONTACTS {}", engine.contacts_json());
 

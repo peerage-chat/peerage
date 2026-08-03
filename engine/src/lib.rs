@@ -62,6 +62,8 @@ pub(crate) enum GroupCmd {
     Retract { gid: Vec<u8>, ids: Vec<u64> },
     /// Удалить сообщения только у себя: пары `(id, автор-hex)`.
     DeleteLocal { gid: Vec<u8>, refs: Vec<(u64, String)> },
+    /// Пир появился в сети — проверить незавершённые вступления в группы.
+    PeerOnline { peer: [u8; 32] },
     /// Отозвать участника (ADR-004, только админ).
     RemoveMember { gid: Vec<u8>, peer: [u8; 32] },
     /// Ротация ключа группы (PCS, ADR-004).
@@ -1902,7 +1904,7 @@ fn event_pump(
             }
             Ok(Job::Beacon) => {
                 last_beacon = Instant::now();
-                beacon_tick(&engine, &groups, &messenger);
+                beacon_tick(&engine, &mut groups, &messenger);
             }
             Ok(Job::Leave(gid)) => {
                 // Стабильная комната: если мы УЖЕ перезашли — отложенный Leave устарел.
@@ -1925,7 +1927,7 @@ fn event_pump(
         }
         if last_beacon.elapsed() >= BEACON_INTERVAL {
             last_beacon = Instant::now();
-            beacon_tick(&engine, &groups, &messenger);
+            beacon_tick(&engine, &mut groups, &messenger);
         }
         blobs.tick(); // переспросить потерянные чанки докачки (M2)
         // Прогресс докачки наверх: UI рисует кружок вместо бесконечного спиннера.
@@ -2018,7 +2020,11 @@ fn save_and_notify_blob(
 }
 
 /// Разослать маячок присутствия членам всех наших комнат и подчистить протухших.
-fn beacon_tick(engine: &Arc<Engine>, groups: &GroupManager, messenger: &Messenger) {
+fn beacon_tick(engine: &Arc<Engine>, groups: &mut GroupManager, messenger: &Messenger) {
+    // Незавершённое вступление в группу: пригласивший мог быть офлайн, когда мы
+    // нажали «Вступить». Повтор живёт здесь, а не на presence, потому что
+    // пригласивший может не быть контактом — presence о нём не приходит вовсе.
+    groups.retry_pending_joins();
     let joined: Vec<(Vec<u8>, u8)> = {
         let rs = engine.rooms.lock_safe();
         rs.joined.iter().map(|(g, f)| (g.clone(), *f)).collect()
@@ -2060,6 +2066,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                         log::info!("outbox on_online peer={:02x?}: досылка (в очереди {})", &peer[..4], c);
                     }
                 }
+            }
+            if online {
+                // Вступление в группу могло застрять: мы нажали «Вступить», пока
+                // пригласивший был офлайн. Он вернулся — повторяем KeyPackage.
+                let _ = engine.jobs.send(Job::Cmd(GroupCmd::PeerOnline { peer }));
             }
             push_event(engine, dto::UiEvent::Presence { peer: hex::encode(peer), online });
             // ADR-007: контакт вернулся, а объявление о смене нашего адреса до него
@@ -2246,6 +2257,10 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             }
             if out.joined {
                 refresh_group_cache(engine, groups);
+                // Карточку приглашения движок уже снял (Welcome пришёл) — но UI об этом
+                // узнаёт только из GroupInvitesChanged. Без него «ждём ответа» висит
+                // рядом с уже вступившей группой до перезапуска.
+                push_event(engine, dto::UiEvent::GroupInvitesChanged);
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
             if out.renamed {
@@ -2418,7 +2433,8 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
         GroupCmd::Invite { gid, peer } => groups.invite(&gid, peer),
         GroupCmd::AcceptInvite { gid } => {
             // KeyPackage ушёл пригласившему; вступление завершится по Welcome (joined).
-            // Карточку убираем из кэша сразу.
+            // Карточка остаётся до этого момента в состоянии «ждём ответа»: пригласивший
+            // мог быть офлайн, и тогда мы повторим KeyPackage на его presence.
             groups.accept_invite(&gid);
             refresh_group_cache(engine, groups);
             push_event(engine, dto::UiEvent::GroupInvitesChanged);
@@ -2450,6 +2466,10 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                 push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(&gid) });
             }
         }
+        GroupCmd::PeerOnline { peer } => {
+            groups.on_peer_online(peer);
+        }
+        // (событие о завершении вступления придёт по Welcome — GroupsChanged)
         GroupCmd::RemoveMember { gid, peer } => {
             if groups.remove_member(&gid, peer) {
                 refresh_group_cache(engine, groups);

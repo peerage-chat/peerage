@@ -92,6 +92,8 @@ internal data class GroupInviteDto(
     val gid: String = "",
     val name: String = "",
     val inviter: String = "",
+    /** «Вступить» нажато, ждём ответа пригласившего (он мог быть офлайн). */
+    val waiting: Boolean = false,
 )
 
 @Serializable

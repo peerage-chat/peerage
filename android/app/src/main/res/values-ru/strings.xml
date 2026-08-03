@@ -622,4 +622,6 @@
     <string name="chat_reply_gone">сообщение удалено</string>
 
     <string name="saved_delete_note">Заметки только у вас — удаление ни у кого больше ничего не меняет.</string>
+
+    <string name="group_invite_waiting">Вы согласились — ждём ответа пригласившего. Он придёт, как только тот появится в сети.</string>
 </resources>
