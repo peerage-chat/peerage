@@ -152,6 +152,7 @@ internal fun ChatScreen(model: AppModel) {
     val lastId = msgs.lastOrNull()?.id
     LaunchedEffect(lastId) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
     PagingUp(listState, key) { done -> model.loadOlder(key, done) }
+    LaunchedEffect(key) { model.refreshPins(key, group = false) }
     // Порог анимации: всё, что было в чате на момент открытия, показываем сразу.
     // Анимировать историю при входе — мельтешение; анимируем только НОВОЕ.
     val appearFrom = remember(key) { msgs.lastOrNull()?.id ?: Long.MIN_VALUE }
@@ -197,6 +198,7 @@ internal fun ChatScreen(model: AppModel) {
     }
 
     Column(Modifier.fillMaxSize()) {
+        PinnedBar(model, key, group = false, canUnpin = true)
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
@@ -435,6 +437,15 @@ private fun SelectionTopBar(model: AppModel) {
         }
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
             model.beginForward(key)
+        }
+        if (sel.size == 1) {
+            val ref = sel.first()
+            val msg = model.messages[key]?.firstOrNull { it.id == ref.id && it.mine == ref.mine }
+            val already = model.pinned[key].orEmpty().any { it.id == ref.id && it.mine == ref.mine }
+            BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
+                msg?.let { model.setPinned(key, false, it, !already) }
+                model.clearSelection()
+            }
         }
         BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
             val text = model.selectedText(key)

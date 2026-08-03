@@ -69,6 +69,8 @@ pub(crate) enum GroupCmd {
     },
     /// Отозвать свои сообщения у участников («удалить у всех»).
     Retract { gid: Vec<u8>, ids: Vec<u64> },
+    /// Закрепить/открепить сообщение в группе (только админ).
+    Pin { gid: Vec<u8>, id: u64, sender: String, on: bool },
     /// Удалить сообщения только у себя: пары `(id, автор-hex)`.
     DeleteLocal { gid: Vec<u8>, refs: Vec<(u64, String)> },
     /// Пир появился в сети — проверить незавершённые вступления в группы.
@@ -150,7 +152,15 @@ impl ChatKey {
         }
     }
 
-    fn as_chat(&self) -> Chat<'_> {
+    /// Идентификатор чата байтами (для событий наружу).
+    pub(crate) fn id_bytes(&self) -> &[u8] {
+        match self {
+            ChatKey::Dm(k) => k.as_slice(),
+            ChatKey::Group(g) => g,
+        }
+    }
+
+    pub(crate) fn as_chat(&self) -> Chat<'_> {
         match self {
             ChatKey::Dm(k) => Chat::Dm(k),
             ChatKey::Group(g) => Chat::Group(g),
@@ -424,6 +434,51 @@ impl Engine {
             }
             Err(_) => None,
         }
+    }
+
+    /// Закрепить или открепить сообщение в чате. Закреп общий для всех участников:
+    /// он живёт у чата, а не у того, кто его поставил, — иначе «закрепил важное»
+    /// означало бы «закрепил у себя», и остальные об этом не узнали бы.
+    ///
+    /// В группе закрепляет только админ (ADR-004): иначе любой участник вешал бы
+    /// своё сообщение в шапку всем.
+    pub fn pin_message(&self, chat: ChatKey, id: u64, sender: &str, on: bool) -> bool {
+        match &chat {
+            ChatKey::Dm(peer) => {
+                let mine = sender == self.me_hex();
+                if self.messenger.send_pin(peer, id, mine, on).is_err() {
+                    return false;
+                }
+                self.apply_pin(chat.as_chat(), id, sender, on, &self.me_hex());
+                push_event(self, dto::UiEvent::PinsChanged { chat: hex::encode(chat.id_bytes()) });
+                true
+            }
+            ChatKey::Group(gid) => self
+                .jobs
+                .send(Job::Cmd(GroupCmd::Pin {
+                    gid: gid.clone(),
+                    id,
+                    sender: sender.to_string(),
+                    on,
+                }))
+                .is_ok(),
+        }
+    }
+
+    /// Закреплённые сообщения чата (свежие первыми) — как обычные строки истории.
+    pub fn pinned_json(&self, chat: ChatKey) -> String {
+        let list = self.messages.lock_safe().pinned(chat.as_chat());
+        serde_json::to_string(&list).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Положить закреп в хранилище (общий путь для своих действий и входящих).
+    pub(crate) fn apply_pin(&self, chat: Chat, id: u64, sender: &str, on: bool, by: &str) {
+        let store = self.messages.lock_safe();
+        let _ = if on {
+            store.pin(chat, id, sender, now(), by)
+        } else {
+            store.unpin(chat, id, sender).map(|_| ())
+        };
     }
 
     /// Переслать сообщения в другой чат. `src`/`dst` — «личный чат или группа» плюс
@@ -2355,6 +2410,13 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 });
             }
         }
+        Event::Pin { peer, target, target_mine, on } => {
+            // Ссылка на сообщение — «автор + id»: чьё именно, решает перевёрнутый
+            // флаг (его перевернул мессенджер на приёме).
+            let author = engine.author_hex(&peer, target_mine);
+            engine.apply_pin(Chat::Dm(&peer), target, &author, on, &hex::encode(peer));
+            push_event(engine, dto::UiEvent::PinsChanged { chat: hex::encode(peer) });
+        }
         Event::Retract { peer, target } => {
             // Удаляем ЕГО сообщение (mine=false): отозвать наше собственное он не может.
             let n = engine
@@ -2508,6 +2570,12 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // отозванное останется на экране до перезахода в чат.
                 if let Some(gid) = &out.gid {
                     push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(gid) });
+                }
+            }
+            if out.pinned {
+                // Шапка чата живёт отдельно от ленты — событие своё.
+                if let Some(gid) = &out.gid {
+                    push_event(engine, dto::UiEvent::PinsChanged { chat: hex::encode(gid) });
                 }
             }
             if out.joined {
@@ -2706,6 +2774,11 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                 // присваивает этот слой, и без перечитывания истории на него нельзя
                 // было бы ни ответить, ни отозвать.
                 push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(&gid) });
+            }
+        }
+        GroupCmd::Pin { gid, id, sender, on } => {
+            if groups.pin(&gid, id, &sender, on) {
+                push_event(engine, dto::UiEvent::PinsChanged { chat: hex::encode(&gid) });
             }
         }
         GroupCmd::Retract { gid, ids } => {

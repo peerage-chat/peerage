@@ -633,4 +633,9 @@
     <string name="forward_hide_author">Скрыть автора</string>
     <string name="forward_hide_author_hint">Получатель увидит «переслано», но не узнает, от кого. Ключ автора не отправляется.</string>
     <string name="forward_from_hidden">Переслано</string>
+    <string name="pin_action">Закрепить</string>
+    <string name="pin_title">Закреплённое</string>
+    <string name="pin_title_many">Закреплённое · %1$d</string>
+    <string name="pin_remove">Открепить</string>
+    <string name="pin_attachment">Вложение</string>
 </resources>

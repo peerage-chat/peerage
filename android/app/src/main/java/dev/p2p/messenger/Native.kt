@@ -207,6 +207,22 @@ object Native {
     /** Удалить все сохранённые вложения. Возвращает освобождённые байты. */
     external fun clearBlobs(sessionPtr: Long): Long
 
+    /**
+     * Закрепить/открепить сообщение. `isGroup` выбирает вид чата, `senderHex` —
+     * автор закрепляемого (ссылка на сообщение — пара «автор + id»).
+     */
+    external fun pinMessage(
+        sessionPtr: Long,
+        chatHex: String,
+        isGroup: Boolean,
+        msgId: Long,
+        senderHex: String,
+        on: Boolean,
+    ): Int
+
+    /** Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми. */
+    external fun pinned(sessionPtr: Long, chatHex: String, isGroup: Boolean): String
+
     /** Хвост переписки с пиром (последняя страница) как JSON-массив. */
     external fun history(sessionPtr: Long, keyHex: String): String
 

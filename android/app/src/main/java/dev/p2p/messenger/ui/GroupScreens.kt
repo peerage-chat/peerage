@@ -111,6 +111,8 @@ internal fun GroupChatScreen(model: AppModel) {
     val gid = model.currentGroup ?: return
     val msgs = model.groupMessages[gid] ?: emptyList()
     val archived = model.groups.firstOrNull { it.gid == gid }?.archived == true
+    val isAdmin = model.groups.firstOrNull { it.gid == gid }?.admin == true
+    LaunchedEffect(gid) { model.refreshPins(gid, group = true) }
     var input by remember(gid) { mutableStateOf("") }
     var focusedParticipant by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
@@ -170,6 +172,7 @@ internal fun GroupChatScreen(model: AppModel) {
                 RoomBanner(model, presenceMembers) { model.joinRoom(gid) }
             }
 
+            PinnedBar(model, gid, group = true, canUnpin = isAdmin)
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
@@ -416,6 +419,19 @@ private fun GroupSelectionTopBar(model: AppModel) {
         )
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
             model.beginForwardGroup(gid)
+        }
+        // Закрепляет только админ — у остальных кнопки нет, чтобы она не обещала
+        // того, что движок всё равно отклонит.
+        if (sel.size == 1 && model.groups.firstOrNull { it.gid == gid }?.admin == true) {
+            val ref = sel.first()
+            val msg = model.groupMessages[gid]
+                ?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
+            val already = model.pinned[gid].orEmpty()
+                .any { it.id == ref.id && it.sender == ref.sender }
+            BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
+                msg?.let { model.setPinnedGroup(gid, it, !already) }
+                model.clearGroupSelection()
+            }
         }
         if (sel.size == 1) {
             BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {

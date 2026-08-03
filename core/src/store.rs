@@ -740,9 +740,9 @@ pub struct StoredMessage {
 
 /// Колонки истории в порядке, который ждёт [`read_msg`]. Один список на все
 /// запросы: разъехавшийся порядок здесь — это молча перепутанные поля.
-const MSG_COLS: &str = "rowid, id, sender, mine, text, time, status, kind, blob_id, mime, name,
-     size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender, system,
-     fwd_from, fwd_anon";
+const MSG_COLS: &str = "m.rowid, m.id, m.sender, m.mine, m.text, m.time, m.status, m.kind,
+     m.blob_id, m.mime, m.name, m.size, m.duration_ms, m.width, m.height, m.thumb_id,
+     m.downloaded, m.reply_to, m.reply_sender, m.system, m.fwd_from, m.fwd_anon";
 
 fn read_msg(row: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
     read_msg_offset(row, 0)
@@ -962,8 +962,8 @@ impl MessageStore {
         }
         let conn = db::lock(&self.db);
         let sql = format!(
-            "SELECT {MSG_COLS} FROM chat_messages
-             WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4"
+            "SELECT {MSG_COLS} FROM chat_messages m
+             WHERE m.chat=?1 AND m.scope=?2 AND m.sender=?3 AND m.id=?4"
         );
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
@@ -981,6 +981,60 @@ impl MessageStore {
         }
         out.sort_by_key(|m| (m.time, m.row));
         out
+    }
+
+    /// Закрепить сообщение в чате. Повторный закреп того же — не ошибка (обновляем
+    /// время и автора), чтобы «закрепить» дважды не ломалось на гонке двух устройств.
+    pub fn pin(&self, chat: Chat, id: u64, sender: &str, at: i64, by: &str) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "INSERT INTO pinned (chat, scope, msg_id, sender, pinned_at, by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(chat, scope, msg_id, sender)
+             DO UPDATE SET pinned_at = excluded.pinned_at, by = excluded.by",
+            rusqlite::params![chat.id(), chat.scope(), id as i64, sender, at, by],
+        )?;
+        Ok(())
+    }
+
+    /// Открепить. Возвращает true, если что-то было закреплено.
+    pub fn unpin(&self, chat: Chat, id: u64, sender: &str) -> Result<bool, StoreError> {
+        let n = db::lock(&self.db).execute(
+            "DELETE FROM pinned WHERE chat=?1 AND scope=?2 AND msg_id=?3 AND sender=?4",
+            rusqlite::params![chat.id(), chat.scope(), id as i64, sender],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Закреплённые сообщения чата вместе с их содержимым, свежие первыми.
+    ///
+    /// Возвращает именно СООБЩЕНИЯ, а не ссылки: шапка чата показывает текст, и
+    /// заставлять клиента искать его в незагруженной истории значит показать пустую
+    /// плашку на старом закрепе.
+    pub fn pinned(&self, chat: Chat) -> Vec<StoredMessage> {
+        let conn = db::lock(&self.db);
+        let sql = format!(
+            "SELECT {MSG_COLS} FROM chat_messages m
+             JOIN pinned p ON p.chat = m.chat AND p.scope = m.scope
+                          AND p.msg_id = m.id AND p.sender = m.sender
+             WHERE m.chat=?1 AND m.scope=?2
+             ORDER BY p.pinned_at DESC"
+        );
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map(rusqlite::params![chat.id(), chat.scope()], read_msg)
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Убрать все закрепы чата (чат удалён/группа покинута).
+    pub fn clear_pins(&self, chat: Chat) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "DELETE FROM pinned WHERE chat=?1 AND scope=?2",
+            rusqlite::params![chat.id(), chat.scope()],
+        )?;
+        Ok(())
     }
 
     /// Запомнить название чата (для групп — имя группы).
@@ -1040,9 +1094,9 @@ impl MessageStore {
     pub fn history(&self, chat: Chat, before: Option<(i64, i64)>, limit: usize) -> Vec<StoredMessage> {
         let conn = db::lock(&self.db);
         let sql = format!(
-            "SELECT {MSG_COLS} FROM chat_messages
-             WHERE chat=?1 AND scope=?2 AND (?3 = 0 OR (time, rowid) < (?4, ?5))
-             ORDER BY time DESC, rowid DESC LIMIT ?6"
+            "SELECT {MSG_COLS} FROM chat_messages m
+             WHERE m.chat=?1 AND m.scope=?2 AND (?3 = 0 OR (m.time, m.rowid) < (?4, ?5))
+             ORDER BY m.time DESC, m.rowid DESC LIMIT ?6"
         );
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
@@ -1086,7 +1140,8 @@ impl MessageStore {
     pub fn export_page(&self, after: i64, limit: usize) -> Vec<(i64, Vec<u8>, i64, StoredMessage)> {
         let conn = db::lock(&self.db);
         let sql = format!(
-            "SELECT chat, scope, {MSG_COLS} FROM chat_messages WHERE rowid > ?1 ORDER BY rowid LIMIT ?2"
+            "SELECT m.chat, m.scope, {MSG_COLS} FROM chat_messages m
+             WHERE m.rowid > ?1 ORDER BY m.rowid LIMIT ?2"
         );
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,

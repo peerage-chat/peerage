@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
+import dev.p2p.messenger.HoloSurface
 import dev.p2p.messenger.R
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -322,5 +324,48 @@ internal fun PagingUp(listState: LazyListState, key: Any?, load: (done: (Int) ->
         // первая страница не запросилась бы никогда.
         snapshotFlow { listState.firstVisibleItemIndex to listState.layoutInfo.totalItemsCount }
             .collect { (idx, count) -> if (idx <= 3 && count > 0) pull() }
+    }
+}
+
+/**
+ * Плашка закреплённого сообщения над лентой. Показывает ВЕРХНЕЕ (самое свежее) и
+ * счётчик остальных: закреп — свойство чата, поэтому одинаков у всех участников.
+ *
+ * Кнопка «открепить» видна тогда же, когда доступно само действие: в личном чате —
+ * всегда, в группе — только админу (иначе она обещала бы то, что движок отклонит).
+ */
+@Composable
+internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: Boolean) {
+    val list = model.pinned[chat].orEmpty()
+    val top = list.firstOrNull() ?: return
+    Row(
+        Modifier.fillMaxWidth().background(HoloSurface).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(TablerIcons.Pin, null, tint = HoloAccent, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (list.size > 1) {
+                    stringResource(R.string.pin_title_many, list.size)
+                } else {
+                    stringResource(R.string.pin_title)
+                },
+                color = HoloAccent,
+                fontSize = 11.sp,
+            )
+            Text(
+                top.text.ifEmpty { stringResource(R.string.pin_attachment) },
+                color = Color.White,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (canUnpin) {
+            BarIcon(Icons.Filled.Close, stringResource(R.string.pin_remove)) {
+                model.setPinned(chat, group, top, false)
+            }
+        }
     }
 }

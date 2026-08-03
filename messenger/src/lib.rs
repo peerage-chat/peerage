@@ -106,6 +106,9 @@ pub enum Event {
     },
     /// Пир просит удалить своё сообщение `target` («удалить у всех»).
     Retract { peer: PeerKey, target: u64 },
+    /// Пир закрепил (или открепил) сообщение в общем чате. `target_mine` уже
+    /// перевёрнут: true — закреплено НАШЕ сообщение.
+    Pin { peer: PeerKey, target: u64, target_mine: bool, on: bool },
     /// Входящее медиа-сообщение (M2): ссылка на блоб-вложение по хэшу.
     Media {
         peer: PeerKey,
@@ -713,6 +716,20 @@ impl Messenger {
         self.shared.send_reliable(peer, false, move |id| Payload::Retract { id, target })
     }
 
+    /// Закрепить/открепить сообщение в личном чате. Надёжно, как отзыв: закреп,
+    /// сделанный пока собеседник офлайн, обязан доехать позже — иначе у двоих
+    /// разные шапки одного чата.
+    pub fn send_pin(
+        &self,
+        peer: &PeerKey,
+        target: u64,
+        target_mine: bool,
+        on: bool,
+    ) -> Result<u64, MessengerError> {
+        self.shared
+            .send_reliable(peer, false, move |id| Payload::Pin { id, target, target_mine, on })
+    }
+
     /// Объявить контакту смену своего АДРЕСА (ADR-007). Надёжно, как текст:
     /// контакт, отсутствовавший в момент смены, обязан узнать новый адрес по
     /// возвращении — иначе связь с ним рвётся навсегда.
@@ -1197,6 +1214,12 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::Retract { id, target } => {
                 // Отзыв касается сообщения ОТПРАВИТЕЛЯ — чужое удалить нельзя.
                 shared.emit(Event::Retract { peer: peer_id, target });
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
+            }
+            Payload::Pin { id, target, target_mine, on } => {
+                // «Чьё» приходит с точки зрения отправителя и переворачивается, как
+                // у ответа: его «моё» для нас — его сообщение.
+                shared.emit(Event::Pin { peer: peer_id, target, target_mine: !target_mine, on });
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::Media {

@@ -148,6 +148,9 @@ pub struct GroupManager {
     messages: Arc<Mutex<MessageStore>>,
     /// hex своего ключа: автор наших сообщений и признак «моё» при чтении.
     me_hex: String,
+    /// Кто админ каждой группы (gid → ключ). Нужен, чтобы проверять права на
+    /// действия, которые приходят ИЗВНЕ: закреп в шапку ставит только админ.
+    admin_keys: HashMap<Vec<u8>, [u8; 32]>,
 }
 
 /// Как часто повторять принятое, но не завершённое вступление в группу.
@@ -179,7 +182,9 @@ impl GroupManager {
             dir,
             messages,
             me_hex,
+            admin_keys: HashMap::new(),
         };
+        m.load_admin_keys();
         m.load_all();
         m.load_pending_invites();
         m.load_sent_invites();
@@ -251,6 +256,40 @@ impl GroupManager {
         if let Ok(j) = serde_json::to_vec(&admins) {
             let _ = std::fs::write(self.dir.join("admins.json"), j);
         }
+    }
+
+    fn admin_keys_path(&self) -> PathBuf {
+        self.dir.join("group_admins.json")
+    }
+
+    fn load_admin_keys(&mut self) {
+        let Ok(bytes) = std::fs::read(self.admin_keys_path()) else { return };
+        let Ok(map) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else { return };
+        for (gid_hex, key_hex) in map {
+            let (Ok(gid), Some(key)) = (hex::decode(&gid_hex), crate::parse_key(&key_hex)) else {
+                continue;
+            };
+            self.admin_keys.insert(gid, key);
+        }
+    }
+
+    fn save_admin_keys(&self) {
+        let map: HashMap<String, String> =
+            self.admin_keys.iter().map(|(g, k)| (hex::encode(g), hex::encode(k))).collect();
+        let _ = std::fs::create_dir_all(&self.dir);
+        if let Ok(j) = serde_json::to_vec(&map) {
+            let _ = std::fs::write(self.admin_keys_path(), j);
+        }
+    }
+
+    /// Ключ админа группы (создателя). `None` — группа старая, админ неизвестен.
+    pub fn admin_key(&self, gid: &[u8]) -> Option<[u8; 32]> {
+        self.admin_keys.get(gid).copied()
+    }
+
+    fn remember_admin(&mut self, gid: &[u8], key: [u8; 32]) {
+        self.admin_keys.insert(gid.to_vec(), key);
+        self.save_admin_keys();
     }
 
     /// Множество gid, где мы админ (из admins.json).
@@ -353,6 +392,8 @@ impl GroupManager {
         // Создатель = админ/секвенсор (ADR-004).
         self.groups.insert(id.clone(), Entry { chat, name: name.to_string(), admin: true });
         self.remember_title(&id, name);
+        let me = self.identity.public_key_bytes();
+        self.remember_admin(&id, me);
         self.save_group(&id);
         Some(id)
     }
@@ -639,6 +680,34 @@ impl GroupManager {
         sent
     }
 
+    /// Закрепить/открепить сообщение в группе. Право — только у админа (ADR-004):
+    /// иначе любой участник вешал бы своё сообщение в шапку всем остальным.
+    /// Возвращает true, если закреп применён и разослан.
+    pub fn pin(&mut self, gid: &[u8], id: u64, sender: &str, on: bool) -> bool {
+        let Some(e) = self.groups.get_mut(gid) else { return false };
+        if !e.admin {
+            log::warn!("pin: не админ группы {} — отказано", hex::encode(gid));
+            return false;
+        }
+        if e.chat.send_pin(id, sender, on).is_err() {
+            return false;
+        }
+        self.apply_pin(gid, id, sender, on, &self.me_hex.clone());
+        // Рассылка двигает MLS-ратчет — состояние обязано лечь на диск.
+        self.save_group(gid);
+        true
+    }
+
+    /// Положить закреп в общее хранилище (свой и входящий путь — один).
+    fn apply_pin(&self, gid: &[u8], id: u64, sender: &str, on: bool, by: &str) {
+        let store = self.messages.lock_safe();
+        let _ = if on {
+            store.pin(Chat::Group(gid), id, sender, now(), by)
+        } else {
+            store.unpin(Chat::Group(gid), id, sender).map(|_| ())
+        };
+    }
+
     /// Удалить сообщения ТОЛЬКО У СЕБЯ: пары `(id, автор-hex)`.
     pub fn delete_local(&mut self, gid: &[u8], refs: &[(u64, String)]) -> usize {
         if !self.groups.contains_key(gid) {
@@ -847,6 +916,19 @@ impl GroupManager {
                         sender: Some(sender_hex), ..Default::default()
                     }
                 }
+                Some(Ok(Inbound::Pin { actor, target, sender, on })) => {
+                    // Право проверяем ЗДЕСЬ: отправитель мог быть пропатчен, а в
+                    // группе админ один и он известен из ростера.
+                    let by_admin = self.admin_key(&gid) == Some(actor);
+                    if by_admin {
+                        self.apply_pin(&gid, target, &sender, on, &hex::encode(actor));
+                    }
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        pinned: by_admin,
+                        ..Default::default()
+                    }
+                }
                 Some(Ok(Inbound::Retract { sender, target })) => {
                     // Автор берётся ИЗ MLS, а не из тела: иначе участник мог бы
                     // стереть чужое сообщение, подставив чужой ключ.
@@ -964,6 +1046,12 @@ impl GroupManager {
                 // Иначе — первое вступление. Мы НЕ админ (админ — пригласивший).
                 // Имя — из принятого инвайта (иначе дефолт; админ всё равно догонит send_name).
                 let name = self.pending_join_name.take().unwrap_or_else(|| "Группа".into());
+                // Пригласивший и есть админ: приглашать и добавлять в MLS вправе
+                // только он (ADR-004).
+                if let Some(inv) = self.pending_invites.get(&id) {
+                    let inviter = inv.inviter;
+                    self.remember_admin(&id, inviter);
+                }
                 self.pending_invites.remove(&id);
                 self.save_pending_invites();
                 self.remember_title(&id, &name);
@@ -1035,12 +1123,15 @@ impl GroupManager {
     /// Удалить группу локально (нас из неё отозвали, ADR-004): файлы + кэш + индекс.
     fn delete_group(&mut self, id: &[u8]) {
         self.groups.remove(id);
+        self.admin_keys.remove(id);
+        self.save_admin_keys();
         let _ = std::fs::remove_file(self.group_path(id));
         let _ = std::fs::remove_file(self.msgs_path(id));
         {
             let store = self.messages.lock_safe();
             let _ = store.clear(Chat::Group(id));
             let _ = store.forget_chat_title(Chat::Group(id));
+            let _ = store.clear_pins(Chat::Group(id));
         }
         self.save_index();
     }
@@ -1050,6 +1141,8 @@ impl GroupManager {
 #[derive(Default)]
 pub struct GroupOutcome {
     pub gid: Option<Vec<u8>>,
+    /// Список закреплённых изменился — UI перечитать шапку чата.
+    pub pinned: bool,
     pub text: Option<String>,
     /// hex отправителя (для Message) или актора (для системного события).
     pub sender: Option<String>,

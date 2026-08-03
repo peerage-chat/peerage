@@ -54,6 +54,11 @@ enum AppMsg {
     /// из MLS, а не из тела.
     #[serde(rename = "retract")]
     Retract { target: u64 },
+    /// Закрепить/открепить сообщение группы. Ссылка — пара «автор + id» (ADR-006).
+    /// Право проверяет верхний слой: закрепляет админ, иначе любой участник мог бы
+    /// повесить своё сообщение в шапку всем остальным.
+    #[serde(rename = "pin")]
+    Pin { target: u64, sender: String, on: bool },
     /// Служебное: имя группы. Админ шлёт его новому участнику после add, чтобы тот
     /// увидел настоящее название, а не дефолт (в UI не показывается как сообщение).
     #[serde(rename = "name")]
@@ -111,6 +116,8 @@ pub enum Inbound {
     },
     /// Отправитель просит удалить СВОЁ сообщение `target` у всех.
     Retract { sender: PeerKey, target: u64 },
+    /// Закрепить/открепить сообщение (`actor` — кто это сделал).
+    Pin { actor: PeerKey, target: u64, sender: String, on: bool },
     /// Медиа-сообщение (M2): отправитель + ссылка на блоб с метаданными карточки.
     Media { sender: PeerKey, media: MediaBody },
     /// Имя группы (служебное): верхний слой обновляет название, без показа в чате.
@@ -277,6 +284,11 @@ impl GroupChat {
         self.send_app(&AppMsg::Media(body))
     }
 
+    /// Закрепить/открепить сообщение у всех участников.
+    pub fn send_pin(&mut self, target: u64, sender: &str, on: bool) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::Pin { target, sender: sender.to_string(), on })
+    }
+
     /// Разослать имя группы участникам (служебное). Админ зовёт после добавления
     /// участника — тот увидит настоящее название вместо дефолта.
     pub fn send_name(&mut self, name: &str) -> Result<(), GroupChatError> {
@@ -312,6 +324,9 @@ impl GroupChat {
                         }
                     }
                     Ok(AppMsg::Retract { target }) => Inbound::Retract { sender, target },
+                    Ok(AppMsg::Pin { target, sender: who, on }) => {
+                        Inbound::Pin { actor: sender, target, sender: who, on }
+                    }
                     Ok(AppMsg::Media(media)) => {
                         // Режем и на приёме: отправитель мог быть пропатчен.
                         let caption = truncate_caption(&media.caption);

@@ -259,3 +259,43 @@ fn hidden_forward_sends_no_author_at_all() {
     assert_eq!(own[0]["fwd_from"].as_str(), Some(""));
     assert_eq!(own[0]["fwd_anon"], true);
 }
+
+/// Закреп в личном чате общий для обоих: он живёт у ЧАТА, а не у того, кто его
+/// поставил. Иначе «закрепил важное» означало бы «закрепил у себя», и собеседник
+/// об этом не узнал бы.
+#[test]
+fn pin_in_a_dm_is_shared_by_both_sides() {
+    let (a, b, a_key, b_key) = pair("pin", 51, 52);
+
+    let id1 = a.send_text(&b_key, "код от домофона 47К").unwrap() as u64;
+    assert!(wait(10, || !history(&b, &a_key).is_empty()), "сообщение дошло");
+
+    let me = hex::encode(a_key);
+    assert!(a.pin_message(p2p_engine::ChatKey::Dm(b_key), id1, &me, true));
+
+    // У себя закреп виден сразу.
+    let mine: serde_json::Value =
+        serde_json::from_str(&a.pinned_json(p2p_engine::ChatKey::Dm(b_key))).unwrap();
+    assert_eq!(mine.as_array().unwrap().len(), 1);
+    assert_eq!(mine[0]["text"], "код от домофона 47К");
+
+    // И у собеседника — тоже, причём это ЕГО ссылка на то же сообщение.
+    assert!(wait(10, || {
+        let v: serde_json::Value =
+            serde_json::from_str(&b.pinned_json(p2p_engine::ChatKey::Dm(a_key))).unwrap();
+        !v.as_array().unwrap().is_empty()
+    }));
+    let at_b: serde_json::Value =
+        serde_json::from_str(&b.pinned_json(p2p_engine::ChatKey::Dm(a_key))).unwrap();
+    assert_eq!(at_b[0]["text"], "код от домофона 47К");
+    assert_eq!(at_b[0]["sender"].as_str(), Some(me.as_str()), "автор — Аня, а не получатель");
+    assert_eq!(at_b[0]["mine"], false);
+
+    // Открепление тоже общее.
+    assert!(a.pin_message(p2p_engine::ChatKey::Dm(b_key), id1, &me, false));
+    assert!(wait(10, || {
+        let v: serde_json::Value =
+            serde_json::from_str(&b.pinned_json(p2p_engine::ChatKey::Dm(a_key))).unwrap();
+        v.as_array().unwrap().is_empty()
+    }));
+}

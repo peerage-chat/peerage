@@ -440,6 +440,11 @@ internal sealed interface EngineEvent {
     @SerialName("group_invites_changed")
     data object GroupInvitesChanged : EngineEvent
 
+    /** Список закреплённых в чате изменился (hex собеседника или gid). */
+    @Serializable
+    @SerialName("pins_changed")
+    data class PinsChanged(val chat: String) : EngineEvent
+
     @Serializable
     @SerialName("group_removed")
     data class GroupRemoved(val gid: String) : EngineEvent

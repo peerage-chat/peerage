@@ -149,6 +149,23 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS calls_started ON calls(started DESC);
 
+        -- Закреплённые сообщения. Side-таблица, а не флаг в самой строке истории:
+        -- закреп — свойство ЧАТА, а не сообщения (его ставит и снимает другой
+        -- человек, и он должен переживать удаление сообщения у себя).
+        --   chat/scope — где закреплено
+        --   msg_id + sender — ссылка на сообщение (ADR-006)
+        --   pinned_at — когда закрепили (шапка показывает последнее)
+        --   by — hex того, кто закрепил
+        CREATE TABLE IF NOT EXISTS pinned (
+            chat      BLOB    NOT NULL,
+            scope     INTEGER NOT NULL DEFAULT 0,
+            msg_id    INTEGER NOT NULL,
+            sender    TEXT    NOT NULL,
+            pinned_at INTEGER NOT NULL,
+            by        TEXT    NOT NULL DEFAULT '',
+            PRIMARY KEY (chat, scope, msg_id, sender)
+        );
+
         -- Название чата. Нужно ровно для одного: групповая переписка, восстановленная
         -- из копии, должна где-то называться. MLS-состояние в копию не входит
         -- (ADR-004), поэтому такая группа живёт как архив: история есть, писать

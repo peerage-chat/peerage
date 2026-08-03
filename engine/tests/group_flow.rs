@@ -7,7 +7,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::store::MessageStore;
+use p2p_core::store::{Chat, MessageStore};
 use p2p_core::Identity;
 use p2p_engine::groups::GroupManager;
 use p2p_engine::MediaBody;
@@ -28,10 +28,19 @@ fn tmpdir(tag: &str) -> PathBuf {
 /// где история группы лежит в общей базе рядом с личными чатами. Второй менеджер на
 /// том же каталоге получает ту же базу: так тесты проверяют и перезапуск.
 fn manager(id: Identity, msgr: Arc<Messenger>, dir: PathBuf) -> GroupManager {
+    manager_with_store(id, msgr, dir).0
+}
+
+/// То же, но отдаёт и хранилище: часть проверок (закрепы) смотрит прямо в него.
+fn manager_with_store(
+    id: Identity,
+    msgr: Arc<Messenger>,
+    dir: PathBuf,
+) -> (GroupManager, Arc<Mutex<MessageStore>>) {
     let me = id.public_key_bytes();
     let db = p2p_core::db::open(&dir).expect("база");
-    let store = MessageStore::open(db, None, &me).expect("хранилище сообщений");
-    GroupManager::new(id, msgr, dir, Arc::new(Mutex::new(store)))
+    let store = Arc::new(Mutex::new(MessageStore::open(db, None, &me).expect("хранилище")));
+    (GroupManager::new(id, msgr, dir, store.clone()), store)
 }
 
 /// Разослать событие мессенджера соответствующему менеджеру группы (как event_pump).
@@ -573,4 +582,62 @@ fn old_group_history_file_migrates_into_the_store() {
     assert!(texts.contains(&"сообщение из старой версии"), "старое переехало: {texts:?}");
     assert!(texts.contains(&"новое сообщение"), "новое на месте: {texts:?}");
     assert!(!path.exists(), "файл убран, чтобы не переливать его снова");
+}
+
+/// Закреп в группе ставит ТОЛЬКО админ — и он доезжает до участников. Иначе любой
+/// участник вешал бы своё сообщение в шапку всем остальным, а проверять право на
+/// стороне отправителя бессмысленно: клиент можно пропатчить.
+#[test]
+fn only_admin_can_pin_in_a_group() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(101), id(102));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
+    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
+    let (mut gm_a, store_a) = manager_with_store(a_id, Arc::new(a_msgr), tmpdir("pin-a"));
+    let (mut gm_b, store_b) = manager_with_store(b_id, Arc::new(b_msgr), tmpdir("pin-b"));
+
+    let gid = gm_a.create("закрепы").expect("группа создана");
+    gm_a.invite(&gid, b_key);
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.invites_json().contains(&hex::encode(&gid))
+    }));
+    gm_b.accept_invite(&gid);
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
+        a.members(&gid).contains(&b_key) && b.group_ids().contains(&gid)
+    }));
+
+    // Админ пишет и закрепляет своё сообщение.
+    assert!(gm_a.send_text(&gid, "встречаемся у входа"));
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.history_json(&gid).contains("встречаемся у входа")
+    }));
+    let hist: serde_json::Value = serde_json::from_str(&gm_a.history_json(&gid)).unwrap();
+    let msg = hist.as_array().unwrap().iter().find(|m| m["text"] == "встречаемся у входа").unwrap();
+    let (msg_id, msg_sender) = (msg["id"].as_u64().unwrap(), msg["sender"].as_str().unwrap().to_string());
+
+    assert!(gm_a.pin(&gid, msg_id, &msg_sender, true), "админ закрепил");
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, _| {
+        !store_b.lock().unwrap().pinned(Chat::Group(&gid)).is_empty()
+    }));
+    let at_b = store_b.lock().unwrap().pinned(Chat::Group(&gid));
+    assert_eq!(at_b.len(), 1);
+    assert_eq!(at_b[0].text, "встречаемся у входа", "закреп доехал до участника");
+
+    // Участник закрепить не может — ни у себя, ни тем более у админа.
+    assert!(!gm_b.pin(&gid, msg_id, &msg_sender, true), "не админ — отказ");
+    for _ in 0..10 {
+        while let Ok(ev) = a_rx.try_recv() {
+            dispatch(&mut gm_a, ev);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(store_a.lock().unwrap().pinned(Chat::Group(&gid)).len(), 1, "чужого закрепа нет");
+
+    // Открепление админом убирает закреп у всех.
+    assert!(gm_a.pin(&gid, msg_id, &msg_sender, false));
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, _| {
+        store_b.lock().unwrap().pinned(Chat::Group(&gid)).is_empty()
+    }));
 }

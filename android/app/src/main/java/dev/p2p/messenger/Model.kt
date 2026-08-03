@@ -603,6 +603,31 @@ class AppModel private constructor() {
         refreshStorage()
     }
 
+    /**
+     * Закреплённые сообщения по чатам (ключ собеседника или gid), свежие первыми.
+     * Шапка чата показывает верхнее; закреп общий для всех участников, поэтому
+     * список приходит из движка, а не собирается на клиенте.
+     */
+    val pinned = mutableStateMapOf<String, List<Message>>()
+
+    /** Перечитать закреплённые для чата. */
+    fun refreshPins(chat: String, group: Boolean) = ops.execute {
+        pinned[chat] = decodeList<MessageDto>(Native.pinned(sessionPtr, chat, group))
+            .map { it.toModel() }
+    }
+
+    /** Закрепить/открепить выделенное сообщение. */
+    fun setPinned(chat: String, group: Boolean, msg: Message, on: Boolean) = ops.execute {
+        Native.pinMessage(sessionPtr, chat, group, msg.id, msg.sender, on)
+        refreshPins(chat, group)
+    }
+
+    /** То же для группового сообщения (там автор известен явно). */
+    fun setPinnedGroup(gid: String, msg: GroupMsg, on: Boolean) = ops.execute {
+        Native.pinMessage(sessionPtr, gid, true, msg.id, msg.sender, on)
+        refreshPins(gid, true)
+    }
+
     /** Заметки себе («Сохранённое»), старые первыми. */
     val notes = mutableStateListOf<Message>()
 
@@ -1901,6 +1926,8 @@ class AppModel private constructor() {
             is EngineEvent.ContactRequestEv -> refreshRequestsNow()
             // Приглашение в группу пришло/принято/отклонено — обновить карточки.
             EngineEvent.GroupInvitesChanged -> refreshGroupInvitesNow()
+            // Закреп общий для всех: его мог поставить собеседник или админ группы.
+            is EngineEvent.PinsChanged -> refreshPins(ev.chat, groups.any { it.gid == ev.chat })
             // M2: контакт прислал профиль (имя/аватар) → перечитать список.
             EngineEvent.ContactsChanged -> refreshContactsNow()
             // Адрес сменился: обновляем показ и завершаем карточку хода.

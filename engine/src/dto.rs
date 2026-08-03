@@ -165,6 +165,8 @@ pub enum UiEvent {
     ContactsChanged,
     GroupsChanged,
     GroupInvitesChanged,
+    /// Список закреплённых в чате изменился (hex ключа собеседника или gid).
+    PinsChanged { chat: String },
     GroupRemoved { gid: String },
     RoomInvite { peer: String, room_id: String, audio: bool, video: bool },
     RoomDecline { peer: String, room_id: String },

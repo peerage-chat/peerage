@@ -53,9 +53,13 @@ internal fun SavedScreen(model: AppModel) {
     }
     PagingUp(listState, Unit) { done -> model.loadOlderNotes(done) }
 
+    val me = model.me?.pubkey.orEmpty()
+    LaunchedEffect(me) { if (me.isNotEmpty()) model.refreshPins(me, group = false) }
+
     Column(Modifier.fillMaxSize()) {
         ForwardSheet(model)
         if (selection.isNotEmpty()) SavedSelectionBar(model)
+        if (me.isNotEmpty()) PinnedBar(model, me, group = false, canUnpin = true)
         if (model.notes.isEmpty()) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 EmptyState(
@@ -175,6 +179,15 @@ private fun SavedSelectionBar(model: AppModel) {
         )
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
             model.beginForward(myKey)
+        }
+        if (sel.size == 1) {
+            val ref = sel.first()
+            val note = model.notes.firstOrNull { it.id == ref.id && it.mine == ref.mine }
+            val already = model.pinned[myKey].orEmpty().any { it.id == ref.id }
+            BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
+                note?.let { model.setPinned(myKey, false, it, !already) }
+                model.clearSelection()
+            }
         }
         BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
             val text = model.selectedText(myKey)

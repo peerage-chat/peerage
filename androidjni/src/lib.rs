@@ -532,6 +532,48 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_forwardMessages<'local>(
     })
 }
 
+/// Закрепить/открепить сообщение в чате (личном или групповом). Возвращает 1/0.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_pinMessage<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    msg_id: jlong,
+    sender_hex: JString<'local>,
+    on: jboolean,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        else {
+            return 0;
+        };
+        let sender = jstr(&mut env, &sender_hex);
+        i32::from(e.pin_message(chat, msg_id as u64, &sender, on != 0))
+    })
+}
+
+/// Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_pinned<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        else {
+            return ret(&env, "[]");
+        };
+        ret(&env, &e.pinned_json(chat))
+    })
+}
+
 // ── Блобы (M2) ──────────────────────────────────────────────────────────────
 
 /// Предложить блоб пиру (картинка/файл/голосовое). Fire-and-forget.
