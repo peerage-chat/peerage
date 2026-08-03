@@ -64,6 +64,8 @@ pub(crate) enum GroupCmd {
         reply_sender: String,
         /// Пересылка: hex автора исходного сообщения (пусто — своё).
         fwd_from: String,
+        /// «Переслано, автора не называем».
+        fwd_anon: bool,
     },
     /// Отозвать свои сообщения у участников («удалить у всех»).
     Retract { gid: Vec<u8>, ids: Vec<u64> },
@@ -121,6 +123,8 @@ pub struct MediaInfo {
     pub caption: String,
     /// Пересылка: hex автора ИСХОДНОГО сообщения (пусто — своё вложение).
     pub fwd_from: String,
+    /// «Переслано, автора не называем».
+    pub fwd_anon: bool,
 }
 
 /// Сколько сообщений отдаётся клиенту за один заход в чат. Переписка бывает
@@ -382,7 +386,7 @@ impl Engine {
         reply_to: u64,
         reply_mine: bool,
     ) -> Option<i64> {
-        self.send_text_full(key, text, reply_to, reply_mine, "")
+        self.send_text_full(key, text, reply_to, reply_mine, "", false)
     }
 
     /// Общий путь отправки текста: обычного, ответом и пересланного. `fwd_from` —
@@ -394,8 +398,9 @@ impl Engine {
         reply_to: u64,
         reply_mine: bool,
         fwd_from: &str,
+        fwd_anon: bool,
     ) -> Option<i64> {
-        match self.messenger.send_text_reply(key, text, reply_to, reply_mine, fwd_from) {
+        match self.messenger.send_text_reply(key, text, reply_to, reply_mine, fwd_from, fwd_anon) {
             Ok(id) => {
                 let t = now();
                 let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
@@ -404,6 +409,7 @@ impl Engine {
                     reply_to,
                     reply_sender: self.reply_author(key, reply_to, reply_mine),
                     fwd_from: fwd_from.to_string(),
+                    fwd_anon,
                     // kind заполняем ЯВНО: пустая строка — не «текст», а «неизвестно»,
                     // и UI рисовал такое сообщение дважды (как содержимое и как
                     // подпись к вложению).
@@ -432,7 +438,13 @@ impl Engine {
     ///
     /// Вложение пересылается, только если его байты уже есть у нас: иначе получателю
     /// было бы некуда идти за содержимым — у ОТПРАВИТЕЛЯ его нет.
-    pub fn forward_messages(&self, src: ChatKey, refs: &[(u64, String)], dst: ChatKey) -> usize {
+    pub fn forward_messages(
+        &self,
+        src: ChatKey,
+        refs: &[(u64, String)],
+        dst: ChatKey,
+        hide_author: bool,
+    ) -> usize {
         let items = self.messages.lock_safe().get_many(src.as_chat(), refs);
         let mut sent = 0;
         for m in items {
@@ -441,10 +453,13 @@ impl Engine {
             if m.system {
                 continue; // системные строки — не сообщения
             }
+            // Скрыли автора — ключ не уходит ВООБЩЕ: иначе «скрыл» значило бы
+            // «спрятал в интерфейсе, но отдал по проводу».
+            let origin = if hide_author { String::new() } else { origin };
             let ok = if m.blob_id.is_empty() {
-                self.forward_text(&dst, &m.text, &origin)
+                self.forward_text(&dst, &m.text, &origin, hide_author)
             } else {
-                self.forward_media(&dst, &m, &origin)
+                self.forward_media(&dst, &m, &origin, hide_author)
             };
             if ok {
                 sent += 1;
@@ -453,9 +468,9 @@ impl Engine {
         sent
     }
 
-    fn forward_text(&self, dst: &ChatKey, text: &str, origin: &str) -> bool {
+    fn forward_text(&self, dst: &ChatKey, text: &str, origin: &str, anon: bool) -> bool {
         match dst {
-            ChatKey::Dm(peer) => self.send_text_full(peer, text, 0, false, origin).is_some(),
+            ChatKey::Dm(peer) => self.send_text_full(peer, text, 0, false, origin, anon).is_some(),
             ChatKey::Group(gid) => {
                 self.jobs
                     .send(Job::Cmd(GroupCmd::SendText {
@@ -464,13 +479,14 @@ impl Engine {
                         reply_to: 0,
                         reply_sender: String::new(),
                         fwd_from: origin.to_string(),
+                        fwd_anon: anon,
                     }))
                     .is_ok()
             }
         }
     }
 
-    fn forward_media(&self, dst: &ChatKey, m: &StoredMessage, origin: &str) -> bool {
+    fn forward_media(&self, dst: &ChatKey, m: &StoredMessage, origin: &str, anon: bool) -> bool {
         // Байты берём из своего хранилища: пересылать ссылку, за которой у нас
         // ничего нет, значит отправить получателю тупик.
         let Some(bytes) = self.blob_read(&m.blob_id) else { return false };
@@ -482,6 +498,7 @@ impl Engine {
             thumb,
             caption: m.text.clone(),
             fwd_from: origin.to_string(),
+            fwd_anon: anon,
         };
         match dst {
             ChatKey::Dm(peer) => {
@@ -596,6 +613,7 @@ impl Engine {
         let id_hex = hex::encode(hash);
         let meta = p2p_messenger::MediaMeta {
             fwd_from: info.fwd_from.clone(),
+            fwd_anon: info.fwd_anon,
             size,
             duration_ms: info.duration_ms,
             width: info.width,
@@ -683,6 +701,7 @@ impl Engine {
         }
         let meta = p2p_messenger::MediaMeta {
             fwd_from: String::new(),
+            fwd_anon: false,
             size,
             duration_ms: info.duration_ms,
             width: info.width,
@@ -1353,6 +1372,7 @@ impl Engine {
             reply_to: 0,
             reply_sender: String::new(),
             fwd_from: String::new(),
+            fwd_anon: false,
         }));
     }
 
@@ -1366,6 +1386,7 @@ impl Engine {
             reply_to,
             reply_sender,
             fwd_from: String::new(),
+            fwd_anon: false,
         }));
     }
 
@@ -2051,7 +2072,8 @@ fn event_pump(
                 let media = MediaBody {
                     // id проставит слой групп при отправке (он же кладёт его в историю).
                     id: 0,
-                    fwd_from: String::new(),
+                    fwd_from: info.fwd_from.clone(),
+                    fwd_anon: info.fwd_anon,
                     kind: Engine::media_kind(&mime).into(),
                     hash: id_hex,
                     mime: mime.clone(),
@@ -2090,7 +2112,8 @@ fn event_pump(
                 let media = MediaBody {
                     // id проставит слой групп при отправке (он же кладёт его в историю).
                     id: 0,
-                    fwd_from: String::new(),
+                    fwd_from: info.fwd_from.clone(),
+                    fwd_anon: info.fwd_anon,
                     kind: Engine::media_kind(&mime).into(),
                     hash: id_hex,
                     mime: mime.clone(),
@@ -2296,7 +2319,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 engine.announce_rotation_to(&peer);
             }
         }
-        Event::Text { peer, id, text, reply_to, reply_mine, fwd_from } => {
+        Event::Text { peer, id, text, reply_to, reply_mine, fwd_from, fwd_anon } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
@@ -2318,6 +2341,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     reply_to,
                     reply_sender: engine.reply_author(&peer, reply_to, reply_mine),
                     fwd_from: fwd_from.clone(),
+                    fwd_anon,
                     kind: "text".into(),
                     ..Default::default()
                 });
@@ -2344,6 +2368,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }
         Event::Media {
             peer, id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
+            fwd_anon,
         } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
@@ -2367,6 +2392,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     id, mine: false, time: t, status: String::new(),
                     sender: hex::encode(peer),
                     fwd_from: fwd_from.clone(),
+                    fwd_anon,
                     text: caption.clone(),
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.clone(), name: name.clone(),
                     size, duration_ms, width, height, thumb_id: thumb_hex.clone(),
@@ -2673,8 +2699,8 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                 push_event(engine, dto::UiEvent::GroupInvitesChanged);
             }
         }
-        GroupCmd::SendText { gid, text, reply_to, reply_sender, fwd_from } => {
-            if groups.send_text_full(&gid, &text, reply_to, &reply_sender, &fwd_from) {
+        GroupCmd::SendText { gid, text, reply_to, reply_sender, fwd_from, fwd_anon } => {
+            if groups.send_text_full(&gid, &text, reply_to, &reply_sender, &fwd_from, fwd_anon) {
                 refresh_group_cache(engine, groups);
                 // Своё сообщение — событием, а не «клиент дорисует сам»: id ему
                 // присваивает этот слой, и без перечитывания истории на него нельзя
@@ -2874,6 +2900,7 @@ impl Engine {
                             // Досылка из очереди: пересылка (если была) уже записана
                             // в истории, а очередь хранит только сам файл и подпись.
                             fwd_from: String::new(),
+                            fwd_anon: false,
                             size: v["size"].as_u64().unwrap_or(0),
                             duration_ms: v["duration_ms"].as_u64().unwrap_or(0) as u32,
                             width: v["width"].as_u64().unwrap_or(0) as u32,

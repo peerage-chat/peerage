@@ -100,6 +100,7 @@ fn large_group_attachment_waits_for_explicit_download() {
         thumb: Some(vec![0xAB; 64]),
         caption: "большое видео".into(),
         fwd_from: String::new(),
+        fwd_anon: false,
     };
     a.group_send_media(gid.clone(), content.clone(), "video/mp4".into(), "clip.mp4".into(), info);
 

@@ -101,6 +101,8 @@ pub enum Event {
         reply_mine: bool,
         /// Пересылка: hex автора исходного сообщения (пусто — сообщение своё).
         fwd_from: String,
+        /// «Переслано, автора не называем».
+        fwd_anon: bool,
     },
     /// Пир просит удалить своё сообщение `target` («удалить у всех»).
     Retract { peer: PeerKey, target: u64 },
@@ -122,6 +124,8 @@ pub enum Event {
         thumb: Vec<u8>,
         /// Пересылка: hex автора исходного сообщения (пусто — своё).
         fwd_from: String,
+        /// «Переслано, автора не называем».
+        fwd_anon: bool,
     },
     /// Пир подтвердил доставку нашего сообщения с данным id (✓✓).
     Ack { peer: PeerKey, id: u64 },
@@ -181,6 +185,8 @@ pub enum Event {
 pub struct MediaMeta {
     /// Пересылка: hex автора исходного сообщения (пусто — своё).
     pub fwd_from: String,
+    /// «Переслано, автора не называем» — ключ автора при этом не отправляется.
+    pub fwd_anon: bool,
     pub size: u64,
     pub duration_ms: u32,
     pub width: u32,
@@ -672,7 +678,7 @@ impl Messenger {
     /// Отправить текст пиру. Возвращает id; доставка повторяется до `Ack` или TTL
     /// (см. [`Event::Ack`] / [`Event::Undelivered`]).
     pub fn send_text(&self, peer: &PeerKey, text: &str) -> Result<u64, MessengerError> {
-        self.send_text_reply(peer, text, 0, false, "")
+        self.send_text_reply(peer, text, 0, false, "", false)
     }
 
     /// То же с ответом на сообщение (`reply_to` = 0 — обычное сообщение).
@@ -685,6 +691,7 @@ impl Messenger {
         reply_to: u64,
         reply_mine: bool,
         fwd_from: &str,
+        fwd_anon: bool,
     ) -> Result<u64, MessengerError> {
         let text = text.to_string();
         let fwd_from = fwd_from.to_string();
@@ -695,6 +702,7 @@ impl Messenger {
             reply_to,
             reply_mine,
             fwd_from,
+            fwd_anon,
         })
     }
 
@@ -739,6 +747,7 @@ impl Messenger {
             reply_to: 0,
             reply_mine: false,
             fwd_from: String::new(),
+            fwd_anon: false,
         })
     }
 
@@ -766,6 +775,7 @@ impl Messenger {
             caption: caption.clone(),
             thumb: meta.thumb.clone(),
             fwd_from: meta.fwd_from.clone(),
+            fwd_anon: meta.fwd_anon,
         })
     }
 
@@ -791,6 +801,7 @@ impl Messenger {
             caption: caption.clone(),
             thumb: meta.thumb.clone(),
             fwd_from: meta.fwd_from.clone(),
+            fwd_anon: meta.fwd_anon,
         })
     }
 
@@ -1169,7 +1180,7 @@ fn receive_loop(shared: Arc<Shared>) {
 
         match payload {
             Payload::Hello => {}
-            Payload::Text { id, text, reply_to, reply_mine, fwd_from } => {
+            Payload::Text { id, text, reply_to, reply_mine, fwd_from, fwd_anon } => {
                 // Флаг «чьё сообщение» приходит с точки зрения ОТПРАВИТЕЛЯ — здесь он
                 // переворачивается: его «моё» для нас «его», и наоборот.
                 shared.emit(Event::Text {
@@ -1179,6 +1190,7 @@ fn receive_loop(shared: Arc<Shared>) {
                     reply_to,
                     reply_mine: reply_to != 0 && !reply_mine,
                     fwd_from,
+                    fwd_anon,
                 });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }
@@ -1189,12 +1201,14 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::Media {
                 id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
+                fwd_anon,
             } => {
                 shared.emit(Event::Media {
                     peer: peer_id, id, hash, mime, name, size, duration_ms, width, height,
                     caption: truncate_caption(&caption),
                     thumb,
                     fwd_from,
+                    fwd_anon,
                 });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }

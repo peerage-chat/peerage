@@ -179,6 +179,7 @@ fn media_info<'local>(
     let thumb_bytes = env.convert_byte_array(thumb).unwrap_or_default();
     p2p_engine::MediaInfo {
         fwd_from: String::new(),
+        fwd_anon: false,
         duration_ms: duration_ms.max(0) as u32,
         width: width.max(0) as u32,
         height: height.max(0) as u32,

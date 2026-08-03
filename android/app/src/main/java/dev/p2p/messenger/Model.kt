@@ -104,6 +104,8 @@ data class Message(
     val system: Boolean = false,
     /** hex автора ИСХОДНОГО сообщения, если это пересылка (пусто — своё). */
     val fwdFrom: String = "",
+    /** Переслано, но автора не называем. */
+    val fwdAnon: Boolean = false,
     /** Курсор пагинации: номер строки в базе движка (0 — запись создана локально). */
     val row: Long = 0,
 )
@@ -189,6 +191,8 @@ data class GroupMsg(
     val system: Boolean = false,
     /** hex автора исходного сообщения, если это пересылка (пусто — своё). */
     val fwdFrom: String = "",
+    /** Переслано, но автора не называем. */
+    val fwdAnon: Boolean = false,
     /** Тип (M2): "text" | "image" | "voice" | "file". */
     val kind: String = "text",
     /** hex-хэш блоба вложения (M2); байты — через AppModel.mediaBlobs. */
@@ -1437,16 +1441,25 @@ class AppModel private constructor() {
         clearGroupSelection()
     }
 
+    /**
+     * Скрывать ли автора при пересылке. Решение принимается на КАЖДУЮ пересылку и
+     * сбрасывается вместе с ней: «скрыл один раз» не должно молча распространяться
+     * на все следующие.
+     */
+    var forwardHideAuthor by mutableStateOf(false)
+
     /** Отправить отложенное в выбранный чат. */
     fun forwardTo(dst: ChatTarget) {
         val (src, refs) = forwarding ?: return
+        val hide = forwardHideAuthor
         forwarding = null
+        forwardHideAuthor = false
         ops.execute {
             val json = WireJson.encodeToString(
                 kotlinx.serialization.builtins.ListSerializer(GroupMsgRef.serializer()),
                 refs.map { GroupMsgRef(it.first, it.second) },
             )
-            Native.forwardMessages(sessionPtr, src.id, src.group, json, dst.id, dst.group)
+            Native.forwardMessages(sessionPtr, src.id, src.group, json, dst.id, dst.group, hide)
             // Целевой чат может быть открыт прямо сейчас — перечитываем его хвост.
             if (dst.group && currentGroup == dst.id) {
                 loadGroupHistory(dst.id)

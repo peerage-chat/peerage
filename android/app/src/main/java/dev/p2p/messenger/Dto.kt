@@ -72,6 +72,8 @@ internal data class MessageDto(
     val system: Boolean = false,
     /** hex автора ИСХОДНОГО сообщения, если это пересылка (пусто — своё). */
     @SerialName("fwd_from") val fwdFrom: String = "",
+    /** Переслано, но автора не называем (пересылающий скрыл источник). */
+    @SerialName("fwd_anon") val fwdAnon: Boolean = false,
     /** Курсор пагинации: номер строки в базе движка. Для догрузки истории вверх. */
     val row: Long = 0,
     val width: Int = 0,
@@ -114,6 +116,8 @@ internal data class GroupMsgDto(
     val row: Long = 0,
     /** hex автора исходного сообщения, если это пересылка (пусто — своё). */
     @SerialName("fwd_from") val fwdFrom: String = "",
+    /** Переслано, но автора не называем. */
+    @SerialName("fwd_anon") val fwdAnon: Boolean = false,
     @SerialName("reply_to") val replyTo: Long = 0,
     @SerialName("reply_sender") val replySender: String = "",
     val text: String = "",
@@ -324,6 +328,7 @@ internal fun MessageDto.toModel() = Message(
     replySender = replySender,
     system = system,
     fwdFrom = fwdFrom,
+    fwdAnon = fwdAnon,
     row = row,
     width = width,
     height = height,
@@ -351,6 +356,7 @@ internal fun GroupMsgDto.toModel() = GroupMsg(
     thumbId = thumbId,
     downloaded = downloaded,
     fwdFrom = fwdFrom,
+    fwdAnon = fwdAnon,
     row = row,
 )
 

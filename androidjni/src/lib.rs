@@ -369,6 +369,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
         let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
         let info = p2p_engine::MediaInfo {
         fwd_from: String::new(),
+        fwd_anon: false,
             duration_ms: duration_ms.max(0) as u32,
             width: width.max(0) as u32,
             height: height.max(0) as u32,
@@ -407,6 +408,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaFile<'local>(
         let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
         let info = p2p_engine::MediaInfo {
         fwd_from: String::new(),
+        fwd_anon: false,
             duration_ms: duration_ms.max(0) as u32,
             width: width.max(0) as u32,
             height: height.max(0) as u32,
@@ -507,6 +509,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_forwardMessages<'local>(
     refs_json: JString<'local>,
     dst_hex: JString<'local>,
     dst_group: jboolean,
+    hide_author: jboolean,
 ) -> jint {
     jni_safe!(0, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
@@ -525,7 +528,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_forwardMessages<'local>(
                     .collect()
             })
             .unwrap_or_default();
-        e.forward_messages(src, &refs, dst) as jint
+        e.forward_messages(src, &refs, dst, hide_author != 0) as jint
     })
 }
 

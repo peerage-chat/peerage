@@ -43,6 +43,9 @@ enum AppMsg {
         /// Пересылка: hex автора ИСХОДНОГО сообщения (пусто — своё).
         #[serde(default)]
         fwd_from: String,
+        /// «Переслано, автора не называем» — ключ автора не отправляется.
+        #[serde(default)]
+        fwd_anon: bool,
     },
     #[serde(rename = "media")]
     Media(MediaBody),
@@ -68,6 +71,9 @@ pub struct MediaBody {
     /// Пересылка: hex автора исходного сообщения (пусто — своё).
     #[serde(default)]
     pub fwd_from: String,
+    /// «Переслано, автора не называем».
+    #[serde(default)]
+    pub fwd_anon: bool,
     /// Идентификатор в пределах отправителя (см. `AppMsg::Text::id`).
     #[serde(default)]
     pub id: u64,
@@ -100,6 +106,8 @@ pub enum Inbound {
         reply_sender: String,
         /// Пересылка: hex автора исходного сообщения (пусто — своё).
         fwd_from: String,
+        /// «Переслано, автора не называем».
+        fwd_anon: bool,
     },
     /// Отправитель просит удалить СВОЁ сообщение `target` у всех.
     Retract { sender: PeerKey, target: u64 },
@@ -232,7 +240,7 @@ impl GroupChat {
         reply_to: u64,
         reply_sender: &str,
     ) -> Result<(), GroupChatError> {
-        self.send_text_full(text, id, reply_to, reply_sender, "")
+        self.send_text_full(text, id, reply_to, reply_sender, "", false)
     }
 
     /// Общий путь: обычный текст, ответ и пересылка. `fwd_from` — hex автора
@@ -244,6 +252,7 @@ impl GroupChat {
         reply_to: u64,
         reply_sender: &str,
         fwd_from: &str,
+        fwd_anon: bool,
     ) -> Result<(), GroupChatError> {
         self.send_app(&AppMsg::Text {
             text: text.to_string(),
@@ -251,6 +260,7 @@ impl GroupChat {
             reply_to,
             reply_sender: reply_sender.to_string(),
             fwd_from: fwd_from.to_string(),
+            fwd_anon,
         })
     }
 
@@ -296,8 +306,10 @@ impl GroupChat {
                 let sender = to_key(sender);
                 // M2: тело — JSON-envelope (текст/медиа); старое сырое-UTF-8 → текст.
                 Ok(match serde_json::from_slice::<AppMsg>(&body) {
-                    Ok(AppMsg::Text { text, id, reply_to, reply_sender, fwd_from }) => {
-                        Inbound::Message { sender, text, id, reply_to, reply_sender, fwd_from }
+                    Ok(AppMsg::Text { text, id, reply_to, reply_sender, fwd_from, fwd_anon }) => {
+                        Inbound::Message {
+                            sender, text, id, reply_to, reply_sender, fwd_from, fwd_anon,
+                        }
                     }
                     Ok(AppMsg::Retract { target }) => Inbound::Retract { sender, target },
                     Ok(AppMsg::Media(media)) => {
@@ -314,6 +326,7 @@ impl GroupChat {
                         reply_to: 0,
                         reply_sender: String::new(),
                         fwd_from: String::new(),
+                        fwd_anon: false,
                     },
                 })
             }

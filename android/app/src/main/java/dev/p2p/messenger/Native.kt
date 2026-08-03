@@ -225,6 +225,7 @@ object Native {
         refsJson: String,
         dstHex: String,
         dstGroup: Boolean,
+        hideAuthor: Boolean,
     ): Int
 
     external fun setVerified(sessionPtr: Long, keyHex: String, verified: Boolean)

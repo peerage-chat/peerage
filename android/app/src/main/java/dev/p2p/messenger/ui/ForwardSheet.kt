@@ -3,6 +3,8 @@
 package dev.p2p.messenger.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -59,7 +63,31 @@ internal fun ForwardSheet(model: AppModel) {
             fontSize = 17.sp,
             modifier = Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         )
-        LazyColumn(Modifier.fillMaxWidth().height(420.dp)) {
+        // Скрыть автора — решение на эту пересылку. Ключ автора при этом не уходит
+        // вовсе: «скрыл» не должно означать «спрятал на экране, но отдал по проводу».
+        Row(
+            Modifier.fillMaxWidth()
+                .clickable { model.forwardHideAuthor = !model.forwardHideAuthor }
+                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = model.forwardHideAuthor,
+                onCheckedChange = { model.forwardHideAuthor = it },
+                colors = CheckboxDefaults.colors(checkedColor = HoloAccent),
+            )
+            Spacer(Modifier.width(4.dp))
+            Column {
+                Text(stringResource(R.string.forward_hide_author), color = Color.White, fontSize = 15.sp)
+                Text(
+                    stringResource(R.string.forward_hide_author_hint),
+                    color = HoloSecondary,
+                    fontSize = 12.sp,
+                )
+            }
+        }
+
+        LazyColumn(Modifier.fillMaxWidth().height(360.dp)) {
             if (me.isNotEmpty()) {
                 item {
                     TargetRow(Icons.Filled.Bookmark, stringResource(R.string.menu_saved)) {
@@ -97,19 +125,26 @@ private fun TargetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, tit
  * можно было бы соврать.
  */
 @Composable
-internal fun ForwardMark(model: AppModel, fwdFrom: String) {
-    if (fwdFrom.isEmpty()) return
-    val who = when {
-        fwdFrom == model.me?.pubkey -> stringResource(R.string.chat_reply_you)
-        else -> model.contacts.firstOrNull { it.key == fwdFrom }?.displayName
-            ?: (fwdFrom.take(8) + "…")
+internal fun ForwardMark(model: AppModel, fwdFrom: String, anon: Boolean = false) {
+    if (fwdFrom.isEmpty() && !anon) return
+    // Скрытый автор — именно «переслано», без имени: сообщение не выдаётся за своё,
+    // но и источник не называется.
+    val label = if (anon || fwdFrom.isEmpty()) {
+        stringResource(R.string.forward_from_hidden)
+    } else {
+        val who = when {
+            fwdFrom == model.me?.pubkey -> stringResource(R.string.chat_reply_you)
+            else -> model.contacts.firstOrNull { it.key == fwdFrom }?.displayName
+                ?: (fwdFrom.take(8) + "…")
+        }
+        stringResource(R.string.forward_from, who)
     }
     Row(
         Modifier.fillMaxWidth().padding(bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            stringResource(R.string.forward_from, who),
+            label,
             color = HoloSecondary,
             fontSize = 12.sp,
             modifier = Modifier.background(Color.Transparent),

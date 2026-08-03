@@ -177,6 +177,7 @@ fn forwarding_keeps_the_original_author() {
         p2p_engine::ChatKey::Dm(a_key),
         &refs,
         p2p_engine::ChatKey::Dm(c_key),
+        false,
     );
     assert_eq!(sent, 1);
     assert!(wait(10, || !history(&c, &b_key).is_empty()), "пересланное дошло до Веры");
@@ -203,6 +204,7 @@ fn forwarding_keeps_the_original_author() {
         p2p_engine::ChatKey::Dm(c_key),
         &refs2,
         p2p_engine::ChatKey::Dm(a_key),
+        false,
     );
     // Ищем ВХОДЯЩЕЕ: в этом чате уже лежит её собственный оригинал с тем же текстом.
     assert!(wait(10, || history(&a, &b_key).iter().any(|m| m["mine"] == false)));
@@ -210,4 +212,50 @@ fn forwarding_keeps_the_original_author() {
     let again = back.iter().find(|m| m["mine"] == false).unwrap();
     assert_eq!(again["text"], "встречаемся в семь");
     assert_eq!(again["fwd_from"].as_str(), Some(hex::encode(a_key).as_str()));
+}
+
+/// «Скрыть автора» скрывает его ПО-НАСТОЯЩЕМУ: ключ не уходит на провод вовсе, а
+/// получатель видит «переслано» без имени. Иначе скрытие было бы косметикой в
+/// интерфейсе — данные всё равно у собеседника.
+#[test]
+fn hidden_forward_sends_no_author_at_all() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id, c_id) = (id(41), id(42), id(43));
+    let (a_key, b_key, c_key) =
+        (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("anon-a"));
+    let b = start(&net, b_id, tmpdir("anon-b"));
+    let c = start(&net, c_id, tmpdir("anon-c"));
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Аня");
+    b.add_contact(&c_key, "Вера");
+    c.add_contact(&b_key, "Боб");
+    std::mem::forget(net);
+
+    a.send_text(&b_key, "это между нами");
+    assert!(wait(10, || !history(&b, &a_key).is_empty()));
+    let at_b = history(&b, &a_key);
+    let refs = vec![(
+        at_b[0]["id"].as_u64().unwrap(),
+        at_b[0]["sender"].as_str().unwrap().to_string(),
+    )];
+
+    b.forward_messages(
+        p2p_engine::ChatKey::Dm(a_key),
+        &refs,
+        p2p_engine::ChatKey::Dm(c_key),
+        true, // скрыть автора
+    );
+    assert!(wait(10, || !history(&c, &b_key).is_empty()));
+
+    let got = history(&c, &b_key);
+    assert_eq!(got[0]["text"], "это между нами");
+    assert_eq!(got[0]["fwd_from"].as_str(), Some(""), "ключа автора у Веры нет");
+    assert_eq!(got[0]["fwd_anon"], true, "но видно, что это пересылка");
+
+    // И своя копия у Боба совпадает с тем, что ушло: показывать себе имя, которого
+    // собеседник не получил, значит расходиться с реальностью.
+    let own = history(&b, &c_key);
+    assert_eq!(own[0]["fwd_from"].as_str(), Some(""));
+    assert_eq!(own[0]["fwd_anon"], true);
 }

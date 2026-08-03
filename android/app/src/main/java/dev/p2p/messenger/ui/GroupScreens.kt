@@ -564,7 +564,7 @@ internal fun GroupBubble(
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Column {
-            ForwardMark(model, m.fwdFrom)
+            ForwardMark(model, m.fwdFrom, m.fwdAnon)
             if (m.replyTo != 0L) GroupQuote(model, m)
             if (senderName != null) {
                 Text(

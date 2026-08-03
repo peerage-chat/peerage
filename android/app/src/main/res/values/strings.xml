@@ -638,4 +638,7 @@
     <string name="forward_action">Forward</string>
     <string name="forward_title">Forward (%1$d) to</string>
     <string name="forward_from">Forwarded from %1$s</string>
+    <string name="forward_hide_author">Hide the author</string>
+    <string name="forward_hide_author_hint">The recipient sees “forwarded” but not from whom. The author key is not sent at all.</string>
+    <string name="forward_from_hidden">Forwarded</string>
 </resources>

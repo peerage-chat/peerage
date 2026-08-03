@@ -630,4 +630,7 @@
     <string name="forward_action">Переслать</string>
     <string name="forward_title">Переслать (%1$d) в чат</string>
     <string name="forward_from">Переслано от %1$s</string>
+    <string name="forward_hide_author">Скрыть автора</string>
+    <string name="forward_hide_author_hint">Получатель увидит «переслано», но не узнает, от кого. Ключ автора не отправляется.</string>
+    <string name="forward_from_hidden">Переслано</string>
 </resources>
