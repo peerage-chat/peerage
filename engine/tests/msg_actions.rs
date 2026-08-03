@@ -334,3 +334,35 @@ fn search_finds_messages_across_chats() {
     .unwrap();
     assert!(scoped.as_array().unwrap().is_empty(), "поиск в чате не видит заметок");
 }
+
+/// Правка доезжает до собеседника и помечается как правка; чужое сообщение
+/// исправить нельзя — иначе это подмена чужих слов, а не редактирование.
+#[test]
+fn editing_replaces_text_on_both_sides_and_only_for_the_author() {
+    let (a, b, a_key, b_key) = pair("edit", 71, 72);
+
+    let id1 = a.send_text(&b_key, "встречаемся в семь").unwrap() as u64;
+    assert!(wait(10, || !history(&b, &a_key).is_empty()), "сообщение дошло");
+
+    assert!(a.edit_message(p2p_engine::ChatKey::Dm(b_key), id1, "встречаемся в восемь"));
+
+    // У автора текст заменён и помечен «изменено».
+    let mine = history(&a, &b_key);
+    let m = mine.iter().find(|m| m["id"].as_u64() == Some(id1)).unwrap();
+    assert_eq!(m["text"], "встречаемся в восемь");
+    assert!(m["edited_at"].as_i64().unwrap_or(0) > 0, "пометка о правке осталась");
+
+    // И у собеседника — тот же текст, а не второе сообщение.
+    assert!(wait(10, || {
+        history(&b, &a_key).iter().any(|m| m["text"] == "встречаемся в восемь")
+    }));
+    let at_b = history(&b, &a_key);
+    assert_eq!(at_b.len(), 1, "правка заменила текст, а не добавила строку");
+    assert!(at_b[0]["edited_at"].as_i64().unwrap_or(0) > 0);
+
+    // Боб пытается исправить сообщение Ани — отказ, и текст у него прежний.
+    assert!(!b.edit_message(p2p_engine::ChatKey::Dm(a_key), id1, "встречаемся в девять"));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(history(&b, &a_key)[0]["text"], "встречаемся в восемь");
+    assert_eq!(history(&a, &b_key)[0]["text"], "встречаемся в восемь", "и у автора тоже");
+}

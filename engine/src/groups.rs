@@ -344,6 +344,7 @@ impl GroupManager {
                 // Пересылок в старом формате не было — переносить нечего.
                 fwd_from: String::new(),
                 fwd_anon: false,
+                edited_at: 0,
                 row: 0,
             });
         }
@@ -680,6 +681,23 @@ impl GroupManager {
         sent
     }
 
+    /// Исправить СВОЁ сообщение в группе. Возвращает `(автор, текст)` при успехе.
+    /// Чужое править нельзя: подменять чужие слова — это не редактирование.
+    pub fn edit(&mut self, gid: &[u8], id: u64, text: &str) -> Option<(String, String)> {
+        let me = self.me_hex.clone();
+        if !self.messages.lock_safe().contains(Chat::Group(gid), &me, id) {
+            return None;
+        }
+        let e = self.groups.get_mut(gid)?;
+        if e.chat.send_edit(id, text).is_err() {
+            return None;
+        }
+        let _ = self.messages.lock_safe().edit_text(Chat::Group(gid), &me, id, text, now());
+        // Рассылка двигает MLS-ратчет — состояние обязано лечь на диск.
+        self.save_group(gid);
+        Some((me, text.to_string()))
+    }
+
     /// Закрепить/открепить сообщение в группе. Право — только у админа (ADR-004):
     /// иначе любой участник вешал бы своё сообщение в шапку всем остальным.
     /// Возвращает true, если закреп применён и разослан.
@@ -916,6 +934,19 @@ impl GroupManager {
                         sender: Some(sender_hex), ..Default::default()
                     }
                 }
+                Some(Ok(Inbound::Edit { sender, target, text })) => {
+                    let who = hex::encode(sender);
+                    let changed = self
+                        .messages
+                        .lock_safe()
+                        .edit_text(Chat::Group(&gid), &who, target, &text, now())
+                        .unwrap_or(false);
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        edited: changed.then(|| (who, target, text)),
+                        ..Default::default()
+                    }
+                }
                 Some(Ok(Inbound::Pin { actor, target, sender, on })) => {
                     // Право проверяем ЗДЕСЬ: отправитель мог быть пропатчен, а в
                     // группе админ один и он известен из ростера.
@@ -1141,6 +1172,8 @@ impl GroupManager {
 #[derive(Default)]
 pub struct GroupOutcome {
     pub gid: Option<Vec<u8>>,
+    /// Сообщение исправлено автором: `(автор, id, новый текст)`.
+    pub edited: Option<(String, u64, String)>,
     /// Список закреплённых изменился — UI перечитать шапку чата.
     pub pinned: bool,
     pub text: Option<String>,

@@ -532,6 +532,28 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_forwardMessages<'local>(
     })
 }
 
+/// Исправить своё сообщение (текст или подпись вложения). Возвращает 1/0.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_editMessage<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    msg_id: jlong,
+    text: JString<'local>,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        else {
+            return 0;
+        };
+        let text = jstr(&mut env, &text);
+        i32::from(e.edit_message(chat, msg_id as u64, &text))
+    })
+}
+
 /// Закрепить/открепить сообщение в чате (личном или групповом). Возвращает 1/0.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_pinMessage<'local>(

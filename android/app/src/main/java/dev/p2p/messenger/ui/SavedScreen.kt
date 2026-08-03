@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -56,8 +57,17 @@ internal fun SavedScreen(model: AppModel) {
     val me = model.me?.pubkey.orEmpty()
     LaunchedEffect(me) { if (me.isNotEmpty()) model.refreshPins(me, group = false) }
 
+    // Правка начинается с текущего текста заметки.
+    LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
+
     Column(Modifier.fillMaxSize()) {
         ForwardSheet(model)
+        model.editTarget?.let { t ->
+            EditStrip(t.text) {
+                model.editTarget = null
+                input = ""
+            }
+        }
         if (selection.isNotEmpty()) SavedSelectionBar(model)
         if (me.isNotEmpty()) PinnedBar(model, me, group = false, canUnpin = true)
         if (model.notes.isEmpty()) {
@@ -100,10 +110,14 @@ internal fun SavedScreen(model: AppModel) {
                                 n.text,
                                 color = Color.White,
                                 fontSize = 15.sp,
-                                modifier = Modifier.padding(end = bubbleTimeReserve(false)),
+                                modifier = Modifier.padding(end = bubbleTimeReserve(false, n.editedAt > 0)),
                             )
                             Text(
-                                fmtMsgTime(n.time),
+                                if (n.editedAt > 0) {
+                                    stringResource(R.string.chat_edited) + " " + fmtMsgTime(n.time)
+                                } else {
+                                    fmtMsgTime(n.time)
+                                },
                                 color = Color.White.copy(alpha = 0.5f),
                                 fontSize = 11.sp,
                                 modifier = Modifier.align(Alignment.BottomEnd),
@@ -143,7 +157,12 @@ internal fun SavedScreen(model: AppModel) {
             }
             Spacer(Modifier.width(Tokens.Space.s))
             SendButton {
-                if (input.isNotBlank()) {
+                val editing = model.editTarget
+                if (editing != null) {
+                    if (input.isNotBlank()) model.applyEdit(myKeyOrEmpty(model), false, editing.id, input.trim())
+                    model.editTarget = null
+                    input = ""
+                } else if (input.isNotBlank()) {
                     model.saveNote(input.trim())
                     input = ""
                 }
@@ -179,6 +198,13 @@ private fun SavedSelectionBar(model: AppModel) {
         )
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
             model.beginForward(myKey)
+        }
+        if (sel.size == 1) {
+            val ref = sel.first()
+            BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
+                model.notes.firstOrNull { it.id == ref.id }?.let { model.editTarget = it }
+                model.clearSelection()
+            }
         }
         if (sel.size == 1) {
             val ref = sel.first()
@@ -222,3 +248,6 @@ private fun SavedSelectionBar(model: AppModel) {
         )
     }
 }
+
+/** Свой ключ (чат «Сохранённого» — это чат с самим собой). */
+private fun myKeyOrEmpty(model: AppModel): String = model.me?.pubkey.orEmpty()

@@ -732,6 +732,10 @@ pub struct StoredMessage {
     /// него самого — чтобы то, что он видит, совпадало с тем, что ушло адресату.
     #[serde(default)]
     pub fwd_anon: bool,
+    /// Когда сообщение отредактировали (0 — не редактировалось). Показывается
+    /// пометкой «изменено»: текст подменился, и молчать об этом нельзя.
+    #[serde(default)]
+    pub edited_at: i64,
     /// Курсор пагинации: номер строки в ЛОКАЛЬНОЙ базе. Только на чтение — при
     /// записи игнорируется, на другом устройстве он свой.
     #[serde(default)]
@@ -742,7 +746,8 @@ pub struct StoredMessage {
 /// запросы: разъехавшийся порядок здесь — это молча перепутанные поля.
 const MSG_COLS: &str = "m.rowid, m.id, m.sender, m.mine, m.text, m.time, m.status, m.kind,
      m.blob_id, m.mime, m.name, m.size, m.duration_ms, m.width, m.height, m.thumb_id,
-     m.downloaded, m.reply_to, m.reply_sender, m.system, m.fwd_from, m.fwd_anon";
+     m.downloaded, m.reply_to, m.reply_sender, m.system, m.fwd_from, m.fwd_anon,
+     m.edited_at";
 
 fn read_msg(row: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
     read_msg_offset(row, 0)
@@ -855,9 +860,9 @@ impl MessageStore {
             "INSERT OR REPLACE INTO chat_messages
                  (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
                   size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
-                  system, fwd_from, fwd_anon)
+                  system, fwd_from, fwd_anon, edited_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20, ?21, ?22, ?23)",
+                     ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             rusqlite::params![
                 chat.id(), chat.scope(), msg.id as i64, &msg.sender, msg.mine as i64,
                 &msg.text, msg.time, &msg.status,
@@ -865,7 +870,7 @@ impl MessageStore {
                 msg.size as i64, msg.duration_ms as i64, msg.width as i64, msg.height as i64,
                 &msg.thumb_id, msg.downloaded as i64,
                 msg.reply_to as i64, &msg.reply_sender, msg.system as i64, &msg.fwd_from,
-                msg.fwd_anon as i64,
+                msg.fwd_anon as i64, msg.edited_at,
             ],
         )?;
         Ok(())
@@ -981,6 +986,26 @@ impl MessageStore {
         }
         out.sort_by_key(|m| (m.time, m.row));
         out
+    }
+
+    /// Заменить текст сообщения (правка автора). Возвращает true, если строка нашлась.
+    ///
+    /// Меняется ТОЛЬКО текст: тип, вложение и время остаются прежними — правка это
+    /// исправление слов, а не подмена содержимого другим файлом.
+    pub fn edit_text(
+        &self,
+        chat: Chat,
+        sender: &str,
+        id: u64,
+        text: &str,
+        at: i64,
+    ) -> Result<bool, StoreError> {
+        let n = db::lock(&self.db).execute(
+            "UPDATE chat_messages SET text=?1, edited_at=?2
+             WHERE chat=?3 AND scope=?4 AND sender=?5 AND id=?6",
+            rusqlite::params![text, at, chat.id(), chat.scope(), sender, id as i64],
+        )?;
+        Ok(n > 0)
     }
 
     /// Закрепить сообщение в чате. Повторный закреп того же — не ошибка (обновляем
@@ -1238,9 +1263,9 @@ impl MessageStore {
             "INSERT OR IGNORE INTO chat_messages
                  (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
                   size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
-                  system, fwd_from, fwd_anon)
+                  system, fwd_from, fwd_anon, edited_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20, ?21, ?22, ?23)",
+                     ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             rusqlite::params![
                 chat.id(), chat.scope(), m.id as i64, &m.sender, m.mine as i64,
                 &m.text, m.time, &m.status,
@@ -1248,7 +1273,7 @@ impl MessageStore {
                 m.size as i64, m.duration_ms as i64, m.width as i64, m.height as i64,
                 &m.thumb_id, m.downloaded as i64,
                 m.reply_to as i64, &m.reply_sender, m.system as i64, &m.fwd_from,
-                m.fwd_anon as i64,
+                m.fwd_anon as i64, m.edited_at,
             ],
         )?;
         Ok(n > 0)
@@ -1280,6 +1305,7 @@ fn read_msg_offset(row: &rusqlite::Row, off: usize) -> rusqlite::Result<StoredMe
         system: row.get::<_, i64>(off + 19)? != 0,
         fwd_from: row.get(off + 20)?,
         fwd_anon: row.get::<_, i64>(off + 21)? != 0,
+        edited_at: row.get(off + 22)?,
     })
 }
 

@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.MoreVert
@@ -114,6 +115,8 @@ internal fun GroupChatScreen(model: AppModel) {
     val isAdmin = model.groups.firstOrNull { it.gid == gid }?.admin == true
     LaunchedEffect(gid) { model.refreshPins(gid, group = true) }
     var input by remember(gid) { mutableStateOf("") }
+    // Правка начинается с текущего текста: человек исправляет, а не набирает заново.
+    LaunchedEffect(model.editTargetGroup) { model.editTargetGroup?.let { input = it.text } }
     var focusedParticipant by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
@@ -208,7 +211,14 @@ internal fun GroupChatScreen(model: AppModel) {
                 MessageInput(
                     value = input,
                     onChange = { input = it },
-                    replyStrip = { model.groupReplyTarget?.let { GroupReplyStrip(model, it) } },
+                    replyStrip = {
+                        model.editTargetGroup?.let { t ->
+                            EditStrip(t.text) {
+                                model.editTargetGroup = null
+                                input = ""
+                            }
+                        } ?: model.groupReplyTarget?.let { GroupReplyStrip(model, it) }
+                    },
                     onPickFile = { filePicker.launch(arrayOf("*/*")) },
                     onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
                     onCamera = openCamera,
@@ -232,7 +242,12 @@ internal fun GroupChatScreen(model: AppModel) {
                     onVoiceStop = stopVoice,
                     model = model,
                     onSend = {
-                        if (input.isNotBlank()) {
+                        val editing = model.editTargetGroup
+                        if (editing != null) {
+                            if (input.isNotBlank()) model.applyEdit(gid, true, editing.id, input)
+                            model.editTargetGroup = null
+                            input = ""
+                        } else if (input.isNotBlank()) {
                             model.sendGroupText(gid, input)
                             input = ""
                         }
@@ -420,6 +435,15 @@ private fun GroupSelectionTopBar(model: AppModel) {
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
             model.beginForwardGroup(gid)
         }
+        // Править можно только своё: подменять чужие слова — не редактирование.
+        if (sel.size == 1 && sel.first().sender == mineKey) {
+            val ref = sel.first()
+            BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
+                model.groupMessages[gid]?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
+                    ?.let { model.editTargetGroup = it }
+                model.clearGroupSelection()
+            }
+        }
         // Закрепляет только админ — у остальных кнопки нет, чтобы она не обещала
         // того, что движок всё равно отклонит.
         if (sel.size == 1 && model.groups.firstOrNull { it.gid == gid }?.admin == true) {
@@ -590,7 +614,7 @@ internal fun GroupBubble(
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(end = bubbleTimeReserve(false)),
+                    modifier = Modifier.padding(end = bubbleTimeReserve(false, m.editedAt > 0)),
                 )
             }
             // Крупное вложение в группе не качается само: карточка с именем/размером/
@@ -613,7 +637,7 @@ internal fun GroupBubble(
                         "voice" -> VoiceAttachment(blobBytes)
                         "file" -> FileAttachment(m.name, blobBytes)
                         // Текст резервирует справа место под время → время оверлеем без наложения.
-                        else -> Text(m.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = bubbleTimeReserve(false)))
+                        else -> Text(m.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = bubbleTimeReserve(false, m.editedAt > 0)))
                     }
                 }
             }
@@ -624,13 +648,19 @@ internal fun GroupBubble(
                     m.text,
                     color = Color.White,
                     fontSize = 15.sp,
-                    modifier = Modifier.padding(top = 6.dp, end = bubbleTimeReserve(false)),
+                    modifier = Modifier.padding(top = 6.dp, end = bubbleTimeReserve(false, m.editedAt > 0)),
                 )
             }
         }
         if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
         Text(
-            fmtMsgTime(time),
+            // Правка меняет текст задним числом — пометка «изм.» рядом со временем
+            // не даёт спутать исправленное с изначально написанным.
+            if (m.editedAt > 0) {
+                stringResource(R.string.chat_edited) + " " + fmtMsgTime(time)
+            } else {
+                fmtMsgTime(time)
+            },
             color = Color.White.copy(alpha = 0.5f),
             fontSize = 10.sp,
             modifier = Modifier.align(Alignment.BottomEnd),

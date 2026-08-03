@@ -106,6 +106,8 @@ pub enum Event {
     },
     /// Пир просит удалить своё сообщение `target` («удалить у всех»).
     Retract { peer: PeerKey, target: u64 },
+    /// Пир исправил своё сообщение `target` — заменяем текст в истории.
+    Edit { peer: PeerKey, target: u64, text: String },
     /// Пир закрепил (или открепил) сообщение в общем чате. `target_mine` уже
     /// перевёрнут: true — закреплено НАШЕ сообщение.
     Pin { peer: PeerKey, target: u64, target_mine: bool, on: bool },
@@ -716,6 +718,14 @@ impl Messenger {
         self.shared.send_reliable(peer, false, move |id| Payload::Retract { id, target })
     }
 
+    /// Исправить СВОЁ сообщение. Надёжно, как отзыв: правка, сделанная пока
+    /// собеседник офлайн, обязана доехать позже — иначе у двоих разный текст одного
+    /// сообщения, и это хуже, чем отсутствие правки вовсе.
+    pub fn send_edit(&self, peer: &PeerKey, target: u64, text: &str) -> Result<u64, MessengerError> {
+        let text = text.to_string();
+        self.shared.send_reliable(peer, false, move |id| Payload::Edit { id, target, text })
+    }
+
     /// Закрепить/открепить сообщение в личном чате. Надёжно, как отзыв: закреп,
     /// сделанный пока собеседник офлайн, обязан доехать позже — иначе у двоих
     /// разные шапки одного чата.
@@ -1214,6 +1224,11 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::Retract { id, target } => {
                 // Отзыв касается сообщения ОТПРАВИТЕЛЯ — чужое удалить нельзя.
                 shared.emit(Event::Retract { peer: peer_id, target });
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
+            }
+            Payload::Edit { id, target, text } => {
+                // Правка касается сообщения ОТПРАВИТЕЛЯ: чужой текст переписать нельзя.
+                shared.emit(Event::Edit { peer: peer_id, target, text });
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::Pin { id, target, target_mine, on } => {

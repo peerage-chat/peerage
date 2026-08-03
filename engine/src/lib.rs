@@ -69,6 +69,8 @@ pub(crate) enum GroupCmd {
     },
     /// Отозвать свои сообщения у участников («удалить у всех»).
     Retract { gid: Vec<u8>, ids: Vec<u64> },
+    /// Исправить своё сообщение в группе.
+    Edit { gid: Vec<u8>, id: u64, text: String },
     /// Закрепить/открепить сообщение в группе (только админ).
     Pin { gid: Vec<u8>, id: u64, sender: String, on: bool },
     /// Удалить сообщения только у себя: пары `(id, автор-hex)`.
@@ -442,6 +444,39 @@ impl Engine {
                 Some(id as i64)
             }
             Err(_) => None,
+        }
+    }
+
+    /// Исправить СВОЁ сообщение: заменить текст (у вложения — подпись).
+    ///
+    /// Чужое править нельзя — это была бы подмена чужих слов; проверяем здесь, а не
+    /// надеемся на клиент. История правок не хранится, но пометка «изменено»
+    /// остаётся навсегда: молча подменённый текст хуже отсутствия правки.
+    pub fn edit_message(&self, chat: ChatKey, id: u64, text: &str) -> bool {
+        let me = self.me_hex();
+        match &chat {
+            ChatKey::Dm(peer) => {
+                let store = self.messages.lock_safe();
+                if !store.contains(chat.as_chat(), &me, id) {
+                    return false; // не наше сообщение (или его уже нет)
+                }
+                drop(store);
+                if self.messenger.send_edit(peer, id, text).is_err() {
+                    return false;
+                }
+                let _ = self.messages.lock_safe().edit_text(chat.as_chat(), &me, id, text, now());
+                push_event(self, dto::UiEvent::MessageEdited {
+                    chat: hex::encode(chat.id_bytes()),
+                    id,
+                    sender: me,
+                    text: text.to_string(),
+                });
+                true
+            }
+            ChatKey::Group(gid) => self
+                .jobs
+                .send(Job::Cmd(GroupCmd::Edit { gid: gid.clone(), id, text: text.to_string() }))
+                .is_ok(),
         }
     }
 
@@ -2431,6 +2466,23 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 });
             }
         }
+        Event::Edit { peer, target, text } => {
+            // Правим строку АВТОРА правки — чужую он переписать не может.
+            let author = hex::encode(peer);
+            let changed = engine
+                .messages
+                .lock_safe()
+                .edit_text(Chat::Dm(&peer), &author, target, &text, now())
+                .unwrap_or(false);
+            if changed {
+                push_event(engine, dto::UiEvent::MessageEdited {
+                    chat: author.clone(),
+                    id: target,
+                    sender: author,
+                    text,
+                });
+            }
+        }
         Event::Pin { peer, target, target_mine, on } => {
             // Ссылка на сообщение — «автор + id»: чьё именно, решает перевёрнутый
             // флаг (его перевернул мессенджер на приёме).
@@ -2591,6 +2643,16 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // отозванное останется на экране до перезахода в чат.
                 if let Some(gid) = &out.gid {
                     push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(gid) });
+                }
+            }
+            if let Some((sender, id, text)) = out.edited.clone() {
+                if let Some(gid) = &out.gid {
+                    push_event(engine, dto::UiEvent::MessageEdited {
+                        chat: hex::encode(gid),
+                        id,
+                        sender,
+                        text,
+                    });
                 }
             }
             if out.pinned {
@@ -2795,6 +2857,16 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                 // присваивает этот слой, и без перечитывания истории на него нельзя
                 // было бы ни ответить, ни отозвать.
                 push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(&gid) });
+            }
+        }
+        GroupCmd::Edit { gid, id, text } => {
+            if let Some((sender, text)) = groups.edit(&gid, id, &text) {
+                push_event(engine, dto::UiEvent::MessageEdited {
+                    chat: hex::encode(&gid),
+                    id,
+                    sender,
+                    text,
+                });
             }
         }
         GroupCmd::Pin { gid, id, sender, on } => {

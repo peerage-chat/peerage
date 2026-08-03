@@ -54,6 +54,9 @@ enum AppMsg {
     /// из MLS, а не из тела.
     #[serde(rename = "retract")]
     Retract { target: u64 },
+    /// Правка своего сообщения: автор берётся из MLS, поэтому в теле только цель.
+    #[serde(rename = "edit")]
+    Edit { target: u64, text: String },
     /// Закрепить/открепить сообщение группы. Ссылка — пара «автор + id» (ADR-006).
     /// Право проверяет верхний слой: закрепляет админ, иначе любой участник мог бы
     /// повесить своё сообщение в шапку всем остальным.
@@ -116,6 +119,8 @@ pub enum Inbound {
     },
     /// Отправитель просит удалить СВОЁ сообщение `target` у всех.
     Retract { sender: PeerKey, target: u64 },
+    /// Отправитель исправил своё сообщение `target`.
+    Edit { sender: PeerKey, target: u64, text: String },
     /// Закрепить/открепить сообщение (`actor` — кто это сделал).
     Pin { actor: PeerKey, target: u64, sender: String, on: bool },
     /// Медиа-сообщение (M2): отправитель + ссылка на блоб с метаданными карточки.
@@ -284,6 +289,11 @@ impl GroupChat {
         self.send_app(&AppMsg::Media(body))
     }
 
+    /// Исправить своё сообщение у всех участников.
+    pub fn send_edit(&mut self, target: u64, text: &str) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::Edit { target, text: text.to_string() })
+    }
+
     /// Закрепить/открепить сообщение у всех участников.
     pub fn send_pin(&mut self, target: u64, sender: &str, on: bool) -> Result<(), GroupChatError> {
         self.send_app(&AppMsg::Pin { target, sender: sender.to_string(), on })
@@ -324,6 +334,7 @@ impl GroupChat {
                         }
                     }
                     Ok(AppMsg::Retract { target }) => Inbound::Retract { sender, target },
+                    Ok(AppMsg::Edit { target, text }) => Inbound::Edit { sender, target, text },
                     Ok(AppMsg::Pin { target, sender: who, on }) => {
                         Inbound::Pin { actor: sender, target, sender: who, on }
                     }

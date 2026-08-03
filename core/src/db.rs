@@ -100,6 +100,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             system       INTEGER NOT NULL DEFAULT 0,
             fwd_from     TEXT    NOT NULL DEFAULT '',
             fwd_anon     INTEGER NOT NULL DEFAULT 0,
+            edited_at    INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (chat, scope, sender, id)
         );
         -- Порядок в чате и курсор пагинации. Курсор двойной, (time, rowid), но в
@@ -223,6 +224,9 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE chat_messages ADD COLUMN fwd_from TEXT NOT NULL DEFAULT ''", []);
     let _ =
         conn.execute("ALTER TABLE chat_messages ADD COLUMN fwd_anon INTEGER NOT NULL DEFAULT 0", []);
+    // Правка сообщения: когда изменено (0 — не редактировалось). Идемпотентно.
+    let _ = conn
+        .execute("ALTER TABLE chat_messages ADD COLUMN edited_at INTEGER NOT NULL DEFAULT 0", []);
     // Миграция для установок с outbox без msg_id (идемпотентно: дубль-колонка → игнор).
     let _ = conn.execute("ALTER TABLE outbox ADD COLUMN msg_id INTEGER NOT NULL DEFAULT 0", []);
     // Ответ на сообщение (ADR-006, «фича-по-ссылке»): ссылка = (автор, id). Здесь

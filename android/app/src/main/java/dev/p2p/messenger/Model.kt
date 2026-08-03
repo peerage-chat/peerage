@@ -106,6 +106,8 @@ data class Message(
     val fwdFrom: String = "",
     /** Переслано, но автора не называем. */
     val fwdAnon: Boolean = false,
+    /** Когда исправлено автором (0 — не редактировалось). */
+    val editedAt: Long = 0,
     /** Курсор пагинации: номер строки в базе движка (0 — запись создана локально). */
     val row: Long = 0,
 )
@@ -193,6 +195,8 @@ data class GroupMsg(
     val fwdFrom: String = "",
     /** Переслано, но автора не называем. */
     val fwdAnon: Boolean = false,
+    /** Когда исправлено автором (0 — не редактировалось). */
+    val editedAt: Long = 0,
     /** Тип (M2): "text" | "image" | "voice" | "file". */
     val kind: String = "text",
     /** hex-хэш блоба вложения (M2); байты — через AppModel.mediaBlobs. */
@@ -1479,6 +1483,20 @@ class AppModel private constructor() {
      */
     var forwarding by mutableStateOf<Pair<ChatTarget, List<Pair<Long, String>>>?>(null)
 
+    /**
+     * Сообщение, которое сейчас правят (null — обычный ввод). Поле ввода при этом
+     * показывает старый текст: правка — это исправление, а не отправка заново.
+     */
+    var editTarget by mutableStateOf<Message?>(null)
+
+    /** То же для группового сообщения. */
+    var editTargetGroup by mutableStateOf<GroupMsg?>(null)
+
+    /** Отправить правку своего сообщения. */
+    fun applyEdit(chat: String, group: Boolean, id: Long, text: String) = ops.execute {
+        if (text.isNotBlank()) Native.editMessage(sessionPtr, chat, group, id, text)
+    }
+
     /** Начать пересылку выделенного в личном чате или «Сохранённом». */
     fun beginForward(chatKey: String) {
         val meKey = me?.pubkey.orEmpty()
@@ -1958,6 +1976,23 @@ class AppModel private constructor() {
             EngineEvent.GroupInvitesChanged -> refreshGroupInvitesNow()
             // Закреп общий для всех: его мог поставить собеседник или админ группы.
             is EngineEvent.PinsChanged -> refreshPins(ev.chat, groups.any { it.gid == ev.chat })
+            // Правка приходит и на свои сообщения (эхо движка), и на чужие: меняем
+            // текст на месте, чтобы не перечитывать всю ленту.
+            is EngineEvent.MessageEdited -> {
+                val stamp = System.currentTimeMillis() / 1000
+                messages[ev.chat]?.let { list ->
+                    val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
+                    if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp)
+                }
+                groupMessages[ev.chat]?.let { list ->
+                    val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
+                    if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp)
+                }
+                if (ev.chat == me?.pubkey) {
+                    val i = notes.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
+                    if (i >= 0) notes[i] = notes[i].copy(text = ev.text, editedAt = stamp)
+                }
+            }
             // M2: контакт прислал профиль (имя/аватар) → перечитать список.
             EngineEvent.ContactsChanged -> refreshContactsNow()
             // Адрес сменился: обновляем показ и завершаем карточку хода.

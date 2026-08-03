@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -231,7 +232,8 @@ internal fun blockGap(pos: BlockPos) =
 /** Резерв места под время в правом-нижнем углу пузыря: время не участвует в потоке
  *  текста, поэтому текст обязан оставить ему ширину, иначе они наложатся.
  *  У своих сообщений шире — там ещё галочка статуса. */
-internal fun bubbleTimeReserve(mine: Boolean) = if (mine) 52.dp else 34.dp
+internal fun bubbleTimeReserve(mine: Boolean, edited: Boolean = false) =
+    (if (mine) 52.dp else 34.dp) + if (edited) 34.dp else 0.dp
 
 /** Форма пузыря: «шов» внутри блока — со стороны отправителя. */
 internal fun bubbleShape(mine: Boolean, pos: BlockPos): RoundedCornerShape {
@@ -367,5 +369,37 @@ internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: 
                 model.setPinned(chat, group, top, false)
             }
         }
+    }
+}
+
+/**
+ * Полоска «Редактирование» над полем ввода: показывает, что уходит правка, а не
+ * новое сообщение, и даёт из неё выйти. Занимает то же место, что цитата ответа —
+ * два режима ввода одновременно не бывают.
+ */
+@Composable
+internal fun EditStrip(text: String, onCancel: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Edit, null, tint = HoloAccent, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                stringResource(R.string.chat_editing),
+                color = HoloAccent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text,
+                color = HoloSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel), onClick = onCancel)
     }
 }

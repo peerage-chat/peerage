@@ -232,6 +232,15 @@ object Native {
         limit: Int,
     ): String
 
+    /** Исправить СВОЁ сообщение (текст или подпись вложения). 1 — получилось. */
+    external fun editMessage(
+        sessionPtr: Long,
+        chatHex: String,
+        isGroup: Boolean,
+        msgId: Long,
+        text: String,
+    ): Int
+
     /** Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми. */
     external fun pinned(sessionPtr: Long, chatHex: String, isGroup: Boolean): String
 

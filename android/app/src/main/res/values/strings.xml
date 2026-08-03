@@ -646,4 +646,7 @@
     <string name="pin_title_many">Pinned · %1$d</string>
     <string name="pin_remove">Unpin</string>
     <string name="pin_attachment">Attachment</string>
+    <string name="chat_edit">Edit</string>
+    <string name="chat_editing">Editing</string>
+    <string name="chat_edited">edited</string>
 </resources>

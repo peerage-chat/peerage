@@ -638,4 +638,7 @@
     <string name="pin_title_many">Закреплённое · %1$d</string>
     <string name="pin_remove">Открепить</string>
     <string name="pin_attachment">Вложение</string>
+    <string name="chat_edit">Изменить</string>
+    <string name="chat_editing">Редактирование</string>
+    <string name="chat_edited">изм.</string>
 </resources>

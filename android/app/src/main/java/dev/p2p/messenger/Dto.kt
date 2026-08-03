@@ -74,6 +74,8 @@ internal data class MessageDto(
     @SerialName("fwd_from") val fwdFrom: String = "",
     /** Переслано, но автора не называем (пересылающий скрыл источник). */
     @SerialName("fwd_anon") val fwdAnon: Boolean = false,
+    /** Когда исправлено автором (0 — не редактировалось). */
+    @SerialName("edited_at") val editedAt: Long = 0,
     /** Курсор пагинации: номер строки в базе движка. Для догрузки истории вверх. */
     val row: Long = 0,
     val width: Int = 0,
@@ -131,6 +133,8 @@ internal data class GroupMsgDto(
     @SerialName("fwd_from") val fwdFrom: String = "",
     /** Переслано, но автора не называем. */
     @SerialName("fwd_anon") val fwdAnon: Boolean = false,
+    /** Когда исправлено автором (0 — не редактировалось). */
+    @SerialName("edited_at") val editedAt: Long = 0,
     @SerialName("reply_to") val replyTo: Long = 0,
     @SerialName("reply_sender") val replySender: String = "",
     val text: String = "",
@@ -342,6 +346,7 @@ internal fun MessageDto.toModel() = Message(
     system = system,
     fwdFrom = fwdFrom,
     fwdAnon = fwdAnon,
+    editedAt = editedAt,
     row = row,
     width = width,
     height = height,
@@ -370,6 +375,7 @@ internal fun GroupMsgDto.toModel() = GroupMsg(
     downloaded = downloaded,
     fwdFrom = fwdFrom,
     fwdAnon = fwdAnon,
+    editedAt = editedAt,
     row = row,
 )
 
@@ -457,6 +463,16 @@ internal sealed interface EngineEvent {
     @Serializable
     @SerialName("pins_changed")
     data class PinsChanged(val chat: String) : EngineEvent
+
+    /** Сообщение исправлено автором — заменить текст в ленте на месте. */
+    @Serializable
+    @SerialName("message_edited")
+    data class MessageEdited(
+        val chat: String,
+        val id: Long,
+        val sender: String,
+        val text: String,
+    ) : EngineEvent
 
     @Serializable
     @SerialName("group_removed")

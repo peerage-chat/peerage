@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
@@ -152,6 +153,8 @@ internal fun ChatScreen(model: AppModel) {
     val lastId = msgs.lastOrNull()?.id
     LaunchedEffect(lastId) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
     PagingUp(listState, key) { done -> model.loadOlder(key, done) }
+    // Правка начинается с ТЕКУЩЕГО текста: человек исправляет, а не набирает заново.
+    LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
     LaunchedEffect(key) { model.refreshPins(key, group = false) }
     // Порог анимации: всё, что было в чате на момент открытия, показываем сразу.
     // Анимировать историю при входе — мельтешение; анимируем только НОВОЕ.
@@ -243,9 +246,22 @@ internal fun ChatScreen(model: AppModel) {
             onVoiceStart = startVoice,
             onVoiceStop = stopVoice,
             model = model,
-            replyStrip = { model.replyTarget?.let { ReplyStrip(model, it) } },
+            replyStrip = {
+                model.editTarget?.let {
+                    EditStrip(it.text) {
+                        model.editTarget = null
+                        input = ""
+                    }
+                }
+                    ?: model.replyTarget?.let { ReplyStrip(model, it) }
+            },
             onSend = {
-                if (input.isNotBlank()) {
+                val editing = model.editTarget
+                if (editing != null) {
+                    if (input.isNotBlank()) model.applyEdit(key, false, editing.id, input)
+                    model.editTarget = null
+                    input = ""
+                } else if (input.isNotBlank()) {
                     model.send(key, input)
                     input = ""
                 }
@@ -437,6 +453,14 @@ private fun SelectionTopBar(model: AppModel) {
         }
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
             model.beginForward(key)
+        }
+        if (sel.size == 1 && sel.first().mine) {
+            val ref = sel.first()
+            BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
+                model.messages[key]?.firstOrNull { it.id == ref.id && it.mine }
+                    ?.let { model.editTarget = it }
+                model.clearSelection()
+            }
         }
         if (sel.size == 1) {
             val ref = sel.first()
@@ -803,7 +827,7 @@ internal fun MessageBubble(
                                 m.text,
                                 color = Color.White,
                                 fontSize = 15.sp,
-                                modifier = Modifier.padding(end = bubbleTimeReserve(m.mine)),
+                                modifier = Modifier.padding(end = bubbleTimeReserve(m.mine, m.editedAt > 0)),
                             )
                         }
                     }
@@ -815,7 +839,7 @@ internal fun MessageBubble(
                             color = Color.White,
                             fontSize = 15.sp,
                             modifier = Modifier
-                                .padding(top = 6.dp, end = bubbleTimeReserve(m.mine)),
+                                .padding(top = 6.dp, end = bubbleTimeReserve(m.mine, m.editedAt > 0)),
                         )
                     }
                 }
@@ -824,6 +848,16 @@ internal fun MessageBubble(
                 Modifier.align(Alignment.BottomEnd),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (m.editedAt > 0) {
+                    // Текст подменился — молчать об этом нельзя, иначе «исправил»
+                    // неотличимо от «так и было написано».
+                    Text(
+                        stringResource(R.string.chat_edited),
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 10.sp,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
                 Text(fmtMsgTime(m.time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                 if (m.mine) {
                     Spacer(Modifier.width(3.dp))
