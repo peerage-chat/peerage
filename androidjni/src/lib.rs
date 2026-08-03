@@ -574,6 +574,31 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_pinned<'local>(
     })
 }
 
+/// Поиск по переписке. `chat_hex` пустой — искать во ВСЕХ чатах.
+/// Возвращает JSON `[{chat, group, ...сообщение}]`, свежие первыми.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_searchMessages<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    query: JString<'local>,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    limit: jint,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        let q = jstr(&mut env, &query);
+        let chat_str = jstr(&mut env, &chat_hex);
+        let chat = if chat_str.trim().is_empty() {
+            None
+        } else {
+            p2p_engine::ChatKey::parse(&chat_str, is_group != 0)
+        };
+        ret(&env, &e.search_json(&q, chat, limit.max(0) as usize))
+    })
+}
+
 // ── Блобы (M2) ──────────────────────────────────────────────────────────────
 
 /// Предложить блоб пиру (картинка/файл/голосовое). Fire-and-forget.

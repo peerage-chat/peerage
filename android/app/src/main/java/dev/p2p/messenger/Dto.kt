@@ -82,6 +82,19 @@ internal data class MessageDto(
     val downloaded: Boolean = false,
 )
 
+/** Находка поиска: строка истории плюс чат, где она лежит. */
+@Serializable
+internal data class SearchHitDto(
+    val chat: String = "",
+    val group: Boolean = false,
+    val id: Long = 0,
+    val sender: String = "",
+    val text: String = "",
+    val mine: Boolean = false,
+    val time: Long = 0,
+    val kind: String = "text",
+)
+
 @Serializable
 internal data class ContactRequestDto(
     val key: String = "",

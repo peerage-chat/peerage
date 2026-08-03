@@ -220,6 +220,18 @@ object Native {
         on: Boolean,
     ): Int
 
+    /**
+     * Поиск по переписке. Пустой `chatHex` — искать во всех чатах.
+     * Возвращает JSON `[{chat, group, ...сообщение}]`, свежие первыми.
+     */
+    external fun searchMessages(
+        sessionPtr: Long,
+        query: String,
+        chatHex: String,
+        isGroup: Boolean,
+        limit: Int,
+    ): String
+
     /** Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми. */
     external fun pinned(sessionPtr: Long, chatHex: String, isGroup: Boolean): String
 

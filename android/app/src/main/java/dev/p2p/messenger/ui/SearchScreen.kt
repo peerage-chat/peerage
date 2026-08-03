@@ -12,11 +12,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,8 +36,13 @@ import dev.p2p.messenger.HoloSecondary
 import dev.p2p.messenger.R
 import dev.p2p.messenger.ScreenPad
 
-/** Глобальный поиск: фильтр контактов и групп по имени/ключу. Сообщения — позже
- *  (история per-peer; полнотекст по чатам подключим, когда история уйдёт в движок). */
+/**
+ * Глобальный поиск: контакты и группы по имени/ключу — и САМИ СООБЩЕНИЯ.
+ *
+ * Поиск по переписке делает движок (полнотекстовый индекс в общей базе): клиент не
+ * держит историю целиком и искать в ней не может. Находка помнит свой чат, поэтому
+ * по нажатию открывается нужный чат — личный или групповой.
+ */
 @Composable
 internal fun SearchScreen(
     model: AppModel,
@@ -52,6 +59,10 @@ internal fun SearchScreen(
         }
     }
     val groups = if (q.isEmpty()) emptyList() else model.groups.filter { it.name.lowercase().contains(q) }
+    // Запрос уходит в движок на каждое изменение строки: поиск идёт по индексу и
+    // возвращает не больше сотни строк, отдельная кнопка «искать» тут лишняя.
+    LaunchedEffect(q) { model.searchMessages(q) }
+    val hits = if (q.isEmpty()) emptyList() else model.searchHits
 
     Column(Modifier.fillMaxSize()) {
         TextField(
@@ -64,7 +75,8 @@ internal fun SearchScreen(
         )
         when {
             q.isEmpty() -> CenterMessage(stringResource(R.string.search_prompt))
-            contacts.isEmpty() && groups.isEmpty() -> CenterMessage(stringResource(R.string.search_empty))
+            contacts.isEmpty() && groups.isEmpty() && hits.isEmpty() ->
+                CenterMessage(stringResource(R.string.search_empty))
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(groups, key = { "g_${it.gid}" }) { g ->
                     ListRow(onClick = { onOpenGroup(g.gid) }) {
@@ -75,6 +87,35 @@ internal fun SearchScreen(
                         Column(Modifier.weight(1f)) {
                             Text(g.name, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(stringResource(R.string.search_group_subtitle, g.members), color = HoloSecondary, fontSize = 11.sp)
+                        }
+                    }
+                }
+                items(hits, key = { "m_${it.chat}_${it.sender}_${it.id}" }) { hit ->
+                    val title = if (hit.group) {
+                        model.groups.firstOrNull { it.gid == hit.chat }?.name.orEmpty()
+                    } else if (hit.chat == model.me?.pubkey) {
+                        stringResource(R.string.menu_saved)
+                    } else {
+                        model.contacts.firstOrNull { it.key == hit.chat }?.displayName
+                            ?: hit.chat.take(8)
+                    }
+                    ListRow(onClick = { if (hit.group) onOpenGroup(hit.chat) else onOpenDm(hit.chat) }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Message,
+                            null,
+                            tint = HoloSecondary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                hit.text,
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(title, color = HoloSecondary, fontSize = 11.sp, maxLines = 1)
                         }
                     }
                 }

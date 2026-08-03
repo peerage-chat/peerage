@@ -299,3 +299,38 @@ fn pin_in_a_dm_is_shared_by_both_sides() {
         v.as_array().unwrap().is_empty()
     }));
 }
+
+/// Поиск по переписке идёт через движок и находит и заметки, и сообщения чата —
+/// с указанием, ГДЕ нашлось. Проверяется на настоящем движке, а не на голом
+/// хранилище: между ними лежит JSON-граница, на которой всё и ломается.
+#[test]
+fn search_finds_messages_across_chats() {
+    let (a, b, _a_key, b_key) = pair("search", 61, 62);
+
+    a.save_note("пароль от вайфая: 12345678");
+    a.send_text(&b_key, "встречаемся в семь у входа");
+    assert!(wait(10, || !history(&b, &_a_key).is_empty()), "сообщение дошло");
+
+    let hits: serde_json::Value = serde_json::from_str(&a.search_json("встреч", None, 50)).unwrap();
+    let arr = hits.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "нашлось одно: {hits}");
+    assert_eq!(arr[0]["text"], "встречаемся в семь у входа");
+    assert_eq!(arr[0]["chat"].as_str(), Some(hex::encode(b_key).as_str()), "видно, где нашлось");
+    assert_eq!(arr[0]["group"], false);
+
+    // Заметка себе — тот же поиск, чат с самим собой.
+    let notes: serde_json::Value = serde_json::from_str(&a.search_json("пароль", None, 50)).unwrap();
+    assert_eq!(notes.as_array().unwrap().len(), 1);
+    assert_eq!(notes[0]["chat"].as_str(), Some(hex::encode(_a_key).as_str()));
+
+    // По началу слова тоже (а не только по целому).
+    let prefix: serde_json::Value = serde_json::from_str(&a.search_json("вайф", None, 50)).unwrap();
+    assert_eq!(prefix.as_array().unwrap().len(), 1, "префиксный поиск: {prefix}");
+
+    // Чужой чат в результат не лезет.
+    let scoped: serde_json::Value = serde_json::from_str(
+        &a.search_json("пароль", Some(p2p_engine::ChatKey::Dm(b_key)), 50),
+    )
+    .unwrap();
+    assert!(scoped.as_array().unwrap().is_empty(), "поиск в чате не видит заметок");
+}

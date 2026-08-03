@@ -168,6 +168,15 @@ impl ChatKey {
     }
 }
 
+/// Находка поиска: сама строка истории плюс чат, в котором она лежит.
+#[derive(serde::Serialize)]
+struct SearchHit {
+    chat: String,
+    group: bool,
+    #[serde(flatten)]
+    msg: StoredMessage,
+}
+
 /// Строка списка групп в том виде, в каком её читает клиент. Живёт здесь, потому
 /// что список склеивается из двух источников: ростер MLS (слой групп) и архивные
 /// группы из базы.
@@ -463,6 +472,18 @@ impl Engine {
                 }))
                 .is_ok(),
         }
+    }
+
+    /// Поиск по переписке. `chat = None` — по всем чатам сразу; свежие первыми.
+    /// Каждая находка помнит, ГДЕ она: результат по всем чатам без этого бесполезен.
+    pub fn search_json(&self, query: &str, chat: Option<ChatKey>, limit: usize) -> String {
+        let store = self.messages.lock_safe();
+        let found = store.search(query, chat.as_ref().map(|c| c.as_chat()), limit);
+        let hits: Vec<SearchHit> = found
+            .into_iter()
+            .map(|(chat, scope, msg)| SearchHit { chat: hex::encode(chat), group: scope == 1, msg })
+            .collect();
+        serde_json::to_string(&hits).unwrap_or_else(|_| "[]".into())
     }
 
     /// Закреплённые сообщения чата (свежие первыми) — как обычные строки истории.

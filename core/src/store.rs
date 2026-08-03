@@ -1037,6 +1037,76 @@ impl MessageStore {
         Ok(())
     }
 
+    /// Поиск по тексту переписки. `chat = None` — по всем чатам; свежие первыми.
+    ///
+    /// Возвращает пары «где нашлось + сама строка», потому что результат по всем
+    /// чатам бесполезен без чата: клиенту нужно и показать, откуда сообщение, и
+    /// открыть его.
+    ///
+    /// Идёт через FTS5, а при его отсутствии — через `LIKE`. Деградация тихая и
+    /// намеренная: поиск, который «иногда не собирается», хуже медленного поиска.
+    pub fn search(
+        &self,
+        query: &str,
+        chat: Option<Chat>,
+        limit: usize,
+    ) -> Vec<(Vec<u8>, i64, StoredMessage)> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Vec::new();
+        }
+        let conn = db::lock(&self.db);
+        let (chat_id, scope) = match chat {
+            Some(c) => (c.id().to_vec(), c.scope()),
+            None => (Vec::new(), -1),
+        };
+        // FTS5-запрос: слово целиком в кавычках + префиксный поиск, чтобы «прив»
+        // находило «привет». Кавычки внутри удваиваем — иначе ввод ломает синтаксис.
+        let fts_query = format!("\"{}\"*", q.replace('"', "\"\""));
+        let fts_sql = format!(
+            "SELECT m.chat, m.scope, {MSG_COLS} FROM messages_fts f
+             JOIN chat_messages m ON m.rowid = f.rowid
+             WHERE messages_fts MATCH ?1 AND (?2 < 0 OR (m.chat = ?3 AND m.scope = ?2))
+             ORDER BY m.time DESC LIMIT ?4"
+        );
+        let rows = conn.prepare(&fts_sql).and_then(|mut stmt| {
+            stmt.query_map(
+                rusqlite::params![fts_query, scope, chat_id, limit as i64],
+                |row| {
+                    let c: Vec<u8> = row.get(0)?;
+                    let s: i64 = row.get(1)?;
+                    Ok((c, s, read_msg_offset(row, 2)?))
+                },
+            )
+            .and_then(|it| it.collect::<rusqlite::Result<Vec<_>>>())
+        });
+        // FTS может отсутствовать в сборке SQLite — тогда молча идём в LIKE.
+        if let Ok(found) = rows {
+            return found;
+        }
+
+        // Фолбэк без FTS: подстрока. `%` и `_` в запросе экранируем, иначе «100%»
+        // превратилось бы в «что угодно».
+        let like = format!("%{}%", q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let like_sql = format!(
+            "SELECT m.chat, m.scope, {MSG_COLS} FROM chat_messages m
+             WHERE m.text LIKE ?1 ESCAPE '\\' AND (?2 < 0 OR (m.chat = ?3 AND m.scope = ?2))
+             ORDER BY m.time DESC LIMIT ?4"
+        );
+        let mut stmt = match conn.prepare(&like_sql) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let out = stmt
+            .query_map(rusqlite::params![like, scope, chat_id, limit as i64], |row| {
+                let c: Vec<u8> = row.get(0)?;
+                let s: i64 = row.get(1)?;
+                Ok((c, s, read_msg_offset(row, 2)?))
+            })
+            .and_then(|it| it.collect::<rusqlite::Result<Vec<_>>>());
+        out.unwrap_or_default()
+    }
+
     /// Запомнить название чата (для групп — имя группы).
     pub fn set_chat_title(&self, chat: Chat, name: &str) -> Result<(), StoreError> {
         db::lock(&self.db).execute(
@@ -1619,6 +1689,46 @@ mod tests {
         // Старой таблицы больше нет — второй прогон не задваивает историю.
         let store2 = MessageStore::open(shared, None, &me).unwrap();
         assert_eq!(store2.history(Chat::Dm(&peer), None, 50).len(), 2);
+    }
+
+    /// Поиск находит сообщение в нужном чате, умеет искать по началу слова и не
+    /// путает чаты между собой. Пустой запрос — пустой результат (иначе «поиск»
+    /// вываливал бы всю переписку).
+    #[test]
+    fn search_finds_messages_by_prefix_and_respects_the_chat() {
+        let (me, peer, other) = (key(), key(), key());
+        let store = MessageStore::open(db(), None, &me).unwrap();
+        let me_hex = hex::encode(me);
+        let put = |chat: Chat, id: u64, text: &str, time: i64| {
+            store
+                .append(chat, &StoredMessage {
+                    id,
+                    sender: me_hex.clone(),
+                    text: text.into(),
+                    mine: true,
+                    time,
+                    ..Default::default()
+                })
+                .unwrap();
+        };
+        put(Chat::Dm(&peer), 1, "встречаемся у входа в семь", 10);
+        put(Chat::Dm(&peer), 2, "не забудь ключи", 20);
+        put(Chat::Dm(&other), 3, "встречаемся завтра", 30);
+
+        let all = store.search("встреч", None, 50);
+        assert_eq!(all.len(), 2, "нашлись оба чата по началу слова");
+        assert_eq!(all[0].2.text, "встречаемся завтра", "свежие первыми");
+
+        let only_peer = store.search("встреч", Some(Chat::Dm(&peer)), 50);
+        assert_eq!(only_peer.len(), 1);
+        assert_eq!(only_peer[0].0, peer.to_vec(), "результат помнит, где нашёлся");
+
+        assert!(store.search("   ", None, 50).is_empty(), "пустой запрос ничего не ищет");
+
+        // Удалённое сообщение из поиска пропадает — индекс не должен переживать
+        // строку истории.
+        store.delete_many(Chat::Dm(&other), &[(3, me_hex.clone())]).unwrap();
+        assert_eq!(store.search("встреч", None, 50).len(), 1);
     }
 
     /// Репутация копится только у контактов и переживает переоткрытие.

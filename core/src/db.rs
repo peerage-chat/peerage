@@ -186,6 +186,38 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             requested  INTEGER NOT NULL
         );
     ")?;
+    // Полнотекстовый индекс переписки. `content='chat_messages'` — индекс без копии
+    // текста: сами строки остаются в основной таблице, FTS хранит только словарь.
+    // Всё в `let _`: на сборке SQLite без FTS5 поиск обязан деградировать до LIKE,
+    // а не ронять запуск приложения (см. `MessageStore::search`).
+    let _ = conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+             USING fts5(text, content='chat_messages', content_rowid='rowid');
+
+         CREATE TRIGGER IF NOT EXISTS chat_messages_ai AFTER INSERT ON chat_messages BEGIN
+             INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+         END;
+         CREATE TRIGGER IF NOT EXISTS chat_messages_ad AFTER DELETE ON chat_messages BEGIN
+             INSERT INTO messages_fts(messages_fts, rowid, text)
+             VALUES ('delete', old.rowid, old.text);
+         END;
+         CREATE TRIGGER IF NOT EXISTS chat_messages_au AFTER UPDATE ON chat_messages BEGIN
+             INSERT INTO messages_fts(messages_fts, rowid, text)
+             VALUES ('delete', old.rowid, old.text);
+             INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+         END;",
+    );
+    // Разовое построение индекса для баз, живших до его появления. Считать строки
+    // в самом индексе бесполезно: у FTS с внешним контентом COUNT(*) читает
+    // ОСНОВНУЮ таблицу и всегда «не пуст», из-за чего переиндексация не запускалась
+    // и поиск по старой переписке молча не находил ничего. Отметку ставим в
+    // user_version, чтобы не перестраивать словарь на каждом запуске.
+    let schema_ver: i64 =
+        conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap_or(0);
+    if schema_ver < 1 {
+        let _ = conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')", []);
+        let _ = conn.execute_batch("PRAGMA user_version = 1;");
+    }
     // Пересылка: автор исходного сообщения. Идемпотентно — на свежей базе колонка
     // уже есть из CREATE TABLE, повторный ALTER просто игнорируется.
     let _ = conn.execute("ALTER TABLE chat_messages ADD COLUMN fwd_from TEXT NOT NULL DEFAULT ''", []);
@@ -229,4 +261,16 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN thumb_id TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN downloaded INTEGER NOT NULL DEFAULT 0", []);
     Ok(())
+}
+
+
+#[cfg(test)]
+mod fts_probe {
+    #[test]
+    fn fts5_is_available_in_this_build() {
+        let db = super::open_in_memory().unwrap();
+        let conn = super::lock(&db);
+        conn.execute_batch("CREATE VIRTUAL TABLE probe USING fts5(x);")
+            .expect("FTS5 должен быть в сборке SQLite");
+    }
 }

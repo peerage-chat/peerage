@@ -628,6 +628,36 @@ class AppModel private constructor() {
         refreshPins(gid, true)
     }
 
+    /** Находка поиска по переписке: где нашлось + само сообщение. */
+    data class SearchHit(
+        val chat: String,
+        val group: Boolean,
+        val id: Long,
+        val sender: String,
+        val text: String,
+        val mine: Boolean,
+        val time: Long,
+    )
+
+    /** Результаты поиска по сообщениям (свежие первыми). */
+    val searchHits = mutableStateListOf<SearchHit>()
+
+    /**
+     * Искать по переписке. Пустой запрос очищает результат: показывать «всё подряд»
+     * на пустой строке — не поиск.
+     */
+    fun searchMessages(query: String, chat: String = "", group: Boolean = false) = ops.execute {
+        if (query.isBlank()) {
+            searchHits.clear()
+            return@execute
+        }
+        val hits = decodeList<SearchHitDto>(
+            Native.searchMessages(sessionPtr, query, chat, group, 100),
+        ).map { SearchHit(it.chat, it.group, it.id, it.sender, it.text, it.mine, it.time) }
+        searchHits.clear()
+        searchHits.addAll(hits)
+    }
+
     /** Заметки себе («Сохранённое»), старые первыми. */
     val notes = mutableStateListOf<Message>()
 
