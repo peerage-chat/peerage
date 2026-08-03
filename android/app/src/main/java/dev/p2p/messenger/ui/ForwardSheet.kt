@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
@@ -143,6 +144,15 @@ internal fun ForwardMark(model: AppModel, fwdFrom: String, anon: Boolean = false
         Modifier.fillMaxWidth().padding(bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Иконка-стрелка: подпись читается как пометка о пересылке даже боковым
+        // зрением, не сливаясь с текстом сообщения.
+        Icon(
+            Icons.AutoMirrored.Filled.ArrowForward,
+            null,
+            tint = HoloSecondary,
+            modifier = Modifier.size(13.dp),
+        )
+        Spacer(Modifier.width(4.dp))
         Text(
             label,
             color = HoloSecondary,
