@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Close
@@ -189,6 +190,7 @@ internal fun GroupChatScreen(model: AppModel) {
                     GroupMessageRow(model, m, pos)
                 }
             }
+            ForwardSheet(model)
             if (archived) {
                 // Группа из резервной копии: история есть, MLS-состояния нет (ADR-004).
                 // Показать поле ввода значило бы обещать отправку, которой не будет.
@@ -412,6 +414,9 @@ private fun GroupSelectionTopBar(model: AppModel) {
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f).padding(start = 8.dp),
         )
+        BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
+            model.beginForwardGroup(gid)
+        }
         if (sel.size == 1) {
             BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
                 val ref = sel.first()
@@ -559,6 +564,7 @@ internal fun GroupBubble(
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Column {
+            ForwardMark(model, m.fwdFrom)
             if (m.replyTo != 0L) GroupQuote(model, m)
             if (senderName != null) {
                 Text(

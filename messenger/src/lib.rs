@@ -93,7 +93,15 @@ pub enum Event {
     /// Входящее текстовое сообщение. `reply_to` = 0 — обычное; иначе это ответ на
     /// сообщение с таким id, а `reply_mine` уже ПЕРЕВЁРНУТ под нашу сторону
     /// (true = отвечают на наше сообщение).
-    Text { peer: PeerKey, id: u64, text: String, reply_to: u64, reply_mine: bool },
+    Text {
+        peer: PeerKey,
+        id: u64,
+        text: String,
+        reply_to: u64,
+        reply_mine: bool,
+        /// Пересылка: hex автора исходного сообщения (пусто — сообщение своё).
+        fwd_from: String,
+    },
     /// Пир просит удалить своё сообщение `target` («удалить у всех»).
     Retract { peer: PeerKey, target: u64 },
     /// Входящее медиа-сообщение (M2): ссылка на блоб-вложение по хэшу.
@@ -112,6 +120,8 @@ pub enum Event {
         caption: String,
         /// Хэш блоба-миниатюры (пусто — нет превью).
         thumb: Vec<u8>,
+        /// Пересылка: hex автора исходного сообщения (пусто — своё).
+        fwd_from: String,
     },
     /// Пир подтвердил доставку нашего сообщения с данным id (✓✓).
     Ack { peer: PeerKey, id: u64 },
@@ -169,6 +179,8 @@ pub enum Event {
 /// инлайн раздуло бы сообщение и сломало размерную неразличимость M5.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MediaMeta {
+    /// Пересылка: hex автора исходного сообщения (пусто — своё).
+    pub fwd_from: String,
     pub size: u64,
     pub duration_ms: u32,
     pub width: u32,
@@ -660,7 +672,7 @@ impl Messenger {
     /// Отправить текст пиру. Возвращает id; доставка повторяется до `Ack` или TTL
     /// (см. [`Event::Ack`] / [`Event::Undelivered`]).
     pub fn send_text(&self, peer: &PeerKey, text: &str) -> Result<u64, MessengerError> {
-        self.send_text_reply(peer, text, 0, false)
+        self.send_text_reply(peer, text, 0, false, "")
     }
 
     /// То же с ответом на сообщение (`reply_to` = 0 — обычное сообщение).
@@ -672,11 +684,18 @@ impl Messenger {
         text: &str,
         reply_to: u64,
         reply_mine: bool,
+        fwd_from: &str,
     ) -> Result<u64, MessengerError> {
         let text = text.to_string();
+        let fwd_from = fwd_from.to_string();
         // DM: notify=true → UI получает Ack/Undelivered (✓✓ / ошибка).
-        self.shared
-            .send_reliable(peer, true, move |id| Payload::Text { id, text, reply_to, reply_mine })
+        self.shared.send_reliable(peer, true, move |id| Payload::Text {
+            id,
+            text,
+            reply_to,
+            reply_mine,
+            fwd_from,
+        })
     }
 
     /// Попросить получателя удалить наше сообщение `target` («удалить у всех»).
@@ -719,6 +738,7 @@ impl Messenger {
             text,
             reply_to: 0,
             reply_mine: false,
+            fwd_from: String::new(),
         })
     }
 
@@ -745,6 +765,7 @@ impl Messenger {
             height: meta.height,
             caption: caption.clone(),
             thumb: meta.thumb.clone(),
+            fwd_from: meta.fwd_from.clone(),
         })
     }
 
@@ -769,6 +790,7 @@ impl Messenger {
             height: meta.height,
             caption: caption.clone(),
             thumb: meta.thumb.clone(),
+            fwd_from: meta.fwd_from.clone(),
         })
     }
 
@@ -1147,7 +1169,7 @@ fn receive_loop(shared: Arc<Shared>) {
 
         match payload {
             Payload::Hello => {}
-            Payload::Text { id, text, reply_to, reply_mine } => {
+            Payload::Text { id, text, reply_to, reply_mine, fwd_from } => {
                 // Флаг «чьё сообщение» приходит с точки зрения ОТПРАВИТЕЛЯ — здесь он
                 // переворачивается: его «моё» для нас «его», и наоборот.
                 shared.emit(Event::Text {
@@ -1156,6 +1178,7 @@ fn receive_loop(shared: Arc<Shared>) {
                     text,
                     reply_to,
                     reply_mine: reply_to != 0 && !reply_mine,
+                    fwd_from,
                 });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }
@@ -1164,11 +1187,14 @@ fn receive_loop(shared: Arc<Shared>) {
                 shared.emit(Event::Retract { peer: peer_id, target });
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
-            Payload::Media { id, hash, mime, name, size, duration_ms, width, height, caption, thumb } => {
+            Payload::Media {
+                id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
+            } => {
                 shared.emit(Event::Media {
                     peer: peer_id, id, hash, mime, name, size, duration_ms, width, height,
                     caption: truncate_caption(&caption),
                     thumb,
+                    fwd_from,
                 });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }

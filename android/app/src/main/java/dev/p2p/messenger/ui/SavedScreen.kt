@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -53,6 +54,7 @@ internal fun SavedScreen(model: AppModel) {
     PagingUp(listState, Unit) { done -> model.loadOlderNotes(done) }
 
     Column(Modifier.fillMaxSize()) {
+        ForwardSheet(model)
         if (selection.isNotEmpty()) SavedSelectionBar(model)
         if (model.notes.isEmpty()) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -171,6 +173,9 @@ private fun SavedSelectionBar(model: AppModel) {
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f).padding(start = 8.dp),
         )
+        BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
+            model.beginForward(myKey)
+        }
         BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
             val text = model.selectedText(myKey)
             if (text.isNotEmpty()) {

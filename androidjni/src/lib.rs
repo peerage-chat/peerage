@@ -368,6 +368,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
         let caption = jstr(&mut env, &caption);
         let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
         let info = p2p_engine::MediaInfo {
+        fwd_from: String::new(),
             duration_ms: duration_ms.max(0) as u32,
             width: width.max(0) as u32,
             height: height.max(0) as u32,
@@ -405,6 +406,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaFile<'local>(
         let caption = jstr(&mut env, &caption);
         let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
         let info = p2p_engine::MediaInfo {
+        fwd_from: String::new(),
             duration_ms: duration_ms.max(0) as u32,
             width: width.max(0) as u32,
             height: height.max(0) as u32,
@@ -490,6 +492,40 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_historyPage<'local>(
         let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
         let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "[]") };
         ret(&env, &e.history_page_json(&key, before_time, before_row))
+    })
+}
+
+/// Переслать сообщения в другой чат. `src_group`/`dst_group` — «это группа?»,
+/// идентификатор в hex (ключ пира или gid). Возвращает, сколько ушло.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_forwardMessages<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    src_hex: JString<'local>,
+    src_group: jboolean,
+    refs_json: JString<'local>,
+    dst_hex: JString<'local>,
+    dst_group: jboolean,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        let src = p2p_engine::ChatKey::parse(&jstr(&mut env, &src_hex), src_group != 0);
+        let dst = p2p_engine::ChatKey::parse(&jstr(&mut env, &dst_hex), dst_group != 0);
+        let (Some(src), Some(dst)) = (src, dst) else { return 0 };
+        let raw: serde_json::Value =
+            serde_json::from_str(&jstr(&mut env, &refs_json)).unwrap_or(serde_json::Value::Null);
+        let refs: Vec<(u64, String)> = raw
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| {
+                        Some((v["id"].as_u64()?, v["sender"].as_str().unwrap_or("").to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        e.forward_messages(src, &refs, dst) as jint
     })
 }
 

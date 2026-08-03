@@ -635,4 +635,7 @@
     <string name="backup_part_groups">Group chats</string>
     <string name="backup_n_group_messages">%1$d messages</string>
     <string name="group_archived">Archive from a backup · you are not in this group</string>
+    <string name="forward_action">Forward</string>
+    <string name="forward_title">Forward (%1$d) to</string>
+    <string name="forward_from">Forwarded from %1$s</string>
 </resources>

@@ -57,7 +57,14 @@ pub(crate) enum GroupCmd {
     AcceptInvite { gid: Vec<u8> },
     /// Отклонить входящее приглашение.
     DeclineInvite { gid: Vec<u8> },
-    SendText { gid: Vec<u8>, text: String, reply_to: u64, reply_sender: String },
+    SendText {
+        gid: Vec<u8>,
+        text: String,
+        reply_to: u64,
+        reply_sender: String,
+        /// Пересылка: hex автора исходного сообщения (пусто — своё).
+        fwd_from: String,
+    },
     /// Отозвать свои сообщения у участников («удалить у всех»).
     Retract { gid: Vec<u8>, ids: Vec<u64> },
     /// Удалить сообщения только у себя: пары `(id, автор-hex)`.
@@ -112,12 +119,40 @@ pub struct MediaInfo {
     /// Подпись к вложению. Едет ВНУТРИ медиа-сообщения: фото с подписью не должно
     /// превращаться в пару пакетов, по которой наблюдатель узнаёт «отправили фото».
     pub caption: String,
+    /// Пересылка: hex автора ИСХОДНОГО сообщения (пусто — своё вложение).
+    pub fwd_from: String,
 }
 
 /// Сколько сообщений отдаётся клиенту за один заход в чат. Переписка бывает
 /// в сотни тысяч строк: поднимать её целиком в память (да ещё гнать через JNI
 /// одним JSON) нельзя. Остальное клиент дозапрашивает страницами вверх.
 pub const HISTORY_PAGE: usize = 200;
+
+/// Чат как адресат операции: личный (ключ собеседника) или группа (gid). Владеющая
+/// версия [`Chat`] — её удобно собирать из строк, пришедших через FFI.
+#[derive(Debug, Clone)]
+pub enum ChatKey {
+    Dm([u8; 32]),
+    Group(Vec<u8>),
+}
+
+impl ChatKey {
+    /// Разобрать пару «hex + это группа?» из клиента.
+    pub fn parse(id_hex: &str, group: bool) -> Option<ChatKey> {
+        if group {
+            hex::decode(id_hex.trim()).ok().filter(|v| !v.is_empty()).map(ChatKey::Group)
+        } else {
+            parse_key(id_hex).map(ChatKey::Dm)
+        }
+    }
+
+    fn as_chat(&self) -> Chat<'_> {
+        match self {
+            ChatKey::Dm(k) => Chat::Dm(k),
+            ChatKey::Group(g) => Chat::Group(g),
+        }
+    }
+}
 
 /// Строка списка групп в том виде, в каком её читает клиент. Живёт здесь, потому
 /// что список склеивается из двух источников: ростер MLS (слой групп) и архивные
@@ -347,7 +382,20 @@ impl Engine {
         reply_to: u64,
         reply_mine: bool,
     ) -> Option<i64> {
-        match self.messenger.send_text_reply(key, text, reply_to, reply_mine) {
+        self.send_text_full(key, text, reply_to, reply_mine, "")
+    }
+
+    /// Общий путь отправки текста: обычного, ответом и пересланного. `fwd_from` —
+    /// hex автора ИСХОДНОГО сообщения (пусто — своё).
+    pub(crate) fn send_text_full(
+        &self,
+        key: &[u8; 32],
+        text: &str,
+        reply_to: u64,
+        reply_mine: bool,
+        fwd_from: &str,
+    ) -> Option<i64> {
+        match self.messenger.send_text_reply(key, text, reply_to, reply_mine, fwd_from) {
             Ok(id) => {
                 let t = now();
                 let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
@@ -355,6 +403,7 @@ impl Engine {
                     sender: self.me_hex(),
                     reply_to,
                     reply_sender: self.reply_author(key, reply_to, reply_mine),
+                    fwd_from: fwd_from.to_string(),
                     // kind заполняем ЯВНО: пустая строка — не «текст», а «неизвестно»,
                     // и UI рисовал такое сообщение дважды (как содержимое и как
                     // подпись к вложению).
@@ -368,6 +417,80 @@ impl Engine {
                 Some(id as i64)
             }
             Err(_) => None,
+        }
+    }
+
+    /// Переслать сообщения в другой чат. `src`/`dst` — «личный чат или группа» плюс
+    /// идентификатор; `refs` — пары «id + автор» (ADR-006). Возвращает, сколько
+    /// сообщений ушло.
+    ///
+    /// Пересылка сохраняет АВТОРСТВО: получатель видит, от кого сообщение изначально.
+    /// Это осознанный размен — без источника пересылка превращается в анонимный
+    /// пересказ, которому нельзя верить. Автор передаётся ключом, а не готовой
+    /// строкой «переслано от Ани»: имя рисует клиент по своим контактам, и подделать
+    /// чужую подпись пересылкой нельзя.
+    ///
+    /// Вложение пересылается, только если его байты уже есть у нас: иначе получателю
+    /// было бы некуда идти за содержимым — у ОТПРАВИТЕЛЯ его нет.
+    pub fn forward_messages(&self, src: ChatKey, refs: &[(u64, String)], dst: ChatKey) -> usize {
+        let items = self.messages.lock_safe().get_many(src.as_chat(), refs);
+        let mut sent = 0;
+        for m in items {
+            // Пересылка пересланного сохраняет ПЕРВОГО автора, а не посредника.
+            let origin = if m.fwd_from.is_empty() { m.sender.clone() } else { m.fwd_from.clone() };
+            if m.system {
+                continue; // системные строки — не сообщения
+            }
+            let ok = if m.blob_id.is_empty() {
+                self.forward_text(&dst, &m.text, &origin)
+            } else {
+                self.forward_media(&dst, &m, &origin)
+            };
+            if ok {
+                sent += 1;
+            }
+        }
+        sent
+    }
+
+    fn forward_text(&self, dst: &ChatKey, text: &str, origin: &str) -> bool {
+        match dst {
+            ChatKey::Dm(peer) => self.send_text_full(peer, text, 0, false, origin).is_some(),
+            ChatKey::Group(gid) => {
+                self.jobs
+                    .send(Job::Cmd(GroupCmd::SendText {
+                        gid: gid.clone(),
+                        text: text.to_string(),
+                        reply_to: 0,
+                        reply_sender: String::new(),
+                        fwd_from: origin.to_string(),
+                    }))
+                    .is_ok()
+            }
+        }
+    }
+
+    fn forward_media(&self, dst: &ChatKey, m: &StoredMessage, origin: &str) -> bool {
+        // Байты берём из своего хранилища: пересылать ссылку, за которой у нас
+        // ничего нет, значит отправить получателю тупик.
+        let Some(bytes) = self.blob_read(&m.blob_id) else { return false };
+        let thumb = if m.thumb_id.is_empty() { None } else { self.blob_read(&m.thumb_id) };
+        let info = MediaInfo {
+            duration_ms: m.duration_ms,
+            width: m.width,
+            height: m.height,
+            thumb,
+            caption: m.text.clone(),
+            fwd_from: origin.to_string(),
+        };
+        match dst {
+            ChatKey::Dm(peer) => {
+                self.send_media_with(peer, bytes, &m.mime, &m.name, info).is_some()
+            }
+            ChatKey::Group(gid) => {
+                self.group_send_media(gid.clone(), bytes, m.mime.clone(), m.name.clone(), info);
+                true
+            }
         }
     }
 
@@ -472,6 +595,7 @@ impl Engine {
         self.store_blob(hash, &bytes);
         let id_hex = hex::encode(hash);
         let meta = p2p_messenger::MediaMeta {
+            fwd_from: info.fwd_from.clone(),
             size,
             duration_ms: info.duration_ms,
             width: info.width,
@@ -486,6 +610,7 @@ impl Engine {
                     // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
                     // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
                     id, mine: true, time: t, status: "sent".into(), sender: self.me_hex(),
+                    fwd_from: info.fwd_from.clone(),
                     // Подпись живёт в `text`: у медиа-сообщения это поле свободно,
                     // и тогда поиск и история работают с ней как с обычным текстом.
                     text: info.caption.clone(),
@@ -557,6 +682,7 @@ impl Engine {
             });
         }
         let meta = p2p_messenger::MediaMeta {
+            fwd_from: String::new(),
             size,
             duration_ms: info.duration_ms,
             width: info.width,
@@ -1226,6 +1352,7 @@ impl Engine {
             text,
             reply_to: 0,
             reply_sender: String::new(),
+            fwd_from: String::new(),
         }));
     }
 
@@ -1233,7 +1360,13 @@ impl Engine {
     /// картинку, сохраняет блоб, шлёт MLS-ссылку всем и пушит байты каждому.
     /// Текст ответом на сообщение `reply_to` автора `reply_sender` (hex).
     pub fn group_send_text_reply(&self, gid: Vec<u8>, text: String, reply_to: u64, reply_sender: String) {
-        let _ = self.jobs.send(Job::Cmd(GroupCmd::SendText { gid, text, reply_to, reply_sender }));
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::SendText {
+            gid,
+            text,
+            reply_to,
+            reply_sender,
+            fwd_from: String::new(),
+        }));
     }
 
     /// Отозвать СВОИ сообщения в группе у всех участников.
@@ -1918,6 +2051,7 @@ fn event_pump(
                 let media = MediaBody {
                     // id проставит слой групп при отправке (он же кладёт его в историю).
                     id: 0,
+                    fwd_from: String::new(),
                     kind: Engine::media_kind(&mime).into(),
                     hash: id_hex,
                     mime: mime.clone(),
@@ -1956,6 +2090,7 @@ fn event_pump(
                 let media = MediaBody {
                     // id проставит слой групп при отправке (он же кладёт его в историю).
                     id: 0,
+                    fwd_from: String::new(),
                     kind: Engine::media_kind(&mime).into(),
                     hash: id_hex,
                     mime: mime.clone(),
@@ -2161,7 +2296,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 engine.announce_rotation_to(&peer);
             }
         }
-        Event::Text { peer, id, text, reply_to, reply_mine } => {
+        Event::Text { peer, id, text, reply_to, reply_mine, fwd_from } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
@@ -2182,6 +2317,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     sender: peer_hex.clone(),
                     reply_to,
                     reply_sender: engine.reply_author(&peer, reply_to, reply_mine),
+                    fwd_from: fwd_from.clone(),
                     kind: "text".into(),
                     ..Default::default()
                 });
@@ -2206,7 +2342,9 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 push_event(engine, dto::UiEvent::Retracted { peer: hex::encode(peer), id: target });
             }
         }
-        Event::Media { peer, id, hash, mime, name, size, duration_ms, width, height, caption, thumb } => {
+        Event::Media {
+            peer, id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
+        } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
@@ -2228,6 +2366,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 let _ = engine.messages.lock_safe().append(Chat::Dm(&peer), &StoredMessage {
                     id, mine: false, time: t, status: String::new(),
                     sender: hex::encode(peer),
+                    fwd_from: fwd_from.clone(),
                     text: caption.clone(),
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.clone(), name: name.clone(),
                     size, duration_ms, width, height, thumb_id: thumb_hex.clone(),
@@ -2534,8 +2673,8 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                 push_event(engine, dto::UiEvent::GroupInvitesChanged);
             }
         }
-        GroupCmd::SendText { gid, text, reply_to, reply_sender } => {
-            if groups.send_text_reply(&gid, &text, reply_to, &reply_sender) {
+        GroupCmd::SendText { gid, text, reply_to, reply_sender, fwd_from } => {
+            if groups.send_text_full(&gid, &text, reply_to, &reply_sender, &fwd_from) {
                 refresh_group_cache(engine, groups);
                 // Своё сообщение — событием, а не «клиент дорисует сам»: id ему
                 // присваивает этот слой, и без перечитывания истории на него нельзя
@@ -2732,6 +2871,9 @@ impl Engine {
                             });
                         }
                         let meta = p2p_messenger::MediaMeta {
+                            // Досылка из очереди: пересылка (если была) уже записана
+                            // в истории, а очередь хранит только сам файл и подпись.
+                            fwd_from: String::new(),
                             size: v["size"].as_u64().unwrap_or(0),
                             duration_ms: v["duration_ms"].as_u64().unwrap_or(0) as u32,
                             width: v["width"].as_u64().unwrap_or(0) as u32,

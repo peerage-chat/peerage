@@ -102,9 +102,14 @@ data class Message(
     val replySender: String = "",
     /** Системная строка (смена состава группы). */
     val system: Boolean = false,
+    /** hex автора ИСХОДНОГО сообщения, если это пересылка (пусто — своё). */
+    val fwdFrom: String = "",
     /** Курсор пагинации: номер строки в базе движка (0 — запись создана локально). */
     val row: Long = 0,
 )
+
+/** Чат как адресат пересылки: личный (ключ собеседника) или группа (gid). */
+data class ChatTarget(val id: String, val group: Boolean, val title: String = "")
 
 /**
  * Ссылка на строку истории: id сообщения + чьё оно. Пара, а не один id: id посеян
@@ -182,6 +187,8 @@ data class GroupMsg(
     val sender: String = "",
     /** Системная строка (смена состава) — рендерится отдельно. */
     val system: Boolean = false,
+    /** hex автора исходного сообщения, если это пересылка (пусто — своё). */
+    val fwdFrom: String = "",
     /** Тип (M2): "text" | "image" | "voice" | "file". */
     val kind: String = "text",
     /** hex-хэш блоба вложения (M2); байты — через AppModel.mediaBlobs. */
@@ -1403,6 +1410,50 @@ class AppModel private constructor() {
                 done(page.size)
             } finally {
                 loadingOlder -= mark
+            }
+        }
+    }
+
+    /**
+     * Что переслать: источник и ссылки на сообщения. Непусто — открыт выбор адресата.
+     * Выделение при этом уже снято: пока человек ищет чат, лента живёт своей жизнью.
+     */
+    var forwarding by mutableStateOf<Pair<ChatTarget, List<Pair<Long, String>>>?>(null)
+
+    /** Начать пересылку выделенного в личном чате или «Сохранённом». */
+    fun beginForward(chatKey: String) {
+        val meKey = me?.pubkey.orEmpty()
+        val refs = selection.map { it.id to (if (it.mine) meKey else chatKey) }
+        if (refs.isEmpty()) return
+        forwarding = ChatTarget(chatKey, group = false) to refs
+        clearSelection()
+    }
+
+    /** Начать пересылку выделенного в группе (там автор известен явно). */
+    fun beginForwardGroup(gid: String) {
+        val refs = groupSelection.map { it.id to it.sender }
+        if (refs.isEmpty()) return
+        forwarding = ChatTarget(gid, group = true) to refs
+        clearGroupSelection()
+    }
+
+    /** Отправить отложенное в выбранный чат. */
+    fun forwardTo(dst: ChatTarget) {
+        val (src, refs) = forwarding ?: return
+        forwarding = null
+        ops.execute {
+            val json = WireJson.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(GroupMsgRef.serializer()),
+                refs.map { GroupMsgRef(it.first, it.second) },
+            )
+            Native.forwardMessages(sessionPtr, src.id, src.group, json, dst.id, dst.group)
+            // Целевой чат может быть открыт прямо сейчас — перечитываем его хвост.
+            if (dst.group && currentGroup == dst.id) {
+                loadGroupHistory(dst.id)
+            } else if (!dst.group && currentChat == dst.id) {
+                loadHistory(dst.id)
+            } else if (!dst.group && dst.id == me?.pubkey) {
+                refreshNotes()
             }
         }
     }

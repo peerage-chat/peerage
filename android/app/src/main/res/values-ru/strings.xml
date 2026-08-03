@@ -627,4 +627,7 @@
     <string name="backup_part_groups">Групповые чаты</string>
     <string name="backup_n_group_messages">%1$d сообщений</string>
     <string name="group_archived">Архив из копии · вы не состоите в этой группе</string>
+    <string name="forward_action">Переслать</string>
+    <string name="forward_title">Переслать (%1$d) в чат</string>
+    <string name="forward_from">Переслано от %1$s</string>
 </resources>

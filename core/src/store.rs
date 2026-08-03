@@ -723,6 +723,11 @@ pub struct StoredMessage {
     /// Системная строка (смена состава группы) — рисуется не пузырём.
     #[serde(default)]
     pub system: bool,
+    /// Пересылка: hex-ключ автора ИСХОДНОГО сообщения (пусто — не переслано).
+    /// Хранится ссылкой на человека, а не строкой «переслано от Ани»: имя рисует
+    /// клиент по своим контактам, и подделать чужую подпись пересылкой нельзя.
+    #[serde(default)]
+    pub fwd_from: String,
     /// Курсор пагинации: номер строки в ЛОКАЛЬНОЙ базе. Только на чтение — при
     /// записи игнорируется, на другом устройстве он свой.
     #[serde(default)]
@@ -732,7 +737,8 @@ pub struct StoredMessage {
 /// Колонки истории в порядке, который ждёт [`read_msg`]. Один список на все
 /// запросы: разъехавшийся порядок здесь — это молча перепутанные поля.
 const MSG_COLS: &str = "rowid, id, sender, mine, text, time, status, kind, blob_id, mime, name,
-     size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender, system";
+     size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender, system,
+     fwd_from";
 
 fn read_msg(row: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
     read_msg_offset(row, 0)
@@ -845,16 +851,16 @@ impl MessageStore {
             "INSERT OR REPLACE INTO chat_messages
                  (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
                   size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
-                  system)
+                  system, fwd_from)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20, ?21)",
+                     ?18, ?19, ?20, ?21, ?22)",
             rusqlite::params![
                 chat.id(), chat.scope(), msg.id as i64, &msg.sender, msg.mine as i64,
                 &msg.text, msg.time, &msg.status,
                 &msg.kind, &msg.blob_id, &msg.mime, &msg.name,
                 msg.size as i64, msg.duration_ms as i64, msg.width as i64, msg.height as i64,
                 &msg.thumb_id, msg.downloaded as i64,
-                msg.reply_to as i64, &msg.reply_sender, msg.system as i64,
+                msg.reply_to as i64, &msg.reply_sender, msg.system as i64, &msg.fwd_from,
             ],
         )?;
         Ok(())
@@ -941,6 +947,35 @@ impl MessageStore {
             })
         });
         rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    /// Прочитать сообщения по ссылкам `(id, hex автора)` — в том порядке, в каком
+    /// они лежат в чате. Нужно пересылке: она берёт содержимое уже сохранённого.
+    pub fn get_many(&self, chat: Chat, refs: &[(u64, String)]) -> Vec<StoredMessage> {
+        if refs.is_empty() {
+            return Vec::new();
+        }
+        let conn = db::lock(&self.db);
+        let sql = format!(
+            "SELECT {MSG_COLS} FROM chat_messages
+             WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4"
+        );
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let mut out = Vec::with_capacity(refs.len());
+        for (id, sender) in refs {
+            let row = stmt.query_row(
+                rusqlite::params![chat.id(), chat.scope(), sender, *id as i64],
+                read_msg,
+            );
+            if let Ok(m) = row {
+                out.push(m);
+            }
+        }
+        out.sort_by_key(|m| (m.time, m.row));
+        out
     }
 
     /// Запомнить название чата (для групп — имя группы).
@@ -1073,16 +1108,16 @@ impl MessageStore {
             "INSERT OR IGNORE INTO chat_messages
                  (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
                   size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
-                  system)
+                  system, fwd_from)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20, ?21)",
+                     ?18, ?19, ?20, ?21, ?22)",
             rusqlite::params![
                 chat.id(), chat.scope(), m.id as i64, &m.sender, m.mine as i64,
                 &m.text, m.time, &m.status,
                 &m.kind, &m.blob_id, &m.mime, &m.name,
                 m.size as i64, m.duration_ms as i64, m.width as i64, m.height as i64,
                 &m.thumb_id, m.downloaded as i64,
-                m.reply_to as i64, &m.reply_sender, m.system as i64,
+                m.reply_to as i64, &m.reply_sender, m.system as i64, &m.fwd_from,
             ],
         )?;
         Ok(n > 0)
@@ -1112,6 +1147,7 @@ fn read_msg_offset(row: &rusqlite::Row, off: usize) -> rusqlite::Result<StoredMe
         reply_to: row.get::<_, i64>(off + 17)? as u64,
         reply_sender: row.get(off + 18)?,
         system: row.get::<_, i64>(off + 19)? != 0,
+        fwd_from: row.get(off + 20)?,
     })
 }
 

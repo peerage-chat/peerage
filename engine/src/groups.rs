@@ -302,6 +302,8 @@ impl GroupManager {
                 reply_to: m.reply_to,
                 reply_sender: m.reply_sender.clone(),
                 system: m.system,
+                // Пересылок в старом формате не было — переносить нечего.
+                fwd_from: String::new(),
                 row: 0,
             });
         }
@@ -566,11 +568,24 @@ impl GroupManager {
         reply_to: u64,
         reply_sender: &str,
     ) -> bool {
+        self.send_text_full(gid, text, reply_to, reply_sender, "")
+    }
+
+    /// Общий путь: обычный текст, ответ и пересылка (`fwd_from` — hex автора
+    /// исходного сообщения, пусто — своё).
+    pub fn send_text_full(
+        &mut self,
+        gid: &[u8],
+        text: &str,
+        reply_to: u64,
+        reply_sender: &str,
+        fwd_from: &str,
+    ) -> bool {
         let Some(e) = self.groups.get_mut(gid) else { return false };
         // id посеян временем в миллисекундах: он должен быть уникален только в
         // пределах отправителя (ссылка — пара «автор + id»).
         let id = now_ms();
-        if e.chat.send_text_reply(text, id, reply_to, reply_sender).is_err() {
+        if e.chat.send_text_full(text, id, reply_to, reply_sender, fwd_from).is_err() {
             return false;
         }
         self.put(gid, &StoredMessage {
@@ -580,6 +595,7 @@ impl GroupManager {
             // kind заполняем явно: пустая строка — «неизвестно», и UI рисовал такое
             // сообщение дважды (как текст и как подпись к вложению).
             kind: "text".into(),
+            fwd_from: fwd_from.to_string(),
             text: text.to_string(), mine: true, time: now(),
             sender: self.me_hex.clone(), ..Default::default()
         });
@@ -656,6 +672,7 @@ impl GroupManager {
         let Some(e) = self.groups.get_mut(gid) else { return false };
         let id = now_ms();
         let media = &MediaBody { id, ..media.clone() };
+        let fwd_from = media.fwd_from.clone();
         if e.chat.send_media(media).is_err() {
             return false;
         }
@@ -669,6 +686,7 @@ impl GroupManager {
             size: media.size, duration_ms: media.duration_ms,
             width: media.width, height: media.height,
             thumb_id: media.thumb.clone(),
+            fwd_from,
             downloaded: true, // своё вложение уже у нас
             ..Default::default()
         });
@@ -806,12 +824,13 @@ impl GroupManager {
         if let Some(gid) = known {
             let inbound = self.groups.get_mut(&gid).map(|e| e.chat.handle(data));
             let outcome = match inbound {
-                Some(Ok(Inbound::Message { sender, text, id, reply_to, reply_sender })) => {
+                Some(Ok(Inbound::Message { sender, text, id, reply_to, reply_sender, fwd_from })) => {
                     let sender_hex = hex::encode(sender);
                     self.put(&gid, &StoredMessage {
                         id,
                         reply_to,
                         reply_sender,
+                        fwd_from,
                         kind: "text".into(),
                         text: text.clone(), mine: false, time: now(),
                         sender: sender_hex.clone(), ..Default::default()
@@ -851,6 +870,7 @@ impl GroupManager {
                             size: media.size, duration_ms: media.duration_ms,
                             width: media.width, height: media.height,
                             thumb_id: media.thumb.clone(),
+                        fwd_from: media.fwd_from.clone(),
                         // Скачано ли — решит верхний слой (он знает хранилище блобов).
                         downloaded: false,
                         ..Default::default()

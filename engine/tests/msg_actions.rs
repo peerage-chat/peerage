@@ -146,3 +146,68 @@ fn deleting_locally_does_not_touch_the_other_side() {
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(history(&b, &a_key).len(), 2, "у собеседника всё на месте");
 }
+
+/// Пересылка сохраняет ПЕРВОГО автора — и когда пересылают чужое сообщение, и
+/// когда пересылают уже пересланное. Иначе цепочка «переслал переславшего»
+/// подменяла бы источник посредником, и подпись «переслано от» ничего не значила бы.
+#[test]
+fn forwarding_keeps_the_original_author() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id, c_id) = (id(31), id(32), id(33));
+    let (a_key, b_key, c_key) =
+        (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("fwd-a"));
+    let b = start(&net, b_id, tmpdir("fwd-b"));
+    let c = start(&net, c_id, tmpdir("fwd-c"));
+    // Гейт контактов пропускает только своих — знакомим все пары.
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Аня");
+    b.add_contact(&c_key, "Вера");
+    c.add_contact(&b_key, "Боб");
+    std::mem::forget(net);
+
+    a.send_text(&b_key, "встречаемся в семь");
+    assert!(wait(10, || !history(&b, &a_key).is_empty()), "сообщение дошло до Боба");
+    let at_b = history(&b, &a_key);
+    let msg = &at_b[0];
+    let refs = vec![(msg["id"].as_u64().unwrap(), msg["sender"].as_str().unwrap().to_string())];
+
+    // Боб пересылает Вере сообщение Ани.
+    let sent = b.forward_messages(
+        p2p_engine::ChatKey::Dm(a_key),
+        &refs,
+        p2p_engine::ChatKey::Dm(c_key),
+    );
+    assert_eq!(sent, 1);
+    assert!(wait(10, || !history(&c, &b_key).is_empty()), "пересланное дошло до Веры");
+
+    let at_c = history(&c, &b_key);
+    let fwd = &at_c[0];
+    assert_eq!(fwd["text"], "встречаемся в семь");
+    assert_eq!(
+        fwd["fwd_from"].as_str(),
+        Some(hex::encode(a_key).as_str()),
+        "у Веры видно, что автор — Аня, а не переславший Боб"
+    );
+    assert_eq!(fwd["sender"].as_str(), Some(hex::encode(b_key).as_str()), "прислал всё же Боб");
+
+    // И у самого Боба его копия помнит источник — иначе «переслать дальше» потеряло
+    // бы автора уже на втором шаге.
+    let own = history(&b, &c_key);
+    assert_eq!(own.len(), 1);
+    assert_eq!(own[0]["fwd_from"].as_str(), Some(hex::encode(a_key).as_str()));
+
+    // Пересылка пересланного: источник остаётся Аня, посредник не подменяет её.
+    let refs2 = vec![(own[0]["id"].as_u64().unwrap(), own[0]["sender"].as_str().unwrap().to_string())];
+    b.forward_messages(
+        p2p_engine::ChatKey::Dm(c_key),
+        &refs2,
+        p2p_engine::ChatKey::Dm(a_key),
+    );
+    // Ищем ВХОДЯЩЕЕ: в этом чате уже лежит её собственный оригинал с тем же текстом.
+    assert!(wait(10, || history(&a, &b_key).iter().any(|m| m["mine"] == false)));
+    let back = history(&a, &b_key);
+    let again = back.iter().find(|m| m["mine"] == false).unwrap();
+    assert_eq!(again["text"], "встречаемся в семь");
+    assert_eq!(again["fwd_from"].as_str(), Some(hex::encode(a_key).as_str()));
+}

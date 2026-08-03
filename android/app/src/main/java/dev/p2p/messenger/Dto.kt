@@ -70,6 +70,8 @@ internal data class MessageDto(
     @SerialName("reply_sender") val replySender: String = "",
     /** Системная строка (смена состава группы) — рисуется не пузырём. */
     val system: Boolean = false,
+    /** hex автора ИСХОДНОГО сообщения, если это пересылка (пусто — своё). */
+    @SerialName("fwd_from") val fwdFrom: String = "",
     /** Курсор пагинации: номер строки в базе движка. Для догрузки истории вверх. */
     val row: Long = 0,
     val width: Int = 0,
@@ -110,6 +112,8 @@ internal data class GroupMsgDto(
     val id: Long = 0,
     /** Курсор пагинации: номер строки в базе движка. */
     val row: Long = 0,
+    /** hex автора исходного сообщения, если это пересылка (пусто — своё). */
+    @SerialName("fwd_from") val fwdFrom: String = "",
     @SerialName("reply_to") val replyTo: Long = 0,
     @SerialName("reply_sender") val replySender: String = "",
     val text: String = "",
@@ -319,6 +323,7 @@ internal fun MessageDto.toModel() = Message(
     sender = sender,
     replySender = replySender,
     system = system,
+    fwdFrom = fwdFrom,
     row = row,
     width = width,
     height = height,
@@ -345,6 +350,7 @@ internal fun GroupMsgDto.toModel() = GroupMsg(
     height = height,
     thumbId = thumbId,
     downloaded = downloaded,
+    fwdFrom = fwdFrom,
     row = row,
 )
 

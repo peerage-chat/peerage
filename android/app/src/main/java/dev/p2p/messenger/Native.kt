@@ -213,6 +213,20 @@ object Native {
     /** Страница ВЫШЕ показанной: курсор — `time`/`row` самого верхнего сообщения. */
     external fun historyPage(sessionPtr: Long, keyHex: String, beforeTime: Long, beforeRow: Long): String
 
+    /**
+     * Переслать сообщения в другой чат. `srcGroup`/`dstGroup` — «это группа?»,
+     * идентификаторы в hex (ключ собеседника или gid). `refsJson` — `[{id, sender}]`.
+     * Возвращает, сколько сообщений ушло.
+     */
+    external fun forwardMessages(
+        sessionPtr: Long,
+        srcHex: String,
+        srcGroup: Boolean,
+        refsJson: String,
+        dstHex: String,
+        dstGroup: Boolean,
+    ): Int
+
     external fun setVerified(sessionPtr: Long, keyHex: String, verified: Boolean)
     external fun renameContact(sessionPtr: Long, keyHex: String, name: String)
     external fun removeContact(sessionPtr: Long, keyHex: String)

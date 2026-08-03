@@ -215,6 +215,7 @@ internal fun ChatScreen(model: AppModel) {
                 MessageBubble(m, model, pos, animate = m.id > appearFrom)
             }
         }
+        ForwardSheet(model)
         MessageInput(
             value = input,
             onChange = { input = it },
@@ -431,6 +432,9 @@ private fun SelectionTopBar(model: AppModel) {
                 model.messages[key]?.firstOrNull { it.id == ref.id && it.mine == ref.mine }
                     ?.let { model.startReply(it) }
             }
+        }
+        BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
+            model.beginForward(key)
         }
         BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
             val text = model.selectedText(key)
@@ -762,6 +766,7 @@ internal fun MessageBubble(
                     // Ответ рисуется ССЫЛКОЙ в локальную историю (ADR-006): текст цитаты
                     // не копируется в сообщение, поэтому удаление оригинала не оставляет
                     // расходящегося дубля.
+                    ForwardMark(model, m.fwdFrom)
                     if (m.replyTo != 0L) {
                         // Ключ строки — пара «автор + id»: id посеян временем
                         // отправителя и у обеих сторон может совпасть.
