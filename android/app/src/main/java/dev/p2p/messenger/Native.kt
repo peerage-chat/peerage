@@ -207,8 +207,11 @@ object Native {
     /** Удалить все сохранённые вложения. Возвращает освобождённые байты. */
     external fun clearBlobs(sessionPtr: Long): Long
 
-    /** История переписки с пиром как JSON-массив. */
+    /** Хвост переписки с пиром (последняя страница) как JSON-массив. */
     external fun history(sessionPtr: Long, keyHex: String): String
+
+    /** Страница ВЫШЕ показанной: курсор — `time`/`row` самого верхнего сообщения. */
+    external fun historyPage(sessionPtr: Long, keyHex: String, beforeTime: Long, beforeRow: Long): String
 
     external fun setVerified(sessionPtr: Long, keyHex: String, verified: Boolean)
     external fun renameContact(sessionPtr: Long, keyHex: String, name: String)
@@ -299,8 +302,11 @@ object Native {
     /** Список групп: JSON [{gid, name, members, admin}]. */
     external fun groupList(sessionPtr: Long): String
 
-    /** История группы: JSON [{text, mine, time}]. */
+    /** Хвост истории группы (последняя страница): JSON [{text, mine, time, sender}]. */
     external fun groupHistory(sessionPtr: Long, gid: String): String
+
+    /** Страница истории группы ВЫШЕ показанной; курсор — `time`/`row` верхнего. */
+    external fun groupHistoryPage(sessionPtr: Long, gid: String, beforeTime: Long, beforeRow: Long): String
 
     /** Ключи участников группы (hex): JSON-массив. */
     external fun groupMembers(sessionPtr: Long, gid: String): String

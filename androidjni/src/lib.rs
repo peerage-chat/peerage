@@ -475,6 +475,24 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_history<'local>(
     })
 }
 
+/// Страница истории ВЫШЕ уже показанной: курсор — `time`/`row` самого верхнего
+/// сообщения. Открытие чата отдаёт только хвост, остальное клиент просит сам.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_historyPage<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+    before_time: jlong,
+    before_row: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "[]") };
+        ret(&env, &e.history_page_json(&key, before_time, before_row))
+    })
+}
+
 // ── Блобы (M2) ──────────────────────────────────────────────────────────────
 
 /// Предложить блоб пиру (картинка/файл/голосовое). Fire-and-forget.

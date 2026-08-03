@@ -186,7 +186,8 @@ pub(crate) struct BenchRecv {
 #[derive(Default)]
 struct GroupCache {
     list: String,
-    history: HashMap<Vec<u8>, String>,
+    /// Ростер MLS — он живёт в потоке актора, поэтому его снапшот кэшируется.
+    /// Истории здесь нет: она в общей базе, и читается напрямую (ADR-009).
     members: HashMap<Vec<u8>, String>,
     /// Входящие приглашения в группы (JSON) — для синхронного чтения из UI.
     invites: String,
@@ -1374,8 +1375,15 @@ impl Engine {
         if s.is_empty() { "[]".into() } else { s }
     }
 
+    /// Хвост истории группы — из общего хранилища, без кэша: раньше кэш жил в
+    /// акторе и UI отставал на одно действие.
     pub fn group_history_json(&self, gid: &[u8]) -> String {
-        self.group_cache.lock_safe().history.get(gid).cloned().unwrap_or_else(|| "[]".into())
+        self.chat_history_json(Chat::Group(gid), None)
+    }
+
+    /// Страница истории группы ВЫШЕ показанной; курсор — `(время, строка)`.
+    pub fn group_history_page_json(&self, gid: &[u8], before_time: i64, before_row: i64) -> String {
+        self.chat_history_json(Chat::Group(gid), Some((before_time, before_row)))
     }
 
     pub fn group_members_json(&self, gid: &[u8]) -> String {
@@ -1902,7 +1910,6 @@ fn event_pump(
                             blobs.offer(*m, &bytes, &mime);
                         }
                     }
-                    engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(&gid));
                     push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
                 }
             }
@@ -1940,7 +1947,6 @@ fn event_pump(
                             blobs.offer_file(*m, manifest.clone(), path.clone());
                         }
                     }
-                    engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(&gid));
                     push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
                 }
             }
@@ -2050,8 +2056,14 @@ fn save_and_notify_blob(
     let _ = engine.messages.lock_safe().mark_downloaded(&id_hex);
     // То же для групп: их история живёт отдельным стором, но блоб — один и тот же.
     for gid in groups.mark_downloaded(&id_hex) {
-        let json = groups.history_json(&gid);
-        engine.group_cache.lock_safe().history.insert(gid, json);
+        push_event(engine, dto::UiEvent::GroupMsg {
+            gid: hex::encode(&gid),
+            mine: false,
+            text: None,
+            sender: None,
+            system: None,
+            media: None,
+        });
     }
     let _ = engine.wanted.lock_safe().remove(&id_hex); // намерение исполнено
     push_event(engine, dto::UiEvent::BlobReceived {
@@ -2288,7 +2300,6 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     // Обновляем кэш истории этого gid: group_history_json читает кэш,
                     // а не live-messages. Без этого полученное сообщение пропадает при
                     // переоткрытии чата (отображается только live-событием).
-                    engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(gid));
                     push_event(engine, dto::UiEvent::GroupMsg {
                         gid: hex::encode(gid),
                         mine: false,
@@ -2303,7 +2314,6 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // Строка исчезла из истории — UI обязан перечитать её целиком, иначе
                 // отозванное останется на экране до перезахода в чат.
                 if let Some(gid) = &out.gid {
-                    engine.group_cache.lock_safe().history.insert(gid.clone(), groups.history_json(gid));
                     push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(gid) });
                 }
             }
@@ -2468,7 +2478,6 @@ fn refresh_group_cache(engine: &Arc<Engine>, groups: &GroupManager) {
     cache.list = groups.list_json();
     cache.invites = groups.invites_json();
     for gid in groups.group_ids() {
-        cache.history.insert(gid.clone(), groups.history_json(&gid));
         cache.members.insert(gid.clone(), groups.members_json(&gid));
     }
 }

@@ -44,9 +44,13 @@ internal fun SavedScreen(model: AppModel) {
     // (в отличие от чата, где её место занимает общая верхняя панель экрана).
     val selection = model.selection
     LaunchedEffect(Unit) { model.refreshNotes() }
-    LaunchedEffect(model.notes.size) {
+    // Вниз — только на НОВУЮ заметку: по размеру списка лента прыгала бы и при
+    // догрузке старых (см. ChatScreen).
+    val lastNote = model.notes.lastOrNull()?.id
+    LaunchedEffect(lastNote) {
         if (model.notes.isNotEmpty()) listState.animateScrollToItem(model.notes.size - 1)
     }
+    PagingUp(listState, Unit) { done -> model.loadOlderNotes(done) }
 
     Column(Modifier.fillMaxSize()) {
         if (selection.isNotEmpty()) SavedSelectionBar(model)

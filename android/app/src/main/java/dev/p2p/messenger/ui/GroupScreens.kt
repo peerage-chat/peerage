@@ -105,7 +105,11 @@ internal fun GroupChatScreen(model: AppModel) {
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+    // Прокрутка вниз — только на НОВОЕ сообщение (см. ChatScreen: по размеру списка
+    // лента прыгала бы при догрузке старых).
+    val lastKey = msgs.lastOrNull()?.let { it.sender to it.id }
+    LaunchedEffect(lastKey) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+    PagingUp(listState, gid) { done -> model.loadOlderGroup(gid, done) }
 
     // Вложения в группе — тот же лист, что в DM (движок пушит блоб всем участникам).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->

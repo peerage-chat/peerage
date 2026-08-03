@@ -340,6 +340,7 @@ internal fun GroupMsgDto.toModel() = GroupMsg(
     height = height,
     thumbId = thumbId,
     downloaded = downloaded,
+    row = row,
 )
 
 // ── События ─────────────────────────────────────────────────────────────────

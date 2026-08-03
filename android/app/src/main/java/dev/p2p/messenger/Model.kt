@@ -163,6 +163,8 @@ data class GroupMsg(
     /** id в пределах ОТПРАВИТЕЛЯ; вместе с [sender] — ссылка на сообщение
      *  (ADR-006). 0 — сообщение старого клиента: сослаться не на что. */
     val id: Long = 0,
+    /** Курсор пагинации: номер строки в базе движка (0 — запись создана локально). */
+    val row: Long = 0,
     /** Ссылка ответа: id цитируемого (0 — обычное) и hex его автора. */
     val replyTo: Long = 0,
     val replySender: String = "",
@@ -590,6 +592,32 @@ class AppModel private constructor() {
         val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
         notes.clear()
         notes.addAll(list)
+        atChatStart -= "notes"
+    }
+
+    /**
+     * Догрузить заметки ВЫШЕ показанных. «Сохранённое» — тот же чат (с самим собой),
+     * поэтому и страницы те же: движок отдаёт хвост, остальное просим по прокрутке.
+     */
+    fun loadOlderNotes(done: (Int) -> Unit) {
+        val meKey = me?.pubkey
+        val top = notes.firstOrNull { it.row != 0L }
+        if (meKey == null || top == null || "notes" in atChatStart || !loadingOlder.add("notes")) {
+            done(0)
+            return
+        }
+        ops.execute {
+            try {
+                val page = decodeList<MessageDto>(
+                    Native.historyPage(sessionPtr, meKey, top.time, top.row),
+                ).map { it.toModel() }
+                if (page.isEmpty()) atChatStart += "notes"
+                if (page.isNotEmpty()) notes.addAll(0, page)
+                done(page.size)
+            } finally {
+                loadingOlder -= "notes"
+            }
+        }
     }
 
     fun saveNote(text: String) = ops.execute {
@@ -1296,12 +1324,81 @@ class AppModel private constructor() {
             .filterNot { (text, ts) -> list.any { it.mine && it.text == text && it.time == ts } }
             .forEach { (text, ts) -> list.add(Message(--localMsgId, text, mine = true, time = ts, status = "queued")) }
         messages[key] = list.toMutableStateList()
+        atChatStart -= key // хвост перечитан — выше снова может что-то быть
         // M2: подтянуть байты вложений, которые уже докачаны (иначе — появятся по blob_received).
         list.forEach { if (it.blobId.isNotEmpty()) cacheBlob(it.blobId) }
     }
 
     private fun log(key: String): SnapshotStateList<Message> =
         messages.getOrPut(key) { mutableListOf<Message>().toMutableStateList() }
+
+    /** Чаты, где мы уже дошли до начала переписки (просить выше нечего). */
+    private val atChatStart = mutableSetOf<String>()
+
+    /** Чаты/группы с идущей догрузкой — чтобы прокрутка не запускала её пачкой. */
+    private val loadingOlder = mutableSetOf<String>()
+
+    /**
+     * Догрузить страницу истории ВЫШЕ показанной. Открытие чата отдаёт только хвост
+     * (движок не поднимает переписку целиком), остальное приезжает по мере прокрутки.
+     *
+     * [done] получает, сколько сообщений добавлено — вызывающему это нужно, чтобы
+     * удержать позицию списка: вставка сверху иначе выглядит как прыжок.
+     */
+    fun loadOlder(key: String, done: (Int) -> Unit) {
+        val list = messages[key]
+        // Курсор берём с первой строки, ПРИШЕДШЕЙ ИЗ БАЗЫ: у локальных (ожидающих
+        // досылки) записей номера строки нет, ссылаться на них не на что.
+        val top = list?.firstOrNull { it.row != 0L }
+        if (list == null || top == null || key in atChatStart || !loadingOlder.add(key)) {
+            done(0)
+            return
+        }
+        ops.execute {
+            try {
+                val page = decodeList<MessageDto>(
+                    Native.historyPage(sessionPtr, key, top.time, top.row),
+                ).map { it.toModel() }
+                if (page.isEmpty()) atChatStart += key
+                if (page.isNotEmpty()) {
+                    list.addAll(0, page)
+                    page.forEach { if (it.blobId.isNotEmpty()) cacheBlob(it.blobId) }
+                }
+                done(page.size)
+            } finally {
+                loadingOlder -= key
+            }
+        }
+    }
+
+    /** То же для группы: путь общий, отличается только источник страницы. */
+    fun loadOlderGroup(gid: String, done: (Int) -> Unit) {
+        val list = groupMessages[gid]
+        val top = list?.firstOrNull { it.row != 0L }
+        val mark = "g:$gid"
+        if (list == null || top == null || mark in atChatStart || !loadingOlder.add(mark)) {
+            done(0)
+            return
+        }
+        ops.execute {
+            try {
+                val page = decodeList<GroupMsgDto>(
+                    Native.groupHistoryPage(sessionPtr, gid, top.time, top.row),
+                ).map { it.toModel() }
+                if (page.isEmpty()) atChatStart += mark
+                if (page.isNotEmpty()) {
+                    list.addAll(0, page)
+                    page.forEach {
+                        if (it.downloaded && it.blobId.isNotEmpty()) cacheBlob(it.blobId)
+                        if (it.thumbId.isNotEmpty()) cacheBlob(it.thumbId)
+                    }
+                }
+                done(page.size)
+            } finally {
+                loadingOlder -= mark
+            }
+        }
+    }
 
     /** hex автора цитируемого сообщения: «моё» — это я, иначе собеседник. */
     private fun replyAuthor(peerKey: String, reply: Message?): String = when {
@@ -2240,6 +2337,7 @@ class AppModel private constructor() {
                 }
             }
         groupMessages[gid] = list.toMutableStateList()
+        atChatStart -= "g:$gid"
         // M2: подтянуть байты уже скачанных вложений (иначе — по blob_received);
         // миниатюры — всегда, на них держится карточка ещё не скачанного.
         list.forEach {

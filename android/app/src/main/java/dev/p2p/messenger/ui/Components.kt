@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
 import dev.p2p.messenger.R
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 // ── Общие элементы ──────────────────────────────────────────────────────────
@@ -288,3 +290,37 @@ internal fun inputColors() = TextFieldDefaults.colors(
     focusedIndicatorColor = HoloAccent,
     unfocusedIndicatorColor = HoloBorder,
 )
+
+/**
+ * Догрузка истории ВВЕРХ по мере прокрутки: чат открывается хвостом (движок не
+ * поднимает переписку целиком), остальное приезжает страницами.
+ *
+ * Две тонкости, обе видны только на живом экране:
+ * - после вставки сверху возвращаем взгляд на то же сообщение, иначе лента дёргается;
+ * - если история короче экрана, прокрутки нет вовсе и по одному лишь индексу вторая
+ *   страница не запросилась бы никогда — поэтому тянем, пока лента не станет
+ *   прокручиваемой или страницы не кончатся.
+ */
+@Composable
+internal fun PagingUp(listState: LazyListState, key: Any?, load: (done: (Int) -> Unit) -> Unit) {
+    val scope = rememberCoroutineScope()
+    fun pull() {
+        val idx = listState.firstVisibleItemIndex
+        val offset = listState.firstVisibleItemScrollOffset
+        load { added ->
+            if (added > 0) {
+                scope.launch {
+                    listState.scrollToItem(idx + added, offset)
+                    if (!listState.canScrollBackward) pull()
+                }
+            }
+        }
+    }
+    LaunchedEffect(key) {
+        // Следим и за числом элементов: история приезжает асинхронно, и в момент
+        // подписки список ещё пуст — по одному лишь индексу (он всё это время 0)
+        // первая страница не запросилась бы никогда.
+        snapshotFlow { listState.firstVisibleItemIndex to listState.layoutInfo.totalItemsCount }
+            .collect { (idx, count) -> if (idx <= 3 && count > 0) pull() }
+    }
+}

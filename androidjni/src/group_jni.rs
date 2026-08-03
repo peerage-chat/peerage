@@ -319,6 +319,23 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistory<'local>(
     })
 }
 
+/// Страница истории группы ВЫШЕ показанной; курсор — `time`/`row` верхнего сообщения.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistoryPage<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    before_time: jlong,
+    before_row: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
+        ret(&env, &e.group_history_page_json(&gid, before_time, before_row))
+    })
+}
+
 /// Ключи участников группы (hex): JSON-массив. Снапшот движка.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(

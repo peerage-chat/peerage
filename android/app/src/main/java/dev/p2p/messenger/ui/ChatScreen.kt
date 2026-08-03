@@ -146,8 +146,12 @@ internal fun ChatScreen(model: AppModel) {
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Держим прокрутку у последнего сообщения при появлении новых.
-    LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+    // Держим прокрутку у последнего сообщения при появлении НОВЫХ. Ориентир — id
+    // последнего, а не размер списка: догрузка старых сверху тоже меняет размер, и
+    // по нему лента прыгала бы вниз ровно тогда, когда человек листает вверх.
+    val lastId = msgs.lastOrNull()?.id
+    LaunchedEffect(lastId) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+    PagingUp(listState, key) { done -> model.loadOlder(key, done) }
     // Порог анимации: всё, что было в чате на момент открытия, показываем сразу.
     // Анимировать историю при входе — мельтешение; анимируем только НОВОЕ.
     val appearFrom = remember(key) { msgs.lastOrNull()?.id ?: Long.MIN_VALUE }
