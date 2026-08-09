@@ -654,4 +654,11 @@
     <string name="chat_menu_unpin">Открепить</string>
     <string name="chat_menu_mute">Без звука</string>
     <string name="chat_menu_unmute">Со звуком</string>
+
+    <!-- ── Экран «Я» (замена выдвижного меню) ───────────────────────────── -->
+    <string name="me_title">Профиль</string>
+    <string name="me_qr_card">Мой код для обмена</string>
+    <string name="me_qr_hint">Покажите его собеседнику — он добавит вас без сервера</string>
+    <string name="peers_online">%1$d пиров в сети</string>
+    <string name="settings_title_sections">Разделы</string>
 </resources>

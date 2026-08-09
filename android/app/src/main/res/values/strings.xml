@@ -662,4 +662,11 @@
     <string name="chat_menu_unpin">Unpin</string>
     <string name="chat_menu_mute">Mute</string>
     <string name="chat_menu_unmute">Unmute</string>
+
+    <!-- ── "Me" screen (replaces the drawer) ────────────────────────────── -->
+    <string name="me_title">Profile</string>
+    <string name="me_qr_card">My exchange code</string>
+    <string name="me_qr_hint">Show it to someone — they add you without any server</string>
+    <string name="peers_online">%1$d peers online</string>
+    <string name="settings_title_sections">Sections</string>
 </resources>

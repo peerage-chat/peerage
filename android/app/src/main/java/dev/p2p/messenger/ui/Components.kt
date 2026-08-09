@@ -71,6 +71,8 @@ internal fun TopBar(
     title: String,
     onBack: (() -> Unit)? = null,
     onMenu: (() -> Unit)? = null,
+    /** Своё содержимое слева вместо «назад»/«меню» — например, аватар-кнопка «Я». */
+    leading: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     // Шапка на фоне экрана, а не на акцентной плашке: цветная полоса сверху делила
@@ -80,6 +82,7 @@ internal fun TopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when {
+            leading != null -> leading()
             onMenu != null -> BarIcon(TablerIcons.Menu2, stringResource(R.string.common_menu), onClick = onMenu)
             onBack != null -> BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
             else -> Spacer(Modifier.width(12.dp))

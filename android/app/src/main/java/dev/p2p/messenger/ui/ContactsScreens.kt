@@ -20,12 +20,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -702,49 +707,145 @@ internal fun AddScreen(
 }
 
 @Composable
-internal fun MeScreen(model: AppModel) {
+internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
     val me = model.me ?: return
     // В QR — код обмена, а не голый ключ: после смены адреса по одной лишь
     // личности до нас не достучаться (ADR-007).
     val code = remember(me.pubkey) { model.myContactCode() }
     val qr = remember(code) { generateQrBitmap(code) }
+    val ctx = LocalContext.current
     Column(
-        Modifier.verticalScroll(rememberScrollState()).padding(ScreenPad).fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(FormGap),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
     ) {
-        if (qr != null) {
-            Image(
-                bitmap = qr.asImageBitmap(),
-                contentDescription = stringResource(R.string.qr_cd),
-                modifier = Modifier.size(240.dp).clip(RoundedCornerShape(8.dp)),
+        // ── Шапка профиля: аватар, имя, адрес ───────────────────────────────
+        // Профиль занял целый экран вместо тесной шапки выдвижного меню: здесь
+        // живут вещи, которые человек показывает другим (код, отпечаток) — им
+        // нужно место, а в панели помещалась одна строка.
+        Column(
+            Modifier.fillMaxWidth().padding(vertical = Tokens.Space.l),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            SquareAvatar(
+                model.selfName.ifBlank { me.pubkey },
+                size = Tokens.Size.avatarBig,
+                avatarBytes = model.selfAvatar,
+                circle = true,
+                ring = HoloBg,
             )
-            Spacer(Modifier.height(4.dp))
-        }
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(FormGap)) {
-            FieldLabel(stringResource(R.string.me_fingerprint_label))
-            FingerprintGrid(model.visualFingerprint(), Modifier.padding(vertical = 4.dp))
+            Spacer(Modifier.height(Tokens.Space.m))
             Text(
-                stringResource(R.string.fp_self_hint),
-                color = HoloSecondary,
-                fontSize = 11.sp,
+                model.selfName.ifBlank { stringResource(R.string.common_you) },
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Medium,
             )
-            Text(me.fingerprint, color = HoloAccent, fontSize = 13.sp)
-            FieldLabel(stringResource(R.string.me_address_label))
-            Text(me.address, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-            FieldLabel(stringResource(R.string.me_pubkey_label))
-            Text(me.pubkey, color = Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-            val ctx = LocalContext.current
-            AccentButton(stringResource(R.string.me_copy_key), modifier = Modifier.fillMaxWidth()) {
-                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                    as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("p2p pubkey", me.pubkey))
-                // API 33+ сам показывает тост «Скопировано», на старых — делаем вручную.
-                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
-                    android.widget.Toast.makeText(ctx, ctx.getString(R.string.common_copied), android.widget.Toast.LENGTH_SHORT).show()
+            Text(
+                stringResource(R.string.peers_online, model.netPeers),
+                color = if (model.netPeers > 0) HoloOnline else Tokens.Colors.tertiary,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = Tokens.Space.xxs),
+            )
+        }
+
+        // ── Код обмена ──────────────────────────────────────────────────────
+        SectionTitle(stringResource(R.string.me_qr_card))
+        CardSection {
+            Column(
+                Modifier.fillMaxWidth().padding(Tokens.Space.l),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (qr != null) {
+                    Image(
+                        bitmap = qr.asImageBitmap(),
+                        contentDescription = stringResource(R.string.qr_cd),
+                        modifier = Modifier.size(220.dp).clip(RoundedCornerShape(Tokens.Radius.tile)),
+                    )
+                    Spacer(Modifier.height(Tokens.Space.m))
+                }
+                Text(
+                    stringResource(R.string.me_qr_hint),
+                    color = Tokens.Colors.secondary,
+                    fontSize = 12.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+            CardRow(inset = 0.dp) {
+                Column(Modifier.weight(1f)) {
+                    FieldLabel(stringResource(R.string.me_address_label))
+                    Text(
+                        me.address,
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(Tokens.Space.s))
+                BarIcon(TablerIcons.Check, stringResource(R.string.me_copy_key)) {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("p2p pubkey", me.pubkey))
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                        android.widget.Toast.makeText(ctx, ctx.getString(R.string.common_copied), android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
+
+        // ── Отпечаток ───────────────────────────────────────────────────────
+        SectionTitle(stringResource(R.string.me_fingerprint_label))
+        CardSection {
+            Column(Modifier.padding(Tokens.Space.m)) {
+                FingerprintGrid(model.visualFingerprint())
+                Text(
+                    stringResource(R.string.fp_self_hint),
+                    color = Tokens.Colors.secondary,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = Tokens.Space.s),
+                )
+                Text(
+                    me.fingerprint,
+                    color = HoloAccent,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = Tokens.Space.xs),
+                )
+            }
+        }
+
+        // ── Разделы приложения ──────────────────────────────────────────────
+        // Списком, а не вкладками: это разнородные места, куда заходят по одному
+        // и возвращаются, — вкладки обещали бы, что их содержимое сопоставимо.
+        SectionTitle(stringResource(R.string.settings_title_sections))
+        CardSection {
+            val items = listOf(
+                Triple(Icons.Filled.Group, stringResource(R.string.menu_contacts), Screen.ContactList),
+                Triple(Icons.Filled.Call, stringResource(R.string.menu_calls), Screen.Calls),
+                Triple(Icons.Filled.Share, stringResource(R.string.menu_network), Screen.Network),
+                Triple(Icons.Filled.Lock, stringResource(R.string.menu_saved), Screen.Saved),
+                Triple(Icons.Filled.Storage, stringResource(R.string.menu_storage), Screen.Storage),
+                Triple(Icons.Filled.Settings, stringResource(R.string.menu_settings), Screen.Settings),
+            )
+            items.forEachIndexed { i, (icon, label, dest) ->
+                CardRow(onClick = { navigate(dest) }, divider = i > 0) {
+                    Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
+                    Spacer(Modifier.width(Tokens.Space.m))
+                    Text(label, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    Icon(
+                        TablerIcons.ChevronRight,
+                        null,
+                        tint = Tokens.Colors.tertiary,
+                        modifier = Modifier.size(Tokens.Size.iconS),
+                    )
+                }
+            }
+        }
+        Text(
+            "p2p messenger · v0.3",
+            color = Tokens.Colors.tertiary,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(Tokens.Space.l),
+        )
     }
 }
 

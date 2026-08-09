@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -239,13 +240,11 @@ private fun CompactShell(model: AppModel) {
     // входящего гасим (не выходим), открытое меню закрываем, иначе возврат к родителю.
     // На главном (Contacts) без оверлеев — обработчик выключен, back выходит штатно.
     BackHandler(
-        enabled = model.dmCallPeer != null || model.incomingCall != null ||
-            drawerState.isOpen || screen != Screen.Contacts,
+        enabled = model.dmCallPeer != null || model.incomingCall != null || screen != Screen.Contacts,
     ) {
         when {
             model.incomingCall != null -> {}
             model.dmCallPeer != null -> {}
-            drawerState.isOpen -> scope.launch { drawerState.close() }
             else -> screen = when (screen) {
                 Screen.Scanner -> if (verifyingPeer != null) {
                     verifyingPeer = null
@@ -263,15 +262,14 @@ private fun CompactShell(model: AppModel) {
     val navigate: (Screen) -> Unit = { dest ->
         if (dest == Screen.Groups) model.refreshGroups()
         screen = dest
-        scope.launch { drawerState.close() }
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        // Свайп-открытие меню — только с Главной (внутри чатов жест мешал бы прокрутке/назад).
-        gesturesEnabled = screen == Screen.Contacts && model.dmCallPeer == null && model.incomingCall == null,
-        drawerContent = { AppDrawer(model, navigate) },
-    ) {
+    // Выдвижной панели больше нет: разделы и профиль живут на своём экране «Я»
+    // (Screen.Me), который открывается аватаром в шапке. Панель делала две работы
+    // сразу — показывала профиль и раздавала разделы, — и профилю в её шапке было
+    // тесно. Свайпом «Я» не открывается намеренно: горизонталь на главной отдана
+    // переключению папок, третий горизонтальный жест дрался бы с ними.
+    run {
         Box(Modifier.fillMaxSize()) {
             Surface(Modifier.fillMaxSize(), color = HoloBg) {
                 Column(Modifier.fillMaxSize()) {
@@ -279,7 +277,22 @@ private fun CompactShell(model: AppModel) {
                     when (screen) {
                         Screen.Contacts -> TopBar(
                             if (activeFilter == "all") stringResource(R.string.nav_chats) else folderTitle(model, activeFilter),
-                            onMenu = { scope.launch { drawerState.open() } },
+                            leading = {
+                                // Аватар как вход в профиль: он же и говорит, под кем
+                                // ты сейчас, — гамбургер об этом молчал.
+                                Box(
+                                    Modifier.padding(horizontal = Tokens.Space.xs)
+                                        .clickable { screen = Screen.Me },
+                                ) {
+                                    SquareAvatar(
+                                        model.selfName.ifBlank { model.me?.pubkey ?: "?" },
+                                        size = 38.dp,
+                                        avatarBytes = model.selfAvatar,
+                                        circle = true,
+                                        ring = HoloBg,
+                                    )
+                                }
+                            },
                         ) {
                             PeerIndicator(
                                 model.netPeers,
@@ -294,7 +307,7 @@ private fun CompactShell(model: AppModel) {
                             onProfile = { screen = Screen.Info },
                         )
                         Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = { screen = Screen.Contacts })
-                        Screen.Me -> TopBar(stringResource(R.string.title_my_key), onBack = { screen = Screen.Contacts })
+                        Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = { screen = Screen.Contacts })
                         Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = { screen = Screen.Chat })
                         Screen.Groups -> TopBar(stringResource(R.string.title_groups), onBack = { screen = Screen.Contacts }) {
                             BarIcon(Icons.Filled.Add, stringResource(R.string.cd_new_group)) { screen = Screen.CreateGroup }
@@ -391,7 +404,7 @@ private fun CompactShell(model: AppModel) {
                                     screen = Screen.Info
                                 }
                             }
-                            Screen.Me -> MeScreen(model)
+                            Screen.Me -> MeScreen(model, navigate)
                             Screen.Info -> ContactProfileScreen(
                                 model,
                                 onMessage = { screen = Screen.Chat },
