@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
@@ -245,11 +246,17 @@ internal fun NetworkScreen(
 
 /** Карточка-контейнер (тёмная поверхность, скругление) для разделов Сети. */
 @Composable
-internal fun SurfaceCard(onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
+internal fun SurfaceCard(
+    onClick: (() -> Unit)? = null,
+    /** Внешний боковой отступ. 0 — если контейнер экрана уже держит свой: иначе
+     *  отступы складываются и карточка уезжает от общей вертикали. */
+    outer: Dp = Tokens.Space.s,
+    content: @Composable () -> Unit,
+) {
     // Радиус и боковой отступ — общие карточные: карточки сети, хранилища и списка
     // чатов стоят по ОДНОЙ вертикали, иначе переход между экранами читается как
     // сдвиг всего макета.
-    val base = Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s)
+    val base = Modifier.fillMaxWidth().padding(horizontal = outer)
         .clip(RoundedCornerShape(Tokens.Radius.card))
         .background(Tokens.Colors.surface)
     Box((if (onClick != null) base.clickable { onClick() } else base).padding(14.dp)) { content() }

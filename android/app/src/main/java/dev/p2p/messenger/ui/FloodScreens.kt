@@ -78,14 +78,14 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        SurfaceCard {
+        SurfaceCard(outer = 0.dp) {
             Text(stringResource(R.string.flood_explain), color = HoloSecondary, fontSize = 13.sp)
         }
 
         FieldLabel(stringResource(R.string.flood_sources))
         model.floodPeers.forEach { f ->
             val name = model.contacts.firstOrNull { it.key == f.peer }?.displayName
-            SurfaceCard {
+            SurfaceCard(outer = 0.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -156,7 +156,7 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
 /** Строка «действие + честное объяснение цены». */
 @Composable
 private fun ActionExplain(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, desc: String) {
-    SurfaceCard {
+    SurfaceCard(outer = 0.dp) {
         Row {
             Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(12.dp))
@@ -189,14 +189,14 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        SurfaceCard {
+        SurfaceCard(outer = 0.dp) {
             Text(stringResource(R.string.rotate_explain), color = HoloSecondary, fontSize = 13.sp)
         }
 
         FieldLabel(stringResource(R.string.rotate_tell_whom))
         model.contacts.forEach { c ->
             val on = selected[c.key] == true
-            SurfaceCard(onClick = { selected[c.key] = !on }) {
+            SurfaceCard(onClick = { selected[c.key] = !on }, outer = 0.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
                         checked = on,
@@ -221,7 +221,7 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
             }
         }
 
-        SurfaceCard {
+        SurfaceCard(outer = 0.dp) {
             Column {
                 Text(
                     stringResource(R.string.rotate_selected, chosen.size, model.contacts.size),
@@ -297,7 +297,7 @@ internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
             ProgressStep(done, stringResource(R.string.rotate_p_told, st.told))
         }
         if (done) {
-            SurfaceCard {
+            SurfaceCard(outer = 0.dp) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.CheckCircle, null, tint = HoloOnline, modifier = Modifier.size(20.dp))

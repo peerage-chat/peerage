@@ -466,7 +466,7 @@ private fun PartRow(
     checked: Boolean,
     onCheck: (Boolean) -> Unit,
 ) {
-    SurfaceCard(onClick = { onCheck(!checked) }) {
+    SurfaceCard(onClick = { onCheck(!checked) }, outer = 0.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Невыбранное — ПУСТАЯ рамка, а не бледная галка: бледная читается как
             // «выбрано, но недоступно», и человек не поймёт, что именно уедет в копию.
