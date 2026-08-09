@@ -625,6 +625,7 @@ internal fun MessageInput(
                         setField(TextFieldValue(text, TextRange(from)))
                     }
                 },
+                onClose = { emojiOpen = false },
             )
         }
         Row(
@@ -789,9 +790,20 @@ internal fun MessageBubble(
             .background(if (selected) HoloAccent.copy(alpha = 0.16f) else Color.Transparent),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
+        // Карточка «скачать» превращается в готовое вложение — это подмена
+        // содержимого прямо под пальцем, поэтому переход плавный.
+        val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
+        // Фото без подписи — САМО себе пузырь: рамка вокруг картинки не несёт
+        // смысла, только съедает 10dp с каждой стороны и делает снимок меньше.
+        // Как только у сообщения появляется что-то ещё (подпись, цитата, пометка
+        // пересылки), пузырь возвращается — этому «что-то» нужна подложка.
+        val photoBubble = m.kind == "image" && !pending && m.text.isEmpty() &&
+            m.fwdFrom.isEmpty() && !m.fwdAnon && m.replyTo == 0L
         Box(
             Modifier.widthIn(max = 290.dp).clip(bubbleShape(m.mine, pos))
-                .background(if (m.mine) BubbleOut else BubbleIn)
+                .then(
+                    if (photoBubble) Modifier else Modifier.background(if (m.mine) BubbleOut else BubbleIn),
+                )
                 .then(
                     if (selected) {
                         Modifier.border(1.dp, HoloAccent, bubbleShape(m.mine, pos))
@@ -805,11 +817,10 @@ internal fun MessageBubble(
                     onLongClick = { model.toggleSelect(m) },
                     onClick = { if (selecting) model.toggleSelect(m) },
                 )
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .then(
+                    if (photoBubble) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                ),
         ) {
-            // Карточка «скачать» превращается в готовое вложение — это подмена
-            // содержимого прямо под пальцем, поэтому переход плавный.
-            val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
             Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
                 Column {
                     // Ответ рисуется ССЫЛКОЙ в локальную историю (ADR-006): текст цитаты
@@ -834,7 +845,7 @@ internal fun MessageBubble(
                             m.blobId,
                         ) { model.currentChat?.let { model.downloadMedia(it, m.blobId) } }
                         else -> when (m.kind) {
-                            "image" -> ImageAttachment(blobBytes) { viewer = true }
+                            "image" -> ImageAttachment(blobBytes, { viewer = true }, bare = photoBubble)
                             "voice" -> VoiceAttachment(blobBytes)
                             "file" -> FileAttachment(m.name, blobBytes)
                             // Текст обтекает мету: она едет в конец последней строки
@@ -852,7 +863,11 @@ internal fun MessageBubble(
             // Мета всегда в правом нижнем углу ПУЗЫРЯ: место под неё уже оставлено
             // в тексте, а прижимать её к концу строки нельзя — у пузыря шире текста
             // (метка «Переслано», имя автора) она повисла бы посередине.
-            Box(Modifier.align(Alignment.BottomEnd)) { meta() }
+            // На голом фото — на затемнении: снимок бывает светлым, и белое время
+            // на нём иначе теряется.
+            Box(Modifier.align(Alignment.BottomEnd)) {
+                if (photoBubble) MetaOnPhoto { meta() } else meta()
+            }
         }
     }
     if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
@@ -861,12 +876,16 @@ internal fun MessageBubble(
 /** Картинка-вложение в пузыре: миниатюра (тап → полный экран) или плейсхолдер, пока
  *  байты докачиваются. */
 @Composable
-internal fun ImageAttachment(bytes: ByteArray?, onOpen: () -> Unit) {
+internal fun ImageAttachment(bytes: ByteArray?, onOpen: () -> Unit, bare: Boolean = false) {
     val bmp = bytes?.let {
         remember(it) { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
     }
+    // [bare] — картинка САМА является пузырём: своё скругление и фон ей не нужны,
+    // их даёт пузырь. Иначе внутри пузыря получалась бы вторая скруглённая рамка.
     Box(
-        Modifier.size(220.dp).clip(RoundedCornerShape(10.dp)).background(HoloSurface).clickable(enabled = bmp != null, onClick = onOpen),
+        Modifier.size(if (bare) 240.dp else 220.dp)
+            .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface))
+            .clickable(enabled = bmp != null, onClick = onOpen),
         contentAlignment = Alignment.Center,
     ) {
         if (bmp != null) {
@@ -1139,6 +1158,18 @@ internal fun MsgMeta(time: Long, mine: Boolean, edited: Boolean, status: String 
             StatusTick(status)
         }
     }
+}
+
+/** Мета поверх фотографии: та же строка на затемнённой плашке. Без неё белое время
+ *  пропадает на светлом снимке — а тень читается хуже плашки и на тёмном, и на светлом. */
+@Composable
+internal fun MetaOnPhoto(content: @Composable () -> Unit) {
+    Box(
+        Modifier.padding(6.dp)
+            .clip(RoundedCornerShape(Tokens.Radius.badge))
+            .background(Color.Black.copy(alpha = 0.45f))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    ) { content() }
 }
 
 @Composable

@@ -2,6 +2,7 @@ package dev.p2p.messenger.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -25,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -131,6 +134,7 @@ internal fun EmojiPanel(
     recent: List<String>,
     onPick: (String) -> Unit,
     onBackspace: () -> Unit,
+    onClose: () -> Unit = {},
 ) {
     var category by remember { mutableStateOf(0) }
     val gridState = rememberLazyGridState()
@@ -141,7 +145,30 @@ internal fun EmojiPanel(
             .background(HoloSurface),
     ) {
         // Ручка — тот же приём, что у листа вложений: панель «выехала» из строки ввода.
-        Box(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.s), contentAlignment = Alignment.Center) {
+        //
+        // И ручка ОБЯЗАНА работать: она обещает «потяни вниз — закроется». Раньше
+        // обещание было пустым — жеста не было вовсе, и панель закрывалась только
+        // повторным тапом по кнопке эмодзи. Аффорданс, который ничего не делает,
+        // хуже отсутствующего: он учит не доверять интерфейсу.
+        var dragged by remember { mutableStateOf(0f) }
+        val closeThreshold = with(LocalDensity.current) { 48.dp.toPx() }
+        Box(
+            Modifier.fillMaxWidth()
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            if (dragged > closeThreshold) onClose()
+                            dragged = 0f
+                        },
+                        onDragCancel = { dragged = 0f },
+                    ) { _, dy -> dragged += dy }
+                }
+                // Тап по ручке закрывает тоже: до неё уже дотянулся палец, а
+                // «потянуть» ради закрытия — лишняя работа.
+                .clickable { onClose() }
+                .padding(vertical = Tokens.Space.s),
+            contentAlignment = Alignment.Center,
+        ) {
             Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(HoloSecondary))
         }
 

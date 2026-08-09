@@ -597,9 +597,14 @@ internal fun GroupBubble(
     // В группе галочек нет: доставку каждому из участников мы не отслеживаем, и
     // одна галочка означала бы больше, чем знает движок.
     val meta: @Composable () -> Unit = { MsgMeta(time, mine = false, edited = m.editedAt > 0) }
+    val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
+    // Фото без подписи — само себе пузырь (как в личном чате). Имя автора над
+    // картинкой считается содержимым: с ним подложка нужна.
+    val photoBubble = m.kind == "image" && !pending && m.text.isEmpty() &&
+        m.fwdFrom.isEmpty() && !m.fwdAnon && m.replyTo == 0L && senderName == null
     Box(
         Modifier.widthIn(max = 280.dp).clip(bubbleShape(mine, pos))
-            .background(if (mine) BubbleOut else BubbleIn)
+            .then(if (photoBubble) Modifier else Modifier.background(if (mine) BubbleOut else BubbleIn))
             .then(
                 if (selected) Modifier.border(1.dp, HoloAccent, bubbleShape(mine, pos)) else Modifier,
             )
@@ -607,7 +612,7 @@ internal fun GroupBubble(
                 onLongClick = { model.toggleGroupSelect(m) },
                 onClick = { if (selecting) model.toggleGroupSelect(m) },
             )
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .then(if (photoBubble) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 6.dp)),
     ) {
         Column {
             ForwardMark(model, m.fwdFrom, m.fwdAnon)
@@ -625,7 +630,6 @@ internal fun GroupBubble(
             // Крупное вложение в группе не качается само: карточка с именем/размером/
             // превью и кнопкой — решение принимает получатель, а не тот, кто отправил
             // видео сразу пятерым (то же правило, что в DM).
-            val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
             Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
                 when {
                     isPending -> PendingAttachmentCard(
@@ -638,7 +642,7 @@ internal fun GroupBubble(
                         m.blobId,
                     ) { model.downloadMedia(m.sender, m.blobId) }
                     else -> when (m.kind) {
-                        "image" -> ImageAttachment(blobBytes) { viewer = true }
+                        "image" -> ImageAttachment(blobBytes, { viewer = true }, bare = photoBubble)
                         "voice" -> VoiceAttachment(blobBytes)
                         "file" -> FileAttachment(m.name, blobBytes)
                         // Текст обтекает мету — перенос считает сам движок вёрстки.
@@ -655,8 +659,10 @@ internal fun GroupBubble(
         if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
         // Мета — в правом нижнем углу ПУЗЫРЯ (место в тексте под неё уже оставлено):
         // имя автора и метка «Переслано» делают пузырь шире текста, и прижатая к
-        // концу строки мета висела бы посередине.
-        Box(Modifier.align(Alignment.BottomEnd)) { meta() }
+        // концу строки мета висела бы посередине. На голом фото — на затемнении.
+        Box(Modifier.align(Alignment.BottomEnd)) {
+            if (photoBubble) MetaOnPhoto { meta() } else meta()
+        }
     }
 }
 
