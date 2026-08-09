@@ -195,7 +195,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
         Text(stringResource(R.string.call_audio_output), color = HoloSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { model.toggleSpeaker() }
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { model.toggleSpeaker() }
                 .background(Tokens.Colors.tile).padding(horizontal = 14.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -221,7 +221,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(10.dp))
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { model.toggleTechInfo() }
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { model.toggleTechInfo() }
                 .background(Tokens.Colors.tile).padding(horizontal = 14.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -244,7 +244,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
         VideoQuality.presets.forEach { preset ->
             val selected = model.videoQuality == preset
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip))
                     .clickable { model.changeVideoQuality(preset) }
                     .background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -308,7 +308,7 @@ private fun ParticipantTile(
 ) {
     val name = tileName(model, t)
     Box(
-        modifier.clip(RoundedCornerShape(12.dp)).background(Tokens.Colors.tile)
+        modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
             // одиночный тап — показать/скрыть chrome; даблтап — фуллскрин участника.
             .pointerInput(t.id) {
                 detectTapGestures(onTap = { onTap() }, onDoubleTap = { onFocus() })
@@ -322,14 +322,14 @@ private fun ParticipantTile(
         }
         // рамка: голубая у себя; зелёная — у говорящего сейчас участника (active-speaker)
         if (t.me) {
-            Box(Modifier.matchParentSize().border(2.dp, HoloAccent, RoundedCornerShape(12.dp)))
+            Box(Modifier.matchParentSize().border(2.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.button)))
         } else if (t.id in model.speakingPeers) {
-            Box(Modifier.matchParentSize().border(2.dp, Tokens.Colors.online, RoundedCornerShape(12.dp)))
+            Box(Modifier.matchParentSize().border(2.dp, Tokens.Colors.online, RoundedCornerShape(Tokens.Radius.button)))
         }
         if (chrome) {
             Row(
                 Modifier.align(Alignment.BottomStart).padding(7.dp)
-                    .clip(RoundedCornerShape(7.dp)).background(Tokens.Colors.tileScrim)
+                    .clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.tileScrim)
                     .padding(horizontal = 7.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -397,7 +397,7 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
         if (chrome) {
             Column(
                 Modifier.align(Alignment.Center).offset(y = 78.dp)
-                    .clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.barScrim)
+                    .clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.barScrim)
                     .padding(horizontal = 18.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -519,7 +519,7 @@ internal fun applyTextureTransform(view: TextureView, bufW: Int, bufH: Int, rota
 @Composable
 private fun ControlBar(model: AppModel, peerKey: String) {
     Row(
-        Modifier.clip(RoundedCornerShape(18.dp)).background(Tokens.Colors.barScrim)
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.pill)).background(Tokens.Colors.barScrim)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -564,7 +564,7 @@ private fun CtlButton(
     onClick: () -> Unit,
 ) {
     Box(
-        Modifier.clip(RoundedCornerShape(14.dp)).background(bg).size(width = 60.dp, height = 48.dp)
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(bg).size(width = 60.dp, height = 48.dp)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(25.dp)) }
@@ -573,7 +573,7 @@ private fun CtlButton(
 @Composable
 private fun ChromeChip(icon: ImageVector, desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(Tokens.Colors.chipScrim).size(34.dp)
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim).size(34.dp)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = Tokens.Colors.iconChrome, modifier = Modifier.size(18.dp)) }
@@ -583,7 +583,7 @@ private fun ChromeChip(icon: ImageVector, desc: String, onClick: () -> Unit) {
 @Composable
 private fun NamePill(name: String) {
     Box(
-        Modifier.height(34.dp).clip(RoundedCornerShape(10.dp)).background(Tokens.Colors.chipScrim)
+        Modifier.height(34.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim)
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -595,7 +595,7 @@ private fun NamePill(name: String) {
 @Composable
 private fun TrafficChip(mbMin: Int) {
     Row(
-        Modifier.height(34.dp).clip(RoundedCornerShape(10.dp)).background(Tokens.Colors.chipScrim)
+        Modifier.height(34.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),

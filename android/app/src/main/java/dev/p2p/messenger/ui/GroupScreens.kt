@@ -348,7 +348,7 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         }
         Spacer(Modifier.width(12.dp))
         Box(
-            Modifier.clip(RoundedCornerShape(10.dp)).background(HoloOnline)
+            Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloOnline)
                 .clickable { onJoin() }.padding(horizontal = 18.dp, vertical = 8.dp),
         ) { Text(stringResource(R.string.room_join), color = Color(0xFF0A1F0A), fontSize = 14.sp, fontWeight = FontWeight.Medium) }
     }
@@ -526,7 +526,7 @@ private fun GroupReplyStrip(model: AppModel, m: GroupMsg) {
     }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp)).background(HoloSurface).padding(8.dp),
+            .clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface).padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(2.dp).height(30.dp).background(HoloAccent))

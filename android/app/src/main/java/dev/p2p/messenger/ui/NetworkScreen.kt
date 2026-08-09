@@ -277,7 +277,7 @@ internal fun MetricCard(label: String, value: String, unit: String?, modifier: M
 @Composable
 internal fun OutlineAction(text: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
-        modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, HoloBorder, RoundedCornerShape(12.dp))
+        modifier.clip(RoundedCornerShape(Tokens.Radius.button)).border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.button))
             .clickable { onClick() }.padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,

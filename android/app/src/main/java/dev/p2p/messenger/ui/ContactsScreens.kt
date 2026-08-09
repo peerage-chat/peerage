@@ -163,7 +163,7 @@ internal fun ContactsScreen(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = ScreenPad, vertical = 6.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(Tokens.Radius.chip))
                     .background(Color(0xFF3A2F12))
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -386,7 +386,7 @@ private fun ChatRowBadge(row: ChatRowUi) {
     val s = row.summary
     when {
         row.unread > 0 -> Box(
-            Modifier.clip(RoundedCornerShape(9.dp))
+            Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
                 .background(if (row.muted) Tokens.Colors.unreadMuted else HoloAccent)
                 .defaultMinSize(minWidth = 19.dp)
                 .padding(horizontal = 6.dp, vertical = 1.dp),
@@ -492,7 +492,7 @@ private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = ScreenPad, vertical = 4.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Tokens.Radius.button))
             .background(HoloSurface)
             .padding(12.dp),
     ) {
@@ -546,7 +546,7 @@ private fun GroupInviteCard(model: AppModel, inv: GroupInvite) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = ScreenPad, vertical = 4.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Tokens.Radius.button))
             .background(HoloSurface)
             .padding(12.dp),
     ) {

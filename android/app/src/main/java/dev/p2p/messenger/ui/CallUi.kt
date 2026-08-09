@@ -88,7 +88,7 @@ internal fun GridTile(
 ) {
     Box(
         modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(Tokens.Radius.button))
             .background(if (me) HoloAccentDark else Color(0xFF2A2F35))
             .clickable { onClick() }
             .aspectRatio(1f),
@@ -125,7 +125,7 @@ internal fun GridTile(
         if (!audio || video) {
             Row(
                 Modifier.align(Alignment.TopEnd).padding(6.dp)
-                    .clip(RoundedCornerShape(6.dp)).background(Tokens.Colors.tileScrim)
+                    .clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.tileScrim)
                     .padding(horizontal = 5.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -189,7 +189,7 @@ internal fun ParticipantFullscreen(
             ) {
                 if (!audio) {
                     Row(
-                        Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x33E53935))
+                        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Color(0x33E53935))
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -200,7 +200,7 @@ internal fun ParticipantFullscreen(
                 }
                 if (video) {
                     Row(
-                        Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x22FFFFFF))
+                        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Color(0x22FFFFFF))
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -310,7 +310,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
 @Composable
 private fun PresetButton(icon: ImageVector, on: Boolean, desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(16.dp)).background(if (on) Tokens.Colors.btnNeutral else Tokens.Colors.btnDangerMuted)
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(if (on) Tokens.Colors.btnNeutral else Tokens.Colors.btnDangerMuted)
             .size(56.dp).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = if (on) Color.White else Tokens.Colors.iconDangerMuted, modifier = Modifier.size(24.dp)) }
@@ -320,7 +320,7 @@ private fun PresetButton(icon: ImageVector, on: Boolean, desc: String, onClick: 
 @Composable
 internal fun CallButton(icon: ImageVector, desc: String, color: Color, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(16.dp)).background(color).size(56.dp).clickable { onClick() },
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(color).size(56.dp).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(26.dp)) }
 }

@@ -135,7 +135,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(FolderSelected),
+                Modifier.size(48.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(FolderSelected),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(folderIcon(icon), null, tint = HoloAccent, modifier = Modifier.size(24.dp))

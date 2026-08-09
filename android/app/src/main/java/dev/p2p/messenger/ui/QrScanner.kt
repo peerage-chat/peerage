@@ -108,7 +108,7 @@ private fun ScannerContent(onResult: (String) -> Unit) {
         // Рамка прицела
         Box(
             Modifier.size(260.dp).align(Alignment.Center)
-                .border(2.dp, HoloAccent, RoundedCornerShape(12.dp)),
+                .border(2.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.button)),
         )
 
         // Подсказка

@@ -65,11 +65,11 @@
   --radius-badge: 6px;
   --radius-tail: 6px;            /* срезанный угол на стыке серии */
   --radius-chip: 10px;
-  --radius-tile: 12px;
+  --radius-tile: 14px;
   --radius-preview: 14px;
   --radius-button: 14px;
   --radius-avatar: 14px;         /* «квадрат со скруглением» */
-  --radius-bubble: 17px;
+  --radius-bubble: 18px;
   --radius-pill: 18px;
   --radius-card: 20px;           /* карточка-контейнер */
 

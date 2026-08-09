@@ -71,7 +71,7 @@ fun AudioSettingsScreen(model: AppModel) {
         }
 
         // Живой уровень микрофона (20 сегментов).
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile).padding(15.dp)) {
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile).padding(15.dp)) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Filled.Mic, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(17.dp))
@@ -112,9 +112,9 @@ fun AudioSettingsScreen(model: AppModel) {
             Text(stringResource(R.string.audio_quality), color = Tokens.Colors.secondary, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             val auto = model.audioQualityAuto
             Row(
-                Modifier.clip(RoundedCornerShape(8.dp))
+                Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
                     .background(if (auto) Tokens.Colors.accentMuted else Tokens.Colors.tile)
-                    .then(if (auto) Modifier.border(1.5.dp, Tokens.Colors.accent, RoundedCornerShape(8.dp)) else Modifier)
+                    .then(if (auto) Modifier.border(1.5.dp, Tokens.Colors.accent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
                     .clickable { model.setAudioQuality(!auto) }
                     .padding(horizontal = 11.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -162,7 +162,7 @@ fun AudioSettingsScreen(model: AppModel) {
 
         Spacer(Modifier.height(20.dp))
         Box(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tokens.Colors.accent)
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.accent)
                 .clickable { model.applyAudioSettings() }.padding(vertical = 15.dp),
             contentAlignment = Alignment.Center,
         ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
@@ -173,8 +173,8 @@ fun AudioSettingsScreen(model: AppModel) {
 @Composable
 private fun DevChip(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
-            .then(if (selected) Modifier.border(1.5.dp, Tokens.Colors.accent, RoundedCornerShape(10.dp)) else Modifier)
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
+            .then(if (selected) Modifier.border(1.5.dp, Tokens.Colors.accent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
             .clickable { onClick() }.padding(horizontal = 13.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -187,7 +187,7 @@ private fun DevChip(icon: ImageVector, label: String, selected: Boolean, onClick
 @Composable
 private fun FxToggle(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tokens.Colors.tile)
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.tile)
             .clickable { onChange(!on) }.padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -214,7 +214,7 @@ private fun SectionLabel(text: String, badge: String? = null) {
     ) {
         Text(text, color = Tokens.Colors.secondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
         if (badge != null) {
-            Box(Modifier.clip(RoundedCornerShape(6.dp)).background(Tokens.Colors.accentBadge).padding(horizontal = 7.dp, vertical = 2.dp)) {
+            Box(Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.accentBadge).padding(horizontal = 7.dp, vertical = 2.dp)) {
                 Text(badge, color = Tokens.Colors.accent, fontSize = 10.sp)
             }
         }

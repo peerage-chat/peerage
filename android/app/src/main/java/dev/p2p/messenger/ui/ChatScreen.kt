@@ -389,7 +389,7 @@ internal fun quoteKind(kind: String): String = stringResource(
 internal fun ReplyStrip(model: AppModel, m: Message) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp)).background(HoloSurface).padding(8.dp),
+            .clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface).padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(2.dp).height(30.dp).background(HoloAccent))
@@ -424,7 +424,7 @@ internal fun ReplyStrip(model: AppModel, m: Message) {
 internal fun E2EBanner() {
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
         Row(
-            Modifier.clip(RoundedCornerShape(8.dp)).background(HoloSurface)
+            Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface)
                 .padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -936,7 +936,7 @@ internal fun ImageAttachment(
     // нельзя — палец всегда попадал в картинку, а не в поля пузыря.
     Box(
         Modifier.size(if (bare) PhotoBubbleSize else 220.dp)
-            .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface))
+            .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface))
             .combinedClickable(
                 enabled = bmp != null,
                 onClick = onOpen,
@@ -1091,7 +1091,7 @@ internal fun PendingAttachmentCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.25f)),
+            Modifier.size(48.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Color.Black.copy(alpha = 0.25f)),
             contentAlignment = Alignment.Center,
         ) {
             val bmp = remember(thumb) {

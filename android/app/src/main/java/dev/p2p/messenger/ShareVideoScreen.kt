@@ -86,7 +86,7 @@ fun ShareVideoScreen(model: AppModel) {
 
         // Превью — плейсхолдер (живое превью не нужно; переключатель фронт/тыл для камеры).
         Box(
-            Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile),
+            Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile),
             contentAlignment = Alignment.Center,
         ) {
             // Живое превью только если камера свободна (видео в звонке выключено).
@@ -115,7 +115,7 @@ fun ShareVideoScreen(model: AppModel) {
             }
             if (!model.shareScreenMode) {
                 Box(
-                    Modifier.align(Alignment.TopEnd).padding(10.dp).clip(RoundedCornerShape(10.dp))
+                    Modifier.align(Alignment.TopEnd).padding(10.dp).clip(RoundedCornerShape(Tokens.Radius.chip))
                         .background(Tokens.Colors.scrimStrong).size(34.dp).clickable { model.pickFacing(!model.shareFront) },
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera), tint = Color.White, modifier = Modifier.size(18.dp)) }
@@ -141,8 +141,8 @@ fun ShareVideoScreen(model: AppModel) {
                 Text(stringResource(R.string.share_bitrate), color = HoloSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 val auto = model.shareBitrateAuto
                 Row(
-                    Modifier.clip(RoundedCornerShape(8.dp)).background(if (auto) Tokens.Colors.accentMuted else Tokens.Colors.tile)
-                        .then(if (auto) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(8.dp)) else Modifier)
+                    Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(if (auto) Tokens.Colors.accentMuted else Tokens.Colors.tile)
+                        .then(if (auto) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
                         .clickable { model.pickBitrateAuto() }.padding(horizontal = 11.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -167,7 +167,7 @@ fun ShareVideoScreen(model: AppModel) {
 
         Spacer(Modifier.height(22.dp))
         Box(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(HoloAccent)
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloAccent)
                 .clickable { model.applyVideoShare() }.padding(vertical = 15.dp),
             contentAlignment = Alignment.Center,
         ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
@@ -178,8 +178,8 @@ fun ShareVideoScreen(model: AppModel) {
 @Composable
 private fun SegButton(icon: ImageVector, label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Row(
-        modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
-            .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(10.dp)) else Modifier)
+        modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
+            .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
             .clickable { onClick() }.padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
@@ -192,8 +192,8 @@ private fun SegButton(icon: ImageVector, label: String, selected: Boolean, modif
 @Composable
 private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
-            .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(10.dp)) else Modifier)
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
+            .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
             .clickable { onClick() }.padding(horizontal = 16.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) { Text(text, color = if (selected) HoloAccent else Color.White, fontSize = 14.sp) }
@@ -209,7 +209,7 @@ private fun SectionLabel(text: String, badge: String? = null) {
         Text(text, color = HoloSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
         if (badge != null) {
             Box(
-                Modifier.clip(RoundedCornerShape(6.dp)).background(Tokens.Colors.accentBadge).padding(horizontal = 7.dp, vertical = 2.dp),
+                Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.accentBadge).padding(horizontal = 7.dp, vertical = 2.dp),
             ) { Text(badge, color = HoloAccent, fontSize = 10.sp) }
         }
     }

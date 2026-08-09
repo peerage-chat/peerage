@@ -121,8 +121,8 @@ private fun ImportKeyStep(model: AppModel, onBack: () -> Unit) {
         },
     ) {
         Box(
-            Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile)
-                .border(1.dp, if (error) HoloError else HoloBorder, RoundedCornerShape(14.dp)).padding(14.dp),
+            Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
+                .border(1.dp, if (error) HoloError else HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
         ) {
             if (phrase.isEmpty()) Text(stringResource(R.string.onb_phrase_placeholder), color = HoloSecondary, fontSize = 15.sp)
             BasicTextField(
@@ -231,7 +231,7 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
         caption = { Text(stringResource(R.string.onb_opensource), color = HoloSecondary, fontSize = 11.sp) },
     ) {
         Box(
-            Modifier.size(62.dp).clip(RoundedCornerShape(18.dp)).background(HoloAccentDark),
+            Modifier.size(62.dp).clip(RoundedCornerShape(Tokens.Radius.pill)).background(HoloAccentDark),
             contentAlignment = Alignment.Center,
         ) { Icon(TablerIcons.ShieldLock, null, tint = HoloAccent, modifier = Modifier.size(32.dp)) }
         Spacer(Modifier.height(8.dp))
@@ -279,7 +279,7 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
             },
         ) {
             Box(
-                Modifier.size(96.dp).clip(RoundedCornerShape(26.dp)).background(Tokens.Colors.avatar),
+                Modifier.size(96.dp).clip(RoundedCornerShape(Tokens.Radius.card)).background(Tokens.Colors.avatar),
                 contentAlignment = Alignment.Center,
             ) {
                 val av = model.selfAvatar
@@ -291,13 +291,13 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
                 }
             }
             Box(
-                Modifier.size(34.dp).clip(RoundedCornerShape(12.dp)).background(HoloAccent).border(3.dp, HoloBg, RoundedCornerShape(12.dp)),
+                Modifier.size(34.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloAccent).border(3.dp, HoloBg, RoundedCornerShape(Tokens.Radius.button)),
                 contentAlignment = Alignment.Center,
             ) { Icon(TablerIcons.Camera, null, tint = HoloAccentDark, modifier = Modifier.size(17.dp)) }
         }
         Spacer(Modifier.height(14.dp))
         Row(
-            Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile).padding(horizontal = 14.dp),
+            Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(TablerIcons.User, null, tint = HoloSecondary, modifier = Modifier.size(20.dp))
@@ -361,8 +361,8 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
         onSecondary = onSkip,
     ) {
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(WarnBg)
-                .border(1.dp, WarnBorder, RoundedCornerShape(14.dp)).padding(14.dp),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(WarnBg)
+                .border(1.dp, WarnBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(22.dp))
@@ -389,8 +389,8 @@ internal fun ColumnScope.PhraseGrid(phrase: String?) {
         return
     }
     Row(
-        Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile)
-            .border(1.dp, HoloBorder, RoundedCornerShape(14.dp)).padding(14.dp),
+        Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
+            .border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         for (col in 0 until 2) {
@@ -499,8 +499,8 @@ private fun ColumnScope.PermCard(
     var dismissed by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().then(if (fill) Modifier.weight(1f) else Modifier)
-            .clip(RoundedCornerShape(14.dp)).background(Tokens.Colors.tile)
-            .border(1.dp, HoloBorder, RoundedCornerShape(14.dp)).padding(14.dp),
+            .clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
+            .border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -522,13 +522,13 @@ private fun ColumnScope.PermCard(
                 dismissed -> Text(stringResource(R.string.onb_later_hint), color = HoloSecondary, fontSize = 12.5.sp)
                 else -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(
-                        Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(11.dp)).background(HoloAccent)
+                        Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloAccent)
                             .clickable(onClick = onGrant),
                         contentAlignment = Alignment.Center,
                     ) { Text(stringResource(R.string.onb_allow), color = HoloAccentDark, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
                     Box(
-                        Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(11.dp))
-                            .border(1.dp, HoloBorder, RoundedCornerShape(11.dp)).clickable { dismissed = true },
+                        Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(Tokens.Radius.chip))
+                            .border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.chip)).clickable { dismissed = true },
                         contentAlignment = Alignment.Center,
                     ) { Text(stringResource(R.string.onb_later), color = HoloSecondary, fontSize = 13.sp) }
                 }

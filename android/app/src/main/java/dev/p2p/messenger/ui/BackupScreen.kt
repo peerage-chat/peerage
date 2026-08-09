@@ -469,13 +469,13 @@ private fun PartRow(
             // Невыбранное — ПУСТАЯ рамка, а не бледная галка: бледная читается как
             // «выбрано, но недоступно», и человек не поймёт, что именно уедет в копию.
             Box(
-                Modifier.size(22.dp).clip(RoundedCornerShape(6.dp))
+                Modifier.size(22.dp).clip(RoundedCornerShape(Tokens.Radius.badge))
                     .background(if (checked) HoloAccent else Color.Transparent)
                     .then(
                         if (checked) {
                             Modifier
                         } else {
-                            Modifier.border(2.dp, HoloSecondary, RoundedCornerShape(6.dp))
+                            Modifier.border(2.dp, HoloSecondary, RoundedCornerShape(Tokens.Radius.badge))
                         },
                     )
                     .clickable { onCheck(!checked) },

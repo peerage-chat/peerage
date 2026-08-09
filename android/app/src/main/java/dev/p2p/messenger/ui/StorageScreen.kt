@@ -57,7 +57,7 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
         if (total > 0 && kinds.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = ScreenPad).height(10.dp)
-                    .clip(RoundedCornerShape(5.dp)),
+                    .clip(RoundedCornerShape(Tokens.Radius.badge)),
             ) {
                 kinds.forEach { (kind, bytes) ->
                     Box(

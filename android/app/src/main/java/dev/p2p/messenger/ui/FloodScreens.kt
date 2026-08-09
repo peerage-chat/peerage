@@ -45,7 +45,7 @@ internal fun FloodCard(model: AppModel, onDetails: () -> Unit) {
     if (flood.isEmpty()) return
     Box(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(Tokens.Radius.button))
             .background(HoloWarn.copy(alpha = 0.08f))
             .clickable { onDetails() }
             .padding(12.dp),
