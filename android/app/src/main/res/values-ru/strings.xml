@@ -641,4 +641,17 @@
     <string name="chat_edit">Изменить</string>
     <string name="chat_editing">Редактирование</string>
     <string name="chat_edited">изм.</string>
+
+    <!-- ── Список чатов (редизайн) ──────────────────────────────────────── -->
+    <string name="chats_preview_you">Вы:</string>
+    <string name="chats_preview_photo">Фото</string>
+    <string name="chats_preview_video">Видео</string>
+    <string name="chats_preview_voice">Голосовое</string>
+    <string name="chats_preview_file">Файл</string>
+    <string name="chats_preview_empty">Нет сообщений</string>
+    <string name="chats_time_yesterday">вчера</string>
+    <string name="chat_menu_pin">Закрепить</string>
+    <string name="chat_menu_unpin">Открепить</string>
+    <string name="chat_menu_mute">Без звука</string>
+    <string name="chat_menu_unmute">Со звуком</string>
 </resources>

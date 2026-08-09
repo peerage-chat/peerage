@@ -9,7 +9,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -26,10 +29,16 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
@@ -40,11 +49,22 @@ import kotlin.math.abs
 
 // ── Общие элементы ──────────────────────────────────────────────────────────
 
-/** Иконка-кнопка топ-бара: единый размер (48dp касание / 24dp иконка). */
+/**
+ * Иконка-кнопка топ-бара: плашка на слое карточки, 38dp с иконкой 20dp.
+ * Фон обязателен — без него иконка на фоне экрана не отличается от подписи и не
+ * читается как нажимаемая (правило «контролы отличаются от контента»).
+ */
 @Composable
-internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = HoloAccent, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
-        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(24.dp))
+internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Color(0xFFD6D6DD), onClick: () -> Unit) {
+    Box(
+        Modifier.padding(horizontal = Tokens.Space.xs)
+            .size(38.dp)
+            .clip(RoundedCornerShape(Tokens.Radius.button))
+            .background(Tokens.Colors.surface)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -55,8 +75,10 @@ internal fun TopBar(
     onMenu: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
+    // Шапка на фоне экрана, а не на акцентной плашке: цветная полоса сверху делила
+    // экран пополам и спорила с карточками за внимание.
     Row(
-        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
+        Modifier.fillMaxWidth().background(HoloBg).height(56.dp).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when {
@@ -87,17 +109,22 @@ internal fun StatusDot(online: Boolean) {
  *  долгий тап — диагностический бенч приёма. */
 @Composable
 internal fun PeerIndicator(peers: Int, onTap: () -> Unit = {}, onLongPress: () -> Unit = {}) {
+    // Та же плашка, что у иконок-кнопок рядом: индикатор нажимаем, значит выглядит
+    // как остальные кнопки шапки.
     Row(
-        Modifier.clip(RoundedCornerShape(8.dp))
+        Modifier.padding(horizontal = Tokens.Space.xs)
+            .height(38.dp)
+            .clip(RoundedCornerShape(Tokens.Radius.button))
+            .background(Tokens.Colors.surface)
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { onTap() },
                     onLongPress = { onLongPress() },
                 )
             }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Icon(
             TablerIcons.Affiliate,
@@ -109,9 +136,15 @@ internal fun PeerIndicator(peers: Int, onTap: () -> Unit = {}, onLongPress: () -
     }
 }
 
-/** Квадратная аватарка со скруглением — единый визуальный язык приложения
- *  (НЕ круг). Буква имени на детерминированном цвете; опционально presence-точка
- *  в правом-нижнем углу; [bg]/[content] переопределяют фон и содержимое (комнаты). */
+/**
+ * Аватар: буква имени на детерминированном цвете, картинка профиля или своя
+ * иконка ([content]); опционально presence-точка в правом-нижнем углу.
+ *
+ * Форма несёт смысл: [circle] — человек, скруглённый квадрат — сущность (группа,
+ * «Сохранённое», канал). Различие формы читается боковым зрением и не требует
+ * подписи. [ring] — цвет обводки presence-точки: она должна совпадать с фоном ПОД
+ * аватаром, иначе точка выглядит наклеенной.
+ */
 @Composable
 internal fun SquareAvatar(
     name: String,
@@ -119,18 +152,24 @@ internal fun SquareAvatar(
     online: Boolean? = null,
     bg: Color? = null,
     avatarBytes: ByteArray? = null,
+    circle: Boolean = false,
+    ring: Color = Tokens.Colors.surface,
     content: (@Composable () -> Unit)? = null,
 ) {
     // Декод байт аватара (M2) — один раз на набор байт, не на каждую рекомпозицию.
     val bmp = avatarBytes?.let {
         remember(it) { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
     }
+    // «квадрат со скруглением» (app-ui.md ~14-15px): пропорция size×0.3, но с кэпом
+    // на Tokens.Radius.avatar — иначе крупные аватарки «балонят» до почти-круга.
+    val shape = if (circle) {
+        CircleShape
+    } else {
+        RoundedCornerShape(minOf(size * 0.3f, Tokens.Radius.avatar))
+    }
     Box(Modifier.size(size), contentAlignment = Alignment.BottomEnd) {
         Box(
-            // «квадрат со скруглением» (app-ui.md ~14-15px): пропорция size×0.3, но с кэпом
-            // на Tokens.Radius.avatar — иначе крупные аватарки «балонят» до почти-круга.
-            Modifier.size(size).clip(RoundedCornerShape(minOf(size * 0.3f, Tokens.Radius.avatar)))
-                .background(bg ?: avatarColor(name)),
+            Modifier.size(size).clip(shape).background(bg ?: avatarColor(name)),
             contentAlignment = Alignment.Center,
         ) {
             when {
@@ -146,9 +185,9 @@ internal fun SquareAvatar(
         }
         if (online != null) {
             Box(
-                Modifier.size(size * 0.28f).clip(RoundedCornerShape(percent = 30))
+                Modifier.size(size * 0.30f).clip(CircleShape)
                     .background(if (online) HoloOnline else OfflineDot)
-                    .border(2.dp, HoloBg, RoundedCornerShape(percent = 30)),
+                    .border(2.5.dp, ring, CircleShape),
             )
         }
     }
@@ -194,6 +233,25 @@ internal fun SendButton(onClick: () -> Unit) {
 internal fun fmtMsgTime(ts: Long): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
 
+/**
+ * Время в строке списка чатов: сегодня — «ЧЧ:ММ», вчера — «вчера», на этой неделе —
+ * короткий день, дальше — «ДД.ММ». Колонка узкая, поэтому чем старше сообщение, тем
+ * грубее единица: точное время недельной давности всё равно ничего не сообщает.
+ */
+@Composable
+internal fun fmtListTime(ts: Long): String {
+    if (ts <= 0) return ""
+    val nowSec = System.currentTimeMillis() / 1000
+    val loc = java.util.Locale.getDefault()
+    val date = java.util.Date(ts * 1000)
+    return when {
+        dayKey(ts) == dayKey(nowSec) -> fmtMsgTime(ts)
+        dayKey(ts) == dayKey(nowSec - 86_400) -> stringResource(R.string.chats_time_yesterday)
+        nowSec - ts < 6 * 86_400 -> java.text.SimpleDateFormat("EEE", loc).format(date)
+        else -> java.text.SimpleDateFormat("dd.MM", loc).format(date)
+    }
+}
+
 /** Ключ дня для сравнения «сменился ли день» между соседними сообщениями
  *  (не-Composable: используется в условии группировки). */
 internal fun dayKey(ts: Long): Long {
@@ -229,16 +287,61 @@ internal fun blockPos(withPrev: Boolean, withNext: Boolean): BlockPos = when {
 internal fun blockGap(pos: BlockPos) =
     if (pos == BlockPos.First || pos == BlockPos.Mid) Tokens.Space.xxs else Tokens.Space.s
 
-/** Резерв места под время в правом-нижнем углу пузыря: время не участвует в потоке
- *  текста, поэтому текст обязан оставить ему ширину, иначе они наложатся.
- *  У своих сообщений шире — там ещё галочка статуса. */
-internal fun bubbleTimeReserve(mine: Boolean, edited: Boolean = false) =
-    (if (mine) 52.dp else 34.dp) + if (edited) 34.dp else 0.dp
+/**
+ * Текст сообщения с метой (время, «изм.», галочка) в правом нижнем углу — так,
+ * что текст ОБТЕКАЕТ мету: короткая последняя строка пускает мету к себе, длинная
+ * переносит её на новую строку.
+ *
+ * Как это устроено: мета сначала измеряется, затем в конец текста подставляется
+ * невидимая вставка ровно её размера — перенос считает уже сам движок вёрстки.
+ * Раньше под мету резервировалась ширина «на глаз» (`bubbleTimeReserve`), и каждый
+ * новый значок в мете (сначала галочка, потом «изм.») этот расчёт ломал: то дыра в
+ * пузыре, то наезд на текст.
+ */
+@Composable
+internal fun BubbleText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.White,
+    fontSize: TextUnit = 15.sp,
+    meta: @Composable () -> Unit,
+) {
+    val slot = "meta"
+    SubcomposeLayout(modifier) { constraints ->
+        val metaP = subcompose(slot, meta).map { it.measure(Constraints()) }
+        val metaW = metaP.maxOfOrNull { it.width } ?: 0
+        val metaH = metaP.maxOfOrNull { it.height } ?: 0
+        // Зазор между текстом и метой — часть вставки, иначе они слипаются.
+        val gap = 8.dp.roundToPx()
+        val holder = Placeholder(
+            width = (metaW + gap).toSp(),
+            height = metaH.toSp(),
+            placeholderVerticalAlign = PlaceholderVerticalAlign.Bottom,
+        )
+        val textP = subcompose("text") {
+            Text(
+                buildAnnotatedString {
+                    append(text)
+                    appendInlineContent(slot, " ")
+                },
+                color = color,
+                fontSize = fontSize,
+                inlineContent = mapOf(slot to InlineTextContent(holder) {}),
+            )
+        }.first().measure(constraints)
 
-/** Форма пузыря: «шов» внутри блока — со стороны отправителя. */
+        layout(textP.width, textP.height) {
+            textP.place(0, 0)
+            metaP.forEach { it.place(textP.width - metaW, textP.height - metaH) }
+        }
+    }
+}
+
+/** Форма пузыря: «шов» внутри блока — со стороны отправителя. Внешние углы серии
+ *  полные, соприкасающиеся — срезанные: наоборот получаются «песочные часы». */
 internal fun bubbleShape(mine: Boolean, pos: BlockPos): RoundedCornerShape {
-    val r = Tokens.Radius.preview // 14 — свободные углы
-    val seam = 5.dp // сшитые углы внутри блока
+    val r = Tokens.Radius.bubble
+    val seam = Tokens.Radius.bubbleTail
     val topSeam = pos == BlockPos.Mid || pos == BlockPos.Last
     val bottomSeam = pos == BlockPos.Mid || pos == BlockPos.First
     return if (mine) {
@@ -340,11 +443,17 @@ internal fun PagingUp(listState: LazyListState, key: Any?, load: (done: (Int) ->
 internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: Boolean) {
     val list = model.pinned[chat].orEmpty()
     val top = list.firstOrNull() ?: return
+    // Полоса, а не карточка: закреплённое читается как продолжение шапки и не
+    // спорит с пузырями за внимание. Слева — акцентная риска вместо иконки.
     Row(
-        Modifier.fillMaxWidth().background(HoloSurface).padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().background(HoloSurface)
+            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(TablerIcons.Pin, null, tint = HoloAccent, modifier = Modifier.size(18.dp))
+        Box(
+            Modifier.width(2.5.dp).height(30.dp)
+                .clip(RoundedCornerShape(2.dp)).background(HoloAccent),
+        )
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(

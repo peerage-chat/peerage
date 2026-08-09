@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Макет — Чат (личный и групповой)</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  /* Локальных цветов нет — только псевдонимы токенов из tokens.css. */
+  :root {
+    --bg2: var(--bg); --card: var(--surface); --card-hi: var(--surface-hi);
+    --in: var(--bubble-in); --out: var(--bubble-out);
+    --r-card: var(--radius-card); --r-ctl: var(--radius-button);
+    --r-bub: var(--radius-bubble); --r-tail: var(--radius-tail);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #08080a; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+         gap: 22px; padding: 24px; font-family: system-ui, "Segoe UI", Roboto, sans-serif; flex-wrap: wrap; }
+  .phone { width: 372px; background: var(--bg2); border: 1px solid #1e1e22; border-radius: 28px;
+           overflow: hidden; color: var(--on-dark); display: flex; flex-direction: column; }
+  .cap { width: 372px; color: #6f6f78; font-size: 12px; margin: -12px 0 0; }
+
+  .statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 18px 4px;
+               font-size: 11.5px; color: #6b6b73; }
+
+  /* ── Шапка ── */
+  .head { display: flex; align-items: center; gap: 10px; padding: 4px 12px 10px; }
+  .back { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+          font-size: 21px; color: #d6d6dd; margin-left: -4px; }
+  .av { width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
+        font-size: 15px; font-weight: 600; color: #0f0f11; flex: 0 0 auto; }
+  .av.person { border-radius: 50%; }
+  .av.entity { border-radius: 12px; }
+  .who { flex: 1; min-width: 0; }
+  .who .n { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .who .s { font-size: 12px; color: #82828c; margin-top: 1px; }
+  .who .s.live { color: var(--accent); }
+  .who .s.on { color: var(--online); }
+  .iconbtn { width: 36px; height: 36px; border-radius: 12px; background: var(--card);
+             display: flex; align-items: center; justify-content: center; font-size: 18px; color: #d6d6dd; }
+
+  /* ── Закреплённое: полоса под шапкой, а не карточка — она не должна спорить с сообщениями ── */
+  .pinned { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--card);
+            border-top: 1px solid #1c1c20; border-bottom: 1px solid #1c1c20; }
+  .pinned .bar { width: 2.5px; align-self: stretch; border-radius: 2px; background: var(--accent); }
+  .pinned .t { flex: 1; min-width: 0; }
+  .pinned .t .lbl { font-size: 11.5px; color: var(--accent); font-weight: 600; }
+  .pinned .t .txt { font-size: 13px; color: #b9b9c2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pinned .cnt { font-size: 11.5px; color: #6f6f78; }
+
+  /* ── Лента ── */
+  .feed { flex: 1; padding: 10px 12px 6px; display: flex; flex-direction: column; gap: 3px; overflow: hidden; }
+  /* Разделитель даты и системное событие — один и тот же «плавающий ярлык»:
+     оба стоят вне диалога и комментируют ленту, значит и выглядеть должны одинаково. */
+  .daysep, .sys { align-self: center; margin: 8px 0 6px; padding: 3px 11px; border-radius: var(--radius-chip);
+                  background: var(--label-scrim); font-size: 11.5px; color: #9a9aa4;
+                  text-align: center; max-width: 84%; }
+  .sys { color: #8a8a94; }
+
+  .msg { display: flex; align-items: flex-end; gap: 7px; max-width: 84%; }
+  .msg.out { align-self: flex-end; }
+  .msg .sav { width: 26px; height: 26px; border-radius: 50%; font-size: 11px; font-weight: 600; color: #0f0f11;
+              display: flex; align-items: center; justify-content: center; flex: 0 0 auto; margin-bottom: 2px; }
+  .msg .sav.blank { background: none; }
+  .bub { background: var(--in); border-radius: var(--r-bub); padding: 7px 11px 6px; position: relative;
+         min-width: 92px; }
+  .msg.out .bub { background: var(--out); }
+  /* Серия склеивается по СТЫКАМ: внешние углы полные, соприкасающиеся — срезанные.
+     Наоборот (полный угол внутри серии) даёт «песочные часы» между пузырями. */
+  .msg.first:not(.last) .bub { border-bottom-left-radius: var(--r-tail); }
+  .msg.mid .bub { border-top-left-radius: var(--r-tail); border-bottom-left-radius: var(--r-tail); }
+  .msg.last:not(.first) .bub { border-top-left-radius: var(--r-tail); }
+  .msg.out.first:not(.last) .bub { border-bottom-left-radius: var(--r-bub); border-bottom-right-radius: var(--r-tail); }
+  .msg.out.mid .bub { border-top-left-radius: var(--r-bub); border-bottom-left-radius: var(--r-bub);
+                      border-top-right-radius: var(--r-tail); border-bottom-right-radius: var(--r-tail); }
+  .msg.out.last:not(.first) .bub { border-top-left-radius: var(--r-bub); border-top-right-radius: var(--r-tail); }
+  .bub .from { font-size: 12.5px; font-weight: 600; margin-bottom: 2px; }
+  .bub .txt { font-size: 14.5px; line-height: 1.35; word-wrap: break-word; }
+  /* Мета едет в конец текста: у нас есть «изм.» и галочки — резерв считается по факту. */
+  .bub .meta { float: right; display: flex; align-items: center; gap: 4px; margin: 6px 0 0 10px;
+               font-size: 10.5px; color: #7d7d87; line-height: 1; }
+  .msg.out .bub .meta { color: var(--meta-on-out); }
+  .bub .meta .tick { font-size: 13px; color: var(--tick-on-out); }
+  .bub .meta .clock { font-size: 12px; }
+
+  /* Ответ внутри пузыря */
+  .quote { display: flex; gap: 7px; padding: 4px 0 5px; margin-bottom: 3px; }
+  .quote .bar { width: 2.5px; border-radius: 2px; background: var(--accent); }
+  .msg.out .quote .bar { background: #8fd0ea; }
+  .quote .q { min-width: 0; }
+  .quote .qn { font-size: 12px; font-weight: 600; color: var(--accent); }
+  .msg.out .quote .qn { color: #8fd0ea; }
+  .quote .qt { font-size: 12.5px; color: #9a9aa4; white-space: nowrap; overflow: hidden;
+               text-overflow: ellipsis; max-width: 200px; }
+
+  /* Пересланное */
+  .fwd { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #8a8a94; margin-bottom: 3px; }
+  .fwd i { font-size: 13px; }
+
+  /* Карточка вложения: крупное не качается само — сначала карточка, потом кнопка */
+  .file { display: flex; align-items: center; gap: 10px; margin: 2px 0 1px; }
+  .file .ic { width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,.07);
+              display: flex; align-items: center; justify-content: center; font-size: 19px; color: #c9c9d2; }
+  .file .fi { min-width: 0; flex: 1; }
+  .file .fn { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file .fs { font-size: 11.5px; color: #8a8a94; margin-top: 1px; }
+  .file .dl { width: 32px; height: 32px; border-radius: 11px; background: var(--accent); color: var(--accent-dark);
+              display: flex; align-items: center; justify-content: center; font-size: 17px; flex: 0 0 auto; }
+  .thumb { width: 208px; height: 128px; border-radius: 12px; margin: 1px 0 2px;
+           background: linear-gradient(135deg, #35505f, #23323b); display: flex; align-items: center;
+           justify-content: center; color: #7f97a5; font-size: 22px; }
+
+  /* ── Ввод ── */
+  .reply-bar { display: flex; align-items: center; gap: 9px; padding: 7px 14px; background: var(--card);
+               border-top: 1px solid #1c1c20; }
+  .reply-bar .bar { width: 2.5px; align-self: stretch; border-radius: 2px; background: var(--accent); }
+  .reply-bar .t { flex: 1; min-width: 0; }
+  .reply-bar .rn { font-size: 12px; font-weight: 600; color: var(--accent); }
+  .reply-bar .rt { font-size: 12.5px; color: #9a9aa4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reply-bar .x { color: #82828c; font-size: 17px; }
+
+  .input { display: flex; align-items: center; gap: 8px; padding: 9px 12px 14px; }
+  .field { flex: 1; min-height: 42px; border-radius: var(--r-ctl); background: var(--card); display: flex;
+           align-items: center; gap: 9px; padding: 0 12px; color: #6f6f78; font-size: 14.5px; }
+  .field .ph { flex: 1; }
+  .field .emoji { font-size: 20px; color: #8a8a94; flex: 0 0 auto; }
+  .send { width: 42px; height: 42px; border-radius: var(--r-ctl); background: var(--accent); color: var(--accent-dark);
+          display: flex; align-items: center; justify-content: center; font-size: 20px; flex: 0 0 auto; }
+  .send.idle { background: var(--card); color: #9a9aa4; }
+
+  .note { width: 372px; color: #8a8a94; font-size: 12.5px; line-height: 1.55; }
+  .note h3 { color: #e6e6ec; font-size: 14px; margin: 14px 0 6px; }
+  .note h3:first-child { margin-top: 0; }
+  .note li { margin: 0 0 7px 16px; }
+  .note b { color: #c9c9d2; }
+</style>
+</head>
+<body>
+
+<!-- ══════════ Личный чат ══════════ -->
+<div>
+<div class="phone">
+  <div class="statusbar"><span>16:41</span><span>◗ ◗ ▮</span></div>
+
+  <div class="head">
+    <div class="back"><i class="ti ti-chevron-left"></i></div>
+    <div class="av person" style="background:#7E57C2">А</div>
+    <div class="who"><div class="n">Аня</div><div class="s live">печатает…</div></div>
+    <div class="iconbtn"><i class="ti ti-phone"></i></div>
+    <div class="iconbtn"><i class="ti ti-dots-vertical"></i></div>
+  </div>
+
+  <div class="pinned">
+    <div class="bar"></div>
+    <div class="t">
+      <div class="lbl">Закреплённое</div>
+      <div class="txt">код от домофона 47К, дверь слева</div>
+    </div>
+    <div class="cnt">1/2</div>
+  </div>
+
+  <div class="feed">
+    <div class="daysep">вчера</div>
+
+    <div class="msg first">
+      <div class="bub">
+        <div class="txt">Привет! Ты во сколько будешь?
+          <span class="meta">15:41</span></div>
+      </div>
+    </div>
+
+    <div class="msg last">
+      <div class="bub">
+        <div class="txt">Я уже почти на месте
+          <span class="meta">15:41</span></div>
+      </div>
+    </div>
+
+    <div class="msg out first last">
+      <div class="bub">
+        <div class="quote">
+          <div class="bar"></div>
+          <div class="q"><div class="qn">Аня</div><div class="qt">Ты во сколько будешь?</div></div>
+        </div>
+        <div class="txt">Минут через десять, застрял на переходе
+          <span class="meta">изм. 15:44 <i class="ti ti-checks tick"></i></span></div>
+      </div>
+    </div>
+
+    <div class="daysep">сегодня</div>
+
+    <div class="msg first last">
+      <div class="bub">
+        <div class="fwd"><i class="ti ti-arrow-forward-up"></i>Переслано</div>
+        <div class="txt">Ребят, встреча переносится на четверг
+          <span class="meta">15:57</span></div>
+      </div>
+    </div>
+
+    <div class="msg out first last">
+      <div class="bub">
+        <div class="thumb"><i class="ti ti-photo"></i></div>
+        <div class="txt" style="min-height:0">
+          <span class="meta">16:02 <i class="ti ti-check tick"></i></span></div>
+      </div>
+    </div>
+
+    <div class="msg out first last">
+      <div class="bub">
+        <div class="txt">код от домофона 47К, дверь слева
+          <span class="meta">16:40 <i class="ti ti-clock clock"></i></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="input">
+    <div class="iconbtn"><i class="ti ti-paperclip"></i></div>
+    <div class="field"><span class="ph">Сообщение</span><i class="ti ti-mood-smile emoji"></i></div>
+    <div class="send idle"><i class="ti ti-microphone"></i></div>
+  </div>
+</div>
+<p class="cap">Личный чат: закреплённое полосой под шапкой, «печатает» в подстроке имени,
+  статусы часы → ✓ → ✓✓ в мете.</p>
+</div>
+
+<!-- ══════════ Групповой чат ══════════ -->
+<div>
+<div class="phone">
+  <div class="statusbar"><span>16:41</span><span>◗ ◗ ▮</span></div>
+
+  <div class="head">
+    <div class="back"><i class="ti ti-chevron-left"></i></div>
+    <div class="av entity" style="background:#2E7D32"><i class="ti ti-users" style="color:#cdebc9"></i></div>
+    <div class="who"><div class="n">Поход</div><div class="s on">5 участников, 3 в сети</div></div>
+    <div class="iconbtn"><i class="ti ti-phone"></i></div>
+    <div class="iconbtn"><i class="ti ti-dots-vertical"></i></div>
+  </div>
+
+  <div class="feed">
+    <div class="sys">Артём добавил Веру</div>
+
+    <div class="msg first">
+      <div class="sav blank"></div>
+      <div class="bub">
+        <div class="from" style="color:#f0a35e">Артём</div>
+        <div class="txt">Встречаемся у входа в 9
+          <span class="meta">16:12</span></div>
+      </div>
+    </div>
+
+    <div class="msg last">
+      <div class="sav" style="background:#f0a35e">А</div>
+      <div class="bub">
+        <div class="txt">Кто берёт палатку?
+          <span class="meta">16:12</span></div>
+      </div>
+    </div>
+
+    <div class="msg first last">
+      <div class="sav" style="background:#8D6E63">В</div>
+      <div class="bub">
+        <div class="from" style="color:#c48b7c">Вера</div>
+        <div class="txt">Я беру, у меня двушка
+          <span class="meta">16:30</span></div>
+      </div>
+    </div>
+
+    <div class="msg first last">
+      <div class="sav" style="background:#5C6BC0">Б</div>
+      <div class="bub">
+        <div class="from" style="color:#8b96e0">Боб</div>
+        <div class="file">
+          <div class="ic"><i class="ti ti-file-zip"></i></div>
+          <div class="fi"><div class="fn">маршрут-финал.gpx</div><div class="fs">4,8 МБ · не загружено</div></div>
+          <div class="dl"><i class="ti ti-download"></i></div>
+        </div>
+        <div class="txt" style="min-height:0"><span class="meta">16:38</span></div>
+      </div>
+    </div>
+
+    <div class="msg out first last">
+      <div class="bub">
+        <div class="txt">Отлично, тогда я на еду
+          <span class="meta">16:39 <i class="ti ti-checks tick"></i></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="reply-bar">
+    <div class="bar"></div>
+    <div class="t"><div class="rn">Вера</div><div class="rt">Я беру, у меня двушка</div></div>
+    <i class="ti ti-x x"></i>
+  </div>
+
+  <div class="input">
+    <div class="iconbtn"><i class="ti ti-paperclip"></i></div>
+    <div class="field"><span class="ph">Сообщение</span><i class="ti ti-mood-smile emoji"></i></div>
+    <div class="send"><i class="ti ti-arrow-up"></i></div>
+  </div>
+</div>
+<p class="cap">Группа: аватар только у последнего сообщения серии, имя автора цветом,
+  строка ответа над полем ввода — результат свайпа по сообщению Веры.</p>
+</div>
+
+<div class="note">
+  <h3>Что тут решено</h3>
+  <ul>
+    <li><b>Серии сообщений.</b> Подряд идущие от одного автора жмутся в столбик с зазором 3px,
+      хвостовой угол скруглён только у последнего, аватар рисуется тоже только у последнего —
+      имя автора при этом только у первого. Так серия читается как один блок, а не как список.</li>
+    <li><b>Мета внутри пузыря, обтеканием.</b> Время, «изм.» и галочки плывут в конец текста и
+      переносятся на новую строку сами, если не влезли. Это снимает ручной резерв ширины —
+      сейчас в коде <code>bubbleTimeReserve()</code> считает его вручную и промахивается,
+      когда добавляется «изм.».</li>
+    <li><b>Закреплённое — полоса, не карточка.</b> Карточка спорила бы с пузырями за внимание;
+      полоса читается как продолжение шапки. Счётчик «1/2» справа — тап листает закреплённые.</li>
+    <li><b>Вложение — карточка с кнопкой.</b> Крупное не качается само (лимиты бюджета пира):
+      видно имя, размер и состояние, загрузка — явным нажатием.</li>
+    <li><b>Статус только у своих.</b> Часы — в очереди, ✓ — ушло в меш, ✓✓ — доставлено.
+      У чужих сообщений в мете только время.</li>
+  </ul>
+
+  <h3>Жесты в чате</h3>
+  <ul>
+    <li>Свайп → по сообщению — ответить (порог ~64dp, вибро-отклик, строка ответа встаёт над полем).</li>
+    <li>Долгое нажатие — выделение и меню: копировать, переслать, закрепить, изменить, удалить.</li>
+    <li>Свайп ↓ по ленте — убрать клавиатуру.</li>
+    <li>Свайп от левого края — назад в список (системный).</li>
+    <li>Тап по закреплённой полосе — прыжок к сообщению; повторный тап — к следующему закреплённому.</li>
+  </ul>
+</div>
+
+</body>
+</html>

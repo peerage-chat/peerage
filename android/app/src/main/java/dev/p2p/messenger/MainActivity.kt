@@ -334,9 +334,9 @@ private fun CompactShell(model: AppModel) {
                         Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = { screen = Screen.Folders })
                         Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = { screen = Screen.Contacts })
                     }
-                    // ── Рейл папок: только на главном экране ────────────────────────
+                    // ── Папки табами: только на главном экране ──────────────────────
                     if (screen == Screen.Contacts) {
-                        FolderRail(
+                        FolderTabs(
                             model,
                             activeFilter,
                             onFilter = { activeFilter = it },
@@ -349,9 +349,10 @@ private fun CompactShell(model: AppModel) {
                     // поллинг, автоскролл) — они шли бы парой. Анимируем то, что внутри.
                     Box(Modifier.weight(1f)) {
                         when (screen) {
-                            Screen.Contacts -> ContactsScreen(
+                            Screen.Contacts -> ChatsPager(
                                 model,
                                 activeFilter,
+                                onFilter = { activeFilter = it },
                                 onOpenDm = {
                                     model.openChat(it)
                                     screen = Screen.Chat

@@ -649,4 +649,17 @@
     <string name="chat_edit">Edit</string>
     <string name="chat_editing">Editing</string>
     <string name="chat_edited">edited</string>
+
+    <!-- ── Chat list (redesign) ─────────────────────────────────────────── -->
+    <string name="chats_preview_you">You:</string>
+    <string name="chats_preview_photo">Photo</string>
+    <string name="chats_preview_video">Video</string>
+    <string name="chats_preview_voice">Voice message</string>
+    <string name="chats_preview_file">File</string>
+    <string name="chats_preview_empty">No messages</string>
+    <string name="chats_time_yesterday">yesterday</string>
+    <string name="chat_menu_pin">Pin</string>
+    <string name="chat_menu_unpin">Unpin</string>
+    <string name="chat_menu_mute">Mute</string>
+    <string name="chat_menu_unmute">Unmute</string>
 </resources>

@@ -286,16 +286,16 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
     val total = roster?.total ?: g?.members ?: 1
     val onlineN = roster?.online ?: 1
     Row(
-        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
+        Modifier.fillMaxWidth().background(HoloBg).height(56.dp).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
         Row(
-            Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onInfo() }
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+            Modifier.weight(1f).clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { onInfo() }
+                .padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SquareAvatar(name, size = 38.dp, bg = Color(0xFF0D2A0D)) {
+            SquareAvatar(name, size = Tokens.Size.avatarHead, bg = Color(0xFF0D2A0D)) {
                 Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(10.dp))
@@ -365,10 +365,13 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg, pos: BlockPos = Block
             } else {
                 stringResource(R.string.group_system_event, who, m.text)
             }
+            // Ярлык того же вида, что разделитель даты: оба комментируют ленту
+            // со стороны, а не участвуют в разговоре.
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
                 Box(
-                    Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface)
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
+                        .background(Tokens.Colors.labelScrim)
+                        .padding(horizontal = 11.dp, vertical = 3.dp),
                 ) {
                     Text(text, color = HoloSecondary, fontSize = 11.sp)
                 }
@@ -389,9 +392,9 @@ internal fun GroupMessageRow(model: AppModel, m: GroupMsg, pos: BlockPos = Block
             val online = model.online[m.sender] == true
             val avatarBottom = pos == BlockPos.Solo || pos == BlockPos.Last
             if (avatarBottom) {
-                SquareAvatar(who, size = 32.dp, online = online)
+                SquareAvatar(who, size = Tokens.Size.avatarSeries, online = online, circle = true, ring = HoloBg)
             } else {
-                Spacer(Modifier.width(32.dp))
+                Spacer(Modifier.width(Tokens.Size.avatarSeries))
             }
             Spacer(Modifier.width(8.dp))
             GroupBubble(
@@ -591,6 +594,9 @@ internal fun GroupBubble(
     var viewer by remember { mutableStateOf(false) }
     val selecting = model.groupSelection.isNotEmpty()
     val selected = GroupMsgRef(m.id, m.sender) in model.groupSelection
+    // В группе галочек нет: доставку каждому из участников мы не отслеживаем, и
+    // одна галочка означала бы больше, чем знает движок.
+    val meta: @Composable () -> Unit = { MsgMeta(time, mine = false, edited = m.editedAt > 0) }
     Box(
         Modifier.widthIn(max = 280.dp).clip(bubbleShape(mine, pos))
             .background(if (mine) BubbleOut else BubbleIn)
@@ -614,7 +620,6 @@ internal fun GroupBubble(
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(end = bubbleTimeReserve(false, m.editedAt > 0)),
                 )
             }
             // Крупное вложение в группе не качается само: карточка с именем/размером/
@@ -636,35 +641,22 @@ internal fun GroupBubble(
                         "image" -> ImageAttachment(blobBytes) { viewer = true }
                         "voice" -> VoiceAttachment(blobBytes)
                         "file" -> FileAttachment(m.name, blobBytes)
-                        // Текст резервирует справа место под время → время оверлеем без наложения.
-                        else -> Text(m.text, color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(end = bubbleTimeReserve(false, m.editedAt > 0)))
+                        // Текст обтекает мету — перенос считает сам движок вёрстки.
+                        else -> BubbleText(m.text) { meta() }
                     }
                 }
             }
             // Подпись к вложению — в том же пузыре под содержимым: она пришла ОДНИМ
             // сообщением с файлом, значит и показывается как его часть.
             if (m.kind != "text" && m.text.isNotEmpty()) {
-                Text(
-                    m.text,
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    modifier = Modifier.padding(top = 6.dp, end = bubbleTimeReserve(false, m.editedAt > 0)),
-                )
+                BubbleText(m.text, modifier = Modifier.padding(top = 6.dp)) { meta() }
             }
         }
         if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
-        Text(
-            // Правка меняет текст задним числом — пометка «изм.» рядом со временем
-            // не даёт спутать исправленное с изначально написанным.
-            if (m.editedAt > 0) {
-                stringResource(R.string.chat_edited) + " " + fmtMsgTime(time)
-            } else {
-                fmtMsgTime(time)
-            },
-            color = Color.White.copy(alpha = 0.5f),
-            fontSize = 10.sp,
-            modifier = Modifier.align(Alignment.BottomEnd),
-        )
+        // Вложению без подписи встроить мету некуда — кладём её поверх, в угол.
+        if (m.kind != "text" && m.text.isEmpty()) {
+            Box(Modifier.align(Alignment.BottomEnd)) { meta() }
+        }
     }
 }
 

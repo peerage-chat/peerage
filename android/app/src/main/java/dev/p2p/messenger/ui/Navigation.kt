@@ -5,7 +5,6 @@ package dev.p2p.messenger.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -49,75 +48,93 @@ internal fun folderLabel(key: String): Int = Folders.firstOrNull { it.first == k
 internal fun folderTitle(model: AppModel, key: String): String =
     model.folderById(key)?.name ?: stringResource(folderLabel(key))
 
-/** Рейл папок-иконок (Discord-стиль): активная подсвечена, бейдж непрочитанного
- *  в правом-нижнем углу. После встроенных идут свои папки, последней — плитка `+`,
- *  которая ведёт в управление папками. */
+/** Ключи папок в порядке показа: встроенные, затем свои. Тот же порядок держит
+ *  страницы пейджера — свайп и табы обязаны совпадать. */
 @Composable
-internal fun FolderRail(
+internal fun folderKeys(model: AppModel): List<String> =
+    Folders.map { it.first } + model.folders.map { it.id }
+
+/**
+ * Полоса папок текстовыми табами. Пришла на смену плиточному рейлу: тот занимал
+ * 62dp высоты постоянно и читался вторым уровнем навигации там, где нужен фильтр.
+ * Табы — 40dp и та же работа.
+ *
+ * Переключение — тап или горизонтальный свайп по списку (см. [ChatsPager]).
+ */
+@Composable
+internal fun FolderTabs(
     model: AppModel,
     activeFilter: String,
     onFilter: (String) -> Unit,
     onManage: () -> Unit = {},
 ) {
-    val dmUnread = model.unread.values.sum()
-    val roomUnread = model.groupPresence.values.sumOf { it.size }
-    fun badgeFor(key: String): Int = when (key) {
-        "all" -> dmUnread
-        "dm" -> dmUnread
-        "room" -> roomUnread
-        else -> 0
-    }
+    val unreadAll = model.unread.values.sum()
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-            .background(HoloBg).padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .background(HoloBg).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Folders.forEach { (key, icon, labelRes) ->
-            FolderTile(icon, stringResource(labelRes), key == activeFilter, badgeFor(key)) { onFilter(key) }
+        Folders.forEach { (key, _, labelRes) ->
+            FolderTab(
+                stringResource(labelRes),
+                key == activeFilter,
+                if (key == "all") unreadAll else 0,
+            ) { onFilter(key) }
         }
         model.folders.forEach { f ->
-            FolderTile(folderIcon(f.icon), f.name, f.id == activeFilter, 0) { onFilter(f.id) }
+            FolderTab(f.name, f.id == activeFilter, 0) { onFilter(f.id) }
         }
-        FolderTile(TablerIcons.Plus, stringResource(R.string.folder_create), false, 0) { onManage() }
-    }
-    HorizontalDivider(thickness = 1.dp, color = HoloBorder)
-}
-
-@Composable
-internal fun FolderTile(icon: ImageVector, label: String, selected: Boolean, badge: Int, onClick: () -> Unit) {
-    // Подсветка активной папки переезжает плавно — иначе рейл «прыгает» цветом.
-    val bg by animateColorAsState(
-        if (selected) FolderSelected else HoloSurface,
-        animationSpec = tween(Tokens.Anim.fast),
-        label = "folderBg",
-    )
-    Box(Modifier.size(48.dp).clickable { onClick() }, contentAlignment = Alignment.BottomEnd) {
         Box(
-            Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(bg),
+            Modifier.size(Tokens.Size.tabBar).clickable { onManage() },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                icon,
-                label,
-                tint = if (selected) HoloAccent else HoloSecondary,
-                modifier = Modifier.size(24.dp),
+                TablerIcons.Plus,
+                stringResource(R.string.folder_create),
+                tint = Tokens.Colors.tertiary,
+                modifier = Modifier.size(Tokens.Size.iconS),
             )
         }
-        if (badge > 0) {
-            Box(
-                Modifier.clip(RoundedCornerShape(percent = 30)).background(HoloAccent).border(2.dp, HoloBg, RoundedCornerShape(percent = 30))
-                    .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
-                    .padding(horizontal = 4.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (badge > 99) "99+" else "$badge",
-                    color = HoloAccentDark,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                )
+    }
+}
+
+/** Один таб: подпись, счётчик непрочитанного и акцентное подчёркивание активного. */
+@Composable
+private fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () -> Unit) {
+    // Цвет переезжает плавно — резкая смена читается как перерисовка экрана.
+    val fg by animateColorAsState(
+        if (selected) HoloAccent else Tokens.Colors.secondary,
+        animationSpec = tween(Tokens.Anim.fast),
+        label = "tabFg",
+    )
+    Box(contentAlignment = Alignment.BottomCenter) {
+        Row(
+            Modifier.height(Tokens.Size.tabBar).clickable { onClick() }
+                .padding(horizontal = Tokens.Space.m),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+        ) {
+            Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            if (badge > 0) {
+                Box(
+                    Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(HoloAccent)
+                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                ) {
+                    Text(
+                        if (badge > 99) "99+" else "$badge",
+                        color = HoloAccentDark,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
+        }
+        if (selected) {
+            Box(
+                Modifier.padding(horizontal = Tokens.Space.s).height(2.dp).width(28.dp)
+                    .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
+                    .background(HoloAccent),
+            )
         }
     }
 }

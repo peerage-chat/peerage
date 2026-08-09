@@ -93,16 +93,23 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
     val online = key?.let { model.online[it] == true } ?: false
     val avatar = c?.avatarId?.let { model.contactAvatars[it] }
     Row(
-        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
+        Modifier.fillMaxWidth().background(HoloBg).height(56.dp).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
         Row(
-            Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { onProfile() }
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+            Modifier.weight(1f).clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { onProfile() }
+                .padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SquareAvatar(name, size = 38.dp, online = online, avatarBytes = avatar)
+            SquareAvatar(
+                name,
+                size = Tokens.Size.avatarHead,
+                online = online,
+                avatarBytes = avatar,
+                circle = true, // собеседник — человек
+                ring = HoloBg,
+            )
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -525,10 +532,12 @@ private fun SelectionTopBar(model: AppModel) {
 /** Чип-разделитель даты. */
 @Composable
 internal fun DateChip(label: String) {
+    // Тот же ярлык, что у системных событий («Артём добавил Веру»): и то и другое
+    // стоит вне диалога и комментирует ленту — значит и выглядеть должно одинаково.
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
         Box(
-            Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface)
-                .padding(horizontal = 10.dp, vertical = 3.dp),
+            Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.labelScrim)
+                .padding(horizontal = 11.dp, vertical = 3.dp),
         ) { Text(label, color = HoloSecondary, fontSize = 11.sp) }
     }
 }
@@ -622,9 +631,10 @@ internal fun MessageInput(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Поле-пилюля: скрепка и эмодзи ВНУТРИ.
+            // Поле ввода: скрепка и эмодзи ВНУТРИ. Скругление такое же, как у кнопок
+            // и карточек — пилюля выбивалась из общего языка форм.
             Row(
-                Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(HoloSurface),
+                Modifier.weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloSurface),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Скрепка выдвигает лист вложений из этой же строки; эмодзи ведёт
@@ -697,8 +707,9 @@ internal fun MessageInput(
                 }
             }
             Box(
-                Modifier.clip(RoundedCornerShape(percent = 30))
-                    .background(if (recording) HoloError else HoloAccent).size(44.dp).then(btnMod),
+                Modifier.clip(RoundedCornerShape(Tokens.Radius.button))
+                    .background(if (recording) HoloError else HoloAccent)
+                    .size(Tokens.Size.inputField).then(btnMod),
                 contentAlignment = Alignment.Center,
             ) {
                 val send = hasText || hasPicked
@@ -764,6 +775,9 @@ internal fun MessageBubble(
     )
     val selecting = model.selection.isNotEmpty()
     val selected = MsgRef(m.id, m.mine) in model.selection
+    // Мета одна на все ветки пузыря: и когда она встроена в текст, и когда лежит
+    // поверх вложения — это один и тот же набор значков.
+    val meta: @Composable () -> Unit = { MsgMeta(m.time, m.mine, m.editedAt > 0, m.status) }
     Row(
         Modifier.fillMaxWidth().padding(bottom = blockGap(pos))
             .graphicsLayer {
@@ -823,46 +837,22 @@ internal fun MessageBubble(
                             "image" -> ImageAttachment(blobBytes) { viewer = true }
                             "voice" -> VoiceAttachment(blobBytes)
                             "file" -> FileAttachment(m.name, blobBytes)
-                            else -> Text(
-                                m.text,
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                modifier = Modifier.padding(end = bubbleTimeReserve(m.mine, m.editedAt > 0)),
-                            )
+                            // Текст обтекает мету: она едет в конец последней строки
+                            // и переносится сама, если та её не вмещает.
+                            else -> BubbleText(m.text) { meta() }
                         }
                     }
                     // Подпись к вложению — в том же пузыре, под содержимым. Она пришла
                     // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
                     if (m.kind != "text" && m.text.isNotEmpty()) {
-                        Text(
-                            m.text,
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            modifier = Modifier
-                                .padding(top = 6.dp, end = bubbleTimeReserve(m.mine, m.editedAt > 0)),
-                        )
+                        BubbleText(m.text, modifier = Modifier.padding(top = 6.dp)) { meta() }
                     }
                 }
             }
-            Row(
-                Modifier.align(Alignment.BottomEnd),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (m.editedAt > 0) {
-                    // Текст подменился — молчать об этом нельзя, иначе «исправил»
-                    // неотличимо от «так и было написано».
-                    Text(
-                        stringResource(R.string.chat_edited),
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 10.sp,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
-                Text(fmtMsgTime(m.time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                if (m.mine) {
-                    Spacer(Modifier.width(3.dp))
-                    StatusTick(m.status)
-                }
+            // У вложения без подписи мете некуда встроиться — она ложится поверх
+            // содержимого в углу пузыря.
+            if (m.kind != "text" && m.text.isEmpty()) {
+                Box(Modifier.align(Alignment.BottomEnd)) { meta() }
             }
         }
     }
@@ -1119,6 +1109,32 @@ internal fun ImageViewer(bytes: ByteArray, onClose: () -> Unit) {
  *  `pending` (уходит прямо сейчас) НЕ только иконкой, но и подписью: раньше оба
  *  рисовались одинаковыми часами, и «ждёт неделю» выглядело как «сейчас отправится».
  *  Галочка `sent` — доставка НЕ подтверждена; ✓✓ ставится только по Ack. */
+/**
+ * Мета сообщения: «изм.», время и — у своих — галочка доставки. Один компонент на
+ * все ленты (личные чаты, группы, заметки): это подпись под одним и тем же фактом,
+ * и расходиться она не должна.
+ */
+@Composable
+internal fun MsgMeta(time: Long, mine: Boolean, edited: Boolean, status: String = "") {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (edited) {
+            // Текст подменился — молчать об этом нельзя, иначе «исправил»
+            // неотличимо от «так и было написано».
+            Text(
+                stringResource(R.string.chat_edited),
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 10.sp,
+            )
+            Spacer(Modifier.width(4.dp))
+        }
+        Text(fmtMsgTime(time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+        if (mine) {
+            Spacer(Modifier.width(3.dp))
+            StatusTick(status)
+        }
+    }
+}
+
 @Composable
 internal fun StatusTick(status: String) {
     val tint = Color.White.copy(alpha = 0.7f)
@@ -1126,10 +1142,9 @@ internal fun StatusTick(status: String) {
         "delivered" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_delivered), tint = tint, modifier = Modifier.size(13.dp))
         "sent" -> Icon(Icons.Filled.Done, stringResource(R.string.status_sent), tint = tint, modifier = Modifier.size(13.dp))
         "pending" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_sending), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
-        // Только значок, без слова: строка времени в пузыре имеет фиксированный
-        // резерв места (см. bubbleTimeReserve), а слово его переполняло и наезжало
-        // на короткий текст. Расшифровка статуса — в описании для screen reader и
-        // на экране очереди отправки.
+        // Только значок, без слова: мета живёт в углу пузыря и должна оставаться
+        // узкой — слово растянуло бы её на половину строки. Расшифровка статуса —
+        // в описании для screen reader и на экране очереди отправки.
         "queued" -> Icon(
             Icons.Filled.CloudQueue,
             stringResource(R.string.status_queued),

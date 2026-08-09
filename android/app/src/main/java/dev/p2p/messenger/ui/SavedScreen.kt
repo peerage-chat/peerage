@@ -106,22 +106,10 @@ internal fun SavedScreen(model: AppModel) {
                                 )
                                 .padding(horizontal = 10.dp, vertical = 6.dp),
                         ) {
-                            Text(
-                                n.text,
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                modifier = Modifier.padding(end = bubbleTimeReserve(false, n.editedAt > 0)),
-                            )
-                            Text(
-                                if (n.editedAt > 0) {
-                                    stringResource(R.string.chat_edited) + " " + fmtMsgTime(n.time)
-                                } else {
-                                    fmtMsgTime(n.time)
-                                },
-                                color = Color.White.copy(alpha = 0.5f),
-                                fontSize = 11.sp,
-                                modifier = Modifier.align(Alignment.BottomEnd),
-                            )
+                            // Заметка себе: галочек нет — доставлять некому.
+                            BubbleText(n.text) {
+                                MsgMeta(n.time, mine = false, edited = n.editedAt > 0)
+                            }
                         }
                     }
                 }
