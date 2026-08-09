@@ -151,7 +151,7 @@
     <string name="channels_soon">Channels — soon</string>
     <!-- Offline queue growth warning (nothing is ever deleted, this is just a notice) -->
     <string name="outbox_warn">%1$d messages are still waiting to be delivered. They are kept — recipients will get them once online.</string>
-    <string name="settings_notifications">NOTIFICATIONS</string>
+    <string name="settings_notifications">Notifications</string>
     <string name="settings_outbox_warn">Warn about a growing outbox</string>
     <string name="settings_outbox_warn_hint">Messages are never deleted — this only shows a notice</string>
     <!-- Contact requests (gate instead of TOFU auto-add) -->
@@ -269,10 +269,10 @@
     <string name="qr_scan_hint">Point the camera at a QR code</string>
 
     <!-- ── Settings ────────────────────────────────────────────────────── -->
-    <string name="settings_video_quality">VIDEO CALL QUALITY</string>
+    <string name="settings_video_quality">Video call quality</string>
     <string name="settings_bitrate">%1$s Mbps</string>
     <string name="settings_video_apply">Applies to the next call.</string>
-    <string name="settings_about">ABOUT</string>
+    <string name="settings_about">About</string>
     <string name="settings_version_label">Version</string>
     <string name="settings_version_value">0.1.0 (dev)</string>
     <string name="settings_transport_label">Transport</string>
@@ -523,7 +523,7 @@
     <string name="settings_privacy_none">No metadata is revealed</string>
     <string name="settings_privacy_none_desc">Read receipts and typing indicators are never sent — there is nothing here to switch off.</string>
     <string name="settings_privacy_presence">Contacts do see your online status: it follows from the keepalive that delivery relies on.</string>
-    <string name="settings_security">SECURITY</string>
+    <string name="settings_security">Security</string>
     <string name="settings_key_backup">Key backup</string>
     <string name="settings_key_backup_done">Done</string>
     <string name="settings_key_backup_todo">Not done — your identity rests on 24 words</string>
@@ -669,4 +669,5 @@
     <string name="me_qr_hint">Show it to someone — they add you without any server</string>
     <string name="peers_online">%1$d peers online</string>
     <string name="settings_title_sections">Sections</string>
+    <string name="settings_title_profile_data">Profile and data</string>
 </resources>

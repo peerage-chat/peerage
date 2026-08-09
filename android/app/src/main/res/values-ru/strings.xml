@@ -143,7 +143,7 @@
     <string name="channels_soon">Каналы — скоро</string>
     <!-- Предупреждение о разросшейся очереди (ничего не удаляется, это только уведомление) -->
     <string name="outbox_warn">%1$d сообщений ещё ждут доставки. Они сохранены — получатели получат их, когда выйдут в сеть.</string>
-    <string name="settings_notifications">УВЕДОМЛЕНИЯ</string>
+    <string name="settings_notifications">Уведомления</string>
     <string name="settings_outbox_warn">Предупреждать о росте очереди</string>
     <string name="settings_outbox_warn_hint">Сообщения не удаляются — это только уведомление</string>
     <!-- Запросы в контакты (гейт вместо TOFU-автодобавления) -->
@@ -261,10 +261,10 @@
     <string name="qr_scan_hint">Наведите камеру на QR-код</string>
 
     <!-- ── Настройки ───────────────────────────────────────────────────── -->
-    <string name="settings_video_quality">КАЧЕСТВО ВИДЕО-ЗВОНКА</string>
+    <string name="settings_video_quality">Качество видеозвонка</string>
     <string name="settings_bitrate">%1$s Мбит/с</string>
     <string name="settings_video_apply">Изменение применяется к следующему звонку.</string>
-    <string name="settings_about">О ПРИЛОЖЕНИИ</string>
+    <string name="settings_about">О приложении</string>
     <string name="settings_version_label">Версия</string>
     <string name="settings_version_value">0.1.0 (dev)</string>
     <string name="settings_transport_label">Транспорт</string>
@@ -515,7 +515,7 @@
     <string name="settings_privacy_none">Метаданные не раскрываем</string>
     <string name="settings_privacy_none_desc">Отчёты о прочтении и индикатор набора не отправляются вовсе — здесь нечего выключать.</string>
     <string name="settings_privacy_presence">Статус «в сети» контакты видят: он следует из keepalive, которым держится доставка.</string>
-    <string name="settings_security">БЕЗОПАСНОСТЬ</string>
+    <string name="settings_security">Безопасность</string>
     <string name="settings_key_backup">Резервная копия ключа</string>
     <string name="settings_key_backup_done">Сделана</string>
     <string name="settings_key_backup_todo">Не сделана — личность держится на 24 словах</string>
@@ -661,4 +661,5 @@
     <string name="me_qr_hint">Покажите его собеседнику — он добавит вас без сервера</string>
     <string name="peers_online">%1$d пиров в сети</string>
     <string name="settings_title_sections">Разделы</string>
+    <string name="settings_title_profile_data">Профиль и данные</string>
 </resources>

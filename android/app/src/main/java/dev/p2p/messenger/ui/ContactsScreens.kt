@@ -840,8 +840,10 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                 }
             }
         }
+        // Версия — из того же ресурса, что и в «О приложении»: подпись «v0.3» здесь
+        // жила отдельной строкой в коде и уже разошлась с настройками.
         Text(
-            "p2p messenger · v0.3",
+            stringResource(R.string.app_name) + " · " + stringResource(R.string.settings_version_value),
             color = Tokens.Colors.tertiary,
             fontSize = 11.sp,
             modifier = Modifier.padding(Tokens.Space.l),
