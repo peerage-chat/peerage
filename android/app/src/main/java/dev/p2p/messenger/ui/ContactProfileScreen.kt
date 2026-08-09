@@ -118,6 +118,8 @@ internal fun ContactProfileScreen(
             }
         }
 
+        Spacer(Modifier.height(Tokens.Space.s))
+
         // ── Действия. Кнопки «Видео» нет: камеру включают уже внутри звонка. ──
         Row(
             Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s),
