@@ -2,7 +2,6 @@
 
 package dev.p2p.messenger.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.AppModel
@@ -140,24 +140,27 @@ internal fun ForwardMark(model: AppModel, fwdFrom: String, anon: Boolean = false
         }
         stringResource(R.string.forward_from, who)
     }
+    // БЕЗ fillMaxWidth: подпись растягивала пузырь до предельной ширины, и короткое
+    // пересланное сообщение превращалось в плиту с дырой перед временем. Ширину
+    // пузыря должно задавать содержимое, а не служебная пометка.
     Row(
-        Modifier.fillMaxWidth().padding(bottom = 2.dp),
+        Modifier.padding(bottom = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Иконка-стрелка: подпись читается как пометка о пересылке даже боковым
         // зрением, не сливаясь с текстом сообщения.
+        //
+        // Цвет — белый с прозрачностью, а НЕ серый `HoloSecondary`: на цветном пузыре
+        // серый читается как пятно чужого слоя, а полупрозрачный белый остаётся в
+        // цветовой семье пузыря и одинаково работает на входящем и исходящем.
+        val tint = Color.White.copy(alpha = 0.55f)
         Icon(
             Icons.AutoMirrored.Filled.ArrowForward,
             null,
-            tint = HoloSecondary,
-            modifier = Modifier.size(13.dp),
+            tint = tint,
+            modifier = Modifier.size(12.dp),
         )
         Spacer(Modifier.width(4.dp))
-        Text(
-            label,
-            color = HoloSecondary,
-            fontSize = 12.sp,
-            modifier = Modifier.background(Color.Transparent),
-        )
+        Text(label, color = tint, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

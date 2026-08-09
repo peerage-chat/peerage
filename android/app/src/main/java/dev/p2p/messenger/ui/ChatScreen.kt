@@ -1115,18 +1115,25 @@ internal fun ImageViewer(bytes: ByteArray, onClose: () -> Unit) {
  */
 @Composable
 internal fun MsgMeta(time: Long, mine: Boolean, edited: Boolean, status: String = "") {
+    // 11sp вместо 10 и прозрачность 0.6 вместо 0.5: на 10sp в полупрозрачном белом
+    // время буквально пропадало. 11 — нижняя граница читаемого в интерфейсе, ниже
+    // опускаться уже нечему.
+    val fg = Color.White.copy(alpha = 0.6f)
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (edited) {
             // Текст подменился — молчать об этом нельзя, иначе «исправил»
             // неотличимо от «так и было написано».
-            Text(
-                stringResource(R.string.chat_edited),
-                color = Color.White.copy(alpha = 0.5f),
-                fontSize = 10.sp,
-            )
+            Text(stringResource(R.string.chat_edited), color = fg, fontSize = 11.sp)
             Spacer(Modifier.width(4.dp))
         }
-        Text(fmtMsgTime(time), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+        // Моноширинные цифры: время у каждого сообщения своё, а колонка меты общая —
+        // на пропорциональных цифрах она слегка гуляла бы от строки к строке.
+        Text(
+            fmtMsgTime(time),
+            color = fg,
+            fontSize = 11.sp,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
         if (mine) {
             Spacer(Modifier.width(3.dp))
             StatusTick(status)
