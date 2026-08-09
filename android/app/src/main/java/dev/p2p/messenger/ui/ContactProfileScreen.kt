@@ -173,23 +173,11 @@ internal fun ContactProfileScreen(
                         stringResource(if (c.verified) R.string.profile_recheck else R.string.profile_scan_qr),
                         Modifier.weight(1f),
                     ) { onScanQr() }
-                    if (c.verified) {
-                        OutlinedButton(
-                            onClick = { model.toggleVerified(key) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(Tokens.Radius.button),
-                        ) {
-                            Text(stringResource(R.string.info_unmark), color = HoloSecondary)
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = { model.toggleVerified(key) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(Tokens.Radius.button),
-                        ) {
-                            Text(stringResource(R.string.info_mark), color = HoloAccent)
-                        }
-                    }
+                    OutlineButton(
+                        stringResource(if (c.verified) R.string.info_unmark else R.string.info_mark),
+                        Modifier.weight(1f),
+                        tint = if (c.verified) Tokens.Colors.secondary else HoloAccent,
+                    ) { model.toggleVerified(key) }
                 }
             }
         }

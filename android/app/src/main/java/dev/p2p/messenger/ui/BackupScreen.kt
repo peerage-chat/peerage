@@ -258,10 +258,12 @@ private fun PickParts(
         AccentButton(stringResource(R.string.backup_next), Modifier.fillMaxWidth()) {
             if (any) onNext()
         }
-        OutlinedButton(
+        OutlineButton(
+            stringResource(R.string.backup_restore),
+            Modifier.fillMaxWidth(),
+            tint = Color.White,
             onClick = onRestore,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.backup_restore), color = Color.White) }
+        )
         Spacer(Modifier.height(Tokens.Space.l))
     }
 }

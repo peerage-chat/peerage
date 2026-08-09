@@ -2,6 +2,7 @@
 
 package dev.p2p.messenger.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -307,13 +308,35 @@ internal fun CardRow(
 internal fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        modifier = modifier,
-        // Форма — наша, а не material-пилюля: кнопка стоит рядом с полем ввода и
-        // плашками той же высоты, и полное скругление выбивалось из шкалы.
+        // Высота как у поля ввода: на material-умолчании (~33dp) радиус 14 съедает
+        // почти всю сторону, и кнопка читается капсулой, а не нашей плашкой.
+        modifier = modifier.heightIn(min = Tokens.Size.inputField),
         shape = RoundedCornerShape(Tokens.Radius.button),
         colors = ButtonDefaults.buttonColors(containerColor = HoloAccent),
     ) {
         Text(text, color = HoloAccentDark, fontWeight = FontWeight.Medium)
+    }
+}
+
+/**
+ * Второстепенная кнопка: та же форма и высота, что у [AccentButton], но контуром.
+ * Material по умолчанию рисует кнопки пилюлей; рядом с нашими плашками радиуса 14
+ * это выглядело как элемент из другого набора.
+ */
+@Composable
+internal fun OutlineButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    tint: Color = HoloAccent,
+    onClick: () -> Unit,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = Tokens.Size.inputField),
+        shape = RoundedCornerShape(Tokens.Radius.button),
+        border = BorderStroke(1.dp, Tokens.Colors.border),
+    ) {
+        Text(text, color = tint, fontWeight = FontWeight.Medium)
     }
 }
 
