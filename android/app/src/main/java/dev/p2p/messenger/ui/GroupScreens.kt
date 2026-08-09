@@ -653,10 +653,10 @@ internal fun GroupBubble(
             }
         }
         if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
-        // Вложению без подписи встроить мету некуда — кладём её поверх, в угол.
-        if (m.kind != "text" && m.text.isEmpty()) {
-            Box(Modifier.align(Alignment.BottomEnd)) { meta() }
-        }
+        // Мета — в правом нижнем углу ПУЗЫРЯ (место в тексте под неё уже оставлено):
+        // имя автора и метка «Переслано» делают пузырь шире текста, и прижатая к
+        // концу строки мета висела бы посередине.
+        Box(Modifier.align(Alignment.BottomEnd)) { meta() }
     }
 }
 

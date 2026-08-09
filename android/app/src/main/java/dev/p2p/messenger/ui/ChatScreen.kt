@@ -849,11 +849,10 @@ internal fun MessageBubble(
                     }
                 }
             }
-            // У вложения без подписи мете некуда встроиться — она ложится поверх
-            // содержимого в углу пузыря.
-            if (m.kind != "text" && m.text.isEmpty()) {
-                Box(Modifier.align(Alignment.BottomEnd)) { meta() }
-            }
+            // Мета всегда в правом нижнем углу ПУЗЫРЯ: место под неё уже оставлено
+            // в тексте, а прижимать её к концу строки нельзя — у пузыря шире текста
+            // (метка «Переслано», имя автора) она повисла бы посередине.
+            Box(Modifier.align(Alignment.BottomEnd)) { meta() }
         }
     }
     if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }

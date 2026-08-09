@@ -107,9 +107,11 @@ internal fun SavedScreen(model: AppModel) {
                                 .padding(horizontal = 10.dp, vertical = 6.dp),
                         ) {
                             // Заметка себе: галочек нет — доставлять некому.
-                            BubbleText(n.text) {
+                            val meta: @Composable () -> Unit = {
                                 MsgMeta(n.time, mine = false, edited = n.editedAt > 0)
                             }
+                            BubbleText(n.text) { meta() }
+                            Box(Modifier.align(Alignment.BottomEnd)) { meta() }
                         }
                     }
                 }
