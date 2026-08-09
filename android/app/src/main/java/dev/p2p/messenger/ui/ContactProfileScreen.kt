@@ -91,23 +91,30 @@ internal fun ContactProfileScreen(
                 color = if (online) HoloOnline else HoloSecondary,
                 fontSize = 13.sp,
             )
-            // Адрес целиком: его сверяют и диктуют, половина для этого бесполезна.
-            Row(
-                Modifier.padding(top = Tokens.Space.s)
-                    .clip(RoundedCornerShape(Tokens.Radius.chip))
-                    .clickable { copyToClipboard(ctx, c.key) }
-                    .padding(horizontal = Tokens.Space.s, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    c.key,
-                    color = HoloSecondary,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.weight(1f, fill = false),
+        }
+
+        // Ключ — строкой в карточке, сокращённо и в одну строку. Целиком он занимал
+        // две строки моноширинного текста прямо под именем и читался как ошибка
+        // вёрстки. Сверяют собеседника всё равно не по нему, а по отпечатку ниже
+        // (знаки + слова); ключ нужен, чтобы его СКОПИРОВАТЬ — тап это и делает.
+        CardSection {
+            CardRow(onClick = { copyToClipboard(ctx, c.key) }, divider = false, inset = 0.dp) {
+                Column(Modifier.weight(1f)) {
+                    FieldLabel(stringResource(R.string.me_pubkey_label))
+                    Text(
+                        c.key.take(10) + "…" + c.key.takeLast(6),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                    )
+                }
+                Icon(
+                    Icons.Filled.ContentCopy,
+                    stringResource(R.string.me_copy_key),
+                    tint = HoloAccent,
+                    modifier = Modifier.size(Tokens.Size.iconS),
                 )
-                Spacer(Modifier.width(6.dp))
-                Icon(Icons.Filled.ContentCopy, null, tint = HoloAccent, modifier = Modifier.size(15.dp))
             }
         }
 
