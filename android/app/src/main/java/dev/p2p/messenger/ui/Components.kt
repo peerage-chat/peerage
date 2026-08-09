@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.InlineTextContent
-import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -31,10 +29,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.Placeholder
-import androidx.compose.ui.text.PlaceholderVerticalAlign
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
@@ -308,35 +306,42 @@ internal fun BubbleText(
     fontSize: TextUnit = 15.sp,
     meta: @Composable () -> Unit,
 ) {
-    val slot = "meta"
+    val measurer = rememberTextMeasurer()
+    val style = TextStyle(color = color, fontSize = fontSize)
     SubcomposeLayout(modifier) { constraints ->
-        // Мету здесь только ИЗМЕРЯЕМ, чтобы оставить ей место в конце текста.
-        // Рисует её сам пузырь, в своём правом нижнем углу: иначе у пузыря шире
-        // текста (например, из-за метки «Переслано») время повисало бы посередине,
-        // а растянуться до ширины соседей этот layout не может.
-        val metaP = subcompose(slot, meta).map { it.measure(Constraints()) }
+        // Мету здесь только ИЗМЕРЯЕМ, чтобы оставить ей место. Рисует её сам пузырь,
+        // в своём правом нижнем углу: у пузыря шире текста (метка «Переслано», имя
+        // автора) прижатая к концу строки мета повисла бы посередине, а растянуться
+        // до ширины соседей этот layout не может.
+        val metaP = subcompose("meta", meta).map { it.measure(Constraints()) }
         val metaW = metaP.maxOfOrNull { it.width } ?: 0
         val metaH = metaP.maxOfOrNull { it.height } ?: 0
-        // Зазор между текстом и метой — часть вставки, иначе они слипаются.
-        val gap = 8.dp.roundToPx()
-        val holder = Placeholder(
-            width = (metaW + gap).toSp(),
-            height = metaH.toSp(),
-            placeholderVerticalAlign = PlaceholderVerticalAlign.Bottom,
-        )
-        val textP = subcompose("text") {
-            Text(
-                buildAnnotatedString {
-                    append(text)
-                    appendInlineContent(slot, " ")
-                },
-                color = color,
-                fontSize = fontSize,
-                inlineContent = mapOf(slot to InlineTextContent(holder) {}),
-            )
-        }.first().measure(constraints)
+        val gap = 8.dp.roundToPx() // зазор между текстом и метой
 
-        layout(textP.width, textP.height) { textP.place(0, 0) }
+        // Стиль ОДИН на измерение и на показ: разойдись они хоть на межбуквенный
+        // интервал — расчёт «влезает ли мета» пойдёт по одной ширине строки, а
+        // нарисуется другая, и время слипнется с текстом.
+        val textP = subcompose("text") { Text(text, style = style) }.first().measure(constraints)
+
+        // Решаем САМИ, влезает ли мета в конец последней строки: меряем текст и
+        // смотрим, где эта строка кончается. Прежний вариант — невидимая вставка
+        // размера меты в конце текста — отдавал решение движку переноса, и тот
+        // считал её частью последнего слова: мета уезжала на отдельную строку даже
+        // когда рядом было полно места, а место под неё всё равно резервировалось
+        // сбоку.
+        val m = measurer.measure(
+            AnnotatedString(text),
+            style,
+            constraints = Constraints(maxWidth = constraints.maxWidth),
+        )
+        val lastRight = m.getLineRight(m.lineCount - 1).toInt()
+        val fits = lastRight + gap + metaW <= constraints.maxWidth
+
+        val width = if (fits) maxOf(textP.width, lastRight + gap + metaW) else textP.width
+        // Не влезла — отдаём ей строку под текстом. Ширину при этом НЕ трогаем:
+        // сбоку резервировать нечего, мета уже не в строке.
+        val height = textP.height + if (fits) 0 else metaH
+        layout(width, height) { textP.place(0, 0) }
     }
 }
 
