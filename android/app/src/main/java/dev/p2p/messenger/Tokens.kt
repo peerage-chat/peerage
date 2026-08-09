@@ -22,8 +22,13 @@ object Tokens {
         val accentBadge = Color(0x2233B5E5) // фон бейджа (акцент @13%)
 
         // ── Поверхности ───────────────────────────────────────────────────────
-        val bg = Color(0xFF1A1A1A) // фон обычных экранов
-        val surface = Color(0xFF222222)
+        // Три слоя с ЗАМЕТНЫМ шагом: фон → карточка → элемент на карточке. Раньше
+        // bg/surface различались на 4% яркости, и экран читался плоским.
+        val bg = Color(0xFF0F0F11) // фон экрана (под карточками)
+        val surface = Color(0xFF1A1A1D) // карточка-контейнер: список, панели
+        val surfaceHi = Color(0xFF232327) // элемент НА карточке (кнопка, поле)
+        val rowPinned = Color(0xFF1F1F23) // закреплённая строка списка — ступень над surface
+        val divider = Color(0xFF26262B) // разделитель ВНУТРИ карточки
         val border = Color(0xFF333333)
         val callBg = Color(0xFF181A1F) // фон экрана звонка/шаринга (темнее тайлов → слоистость)
         val tile = Color(0xFF1A1D21) // тайлы звонка, поля ввода, невыбранные чипы
@@ -31,7 +36,8 @@ object Tokens {
 
         // ── Текст/иконки ──────────────────────────────────────────────────────
         val onDark = Color.White
-        val secondary = Color(0xFF888888)
+        val secondary = Color(0xFF82828C) // вторичный текст: превью чата, подписи
+        val tertiary = Color(0xFF6F6F78) // время, счётчики — тише вторичного
         val iconMuted = Color(0xFF5A5F66) // иконка-заглушка (превью)
         val iconChrome = Color(0xFFE6E7EA) // иконки chrome-чипов
         val onOnline = Color(0xFF0A1F0A) // текст на зелёном (мини-аватар)
@@ -49,9 +55,13 @@ object Tokens {
         val iconDangerMuted = Color(0xFFFF8A8A) // иконка выключенного
 
         // ── Чат ───────────────────────────────────────────────────────────────
-        val bubbleIn = Color(0xFF24292F)
-        val bubbleOut = Color(0xFF245266)
+        val bubbleIn = Color(0xFF1E1E22) // входящий — тот же слой, что карточки списка
+        val bubbleOut = Color(0xFF1F4657) // исходящий — приглушённый акцент
+        val metaOnOut = Color(0xFF9FC4D4) // время/«изм.» на исходящем пузыре
+        val tickOnOut = Color(0xFF8FD0EA) // галочки доставки
+        val labelScrim = Color(0x0FFFFFFF) // подложка ярлыка даты/системного события
         val folderSelected = Color(0xFF1C3A47)
+        val unreadMuted = Color(0xFF3A3A42) // счётчик чата без звука
 
         // ── Скримы/оверлеи ────────────────────────────────────────────────────
         val overlay = Color(0xF2000000) // полноэкранный оверлей (входящее/настройки)
@@ -79,17 +89,21 @@ object Tokens {
         val screen = l // 16 — отступ контента экрана
         val formGap = m // 12 — зазор в формах
         val rowV = 9.dp // намеренная плотность ряда списка (Telegram-density), вне сетки
+        val series = 3.dp // зазор между сообщениями ОДНОЙ серии (между сериями — s)
     }
 
     /** Радиусы скруглений (dp). */
     object Radius {
         val badge = 6.dp
+        val bubbleTail = 6.dp // срезанный угол на СТЫКЕ сообщений одной серии
         val chip = 10.dp
         val tile = 12.dp
         val preview = 14.dp
         val button = 14.dp
         val avatar = 14.dp // «квадрат со скруглением» — абсолютный радиус (app-ui.md: ~14-15px)
+        val bubble = 17.dp // пузырь сообщения (внешние углы)
         val pill = 18.dp
+        val card = 20.dp // карточка-контейнер (список чатов, панели)
     }
 
     /**
@@ -111,6 +125,15 @@ object Tokens {
         val iconS = 18.dp
         val iconM = 22.dp
         val iconL = 25.dp
+
+        // ── Список чатов / чат ────────────────────────────────────────────────
+        val chatRow = 66.dp // высота строки списка чатов
+        val avatarRow = 46.dp // аватар в строке списка
+        val avatarHead = 38.dp // аватар в шапке чата
+        val avatarSeries = 26.dp // аватар у последнего сообщения серии
+        val tabBar = 40.dp // высота полосы табов-папок
+        val inputField = 42.dp // поле ввода и кнопка отправки
+        val metaSlot = 46.dp // ширина правой колонки строки (время + значок)
     }
 
     /** Размеры шрифта (sp). */

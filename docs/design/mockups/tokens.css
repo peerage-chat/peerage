@@ -10,9 +10,12 @@
   --accent-muted: #13313D;
   --accent-badge: rgba(51, 181, 229, 0.13);
 
-  /* ── Поверхности ── */
-  --bg: #1A1A1A;
-  --surface: #222222;
+  /* ── Поверхности (три слоя с заметным шагом: фон → карточка → элемент) ── */
+  --bg: #0F0F11;
+  --surface: #1A1A1D;
+  --surface-hi: #232327;
+  --row-pinned: #1F1F23;
+  --divider: #26262B;
   --border: #333333;
   --call-bg: #181A1F;
   --tile: #1A1D21;
@@ -20,7 +23,8 @@
 
   /* ── Текст/иконки ── */
   --on-dark: #FFFFFF;
-  --secondary: #888888;
+  --secondary: #82828C;
+  --tertiary: #6F6F78;
   --icon-muted: #5A5F66;
   --icon-chrome: #E6E7EA;
   --on-online: #0A1F0A;
@@ -33,9 +37,13 @@
   --offline-dot: #555555;
 
   /* ── Чат ── */
-  --bubble-in: #24292F;          /* входящий пузырь (нейтральный) */
-  --bubble-out: #245266;         /* исходящий (приглушённый акцент) */
+  --bubble-in: #1E1E22;          /* входящий — тот же слой, что карточки списка */
+  --bubble-out: #1F4657;         /* исходящий (приглушённый акцент) */
+  --meta-on-out: #9FC4D4;        /* время/«изм.» на исходящем */
+  --tick-on-out: #8FD0EA;        /* галочки доставки */
+  --label-scrim: rgba(255,255,255,0.06); /* подложка ярлыка даты/системного события */
   --folder-selected: #1C3A47;
+  --unread-muted: #3A3A42;       /* счётчик чата без звука */
 
   /* ── Скримы/оверлеи ── */
   --overlay: rgba(0, 0, 0, 0.95);
@@ -51,15 +59,28 @@
   --space-xl: 20px;
   --space-xxl: 24px;
   --row-v: 9px;
+  --space-series: 3px;           /* зазор внутри серии сообщений */
 
   /* ── Радиусы ── */
   --radius-badge: 6px;
+  --radius-tail: 6px;            /* срезанный угол на стыке серии */
   --radius-chip: 10px;
   --radius-tile: 12px;
   --radius-preview: 14px;
   --radius-button: 14px;
   --radius-avatar: 14px;         /* «квадрат со скруглением» */
+  --radius-bubble: 17px;
   --radius-pill: 18px;
+  --radius-card: 20px;           /* карточка-контейнер */
+
+  /* ── Размеры списка/чата ── */
+  --size-chat-row: 66px;
+  --size-avatar-row: 46px;
+  --size-avatar-head: 38px;
+  --size-avatar-series: 26px;
+  --size-tabbar: 40px;
+  --size-input: 42px;
+  --size-meta-slot: 46px;
 
   /* ── Шрифт (sp ≈ px) ── */
   --font-caption: 11px;

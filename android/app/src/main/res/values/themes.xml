@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Holo-тема (Android 4.x): тёмный фон, синий акцент. Compose задаёт цвета
-         контента сам; этот XML-тема нужна Activity (фон/статус-бар, без ActionBar). -->
+    <!-- Тёмная тема приложения. Compose задаёт цвета контента сам; XML-тема нужна
+         Activity (фон окна, системные полосы, без ActionBar).
+         Значения — зеркало Tokens.Colors.bg (#0F0F11): системные полосы должны
+         сливаться с фоном экрана, иначе окно выглядит вставленным в чужую рамку. -->
     <style name="Theme.P2P" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#04222e</item>
-        <item name="android:windowBackground">#1a1a1a</item>
-        <item name="android:navigationBarColor">#1a1a1a</item>
+        <item name="android:statusBarColor">#0f0f11</item>
+        <item name="android:windowBackground">#0f0f11</item>
+        <item name="android:navigationBarColor">#0f0f11</item>
     </style>
 </resources>
