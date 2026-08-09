@@ -551,7 +551,7 @@ private fun GroupReplyStrip(model: AppModel, m: GroupMsg) {
 
 /** Цитата в групповом пузыре: имя автора оригинала + начало текста. */
 @Composable
-private fun GroupQuote(model: AppModel, m: GroupMsg) {
+private fun GroupQuote(model: AppModel, m: GroupMsg, modifier: Modifier = Modifier) {
     val src = model.groupMessages[model.currentGroup]
         ?.firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
     val who = if (m.replySender == model.me?.pubkey) {
@@ -559,16 +559,19 @@ private fun GroupQuote(model: AppModel, m: GroupMsg) {
     } else {
         groupSenderName(model, m.replySender)
     }
+    // Те же правила, что у цитаты в личном чате: подложка и текст — полупрозрачный
+    // белый, чтобы плашка читалась на цветном пузыре.
     Row(
-        Modifier.padding(bottom = 4.dp).heightIn(min = 28.dp)
-            .clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.06f)),
+        modifier.padding(bottom = 4.dp).heightIn(min = 30.dp)
+            .clip(RoundedCornerShape(Tokens.Radius.chip))
+            .background(Color.White.copy(alpha = 0.10f)),
     ) {
-        Box(Modifier.width(2.dp).heightIn(min = 28.dp).background(HoloAccent))
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp)) {
+        Box(Modifier.width(2.5.dp).heightIn(min = 30.dp).background(HoloAccent))
+        Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
             Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Text(
                 src?.let { it.text.ifEmpty { it.name } } ?: stringResource(R.string.chat_reply_gone),
-                color = HoloSecondary,
+                color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -619,7 +622,9 @@ internal fun GroupBubble(
         Column {
             val head: @Composable () -> Unit = {
                 ForwardMark(model, m.fwdFrom, m.fwdAnon)
-                if (m.replyTo != 0L) GroupQuote(model, m)
+                if (m.replyTo != 0L) {
+                    GroupQuote(model, m, if (photoHeader) Modifier.fillMaxWidth() else Modifier)
+                }
                 if (senderName != null) {
                     Text(
                         senderName,

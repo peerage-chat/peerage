@@ -338,7 +338,12 @@ internal fun displayName(ctx: android.content.Context, uri: android.net.Uri): St
  * это прямо, а не рисуем пустую полоску, иначе ответ выглядит сломанным.
  */
 @Composable
-private fun QuoteBlock(model: AppModel, src: Message?, quotedMine: Boolean) {
+private fun QuoteBlock(
+    model: AppModel,
+    src: Message?,
+    quotedMine: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val who = if (quotedMine) {
         stringResource(R.string.chat_reply_you)
     } else {
@@ -346,17 +351,21 @@ private fun QuoteBlock(model: AppModel, src: Message?, quotedMine: Boolean) {
         model.contacts.firstOrNull { it.key == k }?.displayName
             ?: stringResource(R.string.chat_default_title)
     }
+    // Плашка цитаты живёт ВНУТРИ цветного пузыря, поэтому и подложка, и текст —
+    // полупрозрачный белый: серый (`HoloSecondary`) на синем читается пятном чужого
+    // слоя, а 6% белого на нём почти не видно — плашка казалась случайной рамкой.
     Row(
-        Modifier.padding(bottom = 4.dp).heightIn(min = 28.dp)
-            .clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = 0.06f)),
+        modifier.padding(bottom = 4.dp).heightIn(min = 30.dp)
+            .clip(RoundedCornerShape(Tokens.Radius.chip))
+            .background(Color.White.copy(alpha = 0.10f)),
     ) {
-        Box(Modifier.width(2.dp).heightIn(min = 28.dp).background(HoloAccent))
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 3.dp)) {
+        Box(Modifier.width(2.5.dp).heightIn(min = 30.dp).background(HoloAccent))
+        Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
             Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Text(
                 src?.let { if (it.text.isNotEmpty()) it.text else it.name.ifEmpty { quoteKind(it.kind) } }
                     ?: stringResource(R.string.chat_reply_gone),
-                color = HoloSecondary,
+                color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -838,7 +847,14 @@ internal fun MessageBubble(
                             // отправителя и у обеих сторон может совпасть.
                             val src = model.messages[model.currentChat]
                                 ?.firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
-                            QuoteBlock(model, src, m.replySender == model.me?.pubkey)
+                            QuoteBlock(
+                                model,
+                                src,
+                                m.replySender == model.me?.pubkey,
+                                // Над фото плашка тянется во всю ширину шапки: узкая
+                                // посреди широкой полосы читается обрывком.
+                                modifier = if (photoHeader) Modifier.fillMaxWidth() else Modifier,
+                            )
                         }
                     }
                     if (photoHeader) {
