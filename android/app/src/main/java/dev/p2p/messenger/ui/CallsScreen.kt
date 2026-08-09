@@ -4,7 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallMade
@@ -60,8 +60,14 @@ internal fun CallsScreen(model: AppModel, onCallPeer: (String) -> Unit, onJoinRo
             return
         }
 
+        // Журнал — один контейнер-карточка, как список чатов: это такой же
+        // перечень строк, и различаться формой они не должны.
         LazyColumn(Modifier.fillMaxSize()) {
-            items(rows, key = { "${it.started}_${it.peer}_${it.gid}" }) { e -> CallRow(model, e, onCallPeer, onJoinRoom) }
+            itemsIndexed(rows, key = { _, e -> "${e.started}_${e.peer}_${e.gid}" }) { i, e ->
+                CardBlock(first = i == 0, last = i == rows.lastIndex) {
+                    CallRow(model, e, onCallPeer, onJoinRoom, divider = i > 0)
+                }
+            }
             item { Spacer(Modifier.height(Tokens.Space.l)) }
         }
     }
@@ -73,6 +79,7 @@ private fun CallRow(
     e: CallEntry,
     onCallPeer: (String) -> Unit,
     onJoinRoom: (String) -> Unit,
+    divider: Boolean = false,
 ) {
     val isRoom = e.gid.isNotEmpty() && model.groups.any { it.gid == e.gid }
     val group = model.groups.firstOrNull { it.gid == e.gid }
@@ -80,16 +87,20 @@ private fun CallRow(
     val name = if (isRoom) group?.name.orEmpty() else contact?.displayName ?: e.peer.take(12)
     val missed = e.outcome == "missed"
 
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = RowPadV),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    CardRow(divider = divider, inset = 70.dp) {
         if (isRoom) {
-            SquareAvatar(name, size = 46.dp, bg = Color(0xFF0D2A0D)) {
+            // Комната — сущность: скруглённый квадрат. Человек — круг.
+            SquareAvatar(name, size = Tokens.Size.avatarRow, bg = Color(0xFF0D2A0D)) {
                 Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
             }
         } else {
-            SquareAvatar(name, size = 46.dp, avatarBytes = model.contactAvatars[contact?.avatarId])
+            SquareAvatar(
+                name,
+                size = Tokens.Size.avatarRow,
+                avatarBytes = model.contactAvatars[contact?.avatarId],
+                circle = true,
+                ring = Tokens.Colors.surface,
+            )
         }
         Spacer(Modifier.width(Tokens.Space.m))
         Column(Modifier.weight(1f)) {
@@ -115,7 +126,7 @@ private fun CallRow(
                 Text(outcomeLabel(e, isRoom), color = tint, fontSize = 13.sp)
             }
         }
-        Text(fmtCallTime(e.started), color = HoloSecondary, fontSize = 12.sp)
+        Text(fmtCallTime(e.started), color = Tokens.Colors.tertiary, fontSize = 12.sp)
         Spacer(Modifier.width(Tokens.Space.m))
         if (isRoom) {
             // Комната может звучать прямо сейчас — предлагаем войти, а не перезвонить.
@@ -132,7 +143,8 @@ private fun CallRow(
             }
         } else {
             Box(
-                Modifier.size(38.dp).clip(RoundedCornerShape(Tokens.Radius.tile)).background(HoloSurface)
+                Modifier.size(38.dp).clip(RoundedCornerShape(Tokens.Radius.button))
+                    .background(Tokens.Colors.surfaceHi)
                     .clickable { onCallPeer(e.peer) },
                 contentAlignment = Alignment.Center,
             ) {

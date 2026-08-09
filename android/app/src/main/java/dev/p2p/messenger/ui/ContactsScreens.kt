@@ -601,35 +601,61 @@ internal fun ContactListScreen(model: AppModel, onOpen: (String) -> Unit) {
         EmptyState(Icons.Filled.Group, stringResource(R.string.contacts_empty_title), stringResource(R.string.contacts_empty_hint))
         return
     }
-    LazyColumn(Modifier.fillMaxSize()) {
-        items(model.contacts, key = { it.key }) { c ->
+    // Один контейнер на весь список — как на главной: контакты это такой же
+    // перечень людей, и выглядеть он обязан так же.
+    LazyColumn(Modifier.fillMaxSize().padding(top = Tokens.Space.s)) {
+        itemsIndexed(model.contacts, key = { _, c -> c.key }) { i, c ->
             val online = model.online[c.key] == true
-            ListRow(onClick = { onOpen(c.key) }) {
-                SquareAvatar(c.displayName, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c.avatarId])
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            c.displayName,
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        if (c.verified) {
-                            Spacer(Modifier.width(4.dp))
-                            Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(13.dp))
-                        }
-                    }
-                    Text(
-                        if (online) "онлайн" else "не в сети",
-                        color = if (online) HoloOnline else HoloSecondary,
-                        fontSize = 11.sp,
+            val first = i == 0
+            val last = i == model.contacts.lastIndex
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s)
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = if (first) Tokens.Radius.card else 0.dp,
+                            topEnd = if (first) Tokens.Radius.card else 0.dp,
+                            bottomStart = if (last) Tokens.Radius.card else 0.dp,
+                            bottomEnd = if (last) Tokens.Radius.card else 0.dp,
+                        ),
                     )
+                    .background(Tokens.Colors.surface),
+            ) {
+                CardRow(onClick = { onOpen(c.key) }, divider = !first, inset = 70.dp) {
+                    SquareAvatar(
+                        c.displayName,
+                        size = Tokens.Size.avatarRow,
+                        online = online,
+                        avatarBytes = model.contactAvatars[c.avatarId],
+                        circle = true,
+                        ring = Tokens.Colors.surface,
+                    )
+                    Spacer(Modifier.width(Tokens.Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                c.displayName,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (c.verified) {
+                                Spacer(Modifier.width(Tokens.Space.xs))
+                                Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(13.dp))
+                            }
+                        }
+                        Text(
+                            stringResource(if (online) R.string.status_online else R.string.status_offline),
+                            color = if (online) HoloOnline else Tokens.Colors.tertiary,
+                            fontSize = 12.sp,
+                        )
+                    }
                 }
             }
         }
+        item { Spacer(Modifier.height(Tokens.Space.l)) }
     }
 }
 

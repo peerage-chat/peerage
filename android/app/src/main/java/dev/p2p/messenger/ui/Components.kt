@@ -206,6 +206,100 @@ internal fun FieldLabel(text: String) {
     Text(text, color = HoloSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
 }
 
+// ── Карточки-секции ─────────────────────────────────────────────────────────
+// Единый контейнер для всех списочных экранов: строки живут ВНУТРИ карточки,
+// заголовок секции — СНАРУЖИ, над ней. Так группа читается как один предмет, а
+// заголовок не оказывается «первой строкой списка», к которой хочется прикоснуться.
+
+/** Заголовок секции — над карточкой, приглушённый и мелкий. */
+@Composable
+internal fun SectionTitle(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        color = Tokens.Colors.secondary,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = modifier.padding(
+            start = Tokens.Space.l,
+            end = Tokens.Space.l,
+            top = Tokens.Space.m,
+            bottom = Tokens.Space.xs,
+        ),
+    )
+}
+
+/**
+ * Карточка-секция: фон слоя карточки, скругление 20, строки внутри.
+ * Отступ по бокам — 8dp, как у списка чатов: карточки всех экранов обязаны стоять
+ * по одной вертикали, иначе переход между экранами читается как сдвиг всего макета.
+ */
+@Composable
+internal fun CardSection(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s)
+            .clip(RoundedCornerShape(Tokens.Radius.card))
+            .background(Tokens.Colors.surface),
+        content = content,
+    )
+}
+
+/**
+ * Кусок карточки под ОДНУ строку ленивого списка: скругление появляется только у
+ * первой и последней. Нужен там, где строк много и держать их в одном `Column`
+ * нельзя — `LazyColumn` иначе потеряет переработку элементов.
+ */
+@Composable
+internal fun CardBlock(
+    first: Boolean,
+    last: Boolean,
+    bg: Color = Tokens.Colors.surface,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val r = Tokens.Radius.card
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s)
+            .clip(
+                RoundedCornerShape(
+                    topStart = if (first) r else 0.dp,
+                    topEnd = if (first) r else 0.dp,
+                    bottomStart = if (last) r else 0.dp,
+                    bottomEnd = if (last) r else 0.dp,
+                ),
+            )
+            .background(bg),
+        content = content,
+    )
+}
+
+/**
+ * Строка внутри [CardSection]. [divider] — рисовать ли разделитель СВЕРХУ (у первой
+ * строки не нужен); [inset] — отступ разделителя слева, чтобы он начинался за
+ * иконкой и не рассекал карточку насквозь.
+ */
+@Composable
+internal fun CardRow(
+    onClick: (() -> Unit)? = null,
+    divider: Boolean = true,
+    inset: Dp = 52.dp,
+    content: @Composable RowScope.() -> Unit,
+) {
+    if (divider) {
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = Tokens.Colors.divider,
+            modifier = Modifier.padding(start = inset),
+        )
+    }
+    Row(
+        Modifier.fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .heightIn(min = 52.dp)
+            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
 @Composable
 internal fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(

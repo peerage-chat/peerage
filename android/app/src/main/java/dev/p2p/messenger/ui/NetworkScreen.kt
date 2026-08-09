@@ -230,14 +230,17 @@ internal fun NetworkScreen(
 /** Карточка-контейнер (тёмная поверхность, скругление) для разделов Сети. */
 @Composable
 internal fun SurfaceCard(onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
-    val base = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(HoloSurface)
+    // Радиус — общий карточный (20): карточки настроек, сети и хранилища стоят в
+    // одном ряду со списком чатов, и разные скругления читались бы как разные слои.
+    val base = Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.card))
+        .background(Tokens.Colors.surface)
     Box((if (onClick != null) base.clickable { onClick() } else base).padding(14.dp)) { content() }
 }
 
 /** Метрика: подпись + крупное значение (+ опц. единица). */
 @Composable
 internal fun MetricCard(label: String, value: String, unit: String?, modifier: Modifier = Modifier) {
-    Box(modifier.clip(RoundedCornerShape(14.dp)).background(HoloSurface).padding(14.dp)) {
+    Box(modifier.clip(RoundedCornerShape(Tokens.Radius.card)).background(Tokens.Colors.surface).padding(14.dp)) {
         Column {
             Text(label, color = HoloSecondary, fontSize = 11.sp)
             Spacer(Modifier.height(6.dp))
