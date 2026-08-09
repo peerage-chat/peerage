@@ -71,8 +71,10 @@ internal fun FolderTabs(
     val unreadAll = model.unread.values.sum()
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-            .background(HoloBg).padding(horizontal = Tokens.Space.s),
+            .background(HoloBg)
+            .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
     ) {
         Folders.forEach { (key, _, labelRes) ->
             FolderTab(
@@ -85,7 +87,10 @@ internal fun FolderTabs(
             FolderTab(f.name, f.id == activeFilter, 0) { onFilter(f.id) }
         }
         Box(
-            Modifier.size(Tokens.Size.tabBar).clickable { onManage() },
+            Modifier.size(34.dp)
+                .clip(RoundedCornerShape(Tokens.Radius.chip))
+                .background(Tokens.Colors.surface)
+                .clickable { onManage() },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -98,43 +103,50 @@ internal fun FolderTabs(
     }
 }
 
-/** Один таб: подпись, счётчик непрочитанного и акцентное подчёркивание активного. */
+/**
+ * Один таб-пилюля: подпись, счётчик непрочитанного, у активного — плашка
+ * приглушённого акцента.
+ *
+ * Было подчёркивание, но оно требует линии-основы, которой у нас нет: полоса табов
+ * стоит прямо на фоне экрана, и подчёркнутый текст висел в пустоте. Плашка же
+ * работает по тому же правилу, что иконки шапки и поле ввода: контрол обязан иметь
+ * фон, иначе он неотличим от подписи.
+ */
 @Composable
 private fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () -> Unit) {
-    // Цвет переезжает плавно — резкая смена читается как перерисовка экрана.
+    // Цвет и фон переезжают плавно — резкая смена читается как перерисовка экрана.
     val fg by animateColorAsState(
         if (selected) HoloAccent else Tokens.Colors.secondary,
         animationSpec = tween(Tokens.Anim.fast),
         label = "tabFg",
     )
-    Box(contentAlignment = Alignment.BottomCenter) {
-        Row(
-            Modifier.height(Tokens.Size.tabBar).clickable { onClick() }
-                .padding(horizontal = Tokens.Space.m),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
-        ) {
-            Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            if (badge > 0) {
-                Box(
-                    Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(HoloAccent)
-                        .padding(horizontal = 5.dp, vertical = 1.dp),
-                ) {
-                    Text(
-                        if (badge > 99) "99+" else "$badge",
-                        color = HoloAccentDark,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-        }
-        if (selected) {
+    val bg by animateColorAsState(
+        if (selected) Tokens.Colors.accentMuted else Tokens.Colors.surface,
+        animationSpec = tween(Tokens.Anim.fast),
+        label = "tabBg",
+    )
+    Row(
+        Modifier.height(34.dp)
+            .clip(RoundedCornerShape(Tokens.Radius.chip))
+            .background(bg)
+            .clickable { onClick() }
+            .padding(horizontal = Tokens.Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+    ) {
+        Text(label, color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        if (badge > 0) {
             Box(
-                Modifier.padding(horizontal = Tokens.Space.s).height(2.dp).width(28.dp)
-                    .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
-                    .background(HoloAccent),
-            )
+                Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(HoloAccent)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            ) {
+                Text(
+                    if (badge > 99) "99+" else "$badge",
+                    color = HoloAccentDark,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }
