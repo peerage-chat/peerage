@@ -70,9 +70,11 @@ internal fun ContactProfileScreen(
         ) {
             SquareAvatar(
                 c.displayName,
-                size = 96.dp,
+                size = Tokens.Size.avatarBig,
                 online = online,
                 avatarBytes = model.contactAvatars[c.avatarId],
+                circle = true, // собеседник — человек
+                ring = HoloBg,
             )
             Row(
                 Modifier.padding(top = Tokens.Space.m),
@@ -111,8 +113,8 @@ internal fun ContactProfileScreen(
 
         // ── Действия. Кнопки «Видео» нет: камеру включают уже внутри звонка. ──
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = ScreenPad),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+            Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
         ) {
             ActionTile(Icons.Filled.Message, R.string.profile_message, Modifier.weight(1f), onMessage)
             ActionTile(Icons.Filled.Call, R.string.profile_call, Modifier.weight(1f)) {
@@ -121,56 +123,63 @@ internal fun ContactProfileScreen(
         }
 
         // ── Карточка верификации ─────────────────────────────────────────────
-        Column(
-            Modifier.fillMaxWidth().padding(ScreenPad)
-                .clip(RoundedCornerShape(Tokens.Radius.tile)).background(HoloSurface)
-                .padding(Tokens.Space.l),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (c.verified) Icons.Filled.Verified else Icons.Filled.Block,
-                    null,
-                    tint = if (c.verified) HoloVerified else WarnColor,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(Tokens.Space.s))
+        Spacer(Modifier.height(Tokens.Space.m))
+        CardSection {
+            Column(Modifier.padding(Tokens.Space.l)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (c.verified) Icons.Filled.Verified else Icons.Filled.Block,
+                        null,
+                        tint = if (c.verified) HoloVerified else WarnColor,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(Tokens.Space.s))
+                    Text(
+                        stringResource(if (c.verified) R.string.info_verified else R.string.info_not_verified),
+                        color = if (c.verified) HoloVerified else WarnColor,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
                 Text(
-                    stringResource(if (c.verified) R.string.info_verified else R.string.info_not_verified),
-                    color = if (c.verified) HoloVerified else WarnColor,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
+                    stringResource(
+                        if (c.verified) R.string.profile_verified_hint else R.string.profile_unverified_hint,
+                        c.displayName,
+                    ),
+                    color = HoloSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = Tokens.Space.s),
                 )
-            }
-            Text(
-                stringResource(
-                    if (c.verified) R.string.profile_verified_hint else R.string.profile_unverified_hint,
-                    c.displayName,
-                ),
-                color = HoloSecondary,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = Tokens.Space.s),
-            )
-            FingerprintGrid(model.visualFingerprint(key), Modifier.padding(top = Tokens.Space.l))
-            // Слова — тот же отпечаток, но их удобно диктовать голосом.
-            Text(
-                c.fingerprint,
-                color = HoloAccent,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = Tokens.Space.m),
-            )
-            Spacer(Modifier.height(Tokens.Space.l))
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                AccentButton(
-                    stringResource(if (c.verified) R.string.profile_recheck else R.string.profile_scan_qr),
-                    Modifier.weight(1f),
-                ) { onScanQr() }
-                if (c.verified) {
-                    OutlinedButton(onClick = { model.toggleVerified(key) }, modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.info_unmark), color = HoloSecondary)
-                    }
-                } else {
-                    OutlinedButton(onClick = { model.toggleVerified(key) }, modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.info_mark), color = HoloAccent)
+                FingerprintGrid(model.visualFingerprint(key), Modifier.padding(top = Tokens.Space.l))
+                // Слова — тот же отпечаток, но их удобно диктовать голосом.
+                Text(
+                    c.fingerprint,
+                    color = HoloAccent,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = Tokens.Space.m),
+                )
+                Spacer(Modifier.height(Tokens.Space.l))
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                    AccentButton(
+                        stringResource(if (c.verified) R.string.profile_recheck else R.string.profile_scan_qr),
+                        Modifier.weight(1f),
+                    ) { onScanQr() }
+                    if (c.verified) {
+                        OutlinedButton(
+                            onClick = { model.toggleVerified(key) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(Tokens.Radius.button),
+                        ) {
+                            Text(stringResource(R.string.info_unmark), color = HoloSecondary)
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { model.toggleVerified(key) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(Tokens.Radius.button),
+                        ) {
+                            Text(stringResource(R.string.info_mark), color = HoloAccent)
+                        }
                     }
                 }
             }
@@ -178,14 +187,20 @@ internal fun ContactProfileScreen(
 
         // ── Общее ────────────────────────────────────────────────────────────
         ScreenSectionLabel(stringResource(R.string.profile_common))
-        InfoRow(TablerIcons.Users, stringResource(R.string.profile_common_groups), "$commonGroups")
-        InfoRow(Icons.Filled.Photo, stringResource(R.string.profile_attachments), "$files")
+        CardSection {
+            InfoRow(TablerIcons.Users, stringResource(R.string.profile_common_groups), "$commonGroups", divider = false)
+            InfoRow(Icons.Filled.Photo, stringResource(R.string.profile_attachments), "$files")
+        }
 
         // ── Опасное — внизу и с подтверждением ───────────────────────────────
         ScreenSectionLabel(stringResource(R.string.profile_manage))
-        DangerRow(TablerIcons.Pencil, stringResource(R.string.profile_rename), HoloAccent) { renaming = true }
-        DangerRow(Icons.Filled.Speed, stringResource(R.string.info_speed_test), HoloSecondary) {
-            model.blastBench(key)
+        CardSection {
+            DangerRow(TablerIcons.Pencil, stringResource(R.string.profile_rename), HoloAccent, divider = false) {
+                renaming = true
+            }
+            DangerRow(Icons.Filled.Speed, stringResource(R.string.info_speed_test), Tokens.Colors.secondary) {
+                model.blastBench(key)
+            }
         }
         if (model.benchResult.isNotEmpty()) {
             Text(
@@ -195,8 +210,16 @@ internal fun ContactProfileScreen(
                 modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.xs),
             )
         }
-        DangerRow(Icons.Filled.Block, stringResource(R.string.profile_block), HoloError) { confirmBlock = true }
-        DangerRow(Icons.Filled.Delete, stringResource(R.string.info_delete), HoloError) { confirmDelete = true }
+        // Блокировка и удаление — в СВОЕЙ карточке: их отделяет от остального не
+        // заголовок, а разрыв, иначе «удалить» стоит вплотную к «переименовать».
+        CardSection {
+            DangerRow(Icons.Filled.Block, stringResource(R.string.profile_block), HoloError, divider = false) {
+                confirmBlock = true
+            }
+            DangerRow(Icons.Filled.Delete, stringResource(R.string.info_delete), HoloError) {
+                confirmDelete = true
+            }
+        }
         Spacer(Modifier.height(Tokens.Space.l))
     }
 
@@ -292,26 +315,25 @@ private fun ActionTile(icon: ImageVector, labelRes: Int, modifier: Modifier, onC
 }
 
 @Composable
-private fun InfoRow(icon: ImageVector, label: String, value: String) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = RowPadV),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(21.dp))
+private fun InfoRow(icon: ImageVector, label: String, value: String, divider: Boolean = true) {
+    CardRow(divider = divider) {
+        Icon(icon, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
         Text(label, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
-        Text(value, color = HoloSecondary, fontSize = 13.sp)
+        Text(value, color = Tokens.Colors.secondary, fontSize = 13.sp)
     }
 }
 
 @Composable
-private fun DangerRow(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable { onClick() }
-            .padding(horizontal = ScreenPad, vertical = RowPadV),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(21.dp))
+private fun DangerRow(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    divider: Boolean = true,
+    onClick: () -> Unit,
+) {
+    CardRow(onClick = onClick, divider = divider) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
         Text(label, color = tint, fontSize = 15.sp)
     }

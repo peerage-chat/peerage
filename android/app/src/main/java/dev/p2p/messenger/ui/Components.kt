@@ -308,6 +308,9 @@ internal fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: 
     Button(
         onClick = onClick,
         modifier = modifier,
+        // Форма — наша, а не material-пилюля: кнопка стоит рядом с полем ввода и
+        // плашками той же высоты, и полное скругление выбивалось из шкалы.
+        shape = RoundedCornerShape(Tokens.Radius.button),
         colors = ButtonDefaults.buttonColors(containerColor = HoloAccent),
     ) {
         Text(text, color = HoloAccentDark, fontWeight = FontWeight.Medium)
