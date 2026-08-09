@@ -50,9 +50,12 @@ internal fun NetworkScreen(
     // Офлайн-очередь = сообщения, ждущие появления получателя (статус "queued").
     val queued = model.messages.values.sumOf { l -> l.count { it.status == "queued" } }
 
+    // Отступ по бокам даёт сама карточка (как на всех экранах), а не контейнер:
+    // иначе карточки этого экрана стояли бы по другой вертикали, чем везде.
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(top = Tokens.Space.s, bottom = Tokens.Space.xxl),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
     ) {
         // 0. Поток трафика — только когда он есть. Выше статуса: пока идёт флуд,
         // это самое важное на экране.
@@ -87,7 +90,14 @@ internal fun NetworkScreen(
                     )
                 } else {
                     Row {
-                        Text(stringResource(R.string.net_connected_to), color = Color.White, fontSize = 15.sp)
+                        // Пробел ставит РАЗМЕТКА, а не хвост строки в ресурсе: XML
+                        // обрезает концевые пробелы, и получалось «Connected tomesh».
+                        Text(
+                            stringResource(R.string.net_connected_to).trim(),
+                            color = Color.White,
+                            fontSize = 15.sp,
+                        )
+                        Spacer(Modifier.width(Tokens.Space.xs))
                         Text("mesh", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -98,14 +108,17 @@ internal fun NetworkScreen(
         val ns = model.netStats
         val pingTxt = ns?.pingMs?.takeIf { it > 0 }?.let { "%.0f".format(it) } ?: "—"
         val trafficTxt = if (ns == null) "—" else "↓${ns.rxRate / 1024} ↑${ns.txRate / 1024}"
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            Modifier.padding(horizontal = Tokens.Space.s),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+        ) {
             MetricCard(stringResource(R.string.net_metric_peers), "${ns?.peerCount ?: model.netPeers}", null, Modifier.weight(1f))
             MetricCard(stringResource(R.string.net_metric_ping), pingTxt, if (pingTxt == "—") null else stringResource(R.string.net_unit_ms), Modifier.weight(1f))
             MetricCard(stringResource(R.string.net_metric_traffic), trafficTxt, stringResource(R.string.net_unit_kbs), Modifier.weight(1f))
         }
 
         // 3. Мой узел.
-        FieldLabel(stringResource(R.string.net_my_node))
+        SectionTitle(stringResource(R.string.net_my_node))
         SurfaceCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -126,7 +139,10 @@ internal fun NetworkScreen(
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            Modifier.padding(horizontal = Tokens.Space.s),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+        ) {
             OutlineAction(stringResource(R.string.net_my_qr), Icons.Filled.QrCode2, Modifier.weight(1f), onMyQr)
             OutlineAction(stringResource(R.string.net_share), Icons.Filled.Share, Modifier.weight(1f)) { shareText(ctx, model.myContactCode()) }
         }
@@ -153,7 +169,7 @@ internal fun NetworkScreen(
         }
 
         // 4. Режим участия — выгоды + цена.
-        FieldLabel(stringResource(R.string.net_mode))
+        SectionTitle(stringResource(R.string.net_mode))
         SurfaceCard {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -190,7 +206,7 @@ internal fun NetworkScreen(
 
         // 5. Пиры — реальный список (направление/адрес/пинг с цветом).
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FieldLabel(stringResource(R.string.net_peers_label, ns?.peerCount ?: model.netPeers))
+            SectionTitle(stringResource(R.string.net_peers_label, ns?.peerCount ?: model.netPeers))
             Spacer(Modifier.weight(1f))
         }
         SurfaceCard {
@@ -230,9 +246,11 @@ internal fun NetworkScreen(
 /** Карточка-контейнер (тёмная поверхность, скругление) для разделов Сети. */
 @Composable
 internal fun SurfaceCard(onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
-    // Радиус — общий карточный (20): карточки настроек, сети и хранилища стоят в
-    // одном ряду со списком чатов, и разные скругления читались бы как разные слои.
-    val base = Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.card))
+    // Радиус и боковой отступ — общие карточные: карточки сети, хранилища и списка
+    // чатов стоят по ОДНОЙ вертикали, иначе переход между экранами читается как
+    // сдвиг всего макета.
+    val base = Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s)
+        .clip(RoundedCornerShape(Tokens.Radius.card))
         .background(Tokens.Colors.surface)
     Box((if (onClick != null) base.clickable { onClick() } else base).padding(14.dp)) { content() }
 }

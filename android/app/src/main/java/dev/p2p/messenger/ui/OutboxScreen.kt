@@ -325,13 +325,9 @@ private fun SumRow(label: String, value: String) {
 
 @Composable
 internal fun ScreenSectionLabel(text: String) {
-    Text(
-        text.uppercase(),
-        color = HoloSecondary,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(start = ScreenPad, top = Tokens.Space.l, bottom = Tokens.Space.xs),
-    )
+    // Без uppercase и теми же метриками, что SectionTitle: заголовки секций во всём
+    // приложении обязаны выглядеть одинаково, а КАПС остался от старого набора.
+    SectionTitle(text)
 }
 
 /** Карточка-пояснение с иконкой. */

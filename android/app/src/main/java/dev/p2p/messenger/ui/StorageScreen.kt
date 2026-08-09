@@ -78,47 +78,50 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
                 modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
             )
         }
-        model.storageChats.forEach { (peer, files, bytes) ->
-            val c = model.contacts.firstOrNull { it.key == peer }
-            val name = c?.displayName ?: peer.take(12)
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = RowPadV),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SquareAvatar(name, size = 38.dp, avatarBytes = model.contactAvatars[c?.avatarId])
-                Spacer(Modifier.width(Tokens.Space.m))
-                Column(Modifier.weight(1f)) {
-                    Text(name, color = Color.White, fontSize = 15.sp)
-                    Text(
-                        stringResource(R.string.storage_files, files),
-                        color = HoloSecondary,
-                        fontSize = 12.sp,
+        CardSection {
+            model.storageChats.forEachIndexed { i, (peer, files, bytes) ->
+                val c = model.contacts.firstOrNull { it.key == peer }
+                val name = c?.displayName ?: peer.take(12)
+                CardRow(divider = i > 0, inset = 62.dp) {
+                    SquareAvatar(
+                        name,
+                        size = 38.dp,
+                        avatarBytes = model.contactAvatars[c?.avatarId],
+                        circle = true,
+                        ring = Tokens.Colors.surface,
                     )
+                    Spacer(Modifier.width(Tokens.Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text(name, color = Color.White, fontSize = 15.sp)
+                        Text(
+                            stringResource(R.string.storage_files, files),
+                            color = HoloSecondary,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Text(fmtSizeLong(bytes), color = Tokens.Colors.secondary, fontSize = 13.sp)
                 }
-                Text(fmtSizeLong(bytes), color = HoloSecondary, fontSize = 13.sp)
             }
         }
 
         ScreenSectionLabel(stringResource(R.string.storage_free_up))
-        Row(
-            Modifier.fillMaxWidth().clickable(enabled = model.storageBlobs > 0) { confirm = true }
-                .padding(horizontal = ScreenPad, vertical = RowPadV),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Filled.HideImage,
-                null,
-                tint = if (model.storageBlobs > 0) HoloAccent else HoloSecondary,
-                modifier = Modifier.size(21.dp),
-            )
-            Spacer(Modifier.width(Tokens.Space.m))
-            Text(
-                stringResource(R.string.storage_clear_attachments),
-                color = if (model.storageBlobs > 0) HoloAccent else HoloSecondary,
-                fontSize = 15.sp,
-                modifier = Modifier.weight(1f),
-            )
-            Text(fmtSizeLong(total), color = HoloSecondary, fontSize = 13.sp)
+        CardSection {
+            CardRow(onClick = if (model.storageBlobs > 0) ({ confirm = true }) else null, divider = false) {
+                Icon(
+                    Icons.Filled.HideImage,
+                    null,
+                    tint = if (model.storageBlobs > 0) HoloAccent else HoloSecondary,
+                    modifier = Modifier.size(21.dp),
+                )
+                Spacer(Modifier.width(Tokens.Space.m))
+                Text(
+                    stringResource(R.string.storage_clear_attachments),
+                    color = if (model.storageBlobs > 0) HoloAccent else HoloSecondary,
+                    fontSize = 15.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(fmtSizeLong(total), color = Tokens.Colors.secondary, fontSize = 13.sp)
+            }
         }
         Text(
             stringResource(R.string.storage_attachments_hint),
