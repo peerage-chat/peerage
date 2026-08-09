@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
@@ -19,6 +20,8 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -46,15 +49,85 @@ import kotlinx.coroutines.launch
  * его можно выключить. Показываем факт, а не иллюзию выбора. Появится сигнал —
  * появится и тумблер.
  */
+/**
+ * Настройки — ОГЛАВЛЕНИЕ, а не простыня.
+ *
+ * Раньше всё жило одним экраном: ключи, тумблеры, радиогруппа качества и справка о
+ * лицензии шли подряд. Такой экран нельзя просмотреть — только пролистать, и найти
+ * в нём что-то можно, лишь помня, где оно лежит. Теперь корень отвечает на вопрос
+ * «где искать», а настройка живёт в своей категории.
+ */
 @Composable
 internal fun SettingsScreen(
-    model: AppModel,
+    onSecurity: () -> Unit = {},
+    onPrivacy: () -> Unit = {},
+    onMedia: () -> Unit = {},
+    onNotifications: () -> Unit = {},
+    onAbout: () -> Unit = {},
     onEditProfile: () -> Unit = {},
-    onMyQr: () -> Unit = {},
     onNetwork: () -> Unit = {},
     onStorage: () -> Unit = {},
-    onContacts: () -> Unit = {},
+) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
+    ) {
+        // Профиль и данные — то, что человек чаще всего и ищет в настройках.
+        SectionTitle(stringResource(R.string.settings_title_profile_data))
+        CardSection {
+            SettingRow(
+                Icons.Filled.Person,
+                stringResource(R.string.settings_edit_profile),
+                null,
+                divider = false,
+                onClick = onEditProfile,
+            )
+            SettingRow(Icons.Filled.Share, stringResource(R.string.settings_net_battery), null, onClick = onNetwork)
+            SettingRow(Icons.Filled.Storage, stringResource(R.string.menu_storage), null, onClick = onStorage)
+        }
+
+        SectionTitle(stringResource(R.string.settings_title_sections))
+        CardSection {
+            SettingRow(
+                Icons.Filled.Shield,
+                stringResource(R.string.settings_cat_security),
+                stringResource(R.string.settings_cat_security_desc),
+                divider = false,
+                onClick = onSecurity,
+            )
+            SettingRow(
+                Icons.Filled.VisibilityOff,
+                stringResource(R.string.settings_cat_privacy),
+                stringResource(R.string.settings_cat_privacy_desc),
+                onClick = onPrivacy,
+            )
+            SettingRow(
+                Icons.Filled.Videocam,
+                stringResource(R.string.settings_cat_media),
+                stringResource(R.string.settings_cat_media_desc),
+                onClick = onMedia,
+            )
+            SettingRow(
+                Icons.Filled.Notifications,
+                stringResource(R.string.settings_cat_notifications),
+                stringResource(R.string.settings_cat_notifications_desc),
+                onClick = onNotifications,
+            )
+            SettingRow(
+                Icons.Filled.Info,
+                stringResource(R.string.settings_cat_about),
+                stringResource(R.string.settings_cat_about_desc),
+                onClick = onAbout,
+            )
+        }
+    }
+}
+
+/** Безопасность: копия ключа, блокировка приложения, шифрование хранилища, сверка. */
+@Composable
+internal fun SettingsSecurityScreen(
+    model: AppModel,
     onVaultLevel: () -> Unit = {},
+    onContacts: () -> Unit = {},
     vaultLevel: VaultLevel = VaultLevel.KEYSTORE,
 ) {
     var showPhrase by remember { mutableStateOf(false) }
@@ -62,19 +135,12 @@ internal fun SettingsScreen(
         SeedPhraseSheet(model) { showPhrase = false }
         return
     }
-
     val ctx = LocalContext.current
     val deviceSecure = remember { AppLock.deviceSecure(ctx) }
-
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
     ) {
-        // Профиля здесь больше нет: он живёт на экране «Я», а держать его шапкой и
-        // тут значило бы иметь два места, где меняют одно и то же. Здесь — только
-        // то, что настраивается.
-
-        // ── Безопасность ────────────────────────────────────────────────────
-        SectionTitle(stringResource(R.string.settings_security))
+        Spacer(Modifier.height(Tokens.Space.m))
         CardSection {
             SettingRow(
                 Icons.Filled.Key,
@@ -122,24 +188,55 @@ internal fun SettingsScreen(
                 onClick = onContacts,
             )
         }
+    }
+}
 
-        // ── Профиль и данные ────────────────────────────────────────────────
-        SectionTitle(stringResource(R.string.settings_title_profile_data))
+/**
+ * Приватность: тумблеров нет намеренно. Отчёты о прочтении и индикатор набора мы не
+ * отправляем ВООБЩЕ — переключатель подразумевал бы, что сигнал есть и его можно
+ * выключить. Показываем факт, а не иллюзию выбора; появится сигнал — появится тумблер.
+ */
+@Composable
+internal fun SettingsPrivacyScreen() {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
+    ) {
+        Spacer(Modifier.height(Tokens.Space.m))
         CardSection {
-            SettingRow(
-                Icons.Filled.Person,
-                stringResource(R.string.settings_edit_profile),
-                null,
-                divider = false,
-                onClick = onEditProfile,
-            )
-            SettingRow(Icons.Filled.Share, stringResource(R.string.settings_net_battery), null, onClick = onNetwork)
-            SettingRow(Icons.Filled.Storage, stringResource(R.string.menu_storage), null, onClick = onStorage)
+            Row(Modifier.padding(Tokens.Space.m)) {
+                Icon(
+                    Icons.Filled.VisibilityOff,
+                    null,
+                    tint = HoloOnline,
+                    modifier = Modifier.size(Tokens.Size.iconM),
+                )
+                Spacer(Modifier.width(Tokens.Space.m))
+                Column {
+                    Text(stringResource(R.string.settings_privacy_none), color = Color.White, fontSize = 15.sp)
+                    Text(
+                        stringResource(R.string.settings_privacy_none_desc),
+                        color = Tokens.Colors.secondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = Tokens.Space.xs),
+                    )
+                    Text(
+                        stringResource(R.string.settings_privacy_presence),
+                        color = Tokens.Colors.secondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = Tokens.Space.s),
+                    )
+                }
+            }
         }
+    }
+}
 
-        // ── Качество видео ──────────────────────────────────────────────────
-        // Пресеты внутри одной карточки: раньше каждый был отдельной плашкой на
-        // фоне экрана и читался как самостоятельная кнопка, хотя это один выбор.
+/** Медиа и звонки: качество исходящего видео. */
+@Composable
+internal fun SettingsMediaScreen(model: AppModel) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
+    ) {
         SectionTitle(stringResource(R.string.settings_video_quality))
         CardSection {
             VideoQuality.presets.forEachIndexed { i, preset ->
@@ -174,12 +271,18 @@ internal fun SettingsScreen(
             stringResource(R.string.settings_video_apply),
             color = Tokens.Colors.secondary,
             fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.xs),
+            modifier = Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         )
+    }
+}
 
-        // ── Уведомления ─────────────────────────────────────────────────────
-        // Разрастание очереди — единственное, о чём мы уведомляем помимо сообщений.
-        SectionTitle(stringResource(R.string.settings_notifications))
+/** Уведомления: разрастание очереди — единственное, о чём мы говорим помимо сообщений. */
+@Composable
+internal fun SettingsNotificationsScreen(model: AppModel) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
+    ) {
+        Spacer(Modifier.height(Tokens.Space.m))
         CardSection {
             SettingSwitchRow(
                 Icons.Filled.Notifications,
@@ -189,9 +292,16 @@ internal fun SettingsScreen(
                 divider = false,
             ) { model.toggleOutboxWarning() }
         }
+    }
+}
 
-        // ── О приложении ────────────────────────────────────────────────────
-        SectionTitle(stringResource(R.string.settings_about))
+/** О приложении: версия, транспорт, шифрование, лицензия. */
+@Composable
+internal fun SettingsAboutScreen() {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
+    ) {
+        Spacer(Modifier.height(Tokens.Space.m))
         CardSection {
             SettingInfoRow(
                 stringResource(R.string.settings_version_label),

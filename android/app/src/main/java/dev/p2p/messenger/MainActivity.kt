@@ -190,7 +190,41 @@ internal fun CenterMessage(text: String) {
     }
 }
 
-internal enum class Screen { Contacts, Chat, Add, Me, Info, Groups, GroupChat, CreateGroup, AddMember, Settings, Scanner, ContactList, Calls, Network, Saved, Search, NewChat, Storage, Outbox, Folders, FolderEdit, Flood, RotateAddress, EditProfile, VaultLevel, Backup }
+internal enum class Screen {
+    Contacts,
+    Chat,
+    Add,
+    Me,
+    Info,
+    Groups,
+    GroupChat,
+    CreateGroup,
+    AddMember,
+    Settings,
+    Scanner,
+    ContactList,
+    Calls,
+    Network,
+    Saved,
+    Search,
+    NewChat,
+    Storage,
+    Outbox,
+    Folders,
+    FolderEdit,
+    Flood,
+    RotateAddress,
+    EditProfile,
+    VaultLevel,
+    Backup,
+
+    // Настройки разложены по категориям: корень — оглавление, содержимое живёт здесь.
+    SettingsSecurity,
+    SettingsPrivacy,
+    SettingsMedia,
+    SettingsNotifications,
+    SettingsAbout,
+}
 
 /** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
  *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
@@ -253,6 +287,9 @@ private fun CompactShell(model: AppModel) {
                     Screen.Add
                 }
                 Screen.CreateGroup -> Screen.NewChat
+                Screen.SettingsSecurity, Screen.SettingsPrivacy, Screen.SettingsMedia,
+                Screen.SettingsNotifications, Screen.SettingsAbout,
+                -> Screen.Settings
                 Screen.AddMember -> Screen.GroupChat
                 else -> Screen.Contacts
             }
@@ -324,6 +361,11 @@ private fun CompactShell(model: AppModel) {
                         Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = { screen = Screen.Contacts })
                         Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = { screen = Screen.GroupChat })
                         Screen.Settings -> TopBar(stringResource(R.string.menu_settings), onBack = { screen = Screen.Contacts })
+                        Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = { screen = Screen.Settings })
+                        Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = { screen = Screen.Settings })
+                        Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = { screen = Screen.Settings })
+                        Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = { screen = Screen.Settings })
+                        Screen.SettingsAbout -> TopBar(stringResource(R.string.settings_cat_about), onBack = { screen = Screen.Settings })
                         Screen.Scanner -> TopBar(
                             stringResource(if (verifyingPeer != null) R.string.title_verify_qr else R.string.title_scan_qr),
                             onBack = {
@@ -434,15 +476,25 @@ private fun CompactShell(model: AppModel) {
                             )
                             Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
                             Screen.Settings -> SettingsScreen(
-                                model,
+                                onSecurity = { screen = Screen.SettingsSecurity },
+                                onPrivacy = { screen = Screen.SettingsPrivacy },
+                                onMedia = { screen = Screen.SettingsMedia },
+                                onNotifications = { screen = Screen.SettingsNotifications },
+                                onAbout = { screen = Screen.SettingsAbout },
                                 onEditProfile = { screen = Screen.EditProfile },
-                                onMyQr = { screen = Screen.Me },
                                 onNetwork = { screen = Screen.Network },
                                 onStorage = { screen = Screen.Storage },
-                                onContacts = { screen = Screen.ContactList },
+                            )
+                            Screen.SettingsSecurity -> SettingsSecurityScreen(
+                                model,
                                 onVaultLevel = { screen = Screen.VaultLevel },
+                                onContacts = { screen = Screen.ContactList },
                                 vaultLevel = VaultKeyManager.level(java.io.File(dataDir)),
                             )
+                            Screen.SettingsPrivacy -> SettingsPrivacyScreen()
+                            Screen.SettingsMedia -> SettingsMediaScreen(model)
+                            Screen.SettingsNotifications -> SettingsNotificationsScreen(model)
+                            Screen.SettingsAbout -> SettingsAboutScreen()
                             Screen.ContactList -> ContactListScreen(model) {
                                 model.openChat(it)
                                 screen = Screen.Chat
