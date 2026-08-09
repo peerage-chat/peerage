@@ -749,8 +749,25 @@ const MSG_COLS: &str = "m.rowid, m.id, m.sender, m.mine, m.text, m.time, m.statu
      m.downloaded, m.reply_to, m.reply_sender, m.system, m.fwd_from, m.fwd_anon,
      m.edited_at";
 
+/// Сколько колонок в [`MSG_COLS`] — с этого места начинаются дописанные к запросу.
+/// Держать числом рядом со списком: запрос, который добавит колонку и забудет про
+/// сдвиг, прочитает соседнее поле молча.
+const MSG_COL_COUNT: usize = 23;
+
 fn read_msg(row: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
     read_msg_offset(row, 0)
+}
+
+/// Строка списка чатов: последнее сообщение и локальные пометки. Непрочитанные и
+/// присутствие сюда НЕ входят — они живут не в истории, и клиент подмешивает их сам.
+#[derive(Debug, Clone)]
+pub struct ChatSummary {
+    pub chat: Vec<u8>,
+    pub scope: i64,
+    pub last: StoredMessage,
+    /// 0 — чат не закреплён; иначе время закрепления (позже закрепили — выше).
+    pub pinned_at: i64,
+    pub muted: bool,
 }
 
 /// Вложение из истории: чем занято место и в каком чате.
@@ -1177,6 +1194,89 @@ impl MessageStore {
         stmt.query_map(rusqlite::params![scope, blob_id], |r| r.get::<_, Vec<u8>>(0))
             .map(|rows| rows.filter_map(|r| r.ok()).collect())
             .unwrap_or_default()
+    }
+
+    /// Строка списка чатов: последнее сообщение плюс локальные пометки. Собирается
+    /// ОДНИМ запросом: список чатов рисуется на каждом событии, и делать по запросу
+    /// на чат — значит платить за это тем больше, чем активнее человек переписывается.
+    pub fn summaries(&self) -> Vec<ChatSummary> {
+        let conn = db::lock(&self.db);
+        // Последнее сообщение чата — строка с максимальным курсором `(time, rowid)`,
+        // тем же, по которому листается история: иначе «последнее» в списке и
+        // «последнее» в чате разъедутся на сообщениях одной секунды.
+        let sql = format!(
+            "SELECT {MSG_COLS}, m.chat, m.scope,
+                    COALESCE(f.pinned_at, 0), COALESCE(f.muted, 0)
+             FROM chat_messages m
+             LEFT JOIN chat_flags f ON f.chat = m.chat AND f.scope = m.scope
+             WHERE m.rowid = (SELECT m2.rowid FROM chat_messages m2
+                              WHERE m2.chat = m.chat AND m2.scope = m.scope
+                              ORDER BY m2.time DESC, m2.rowid DESC LIMIT 1)"
+        );
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let n = MSG_COL_COUNT;
+        stmt.query_map([], |r| {
+            Ok(ChatSummary {
+                chat: r.get(n)?,
+                scope: r.get(n + 1)?,
+                pinned_at: r.get(n + 2)?,
+                muted: r.get::<_, i64>(n + 3)? != 0,
+                last: read_msg(r)?,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
+    /// Закрепить чат в списке (`at` — время закрепления) или снять закреп (`at = 0`).
+    pub fn set_chat_pinned(&self, chat: Chat, at: i64) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "INSERT INTO chat_flags (chat, scope, pinned_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(chat, scope) DO UPDATE SET pinned_at = excluded.pinned_at",
+            rusqlite::params![chat.id(), chat.scope(), at],
+        )?;
+        Ok(())
+    }
+
+    /// Выключить/включить звук чата.
+    pub fn set_chat_muted(&self, chat: Chat, muted: bool) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "INSERT INTO chat_flags (chat, scope, muted) VALUES (?1, ?2, ?3)
+             ON CONFLICT(chat, scope) DO UPDATE SET muted = excluded.muted",
+            rusqlite::params![chat.id(), chat.scope(), muted as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Пометки всех чатов: `(идентификатор, вид, когда закреплён, без звука)`.
+    /// Отдельно от [`summaries`], потому что пометка живёт и у чата без единого
+    /// сообщения — закрепить пустой чат можно, и он обязан остаться наверху.
+    pub fn chat_flags(&self) -> Vec<(Vec<u8>, i64, i64, bool)> {
+        let conn = db::lock(&self.db);
+        let mut stmt = match conn.prepare(
+            "SELECT chat, scope, pinned_at, muted FROM chat_flags
+             WHERE pinned_at != 0 OR muted != 0",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0))
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
+    /// Забыть пометки чата (чат удалён у себя).
+    pub fn forget_chat_flags(&self, chat: Chat) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "DELETE FROM chat_flags WHERE chat=?1 AND scope=?2",
+            rusqlite::params![chat.id(), chat.scope()],
+        )?;
+        Ok(())
     }
 
     /// Страница истории чата, старые первыми. `before` — курсор `(time, row)` из

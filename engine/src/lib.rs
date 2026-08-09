@@ -15,7 +15,7 @@ pub mod groups;
 pub mod net;
 pub mod room_call;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -177,6 +177,17 @@ struct SearchHit {
     group: bool,
     #[serde(flatten)]
     msg: StoredMessage,
+}
+
+/// Строка списка чатов на главной: где чат, его пометки и последнее сообщение.
+/// `last = null` — чат без переписки (закреплён или заглушен, но пуст).
+#[derive(serde::Serialize)]
+struct ChatSummaryJson {
+    chat: String,
+    group: bool,
+    pinned_at: i64,
+    muted: bool,
+    last: Option<StoredMessage>,
 }
 
 /// Строка списка групп в том виде, в каком её читает клиент. Живёт здесь, потому
@@ -519,6 +530,57 @@ impl Engine {
             .map(|(chat, scope, msg)| SearchHit { chat: hex::encode(chat), group: scope == 1, msg })
             .collect();
         serde_json::to_string(&hits).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Сводка по всем чатам для списка на главной: последнее сообщение, время,
+    /// закреп и «без звука». Одним вызовом, а не по чату на строку: главная
+    /// перерисовывается на каждое входящее сообщение.
+    ///
+    /// Непрочитанные и присутствие сюда не входят — они не в истории; клиент
+    /// подмешивает их из своих источников.
+    pub fn chat_summaries_json(&self) -> String {
+        let store = self.messages.lock_safe();
+        let mut rows: Vec<ChatSummaryJson> = store
+            .summaries()
+            .into_iter()
+            .map(|s| ChatSummaryJson {
+                chat: hex::encode(&s.chat),
+                group: s.scope == 1,
+                pinned_at: s.pinned_at,
+                muted: s.muted,
+                last: Some(s.last),
+            })
+            .collect();
+        // Чат без единого сообщения тоже может быть закреплён или заглушен —
+        // такие строки в `summaries` не попадают, добавляем их отдельно.
+        let seen: HashSet<(String, bool)> =
+            rows.iter().map(|r| (r.chat.clone(), r.group)).collect();
+        for (chat, scope, pinned_at, muted) in store.chat_flags() {
+            let row = (hex::encode(&chat), scope == 1);
+            if !seen.contains(&row) {
+                rows.push(ChatSummaryJson {
+                    chat: row.0,
+                    group: row.1,
+                    pinned_at,
+                    muted,
+                    last: None,
+                });
+            }
+        }
+        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Закрепить чат в списке или снять закреп. Пометка ЛОКАЛЬНАЯ: собеседник о ней
+    /// не узнаёт, в отличие от закрепа сообщения (тот общий для чата).
+    pub fn set_chat_pinned(&self, chat: ChatKey, on: bool) {
+        let store = self.messages.lock_safe();
+        let _ = store.set_chat_pinned(chat.as_chat(), if on { now() } else { 0 });
+    }
+
+    /// Выключить/включить звук чата (тоже локально).
+    pub fn set_chat_muted(&self, chat: ChatKey, muted: bool) {
+        let store = self.messages.lock_safe();
+        let _ = store.set_chat_muted(chat.as_chat(), muted);
     }
 
     /// Закреплённые сообщения чата (свежие первыми) — как обычные строки истории.

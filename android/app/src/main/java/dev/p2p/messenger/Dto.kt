@@ -84,6 +84,20 @@ internal data class MessageDto(
     val downloaded: Boolean = false,
 )
 
+/**
+ * Строка списка чатов из движка: где чат, локальные пометки и последнее сообщение.
+ * `last = null` — чат без переписки (например, закреплённый пустой).
+ */
+@Serializable
+internal data class ChatSummaryDto(
+    val chat: String = "",
+    val group: Boolean = false,
+    /** 0 — не закреплён; иначе время закрепления (позже закрепили — выше). */
+    @SerialName("pinned_at") val pinnedAt: Long = 0,
+    val muted: Boolean = false,
+    val last: MessageDto? = null,
+)
+
 /** Находка поиска: строка истории плюс чат, где она лежит. */
 @Serializable
 internal data class SearchHitDto(

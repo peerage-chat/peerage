@@ -596,6 +596,60 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_pinned<'local>(
     })
 }
 
+/// Сводка по всем чатам для главной: JSON `[{chat, group, pinned_at, muted, last}]`.
+/// Один вызов на перерисовку списка вместо запроса на чат.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_chatSummaries<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.chat_summaries_json())
+    })
+}
+
+/// Закрепить чат в списке или снять закреп (пометка локальная, не уходит собеседнику).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_setChatPinned<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    on: jboolean,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        else {
+            return;
+        };
+        e.set_chat_pinned(chat, on != 0);
+    })
+}
+
+/// Выключить/включить звук чата (тоже локально).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_setChatMuted<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    muted: jboolean,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        else {
+            return;
+        };
+        e.set_chat_muted(chat, muted != 0);
+    })
+}
+
 /// Поиск по переписке. `chat_hex` пустой — искать во ВСЕХ чатах.
 /// Возвращает JSON `[{chat, group, ...сообщение}]`, свежие первыми.
 #[no_mangle]

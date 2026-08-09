@@ -244,6 +244,19 @@ object Native {
     /** Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми. */
     external fun pinned(sessionPtr: Long, chatHex: String, isGroup: Boolean): String
 
+    /**
+     * Сводка по всем чатам для главной: JSON `[{chat, group, pinned_at, muted, last}]`,
+     * где `last` — последнее сообщение чата (или null у пустого). Один вызов на
+     * перерисовку списка: запрос на чат стоил бы тем дороже, чем больше переписок.
+     */
+    external fun chatSummaries(sessionPtr: Long): String
+
+    /** Закрепить чат в списке / снять закреп. Пометка локальная, собеседнику не уходит. */
+    external fun setChatPinned(sessionPtr: Long, chatHex: String, isGroup: Boolean, on: Boolean)
+
+    /** Выключить/включить звук чата (тоже локально). */
+    external fun setChatMuted(sessionPtr: Long, chatHex: String, isGroup: Boolean, muted: Boolean)
+
     /** Хвост переписки с пиром (последняя страница) как JSON-массив. */
     external fun history(sessionPtr: Long, keyHex: String): String
 

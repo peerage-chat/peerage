@@ -142,6 +142,33 @@ data class Group(
     val archived: Boolean = false,
 )
 
+/**
+ * Строка списка чатов на главной: последнее сообщение, время и локальные пометки.
+ * Личные чаты и группы приходят одним списком — на главной они и живут вперемешку,
+ * отсортированные по времени последнего сообщения.
+ */
+data class ChatSummary(
+    /** hex: ключ собеседника или gid. */
+    val id: String,
+    val group: Boolean,
+    /** 0 — не закреплён; иначе когда закрепили (позже — выше в списке). */
+    val pinnedAt: Long = 0,
+    val muted: Boolean = false,
+    /** Превью последнего сообщения (текст или подпись вложения); пусто — чат пуст. */
+    val lastText: String = "",
+    val lastTime: Long = 0,
+    val lastMine: Boolean = false,
+    /** hex автора последнего сообщения — в группе показываем его имя перед текстом. */
+    val lastSender: String = "",
+    /** "text" | "image" | "file" | "voice" — определяет подпись вместо текста. */
+    val lastKind: String = "text",
+    /** Статус доставки СВОЕГО последнего сообщения ("" | sent | delivered | …). */
+    val lastStatus: String = "",
+    val lastSystem: Boolean = false,
+) {
+    val pinned: Boolean get() = pinnedAt > 0
+}
+
 /** Входящее приглашение в группу (карточка на одобрение вместо тихого авто-входа). */
 data class GroupInvite(
     val gid: String,
@@ -425,6 +452,11 @@ class AppModel private constructor() {
     /** Входящие приглашения в группы (карточки на одобрение). */
     val groupInvites = mutableStateListOf<GroupInvite>()
     val groupMessages = mutableStateMapOf<String, SnapshotStateList<GroupMsg>>()
+
+    /** Непрочитанные в группах: gid → счётчик. Живёт только в памяти, как и [unread]
+     *  у личных чатов — это «что пришло, пока я смотрел в другое место», а не факт
+     *  переписки, который стоило бы хранить. */
+    val groupUnread = mutableStateMapOf<String, Int>()
     var currentGroup by mutableStateOf<String?>(null)
 
     /** Присутствие открытой группы «N уч · M в сети» — агрегат отдаёт движок
@@ -1128,6 +1160,7 @@ class AppModel private constructor() {
         refreshRequestsNow()
         refreshGroupsNow()
         refreshGroupInvitesNow()
+        refreshChatSummariesNow() // список чатов с превью — сразу, до первого события
         loadWanted() // докачки, заказанные до перезапуска
         loadFolders()
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
@@ -1190,6 +1223,13 @@ class AppModel private constructor() {
                 while (e.isNotEmpty()) {
                     runCatching { applyEvent(e) }
                     e = Native.pollEvent(sessionPtr)
+                }
+                // Сводка чатов пересчитывается РАЗ на пачку событий, а не на каждое:
+                // при разгребании офлайн-очереди событий приходят сотни, а список
+                // чатов всё равно перерисуется один раз.
+                if (summariesDirty) {
+                    summariesDirty = false
+                    runCatching { refreshChatSummariesNow() }
                 }
                 // В фоне реже опрашиваем (входящие задержатся максимум на интервал —
                 // приемлемо), на переднем плане — отзывчиво.
@@ -1597,6 +1637,7 @@ class AppModel private constructor() {
                 )
                 enqueueOffline(key, text, now)
             }
+            markSummariesDirty() // своё сообщение — тоже последнее в списке чатов
         }
     }
 
@@ -1695,6 +1736,7 @@ class AppModel private constructor() {
         if (Native.sendMedia(sessionPtr, key, content, mime, name) >= 0 && currentChat == key) {
             loadHistory(key)
         }
+        markSummariesDirty()
     }
 
     /** Отправить вложение с метаданными для карточки (длительность/кадр/превью).
@@ -1712,6 +1754,7 @@ class AppModel private constructor() {
             meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
         )
         if (id >= 0 && currentChat == key) loadHistory(key)
+        markSummariesDirty()
     }
 
     /** Отправить вложение ФАЙЛОМ (потоково). Файл должен пережить отдачу — движок
@@ -1729,6 +1772,7 @@ class AppModel private constructor() {
             meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
         )
         if (id >= 0 && currentChat == key) loadHistory(key)
+        markSummariesDirty()
     }
 
     // ── Флуд и смена адреса (ADR-007) ────────────────────────────────────────
@@ -1872,7 +1916,18 @@ class AppModel private constructor() {
         if (json.isEmpty()) return
         // Разбор по ТИПУ, а не по строковым ключам: набор полей каждого события
         // зафиксирован в Dto.kt и сверяется компилятором с dto.rs.
-        when (val ev = parseEvent(json)) {
+        val ev = parseEvent(json)
+        // Что меняет ПОСЛЕДНЕЕ сообщение чата или его статус — меняет и строку в
+        // списке. Флаг, а не пересчёт на месте: он гасится один раз за пачку.
+        when (ev) {
+            is EngineEvent.Text, is EngineEvent.Media, is EngineEvent.Ack,
+            is EngineEvent.Retracted, is EngineEvent.MessageEdited,
+            is EngineEvent.GroupMsgEv, EngineEvent.GroupsChanged,
+            is EngineEvent.Undelivered,
+            -> markSummariesDirty()
+            else -> {}
+        }
+        when (ev) {
             is EngineEvent.Presence -> {
                 val wasOnline = online[ev.peer]
                 online[ev.peer] = ev.online
@@ -2070,6 +2125,9 @@ class AppModel private constructor() {
                             downloaded = md?.downloaded ?: false,
                         ),
                     )
+                    // Системные строки (кто вошёл/вышел) непрочитанным не считаем:
+                    // счётчик обещает сообщения, за которыми стоит человек.
+                    if (!ev.system) groupUnread[ev.gid] = (groupUnread[ev.gid] ?: 0) + 1
                 }
             }
             // В группе отозвали сообщение — перечитываем ленту целиком.
@@ -2425,6 +2483,63 @@ class AppModel private constructor() {
         groups.addAll(list)
     }
 
+    // ── Сводка чатов для главной ────────────────────────────────────────────
+
+    /** Строки списка чатов по ключу `dm:<hex>` / `g:<gid>`. Заполняется движком:
+     *  последнее сообщение, закреп и «без звука». Непрочитанные и присутствие —
+     *  не отсюда ([unread], [online], [groupPresence]). */
+    val chatSummaries = mutableStateMapOf<String, ChatSummary>()
+
+    /** Ключ строки в [chatSummaries]: вид чата входит в ключ, потому что hex группы
+     *  и hex контакта живут в одном пространстве имён и однажды совпали бы. */
+    fun chatKey(id: String, group: Boolean): String = if (group) "g:$id" else "dm:$id"
+
+    /** Взведён — сводку надо перечитать. Гасится в [startLoops] после пачки событий. */
+    @Volatile private var summariesDirty = false
+
+    /** Пометить список чатов устаревшим (последнее сообщение/статус изменились). */
+    internal fun markSummariesDirty() {
+        summariesDirty = true
+    }
+
+    fun refreshChatSummaries() = ops.execute { refreshChatSummariesNow() }
+
+    private fun refreshChatSummariesNow() {
+        val rows = decodeList<ChatSummaryDto>(Native.chatSummaries(sessionPtr))
+        val fresh = rows.associate { s ->
+            val last = s.last
+            chatKey(s.chat, s.group) to ChatSummary(
+                id = s.chat,
+                group = s.group,
+                pinnedAt = s.pinnedAt,
+                muted = s.muted,
+                lastText = last?.text.orEmpty(),
+                lastTime = last?.time ?: 0,
+                lastMine = last?.mine ?: false,
+                lastSender = last?.sender.orEmpty(),
+                lastKind = last?.kind ?: "text",
+                lastStatus = last?.status.orEmpty(),
+                lastSystem = last?.system ?: false,
+            )
+        }
+        // Не clear+addAll: снапшот-карта уведомляет по ключам, и полная очистка
+        // заставила бы список мигнуть пустотой на каждом входящем сообщении.
+        chatSummaries.keys.retainAll(fresh.keys)
+        chatSummaries.putAll(fresh)
+    }
+
+    /** Закрепить чат в списке / снять. Пометка локальная — собеседник не узнает. */
+    fun pinChat(id: String, group: Boolean, on: Boolean) = ops.execute {
+        Native.setChatPinned(sessionPtr, id, group, on)
+        refreshChatSummariesNow()
+    }
+
+    /** Выключить/включить звук чата (тоже локально). */
+    fun muteChat(id: String, group: Boolean, muted: Boolean) = ops.execute {
+        Native.setChatMuted(sessionPtr, id, group, muted)
+        refreshChatSummariesNow()
+    }
+
     // ── Приглашения в группы (карточки на одобрение) ───────────────────────
     fun refreshGroupInvites() = ops.execute { refreshGroupInvitesNow() }
 
@@ -2483,6 +2598,7 @@ class AppModel private constructor() {
     fun openGroup(gid: String) {
         currentGroup = gid
         currentGroupRoster = null // тикер подтянет свежий агрегат
+        groupUnread[gid] = 0
         loadGroupMembers(gid)
         ops.execute { loadGroupHistory(gid) }
     }
