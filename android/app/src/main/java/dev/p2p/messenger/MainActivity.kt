@@ -280,8 +280,11 @@ private fun CompactShell(model: AppModel) {
                             leading = {
                                 // Аватар как вход в профиль: он же и говорит, под кем
                                 // ты сейчас, — гамбургер об этом молчал.
+                                // Отступ больше, чем у иконок-кнопок рядом: у тех
+                                // край плашки, а у аватара — сам круг, и на равном
+                                // отступе он выглядит прижатым к краю экрана.
                                 Box(
-                                    Modifier.padding(horizontal = Tokens.Space.xs)
+                                    Modifier.padding(start = Tokens.Space.s, end = Tokens.Space.m)
                                         .clickable { screen = Screen.Me },
                                 ) {
                                     SquareAvatar(
