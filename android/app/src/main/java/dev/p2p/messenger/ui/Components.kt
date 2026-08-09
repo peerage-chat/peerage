@@ -343,7 +343,10 @@ internal fun OutlineButton(
 @Composable
 internal fun SendButton(onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(percent = 30)).background(HoloAccent).size(44.dp).clickable { onClick() },
+        // Та же форма и размер, что у кнопки отправки в чате: это одна и та же
+        // кнопка по смыслу, и различаться ей незачем.
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloAccent)
+            .size(Tokens.Size.inputField).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.common_send), tint = HoloAccentDark, modifier = Modifier.size(20.dp)) }
 }

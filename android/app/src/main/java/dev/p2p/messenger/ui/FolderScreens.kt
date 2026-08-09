@@ -61,51 +61,60 @@ internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
         )
 
         ScreenSectionLabel(stringResource(R.string.folders_builtin))
-        Folders.forEach { (key, icon, labelRes) ->
-            val count = when (key) {
-                "all" -> model.contacts.size + model.groups.size
-                "dm" -> model.contacts.size
-                "room" -> model.groups.size
-                else -> 0
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = RowPadV),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(21.dp))
-                Spacer(Modifier.width(Tokens.Space.m))
-                Text(stringResource(labelRes), color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                Text("$count", color = HoloSecondary, fontSize = 13.sp)
+        CardSection {
+            Folders.forEachIndexed { i, (key, icon, labelRes) ->
+                val count = when (key) {
+                    "all" -> model.contacts.size + model.groups.size
+                    "dm" -> model.contacts.size
+                    "room" -> model.groups.size
+                    else -> 0
+                }
+                CardRow(divider = i > 0) {
+                    Icon(icon, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconM))
+                    Spacer(Modifier.width(Tokens.Space.m))
+                    Text(
+                        stringResource(labelRes),
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("$count", color = Tokens.Colors.secondary, fontSize = 13.sp)
+                }
             }
         }
 
         ScreenSectionLabel(stringResource(R.string.folders_mine))
-        model.folders.forEach { f ->
-            Row(
-                Modifier.fillMaxWidth().clickable { onEdit(f.id) }
-                    .padding(horizontal = ScreenPad, vertical = RowPadV),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier.size(38.dp).clip(RoundedCornerShape(Tokens.Radius.tile)).background(FolderSelected),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(folderIcon(f.icon), null, tint = HoloAccent, modifier = Modifier.size(19.dp))
+        CardSection {
+            model.folders.forEachIndexed { i, f ->
+                CardRow(onClick = { onEdit(f.id) }, divider = i > 0, inset = 62.dp) {
+                    Box(
+                        Modifier.size(38.dp).clip(RoundedCornerShape(Tokens.Radius.button))
+                            .background(FolderSelected),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(folderIcon(f.icon), null, tint = HoloAccent, modifier = Modifier.size(19.dp))
+                    }
+                    Spacer(Modifier.width(Tokens.Space.m))
+                    Text(f.name, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    Icon(
+                        TablerIcons.ChevronRight,
+                        null,
+                        tint = Tokens.Colors.tertiary,
+                        modifier = Modifier.size(Tokens.Size.iconS),
+                    )
                 }
-                Spacer(Modifier.width(Tokens.Space.m))
-                Text(f.name, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                Icon(TablerIcons.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(18.dp))
             }
         }
 
-        Row(
-            Modifier.fillMaxWidth().clickable { onEdit(null) }
-                .padding(horizontal = ScreenPad, vertical = RowPadV),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(TablerIcons.Plus, null, tint = HoloAccent, modifier = Modifier.size(21.dp))
-            Spacer(Modifier.width(Tokens.Space.m))
-            Text(stringResource(R.string.folder_create), color = HoloAccent, fontSize = 15.sp)
+        // «Создать папку» — своей карточкой под списком: это действие, а не ещё
+        // одна папка, и попасть в него по ошибке при промахе по списку не должно.
+        Spacer(Modifier.height(Tokens.Space.s))
+        CardSection {
+            CardRow(onClick = { onEdit(null) }, divider = false) {
+                Icon(TablerIcons.Plus, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
+                Spacer(Modifier.width(Tokens.Space.m))
+                Text(stringResource(R.string.folder_create), color = HoloAccent, fontSize = 15.sp)
+            }
         }
         Spacer(Modifier.height(Tokens.Space.l))
     }

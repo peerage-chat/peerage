@@ -19,6 +19,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
@@ -279,7 +280,8 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
             },
         ) {
             Box(
-                Modifier.size(96.dp).clip(RoundedCornerShape(Tokens.Radius.card)).background(Tokens.Colors.avatar),
+                // Свой аватар — круг: человек, как и везде в приложении.
+                Modifier.size(96.dp).clip(CircleShape).background(Tokens.Colors.avatar),
                 contentAlignment = Alignment.Center,
             ) {
                 val av = model.selfAvatar

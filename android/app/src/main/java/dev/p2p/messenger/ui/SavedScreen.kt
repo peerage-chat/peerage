@@ -91,11 +91,11 @@ internal fun SavedScreen(model: AppModel) {
                         horizontalArrangement = Arrangement.End,
                     ) {
                         Box(
-                            Modifier.widthIn(max = 290.dp).clip(RoundedCornerShape(Tokens.Radius.preview))
+                            Modifier.widthIn(max = 290.dp).clip(RoundedCornerShape(Tokens.Radius.bubble))
                                 .background(BubbleOut)
                                 .then(
                                     if (selected) {
-                                        Modifier.border(1.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.preview))
+                                        Modifier.border(1.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.bubble))
                                     } else {
                                         Modifier
                                     },
@@ -126,8 +126,9 @@ internal fun SavedScreen(model: AppModel) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(Tokens.Radius.pill))
-                    .background(HoloSurface).padding(horizontal = Tokens.Space.l),
+                Modifier.weight(1f).height(Tokens.Size.inputField)
+                    .clip(RoundedCornerShape(Tokens.Radius.button))
+                    .background(Tokens.Colors.surface).padding(horizontal = Tokens.Space.m),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 androidx.compose.foundation.text.BasicTextField(
