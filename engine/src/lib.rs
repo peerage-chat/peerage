@@ -129,6 +129,11 @@ pub struct MediaInfo {
     pub fwd_from: String,
     /// «Переслано, автора не называем».
     pub fwd_anon: bool,
+    /// Ответ вложением: id цитируемого сообщения (0 — обычное).
+    pub reply_to: u64,
+    /// hex автора цитируемого сообщения (пусто — обычное). Ссылка «автор + id»
+    /// (ADR-006): на проводе едет флаг «моё/не моё», здесь — явный автор.
+    pub reply_sender: String,
 }
 
 /// Сколько сообщений отдаётся клиенту за один заход в чат. Переписка бывает
@@ -672,6 +677,10 @@ impl Engine {
             caption: m.text.clone(),
             fwd_from: origin.to_string(),
             fwd_anon: anon,
+            // Пересылка не тащит цитату: ответ имеет смысл только в том чате, где
+            // лежит оригинал, а в новом эта ссылка указывала бы в пустоту.
+            reply_to: 0,
+            reply_sender: String::new(),
         };
         match dst {
             ChatKey::Dm(peer) => {
@@ -793,6 +802,10 @@ impl Engine {
             height: info.height,
             thumb: thumb_hash.map(|h| h.to_vec()).unwrap_or_default(),
             caption: info.caption.clone(),
+            reply_to: info.reply_to,
+            // На проводе «чьё» едет с точки зрения отправителя: наш ответ на своё
+            // сообщение для получателя — ответ на наше.
+            reply_mine: info.reply_sender == self.me_hex(),
         };
         match self.messenger.send_media_message(key, &hash, mime, name, meta.clone()) {
             Ok(id) => {
@@ -809,6 +822,8 @@ impl Engine {
                     size, duration_ms: info.duration_ms, width: info.width, height: info.height,
                     thumb_id: hex::encode(&meta.thumb),
                     downloaded: true, // своё вложение уже у нас
+                    reply_to: info.reply_to,
+                    reply_sender: info.reply_sender.clone(),
                     ..Default::default()
                 });
                 // В офлайн-очередь — как текст: если получатель сейчас недоступен,
@@ -881,6 +896,10 @@ impl Engine {
             height: info.height,
             thumb: thumb_hash.map(|h| h.to_vec()).unwrap_or_default(),
             caption: info.caption.clone(),
+            reply_to: info.reply_to,
+            // На проводе «чьё» едет с точки зрения отправителя: наш ответ на своё
+            // сообщение для получателя — ответ на наше.
+            reply_mine: info.reply_sender == self.me_hex(),
         };
         let id = self.messenger.send_media_message(key, &hash, mime, name, meta.clone()).ok()?;
         let t = now();
@@ -891,6 +910,8 @@ impl Engine {
             size, duration_ms: info.duration_ms, width: info.width, height: info.height,
             thumb_id: hex::encode(&meta.thumb),
             downloaded: true,
+            reply_to: info.reply_to,
+            reply_sender: info.reply_sender.clone(),
             ..Default::default()
         });
         self.outbox.lock_safe().on_sent_media(
@@ -2247,6 +2268,8 @@ fn event_pump(
                     id: 0,
                     fwd_from: info.fwd_from.clone(),
                     fwd_anon: info.fwd_anon,
+                    reply_to: info.reply_to,
+                    reply_sender: info.reply_sender.clone(),
                     kind: Engine::media_kind(&mime).into(),
                     hash: id_hex,
                     mime: mime.clone(),
@@ -2287,6 +2310,8 @@ fn event_pump(
                     id: 0,
                     fwd_from: info.fwd_from.clone(),
                     fwd_anon: info.fwd_anon,
+                    reply_to: info.reply_to,
+                    reply_sender: info.reply_sender.clone(),
                     kind: Engine::media_kind(&mime).into(),
                     hash: id_hex,
                     mime: mime.clone(),
@@ -2565,7 +2590,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }
         Event::Media {
             peer, id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
-            fwd_anon,
+            fwd_anon, reply_to, reply_mine,
         } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
@@ -2594,6 +2619,16 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     kind: kind.into(), blob_id: id_hex.clone(), mime: mime.clone(), name: name.clone(),
                     size, duration_ms, width, height, thumb_id: thumb_hex.clone(),
                     downloaded: have,
+                    reply_to,
+                    // Флаг с провода уже перевёрнут мессенджером: «моё» здесь —
+                    // действительно наше сообщение (ADR-006 хранит явного автора).
+                    reply_sender: if reply_to == 0 {
+                        String::new()
+                    } else if reply_mine {
+                        engine.me_hex()
+                    } else {
+                        hex::encode(peer)
+                    },
                     ..Default::default()
                 });
                 // Миниатюру тянем всегда — она мелкая, ради неё и заведена.
@@ -2618,6 +2653,14 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     thumb_id: thumb_hex,
                     downloaded: have,
                     auto,
+                    reply_to,
+                    reply_sender: if reply_to == 0 {
+                        String::new()
+                    } else if reply_mine {
+                        engine.me_hex()
+                    } else {
+                        hex::encode(peer)
+                    },
                 });
             }
         }
@@ -3135,6 +3178,10 @@ impl Engine {
                             height: v["height"].as_u64().unwrap_or(0) as u32,
                             thumb: v["thumb"].as_str().and_then(|t| hex::decode(t).ok()).unwrap_or_default(),
                             caption: v["caption"].as_str().unwrap_or_default().to_string(),
+                            // Ссылка ответа в очередь не пишется — как и пересылка,
+                            // она уже в истории; дублировать её в досылке нечем.
+                            reply_to: 0,
+                            reply_mine: false,
                         };
                         let _ = m.resend_media_message(peer, id, &hash, mime, name, meta);
                     }

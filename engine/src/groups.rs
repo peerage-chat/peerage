@@ -778,6 +778,8 @@ impl GroupManager {
             thumb_id: media.thumb.clone(),
             fwd_from,
             fwd_anon,
+            reply_to: media.reply_to,
+            reply_sender: media.reply_sender.clone(),
             downloaded: true, // своё вложение уже у нас
             ..Default::default()
         });
@@ -992,6 +994,8 @@ impl GroupManager {
                             thumb_id: media.thumb.clone(),
                         fwd_from: media.fwd_from.clone(),
                         fwd_anon: media.fwd_anon,
+                        reply_to: media.reply_to,
+                        reply_sender: media.reply_sender.clone(),
                         // Скачано ли — решит верхний слой (он знает хранилище блобов).
                         downloaded: false,
                         ..Default::default()

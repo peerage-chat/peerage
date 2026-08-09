@@ -131,6 +131,10 @@ pub enum Event {
         fwd_from: String,
         /// «Переслано, автора не называем».
         fwd_anon: bool,
+        /// Ответ: id цитируемого сообщения (0 — обычное вложение).
+        reply_to: u64,
+        /// Чьё сообщение цитируется — уже с НАШЕЙ точки зрения (флаг перевёрнут).
+        reply_mine: bool,
     },
     /// Пир подтвердил доставку нашего сообщения с данным id (✓✓).
     Ack { peer: PeerKey, id: u64 },
@@ -199,6 +203,10 @@ pub struct MediaMeta {
     pub thumb: Vec<u8>,
     /// Подпись к вложению (обрезается до `MAX_CAPTION` на отправке).
     pub caption: String,
+    /// Ответ: id цитируемого сообщения (0 — обычное вложение).
+    pub reply_to: u64,
+    /// Чьё сообщение цитируется, с точки зрения ОТПРАВИТЕЛЯ (ADR-006).
+    pub reply_mine: bool,
 }
 
 /// Обрезать подпись до `MAX_CAPTION` БАЙТ по границе символа: рвать UTF-8 посередине
@@ -803,6 +811,8 @@ impl Messenger {
             thumb: meta.thumb.clone(),
             fwd_from: meta.fwd_from.clone(),
             fwd_anon: meta.fwd_anon,
+            reply_to: meta.reply_to,
+            reply_mine: meta.reply_mine,
         })
     }
 
@@ -829,6 +839,8 @@ impl Messenger {
             thumb: meta.thumb.clone(),
             fwd_from: meta.fwd_from.clone(),
             fwd_anon: meta.fwd_anon,
+            reply_to: meta.reply_to,
+            reply_mine: meta.reply_mine,
         })
     }
 
@@ -1239,7 +1251,7 @@ fn receive_loop(shared: Arc<Shared>) {
             }
             Payload::Media {
                 id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
-                fwd_anon,
+                fwd_anon, reply_to, reply_mine,
             } => {
                 shared.emit(Event::Media {
                     peer: peer_id, id, hash, mime, name, size, duration_ms, width, height,
@@ -1247,6 +1259,9 @@ fn receive_loop(shared: Arc<Shared>) {
                     thumb,
                     fwd_from,
                     fwd_anon,
+                    reply_to,
+                    // Как у текста: «моё» отправителя — это «его» для нас.
+                    reply_mine: !reply_mine,
                 });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }

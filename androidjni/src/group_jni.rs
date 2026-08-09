@@ -175,6 +175,8 @@ fn media_info<'local>(
     height: jint,
     thumb: &JByteArray<'local>,
     caption: &JString<'local>,
+    reply_to: jlong,
+    reply_sender: &JString<'local>,
 ) -> p2p_engine::MediaInfo {
     let thumb_bytes = env.convert_byte_array(thumb).unwrap_or_default();
     p2p_engine::MediaInfo {
@@ -185,6 +187,8 @@ fn media_info<'local>(
         height: height.max(0) as u32,
         thumb: (!thumb_bytes.is_empty()).then_some(thumb_bytes),
         caption: jstr(env, caption),
+        reply_to: reply_to.max(0) as u64,
+        reply_sender: jstr(env, reply_sender),
     }
 }
 
@@ -205,6 +209,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMedia<'local>(
     height: jint,
     thumb: JByteArray<'local>,
     caption: JString<'local>,
+    reply_to: jlong,
+    reply_sender_hex: JString<'local>,
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
@@ -212,7 +218,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMedia<'local>(
         let bytes = env.convert_byte_array(&content).unwrap_or_default();
         if bytes.is_empty() { return; }
         let (mime, name) = (jstr(&mut env, &mime), jstr(&mut env, &name));
-        let info = media_info(&mut env, duration_ms, width, height, &thumb, &caption);
+        let info =
+            media_info(&mut env, duration_ms, width, height, &thumb, &caption, reply_to, &reply_sender_hex);
         e.group_send_media(gid, bytes, mime, name, info);
     });
 }
@@ -233,13 +240,16 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMediaFile<'local>(
     height: jint,
     thumb: JByteArray<'local>,
     caption: JString<'local>,
+    reply_to: jlong,
+    reply_sender_hex: JString<'local>,
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
         let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
         let path = std::path::PathBuf::from(jstr(&mut env, &path));
         let (mime, name) = (jstr(&mut env, &mime), jstr(&mut env, &name));
-        let info = media_info(&mut env, duration_ms, width, height, &thumb, &caption);
+        let info =
+            media_info(&mut env, duration_ms, width, height, &thumb, &caption, reply_to, &reply_sender_hex);
         e.group_send_media_file(gid, path, mime, name, info);
     });
 }

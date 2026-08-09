@@ -447,6 +447,10 @@ internal sealed interface EngineEvent {
         @SerialName("thumb_id") val thumbId: String = "",
         val downloaded: Boolean = false,
         val auto: Boolean = false,
+        /** Ответ вложением: id цитируемого сообщения (0 — обычное). */
+        @SerialName("reply_to") val replyTo: Long = 0,
+        /** hex автора цитируемого сообщения (пусто — обычное). */
+        @SerialName("reply_sender") val replySender: String = "",
     ) : EngineEvent
 
     @Serializable

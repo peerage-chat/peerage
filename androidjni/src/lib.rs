@@ -357,6 +357,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
     height: jint,
     thumb: JByteArray<'local>,
     caption: JString<'local>,
+    reply_to: jlong,
+    reply_sender_hex: JString<'local>,
 ) -> jlong {
     jni_safe!(-1, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
@@ -368,13 +370,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
         let caption = jstr(&mut env, &caption);
         let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
         let info = p2p_engine::MediaInfo {
-        fwd_from: String::new(),
-        fwd_anon: false,
+            fwd_from: String::new(),
+            fwd_anon: false,
             duration_ms: duration_ms.max(0) as u32,
             width: width.max(0) as u32,
             height: height.max(0) as u32,
             thumb: (!thumb_bytes.is_empty()).then_some(thumb_bytes),
             caption,
+            reply_to: reply_to.max(0) as u64,
+            reply_sender: jstr(&mut env, &reply_sender_hex),
         };
         e.send_media_with(&key, bytes, &mime, &name, info).unwrap_or(-1)
     })
@@ -397,6 +401,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaFile<'local>(
     height: jint,
     thumb: JByteArray<'local>,
     caption: JString<'local>,
+    reply_to: jlong,
+    reply_sender_hex: JString<'local>,
 ) -> jlong {
     jni_safe!(-1, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
@@ -407,13 +413,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaFile<'local>(
         let caption = jstr(&mut env, &caption);
         let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
         let info = p2p_engine::MediaInfo {
-        fwd_from: String::new(),
-        fwd_anon: false,
+            fwd_from: String::new(),
+            fwd_anon: false,
             duration_ms: duration_ms.max(0) as u32,
             width: width.max(0) as u32,
             height: height.max(0) as u32,
             thumb: (!thumb_bytes.is_empty()).then_some(thumb_bytes),
             caption,
+            reply_to: reply_to.max(0) as u64,
+            reply_sender: jstr(&mut env, &reply_sender_hex),
         };
         e.send_media_file(&key, std::path::Path::new(&path), &mime, &name, info).unwrap_or(-1)
     })

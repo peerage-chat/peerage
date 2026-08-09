@@ -94,6 +94,8 @@ fn large_group_attachment_waits_for_explicit_download() {
     // 3 МБ — заведомо больше порога автозагрузки.
     let content: Vec<u8> = (0..3 * 1024 * 1024).map(|i| (i * 7 ^ 0x5a) as u8).collect();
     let info = MediaInfo {
+        reply_to: 0,
+        reply_sender: String::new(),
         duration_ms: 12_000,
         width: 1920,
         height: 1080,

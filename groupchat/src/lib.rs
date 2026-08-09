@@ -82,6 +82,13 @@ pub struct MediaBody {
     /// «Переслано, автора не называем».
     #[serde(default)]
     pub fwd_anon: bool,
+    /// Ответ вложением: id цитируемого сообщения (0 — обычное). Как у `Text`:
+    /// ответить фотографией — обычный случай, и ссылка тут та же (ADR-006).
+    #[serde(default)]
+    pub reply_to: u64,
+    /// hex автора цитируемого сообщения (пусто — обычное).
+    #[serde(default)]
+    pub reply_sender: String,
     /// Идентификатор в пределах отправителя (см. `AppMsg::Text::id`).
     #[serde(default)]
     pub id: u64,

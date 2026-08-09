@@ -61,6 +61,10 @@ object Native {
         height: Int,
         thumb: ByteArray,
         caption: String,
+        /** Ответ вложением: id цитируемого сообщения (0 — обычное). */
+        replyTo: Long,
+        /** hex автора цитируемого сообщения (пусто — обычное). */
+        replySenderHex: String,
     ): Long
 
     /** Отправить вложение ФАЙЛОМ: движок считает манифест потоково и отдаёт чанки
@@ -76,6 +80,10 @@ object Native {
         height: Int,
         thumb: ByteArray,
         caption: String,
+        /** Ответ вложением: id цитируемого сообщения (0 — обычное). */
+        replyTo: Long,
+        /** hex автора цитируемого сообщения (пусто — обычное). */
+        replySenderHex: String,
     ): Long
 
     /** Скачать вложение по кнопке. Готовность придёт событием `blob_received`. */
@@ -339,6 +347,8 @@ object Native {
         height: Int,
         thumb: ByteArray,
         caption: String,
+        replyTo: Long,
+        replySenderHex: String,
     )
 
     /** Отправить в группу вложение ФАЙЛОМ (потоково). */
@@ -353,6 +363,8 @@ object Native {
         height: Int,
         thumb: ByteArray,
         caption: String,
+        replyTo: Long,
+        replySenderHex: String,
     )
 
     /** Отозвать участника группы по hex-ключу (ADR-004, только админ). */

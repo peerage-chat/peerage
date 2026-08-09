@@ -1749,9 +1749,14 @@ class AppModel private constructor() {
         meta: MediaMeta,
         caption: String = "",
     ) = ops.execute {
+        // Цель ответа снимаем в тот же момент, что и у текста: иначе полоска
+        // «отвечаем на …» висела бы после отправки вложения, а ссылка терялась.
+        val reply = replyTarget
+        replyTarget = null
         val id = Native.sendMediaWithMeta(
             sessionPtr, key, content, mime, name,
             meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+            reply?.id ?: 0, replyAuthor(key, reply),
         )
         if (id >= 0 && currentChat == key) loadHistory(key)
         markSummariesDirty()
@@ -1767,9 +1772,12 @@ class AppModel private constructor() {
         meta: MediaMeta,
         caption: String = "",
     ) = ops.execute {
+        val reply = replyTarget
+        replyTarget = null
         val id = Native.sendMediaFile(
             sessionPtr, key, path, mime, name,
             meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+            reply?.id ?: 0, replyAuthor(key, reply),
         )
         if (id >= 0 && currentChat == key) loadHistory(key)
         markSummariesDirty()
@@ -1973,6 +1981,9 @@ class AppModel private constructor() {
                         size = ev.size, durationMs = ev.durationMs,
                         width = ev.width, height = ev.height,
                         thumbId = ev.thumbId, downloaded = ev.downloaded,
+                        // Ответ вложением: ссылка «автор + id» (ADR-006) — цитату
+                        // лента рисует по своей истории.
+                        replyTo = ev.replyTo, replySender = ev.replySender,
                     ),
                 )
                 // Миниатюра приходит отдельным мелким блобом — подтянем, если уже есть.
@@ -2719,9 +2730,12 @@ class AppModel private constructor() {
         meta: MediaMeta = MediaMeta(),
         caption: String = "",
     ) = ops.execute {
+        val reply = groupReplyTarget
+        groupReplyTarget = null
         Native.groupSendMedia(
             sessionPtr, gid, content, mime, name,
             meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+            reply?.id ?: 0, reply?.sender.orEmpty(),
         )
     }
 
@@ -2735,9 +2749,12 @@ class AppModel private constructor() {
         meta: MediaMeta = MediaMeta(),
         caption: String = "",
     ) = ops.execute {
+        val reply = groupReplyTarget
+        groupReplyTarget = null
         Native.groupSendMediaFile(
             sessionPtr, gid, path, mime, name,
             meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+            reply?.id ?: 0, reply?.sender.orEmpty(),
         )
     }
 

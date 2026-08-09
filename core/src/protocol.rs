@@ -134,6 +134,14 @@ pub enum Payload {
         /// «Переслано, автора не называем» (см. `Text::fwd_anon`).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         fwd_anon: bool,
+        /// Ответ: id сообщения, на которое отвечают (0 — обычное). Те же поля, что
+        /// у `Text`: ответить фотографией — такой же обычный случай, как ответить
+        /// текстом, и хранить это по-разному значило бы писать фичу дважды.
+        #[serde(default)]
+        reply_to: u64,
+        /// Чьё сообщение цитируется — с точки зрения ОТПРАВИТЕЛЯ (как у `Text`).
+        #[serde(default)]
+        reply_mine: bool,
     },
     /// Подтверждение доставки сообщения с данным id (✓✓ в ТЗ).
     Ack { id: u64 },
@@ -485,12 +493,12 @@ mod tests {
             Payload::Text { id: 1, text: "hi".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false },
             Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "p.jpg".into(),
-                size: 1234, duration_ms: 0, width: 800, height: 600, caption: String::new(), thumb: vec![9u8; 32], fwd_from: String::new(), fwd_anon: false,
+                size: 1234, duration_ms: 0, width: 800, height: 600, caption: String::new(), thumb: vec![9u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
             },
             // Видео с длительностью и без превью — поля опциональны.
             Payload::Media {
                 id: 3, hash: vec![6u8; 32], mime: "video/mp4".into(), name: "v.mp4".into(),
-                size: 900_000_000, duration_ms: 125_000, width: 1920, height: 1080, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false,
+                size: 900_000_000, duration_ms: 125_000, width: 1920, height: 1080, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
             },
             Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: false },
             Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] },
@@ -544,17 +552,17 @@ mod tests {
             enc(&Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(),
                 name: "secret-photo.jpg".into(), size: 2_400_000,
-                duration_ms: 0, width: 4000, height: 3000, caption: String::new(), thumb: vec![1u8; 32], fwd_from: String::new(), fwd_anon: false,
+                duration_ms: 0, width: 4000, height: 3000, caption: String::new(), thumb: vec![1u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
             }),
             enc(&Payload::Media {
                 id: 3, hash: vec![6u8; 32], mime: "audio/mp4".into(),
                 name: "voice.m4a".into(), size: 48_000,
-                duration_ms: 7_400, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false,
+                duration_ms: 7_400, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
             }),
             enc(&Payload::Media {
                 id: 4, hash: vec![7u8; 32], mime: "application/pdf".into(),
                 name: "договор-2026.pdf".into(), size: 900_000_000,
-                duration_ms: 0, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false,
+                duration_ms: 0, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
             }),
             enc(&Payload::Group { id: 5, data: vec![1u8; 200] }),
             // Смена адреса (ADR-007) едет здесь же: подпись 64 Б не влезает в
