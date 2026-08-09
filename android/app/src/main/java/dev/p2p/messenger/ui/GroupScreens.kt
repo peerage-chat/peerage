@@ -598,10 +598,12 @@ internal fun GroupBubble(
     // одна галочка означала бы больше, чем знает движок.
     val meta: @Composable () -> Unit = { MsgMeta(time, mine = false, edited = m.editedAt > 0) }
     val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
-    // Фото без подписи — само себе пузырь (как в личном чате). Имя автора над
-    // картинкой считается содержимым: с ним подложка нужна.
-    val photoBubble = m.kind == "image" && !pending && m.text.isEmpty() &&
-        m.fwdFrom.isEmpty() && !m.fwdAnon && m.replyTo == 0L && senderName == null
+    // Фото без подписи — само себе пузырь (как в личном чате). Имя автора, цитата
+    // и пометка пересылки уходят шапкой НАД снимком, на своей подложке, — картинка
+    // при этом остаётся голой.
+    val photoBubble = m.kind == "image" && !pending && m.text.isEmpty()
+    val photoHeader = photoBubble &&
+        (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
     Box(
         Modifier.widthIn(max = 280.dp).clip(bubbleShape(mine, pos))
             .then(if (photoBubble) Modifier else Modifier.background(if (mine) BubbleOut else BubbleIn))
@@ -615,17 +617,29 @@ internal fun GroupBubble(
             .then(if (photoBubble) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 6.dp)),
     ) {
         Column {
-            ForwardMark(model, m.fwdFrom, m.fwdAnon)
-            if (m.replyTo != 0L) GroupQuote(model, m)
-            if (senderName != null) {
-                Text(
-                    senderName,
-                    color = senderColor,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            val head: @Composable () -> Unit = {
+                ForwardMark(model, m.fwdFrom, m.fwdAnon)
+                if (m.replyTo != 0L) GroupQuote(model, m)
+                if (senderName != null) {
+                    Text(
+                        senderName,
+                        color = senderColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (photoHeader) {
+                // Подложка — только под шапкой, шириной со снимок.
+                Column(
+                    Modifier.width(PhotoBubbleSize)
+                        .background(if (mine) BubbleOut else BubbleIn)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) { head() }
+            } else if (!photoBubble) {
+                head()
             }
             // Крупное вложение в группе не качается само: карточка с именем/размером/
             // превью и кнопкой — решение принимает получатель, а не тот, кто отправил
@@ -642,9 +656,16 @@ internal fun GroupBubble(
                         m.blobId,
                     ) { model.downloadMedia(m.sender, m.blobId) }
                     else -> when (m.kind) {
-                        "image" -> ImageAttachment(blobBytes, { viewer = true }, bare = photoBubble)
+                        // В режиме выделения тап по вложению переключает выбор,
+                        // а не открывает файл.
+                        "image" -> ImageAttachment(
+                            blobBytes,
+                            onOpen = { if (selecting) model.toggleGroupSelect(m) else viewer = true },
+                            bare = photoBubble,
+                            onLongClick = { model.toggleGroupSelect(m) },
+                        )
                         "voice" -> VoiceAttachment(blobBytes)
-                        "file" -> FileAttachment(m.name, blobBytes)
+                        "file" -> FileAttachment(m.name, blobBytes) { model.toggleGroupSelect(m) }
                         // Текст обтекает мету — перенос считает сам движок вёрстки.
                         else -> BubbleText(m.text) { meta() }
                     }

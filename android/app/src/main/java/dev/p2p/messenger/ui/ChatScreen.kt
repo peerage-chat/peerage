@@ -795,10 +795,12 @@ internal fun MessageBubble(
         val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
         // Фото без подписи — САМО себе пузырь: рамка вокруг картинки не несёт
         // смысла, только съедает 10dp с каждой стороны и делает снимок меньше.
-        // Как только у сообщения появляется что-то ещё (подпись, цитата, пометка
-        // пересылки), пузырь возвращается — этому «что-то» нужна подложка.
-        val photoBubble = m.kind == "image" && !pending && m.text.isEmpty() &&
-            m.fwdFrom.isEmpty() && !m.fwdAnon && m.replyTo == 0L
+        // Подпись возвращает подложку — под текстом она нужна. А вот цитата и
+        // пометка пересылки НЕ возвращают: они уходят шапкой НАД картинкой, на
+        // своей подложке, и сама картинка остаётся голой (так в Telegram).
+        val photoBubble = m.kind == "image" && !pending && m.text.isEmpty()
+        // Шапка над фото: пометка пересылки и цитата ответа.
+        val photoHeader = photoBubble && (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L)
         Box(
             Modifier.widthIn(max = 290.dp).clip(bubbleShape(m.mine, pos))
                 .then(
@@ -826,13 +828,27 @@ internal fun MessageBubble(
                     // Ответ рисуется ССЫЛКОЙ в локальную историю (ADR-006): текст цитаты
                     // не копируется в сообщение, поэтому удаление оригинала не оставляет
                     // расходящегося дубля.
-                    ForwardMark(model, m.fwdFrom, m.fwdAnon)
-                    if (m.replyTo != 0L) {
-                        // Ключ строки — пара «автор + id»: id посеян временем
-                        // отправителя и у обеих сторон может совпасть.
-                        val src = model.messages[model.currentChat]
-                            ?.firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
-                        QuoteBlock(model, src, m.replySender == model.me?.pubkey)
+                    //
+                    // У фото шапка живёт на СВОЕЙ подложке шириной со снимок: подложка
+                    // нужна тексту цитаты, а не картинке.
+                    val head: @Composable () -> Unit = {
+                        ForwardMark(model, m.fwdFrom, m.fwdAnon)
+                        if (m.replyTo != 0L) {
+                            // Ключ строки — пара «автор + id»: id посеян временем
+                            // отправителя и у обеих сторон может совпасть.
+                            val src = model.messages[model.currentChat]
+                                ?.firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
+                            QuoteBlock(model, src, m.replySender == model.me?.pubkey)
+                        }
+                    }
+                    if (photoHeader) {
+                        Column(
+                            Modifier.width(PhotoBubbleSize)
+                                .background(if (m.mine) BubbleOut else BubbleIn)
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        ) { head() }
+                    } else if (!photoBubble) {
+                        head()
                     }
                     when {
                         isPending -> PendingAttachmentCard(
@@ -845,9 +861,16 @@ internal fun MessageBubble(
                             m.blobId,
                         ) { model.currentChat?.let { model.downloadMedia(it, m.blobId) } }
                         else -> when (m.kind) {
-                            "image" -> ImageAttachment(blobBytes, { viewer = true }, bare = photoBubble)
+                            // В режиме выделения тап по вложению переключает выбор,
+                            // а не открывает файл: иначе выбор был бы ловушкой.
+                            "image" -> ImageAttachment(
+                                blobBytes,
+                                onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
+                                bare = photoBubble,
+                                onLongClick = { model.toggleSelect(m) },
+                            )
                             "voice" -> VoiceAttachment(blobBytes)
-                            "file" -> FileAttachment(m.name, blobBytes)
+                            "file" -> FileAttachment(m.name, blobBytes) { model.toggleSelect(m) }
                             // Текст обтекает мету: она едет в конец последней строки
                             // и переносится сама, если та её не вмещает.
                             else -> BubbleText(m.text) { meta() }
@@ -873,19 +896,36 @@ internal fun MessageBubble(
     if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
 }
 
+/** Сторона снимка, который сам себе пузырь. Шапка над ним (цитата, «Переслано»)
+ *  берёт ту же ширину — иначе она торчала бы за край картинки. */
+internal val PhotoBubbleSize = 240.dp
+
 /** Картинка-вложение в пузыре: миниатюра (тап → полный экран) или плейсхолдер, пока
  *  байты докачиваются. */
 @Composable
-internal fun ImageAttachment(bytes: ByteArray?, onOpen: () -> Unit, bare: Boolean = false) {
+internal fun ImageAttachment(
+    bytes: ByteArray?,
+    onOpen: () -> Unit,
+    bare: Boolean = false,
+    onLongClick: () -> Unit = {},
+) {
     val bmp = bytes?.let {
         remember(it) { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
     }
     // [bare] — картинка САМА является пузырём: своё скругление и фон ей не нужны,
     // их даёт пузырь. Иначе внутри пузыря получалась бы вторая скруглённая рамка.
+    //
+    // Долгое нажатие обрабатывается ЗДЕСЬ, а не только у пузыря: обычный
+    // `clickable` на картинке съедал жест целиком, и выделить сообщение-фото было
+    // нельзя — палец всегда попадал в картинку, а не в поля пузыря.
     Box(
-        Modifier.size(if (bare) 240.dp else 220.dp)
+        Modifier.size(if (bare) PhotoBubbleSize else 220.dp)
             .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(10.dp)).background(HoloSurface))
-            .clickable(enabled = bmp != null, onClick = onOpen),
+            .combinedClickable(
+                enabled = bmp != null,
+                onClick = onOpen,
+                onLongClick = onLongClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         if (bmp != null) {
@@ -898,10 +938,16 @@ internal fun ImageAttachment(bytes: ByteArray?, onOpen: () -> Unit, bare: Boolea
 
 /** Файл-вложение: иконка + имя + размер; тап (когда скачан) → открыть системой. */
 @Composable
-internal fun FileAttachment(name: String, bytes: ByteArray?) {
+internal fun FileAttachment(name: String, bytes: ByteArray?, onLongClick: () -> Unit = {}) {
     val ctx = LocalContext.current
     Row(
-        Modifier.padding(end = 44.dp).widthIn(min = 160.dp).clickable(enabled = bytes != null) { bytes?.let { openWithSystem(ctx, name, it) } },
+        // Долгое нажатие пробрасывается наружу — иначе своим `clickable` карточка
+        // забирала бы жест и выделить сообщение-файл было бы нельзя.
+        Modifier.padding(end = 44.dp).widthIn(min = 160.dp).combinedClickable(
+            enabled = bytes != null,
+            onClick = { bytes?.let { openWithSystem(ctx, name, it) } },
+            onLongClick = onLongClick,
+        ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (bytes == null) {
