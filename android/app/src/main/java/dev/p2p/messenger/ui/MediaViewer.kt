@@ -59,6 +59,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -319,26 +320,43 @@ private fun MediaPage(
     var scale by remember(item.blobId) { mutableFloatStateOf(1f) }
     var offX by remember(item.blobId) { mutableFloatStateOf(0f) }
     var offY by remember(item.blobId) { mutableFloatStateOf(0f) }
+    var box by remember { mutableStateOf(IntSize.Zero) }
     val zoom by animateFloatAsState(scale, label = "zoom")
     val video = item.mime.startsWith("video/")
 
+    // Дальше своих краёв снимок не уезжает: без этого его можно утащить за экран
+    // и потерять из виду, а вернуть — только сбросом зума.
+    fun clamp(off: Float, side: Int): Float {
+        val limit = (side * (scale - 1f) / 2f).coerceAtLeast(0f)
+        return off.coerceIn(-limit, limit)
+    }
+
     // Щипок обрабатываем сами, а не через `detectTransformGestures`: тот съедает
-    // и одиночную протяжку, а её ждут пейджер (соседнее вложение) и жест
-    // закрытия. Поэтому события потребляются только при двух пальцах или уже
-    // увеличенном снимке — в остальных случаях они уходят дальше.
+    // и одиночную протяжку, а её ждут пейджер (соседнее вложение) и жест закрытия.
+    //
+    // Потребляем ТОЛЬКО реальное движение — щипок или протяжку по увеличенному
+    // снимку. Раньше на увеличенном потреблялось любое касание, и распознаватель
+    // тапов переставал их получать (основная фаза идёт от последнего модификатора
+    // к первому): из зума нельзя было выйти двойным тапом, а хром не возвращался.
     val zoomable = Modifier.pointerInput(item.blobId) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)
+            var moved = false
             var event: PointerEvent
             do {
                 event = awaitPointerEvent()
                 val multi = event.changes.count { it.pressed } > 1
-                if (multi || scale > 1f) {
+                val pan = event.calculatePan()
+                if (multi) {
+                    moved = true
                     scale = (scale * event.calculateZoom()).coerceIn(1f, 6f)
+                } else if (scale > 1f && !moved && pan.getDistance() > viewConfiguration.touchSlop) {
+                    moved = true
+                }
+                if (moved) {
                     if (scale > 1f) {
-                        val pan = event.calculatePan()
-                        offX += pan.x
-                        offY += pan.y
+                        offX = clamp(offX + pan.x, box.width)
+                        offY = clamp(offY + pan.y, box.height)
                     } else {
                         offX = 0f
                         offY = 0f
@@ -377,10 +395,11 @@ private fun MediaPage(
     }
 
     Box(
-        // Порядок важен: распознавание тапов идёт ПЕРВЫМ. За ним щипок, который
-        // при одном пальце ничего не потребляет, и последним — протяжка вниз.
-        // Иначе двойной тап терялся: жест успевал уйти в обработчик протяжки.
-        Modifier.fillMaxSize().then(taps).then(zoomable).then(closeDrag),
+        Modifier.fillMaxSize()
+            .onSizeChanged { box = it }
+            .then(taps)
+            .then(zoomable)
+            .then(closeDrag),
         contentAlignment = Alignment.Center,
     ) {
         when {
