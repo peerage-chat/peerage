@@ -402,6 +402,9 @@
     <string name="storage_backup_none">Копия не сделана</string>
     <string name="storage_backup_hint">Переписка и контакты живут только на этом устройстве. Потеряете телефон — восстановить будет нечем: ключ возвращает личность, но не историю.</string>
     <string name="storage_empty">Вложений пока нет.</string>
+    <string name="quote_kind_image">Фото</string>
+    <string name="quote_kind_voice">Голосовое</string>
+    <string name="quote_kind_file">Файл</string>
     <string name="storage_kind_image">Фото</string>
     <string name="storage_kind_video">Видео</string>
     <string name="storage_kind_voice">Голосовые</string>

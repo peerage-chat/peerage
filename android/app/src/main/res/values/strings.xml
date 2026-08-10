@@ -410,6 +410,9 @@
     <string name="storage_backup_none">No backup yet</string>
     <string name="storage_backup_hint">Your messages and contacts live only on this device. Lose the phone and there is nothing to restore from: the key brings back your identity, not your history.</string>
     <string name="storage_empty">No attachments saved yet.</string>
+    <string name="quote_kind_image">Photo</string>
+    <string name="quote_kind_voice">Voice message</string>
+    <string name="quote_kind_file">File</string>
     <string name="storage_kind_image">Photos</string>
     <string name="storage_kind_video">Video</string>
     <string name="storage_kind_voice">Voice messages</string>

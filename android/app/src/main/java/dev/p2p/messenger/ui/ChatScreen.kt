@@ -356,16 +356,25 @@ private fun QuoteBlock(
     // полупрозрачный белый: серый (`HoloSecondary`) на синем читается пятном чужого
     // слоя, а 6% белого на нём почти не видно — плашка казалась случайной рамкой.
     Row(
-        modifier.padding(bottom = 4.dp).heightIn(min = 30.dp)
+        modifier.padding(bottom = 4.dp).height(IntrinsicSize.Min).heightIn(min = 30.dp)
             .clip(RoundedCornerShape(Tokens.Radius.chip))
             .background(Color.White.copy(alpha = 0.10f)),
     ) {
-        Box(Modifier.width(2.5.dp).heightIn(min = 30.dp).background(HoloAccent))
+        Box(Modifier.width(2.5.dp).fillMaxHeight().background(HoloAccent))
+        // Миниатюра слева от подписи — если она у нас есть.
+        val hasThumb = src != null && src.kind != "text" &&
+            QuoteThumb(model, src.blobId, src.thumbId)
         Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
             Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Text(
-                src?.let { if (it.text.isNotEmpty()) it.text else it.name.ifEmpty { quoteKind(it.kind) } }
-                    ?: stringResource(R.string.chat_reply_gone),
+                src?.let {
+                    when {
+                        it.text.isNotEmpty() -> it.text
+                        // С миниатюрой имя файла лишнее — картинка уже сказала, что это.
+                        hasThumb -> quoteKind(it.kind)
+                        else -> it.name.ifEmpty { quoteKind(it.kind) }
+                    }
+                } ?: stringResource(R.string.chat_reply_gone),
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 maxLines = 1,
@@ -379,9 +388,9 @@ private fun QuoteBlock(
 @Composable
 internal fun quoteKind(kind: String): String = stringResource(
     when (kind) {
-        "image" -> R.string.storage_kind_image
-        "voice" -> R.string.storage_kind_voice
-        else -> R.string.storage_kind_file
+        "image" -> R.string.quote_kind_image
+        "voice" -> R.string.quote_kind_voice
+        else -> R.string.quote_kind_file
     },
 )
 

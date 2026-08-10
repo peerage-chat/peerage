@@ -562,15 +562,23 @@ private fun GroupQuote(model: AppModel, m: GroupMsg, modifier: Modifier = Modifi
     // Те же правила, что у цитаты в личном чате: подложка и текст — полупрозрачный
     // белый, чтобы плашка читалась на цветном пузыре.
     Row(
-        modifier.padding(bottom = 4.dp).heightIn(min = 30.dp)
+        modifier.padding(bottom = 4.dp).height(IntrinsicSize.Min).heightIn(min = 30.dp)
             .clip(RoundedCornerShape(Tokens.Radius.chip))
             .background(Color.White.copy(alpha = 0.10f)),
     ) {
-        Box(Modifier.width(2.5.dp).heightIn(min = 30.dp).background(HoloAccent))
+        Box(Modifier.width(2.5.dp).fillMaxHeight().background(HoloAccent))
+        val hasThumb = src != null && src.kind != "text" &&
+            QuoteThumb(model, src.blobId, src.thumbId)
         Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
             Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Text(
-                src?.let { it.text.ifEmpty { it.name } } ?: stringResource(R.string.chat_reply_gone),
+                src?.let {
+                    when {
+                        it.text.isNotEmpty() -> it.text
+                        hasThumb -> quoteKind(it.kind)
+                        else -> it.name.ifEmpty { quoteKind(it.kind) }
+                    }
+                } ?: stringResource(R.string.chat_reply_gone),
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 maxLines = 1,

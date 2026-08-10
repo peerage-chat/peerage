@@ -340,6 +340,37 @@ internal fun OutlineButton(
     }
 }
 
+/**
+ * Квадратик миниатюры в плашке цитаты. Возвращает `false`, если показывать нечего —
+ * вызывающий тогда оставляет текстовую подпись («Фото», имя файла).
+ *
+ * Имя файла в цитате человеку ничего не говорит: на «v11.png» невозможно узнать
+ * снимок, на который отвечают. Миниатюра узнаётся мгновенно.
+ */
+@Composable
+internal fun RowScope.QuoteThumb(model: AppModel, blobId: String, thumbId: String): Boolean {
+    // Сначала миниатюра, потом сам блоб: у крупного вложения байт может не быть
+    // вовсе, а превью приезжает отдельным мелким блобом сразу.
+    val bytes = thumbId.takeIf { it.isNotEmpty() }?.let { model.mediaBlobs[it] }
+        ?: blobId.takeIf { it.isNotEmpty() }?.let { model.mediaBlobs[it] }
+        ?: return false
+    val bmp = remember(bytes) {
+        runCatching {
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+        }.getOrNull()
+    } ?: return false
+    Image(
+        bmp,
+        null,
+        Modifier.align(Alignment.CenterVertically)
+            .padding(start = 6.dp, end = Tokens.Space.s)
+            .size(34.dp)
+            .clip(RoundedCornerShape(Tokens.Radius.badge)),
+        contentScale = ContentScale.Crop,
+    )
+    return true
+}
+
 @Composable
 internal fun SendButton(onClick: () -> Unit) {
     Box(
