@@ -612,7 +612,7 @@ internal fun GroupBubble(
     // Фото без подписи — само себе пузырь (как в личном чате). Имя автора, цитата
     // и пометка пересылки уходят шапкой НАД снимком, на своей подложке, — картинка
     // при этом остаётся голой.
-    val photoBubble = m.kind == "image" && !pending && m.text.isEmpty()
+    val photoBubble = (m.kind == "image" || m.kind == "video") && !pending && m.text.isEmpty()
     val photoHeader = photoBubble &&
         (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
     Box(
@@ -677,6 +677,13 @@ internal fun GroupBubble(
                             bare = photoBubble,
                             onLongClick = { model.toggleGroupSelect(m) },
                         )
+                        "video" -> VideoAttachment(
+                            blobBytes,
+                            m.durationMs,
+                            onOpen = { if (selecting) model.toggleGroupSelect(m) else viewer = true },
+                            bare = photoBubble,
+                            onLongClick = { model.toggleGroupSelect(m) },
+                        )
                         "voice" -> VoiceAttachment(blobBytes)
                         "file" -> FileAttachment(m.name, blobBytes) { model.toggleGroupSelect(m) }
                         // Текст обтекает мету — перенос считает сам движок вёрстки.
@@ -690,7 +697,9 @@ internal fun GroupBubble(
                 BubbleText(m.text, modifier = Modifier.padding(top = 6.dp)) { meta() }
             }
         }
-        if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
+        if (viewer && blobBytes != null) {
+            MediaViewer(blobBytes, m.mime, m.name, groupSenderName(model, m.sender), m.time) { viewer = false }
+        }
         // Мета — в правом нижнем углу ПУЗЫРЯ (место в тексте под неё уже оставлено):
         // имя автора и метка «Переслано» делают пузырь шире текста, и прижатая к
         // концу строки мета висела бы посередине. На голом фото — на затемнении.

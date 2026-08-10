@@ -740,11 +740,13 @@ impl Engine {
         sent
     }
 
-    /// Тип медиа-сообщения по MIME (M2): картинка → превью, аудио → голосовое-плеер,
-    /// остальное → файл-карточка.
+    /// Тип медиа-сообщения по MIME (M2): картинка → превью, видео → кадр с кнопкой
+    /// воспроизведения, аудио → голосовое-плеер, остальное → файл-карточка.
     fn media_kind(mime: &str) -> &'static str {
         if mime.starts_with("image/") {
             "image"
+        } else if mime.starts_with("video/") {
+            "video"
         } else if mime.starts_with("audio/") {
             "voice"
         } else {

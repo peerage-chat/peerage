@@ -74,7 +74,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import dev.p2p.messenger.*
 import dev.p2p.messenger.R
 import kotlinx.coroutines.Dispatchers
@@ -389,6 +388,7 @@ private fun QuoteBlock(
 internal fun quoteKind(kind: String): String = stringResource(
     when (kind) {
         "image" -> R.string.quote_kind_image
+        "video" -> R.string.quote_kind_video
         "voice" -> R.string.quote_kind_voice
         else -> R.string.quote_kind_file
     },
@@ -817,7 +817,7 @@ internal fun MessageBubble(
         // Подпись возвращает подложку — под текстом она нужна. А вот цитата и
         // пометка пересылки НЕ возвращают: они уходят шапкой НАД картинкой, на
         // своей подложке, и сама картинка остаётся голой (так в Telegram).
-        val photoBubble = m.kind == "image" && !pending && m.text.isEmpty()
+        val photoBubble = (m.kind == "image" || m.kind == "video") && !pending && m.text.isEmpty()
         // Шапка над фото: пометка пересылки и цитата ответа.
         val photoHeader = photoBubble && (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L)
         Box(
@@ -895,6 +895,16 @@ internal fun MessageBubble(
                                 bare = photoBubble,
                                 onLongClick = { model.toggleSelect(m) },
                             )
+                            // Видео — тот же кадр, что и фото, плюс метка
+                            // длительности: тап открывает просмотрщик, а не отдаёт
+                            // файл наружу системному плееру.
+                            "video" -> VideoAttachment(
+                                blobBytes,
+                                m.durationMs,
+                                onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
+                                bare = photoBubble,
+                                onLongClick = { model.toggleSelect(m) },
+                            )
                             "voice" -> VoiceAttachment(blobBytes)
                             "file" -> FileAttachment(m.name, blobBytes) { model.toggleSelect(m) }
                             // Текст обтекает мету: она едет в конец последней строки
@@ -919,7 +929,22 @@ internal fun MessageBubble(
             }
         }
     }
-    if (viewer && blobBytes != null) ImageViewer(blobBytes) { viewer = false }
+    if (viewer && blobBytes != null) {
+        MediaViewer(
+            blobBytes,
+            m.mime,
+            m.name,
+            // Автор снимка в шапке просмотрщика: «Вы» или имя собеседника —
+            // то же, чем подписана цитата, чтобы подписи не расходились.
+            if (m.mine) {
+                stringResource(R.string.chat_reply_you)
+            } else {
+                model.contacts.firstOrNull { it.key == model.currentChat }?.displayName
+                    ?: stringResource(R.string.chat_default_title)
+            },
+            m.time,
+        ) { viewer = false }
+    }
 }
 
 /** Сторона снимка, который сам себе пузырь. Шапка над ним (цитата, «Переслано»)
@@ -958,6 +983,77 @@ internal fun ImageAttachment(
             Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+        }
+    }
+}
+
+/**
+ * Видео-вложение: первый кадр + метка длительности, тап → просмотрщик.
+ *
+ * Кадр и длительность приезжают ВМЕСТЕ с сообщением (миниатюра — отдельным мелким
+ * блобом), поэтому видно, что предлагают, ещё до скачивания самого файла.
+ */
+@Composable
+internal fun VideoAttachment(
+    bytes: ByteArray?,
+    durationMs: Int,
+    onOpen: () -> Unit,
+    bare: Boolean = false,
+    onLongClick: () -> Unit = {},
+) {
+    val frame = bytes?.let {
+        remember(it) {
+            runCatching {
+                // Первый кадр достаём из самих байт: миниатюра могла и не приехать,
+                // а файл уже здесь — значит показать есть что в любом случае.
+                android.media.MediaMetadataRetriever().use { r ->
+                    val f = java.io.File.createTempFile("frame", null)
+                    f.writeBytes(it)
+                    r.setDataSource(f.absolutePath)
+                    val bmp = r.frameAtTime
+                    f.delete()
+                    bmp?.asImageBitmap()
+                }
+            }.getOrNull()
+        }
+    }
+    Box(
+        Modifier.size(if (bare) PhotoBubbleSize else 220.dp)
+            .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)))
+            .background(Color.Black)
+            .combinedClickable(
+                enabled = bytes != null,
+                onClick = onOpen,
+                onLongClick = onLongClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (frame != null) {
+            Image(frame, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+        if (bytes == null) {
+            CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+        } else {
+            // Кнопка «play» — на затемнении: кадр бывает светлым, и белый значок
+            // на нём иначе теряется.
+            Box(
+                Modifier.size(52.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(32.dp))
+            }
+        }
+        if (durationMs > 0) {
+            Text(
+                fmtDuration(durationMs),
+                color = Color.White,
+                fontSize = 11.sp,
+                modifier = Modifier.align(Alignment.BottomStart)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(Tokens.Radius.badge))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            )
         }
     }
 }
@@ -1177,20 +1273,6 @@ private fun fmtSize(bytes: Int): String = when {
 internal fun fmtDuration(ms: Int): String {
     val s = ms / 1000
     return "%d:%02d".format(s / 60, s % 60)
-}
-
-/** Полноэкранный просмотр картинки (тап по фону — закрыть). */
-@Composable
-internal fun ImageViewer(bytes: ByteArray, onClose: () -> Unit) {
-    val bmp = remember(bytes) { runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull() }
-    Dialog(onDismissRequest = onClose) {
-        Box(
-            Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable(onClick = onClose),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (bmp != null) Image(bmp, null, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit)
-        }
-    }
 }
 
 /** Статус доставки исходящего сообщения — честно, без приукрашивания.

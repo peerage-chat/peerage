@@ -15,6 +15,11 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Только чтобы «Сохранить» из просмотрщика клало снимок в галерею. С Android 10
+         MediaStore делает это без разрешений, поэтому дальше 28 оно не нужно. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
     <!-- Постоянный mesh-узел: foreground-сервис + локи CPU/Wi-Fi (Фаза D, режим A). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />

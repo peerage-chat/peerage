@@ -345,6 +345,7 @@
     <string name="onb_later">Later</string>
     <string name="onb_granted">Granted</string>
     <string name="onb_later_hint">Can be enabled later in settings</string>
+    <string name="perm_denied_storage">Saving needs storage access</string>
     <string name="perm_denied_mic">Calls need microphone access</string>
     <string name="perm_denied_camera">Camera access is required</string>
     <string name="perm_denied_call">Joining a call needs microphone access</string>
@@ -408,6 +409,14 @@
     <string name="storage_backup_none">No backup yet</string>
     <string name="storage_backup_hint">Your messages and contacts live only on this device. Lose the phone and there is nothing to restore from: the key brings back your identity, not your history.</string>
     <string name="storage_empty">No attachments saved yet.</string>
+    <string name="viewer_progress">%1$s / %2$s</string>
+    <string name="viewer_save">Save</string>
+    <string name="viewer_share">Share</string>
+    <string name="viewer_saved">Saved to gallery</string>
+    <string name="viewer_save_failed">Could not save</string>
+    <string name="viewer_today">today at %1$s</string>
+    <string name="viewer_on_date">%1$s at %2$s</string>
+    <string name="quote_kind_video">Video</string>
     <string name="quote_kind_image">Photo</string>
     <string name="quote_kind_voice">Voice message</string>
     <string name="quote_kind_file">File</string>
