@@ -177,8 +177,6 @@
     <string name="info_unmark">Unmark</string>
     <string name="info_mark">Mark</string>
     <string name="info_delete">Delete contact</string>
-    <string name="info_diagnostics">DIAGNOSTICS</string>
-    <string name="info_speed_test">Speed test</string>
     <string name="info_self_name">Calls themselves: %1$s</string>
 
     <!-- ── Chat ────────────────────────────────────────────────────────── -->
@@ -448,6 +446,19 @@
     <string name="profile_common">Common</string>
     <string name="profile_common_groups">Common groups</string>
     <string name="profile_attachments">Attachments</string>
+    <string name="profile_mute">Mute</string>
+    <string name="profile_share">Share contact</string>
+    <string name="profile_share_confirm">You are about to pass %1$s’s key to someone else. They will be able to reach %1$s directly. This cannot be taken back.</string>
+    <string name="profile_share_ok">Share</string>
+    <string name="profile_verify_done">Fingerprint checked</string>
+    <string name="profile_verify_todo">Fingerprint not checked yet</string>
+    <string name="net_diagnostics">Diagnostics</string>
+    <string name="net_bench_row">Throughput test</string>
+    <string name="net_bench_row_desc">Measures mesh speed to a contact</string>
+    <string name="net_bench_nobody">Nobody is online right now.</string>
+    <string name="net_bench_confirm_title">Run the test?</string>
+    <string name="net_bench_confirm">About 30 MB of test data will be sent to %1$s over the mesh. Their traffic and battery pay for it too.</string>
+    <string name="net_bench_start">Run</string>
     <string name="profile_manage">Manage</string>
     <string name="profile_rename">Change name</string>
     <string name="profile_block">Block</string>

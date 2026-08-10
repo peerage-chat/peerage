@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Group
@@ -857,80 +856,5 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
             fontSize = 11.sp,
             modifier = Modifier.padding(Tokens.Space.l),
         )
-    }
-}
-
-@Composable
-internal fun InfoScreen(model: AppModel, onDeleted: () -> Unit) {
-    val key = model.currentChat ?: return
-    val c = model.contacts.firstOrNull { it.key == key } ?: return
-    var name by remember(key) { mutableStateOf(c.name) }
-    Column(
-        Modifier.verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(FormGap),
-    ) {
-        // Шапка: аватар + имя для показа (M2) — сразу видно, кто это.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            SquareAvatar(c.displayName, size = 56.dp, avatarBytes = model.contactAvatars[c.avatarId])
-            Spacer(Modifier.width(14.dp))
-            Text(c.displayName, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
-        }
-        FieldLabel(stringResource(R.string.label_name))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextField(name, { name = it }, Modifier.weight(1f), colors = inputColors())
-            Spacer(Modifier.width(8.dp))
-            AccentButton("OK") { model.rename(key, name) }
-        }
-        // Самоназвание контакта (как он назвал СЕБЯ) — подсказка для выбора заметки.
-        if (c.profileName.isNotBlank()) {
-            Text(
-                stringResource(R.string.info_self_name, c.profileName),
-                color = HoloSecondary,
-                fontSize = 11.sp,
-            )
-        }
-        // Сверка глазами: знаки рисует само приложение, поэтому картинка одинакова
-        // на любом устройстве. Слова BIP39 оставлены рядом — их удобно диктовать
-        // голосом, когда сверяются по видеосвязи.
-        FieldLabel(stringResource(R.string.fp_label))
-        FingerprintGrid(model.visualFingerprint(key), Modifier.padding(vertical = 4.dp))
-        Text(
-            stringResource(R.string.fp_hint, c.displayName),
-            color = HoloSecondary,
-            fontSize = 11.sp,
-        )
-        Text(c.fingerprint, color = HoloAccent, fontSize = 13.sp)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (c.verified) {
-                Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-            }
-            Text(
-                stringResource(if (c.verified) R.string.info_verified else R.string.info_not_verified),
-                color = if (c.verified) HoloVerified else WarnColor,
-                modifier = Modifier.weight(1f),
-            )
-            AccentButton(stringResource(if (c.verified) R.string.info_unmark else R.string.info_mark)) { model.toggleVerified(key) }
-        }
-        FieldLabel(stringResource(R.string.me_pubkey_label))
-        Text(c.key, color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-        Button(
-            onClick = {
-                model.remove(key)
-                onDeleted()
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = HoloError),
-        ) {
-            Icon(Icons.Filled.Delete, null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.info_delete), color = Color.White)
-        }
-        // Диагностика: замер скорости меша до этого контакта (~30 МБ блба).
-        FieldLabel(stringResource(R.string.info_diagnostics))
-        AccentButton(stringResource(R.string.info_speed_test)) { model.blastBench(key) }
-        if (model.benchResult.isNotEmpty()) {
-            Text(model.benchResult, color = HoloSecondary, fontSize = 12.sp)
-        }
     }
 }

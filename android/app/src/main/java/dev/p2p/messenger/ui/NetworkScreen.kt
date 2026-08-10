@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -49,6 +50,8 @@ internal fun NetworkScreen(
 ) {
     val me = model.me ?: return
     val ctx = LocalContext.current
+    var benchPick by remember { mutableStateOf(false) }
+    var benchTarget by remember { mutableStateOf<Contact?>(null) }
     // Офлайн-очередь = сообщения, ждущие появления получателя (статус "queued").
     val queued = model.messages.values.sumOf { l -> l.count { it.status == "queued" } }
 
@@ -230,7 +233,28 @@ internal fun NetworkScreen(
             }
         }
 
-        // 6. Офлайн-очередь.
+        // 6. Диагностика. Замер жил кнопкой в профиле КАЖДОГО контакта — один тап
+        // отправлял человеку ~30 МБ, то есть флуд с парадного входа. Инструмент
+        // сам по себе нужен (меш без цифр не отладить), поэтому он переехал в
+        // диагностику: контакт выбирают явно, объём назван до запуска.
+        SectionTitle(stringResource(R.string.net_diagnostics))
+        SurfaceCard(onClick = { benchPick = true }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Speed, null, tint = HoloSecondary, modifier = Modifier.size(26.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.net_bench_row), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        model.benchResult.ifEmpty { stringResource(R.string.net_bench_row_desc) },
+                        color = HoloSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+            }
+        }
+
+        // 7. Офлайн-очередь.
         SurfaceCard(onClick = onOpenOutbox) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Schedule, null, tint = HoloAccent, modifier = Modifier.size(26.dp))
@@ -242,6 +266,63 @@ internal fun NetworkScreen(
                 Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
             }
         }
+    }
+
+    // Выбор пира: только те, кто сейчас на связи. Оффлайновому замер всё равно
+    // осядет в очередь и уедет к нему потом — это уже не диагностика, а сюрприз.
+    if (benchPick) {
+        val online = model.contacts.filter { model.online[it.key] == true }
+        AlertDialog(
+            onDismissRequest = { benchPick = false },
+            title = { Text(stringResource(R.string.net_bench_row)) },
+            text = {
+                if (online.isEmpty()) {
+                    Text(stringResource(R.string.net_bench_nobody), color = HoloSecondary)
+                } else {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        online.forEach { c ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable {
+                                    benchPick = false
+                                    benchTarget = c
+                                }.padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                SquareAvatar(c.displayName, size = 32.dp, circle = true)
+                                Spacer(Modifier.width(12.dp))
+                                Text(c.displayName, color = Color.White, fontSize = 15.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { benchPick = false }) {
+                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
+                }
+            },
+        )
+    }
+
+    // Второй шаг — цена вопроса словами. Тридцать мегабайт по мешу платит и
+    // получатель: его трафиком и его батареей.
+    benchTarget?.let { c ->
+        AlertDialog(
+            onDismissRequest = { benchTarget = null },
+            title = { Text(stringResource(R.string.net_bench_confirm_title)) },
+            text = { Text(stringResource(R.string.net_bench_confirm, c.displayName)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    model.blastBench(c.key)
+                    benchTarget = null
+                }) { Text(stringResource(R.string.net_bench_start), color = HoloAccent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { benchTarget = null }) {
+                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
+                }
+            },
+        )
     }
 }
 

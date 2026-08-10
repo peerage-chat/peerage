@@ -169,8 +169,6 @@
     <string name="info_unmark">Снять</string>
     <string name="info_mark">Пометить</string>
     <string name="info_delete">Удалить контакт</string>
-    <string name="info_diagnostics">ДИАГНОСТИКА</string>
-    <string name="info_speed_test">Тест скорости</string>
     <string name="info_self_name">Называет себя: %1$s</string>
 
     <!-- ── Чат ─────────────────────────────────────────────────────────── -->
@@ -440,6 +438,19 @@
     <string name="profile_common">Общее</string>
     <string name="profile_common_groups">Общие группы</string>
     <string name="profile_attachments">Вложения</string>
+    <string name="profile_mute">Без звука</string>
+    <string name="profile_share">Поделиться контактом</string>
+    <string name="profile_share_confirm">Вы передадите ключ %1$s другому человеку. Он сможет написать напрямую. Отозвать это уже нельзя.</string>
+    <string name="profile_share_ok">Поделиться</string>
+    <string name="profile_verify_done">Отпечаток сверен</string>
+    <string name="profile_verify_todo">Отпечаток ещё не сверен</string>
+    <string name="net_diagnostics">Диагностика</string>
+    <string name="net_bench_row">Замер скорости</string>
+    <string name="net_bench_row_desc">Скорость меша до выбранного контакта</string>
+    <string name="net_bench_nobody">Сейчас никого нет на связи.</string>
+    <string name="net_bench_confirm_title">Запустить замер?</string>
+    <string name="net_bench_confirm">Контакту %1$s уйдёт около 30 МБ тестовых данных по мешу. За это платит и он — трафиком и батареей.</string>
+    <string name="net_bench_start">Запустить</string>
     <string name="profile_manage">Управление</string>
     <string name="profile_rename">Изменить имя</string>
     <string name="profile_block">Заблокировать</string>

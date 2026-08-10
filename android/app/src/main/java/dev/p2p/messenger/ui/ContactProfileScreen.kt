@@ -1,5 +1,6 @@
 package dev.p2p.messenger.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -12,9 +13,13 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Message
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Photo
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -55,10 +60,17 @@ internal fun ContactProfileScreen(
     var renaming by remember(key) { mutableStateOf(false) }
     var confirmDelete by remember(key) { mutableStateOf(false) }
     var confirmBlock by remember(key) { mutableStateOf(false) }
+    var confirmShare by remember(key) { mutableStateOf(false) }
+    // Флаг чата приходит из сводки — она же кормит список на главной, так что
+    // «без звука» здесь и значок на главной не разъедутся.
+    val muted = model.chatSummaries[model.chatKey(key, false)]?.muted == true
 
     // Сколько вложений от этого чата лежит на диске — цифра уже посчитана движком
     // для «Хранилища», второй раз считать незачем.
-    LaunchedEffect(key) { model.refreshStorage() }
+    LaunchedEffect(key) {
+        model.refreshStorage()
+        model.refreshChatSummaries()
+    }
     val files = model.storageChats.firstOrNull { it.first == key }?.second ?: 0L
     val commonGroups = model.groupMemberKeys.count { (_, members) -> key in members }
 
@@ -132,52 +144,80 @@ internal fun ContactProfileScreen(
         }
 
         // ── Карточка верификации ─────────────────────────────────────────────
+        // Свёрнута по умолчанию: развёрнутая сверка (предупреждение + сетка знаков +
+        // слова + две кнопки) занимала пол-экрана и отодвигала всё остальное вниз,
+        // хотя сверяются один раз за знакомство. Статус при этом виден всегда —
+        // именно он и есть то, ради чего сюда заходят.
         Spacer(Modifier.height(Tokens.Space.m))
+        var verifyOpen by remember(key) { mutableStateOf(false) }
         CardSection {
-            Column(Modifier.padding(Tokens.Space.l)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (c.verified) Icons.Filled.Verified else Icons.Filled.Block,
-                        null,
-                        tint = if (c.verified) HoloVerified else WarnColor,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(Modifier.width(Tokens.Space.s))
+            CardRow(onClick = { verifyOpen = !verifyOpen }, divider = false, inset = 0.dp) {
+                Icon(
+                    if (c.verified) Icons.Filled.Verified else Icons.Filled.Block,
+                    null,
+                    tint = if (c.verified) HoloVerified else WarnColor,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(Tokens.Space.s))
+                Column(Modifier.weight(1f)) {
                     Text(
                         stringResource(if (c.verified) R.string.info_verified else R.string.info_not_verified),
                         color = if (c.verified) HoloVerified else WarnColor,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                     )
+                    Text(
+                        stringResource(
+                            if (c.verified) R.string.profile_verify_done else R.string.profile_verify_todo,
+                        ),
+                        color = HoloSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
                 }
-                Text(
-                    stringResource(
-                        if (c.verified) R.string.profile_verified_hint else R.string.profile_unverified_hint,
-                        c.displayName,
+                Icon(
+                    if (verifyOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    null,
+                    tint = Tokens.Colors.secondary,
+                    modifier = Modifier.size(Tokens.Size.iconM),
+                )
+            }
+            AnimatedVisibility(verifyOpen) {
+                Column(
+                    Modifier.padding(
+                        start = Tokens.Space.l,
+                        end = Tokens.Space.l,
+                        bottom = Tokens.Space.l,
                     ),
-                    color = HoloSecondary,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = Tokens.Space.s),
-                )
-                FingerprintGrid(model.visualFingerprint(key), Modifier.padding(top = Tokens.Space.l))
-                // Слова — тот же отпечаток, но их удобно диктовать голосом.
-                Text(
-                    c.fingerprint,
-                    color = HoloAccent,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = Tokens.Space.m),
-                )
-                Spacer(Modifier.height(Tokens.Space.l))
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                    AccentButton(
-                        stringResource(if (c.verified) R.string.profile_recheck else R.string.profile_scan_qr),
-                        Modifier.weight(1f),
-                    ) { onScanQr() }
-                    OutlineButton(
-                        stringResource(if (c.verified) R.string.info_unmark else R.string.info_mark),
-                        Modifier.weight(1f),
-                        tint = if (c.verified) Tokens.Colors.secondary else HoloAccent,
-                    ) { model.toggleVerified(key) }
+                ) {
+                    Text(
+                        stringResource(
+                            if (c.verified) R.string.profile_verified_hint else R.string.profile_unverified_hint,
+                            c.displayName,
+                        ),
+                        color = HoloSecondary,
+                        fontSize = 12.sp,
+                    )
+                    FingerprintGrid(model.visualFingerprint(key), Modifier.padding(top = Tokens.Space.l))
+                    // Слова — тот же отпечаток, но их удобно диктовать голосом.
+                    Text(
+                        c.fingerprint,
+                        color = HoloAccent,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = Tokens.Space.m),
+                    )
+                    Spacer(Modifier.height(Tokens.Space.l))
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                        AccentButton(
+                            stringResource(if (c.verified) R.string.profile_recheck else R.string.profile_scan_qr),
+                            Modifier.weight(1f),
+                        ) { onScanQr() }
+                        OutlineButton(
+                            stringResource(if (c.verified) R.string.info_unmark else R.string.info_mark),
+                            Modifier.weight(1f),
+                            tint = if (c.verified) Tokens.Colors.secondary else HoloAccent,
+                        ) { model.toggleVerified(key) }
+                    }
                 }
             }
         }
@@ -195,17 +235,27 @@ internal fun ContactProfileScreen(
             DangerRow(TablerIcons.Pencil, stringResource(R.string.profile_rename), HoloAccent, divider = false) {
                 renaming = true
             }
-            DangerRow(Icons.Filled.Speed, stringResource(R.string.info_speed_test), Tokens.Colors.secondary) {
-                model.blastBench(key)
+            // «Без звука» — локальная пометка чата: собеседник о ней не узнаёт,
+            // поэтому она и живёт здесь, а не в общих настройках уведомлений.
+            CardRow {
+                Icon(
+                    if (muted) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
+                    null,
+                    tint = Tokens.Colors.secondary,
+                    modifier = Modifier.size(Tokens.Size.iconM),
+                )
+                Spacer(Modifier.width(Tokens.Space.m))
+                Text(
+                    stringResource(R.string.profile_mute),
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = muted, onCheckedChange = { model.muteChat(key, false, it) })
             }
-        }
-        if (model.benchResult.isNotEmpty()) {
-            Text(
-                model.benchResult,
-                color = HoloSecondary,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.xs),
-            )
+            DangerRow(Icons.Filled.Share, stringResource(R.string.profile_share), HoloAccent) {
+                confirmShare = true
+            }
         }
         // Блокировка и удаление — в СВОЕЙ карточке: их отделяет от остального не
         // заголовок, а разрыв, иначе «удалить» стоит вплотную к «переименовать».
@@ -235,6 +285,30 @@ internal fun ContactProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmBlock = false }) {
+                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
+                }
+            },
+        )
+    }
+
+    // Делимся ЧИСТЫМ ключом, без имени и пояснений: получатель вставляет строку
+    // в «Добавить контакт» как есть. Имя ушло в заголовок системного листа.
+    //
+    // Спрашиваем, потому что раздаётся чужая личность: после этого третий человек
+    // сможет постучаться к собеседнику, и отозвать это уже нельзя.
+    if (confirmShare) {
+        AlertDialog(
+            onDismissRequest = { confirmShare = false },
+            title = { Text(stringResource(R.string.profile_share)) },
+            text = { Text(stringResource(R.string.profile_share_confirm, c.displayName)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmShare = false
+                    shareText(ctx, c.key)
+                }) { Text(stringResource(R.string.profile_share_ok), color = HoloAccent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmShare = false }) {
                     Text(stringResource(R.string.common_cancel), color = HoloSecondary)
                 }
             },
