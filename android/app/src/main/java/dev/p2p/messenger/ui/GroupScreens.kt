@@ -125,6 +125,14 @@ internal fun GroupChatScreen(model: AppModel) {
     // лента прыгала бы при догрузке старых).
     val lastKey = msgs.lastOrNull()?.let { it.sender to it.id }
     LaunchedEffect(lastKey) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+    LaunchedEffect(model.jumpTo) {
+        val target = model.jumpTo
+        if (target != 0L) {
+            val i = msgs.indexOfFirst { it.id == target }
+            if (i >= 0) listState.animateScrollToItem(i)
+            model.jumpTo = 0L
+        }
+    }
     PagingUp(listState, gid) { done -> model.loadOlderGroup(gid, done) }
 
     // Вложения в группе — тот же лист, что в DM (движок пушит блоб всем участникам).
@@ -697,8 +705,36 @@ internal fun GroupBubble(
                 BubbleText(m.text, modifier = Modifier.padding(top = 6.dp)) { meta() }
             }
         }
-        if (viewer && blobBytes != null) {
-            MediaViewer(blobBytes, m.mime, m.name, groupSenderName(model, m.sender), m.time) { viewer = false }
+        if (viewer) {
+            val gid = model.currentGroup.orEmpty()
+            val items = remember(gid, model.groupMessages[gid]?.size) {
+                model.groupMessages[gid].orEmpty()
+                    .filter { (it.kind == "image" || it.kind == "video") && it.blobId.isNotEmpty() }
+                    .map { ViewerItem(it.id, it.sender, "", it.time, it.mime, it.name, it.blobId) }
+            }
+            // Имя автора считается здесь: `groupSenderName` — composable, внутри
+            // remember его звать нельзя.
+            val named = items.map { it.copy(author = groupSenderName(model, it.sender)) }
+            val start = named.indexOfFirst { it.id == m.id && it.sender == m.sender }
+            MediaViewer(
+                model,
+                named,
+                start.coerceAtLeast(0),
+                onClose = { viewer = false },
+                onForward = {
+                    viewer = false
+                    model.toggleGroupSelect(m)
+                    model.beginForwardGroup(gid)
+                },
+                onDelete = {
+                    model.toggleGroupSelect(m)
+                    model.deleteGroupSelected(gid)
+                },
+                onShowInChat = { target ->
+                    viewer = false
+                    model.jumpTo = target.id
+                },
+            )
         }
         // Мета — в правом нижнем углу ПУЗЫРЯ (место в тексте под неё уже оставлено):
         // имя автора и метка «Переслано» делают пузырь шире текста, и прижатая к

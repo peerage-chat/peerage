@@ -2674,6 +2674,11 @@ class AppModel private constructor() {
         groupSelection = if (ref in groupSelection) groupSelection - ref else groupSelection + ref
     }
 
+    /** id сообщения, к которому просят прокрутить ленту («показать в чате» из
+     *  просмотрщика). Лента сама гасит его после прокрутки — иначе повторный вход
+     *  в чат снова уезжал бы к старому вложению. */
+    var jumpTo by mutableStateOf(0L)
+
     fun clearGroupSelection() {
         groupSelection = emptySet()
     }

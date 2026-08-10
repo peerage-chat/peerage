@@ -401,6 +401,14 @@
     <string name="storage_backup_none">Копия не сделана</string>
     <string name="storage_backup_hint">Переписка и контакты живут только на этом устройстве. Потеряете телефон — восстановить будет нечем: ключ возвращает личность, но не историю.</string>
     <string name="storage_empty">Вложений пока нет.</string>
+    <string name="viewer_of">%1$s · %2$d из %3$d</string>
+    <string name="viewer_show_in_chat">Показать в чате</string>
+    <string name="viewer_delete">Удалить</string>
+    <string name="viewer_delete_confirm">Удалить это сообщение вместе с вложением?</string>
+    <string name="viewer_play">Воспроизвести</string>
+    <string name="viewer_pause">Пауза</string>
+    <string name="viewer_mute">Выключить звук</string>
+    <string name="viewer_unmute">Включить звук</string>
     <string name="viewer_progress">%1$s / %2$s</string>
     <string name="viewer_save">Сохранить</string>
     <string name="viewer_share">Поделиться</string>

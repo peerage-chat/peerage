@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package dev.p2p.messenger.ui
 
 import android.content.ContentValues
@@ -12,18 +14,35 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Message
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +50,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -43,117 +64,107 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import dev.p2p.messenger.AppModel
+import dev.p2p.messenger.HoloAccent
+import dev.p2p.messenger.HoloError
 import dev.p2p.messenger.HoloSecondary
 import dev.p2p.messenger.R
 import dev.p2p.messenger.Tokens
 import kotlin.math.abs
+
+/** Одно вложение в просмотрщике. Плоская запись, а не сообщение чата: просмотрщик
+ *  одинаково открывается из личного чата, группы и «Сохранённого». */
+internal data class ViewerItem(
+    val id: Long,
+    val sender: String,
+    val author: String,
+    val time: Long,
+    val mime: String,
+    val name: String,
+    val blobId: String,
+)
 
 /**
  * Полноэкранный просмотр вложения — фото и видео.
  *
  * Экран сознательно «голый»: чёрный фон во весь экран, никаких карточек и
  * поверхностей. Здесь единственный предмет — сам снимок, и всё, что не он,
- * соревнуется с ним за внимание. Поэтому шапка появляется только по тапу.
+ * соревнуется с ним за внимание. Поэтому хром (шапка и таймлайн) прячется по
+ * тапу и сам уходит через пять секунд после последнего касания.
  *
- * Жесты (как везде, где смотрят медиа, — им не учатся, их ожидают):
- * щипок — зум, двойной тап — 1× ↔ 2.5×, потянуть вниз — закрыть, тап — шапка.
- * Пока картинка увеличена, протяжка двигает её, а не закрывает экран: иначе
- * рассмотреть угол снимка было бы невозможно.
+ * Жесты: щипок — зум, двойной тап у фото — 1× ↔ 2.5×, протяжка вниз — закрыть,
+ * протяжка вбок — соседнее вложение чата. Пока снимок увеличен, протяжка двигает
+ * его, а не листает и не закрывает: иначе рассмотреть угол было бы невозможно.
+ *
+ * Список [items] — то, что уже загружено в ленту чата; полная история медиа
+ * потребует запроса в движок (задача #45), и тогда счётчик «N из M» будет
+ * считать по всему чату, а не по подгруженному куску.
  */
 @Composable
 internal fun MediaViewer(
-    bytes: ByteArray,
-    mime: String,
-    name: String,
-    author: String,
-    time: Long,
+    model: AppModel,
+    items: List<ViewerItem>,
+    startIndex: Int,
     onClose: () -> Unit,
+    onForward: (ViewerItem) -> Unit,
+    onDelete: (ViewerItem) -> Unit,
+    onShowInChat: (ViewerItem) -> Unit,
 ) {
+    if (items.isEmpty()) return
     val ctx = LocalContext.current
     val storagePerm = rememberPermissionRunner()
-    val video = mime.startsWith("video/")
-    var chromeShown by remember { mutableStateOf(true) }
-    val chrome = chromeShown || video
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offX by remember { mutableFloatStateOf(0f) }
-    var offY by remember { mutableFloatStateOf(0f) }
+    val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, items.lastIndex)) { items.size }
+    val item = items[pager.currentPage.coerceIn(0, items.lastIndex)]
+    val bytes = model.mediaBlobs[item.blobId]
+    val video = item.mime.startsWith("video/")
+
+    var chrome by remember { mutableStateOf(true) }
+    var menu by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var muted by remember { mutableStateOf(false) }
     // Смещение «оттягивания» вниз. Фон гаснет вместе с ним — жест виден до того,
     // как отпустишь палец, и понятно, что произойдёт.
     var dragY by remember { mutableFloatStateOf(0f) }
     val dim = (1f - (abs(dragY) / 900f)).coerceIn(0.35f, 1f)
-    val zoom by animateFloatAsState(scale, label = "zoom")
 
-    Dialog(
-        onDismissRequest = onClose,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
+    // Хром уходит сам: пока он на экране, он закрывает часть кадра. Отсчёт
+    // перезапускается на каждое переключение и на смену страницы; открытое меню
+    // держит его — иначе пункты исчезали бы из-под пальца.
+    LaunchedEffect(chrome, pager.currentPage, menu) {
+        if (chrome && !menu) {
+            kotlinx.coroutines.delay(5000)
+            chrome = false
+        }
+    }
+
+    Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false)) {
         Box(
             Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)),
             contentAlignment = Alignment.Center,
         ) {
-            val gestures = Modifier
-                .pointerInput(video) {
-                    detectTapGestures(
-                        onTap = { chromeShown = !chromeShown },
-                        onDoubleTap = {
-                            // Второй тап возвращает в исходное — иначе из зума
-                            // выбираться приходилось бы щипком двумя пальцами.
-                            if (scale > 1f) {
-                                scale = 1f
-                                offX = 0f
-                                offY = 0f
-                            } else {
-                                scale = 2.5f
-                            }
-                        },
-                    )
-                }
-                .pointerInput(video) {
-                    detectTransformGestures { _, pan, gestureZoom, _ ->
-                        scale = (scale * gestureZoom).coerceIn(1f, 6f)
-                        if (scale > 1f) {
-                            offX += pan.x
-                            offY += pan.y
-                            dragY = 0f
-                        } else {
-                            // На единичном масштабе вертикальная протяжка — это
-                            // «закрыть», а не панорама: двигать нечего.
-                            offX = 0f
-                            offY = 0f
-                            dragY += pan.y
-                            if (dragY > 220f) onClose()
-                        }
-                    }
-                }
-
-            if (video) {
-                VideoSurface(bytes, name, Modifier.fillMaxSize().then(gestures))
-            } else {
-                val bmp = remember(bytes) {
-                    runCatching {
-                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                            ?.asImageBitmap()
-                    }.getOrNull()
-                }
-                if (bmp != null) {
-                    Image(
-                        bmp,
-                        null,
-                        Modifier.fillMaxSize()
-                            .graphicsLayerZoom(zoom, offX, offY + dragY)
-                            .then(gestures),
-                        contentScale = ContentScale.Fit,
-                    )
-                }
+            HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
+                val it = items[page]
+                MediaPage(
+                    it,
+                    model.mediaBlobs[it.blobId],
+                    muted,
+                    chrome,
+                    onChrome = { chrome = !chrome },
+                    onDrag = { dy ->
+                        dragY += dy
+                        if (dragY > 220f) onClose()
+                    },
+                    onDragEnd = { dragY = 0f },
+                )
             }
 
             // Шапка поверх снимка, а не над ним: отдельная полоса откусывала бы
             // высоту у самого изображения ради подписи, которую и так знают.
             AnimatedVisibility(
                 chrome,
+                Modifier.align(Alignment.TopCenter),
                 enter = fadeIn() + slideInVertically { -it },
                 exit = fadeOut() + slideOutVertically { -it },
-                modifier = Modifier.align(Alignment.TopCenter),
             ) {
                 Row(
                     Modifier.fillMaxWidth()
@@ -162,48 +173,253 @@ internal fun MediaViewer(
                         .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel), onClick = onClose)
+                    BarIcon(Icons.Filled.Close, stringResource(R.string.common_back), onClick = onClose)
                     Spacer(Modifier.width(Tokens.Space.s))
                     Column(Modifier.weight(1f)) {
                         Text(
-                            author,
+                            item.author,
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Text(fmtViewerDate(time), color = HoloSecondary, fontSize = 12.sp)
+                        // Счётчик — во второй строке, а не третьим элементом ряда:
+                        // ряд из трёх смысловых блоков читается как панель, а не
+                        // как подпись к снимку.
+                        Text(
+                            if (items.size > 1) {
+                                stringResource(
+                                    R.string.viewer_of,
+                                    fmtViewerDate(item.time),
+                                    pager.currentPage + 1,
+                                    items.size,
+                                )
+                            } else {
+                                fmtViewerDate(item.time)
+                            },
+                            color = HoloSecondary,
+                            fontSize = 12.sp,
+                        )
                     }
-                    BarIcon(Icons.Filled.Download, stringResource(R.string.viewer_save)) {
-                        // До Android 10 запись в галерею требует разрешения; начиная
-                        // с неё MediaStore кладёт файл в свою папку и без него.
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            saveToGallery(ctx, bytes, mime, name)
-                        } else {
-                            storagePerm(
-                                arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
-                                R.string.perm_denied_storage,
-                            ) { saveToGallery(ctx, bytes, mime, name) }
+                    Box {
+                        BarIcon(Icons.Filled.MoreVert, stringResource(R.string.common_more)) { menu = true }
+                        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                            ViewerMenuItem(Icons.Filled.Download, R.string.viewer_save) {
+                                menu = false
+                                if (bytes != null) saveWithPermission(ctx, storagePerm, bytes, item)
+                            }
+                            ViewerMenuItem(Icons.AutoMirrored.Filled.Send, R.string.forward_action) {
+                                menu = false
+                                onForward(item)
+                            }
+                            ViewerMenuItem(Icons.Filled.Share, R.string.viewer_share) {
+                                menu = false
+                                bytes?.let { shareFile(ctx, it, item.mime, item.name) }
+                            }
+                            ViewerMenuItem(Icons.AutoMirrored.Filled.Message, R.string.viewer_show_in_chat) {
+                                menu = false
+                                onShowInChat(item)
+                            }
+                            ViewerMenuItem(Icons.Filled.Delete, R.string.viewer_delete, HoloError) {
+                                menu = false
+                                confirmDelete = true
+                            }
                         }
                     }
-                    BarIcon(Icons.Filled.Share, stringResource(R.string.viewer_share)) {
-                        shareFile(ctx, bytes, mime, name)
+                }
+            }
+
+            // Таймлайн прячется вместе с шапкой: это один слой управления,
+            // разнесённый по краям кадра.
+            if (video) {
+                AnimatedVisibility(
+                    chrome,
+                    Modifier.align(Alignment.BottomCenter),
+                    enter = fadeIn() + slideInVertically { it },
+                    exit = fadeOut() + slideOutVertically { it },
+                ) {
+                    VideoBar(muted) { muted = it }
+                }
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(stringResource(R.string.viewer_delete)) },
+            text = { Text(stringResource(R.string.viewer_delete_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    onDelete(item)
+                    onClose()
+                }) { Text(stringResource(R.string.folder_delete_ok), color = HoloError) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
+                }
+            },
+        )
+    }
+}
+
+/** До Android 10 запись в галерею требует разрешения; начиная с неё MediaStore
+ *  кладёт файл в свою папку и без него. */
+private fun saveWithPermission(
+    ctx: Context,
+    ask: (Array<String>, Int, () -> Unit) -> Unit,
+    bytes: ByteArray,
+    item: ViewerItem,
+) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        saveToGallery(ctx, bytes, item.mime, item.name)
+    } else {
+        ask(
+            arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
+            R.string.perm_denied_storage,
+        ) { saveToGallery(ctx, bytes, item.mime, item.name) }
+    }
+}
+
+@Composable
+private fun ViewerMenuItem(
+    icon: ImageVector,
+    labelRes: Int,
+    tint: Color = Color.White,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(stringResource(labelRes), color = tint, fontSize = 14.sp) },
+        leadingIcon = {
+            Icon(
+                icon,
+                null,
+                tint = if (tint == Color.White) HoloSecondary else tint,
+                modifier = Modifier.size(Tokens.Size.iconM),
+            )
+        },
+        onClick = onClick,
+    )
+}
+
+/** Одна страница пейджера: снимок с зумом или видео. */
+@Composable
+private fun MediaPage(
+    item: ViewerItem,
+    bytes: ByteArray?,
+    muted: Boolean,
+    chrome: Boolean,
+    onChrome: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+) {
+    var scale by remember(item.blobId) { mutableFloatStateOf(1f) }
+    var offX by remember(item.blobId) { mutableFloatStateOf(0f) }
+    var offY by remember(item.blobId) { mutableFloatStateOf(0f) }
+    val zoom by animateFloatAsState(scale, label = "zoom")
+    val video = item.mime.startsWith("video/")
+
+    // Щипок обрабатываем сами, а не через `detectTransformGestures`: тот съедает
+    // и одиночную протяжку, а её ждут пейджер (соседнее вложение) и жест
+    // закрытия. Поэтому события потребляются только при двух пальцах или уже
+    // увеличенном снимке — в остальных случаях они уходят дальше.
+    val zoomable = Modifier.pointerInput(item.blobId) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            var event: PointerEvent
+            do {
+                event = awaitPointerEvent()
+                val multi = event.changes.count { it.pressed } > 1
+                if (multi || scale > 1f) {
+                    scale = (scale * event.calculateZoom()).coerceIn(1f, 6f)
+                    if (scale > 1f) {
+                        val pan = event.calculatePan()
+                        offX += pan.x
+                        offY += pan.y
+                    } else {
+                        offX = 0f
+                        offY = 0f
                     }
+                    event.changes.forEach { it.consume() }
+                }
+            } while (event.changes.any { it.pressed })
+        }
+    }
+
+    val taps = Modifier.pointerInput(item.blobId, video) {
+        detectTapGestures(
+            onTap = { onChrome() },
+            onDoubleTap = {
+                // У видео двойной тап не занят зумом: кадр и так вписан в экран.
+                if (!video) {
+                    if (scale > 1f) {
+                        scale = 1f
+                        offX = 0f
+                        offY = 0f
+                    } else {
+                        scale = 2.5f
+                    }
+                }
+            },
+        )
+    }
+
+    // Закрытие протяжкой вниз — только на единичном масштабе: увеличенный снимок
+    // двигают, а не закрывают.
+    val closeDrag = Modifier.pointerInput(item.blobId) {
+        detectVerticalDragGestures(
+            onDragEnd = { onDragEnd() },
+            onDragCancel = { onDragEnd() },
+        ) { _, dy -> if (scale <= 1f) onDrag(dy) }
+    }
+
+    Box(
+        // Порядок важен: распознавание тапов идёт ПЕРВЫМ. За ним щипок, который
+        // при одном пальце ничего не потребляет, и последним — протяжка вниз.
+        // Иначе двойной тап терялся: жест успевал уйти в обработчик протяжки.
+        Modifier.fillMaxSize().then(taps).then(zoomable).then(closeDrag),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            bytes == null -> Text(
+                stringResource(R.string.chat_downloading),
+                color = HoloSecondary,
+                fontSize = 13.sp,
+            )
+            video -> VideoSurface(bytes, item.name, muted, chrome)
+            else -> {
+                val bmp = remember(bytes) {
+                    runCatching {
+                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                    }.getOrNull()
+                }
+                if (bmp != null) {
+                    Image(
+                        bmp,
+                        null,
+                        Modifier.fillMaxSize().graphicsLayer {
+                            scaleX = zoom
+                            scaleY = zoom
+                            translationX = offX
+                            translationY = offY
+                        },
+                        contentScale = ContentScale.Fit,
+                    )
                 }
             }
         }
     }
 }
 
-/** Зум и сдвиг одним слоем: масштаб общий, поэтому и точка отсчёта общая. */
-private fun Modifier.graphicsLayerZoom(scale: Float, x: Float, y: Float): Modifier =
-    this.graphicsLayer {
-        scaleX = scale
-        scaleY = scale
-        translationX = x
-        translationY = y
-    }
+/** Плеер один на весь просмотрщик: таймлайн лежит в другой ветке дерева, а
+ *  управляет тем же воспроизведением. */
+private object Player {
+    var view: android.widget.VideoView? = null
+    var media: android.media.MediaPlayer? = null
+}
 
 /**
  * Видео проигрывается ВНУТРИ приложения, а не отдаётся системному плееру: файл
@@ -211,7 +427,7 @@ private fun Modifier.graphicsLayerZoom(scale: Float, x: Float, y: Float): Modifi
  * «play» не за что. Байты кладём в приватный кэш, откуда их никто не читает.
  */
 @Composable
-private fun VideoSurface(bytes: ByteArray, name: String, modifier: Modifier) {
+private fun VideoSurface(bytes: ByteArray, name: String, muted: Boolean, chrome: Boolean) {
     val ctx = LocalContext.current
     val file = remember(bytes) {
         runCatching {
@@ -220,119 +436,136 @@ private fun VideoSurface(bytes: ByteArray, name: String, modifier: Modifier) {
                 .apply { writeBytes(bytes) }
         }.getOrNull()
     }
-    var playing by remember { mutableStateOf(true) }
-    var position by remember { mutableIntStateOf(0) }
-    var duration by remember { mutableIntStateOf(0) }
-    val view = remember { mutableStateOf<android.widget.VideoView?>(null) }
     DisposableEffect(file) {
         onDispose {
-            view.value?.stopPlayback()
+            Player.view?.stopPlayback()
+            Player.view = null
+            Player.media = null
             file?.delete()
         }
     }
-    // Положение читаем опросом: VideoView не сообщает о нём сам, а четыре раза в
-    // секунду достаточно, чтобы полоса не дёргалась и не грела процессор.
-    LaunchedEffect(playing) {
-        while (playing) {
-            view.value?.let {
-                position = it.currentPosition
-                duration = it.duration.coerceAtLeast(0)
-            }
-            kotlinx.coroutines.delay(250)
-        }
+    LaunchedEffect(muted) {
+        val v = if (muted) 0f else 1f
+        Player.media?.setVolume(v, v)
     }
-    Box(modifier, contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (file != null) {
             AndroidView(
                 factory = { c ->
                     android.widget.VideoView(c).apply {
                         setVideoPath(file.absolutePath)
-                        // Зациклено: короткое видео из чата пересматривают, и жать
-                        // «заново» после каждого прохода — работа на пустом месте.
-                        setOnPreparedListener {
-                            it.isLooping = true
-                            duration = this.duration.coerceAtLeast(0)
+                        setOnPreparedListener { mp ->
+                            // Зациклено: короткое видео из чата пересматривают, и
+                            // жать «заново» после каждого прохода — работа на
+                            // пустом месте.
+                            mp.isLooping = true
+                            Player.media = mp
+                            val v = if (muted) 0f else 1f
+                            mp.setVolume(v, v)
                         }
                         start()
-                        view.value = this
+                        Player.view = this
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
             )
-            // Пауза/продолжить по тапу — на самом видео, поверх поверхности.
+        }
+        // Значок паузы по центру — только когда хром скрыт: с таймлайном на
+        // экране состояние и так видно по его кнопке.
+        if (!chrome && Player.view?.isPlaying == false) {
             Box(
-                Modifier.matchParentSize().pointerInput(Unit) {
-                    detectTapGestures {
-                        val v = view.value ?: return@detectTapGestures
-                        if (v.isPlaying) v.pause() else v.start()
-                        playing = v.isPlaying
-                    }
-                },
-            )
-            if (!playing) {
-                // Значок на затемнении: кадр бывает светлым, и белый треугольник
-                // на нём иначе теряется.
-                Box(
-                    Modifier.size(72.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(44.dp))
-                }
-            }
-            if (duration > 0) {
-                VideoProgress(position, duration, Modifier.align(Alignment.BottomCenter)) { ms ->
-                    view.value?.seekTo(ms)
-                    position = ms
-                }
+                Modifier.size(72.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(44.dp))
             }
         }
     }
 }
 
-/**
- * Полоса прогресса с перемоткой. Тап и протяжка по ней переносят воспроизведение
- * одинаково, а область касания намеренно выше самой линии: попадать пальцем в
- * три пикселя невозможно.
- */
+/** Нижняя панель видео: пуск/пауза · полоса с перемоткой · время · звук. */
 @Composable
-private fun VideoProgress(
-    position: Int,
-    duration: Int,
-    modifier: Modifier,
-    onSeek: (Int) -> Unit,
-) {
+private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
+    var position by remember { mutableIntStateOf(0) }
+    var duration by remember { mutableIntStateOf(0) }
+    var playing by remember { mutableStateOf(true) }
     var width by remember { mutableIntStateOf(1) }
-    Column(
-        modifier.fillMaxWidth()
+    // Положение читаем опросом: VideoView не сообщает о нём сам, а четыре раза в
+    // секунду достаточно, чтобы полоса не дёргалась и не грела процессор.
+    LaunchedEffect(Unit) {
+        while (true) {
+            Player.view?.let {
+                position = it.currentPosition
+                duration = it.duration.coerceAtLeast(0)
+                playing = it.isPlaying
+            }
+            kotlinx.coroutines.delay(250)
+        }
+    }
+    val seek = { x: Float ->
+        if (duration > 0) {
+            val ms = (x / width * duration).toInt().coerceIn(0, duration)
+            Player.view?.seekTo(ms)
+            position = ms
+        }
+    }
+    Row(
+        Modifier.fillMaxWidth()
             .background(Color.Black.copy(alpha = 0.55f))
             .navigationBarsPadding()
-            .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
+            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        Icon(
+            if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+            stringResource(if (playing) R.string.viewer_pause else R.string.viewer_play),
+            tint = Color.White,
+            modifier = Modifier.size(26.dp).pointerInput(Unit) {
+                detectTapGestures {
+                    val v = Player.view ?: return@detectTapGestures
+                    if (v.isPlaying) v.pause() else v.start()
+                    playing = v.isPlaying
+                }
+            },
+        )
+        Spacer(Modifier.width(Tokens.Space.m))
+        // Область касания намеренно выше самой линии: попадать пальцем в три
+        // пикселя невозможно.
         Box(
-            Modifier.fillMaxWidth()
+            Modifier.weight(1f)
                 .height(24.dp)
                 .onSizeChanged { width = it.width.coerceAtLeast(1) }
+                .pointerInput(duration) { detectTapGestures { p -> seek(p.x) } }
                 .pointerInput(duration) {
-                    detectTapGestures { p -> onSeek((p.x / width * duration).toInt().coerceIn(0, duration)) }
-                }
-                .pointerInput(duration) {
-                    detectHorizontalDragGestures { change, _ ->
-                        onSeek((change.position.x / width * duration).toInt().coerceIn(0, duration))
-                    }
+                    detectHorizontalDragGestures { change, _ -> seek(change.position.x) }
                 },
             contentAlignment = Alignment.CenterStart,
         ) {
             Box(Modifier.fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.25f)))
-            Box(
-                Modifier.fillMaxWidth(position.toFloat() / duration)
-                    .height(3.dp)
-                    .background(Color.White),
-            )
+            if (duration > 0) {
+                val done = (position.toFloat() / duration).coerceIn(0f, 1f)
+                Box(Modifier.fillMaxWidth(done).height(3.dp).background(HoloAccent))
+            }
         }
+        Spacer(Modifier.width(Tokens.Space.m))
         Text(
-            stringResource(R.string.viewer_progress, fmtDuration(position), fmtDuration(duration)),
+            if (duration > 0) {
+                stringResource(R.string.viewer_progress, fmtDuration(position), fmtDuration(duration))
+            } else {
+                fmtDuration(position)
+            },
             color = Color.White.copy(alpha = 0.75f),
             fontSize = 11.sp,
+            maxLines = 1,
+        )
+        Spacer(Modifier.width(Tokens.Space.s))
+        Icon(
+            if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+            stringResource(if (muted) R.string.viewer_unmute else R.string.viewer_mute),
+            tint = Color.White,
+            modifier = Modifier.size(22.dp).pointerInput(Unit) {
+                detectTapGestures { onMute(!muted) }
+            },
         )
     }
 }
@@ -341,20 +574,18 @@ private fun VideoProgress(
 @Composable
 private fun fmtViewerDate(time: Long): String {
     val ms = time * 1000
-    val clock = android.text.format.DateFormat.getTimeFormat(LocalContext.current).format(java.util.Date(ms))
+    val ctx = LocalContext.current
+    val clock = android.text.format.DateFormat.getTimeFormat(ctx).format(java.util.Date(ms))
     return if (android.text.format.DateUtils.isToday(ms)) {
         stringResource(R.string.viewer_today, clock)
     } else {
-        val day = android.text.format.DateFormat.getMediumDateFormat(LocalContext.current).format(java.util.Date(ms))
+        val day = android.text.format.DateFormat.getMediumDateFormat(ctx).format(java.util.Date(ms))
         stringResource(R.string.viewer_on_date, day, clock)
     }
 }
 
-/**
- * Сохранить вложение в галерею. На Android 10+ это MediaStore без единого
- * разрешения; на более старых системах тот же путь требует записи во внешнее
- * хранилище, поэтому там сначала спрашивают.
- */
+/** Сохранить вложение в галерею — в свою папку приложения, как это делают камеры
+ *  и мессенджеры: иначе чужие снимки смешиваются с собственными. */
 private fun saveToGallery(ctx: Context, bytes: ByteArray, mime: String, name: String) {
     val video = mime.startsWith("video/")
     val ok = runCatching {
@@ -367,7 +598,11 @@ private fun saveToGallery(ctx: Context, bytes: ByteArray, mime: String, name: St
             put(MediaStore.MediaColumns.DISPLAY_NAME, name.ifBlank { defaultName(video) })
             put(MediaStore.MediaColumns.MIME_TYPE, mime.ifBlank { if (video) "video/mp4" else "image/jpeg" })
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val dir = if (video) android.os.Environment.DIRECTORY_MOVIES else android.os.Environment.DIRECTORY_PICTURES
+                val dir = if (video) {
+                    android.os.Environment.DIRECTORY_MOVIES
+                } else {
+                    android.os.Environment.DIRECTORY_PICTURES
+                }
                 put(MediaStore.MediaColumns.RELATIVE_PATH, "$dir/${ctx.getString(R.string.app_name)}")
             }
         }
@@ -391,7 +626,8 @@ private fun defaultName(video: Boolean): String {
 private fun shareFile(ctx: Context, bytes: ByteArray, mime: String, name: String) {
     runCatching {
         val dir = java.io.File(ctx.cacheDir, "shared").apply { mkdirs() }
-        val f = java.io.File(dir, name.ifBlank { defaultName(mime.startsWith("video/")) }).apply { writeBytes(bytes) }
+        val f = java.io.File(dir, name.ifBlank { defaultName(mime.startsWith("video/")) })
+            .apply { writeBytes(bytes) }
         val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
         val send = android.content.Intent(android.content.Intent.ACTION_SEND)
             .setType(mime.ifBlank { "*/*" })

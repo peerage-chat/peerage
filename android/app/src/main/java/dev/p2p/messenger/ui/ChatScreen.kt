@@ -159,6 +159,16 @@ internal fun ChatScreen(model: AppModel) {
     // по нему лента прыгала бы вниз ровно тогда, когда человек листает вверх.
     val lastId = msgs.lastOrNull()?.id
     LaunchedEffect(lastId) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+    // «Показать в чате» из просмотрщика: доводим ленту до сообщения, если оно в
+    // уже загруженной странице истории.
+    LaunchedEffect(model.jumpTo) {
+        val target = model.jumpTo
+        if (target != 0L) {
+            val i = msgs.indexOfFirst { it.id == target }
+            if (i >= 0) listState.animateScrollToItem(i)
+            model.jumpTo = 0L
+        }
+    }
     PagingUp(listState, key) { done -> model.loadOlder(key, done) }
     // Правка начинается с ТЕКУЩЕГО текста: человек исправляет, а не набирает заново.
     LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
@@ -929,21 +939,40 @@ internal fun MessageBubble(
             }
         }
     }
-    if (viewer && blobBytes != null) {
+    if (viewer) {
+        // Листаем по вложениям ЭТОГО чата, а не показываем одно: список берётся из
+        // уже загруженной ленты (полная история медиа — задача #45).
+        val chat = model.currentChat.orEmpty()
+        val me = stringResource(R.string.chat_reply_you)
+        val peer = model.contacts.firstOrNull { it.key == chat }?.displayName
+            ?: stringResource(R.string.chat_default_title)
+        val items = remember(chat, model.messages[chat]?.size) {
+            model.messages[chat].orEmpty()
+                .filter { (it.kind == "image" || it.kind == "video") && it.blobId.isNotEmpty() }
+                .map { ViewerItem(it.id, it.sender, if (it.mine) me else peer, it.time, it.mime, it.name, it.blobId) }
+        }
+        val start = items.indexOfFirst { it.id == m.id && it.sender == m.sender }
         MediaViewer(
-            blobBytes,
-            m.mime,
-            m.name,
-            // Автор снимка в шапке просмотрщика: «Вы» или имя собеседника —
-            // то же, чем подписана цитата, чтобы подписи не расходились.
-            if (m.mine) {
-                stringResource(R.string.chat_reply_you)
-            } else {
-                model.contacts.firstOrNull { it.key == model.currentChat }?.displayName
-                    ?: stringResource(R.string.chat_default_title)
+            model,
+            items,
+            start.coerceAtLeast(0),
+            onClose = { viewer = false },
+            onForward = {
+                viewer = false
+                // Пересылка идёт через выделение — тот же путь, что из панели
+                // чата, чтобы «переслать» везде означало ровно одно.
+                model.toggleSelect(m)
+                model.beginForward(chat)
             },
-            m.time,
-        ) { viewer = false }
+            onDelete = {
+                model.toggleSelect(m)
+                model.deleteSelected(chat)
+            },
+            onShowInChat = { target ->
+                viewer = false
+                model.jumpTo = target.id
+            },
+        )
     }
 }
 
