@@ -359,12 +359,21 @@ private fun ChatListRow(
                     }
                 }
                 Spacer(Modifier.width(Tokens.Space.s))
+                // Ширина МИНИМАЛЬНАЯ, а не фиксированная: «yesterday» в 46dp не
+                // влезает и обрезается в «yesterda». Правый край всё равно общий —
+                // колонка прижата к нему, — а левый пусть плавает под содержимое.
                 Column(
-                    Modifier.width(Tokens.Size.metaSlot),
+                    Modifier.widthIn(min = Tokens.Size.metaSlot),
                     horizontalAlignment = Alignment.End,
                 ) {
                     Box(Modifier.height(20.dp), contentAlignment = Alignment.CenterEnd) {
-                        Text(fmtListTime(row.time), color = Tokens.Colors.tertiary, fontSize = 11.sp)
+                        Text(
+                            fmtListTime(row.time),
+                            color = Tokens.Colors.tertiary,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
                     }
                     Spacer(Modifier.height(Tokens.Space.xxs))
                     // Нижний слот занимает место ВСЕГДА, даже пустой: иначе время
