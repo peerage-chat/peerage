@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
@@ -261,12 +262,12 @@ private fun GalleryTile(g: GalleryItem, pickedAt: Int, onClick: () -> Unit) {
         // чёрной кляксой на тёмном.
         Box(
             Modifier.align(Alignment.TopEnd).padding(5.dp).size(22.dp)
-                .clip(RoundedCornerShape(percent = 50))
+                .clip(CircleShape)
                 .background(if (pickedAt >= 0) HoloAccent else Tokens.Colors.tileScrim)
                 .border(
                     2.dp,
                     if (pickedAt >= 0) HoloAccent else Color.White.copy(alpha = 0.85f),
-                    RoundedCornerShape(percent = 50),
+                    CircleShape,
                 ),
             contentAlignment = Alignment.Center,
         ) {

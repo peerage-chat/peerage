@@ -104,7 +104,7 @@ internal fun TopBar(
 /** Индикатор присутствия: маленький кружок (онлайн/офлайн). */
 @Composable
 internal fun StatusDot(online: Boolean) {
-    Box(Modifier.size(10.dp).clip(RoundedCornerShape(percent = 30)).background(if (online) HoloOnline else OfflineDot))
+    Box(Modifier.size(10.dp).clip(CircleShape).background(if (online) HoloOnline else OfflineDot))
 }
 
 /** Индикатор пиров меша в шапке Главной (⊹ N). Тап → «Сеть»,

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -760,7 +761,7 @@ internal fun graphemeStart(text: String, end: Int): Int {
 @Composable
 internal fun PillIcon(icon: ImageVector, desc: String, tint: Color = HoloSecondary, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(RoundedCornerShape(percent = 30)).clickable { onClick() },
+        Modifier.size(44.dp).clip(CircleShape).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(22.dp)) }
 }
@@ -1001,7 +1002,7 @@ internal fun VoiceAttachment(bytes: ByteArray?) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(38.dp).clip(RoundedCornerShape(percent = 50)).background(HoloAccent)
+            Modifier.size(38.dp).clip(CircleShape).background(HoloAccent)
                 .clickable(enabled = bytes != null) {
                     val mp = player.value
                     if (mp != null && mp.isPlaying) {

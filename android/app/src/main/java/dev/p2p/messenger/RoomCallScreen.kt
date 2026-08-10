@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -187,7 +188,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Box(
-                Modifier.clip(RoundedCornerShape(percent = 30)).background(Color(0x33FFFFFF)).size(36.dp).clickable { onClose() },
+                Modifier.clip(CircleShape).background(Tokens.Colors.glass).size(36.dp).clickable { onClose() },
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Filled.Close, stringResource(R.string.call_close), tint = Color.White, modifier = Modifier.size(18.dp)) }
         }

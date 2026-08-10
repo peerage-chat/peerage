@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -68,7 +69,7 @@ internal fun NetworkScreen(
                 // Цвет и текст — по фактическому состоянию. «Подключено» при
                 // разорванных соединениях было бы прямой ложью на главном индикаторе.
                 Box(
-                    Modifier.size(10.dp).clip(RoundedCornerShape(percent = 30))
+                    Modifier.size(10.dp).clip(CircleShape)
                         .background(if (model.offline) HoloWarn else HoloOnline),
                 )
                 Spacer(Modifier.width(10.dp))

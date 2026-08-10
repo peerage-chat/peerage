@@ -30,7 +30,7 @@ object Tokens {
         val rowPinned = Color(0xFF1F1F23) // закреплённая строка списка — ступень над surface
         val divider = Color(0xFF26262B) // разделитель ВНУТРИ карточки
         val border = Color(0xFF333333)
-        val callBg = Color(0xFF181A1F) // фон экрана звонка/шаринга (темнее тайлов → слоистость)
+        val callBg = Color(0xFF131418) // фон экрана звонка (темнее и тайлов, и фона приложения)
         val tile = Color(0xFF1A1D21) // тайлы звонка, поля ввода, невыбранные чипы
         val avatar = Color(0xFF3A3F45) // фон аватара-заглушки
 
@@ -69,6 +69,15 @@ object Tokens {
         val barScrim = Color(0xBC141518) // нижняя панель управления
         val tileScrim = Color(0xAA000000) // плашка имени на тайле
         val scrimStrong = Color(0xCC181A1F) // кнопка фронт/тыл на превью
+
+        // ── Поверх видео ──────────────────────────────────────────────────────
+        // Полупрозрачный БЕЛЫЙ, а не наш серый: под этими плашками кадр, и любой
+        // непрозрачный цвет читался бы дырой в картинке.
+        val glass = Color(0x33FFFFFF) // кнопка/чип поверх кадра
+        val glassDim = Color(0x22FFFFFF) // то же, но для второстепенного
+        val glassDanger = Color(0x33E53935) // «микрофон выключен» и подобное
+        val tileBorder = Color(0xFF4A4F55) // обводка тайла участника
+        val tileIdle = Color(0xFF2A2F35) // тайл участника без видео
     }
 
     /**

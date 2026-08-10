@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -89,7 +90,7 @@ internal fun GridTile(
     Box(
         modifier
             .clip(RoundedCornerShape(Tokens.Radius.button))
-            .background(if (me) HoloAccentDark else Color(0xFF2A2F35))
+            .background(if (me) HoloAccentDark else Tokens.Colors.tileIdle)
             .clickable { onClick() }
             .aspectRatio(1f),
     ) {
@@ -99,7 +100,7 @@ internal fun GridTile(
             verticalArrangement = Arrangement.Center,
         ) {
             Box(
-                Modifier.size(64.dp).clip(RoundedCornerShape(Tokens.Radius.avatar))
+                Modifier.size(64.dp).clip(CircleShape)
                     .background(if (me) HoloAccent else Tokens.Colors.avatar),
                 contentAlignment = Alignment.Center,
             ) {
@@ -145,11 +146,11 @@ internal fun ParticipantFullscreen(
     me: Boolean,
     onDismiss: () -> Unit,
 ) {
-    Box(Modifier.fillMaxSize().background(Color(0xEE000000)).clickable { onDismiss() }) {
+    Box(Modifier.fillMaxSize().background(Tokens.Colors.overlay).clickable { onDismiss() }) {
         // Кнопка закрытия — правый верхний угол
         Box(
             Modifier.align(Alignment.TopEnd).padding(16.dp).size(36.dp)
-                .clip(RoundedCornerShape(percent = 30)).background(Color(0x33FFFFFF)).clickable { onDismiss() },
+                .clip(CircleShape).background(Tokens.Colors.glass).clickable { onDismiss() },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -170,7 +171,11 @@ internal fun ParticipantFullscreen(
             Box(
                 Modifier.size(128.dp).clip(RoundedCornerShape(Tokens.Radius.avatar))
                     .background(if (me) HoloAccent else Tokens.Colors.avatar)
-                    .border(3.dp, if (me) HoloAccent.copy(alpha = 0.4f) else Color(0xFF4A4F55), RoundedCornerShape(Tokens.Radius.avatar)),
+                    .border(
+                        3.dp,
+                        if (me) HoloAccent.copy(alpha = 0.4f) else Tokens.Colors.tileBorder,
+                        RoundedCornerShape(Tokens.Radius.avatar),
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -189,7 +194,7 @@ internal fun ParticipantFullscreen(
             ) {
                 if (!audio) {
                     Row(
-                        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Color(0x33E53935))
+                        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.glassDanger)
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -200,7 +205,7 @@ internal fun ParticipantFullscreen(
                 }
                 if (video) {
                     Row(
-                        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Color(0x22FFFFFF))
+                        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.glassDim)
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp),

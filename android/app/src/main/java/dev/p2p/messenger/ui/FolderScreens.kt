@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -326,7 +327,7 @@ private fun PickRow(name: String, checked: Boolean, avatar: ByteArray?, onToggle
         Spacer(Modifier.width(Tokens.Space.m))
         Text(name, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
         Box(
-            Modifier.size(22.dp).clip(RoundedCornerShape(percent = 50))
+            Modifier.size(22.dp).clip(CircleShape)
                 .background(if (checked) HoloAccent else Color.Transparent),
             contentAlignment = Alignment.Center,
         ) {
@@ -334,7 +335,7 @@ private fun PickRow(name: String, checked: Boolean, avatar: ByteArray?, onToggle
                 Icon(TablerIcons.Check, null, tint = HoloAccentDark, modifier = Modifier.size(14.dp))
             } else {
                 Box(
-                    Modifier.size(22.dp).clip(RoundedCornerShape(percent = 50))
+                    Modifier.size(22.dp).clip(CircleShape)
                         .background(HoloSurface),
                 )
             }
