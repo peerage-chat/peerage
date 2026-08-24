@@ -148,7 +148,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
 @Composable
 internal fun ChatScreen(model: AppModel) {
     val key = model.currentChat ?: return
-    val msgs = model.messages[key] ?: emptyList()
+    val msgs = model.chat(key)
     var input by remember(key) { mutableStateOf("") }
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
@@ -482,7 +482,7 @@ private fun SelectionTopBar(model: AppModel) {
         if (sel.size == 1) {
             BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
                 val ref = sel.first()
-                model.messages[key]?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
+                model.chat(key).firstOrNull { it.id == ref.id && it.sender == ref.sender }
                     ?.let { model.startReply(it) }
             }
         }
@@ -492,14 +492,14 @@ private fun SelectionTopBar(model: AppModel) {
         if (sel.size == 1 && model.isMine(sel.first())) {
             val ref = sel.first()
             BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
-                model.messages[key]?.firstOrNull { it.id == ref.id && it.mine }
+                model.chat(key).firstOrNull { it.id == ref.id && it.mine }
                     ?.let { model.editTarget = it }
                 model.clearSelection()
             }
         }
         if (sel.size == 1) {
             val ref = sel.first()
-            val msg = model.messages[key]?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
+            val msg = model.chat(key).firstOrNull { it.id == ref.id && it.sender == ref.sender }
             val already = model.pinned[key].orEmpty().any { it.id == ref.id && it.sender == ref.sender }
             BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
                 msg?.let { model.setPinned(key, false, it, !already) }
@@ -864,8 +864,8 @@ internal fun MessageBubble(
                         if (m.replyTo != 0L) {
                             // Ключ строки — пара «автор + id»: id посеян временем
                             // отправителя и у обеих сторон может совпасть.
-                            val src = model.messages[model.currentChat]
-                                ?.firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
+                            val src = model.chat(model.currentChat)
+                                .firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
                             QuoteBlock(
                                 model,
                                 src,
@@ -947,8 +947,8 @@ internal fun MessageBubble(
         val me = stringResource(R.string.chat_reply_you)
         val peer = model.contacts.firstOrNull { it.key == chat }?.displayName
             ?: stringResource(R.string.chat_default_title)
-        val items = remember(chat, model.messages[chat]?.size) {
-            model.messages[chat].orEmpty()
+        val items = remember(chat, model.chat(chat).size) {
+            model.chat(chat)
                 .filter { (it.kind == "image" || it.kind == "video") && it.blobId.isNotEmpty() }
                 .map { ViewerItem(it.id, it.sender, if (it.mine) me else peer, it.time, it.mime, it.name, it.blobId) }
         }

@@ -110,13 +110,13 @@ internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
 @Composable
 internal fun GroupChatScreen(model: AppModel) {
     val gid = model.currentGroup ?: return
-    val msgs = model.groupMessages[gid] ?: emptyList()
+    val msgs = model.chat(gid, group = true)
     val archived = model.groups.firstOrNull { it.gid == gid }?.archived == true
     val isAdmin = model.groups.firstOrNull { it.gid == gid }?.admin == true
     LaunchedEffect(gid) { model.refreshPins(gid, group = true) }
     var input by remember(gid) { mutableStateOf("") }
     // Правка начинается с текущего текста: человек исправляет, а не набирает заново.
-    LaunchedEffect(model.editTargetGroup) { model.editTargetGroup?.let { input = it.text } }
+    LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
     var focusedParticipant by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
@@ -220,12 +220,12 @@ internal fun GroupChatScreen(model: AppModel) {
                     value = input,
                     onChange = { input = it },
                     replyStrip = {
-                        model.editTargetGroup?.let { t ->
+                        model.editTarget?.let { t ->
                             EditStrip(t.text) {
-                                model.editTargetGroup = null
+                                model.editTarget = null
                                 input = ""
                             }
-                        } ?: model.groupReplyTarget?.let { GroupReplyStrip(model, it) }
+                        } ?: model.replyTarget?.let { GroupReplyStrip(model, it) }
                     },
                     onPickFile = { filePicker.launch(arrayOf("*/*")) },
                     onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
@@ -250,10 +250,10 @@ internal fun GroupChatScreen(model: AppModel) {
                     onVoiceStop = stopVoice,
                     model = model,
                     onSend = {
-                        val editing = model.editTargetGroup
+                        val editing = model.editTarget
                         if (editing != null) {
                             if (input.isNotBlank()) model.applyEdit(gid, true, editing.id, input)
-                            model.editTargetGroup = null
+                            model.editTarget = null
                             input = ""
                         } else if (input.isNotBlank()) {
                             model.sendGroupText(gid, input)
@@ -281,7 +281,7 @@ internal fun GroupChatScreen(model: AppModel) {
  *  войти/выйти из комнаты · меню. */
 @Composable
 internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit) {
-    if (model.groupSelection.isNotEmpty()) {
+    if (model.selection.isNotEmpty()) {
         GroupSelectionTopBar(model)
         return
     }
@@ -427,7 +427,7 @@ internal fun GroupMessageRow(model: AppModel, m: Message, pos: BlockPos = BlockP
 private fun GroupSelectionTopBar(model: AppModel) {
     val gid = model.currentGroup ?: return
     val ctx = LocalContext.current
-    val sel = model.groupSelection
+    val sel = model.selection
     val mineKey = model.me?.pubkey.orEmpty()
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -435,7 +435,7 @@ private fun GroupSelectionTopBar(model: AppModel) {
         Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel)) { model.clearGroupSelection() }
+        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel)) { model.clearSelection() }
         Text(
             sel.size.toString(),
             color = Color.White,
@@ -450,33 +450,33 @@ private fun GroupSelectionTopBar(model: AppModel) {
         if (sel.size == 1 && sel.first().sender == mineKey) {
             val ref = sel.first()
             BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
-                model.groupMessages[gid]?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
-                    ?.let { model.editTargetGroup = it }
-                model.clearGroupSelection()
+                model.chat(gid, group = true).firstOrNull { it.id == ref.id && it.sender == ref.sender }
+                    ?.let { model.editTarget = it }
+                model.clearSelection()
             }
         }
         // Закрепляет только админ — у остальных кнопки нет, чтобы она не обещала
         // того, что движок всё равно отклонит.
         if (sel.size == 1 && model.groups.firstOrNull { it.gid == gid }?.admin == true) {
             val ref = sel.first()
-            val msg = model.groupMessages[gid]
-                ?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
+            val msg = model.chat(gid, group = true)
+                .firstOrNull { it.id == ref.id && it.sender == ref.sender }
             val already = model.pinned[gid].orEmpty()
                 .any { it.id == ref.id && it.sender == ref.sender }
             BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
                 msg?.let { model.setPinnedGroup(gid, it, !already) }
-                model.clearGroupSelection()
+                model.clearSelection()
             }
         }
         if (sel.size == 1) {
             BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
                 val ref = sel.first()
-                model.groupMessages[gid]?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
-                    ?.let { model.startGroupReply(it) }
+                model.chat(gid, group = true).firstOrNull { it.id == ref.id && it.sender == ref.sender }
+                    ?.let { model.startReply(it) }
             }
         }
         BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
-            val text = model.groupSelectedText(gid)
+            val text = model.selectedTextOf(gid)
             if (text.isNotEmpty()) {
                 val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
@@ -484,7 +484,7 @@ private fun GroupSelectionTopBar(model: AppModel) {
                 android.widget.Toast
                     .makeText(ctx, R.string.chat_copied, android.widget.Toast.LENGTH_SHORT).show()
             }
-            model.clearGroupSelection()
+            model.clearSelection()
         }
         BarIcon(Icons.Filled.Delete, stringResource(R.string.chat_delete)) { confirmDelete = true }
     }
@@ -552,7 +552,7 @@ private fun GroupReplyStrip(model: AppModel, m: Message) {
             Icons.Filled.Close,
             stringResource(R.string.common_cancel),
             tint = HoloSecondary,
-            modifier = Modifier.size(20.dp).clickable { model.cancelGroupReply() },
+            modifier = Modifier.size(20.dp).clickable { model.cancelReply() },
         )
     }
 }
@@ -560,8 +560,8 @@ private fun GroupReplyStrip(model: AppModel, m: Message) {
 /** Цитата в групповом пузыре: имя автора оригинала + начало текста. */
 @Composable
 private fun GroupQuote(model: AppModel, m: Message, modifier: Modifier = Modifier) {
-    val src = model.groupMessages[model.currentGroup]
-        ?.firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
+    val src = model.chat(model.currentGroup, group = true)
+        .firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
     val who = if (m.replySender == model.me?.pubkey) {
         stringResource(R.string.chat_reply_you)
     } else {
@@ -611,8 +611,8 @@ internal fun GroupBubble(
     // M2: байты вложения из реактивного кэша (появятся по докачке блоба без рефреша).
     val blobBytes = model.blob(m.blobId)
     var viewer by remember { mutableStateOf(false) }
-    val selecting = model.groupSelection.isNotEmpty()
-    val selected = MsgRef(m.id, m.sender) in model.groupSelection
+    val selecting = model.selection.isNotEmpty()
+    val selected = MsgRef(m.id, m.sender) in model.selection
     // В группе галочек нет: доставку каждому из участников мы не отслеживаем, и
     // одна галочка означала бы больше, чем знает движок.
     val meta: @Composable () -> Unit = { MsgMeta(time, mine = false, edited = m.editedAt > 0) }
@@ -630,8 +630,8 @@ internal fun GroupBubble(
                 if (selected) Modifier.border(1.dp, HoloAccent, bubbleShape(mine, pos)) else Modifier,
             )
             .combinedClickable(
-                onLongClick = { model.toggleGroupSelect(m) },
-                onClick = { if (selecting) model.toggleGroupSelect(m) },
+                onLongClick = { model.toggleSelect(m) },
+                onClick = { if (selecting) model.toggleSelect(m) },
             )
             .then(if (photoBubble) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 6.dp)),
     ) {
@@ -681,21 +681,21 @@ internal fun GroupBubble(
                         // а не открывает файл.
                         "image" -> ImageAttachment(
                             blobBytes,
-                            onOpen = { if (selecting) model.toggleGroupSelect(m) else viewer = true },
+                            onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
                             bare = photoBubble,
-                            onLongClick = { model.toggleGroupSelect(m) },
+                            onLongClick = { model.toggleSelect(m) },
                             cacheKey = m.blobId,
                         )
                         "video" -> VideoAttachment(
                             blobBytes,
                             m.durationMs,
-                            onOpen = { if (selecting) model.toggleGroupSelect(m) else viewer = true },
+                            onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
                             bare = photoBubble,
-                            onLongClick = { model.toggleGroupSelect(m) },
+                            onLongClick = { model.toggleSelect(m) },
                             cacheKey = m.blobId,
                         )
                         "voice" -> VoiceAttachment(blobBytes)
-                        "file" -> FileAttachment(m.name, blobBytes) { model.toggleGroupSelect(m) }
+                        "file" -> FileAttachment(m.name, blobBytes) { model.toggleSelect(m) }
                         // Текст обтекает мету — перенос считает сам движок вёрстки.
                         else -> BubbleText(m.text) { meta() }
                     }
@@ -709,8 +709,8 @@ internal fun GroupBubble(
         }
         if (viewer) {
             val gid = model.currentGroup.orEmpty()
-            val items = remember(gid, model.groupMessages[gid]?.size) {
-                model.groupMessages[gid].orEmpty()
+            val items = remember(gid, model.chat(gid, group = true).size) {
+                model.chat(gid, group = true)
                     .filter { (it.kind == "image" || it.kind == "video") && it.blobId.isNotEmpty() }
                     .map { ViewerItem(it.id, it.sender, "", it.time, it.mime, it.name, it.blobId) }
             }
@@ -725,11 +725,11 @@ internal fun GroupBubble(
                 onClose = { viewer = false },
                 onForward = {
                     viewer = false
-                    model.toggleGroupSelect(m)
+                    model.toggleSelect(m)
                     model.beginForwardGroup(gid)
                 },
                 onDelete = {
-                    model.toggleGroupSelect(m)
+                    model.toggleSelect(m)
                     model.deleteGroupSelected(gid)
                 },
                 onShowInChat = { target ->

@@ -443,7 +443,19 @@ class AppModel private constructor() {
     val contactRequests = mutableStateListOf<ContactRequest>()
     val online = mutableStateMapOf<String, Boolean>()
     val unread = mutableStateMapOf<String, Int>()
+
+    /**
+     * Ленты всех чатов: ключ — [chatKey], то есть вид чата входит в ключ. Раньше
+     * карт было две (личные и групповые), и всё, что работает с историей, шло по
+     * два раза — по одному на каждую.
+     *
+     * Читать удобнее через [chat]: он не заставляет вызывающего собирать ключ.
+     */
     val messages = mutableStateMapOf<String, SnapshotStateList<Message>>()
+
+    /** Лента чата: `chat(hex)` — личный, `chat(gid, group = true)` — групповой. */
+    fun chat(id: String?, group: Boolean = false): List<Message> =
+        id?.let { messages[chatKey(it, group)] }.orEmpty()
 
     var currentChat by mutableStateOf<String?>(null)
     var netPeers by mutableStateOf(0)
@@ -468,7 +480,6 @@ class AppModel private constructor() {
 
     /** Входящие приглашения в группы (карточки на одобрение). */
     val groupInvites = mutableStateListOf<GroupInvite>()
-    val groupMessages = mutableStateMapOf<String, SnapshotStateList<Message>>()
 
     /** Непрочитанные в группах: gid → счётчик. Живёт только в памяти, как и [unread]
      *  у личных чатов — это «что пришло, пока я смотрел в другое место», а не факт
@@ -1446,6 +1457,10 @@ class AppModel private constructor() {
     }
 
     fun openChat(key: String) {
+        // Выделение, ответ и правка теперь общие на все чаты, а принадлежат они
+        // ОТКРЫТОМУ: без сброса выбранное в одном чате оказалось бы «выбранным» и
+        // в следующем, а действие ушло бы не туда.
+        leaveChat()
         currentChat = key
         unread[key] = 0
         ops.execute { loadHistory(key) }
@@ -1478,7 +1493,7 @@ class AppModel private constructor() {
                     ),
                 )
             }
-        messages[key] = list.toMutableStateList()
+        messages[chatKey(key, group = false)] = list.toMutableStateList()
         atChatStart -= key // хвост перечитан — выше снова может что-то быть
         // Байты вложений НЕ читаем заранее: `blob()` возьмёт их при показе, то есть
         // только для видимых пузырей. Раньше вход в чат тянул с диска всю страницу,
@@ -1486,7 +1501,7 @@ class AppModel private constructor() {
     }
 
     private fun log(key: String): SnapshotStateList<Message> =
-        messages.getOrPut(key) { mutableListOf<Message>().toMutableStateList() }
+        messages.getOrPut(chatKey(key, group = false)) { mutableListOf<Message>().toMutableStateList() }
 
     /** Чаты, где мы уже дошли до начала переписки (просить выше нечего). */
     private val atChatStart = mutableSetOf<String>()
@@ -1502,7 +1517,7 @@ class AppModel private constructor() {
      * удержать позицию списка: вставка сверху иначе выглядит как прыжок.
      */
     fun loadOlder(key: String, done: (Int) -> Unit) {
-        val list = messages[key]
+        val list = messages[chatKey(key, group = false)]
         // Курсор берём с первой строки, ПРИШЕДШЕЙ ИЗ БАЗЫ: у локальных (ожидающих
         // досылки) записей номера строки нет, ссылаться на них не на что.
         val top = list?.firstOrNull { it.row != 0L }
@@ -1528,7 +1543,7 @@ class AppModel private constructor() {
 
     /** То же для группы: путь общий, отличается только источник страницы. */
     fun loadOlderGroup(gid: String, done: (Int) -> Unit) {
-        val list = groupMessages[gid]
+        val list = messages[chatKey(gid, group = true)]
         val top = list?.firstOrNull { it.row != 0L }
         val mark = "g:$gid"
         if (list == null || top == null || mark in atChatStart || !loadingOlder.add(mark)) {
@@ -1564,7 +1579,6 @@ class AppModel private constructor() {
     var editTarget by mutableStateOf<Message?>(null)
 
     /** То же для группового сообщения. */
-    var editTargetGroup by mutableStateOf<Message?>(null)
 
     /** Отправить правку своего сообщения. */
     fun applyEdit(chat: String, group: Boolean, id: Long, text: String) = ops.execute {
@@ -1605,10 +1619,10 @@ class AppModel private constructor() {
 
     /** Начать пересылку выделенного в группе (там автор известен явно). */
     fun beginForwardGroup(gid: String) {
-        val refs = groupSelection.map { it.id to it.sender }
+        val refs = selection.map { it.id to it.sender }
         if (refs.isEmpty()) return
         forwarding = ChatTarget(gid, group = true) to refs
-        clearGroupSelection()
+        clearSelection()
     }
 
     /**
@@ -1698,8 +1712,9 @@ class AppModel private constructor() {
     // ── Действия с сообщением (ADR-006) ───────────────────────────────────────
 
     /**
-     * Что выделено в открытом чате. Ключ строки истории — ПАРА (id, mine): id посеян
-     * временем отправителя, поэтому у моего и чужого сообщения он может совпасть.
+     * Что выделено в открытом чате. Одно на все виды чатов: открыт всегда ровно
+     * один, и держать отдельный набор для группы значило бы синхронизировать два
+     * состояния там, где хватает одного.
      */
     var selection by mutableStateOf<Set<MsgRef>>(emptySet())
         private set
@@ -1709,8 +1724,18 @@ class AppModel private constructor() {
         private set
 
     fun toggleSelect(m: Message) {
+        // Сообщения без id (старый клиент) выбрать нельзя: с ними нечего делать —
+        // ни отозвать, ни ответить, а «удалить у себя» без ссылки не адресуется.
+        if (m.id == 0L) return
         val ref = MsgRef(m.id, m.sender)
         selection = if (ref in selection) selection - ref else selection + ref
+    }
+
+    /** Забыть всё, что относится к прежде открытому чату. */
+    fun leaveChat() {
+        selection = emptySet()
+        replyTarget = null
+        editTarget = null
     }
 
     fun clearSelection() {
@@ -1727,12 +1752,15 @@ class AppModel private constructor() {
     }
 
     /** Текст выделенного для буфера обмена: несколько сообщений — с новой строки. */
-    fun selectedText(key: String): String {
+    /** Текст выделенного (для копирования) — из ленты любого чата. */
+    fun selectedTextOf(id: String, group: Boolean = false): String {
         val sel = selection
-        return (messages[key] ?: emptyList<Message>())
+        return chat(id, group)
             .filter { MsgRef(it.id, it.sender) in sel }
             .joinToString("\n") { if (it.text.isNotEmpty()) it.text else it.name }
     }
+
+    fun selectedText(key: String): String = selectedTextOf(key)
 
     /** Удалить выделенное только у себя. */
     fun deleteSelected(key: String) {
@@ -2020,7 +2048,7 @@ class AppModel private constructor() {
             // Собеседник отозвал своё сообщение: движок уже удалил его из истории,
             // здесь убираем из открытой ленты, чтобы не ждать перезахода в чат.
             is EngineEvent.Retracted -> {
-                messages[ev.peer]?.removeAll { it.id == ev.id && !it.mine }
+                messages[chatKey(ev.peer, group = false)]?.removeAll { it.id == ev.id && !it.mine }
             }
             // M2: входящее медиа (ссылка на блоб; байты подтянутся блоб-каналом).
             is EngineEvent.Media -> {
@@ -2045,7 +2073,7 @@ class AppModel private constructor() {
             is EngineEvent.Undelivered -> {
                 // Rust ретраил 5 минут и не смог — передаём в Kotlin-очередь.
                 // Пир появится онлайн → flushQueueFor доставит автоматически.
-                val l = messages[ev.peer] ?: return
+                val l = messages[chatKey(ev.peer, group = false)] ?: return
                 val idx = l.indexOfFirst { it.id == ev.id && it.mine }
                 if (idx >= 0) {
                     val msg = l[idx]
@@ -2097,11 +2125,11 @@ class AppModel private constructor() {
             // текст на месте, чтобы не перечитывать всю ленту.
             is EngineEvent.MessageEdited -> {
                 val stamp = System.currentTimeMillis() / 1000
-                messages[ev.chat]?.let { list ->
+                messages[chatKey(ev.chat, group = false)]?.let { list ->
                     val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
                     if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp)
                 }
-                groupMessages[ev.chat]?.let { list ->
+                messages[chatKey(ev.chat, group = true)]?.let { list ->
                     val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
                     if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp)
                 }
@@ -2202,7 +2230,7 @@ class AppModel private constructor() {
     }
 
     private fun updateStatus(peer: String, id: Long, status: String) {
-        val l = messages[peer] ?: return
+        val l = messages[chatKey(peer, group = false)] ?: return
         val idx = l.indexOfFirst { it.id == id && it.mine }
         if (idx >= 0) l[idx] = l[idx].copy(status = status)
     }
@@ -2280,7 +2308,7 @@ class AppModel private constructor() {
             }
             saveOfflineQueue()
             // Убираем «ожидание»-заглушки из лога — они вернутся с настоящими ID.
-            messages[peer]?.removeAll { it.mine && it.status == "queued" }
+            messages[chatKey(peer, group = false)]?.removeAll { it.mine && it.status == "queued" }
             msgs.forEach { (text, _) ->
                 val now = System.currentTimeMillis() / 1000
                 val id = Native.sendText(sessionPtr, peer, text)
@@ -2660,6 +2688,7 @@ class AppModel private constructor() {
     }
 
     fun openGroup(gid: String) {
+        leaveChat()
         currentGroup = gid
         currentGroupRoster = null // тикер подтянет свежий агрегат
         groupUnread[gid] = 0
@@ -2679,21 +2708,21 @@ class AppModel private constructor() {
                     it
                 }
             }
-        groupMessages[gid] = list.toMutableStateList()
+        messages[chatKey(gid, group = true)] = list.toMutableStateList()
         atChatStart -= "g:$gid"
         // Байты вложений и миниатюры подтянет `blob()` при показе — заранее
         // читать всю страницу с диска незачем.
     }
 
     private fun groupLog(gid: String): SnapshotStateList<Message> =
-        groupMessages.getOrPut(gid) { mutableListOf<Message>().toMutableStateList() }
+        messages.getOrPut(chatKey(gid, group = true)) { mutableListOf<Message>().toMutableStateList() }
 
     fun inviteToGroup(gid: String, peerHex: String) = ops.execute { Native.groupInvite(sessionPtr, gid, peerHex) }
 
     fun sendGroupText(gid: String, text: String) {
         if (text.isBlank()) return
-        val reply = groupReplyTarget
-        groupReplyTarget = null
+        val reply = replyTarget
+        replyTarget = null
         ops.execute {
             Native.groupSendTextReply(
                 sessionPtr,
@@ -2709,49 +2738,15 @@ class AppModel private constructor() {
 
     // ── Действия с групповым сообщением (ADR-006) ────────────────────────────
 
-    var groupSelection by mutableStateOf<Set<MsgRef>>(emptySet())
-        private set
-
-    var groupReplyTarget by mutableStateOf<Message?>(null)
-        private set
-
-    fun toggleGroupSelect(m: Message) {
-        // Сообщения без id (старый клиент) выбрать нельзя: с ними нечего делать —
-        // ни отозвать, ни ответить, а «удалить у себя» без ссылки не адресуется.
-        if (m.id == 0L) return
-        val ref = MsgRef(m.id, m.sender)
-        groupSelection = if (ref in groupSelection) groupSelection - ref else groupSelection + ref
-    }
-
     /** id сообщения, к которому просят прокрутить ленту («показать в чате» из
      *  просмотрщика). Лента сама гасит его после прокрутки — иначе повторный вход
      *  в чат снова уезжал бы к старому вложению. */
     var jumpTo by mutableStateOf(0L)
 
-    fun clearGroupSelection() {
-        groupSelection = emptySet()
-    }
-
-    fun startGroupReply(m: Message) {
-        groupReplyTarget = m
-        groupSelection = emptySet()
-    }
-
-    fun cancelGroupReply() {
-        groupReplyTarget = null
-    }
-
-    fun groupSelectedText(gid: String): String {
-        val sel = groupSelection
-        return (groupMessages[gid] ?: emptyList<Message>())
-            .filter { MsgRef(it.id, it.sender) in sel }
-            .joinToString("\n") { if (it.text.isNotEmpty()) it.text else it.name }
-    }
-
     fun deleteGroupSelected(gid: String) {
-        val refs = groupSelection.toList()
+        val refs = selection.toList()
         if (refs.isEmpty()) return
-        groupSelection = emptySet()
+        selection = emptySet()
         val json = wireGroupRefs(refs)
         ops.execute {
             Native.groupDeleteMessages(sessionPtr, gid, json)
@@ -2761,9 +2756,9 @@ class AppModel private constructor() {
     /** Отозвать выделенные СВОИ сообщения у участников. Чужие не трогаем. */
     fun retractGroupSelected(gid: String) {
         val mine = me?.pubkey.orEmpty()
-        val ids = groupSelection.filter { it.sender == mine }.map { it.id }
+        val ids = selection.filter { it.sender == mine }.map { it.id }
         if (ids.isEmpty()) return
-        groupSelection = emptySet()
+        selection = emptySet()
         val json = ids.joinToString(prefix = "[", postfix = "]")
         ops.execute {
             Native.groupRetractMessages(sessionPtr, gid, json)
@@ -2781,8 +2776,8 @@ class AppModel private constructor() {
         meta: MediaMeta = MediaMeta(),
         caption: String = "",
     ) = ops.execute {
-        val reply = groupReplyTarget
-        groupReplyTarget = null
+        val reply = replyTarget
+        replyTarget = null
         Native.groupSendMedia(
             sessionPtr, gid, content, mime, name,
             meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
@@ -2800,8 +2795,8 @@ class AppModel private constructor() {
         meta: MediaMeta = MediaMeta(),
         caption: String = "",
     ) = ops.execute {
-        val reply = groupReplyTarget
-        groupReplyTarget = null
+        val reply = replyTarget
+        replyTarget = null
         Native.groupSendMediaFile(
             sessionPtr, gid, path, mime, name,
             meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
