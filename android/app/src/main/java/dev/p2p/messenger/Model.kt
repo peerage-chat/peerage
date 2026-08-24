@@ -1588,26 +1588,10 @@ class AppModel private constructor() {
         if (text.isNotBlank()) Native.editMessage(sessionPtr, chat, group, id, text)
     }
 
-    /** Ссылки в форме личного канала: там на проводе не автор, а «моё/чужое». */
-    @kotlinx.serialization.Serializable
-    private data class WireDmRef(val id: Long, val mine: Boolean)
+    private fun wireDmRefs(refs: Collection<MsgRef>): String =
+        dmRefsJson(refs, me?.pubkey.orEmpty())
 
-    /** Ссылки в форме группового канала: там автор нужен явно. */
-    @kotlinx.serialization.Serializable
-    private data class WireGroupRef(val id: Long, val sender: String)
-
-    private fun wireDmRefs(refs: Collection<MsgRef>): String {
-        val meKey = me?.pubkey.orEmpty()
-        return WireJson.encodeToString(
-            kotlinx.serialization.builtins.ListSerializer(WireDmRef.serializer()),
-            refs.map { WireDmRef(it.id, it.sender == meKey) },
-        )
-    }
-
-    private fun wireGroupRefs(refs: Collection<MsgRef>): String = WireJson.encodeToString(
-        kotlinx.serialization.builtins.ListSerializer(WireGroupRef.serializer()),
-        refs.map { WireGroupRef(it.id, it.sender) },
-    )
+    private fun wireGroupRefs(refs: Collection<MsgRef>): String = groupRefsJson(refs)
 
     /** Своё ли это сообщение: сравнение автора с собственным ключом. */
     fun isMine(ref: MsgRef): Boolean = ref.sender == me?.pubkey
