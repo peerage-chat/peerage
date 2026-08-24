@@ -70,14 +70,22 @@ private fun sendGroupUriAttachment(
         // целиком. Всё остальное — потоком, как в личке.
         if (mime.startsWith("image/")) {
             val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
-            model.sendGroupMedia(gid, bytes, mime, name, MediaMeta.extract(ctx, uri, mime, bytes), caption)
+            model.sendMediaWithMeta(
+                gid,
+                bytes,
+                mime,
+                name,
+                MediaMeta.extract(ctx, uri, mime, bytes),
+                caption,
+                group = true,
+            )
             return@launch
         }
         // Метаданные (длительность/кадр/превью) достаём здесь: без них у участников
         // будет карточка «скачать» без единой подсказки, что именно им предлагают.
         val cached = cacheFromUri(ctx, uri, name) ?: return@launch
         val meta = MediaMeta.extract(ctx, uri, mime, ByteArray(0))
-        model.sendGroupMediaFile(gid, cached.absolutePath, mime, name, meta, caption)
+        model.sendMediaFile(gid, cached.absolutePath, mime, name, meta, caption, group = true)
     }
 }
 
@@ -133,7 +141,7 @@ internal fun GroupChatScreen(model: AppModel) {
             model.jumpTo = 0L
         }
     }
-    PagingUp(listState, gid) { done -> model.loadOlderGroup(gid, done) }
+    PagingUp(listState, gid) { done -> model.loadOlder(gid, done, group = true) }
 
     // Вложения в группе — тот же лист, что в DM (движок пушит блоб всем участникам).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -167,7 +175,11 @@ internal fun GroupChatScreen(model: AppModel) {
     val stopVoice = {
         if (recording) {
             recording = false
-            recorder.stop()?.let { bytes -> scope.launch(Dispatchers.IO) { model.sendGroupMedia(gid, bytes, "audio/mp4", "voice.m4a") } }
+            recorder.stop()?.let { bytes ->
+                scope.launch(Dispatchers.IO) {
+                    model.sendMediaWithMeta(gid, bytes, "audio/mp4", "voice.m4a", MediaMeta(), group = true)
+                }
+            }
         }
     }
 
@@ -256,7 +268,7 @@ internal fun GroupChatScreen(model: AppModel) {
                             model.editTarget = null
                             input = ""
                         } else if (input.isNotBlank()) {
-                            model.sendGroupText(gid, input)
+                            model.send(gid, input, group = true)
                             input = ""
                         }
                     },
@@ -444,7 +456,7 @@ private fun GroupSelectionTopBar(model: AppModel) {
             modifier = Modifier.weight(1f).padding(start = 8.dp),
         )
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
-            model.beginForwardGroup(gid)
+            model.beginForward(gid, group = true)
         }
         // Править можно только своё: подменять чужие слова — не редактирование.
         if (sel.size == 1 && sel.first().sender == mineKey) {
@@ -464,7 +476,7 @@ private fun GroupSelectionTopBar(model: AppModel) {
             val already = model.pinned[gid].orEmpty()
                 .any { it.id == ref.id && it.sender == ref.sender }
             BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
-                msg?.let { model.setPinnedGroup(gid, it, !already) }
+                msg?.let { model.setPinned(gid, true, it, !already) }
                 model.clearSelection()
             }
         }
@@ -505,12 +517,12 @@ private fun GroupSelectionTopBar(model: AppModel) {
                 Column(horizontalAlignment = Alignment.End) {
                     if (allMine) {
                         TextButton(onClick = {
-                            model.retractGroupSelected(gid)
+                            model.retractSelected(gid, group = true)
                             confirmDelete = false
                         }) { Text(stringResource(R.string.chat_delete_for_all), color = HoloError) }
                     }
                     TextButton(onClick = {
-                        model.deleteGroupSelected(gid)
+                        model.deleteSelected(gid, group = true)
                         confirmDelete = false
                     }) { Text(stringResource(R.string.chat_delete_for_me), color = HoloError) }
                 }
@@ -726,11 +738,11 @@ internal fun GroupBubble(
                 onForward = {
                     viewer = false
                     model.toggleSelect(m)
-                    model.beginForwardGroup(gid)
+                    model.beginForward(gid, group = true)
                 },
                 onDelete = {
                     model.toggleSelect(m)
-                    model.deleteGroupSelected(gid)
+                    model.deleteSelected(gid, group = true)
                 },
                 onShowInChat = { target ->
                     viewer = false

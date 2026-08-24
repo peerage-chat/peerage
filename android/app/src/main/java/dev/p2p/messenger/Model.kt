@@ -693,12 +693,6 @@ class AppModel private constructor() {
         refreshPins(chat, group)
     }
 
-    /** То же для группового сообщения (там автор известен явно). */
-    fun setPinnedGroup(gid: String, msg: Message, on: Boolean) = ops.execute {
-        Native.pinMessage(sessionPtr, gid, true, msg.id, msg.sender, on)
-        refreshPins(gid, true)
-    }
-
     /** Находка поиска по переписке: где нашлось + само сообщение. */
     data class SearchHit(
         val chat: String,
@@ -1516,7 +1510,16 @@ class AppModel private constructor() {
      * [done] получает, сколько сообщений добавлено — вызывающему это нужно, чтобы
      * удержать позицию списка: вставка сверху иначе выглядит как прыжок.
      */
-    fun loadOlder(key: String, done: (Int) -> Unit) {
+    /**
+     * Догрузить страницу истории выше текущей. Вид чата — параметр: страницы
+     * приходят из разных вызовов движка, но условия («уже в начале», «загрузка
+     * идёт») и место вставки общие.
+     */
+    fun loadOlder(key: String, done: (Int) -> Unit, group: Boolean = false) {
+        if (group) {
+            loadOlderGroup(key, done)
+            return
+        }
         val list = messages[chatKey(key, group = false)]
         // Курсор берём с первой строки, ПРИШЕДШЕЙ ИЗ БАЗЫ: у локальных (ожидающих
         // досылки) записей номера строки нет, ссылаться на них не на что.
@@ -1542,7 +1545,7 @@ class AppModel private constructor() {
     }
 
     /** То же для группы: путь общий, отличается только источник страницы. */
-    fun loadOlderGroup(gid: String, done: (Int) -> Unit) {
+    private fun loadOlderGroup(gid: String, done: (Int) -> Unit) {
         val list = messages[chatKey(gid, group = true)]
         val top = list?.firstOrNull { it.row != 0L }
         val mark = "g:$gid"
@@ -1610,18 +1613,10 @@ class AppModel private constructor() {
     fun isMine(ref: MsgRef): Boolean = ref.sender == me?.pubkey
 
     /** Начать пересылку выделенного в личном чате или «Сохранённом». */
-    fun beginForward(chatKey: String) {
+    fun beginForward(chatKey: String, group: Boolean = false) {
         val refs = selection.map { it.id to it.sender }
         if (refs.isEmpty()) return
-        forwarding = ChatTarget(chatKey, group = false) to refs
-        clearSelection()
-    }
-
-    /** Начать пересылку выделенного в группе (там автор известен явно). */
-    fun beginForwardGroup(gid: String) {
-        val refs = selection.map { it.id to it.sender }
-        if (refs.isEmpty()) return
-        forwarding = ChatTarget(gid, group = true) to refs
+        forwarding = ChatTarget(chatKey, group) to refs
         clearSelection()
     }
 
@@ -1659,7 +1654,15 @@ class AppModel private constructor() {
         else -> peerKey
     }
 
-    fun send(key: String, text: String) {
+    /**
+     * Отправить текст в чат. Различие каналов — одна ветка внутри, а не два
+     * публичных метода: снаружи «отправить» означает одно и то же.
+     */
+    fun send(key: String, text: String, group: Boolean = false) {
+        if (group) {
+            sendGroup(key, text)
+            return
+        }
         if (text.isBlank()) return
         // Цель ответа снимаем СРАЗУ: пользователь уже нажал «отправить», и оставленная
         // цитата в поле ввода означала бы, что следующее сообщение тоже уйдёт ответом.
@@ -1763,26 +1766,34 @@ class AppModel private constructor() {
     fun selectedText(key: String): String = selectedTextOf(key)
 
     /** Удалить выделенное только у себя. */
-    fun deleteSelected(key: String) {
+    fun deleteSelected(key: String, group: Boolean = false) {
         val refs = selection.toList()
         if (refs.isEmpty()) return
         selection = emptySet()
-        val json = wireDmRefs(refs)
         ops.execute {
-            Native.deleteMessages(sessionPtr, key, json)
-            reloadHistory(key)
+            if (group) {
+                Native.groupDeleteMessages(sessionPtr, key, wireGroupRefs(refs))
+                // Ленту группы перечитает событие от движка.
+            } else {
+                Native.deleteMessages(sessionPtr, key, wireDmRefs(refs))
+                reloadHistory(key)
+            }
         }
     }
 
     /** Отозвать выделенные СВОИ сообщения у собеседника. Чужие не трогаем. */
-    fun retractSelected(key: String) {
+    fun retractSelected(key: String, group: Boolean = false) {
         val ids = selection.filter { isMine(it) }.map { it.id }
         if (ids.isEmpty()) return
         selection = emptySet()
         val json = ids.joinToString(prefix = "[", postfix = "]")
         ops.execute {
-            Native.retractMessages(sessionPtr, key, json)
-            reloadHistory(key)
+            if (group) {
+                Native.groupRetractMessages(sessionPtr, key, json)
+            } else {
+                Native.retractMessages(sessionPtr, key, json)
+                reloadHistory(key)
+            }
         }
     }
 
@@ -1820,6 +1831,10 @@ class AppModel private constructor() {
 
     /** Отправить вложение с метаданными для карточки (длительность/кадр/превью).
      *  Их извлекает клиент — движок медиа не декодирует. */
+    /**
+     * Отправить вложение. Различие каналов — одна ветка внутри: снаружи это одно
+     * действие, и полоска «отвечаем на …» снимается одинаково для обоих.
+     */
     fun sendMediaWithMeta(
         key: String,
         content: ByteArray,
@@ -1827,17 +1842,26 @@ class AppModel private constructor() {
         name: String,
         meta: MediaMeta,
         caption: String = "",
+        group: Boolean = false,
     ) = ops.execute {
         // Цель ответа снимаем в тот же момент, что и у текста: иначе полоска
         // «отвечаем на …» висела бы после отправки вложения, а ссылка терялась.
         val reply = replyTarget
         replyTarget = null
-        val id = Native.sendMediaWithMeta(
-            sessionPtr, key, content, mime, name,
-            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
-            reply?.id ?: 0, replyAuthor(key, reply),
-        )
-        if (id >= 0 && currentChat == key) loadHistory(key)
+        if (group) {
+            Native.groupSendMedia(
+                sessionPtr, key, content, mime, name,
+                meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+                reply?.id ?: 0, reply?.sender.orEmpty(),
+            )
+        } else {
+            val id = Native.sendMediaWithMeta(
+                sessionPtr, key, content, mime, name,
+                meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+                reply?.id ?: 0, replyAuthor(key, reply),
+            )
+            if (id >= 0 && currentChat == key) loadHistory(key)
+        }
         markSummariesDirty()
     }
 
@@ -1850,15 +1874,24 @@ class AppModel private constructor() {
         name: String,
         meta: MediaMeta,
         caption: String = "",
+        group: Boolean = false,
     ) = ops.execute {
         val reply = replyTarget
         replyTarget = null
-        val id = Native.sendMediaFile(
-            sessionPtr, key, path, mime, name,
-            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
-            reply?.id ?: 0, replyAuthor(key, reply),
-        )
-        if (id >= 0 && currentChat == key) loadHistory(key)
+        if (group) {
+            Native.groupSendMediaFile(
+                sessionPtr, key, path, mime, name,
+                meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+                reply?.id ?: 0, reply?.sender.orEmpty(),
+            )
+        } else {
+            val id = Native.sendMediaFile(
+                sessionPtr, key, path, mime, name,
+                meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+                reply?.id ?: 0, replyAuthor(key, reply),
+            )
+            if (id >= 0 && currentChat == key) loadHistory(key)
+        }
         markSummariesDirty()
     }
 
@@ -2719,7 +2752,7 @@ class AppModel private constructor() {
 
     fun inviteToGroup(gid: String, peerHex: String) = ops.execute { Native.groupInvite(sessionPtr, gid, peerHex) }
 
-    fun sendGroupText(gid: String, text: String) {
+    private fun sendGroup(gid: String, text: String) {
         if (text.isBlank()) return
         val reply = replyTarget
         replyTarget = null
@@ -2742,67 +2775,6 @@ class AppModel private constructor() {
      *  просмотрщика). Лента сама гасит его после прокрутки — иначе повторный вход
      *  в чат снова уезжал бы к старому вложению. */
     var jumpTo by mutableStateOf(0L)
-
-    fun deleteGroupSelected(gid: String) {
-        val refs = selection.toList()
-        if (refs.isEmpty()) return
-        selection = emptySet()
-        val json = wireGroupRefs(refs)
-        ops.execute {
-            Native.groupDeleteMessages(sessionPtr, gid, json)
-        }
-    }
-
-    /** Отозвать выделенные СВОИ сообщения у участников. Чужие не трогаем. */
-    fun retractGroupSelected(gid: String) {
-        val mine = me?.pubkey.orEmpty()
-        val ids = selection.filter { it.sender == mine }.map { it.id }
-        if (ids.isEmpty()) return
-        selection = emptySet()
-        val json = ids.joinToString(prefix = "[", postfix = "]")
-        ops.execute {
-            Native.groupRetractMessages(sessionPtr, gid, json)
-        }
-    }
-
-    /** Отправить вложение в группу (M2): движок чистит картинку, шлёт блоб всем
-     *  участникам + MLS-ссылку. Своё сообщение подтянется перечитыванием истории
-     *  (event group_msg mine=true), т.к. blob_id считается от очищенных байт в движке. */
-    fun sendGroupMedia(
-        gid: String,
-        content: ByteArray,
-        mime: String,
-        name: String,
-        meta: MediaMeta = MediaMeta(),
-        caption: String = "",
-    ) = ops.execute {
-        val reply = replyTarget
-        replyTarget = null
-        Native.groupSendMedia(
-            sessionPtr, gid, content, mime, name,
-            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
-            reply?.id ?: 0, reply?.sender.orEmpty(),
-        )
-    }
-
-    /** Отправить в группу вложение ФАЙЛОМ (потоково). Файл должен пережить отдачу:
-     *  движок читает из него чанки по запросу участников. */
-    fun sendGroupMediaFile(
-        gid: String,
-        path: String,
-        mime: String,
-        name: String,
-        meta: MediaMeta = MediaMeta(),
-        caption: String = "",
-    ) = ops.execute {
-        val reply = replyTarget
-        replyTarget = null
-        Native.groupSendMediaFile(
-            sessionPtr, gid, path, mime, name,
-            meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
-            reply?.id ?: 0, reply?.sender.orEmpty(),
-        )
-    }
 
     // ── Диагностика: тест пропускной способности ─────────────────────────────
 
