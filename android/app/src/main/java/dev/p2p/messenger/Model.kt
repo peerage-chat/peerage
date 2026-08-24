@@ -1507,8 +1507,9 @@ class AppModel private constructor() {
             .forEach { (text, ts) -> list.add(Message(--localMsgId, text, mine = true, time = ts, status = "queued")) }
         messages[key] = list.toMutableStateList()
         atChatStart -= key // хвост перечитан — выше снова может что-то быть
-        // M2: подтянуть байты вложений, которые уже докачаны (иначе — появятся по blob_received).
-        list.forEach { if (it.blobId.isNotEmpty()) cacheBlob(it.blobId) }
+        // Байты вложений НЕ читаем заранее: `blob()` возьмёт их при показе, то есть
+        // только для видимых пузырей. Раньше вход в чат тянул с диска всю страницу,
+        // включая вложения, до которых человек не долистает.
     }
 
     private fun log(key: String): SnapshotStateList<Message> =
@@ -1544,7 +1545,6 @@ class AppModel private constructor() {
                 if (page.isEmpty()) atChatStart += key
                 if (page.isNotEmpty()) {
                     list.addAll(0, page)
-                    page.forEach { if (it.blobId.isNotEmpty()) cacheBlob(it.blobId) }
                 }
                 done(page.size)
             } finally {
@@ -1570,10 +1570,6 @@ class AppModel private constructor() {
                 if (page.isEmpty()) atChatStart += mark
                 if (page.isNotEmpty()) {
                     list.addAll(0, page)
-                    page.forEach {
-                        if (it.downloaded && it.blobId.isNotEmpty()) cacheBlob(it.blobId)
-                        if (it.thumbId.isNotEmpty()) cacheBlob(it.thumbId)
-                    }
                 }
                 done(page.size)
             } finally {
@@ -2693,12 +2689,8 @@ class AppModel private constructor() {
             }
         groupMessages[gid] = list.toMutableStateList()
         atChatStart -= "g:$gid"
-        // M2: подтянуть байты уже скачанных вложений (иначе — по blob_received);
-        // миниатюры — всегда, на них держится карточка ещё не скачанного.
-        list.forEach {
-            if (it.downloaded && it.blobId.isNotEmpty()) cacheBlob(it.blobId)
-            if (it.thumbId.isNotEmpty()) cacheBlob(it.thumbId)
-        }
+        // Байты вложений и миниатюры подтянет `blob()` при показе — заранее
+        // читать всю страницу с диска незачем.
     }
 
     private fun groupLog(gid: String): SnapshotStateList<GroupMsg> =
