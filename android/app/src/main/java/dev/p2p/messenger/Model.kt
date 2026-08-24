@@ -19,268 +19,6 @@ import java.io.File
 import java.util.concurrent.Executors
 
 /** Пресет качества видео-звонка. */
-data class VideoQuality(
-    val label: String,
-    val width: Int,
-    val height: Int,
-    val fps: Int,
-    val bitrate: Int,
-) {
-    val key get() = "${width}x$height@$fps"
-
-    companion object {
-        val presets = listOf(
-            VideoQuality("480p  30fps", 854, 480, 30, 1_000_000),
-            VideoQuality("720p  30fps", 1280, 720, 30, 2_000_000),
-            VideoQuality("720p  60fps", 1280, 720, 60, 4_000_000),
-            VideoQuality("1080p 30fps", 1920, 1080, 30, 4_000_000),
-            VideoQuality("1080p 60fps", 1920, 1080, 60, 8_000_000),
-        )
-        val default get() = presets[1] // 720p 30fps
-    }
-}
-
-data class Contact(
-    val key: String,
-    /** Локальная заметка — как ЭТОТ пользователь назвал контакт (может быть пустой). */
-    val name: String,
-    val fingerprint: String,
-    val verified: Boolean,
-    /** Самоназвание контакта (M2): как он назвал себя (ProfileUpdate). */
-    val profileName: String = "",
-    /** hex-хэш аватара контакта (M2); байты — через [AppModel.contactAvatars]. */
-    val avatarId: String = "",
-) {
-    /** Имя для показа: локальная заметка → самоназвание → короткий hex.
-     *  (docs/architecture: приоритет local → profile_name → hex.) */
-    val displayName: String
-        get() = name.ifBlank { profileName.ifBlank { key.take(8) } }
-}
-
-/** Входящий «запрос в контакты» от незнакомца (гейт вместо TOFU). Первое сообщение
- *  приходит сюда карточкой на одобрение, а не в чат. */
-data class ContactRequest(
-    val key: String,
-    val fingerprint: String,
-    /** Превью первого сообщения (или «[image]»/«[file]»/«[voice]»). */
-    val preview: String,
-    val time: Long,
-) {
-    val shortKey: String get() = key.take(8)
-}
-
-data class Message(
-    val id: Long,
-    val text: String,
-    val mine: Boolean,
-    val time: Long,
-    val status: String,
-    /** Тип (M2): "text" | "image" | "file". */
-    val kind: String = "text",
-    /** hex-хэш блоба вложения (M2); байты — через Native.blobRead. */
-    val blobId: String = "",
-    val mime: String = "",
-    /** Исходное имя файла вложения (M2). */
-    val name: String = "",
-    /** Размер вложения в байтах — виден в карточке ДО скачивания. */
-    val size: Long = 0,
-    /** Длительность аудио/видео в мс (0 — не применимо). */
-    val durationMs: Int = 0,
-    val width: Int = 0,
-    val height: Int = 0,
-    /** hex-хэш блоба-миниатюры (пусто — нет превью). */
-    val thumbId: String = "",
-    /** Скачано ли содержимое. Крупное не тянется само — сначала карточка. */
-    val downloaded: Boolean = false,
-    /** id сообщения, на которое это ответ (0 — обычное). Цитата рисуется из истории
-     *  по ссылке (ADR-006), а не хранится копией текста. */
-    val replyTo: Long = 0,
-    /** hex автора: вместе с [id] — ссылка на сообщение. Читается одинаково в личном
-     *  чате и в группе, поэтому «моё/чужое» больше не часть ключа. */
-    val sender: String = "",
-    /** hex автора цитируемого сообщения (пусто — обычное). */
-    val replySender: String = "",
-    /** Системная строка (смена состава группы). */
-    val system: Boolean = false,
-    /** hex автора ИСХОДНОГО сообщения, если это пересылка (пусто — своё). */
-    val fwdFrom: String = "",
-    /** Переслано, но автора не называем. */
-    val fwdAnon: Boolean = false,
-    /** Когда исправлено автором (0 — не редактировалось). */
-    val editedAt: Long = 0,
-    /** Курсор пагинации: номер строки в базе движка (0 — запись создана локально). */
-    val row: Long = 0,
-)
-
-/** Чат как адресат пересылки: личный (ключ собеседника) или группа (gid). */
-data class ChatTarget(val id: String, val group: Boolean, val title: String = "")
-
-/**
- * Ссылка на строку истории: id сообщения плюс его автор (ADR-006). Пара, а не один
- * id: id посеян временем ОТПРАВИТЕЛЯ, поэтому у моего и чужого сообщения он может
- * совпасть.
- *
- * Автор годится и для личного чата, и для группы, поэтому ссылка одна на оба.
- * «Моё» выводится сравнением с собственным ключом. На проводе формы РАЗНЫЕ и свои
- * у каждого канала (`{id,mine}` в личном, `{id,sender}` в групповом) — перевод
- * живёт на границе JNI.
- */
-data class MsgRef(val id: Long, val sender: String)
-
-/** Идентичность пользователя (своя «визитка»). */
-data class Me(val pubkey: String, val address: String, val fingerprint: String)
-
-data class Group(
-    val gid: String,
-    val name: String,
-    val members: Int,
-    val admin: Boolean = false,
-    /** Группа восстановлена из копии: история есть, членства нет — только чтение. */
-    val archived: Boolean = false,
-)
-
-/**
- * Строка списка чатов на главной: последнее сообщение, время и локальные пометки.
- * Личные чаты и группы приходят одним списком — на главной они и живут вперемешку,
- * отсортированные по времени последнего сообщения.
- */
-data class ChatSummary(
-    /** hex: ключ собеседника или gid. */
-    val id: String,
-    val group: Boolean,
-    /** 0 — не закреплён; иначе когда закрепили (позже — выше в списке). */
-    val pinnedAt: Long = 0,
-    val muted: Boolean = false,
-    /** Превью последнего сообщения (текст или подпись вложения); пусто — чат пуст. */
-    val lastText: String = "",
-    val lastTime: Long = 0,
-    val lastMine: Boolean = false,
-    /** hex автора последнего сообщения — в группе показываем его имя перед текстом. */
-    val lastSender: String = "",
-    /** "text" | "image" | "file" | "voice" — определяет подпись вместо текста. */
-    val lastKind: String = "text",
-    /** Статус доставки СВОЕГО последнего сообщения ("" | sent | delivered | …). */
-    val lastStatus: String = "",
-    val lastSystem: Boolean = false,
-) {
-    val pinned: Boolean get() = pinnedAt > 0
-}
-
-/** Входящее приглашение в группу (карточка на одобрение вместо тихого авто-входа). */
-data class GroupInvite(
-    val gid: String,
-    val name: String,
-    val inviter: String,
-    /** Мы уже согласились; ждём, когда пригласивший окажется в сети и ответит. */
-    val waiting: Boolean = false,
-)
-
-/** Пир транспорта (адрес/направление/пинг/трафик) — из снапшота движка. */
-data class NetPeer(
-    val key: String,
-    val inbound: Boolean,
-    val up: Boolean,
-    val latencyMs: Double,
-    val rxRate: Long,
-    val txRate: Long,
-    val uptimeS: Double,
-)
-
-/** Снапшот стата сети (агрегаты считает движок). */
-data class NetStats(
-    val peerCount: Int,
-    val tree: Int,
-    val pingMs: Double,
-    val rxRate: Long,
-    val txRate: Long,
-    val peers: List<NetPeer>,
-)
-
-/** Присутствие группы «N уч · M в сети» — агрегат (MLS-ростер ∩ presence) считает движок. */
-data class GroupRoster(val total: Int, val online: Int)
-
-/** Источник флуда для UI: сколько отброшено и с каким темпом (ADR-007). */
-data class FloodPeer(
-    val peer: String,
-    val dropped: Long,
-    val pps: Double,
-    /** Уже заблокирован — его пакеты режутся ещё в транспорте, до FFI. */
-    val blocked: Boolean,
-)
-
-/** Ход смены адреса: обратный отсчёт паузы, затем итог. */
-data class RotationState(
-    /** Сколько секунд паузы осталось; 0 — пауза кончилась. */
-    val secondsLeft: Int,
-    /** Скольким контактам уйдёт новый адрес. */
-    val told: Int,
-    /** Новый адрес — приходит событием после подъёма узла. */
-    val newAddress: String = "",
-)
-
-/**
- * Пользовательская папка — это ВИД, а не коробка: чат может попадать сразу в
- * несколько. Живёт в prefs на клиенте: к протоколу отношения не имеет, собеседник
- * о ней ничего не знает.
- *
- * @param types типы чатов целиком ("dm" / "room")
- * @param chats конкретные чаты (ключ контакта или gid группы)
- * @param excludeRead прятать те, где нет непрочитанного
- */
-data class Folder(
-    val id: String,
-    val name: String,
-    val icon: String,
-    val types: Set<String> = emptySet(),
-    val chats: Set<String> = emptySet(),
-    val excludeRead: Boolean = false,
-)
-
-/**
- * Запись журнала звонков. Живёт ТОЛЬКО на этом устройстве: наружу не уходит и ни с кем
- * не синхронизируется.
- *
- * @param outcome answered | missed | declined | unanswered
- * @param gid id комнаты; пусто у личного звонка
- */
-data class CallEntry(
-    val peer: String,
-    val gid: String,
-    val incoming: Boolean,
-    val outcome: String,
-    val started: Long,
-    val duration: Long,
-)
-
-/** Строка очереди отправки: кому, сколько ждёт и с какого времени. */
-data class OutboxPeer(val peer: String, val count: Int, val bytes: Long, val oldest: Long)
-
-/** Входящий DM-звонок (до того как пользователь ответил или отклонил). */
-data class IncomingRoomCall(
-    val peer: String,
-    val roomId: String,
-    val audio: Boolean,
-    val video: Boolean,
-)
-
-/** Участник комнаты-звонка (присутствие). */
-data class RoomMember(val peer: String, val audio: Boolean, val video: Boolean)
-
-/**
- * Состояние приложения поверх [Native].
- *
- * АРХИТЕКТУРА ПОТОКОВ (важно для отзывчивости): UI (главный поток Compose)
- * НИКОГДА не вызывает `Native.*` напрямую — любой JNI-вызов может заблокировать
- * (сеть/Go-FFI/диск/мьютексы ядра). Всё взаимодействие с ядром — на выделенных
- * фоновых потоках:
- *   • [pollThread]   — опрос событий ядра;
- *   • [tickerThread] — периодический статус (пиры/онлайн);
- *   • [ops]          — single-thread executor для разовых операций (отправка,
- *                      контакты, звонки, группы), сериализует JNI.
- * Состояние — Compose snapshot-state (mutableStateOf/List/Map), его БЕЗОПАСНО
- * писать из фоновых потоков: рекомпозиция планируется на главный поток сама.
- * Так главный поток не блокируется ничем → нет ANR.
- */
 class AppModel private constructor() {
     companion object {
         /**
@@ -380,8 +118,8 @@ class AppModel private constructor() {
     private val blobCacheLimit = 24L * 1024 * 1024
 
     /** Порядок обращений для вытеснения (в конце — самые свежие). */
-    private val blobOrder = LinkedHashSet<String>()
-    private var blobBytes = 0L
+    internal val blobOrder = LinkedHashSet<String>()
+    internal var blobBytes = 0L
 
     /** Блобы, чтение которых уже заказано — чтобы промах не плодил очередь заказов
      *  на каждую рекомпозицию. */
@@ -546,7 +284,7 @@ class AppModel private constructor() {
 
     /** Сколько сообщений ждёт доставки и надо ли предупредить (из движка). */
     var outboxPending by mutableStateOf(0)
-        private set
+        internal set
     var outboxWarn by mutableStateOf(false)
         private set
 
@@ -558,29 +296,19 @@ class AppModel private constructor() {
 
     // ── Хранилище (простой экран; нормальный дизайн — позже) ──────────────────
     var storageBlobs by mutableStateOf(0L)
-        private set
+        internal set
     var storageBlobBytes by mutableStateOf(0L)
-        private set
+        internal set
     var storageOutboxPending by mutableStateOf(0L)
-        private set
+        internal set
 
     /** Что занимает место, по типам вложения: kind → байты. */
     var storageByKind by mutableStateOf<List<Pair<String, Long>>>(emptyList())
-        private set
+        internal set
 
     /** По чатам: (ключ пира, файлов, байт), самый тяжёлый первым. */
     var storageChats by mutableStateOf<List<Triple<String, Long, Long>>>(emptyList())
-        private set
-
-    fun refreshStorage() = ops.execute {
-        val st = decodeOrNull<StorageStatsDto>(Native.storageStats(sessionPtr)) ?: return@execute
-        storageBlobs = st.blobs
-        storageBlobBytes = st.blobBytes
-        storageOutboxPending = st.outboxPending
-        // Самый тяжёлый тип первым — полоса состава читается сверху вниз.
-        storageByKind = st.byKind.toList().sortedByDescending { it.second }
-        storageChats = st.chats.map { Triple(it.peer, it.files, it.bytes) }
-    }
+        internal set
 
     // ── Резервная копия ДАННЫХ (M4) ───────────────────────────────────────────
     // Не путать с копией КЛЮЧА ([revealSeedPhrase]): ключ возвращает личность, копия
@@ -590,7 +318,7 @@ class AppModel private constructor() {
      *  Локальный факт, как и [keyBackupDone]: сам файл мы после сохранения не видим
      *  (он у пользователя), а сказать «копии нет» после её создания — врать. */
     var dataBackupAt by mutableStateOf(0L)
-        private set
+        internal set
 
     private fun markDataBackupDone() {
         val now = System.currentTimeMillis() / 1000
@@ -638,41 +366,7 @@ class AppModel private constructor() {
 
     /** Очередь по получателям: (ключ, сколько ждёт, байт, время самой старой записи). */
     var outboxByPeer by mutableStateOf<List<OutboxPeer>>(emptyList())
-        private set
-
-    fun refreshOutbox() = ops.execute {
-        outboxByPeer = decodeList<OutboxPeerDto>(Native.outboxByPeer(sessionPtr))
-            .map { OutboxPeer(it.peer, it.count, it.bytes, it.oldest) }
-        outboxPending = outboxByPeer.sumOf { it.count }
-    }
-
-    /** Сбросить очередь одному получателю (после подтверждения в UI). */
-    fun clearOutboxFor(peer: String) = ops.execute {
-        Native.clearOutboxFor(sessionPtr, peer)
-        refreshOutbox()
-    }
-
-    /** Сбросить очередь всем (после двойного подтверждения в UI). */
-    fun clearOutboxAll() = ops.execute {
-        Native.clearOutboxAll(sessionPtr)
-        refreshOutbox()
-    }
-
-    /** Удалить сохранённые вложения. История и ссылки остаются — байты можно
-     *  скачать у собеседника заново (блобы контент-адресные). */
-    fun clearAttachments() = ops.execute {
-        Native.clearBlobs(sessionPtr)
-        mediaBlobs.clear()
-        // Учёт объёма и порядок обращений — часть того же кэша: без сброса они
-        // остались бы считать давно удалённые байты.
-        synchronized(blobOrder) {
-            blobOrder.clear()
-            blobBytes = 0
-        }
-        dev.p2p.messenger.ui.Bitmaps.clear()
-        contactAvatars.clear()
-        refreshStorage()
-    }
+        internal set
 
     /**
      * Закреплённые сообщения по чатам (ключ собеседника или gid), свежие первыми.
@@ -707,81 +401,11 @@ class AppModel private constructor() {
     /** Результаты поиска по сообщениям (свежие первыми). */
     val searchHits = mutableStateListOf<SearchHit>()
 
-    /**
-     * Искать по переписке. Пустой запрос очищает результат: показывать «всё подряд»
-     * на пустой строке — не поиск.
-     */
-    fun searchMessages(query: String, chat: String = "", group: Boolean = false) = ops.execute {
-        if (query.isBlank()) {
-            searchHits.clear()
-            return@execute
-        }
-        val hits = decodeList<SearchHitDto>(
-            Native.searchMessages(sessionPtr, query, chat, group, 100),
-        ).map { SearchHit(it.chat, it.group, it.id, it.sender, it.text, it.mine, it.time) }
-        searchHits.clear()
-        searchHits.addAll(hits)
-    }
-
     /** Заметки себе («Сохранённое»), старые первыми. */
     val notes = mutableStateListOf<Message>()
 
-    fun refreshNotes() = ops.execute {
-        val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
-        notes.clear()
-        notes.addAll(list)
-        atChatStart -= "notes"
-    }
-
-    /**
-     * Догрузить заметки ВЫШЕ показанных. «Сохранённое» — тот же чат (с самим собой),
-     * поэтому и страницы те же: движок отдаёт хвост, остальное просим по прокрутке.
-     */
-    fun loadOlderNotes(done: (Int) -> Unit) {
-        val meKey = me?.pubkey
-        val top = notes.firstOrNull { it.row != 0L }
-        if (meKey == null || top == null || "notes" in atChatStart || !loadingOlder.add("notes")) {
-            done(0)
-            return
-        }
-        ops.execute {
-            try {
-                val page = decodeList<MessageDto>(
-                    Native.historyPage(sessionPtr, meKey, top.time, top.row),
-                ).map { it.toModel() }
-                if (page.isEmpty()) atChatStart += "notes"
-                if (page.isNotEmpty()) notes.addAll(0, page)
-                done(page.size)
-            } finally {
-                loadingOlder -= "notes"
-            }
-        }
-    }
-
-    fun saveNote(text: String) = ops.execute {
-        Native.saveNote(sessionPtr, text)
-        refreshNotes()
-    }
-
-    fun deleteNote(id: Long) = ops.execute {
-        Native.deleteNote(sessionPtr, id)
-        refreshNotes()
-    }
-
     /** Журнал звонков (свежие первыми). */
     val callLog = mutableStateListOf<CallEntry>()
-
-    fun refreshCallLog() = ops.execute {
-        val list = decodeList<CallEntryDto>(Native.callLog(sessionPtr, 200))
-            .map { CallEntry(it.peer, it.gid, it.incoming, it.outcome, it.started, it.duration) }
-        callLog.clear()
-        callLog.addAll(list)
-    }
-
-    fun clearCallLog() = ops.execute {
-        Native.clearCallLog(sessionPtr)
-        refreshCallLog()
-    }
 
     /** Визуальные отпечатки ключей (hex) — кэш, чтобы не дёргать JNI на рекомпозицию. */
     private val fpCache = mutableMapOf<String, String>()
@@ -1141,7 +765,10 @@ class AppModel private constructor() {
         private set
 
     // Фоновое взаимодействие с ядром (никогда не на главном потоке).
-    private val ops = Executors.newSingleThreadExecutor { Thread(it, "native-ops").apply { isDaemon = true } }
+    // `internal`, а не `private`: поведение модели разнесено по зонам-файлам
+    // (заметки, поиск, хранилище), и всем им нужен один и тот же поток-актор.
+    // Заводить второй значило бы получить два порядка операций над одной сессией.
+    internal val ops = Executors.newSingleThreadExecutor { Thread(it, "native-ops").apply { isDaemon = true } }
 
     @Volatile private var running = false
     private var pollThread: Thread? = null
@@ -1498,10 +1125,10 @@ class AppModel private constructor() {
         messages.getOrPut(chatKey(key, group = false)) { mutableListOf<Message>().toMutableStateList() }
 
     /** Чаты, где мы уже дошли до начала переписки (просить выше нечего). */
-    private val atChatStart = mutableSetOf<String>()
+    internal val atChatStart = mutableSetOf<String>()
 
     /** Чаты/группы с идущей догрузкой — чтобы прокрутка не запускала её пачкой. */
-    private val loadingOlder = mutableSetOf<String>()
+    internal val loadingOlder = mutableSetOf<String>()
 
     /**
      * Догрузить страницу истории ВЫШЕ показанной. Открытие чата отдаёт только хвост
@@ -1588,7 +1215,7 @@ class AppModel private constructor() {
         if (text.isNotBlank()) Native.editMessage(sessionPtr, chat, group, id, text)
     }
 
-    private fun wireDmRefs(refs: Collection<MsgRef>): String =
+    internal fun wireDmRefs(refs: Collection<MsgRef>): String =
         dmRefsJson(refs, me?.pubkey.orEmpty())
 
     private fun wireGroupRefs(refs: Collection<MsgRef>): String = groupRefsJson(refs)
@@ -1704,7 +1331,7 @@ class AppModel private constructor() {
      * состояния там, где хватает одного.
      */
     var selection by mutableStateOf<Set<MsgRef>>(emptySet())
-        private set
+        internal set
 
     /** На какое сообщение отвечаем (null — обычная отправка). */
     var replyTarget by mutableStateOf<Message?>(null)
@@ -1778,21 +1405,6 @@ class AppModel private constructor() {
                 Native.retractMessages(sessionPtr, key, json)
                 reloadHistory(key)
             }
-        }
-    }
-
-    /** Удалить выделенные заметки (чат с самим собой). */
-    fun deleteSelectedNotes() {
-        val refs = selection.toList()
-        if (refs.isEmpty()) return
-        selection = emptySet()
-        val key = me?.pubkey ?: return
-        val json = wireDmRefs(refs)
-        ops.execute {
-            Native.deleteMessages(sessionPtr, key, json)
-            val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
-            notes.clear()
-            notes.addAll(list)
         }
     }
 
