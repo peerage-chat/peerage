@@ -233,7 +233,7 @@ internal fun ChatScreen(model: AppModel) {
                     withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time),
                     withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time),
                 )
-                MessageBubble(m, model, pos, animate = m.id > appearFrom)
+                MessageRow(model, m, pos, animate = m.id > appearFrom)
             }
         }
         ForwardSheet(model)
@@ -347,17 +347,19 @@ internal fun displayName(ctx: android.content.Context, uri: android.net.Uri): St
  * это прямо, а не рисуем пустую полоску, иначе ответ выглядит сломанным.
  */
 @Composable
-private fun QuoteBlock(
+internal fun QuoteBlock(
     model: AppModel,
     src: Message?,
     quotedMine: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val who = if (quotedMine) {
-        stringResource(R.string.chat_reply_you)
-    } else {
-        val k = model.currentChat
-        model.contacts.firstOrNull { it.key == k }?.displayName
+    // Автор цитаты: своё — «Вы», чужое в группе — имя участника, чужое в личном —
+    // имя собеседника. Ключ автора у цитаты есть всегда (ADR-006), поэтому имя
+    // ищется по нему, а не по тому, чей это чат.
+    val who = when {
+        quotedMine -> stringResource(R.string.chat_reply_you)
+        src != null && src.sender.isNotEmpty() -> groupSenderName(model, src.sender)
+        else -> model.contacts.firstOrNull { it.key == model.currentChat }?.displayName
             ?: stringResource(R.string.chat_default_title)
     }
     // Плашка цитаты живёт ВНУТРИ цветного пузыря, поэтому и подложка, и текст —
@@ -413,10 +415,11 @@ internal fun ReplyStrip(model: AppModel, m: Message) {
     ) {
         Box(Modifier.width(2.dp).height(30.dp).background(HoloAccent))
         Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+            // Кому отвечаем: своё — «Вы», чужое — имя автора по его ключу. В личном
+            // чате это собеседник, в группе — конкретный участник; отдельная полоска
+            // для группы отличалась ровно этой строкой.
             Text(
-                stringResource(
-                    if (m.mine) R.string.chat_reply_you else R.string.chat_reply_to_them,
-                ),
+                if (m.mine) stringResource(R.string.chat_reply_you) else groupSenderName(model, m.sender),
                 color = HoloAccent,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
@@ -461,8 +464,8 @@ internal fun E2EBanner() {
  * действие, а вопрос «на какое из них», и отвечать за пользователя тут нельзя.
  */
 @Composable
-private fun SelectionTopBar(model: AppModel) {
-    val key = model.currentChat ?: return
+internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
+    val key = (if (group) model.currentGroup else model.currentChat) ?: return
     val ctx = LocalContext.current
     val sel = model.selection
     var confirmDelete by remember { mutableStateOf(false) }
@@ -482,32 +485,33 @@ private fun SelectionTopBar(model: AppModel) {
         if (sel.size == 1) {
             BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
                 val ref = sel.first()
-                model.chat(key).firstOrNull { it.id == ref.id && it.sender == ref.sender }
+                model.chat(key, group).firstOrNull { it.id == ref.id && it.sender == ref.sender }
                     ?.let { model.startReply(it) }
             }
         }
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
-            model.beginForward(key)
+            model.beginForward(key, group)
         }
         if (sel.size == 1 && model.isMine(sel.first())) {
             val ref = sel.first()
             BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
-                model.chat(key).firstOrNull { it.id == ref.id && it.mine }
+                model.chat(key, group).firstOrNull { it.id == ref.id && it.mine }
                     ?.let { model.editTarget = it }
                 model.clearSelection()
             }
         }
-        if (sel.size == 1) {
+        val mayPin = !group || model.groups.firstOrNull { it.gid == key }?.admin == true
+        if (sel.size == 1 && mayPin) {
             val ref = sel.first()
-            val msg = model.chat(key).firstOrNull { it.id == ref.id && it.sender == ref.sender }
+            val msg = model.chat(key, group).firstOrNull { it.id == ref.id && it.sender == ref.sender }
             val already = model.pinned[key].orEmpty().any { it.id == ref.id && it.sender == ref.sender }
             BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
-                msg?.let { model.setPinned(key, false, it, !already) }
+                msg?.let { model.setPinned(key, group, it, !already) }
                 model.clearSelection()
             }
         }
         BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
-            val text = model.selectedText(key)
+            val text = model.selectedTextOf(key, group)
             if (text.isNotEmpty()) {
                 val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
@@ -538,12 +542,12 @@ private fun SelectionTopBar(model: AppModel) {
                 Column(horizontalAlignment = Alignment.End) {
                     if (allMine) {
                         TextButton(onClick = {
-                            model.retractSelected(key)
+                            model.retractSelected(key, group)
                             confirmDelete = false
                         }) { Text(stringResource(R.string.chat_delete_for_all), color = HoloError) }
                     }
                     TextButton(onClick = {
-                        model.deleteSelected(key)
+                        model.deleteSelected(key, group)
                         confirmDelete = false
                     }) { Text(stringResource(R.string.chat_delete_for_me), color = HoloError) }
                 }
@@ -784,12 +788,86 @@ internal fun PillIcon(icon: ImageVector, desc: String, tint: Color = HoloSeconda
     ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(22.dp)) }
 }
 
+/**
+ * Строка ленты: системный ярлык, своё сообщение или чужое с аватаром.
+ *
+ * Одна на личный чат и группу. Различий ровно два: в группе у входящих есть
+ * аватар и имя автора (собеседников много), а системные строки бывают только
+ * там. Всё остальное — тот же пузырь.
+ */
+@Composable
+internal fun MessageRow(
+    model: AppModel,
+    m: Message,
+    pos: BlockPos = BlockPos.Solo,
+    group: Boolean = false,
+    animate: Boolean = false,
+) {
+    when {
+        m.system -> {
+            val who = groupSenderName(model, m.sender)
+            val text = if (m.text.isBlank()) {
+                stringResource(R.string.group_system_membership, who)
+            } else {
+                stringResource(R.string.group_system_event, who, m.text)
+            }
+            // Ярлык того же вида, что разделитель даты: оба комментируют ленту
+            // со стороны, а не участвуют в разговоре.
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
+                Box(
+                    Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
+                        .background(Tokens.Colors.labelScrim)
+                        .padding(horizontal = 11.dp, vertical = 3.dp),
+                ) {
+                    Text(text, color = HoloSecondary, fontSize = 11.sp)
+                }
+            }
+        }
+        // Входящее в группе: аватар — ТОЛЬКО у нижнего сообщения блока, у остальных
+        // на его месте распорка, чтобы левый край блока не гулял. Имя автора — на
+        // первом сообщении блока, внутри пузыря.
+        group && !m.mine -> Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            val who = groupSenderName(model, m.sender)
+            val avatarBottom = pos == BlockPos.Solo || pos == BlockPos.Last
+            if (avatarBottom) {
+                SquareAvatar(
+                    who,
+                    size = Tokens.Size.avatarSeries,
+                    online = model.online[m.sender] == true,
+                    circle = true,
+                    ring = HoloBg,
+                )
+            } else {
+                Spacer(Modifier.width(Tokens.Size.avatarSeries))
+            }
+            Spacer(Modifier.width(8.dp))
+            MessageBubble(
+                m,
+                model,
+                pos,
+                animate,
+                senderName = if (pos == BlockPos.Solo || pos == BlockPos.First) who else null,
+                senderColor = nameColor(m.sender),
+            )
+        }
+        else -> MessageBubble(m, model, pos, animate)
+    }
+}
+
 @Composable
 internal fun MessageBubble(
     m: Message,
     model: AppModel,
     pos: BlockPos = BlockPos.Solo,
     animate: Boolean = false,
+    /** Имя автора внутри пузыря — только в группе и только на первом сообщении
+     *  блока: в личном чате собеседник один и подписывать его нечем. */
+    senderName: String? = null,
+    senderColor: Color = Color.White,
 ) {
     // M2: байты вложения из реактивного кэша (появятся по докачке без рефреша).
     val blobBytes = model.blob(m.blobId)
@@ -806,7 +884,9 @@ internal fun MessageBubble(
     val selected = MsgRef(m.id, m.sender) in model.selection
     // Мета одна на все ветки пузыря: и когда она встроена в текст, и когда лежит
     // поверх вложения — это один и тот же набор значков.
-    val meta: @Composable () -> Unit = { MsgMeta(m.time, m.mine, m.editedAt > 0, m.status) }
+    val meta: @Composable () -> Unit = {
+        MsgMeta(m.time, m.mine && m.status.isNotEmpty(), m.editedAt > 0, m.status)
+    }
     Row(
         Modifier.fillMaxWidth().padding(bottom = blockGap(pos))
             .graphicsLayer {
@@ -828,7 +908,8 @@ internal fun MessageBubble(
         // своей подложке, и сама картинка остаётся голой (так в Telegram).
         val photoBubble = (m.kind == "image" || m.kind == "video") && !pending && m.text.isEmpty()
         // Шапка над фото: пометка пересылки и цитата ответа.
-        val photoHeader = photoBubble && (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L)
+        val photoHeader = photoBubble &&
+            (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
         Box(
             Modifier.widthIn(max = 290.dp).clip(bubbleShape(m.mine, pos))
                 .then(
@@ -864,8 +945,11 @@ internal fun MessageBubble(
                         if (m.replyTo != 0L) {
                             // Ключ строки — пара «автор + id»: id посеян временем
                             // отправителя и у обеих сторон может совпасть.
-                            val src = model.chat(model.currentChat)
-                                .firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
+                            val group = senderName != null || model.currentGroup != null
+                            val src = model.chat(
+                                if (group) model.currentGroup else model.currentChat,
+                                group,
+                            ).firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
                             QuoteBlock(
                                 model,
                                 src,
@@ -873,6 +957,18 @@ internal fun MessageBubble(
                                 // Над фото плашка тянется во всю ширину шапки: узкая
                                 // посреди широкой полосы читается обрывком.
                                 modifier = if (photoHeader) Modifier.fillMaxWidth() else Modifier,
+                            )
+                        }
+                        // Имя автора — под цитатой и пометкой пересылки: сначала «на
+                        // что отвечают», потом «кто говорит».
+                        if (senderName != null) {
+                            Text(
+                                senderName,
+                                color = senderColor,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }

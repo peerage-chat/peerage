@@ -8,12 +8,8 @@ package dev.p2p.messenger.ui
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,14 +18,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Reply
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.MoreVert
@@ -213,7 +203,7 @@ internal fun GroupChatScreen(model: AppModel) {
                         withNext = next != null && !m.system && !next.system &&
                             continuesBlock(m.sender, m.time, next.sender, next.time),
                     )
-                    GroupMessageRow(model, m, pos)
+                    MessageRow(model, m, pos, group = true)
                 }
             }
             ForwardSheet(model)
@@ -237,7 +227,7 @@ internal fun GroupChatScreen(model: AppModel) {
                                 model.editTarget = null
                                 input = ""
                             }
-                        } ?: model.replyTarget?.let { GroupReplyStrip(model, it) }
+                        } ?: model.replyTarget?.let { ReplyStrip(model, it) }
                     },
                     onPickFile = { filePicker.launch(arrayOf("*/*")) },
                     onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
@@ -294,7 +284,7 @@ internal fun GroupChatScreen(model: AppModel) {
 @Composable
 internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit) {
     if (model.selection.isNotEmpty()) {
-        GroupSelectionTopBar(model)
+        SelectionTopBar(model, group = true)
         return
     }
     val gid = model.currentGroup
@@ -371,391 +361,6 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
             Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloOnline)
                 .clickable { onJoin() }.padding(horizontal = 18.dp, vertical = 8.dp),
         ) { Text(stringResource(R.string.room_join), color = Color(0xFF0A1F0A), fontSize = 14.sp, fontWeight = FontWeight.Medium) }
-    }
-}
-
-/** Строка группового сообщения: системная / своя / входящая (имя цветом + аватар). */
-@Composable
-internal fun GroupMessageRow(model: AppModel, m: Message, pos: BlockPos = BlockPos.Solo) {
-    when {
-        m.system -> {
-            val who = groupSenderName(model, m.sender)
-            val text = if (m.text.isBlank()) {
-                stringResource(R.string.group_system_membership, who)
-            } else {
-                stringResource(R.string.group_system_event, who, m.text)
-            }
-            // Ярлык того же вида, что разделитель даты: оба комментируют ленту
-            // со стороны, а не участвуют в разговоре.
-            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
-                Box(
-                    Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
-                        .background(Tokens.Colors.labelScrim)
-                        .padding(horizontal = 11.dp, vertical = 3.dp),
-                ) {
-                    Text(text, color = HoloSecondary, fontSize = 11.sp)
-                }
-            }
-        }
-        m.mine -> Row(Modifier.fillMaxWidth().padding(bottom = blockGap(pos)), horizontalArrangement = Arrangement.End) {
-            GroupBubble(m, model, true, m.time, pos = pos)
-        }
-        // Входящее: аватар — ТОЛЬКО у нижнего сообщения блока (Telegram-style), у
-        // остальных на его месте пустая распорка, чтобы левый край блока не гулял.
-        // Имя отправителя — только на ПЕРВОМ сообщении блока, внутри пузыря.
-        else -> Row(
-            Modifier.fillMaxWidth().padding(bottom = blockGap(pos)),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            val who = groupSenderName(model, m.sender)
-            val online = model.online[m.sender] == true
-            val avatarBottom = pos == BlockPos.Solo || pos == BlockPos.Last
-            if (avatarBottom) {
-                SquareAvatar(who, size = Tokens.Size.avatarSeries, online = online, circle = true, ring = HoloBg)
-            } else {
-                Spacer(Modifier.width(Tokens.Size.avatarSeries))
-            }
-            Spacer(Modifier.width(8.dp))
-            GroupBubble(
-                m,
-                model,
-                false,
-                m.time,
-                senderName = if (pos == BlockPos.Solo || pos == BlockPos.First) who else null,
-                senderColor = nameColor(m.sender),
-                pos = pos,
-            )
-        }
-    }
-}
-
-/**
- * Действия над выделенными сообщениями группы. Отличие от DM: «удалить у всех»
- * доступно, только когда все выбранные — НАШИ (автор берётся из MLS, чужое отозвать
- * нельзя), а ответ — только при одном выбранном.
- */
-@Composable
-private fun GroupSelectionTopBar(model: AppModel) {
-    val gid = model.currentGroup ?: return
-    val ctx = LocalContext.current
-    val sel = model.selection
-    val mineKey = model.me?.pubkey.orEmpty()
-    var confirmDelete by remember { mutableStateOf(false) }
-
-    Row(
-        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel)) { model.clearSelection() }
-        Text(
-            sel.size.toString(),
-            color = Color.White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f).padding(start = 8.dp),
-        )
-        BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
-            model.beginForward(gid, group = true)
-        }
-        // Править можно только своё: подменять чужие слова — не редактирование.
-        if (sel.size == 1 && sel.first().sender == mineKey) {
-            val ref = sel.first()
-            BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
-                model.chat(gid, group = true).firstOrNull { it.id == ref.id && it.sender == ref.sender }
-                    ?.let { model.editTarget = it }
-                model.clearSelection()
-            }
-        }
-        // Закрепляет только админ — у остальных кнопки нет, чтобы она не обещала
-        // того, что движок всё равно отклонит.
-        if (sel.size == 1 && model.groups.firstOrNull { it.gid == gid }?.admin == true) {
-            val ref = sel.first()
-            val msg = model.chat(gid, group = true)
-                .firstOrNull { it.id == ref.id && it.sender == ref.sender }
-            val already = model.pinned[gid].orEmpty()
-                .any { it.id == ref.id && it.sender == ref.sender }
-            BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
-                msg?.let { model.setPinned(gid, true, it, !already) }
-                model.clearSelection()
-            }
-        }
-        if (sel.size == 1) {
-            BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
-                val ref = sel.first()
-                model.chat(gid, group = true).firstOrNull { it.id == ref.id && it.sender == ref.sender }
-                    ?.let { model.startReply(it) }
-            }
-        }
-        BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
-            val text = model.selectedTextOf(gid)
-            if (text.isNotEmpty()) {
-                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                    as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("p2p", text))
-                android.widget.Toast
-                    .makeText(ctx, R.string.chat_copied, android.widget.Toast.LENGTH_SHORT).show()
-            }
-            model.clearSelection()
-        }
-        BarIcon(Icons.Filled.Delete, stringResource(R.string.chat_delete)) { confirmDelete = true }
-    }
-
-    if (confirmDelete) {
-        val allMine = sel.all { it.sender == mineKey }
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text(stringResource(R.string.chat_delete_title, sel.size)) },
-            text = {
-                Text(
-                    stringResource(
-                        if (allMine) R.string.chat_delete_note_all else R.string.chat_delete_note_foreign,
-                    ),
-                )
-            },
-            confirmButton = {
-                Column(horizontalAlignment = Alignment.End) {
-                    if (allMine) {
-                        TextButton(onClick = {
-                            model.retractSelected(gid, group = true)
-                            confirmDelete = false
-                        }) { Text(stringResource(R.string.chat_delete_for_all), color = HoloError) }
-                    }
-                    TextButton(onClick = {
-                        model.deleteSelected(gid, group = true)
-                        confirmDelete = false
-                    }) { Text(stringResource(R.string.chat_delete_for_me), color = HoloError) }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
-        )
-    }
-}
-
-/** Полоска «отвечаем на …» над полем ввода группы. */
-@Composable
-private fun GroupReplyStrip(model: AppModel, m: Message) {
-    val who = if (m.sender == model.me?.pubkey) {
-        stringResource(R.string.chat_reply_you)
-    } else {
-        groupSenderName(model, m.sender)
-    }
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface).padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.width(2.dp).height(30.dp).background(HoloAccent))
-        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-            Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            Text(
-                m.text.ifEmpty { m.name.ifEmpty { quoteKind(m.kind) } },
-                color = HoloSecondary,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Icon(
-            Icons.Filled.Close,
-            stringResource(R.string.common_cancel),
-            tint = HoloSecondary,
-            modifier = Modifier.size(20.dp).clickable { model.cancelReply() },
-        )
-    }
-}
-
-/** Цитата в групповом пузыре: имя автора оригинала + начало текста. */
-@Composable
-private fun GroupQuote(model: AppModel, m: Message, modifier: Modifier = Modifier) {
-    val src = model.chat(model.currentGroup, group = true)
-        .firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
-    val who = if (m.replySender == model.me?.pubkey) {
-        stringResource(R.string.chat_reply_you)
-    } else {
-        groupSenderName(model, m.replySender)
-    }
-    // Те же правила, что у цитаты в личном чате: подложка и текст — полупрозрачный
-    // белый, чтобы плашка читалась на цветном пузыре.
-    Row(
-        modifier.padding(bottom = 4.dp).height(IntrinsicSize.Min).heightIn(min = 30.dp)
-            .clip(RoundedCornerShape(Tokens.Radius.chip))
-            .background(Color.White.copy(alpha = 0.10f)),
-    ) {
-        Box(Modifier.width(2.5.dp).fillMaxHeight().background(HoloAccent))
-        val hasThumb = src != null && src.kind != "text" &&
-            QuoteThumb(model, src.blobId, src.thumbId)
-        Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
-            Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            Text(
-                src?.let {
-                    when {
-                        it.text.isNotEmpty() -> it.text
-                        hasThumb -> quoteKind(it.kind)
-                        else -> it.name.ifEmpty { quoteKind(it.kind) }
-                    }
-                } ?: stringResource(R.string.chat_reply_gone),
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-/** Пузырь группового сообщения. Имя отправителя (цветом) — встроено сверху внутрь
- *  пузыря; время — в правом нижнем углу (как DM); без галочек. */
-@Composable
-internal fun GroupBubble(
-    m: Message,
-    model: AppModel,
-    mine: Boolean,
-    time: Long,
-    senderName: String? = null,
-    senderColor: Color = Color.White,
-    pos: BlockPos = BlockPos.Solo,
-) {
-    // M2: байты вложения из реактивного кэша (появятся по докачке блоба без рефреша).
-    val blobBytes = model.blob(m.blobId)
-    var viewer by remember { mutableStateOf(false) }
-    val selecting = model.selection.isNotEmpty()
-    val selected = MsgRef(m.id, m.sender) in model.selection
-    // В группе галочек нет: доставку каждому из участников мы не отслеживаем, и
-    // одна галочка означала бы больше, чем знает движок.
-    val meta: @Composable () -> Unit = { MsgMeta(time, mine = false, edited = m.editedAt > 0) }
-    val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
-    // Фото без подписи — само себе пузырь (как в личном чате). Имя автора, цитата
-    // и пометка пересылки уходят шапкой НАД снимком, на своей подложке, — картинка
-    // при этом остаётся голой.
-    val photoBubble = (m.kind == "image" || m.kind == "video") && !pending && m.text.isEmpty()
-    val photoHeader = photoBubble &&
-        (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
-    Box(
-        Modifier.widthIn(max = 280.dp).clip(bubbleShape(mine, pos))
-            .then(if (photoBubble) Modifier else Modifier.background(if (mine) BubbleOut else BubbleIn))
-            .then(
-                if (selected) Modifier.border(1.dp, HoloAccent, bubbleShape(mine, pos)) else Modifier,
-            )
-            .combinedClickable(
-                onLongClick = { model.toggleSelect(m) },
-                onClick = { if (selecting) model.toggleSelect(m) },
-            )
-            .then(if (photoBubble) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 6.dp)),
-    ) {
-        Column {
-            val head: @Composable () -> Unit = {
-                ForwardMark(model, m.fwdFrom, m.fwdAnon)
-                if (m.replyTo != 0L) {
-                    GroupQuote(model, m, if (photoHeader) Modifier.fillMaxWidth() else Modifier)
-                }
-                if (senderName != null) {
-                    Text(
-                        senderName,
-                        color = senderColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            if (photoHeader) {
-                // Подложка — только под шапкой, шириной со снимок.
-                Column(
-                    Modifier.width(PhotoBubbleSize)
-                        .background(if (mine) BubbleOut else BubbleIn)
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                ) { head() }
-            } else if (!photoBubble) {
-                head()
-            }
-            // Крупное вложение в группе не качается само: карточка с именем/размером/
-            // превью и кнопкой — решение принимает получатель, а не тот, кто отправил
-            // видео сразу пятерым (то же правило, что в DM).
-            Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
-                when {
-                    isPending -> PendingAttachmentCard(
-                        model,
-                        m.kind,
-                        m.name,
-                        m.size,
-                        m.durationMs,
-                        m.thumbId,
-                        m.blobId,
-                    ) { model.downloadMedia(m.sender, m.blobId) }
-                    else -> when (m.kind) {
-                        // В режиме выделения тап по вложению переключает выбор,
-                        // а не открывает файл.
-                        "image" -> ImageAttachment(
-                            blobBytes,
-                            onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
-                            bare = photoBubble,
-                            onLongClick = { model.toggleSelect(m) },
-                            cacheKey = m.blobId,
-                        )
-                        "video" -> VideoAttachment(
-                            blobBytes,
-                            m.durationMs,
-                            onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
-                            bare = photoBubble,
-                            onLongClick = { model.toggleSelect(m) },
-                            cacheKey = m.blobId,
-                        )
-                        "voice" -> VoiceAttachment(blobBytes)
-                        "file" -> FileAttachment(m.name, blobBytes) { model.toggleSelect(m) }
-                        // Текст обтекает мету — перенос считает сам движок вёрстки.
-                        else -> BubbleText(m.text) { meta() }
-                    }
-                }
-            }
-            // Подпись к вложению — в том же пузыре под содержимым: она пришла ОДНИМ
-            // сообщением с файлом, значит и показывается как его часть.
-            if (m.kind != "text" && m.text.isNotEmpty()) {
-                BubbleText(m.text, modifier = Modifier.padding(top = 6.dp)) { meta() }
-            }
-        }
-        if (viewer) {
-            val gid = model.currentGroup.orEmpty()
-            val items = remember(gid, model.chat(gid, group = true).size) {
-                model.chat(gid, group = true)
-                    .filter { (it.kind == "image" || it.kind == "video") && it.blobId.isNotEmpty() }
-                    .map { ViewerItem(it.id, it.sender, "", it.time, it.mime, it.name, it.blobId) }
-            }
-            // Имя автора считается здесь: `groupSenderName` — composable, внутри
-            // remember его звать нельзя.
-            val named = items.map { it.copy(author = groupSenderName(model, it.sender)) }
-            val start = named.indexOfFirst { it.id == m.id && it.sender == m.sender }
-            MediaViewer(
-                model,
-                named,
-                start.coerceAtLeast(0),
-                onClose = { viewer = false },
-                onForward = {
-                    viewer = false
-                    model.toggleSelect(m)
-                    model.beginForward(gid, group = true)
-                },
-                onDelete = {
-                    model.toggleSelect(m)
-                    model.deleteSelected(gid, group = true)
-                },
-                onShowInChat = { target ->
-                    viewer = false
-                    model.jumpTo = target.id
-                },
-            )
-        }
-        // Мета — в правом нижнем углу ПУЗЫРЯ (место в тексте под неё уже оставлено):
-        // имя автора и метка «Переслано» делают пузырь шире текста, и прижатая к
-        // концу строки мета висела бы посередине. На голом фото — на затемнении.
-        Box(Modifier.align(Alignment.BottomEnd)) {
-            if (photoBubble) MetaOnPhoto { meta() } else meta()
-        }
     }
 }
 
