@@ -294,7 +294,7 @@ internal fun newCameraUri(ctx: android.content.Context): android.net.Uri? = runC
 }.getOrNull()
 
 /** Прочитать содержимое uri (байты + mime + имя) в IO и отправить как вложение (M2). */
-private fun sendUriAttachment(
+internal fun sendUriAttachment(
     ctx: android.content.Context,
     model: AppModel,
     key: String,
@@ -302,6 +302,7 @@ private fun sendUriAttachment(
     scope: kotlinx.coroutines.CoroutineScope,
     fallbackName: String,
     caption: String = "",
+    group: Boolean = false,
 ) {
     scope.launch(Dispatchers.IO) {
         val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
@@ -311,7 +312,7 @@ private fun sendUriAttachment(
         if (mime.startsWith("image/")) {
             val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
             val meta = MediaMeta.extract(ctx, uri, mime, bytes)
-            model.sendMediaWithMeta(key, bytes, mime, name, meta, caption)
+            model.sendMediaWithMeta(key, bytes, mime, name, meta, caption, group)
             return@launch
         }
         // Всё остальное — ПОТОКОМ: сначала переливаем content:// в кэш-файл по 64 КБ,
@@ -319,7 +320,7 @@ private fun sendUriAttachment(
         // должно стоить гигабайта RAM только потому, что его выбрали в пикере.
         val cached = cacheFromUri(ctx, uri, name) ?: return@launch
         val meta = MediaMeta.extract(ctx, uri, mime, ByteArray(0))
-        model.sendMediaFile(key, cached.absolutePath, mime, name, meta, caption)
+        model.sendMediaFile(key, cached.absolutePath, mime, name, meta, caption, group)
     }
 }
 

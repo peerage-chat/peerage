@@ -406,6 +406,31 @@ internal fun dayKey(ts: Long): Long {
     return c.get(java.util.Calendar.YEAR) * 1000L + c.get(java.util.Calendar.DAY_OF_YEAR)
 }
 
+// ── Автор сообщения ─────────────────────────────────────────────────────────
+// Живёт здесь, а не в экране группы: имя и цвет автора нужны и ленте, и цитате,
+// и полоске ответа — то есть общему коду чата, а не одному экрану.
+
+/** Имя отправителя группового сообщения по hex-ключу. */
+@Composable
+internal fun groupSenderName(model: AppModel, hex: String): String = when {
+    hex.isEmpty() -> stringResource(R.string.group_member_fallback)
+    hex == model.me?.pubkey -> stringResource(R.string.common_you)
+    else -> model.contacts.firstOrNull { it.key == hex }?.name ?: (hex.take(6) + "…")
+}
+
+/** Яркий детерминированный цвет имени отправителя (Discord-style). */
+internal val NameColors = listOf(
+    Color(0xFF5BC0EB),
+    Color(0xFF9BC53D),
+    Color(0xFFE5793A),
+    Color(0xFFEF6FB3),
+    Color(0xFF7C5CFC),
+    Color(0xFF20C997),
+    Color(0xFFF6C453),
+)
+internal fun nameColor(hex: String): Color =
+    if (hex.isEmpty()) HoloSecondary else NameColors[abs(hex.hashCode()) % NameColors.size]
+
 // ── Склейка сообщений в блоки (docs/design/mockups/chat-blocks.html) ────────
 // Блок — подряд идущие сообщения ОДНОГО отправителя внутри окна времени, без
 // разделителей между ними. Внутри блока сообщения стоят вплотную и «сшиваются»

@@ -41,43 +41,6 @@ import dev.p2p.messenger.*
 import dev.p2p.messenger.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlin.math.abs
-
-/** Прочитать uri (байты+mime+имя) в IO и отправить как вложение в группу (M2). */
-private fun sendGroupUriAttachment(
-    ctx: android.content.Context,
-    model: AppModel,
-    gid: String,
-    uri: android.net.Uri,
-    scope: kotlinx.coroutines.CoroutineScope,
-    fallbackName: String,
-    caption: String = "",
-) {
-    scope.launch(Dispatchers.IO) {
-        val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
-        val name = displayName(ctx, uri) ?: fallbackName
-        // Картинки — через память: им нужен scrub (EXIF/GPS), а он требует файла
-        // целиком. Всё остальное — потоком, как в личке.
-        if (mime.startsWith("image/")) {
-            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
-            model.sendMediaWithMeta(
-                gid,
-                bytes,
-                mime,
-                name,
-                MediaMeta.extract(ctx, uri, mime, bytes),
-                caption,
-                group = true,
-            )
-            return@launch
-        }
-        // Метаданные (длительность/кадр/превью) достаём здесь: без них у участников
-        // будет карточка «скачать» без единой подсказки, что именно им предлагают.
-        val cached = cacheFromUri(ctx, uri, name) ?: return@launch
-        val meta = MediaMeta.extract(ctx, uri, mime, ByteArray(0))
-        model.sendMediaFile(gid, cached.absolutePath, mime, name, meta, caption, group = true)
-    }
-}
 
 @Composable
 internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
@@ -135,14 +98,14 @@ internal fun GroupChatScreen(model: AppModel) {
 
     // Вложения в группе — тот же лист, что в DM (движок пушит блоб всем участникам).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { sendGroupUriAttachment(ctx, model, gid, it, scope, "file") }
+        uri?.let { sendUriAttachment(ctx, model, gid, it, scope, "file", group = true) }
     }
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { sendGroupUriAttachment(ctx, model, gid, it, scope, "audio") }
+        uri?.let { sendUriAttachment(ctx, model, gid, it, scope, "audio", group = true) }
     }
     val camUri = remember { mutableStateOf<android.net.Uri?>(null) }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) camUri.value?.let { sendGroupUriAttachment(ctx, model, gid, it, scope, "photo.jpg") }
+        if (ok) camUri.value?.let { sendUriAttachment(ctx, model, gid, it, scope, "photo.jpg", group = true) }
     }
     val camPerm = rememberPermissionRunner()
     val openCamera = {
@@ -236,7 +199,7 @@ internal fun GroupChatScreen(model: AppModel) {
                         // Подпись — только на первом вложении, как в DM: серия из пяти
                         // фото с одной подписью на каждом читалась бы как спам.
                         list.forEachIndexed { i, g ->
-                            sendGroupUriAttachment(
+                            sendUriAttachment(
                                 ctx,
                                 model,
                                 gid,
@@ -244,6 +207,7 @@ internal fun GroupChatScreen(model: AppModel) {
                                 scope,
                                 if (g.isVideo) "video.mp4" else "photo.jpg",
                                 caption = if (i == 0) caption else "",
+                                group = true,
                             )
                         }
                     },
@@ -363,27 +327,6 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         ) { Text(stringResource(R.string.room_join), color = Color(0xFF0A1F0A), fontSize = 14.sp, fontWeight = FontWeight.Medium) }
     }
 }
-
-/** Имя отправителя группового сообщения по hex-ключу. */
-@Composable
-internal fun groupSenderName(model: AppModel, hex: String): String = when {
-    hex.isEmpty() -> stringResource(R.string.group_member_fallback)
-    hex == model.me?.pubkey -> stringResource(R.string.common_you)
-    else -> model.contacts.firstOrNull { it.key == hex }?.name ?: (hex.take(6) + "…")
-}
-
-/** Яркий детерминированный цвет имени отправителя (Discord-style). */
-internal val NameColors = listOf(
-    Color(0xFF5BC0EB),
-    Color(0xFF9BC53D),
-    Color(0xFFE5793A),
-    Color(0xFFEF6FB3),
-    Color(0xFF7C5CFC),
-    Color(0xFF20C997),
-    Color(0xFFF6C453),
-)
-internal fun nameColor(hex: String): Color =
-    if (hex.isEmpty()) HoloSecondary else NameColors[abs(hex.hashCode()) % NameColors.size]
 
 /** Сетка участников комнаты (2 колонки). Тап по тайлу → onFocus(key).
  *  [inRoom] — мы сейчас в комнате (показываем себя + model.roomMembers).
