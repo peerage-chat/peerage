@@ -116,19 +116,16 @@ data class Message(
 data class ChatTarget(val id: String, val group: Boolean, val title: String = "")
 
 /**
- * Ссылка на строку истории: id сообщения + чьё оно. Пара, а не один id: id посеян
- * временем ОТПРАВИТЕЛЯ, поэтому у моего и чужого сообщения он может совпасть.
- * Тот же формат читает движок (`deleteMessages`).
+ * Ссылка на строку истории: id сообщения плюс его автор (ADR-006). Пара, а не один
+ * id: id посеян временем ОТПРАВИТЕЛЯ, поэтому у моего и чужого сообщения он может
+ * совпасть.
+ *
+ * Автор годится и для личного чата, и для группы, поэтому ссылка одна на оба.
+ * «Моё» выводится сравнением с собственным ключом. На проводе формы РАЗНЫЕ и свои
+ * у каждого канала (`{id,mine}` в личном, `{id,sender}` в групповом) — перевод
+ * живёт на границе JNI.
  */
-@kotlinx.serialization.Serializable
-data class MsgRef(val id: Long, val mine: Boolean)
-
-/**
- * Ссылка на групповое сообщение: id + автор. В группе собеседников много, поэтому
- * (в отличие от DM) флага «моё/чужое» недостаточно.
- */
-@kotlinx.serialization.Serializable
-data class GroupMsgRef(val id: Long, val sender: String)
+data class MsgRef(val id: Long, val sender: String)
 
 /** Идентичность пользователя (своя «визитка»). */
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
@@ -201,44 +198,6 @@ data class NetStats(
 
 /** Присутствие группы «N уч · M в сети» — агрегат (MLS-ростер ∩ presence) считает движок. */
 data class GroupRoster(val total: Int, val online: Int)
-
-data class GroupMsg(
-    /** id в пределах ОТПРАВИТЕЛЯ; вместе с [sender] — ссылка на сообщение
-     *  (ADR-006). 0 — сообщение старого клиента: сослаться не на что. */
-    val id: Long = 0,
-    /** Курсор пагинации: номер строки в базе движка (0 — запись создана локально). */
-    val row: Long = 0,
-    /** Ссылка ответа: id цитируемого (0 — обычное) и hex его автора. */
-    val replyTo: Long = 0,
-    val replySender: String = "",
-    val text: String,
-    val mine: Boolean,
-    val time: Long,
-    /** hex ed25519-pubkey отправителя (имя/цвет/аватарка в UI). "" — неизвестно. */
-    val sender: String = "",
-    /** Системная строка (смена состава) — рендерится отдельно. */
-    val system: Boolean = false,
-    /** hex автора исходного сообщения, если это пересылка (пусто — своё). */
-    val fwdFrom: String = "",
-    /** Переслано, но автора не называем. */
-    val fwdAnon: Boolean = false,
-    /** Когда исправлено автором (0 — не редактировалось). */
-    val editedAt: Long = 0,
-    /** Тип (M2): "text" | "image" | "voice" | "file". */
-    val kind: String = "text",
-    /** hex-хэш блоба вложения (M2); байты — через AppModel.mediaBlobs. */
-    val blobId: String = "",
-    val mime: String = "",
-    val name: String = "",
-    /** Метаданные карточки: известны ДО загрузки байт (имя/размер/превью). */
-    val size: Long = 0,
-    val durationMs: Int = 0,
-    val width: Int = 0,
-    val height: Int = 0,
-    val thumbId: String = "",
-    /** Байты вложения уже у нас (своё сообщение или докачано). */
-    val downloaded: Boolean = false,
-)
 
 /** Источник флуда для UI: сколько отброшено и с каким темпом (ADR-007). */
 data class FloodPeer(
@@ -509,7 +468,7 @@ class AppModel private constructor() {
 
     /** Входящие приглашения в группы (карточки на одобрение). */
     val groupInvites = mutableStateListOf<GroupInvite>()
-    val groupMessages = mutableStateMapOf<String, SnapshotStateList<GroupMsg>>()
+    val groupMessages = mutableStateMapOf<String, SnapshotStateList<Message>>()
 
     /** Непрочитанные в группах: gid → счётчик. Живёт только в памяти, как и [unread]
      *  у личных чатов — это «что пришло, пока я смотрел в другое место», а не факт
@@ -724,7 +683,7 @@ class AppModel private constructor() {
     }
 
     /** То же для группового сообщения (там автор известен явно). */
-    fun setPinnedGroup(gid: String, msg: GroupMsg, on: Boolean) = ops.execute {
+    fun setPinnedGroup(gid: String, msg: Message, on: Boolean) = ops.execute {
         Native.pinMessage(sessionPtr, gid, true, msg.id, msg.sender, on)
         refreshPins(gid, true)
     }
@@ -1504,7 +1463,21 @@ class AppModel private constructor() {
         // и секунде отправки — id у очереди своего нет.
         synchronized(queueLock) { offlineQueueMap[key]?.toList() ?: emptyList() }
             .filterNot { (text, ts) -> list.any { it.mine && it.text == text && it.time == ts } }
-            .forEach { (text, ts) -> list.add(Message(--localMsgId, text, mine = true, time = ts, status = "queued")) }
+            .forEach { (text, ts) ->
+                // Автор обязателен даже у локальной записи: ссылка на сообщение —
+                // это пара «id + автор», и без него выделение такой строки
+                // указывало бы в пустоту.
+                list.add(
+                    Message(
+                        --localMsgId,
+                        text,
+                        mine = true,
+                        time = ts,
+                        status = "queued",
+                        sender = me?.pubkey.orEmpty(),
+                    ),
+                )
+            }
         messages[key] = list.toMutableStateList()
         atChatStart -= key // хвост перечитан — выше снова может что-то быть
         // Байты вложений НЕ читаем заранее: `blob()` возьмёт их при показе, то есть
@@ -1591,17 +1564,40 @@ class AppModel private constructor() {
     var editTarget by mutableStateOf<Message?>(null)
 
     /** То же для группового сообщения. */
-    var editTargetGroup by mutableStateOf<GroupMsg?>(null)
+    var editTargetGroup by mutableStateOf<Message?>(null)
 
     /** Отправить правку своего сообщения. */
     fun applyEdit(chat: String, group: Boolean, id: Long, text: String) = ops.execute {
         if (text.isNotBlank()) Native.editMessage(sessionPtr, chat, group, id, text)
     }
 
+    /** Ссылки в форме личного канала: там на проводе не автор, а «моё/чужое». */
+    @kotlinx.serialization.Serializable
+    private data class WireDmRef(val id: Long, val mine: Boolean)
+
+    /** Ссылки в форме группового канала: там автор нужен явно. */
+    @kotlinx.serialization.Serializable
+    private data class WireGroupRef(val id: Long, val sender: String)
+
+    private fun wireDmRefs(refs: Collection<MsgRef>): String {
+        val meKey = me?.pubkey.orEmpty()
+        return WireJson.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(WireDmRef.serializer()),
+            refs.map { WireDmRef(it.id, it.sender == meKey) },
+        )
+    }
+
+    private fun wireGroupRefs(refs: Collection<MsgRef>): String = WireJson.encodeToString(
+        kotlinx.serialization.builtins.ListSerializer(WireGroupRef.serializer()),
+        refs.map { WireGroupRef(it.id, it.sender) },
+    )
+
+    /** Своё ли это сообщение: сравнение автора с собственным ключом. */
+    fun isMine(ref: MsgRef): Boolean = ref.sender == me?.pubkey
+
     /** Начать пересылку выделенного в личном чате или «Сохранённом». */
     fun beginForward(chatKey: String) {
-        val meKey = me?.pubkey.orEmpty()
-        val refs = selection.map { it.id to (if (it.mine) meKey else chatKey) }
+        val refs = selection.map { it.id to it.sender }
         if (refs.isEmpty()) return
         forwarding = ChatTarget(chatKey, group = false) to refs
         clearSelection()
@@ -1629,10 +1625,7 @@ class AppModel private constructor() {
         forwarding = null
         forwardHideAuthor = false
         ops.execute {
-            val json = WireJson.encodeToString(
-                kotlinx.serialization.builtins.ListSerializer(GroupMsgRef.serializer()),
-                refs.map { GroupMsgRef(it.first, it.second) },
-            )
+            val json = wireGroupRefs(refs.map { MsgRef(it.first, it.second) })
             Native.forwardMessages(sessionPtr, src.id, src.group, json, dst.id, dst.group, hide)
             // Целевой чат может быть открыт прямо сейчас — перечитываем его хвост.
             if (dst.group && currentGroup == dst.id) {
@@ -1716,7 +1709,7 @@ class AppModel private constructor() {
         private set
 
     fun toggleSelect(m: Message) {
-        val ref = MsgRef(m.id, m.mine)
+        val ref = MsgRef(m.id, m.sender)
         selection = if (ref in selection) selection - ref else selection + ref
     }
 
@@ -1737,7 +1730,7 @@ class AppModel private constructor() {
     fun selectedText(key: String): String {
         val sel = selection
         return (messages[key] ?: emptyList<Message>())
-            .filter { MsgRef(it.id, it.mine) in sel }
+            .filter { MsgRef(it.id, it.sender) in sel }
             .joinToString("\n") { if (it.text.isNotEmpty()) it.text else it.name }
     }
 
@@ -1746,7 +1739,7 @@ class AppModel private constructor() {
         val refs = selection.toList()
         if (refs.isEmpty()) return
         selection = emptySet()
-        val json = WireJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(MsgRef.serializer()), refs)
+        val json = wireDmRefs(refs)
         ops.execute {
             Native.deleteMessages(sessionPtr, key, json)
             reloadHistory(key)
@@ -1755,7 +1748,7 @@ class AppModel private constructor() {
 
     /** Отозвать выделенные СВОИ сообщения у собеседника. Чужие не трогаем. */
     fun retractSelected(key: String) {
-        val ids = selection.filter { it.mine }.map { it.id }
+        val ids = selection.filter { isMine(it) }.map { it.id }
         if (ids.isEmpty()) return
         selection = emptySet()
         val json = ids.joinToString(prefix = "[", postfix = "]")
@@ -1771,10 +1764,7 @@ class AppModel private constructor() {
         if (refs.isEmpty()) return
         selection = emptySet()
         val key = me?.pubkey ?: return
-        val json = WireJson.encodeToString(
-            kotlinx.serialization.builtins.ListSerializer(MsgRef.serializer()),
-            refs,
-        )
+        val json = wireDmRefs(refs)
         ops.execute {
             Native.deleteMessages(sessionPtr, key, json)
             val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
@@ -2179,7 +2169,9 @@ class AppModel private constructor() {
                     if (md != null && md.downloaded) cacheBlob(md.blobId)
                     md?.thumbId?.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
                     groupLog(ev.gid).add(
-                        GroupMsg(
+                        Message(
+                            id = 0,
+                            status = "",
                             text = ev.text,
                             mine = false,
                             time = System.currentTimeMillis() / 1000,
@@ -2693,8 +2685,8 @@ class AppModel private constructor() {
         // читать всю страницу с диска незачем.
     }
 
-    private fun groupLog(gid: String): SnapshotStateList<GroupMsg> =
-        groupMessages.getOrPut(gid) { mutableListOf<GroupMsg>().toMutableStateList() }
+    private fun groupLog(gid: String): SnapshotStateList<Message> =
+        groupMessages.getOrPut(gid) { mutableListOf<Message>().toMutableStateList() }
 
     fun inviteToGroup(gid: String, peerHex: String) = ops.execute { Native.groupInvite(sessionPtr, gid, peerHex) }
 
@@ -2717,17 +2709,17 @@ class AppModel private constructor() {
 
     // ── Действия с групповым сообщением (ADR-006) ────────────────────────────
 
-    var groupSelection by mutableStateOf<Set<GroupMsgRef>>(emptySet())
+    var groupSelection by mutableStateOf<Set<MsgRef>>(emptySet())
         private set
 
-    var groupReplyTarget by mutableStateOf<GroupMsg?>(null)
+    var groupReplyTarget by mutableStateOf<Message?>(null)
         private set
 
-    fun toggleGroupSelect(m: GroupMsg) {
+    fun toggleGroupSelect(m: Message) {
         // Сообщения без id (старый клиент) выбрать нельзя: с ними нечего делать —
         // ни отозвать, ни ответить, а «удалить у себя» без ссылки не адресуется.
         if (m.id == 0L) return
-        val ref = GroupMsgRef(m.id, m.sender)
+        val ref = MsgRef(m.id, m.sender)
         groupSelection = if (ref in groupSelection) groupSelection - ref else groupSelection + ref
     }
 
@@ -2740,7 +2732,7 @@ class AppModel private constructor() {
         groupSelection = emptySet()
     }
 
-    fun startGroupReply(m: GroupMsg) {
+    fun startGroupReply(m: Message) {
         groupReplyTarget = m
         groupSelection = emptySet()
     }
@@ -2751,8 +2743,8 @@ class AppModel private constructor() {
 
     fun groupSelectedText(gid: String): String {
         val sel = groupSelection
-        return (groupMessages[gid] ?: emptyList<GroupMsg>())
-            .filter { GroupMsgRef(it.id, it.sender) in sel }
+        return (groupMessages[gid] ?: emptyList<Message>())
+            .filter { MsgRef(it.id, it.sender) in sel }
             .joinToString("\n") { if (it.text.isNotEmpty()) it.text else it.name }
     }
 
@@ -2760,10 +2752,7 @@ class AppModel private constructor() {
         val refs = groupSelection.toList()
         if (refs.isEmpty()) return
         groupSelection = emptySet()
-        val json = WireJson.encodeToString(
-            kotlinx.serialization.builtins.ListSerializer(GroupMsgRef.serializer()),
-            refs,
-        )
+        val json = wireGroupRefs(refs)
         ops.execute {
             Native.groupDeleteMessages(sessionPtr, gid, json)
         }

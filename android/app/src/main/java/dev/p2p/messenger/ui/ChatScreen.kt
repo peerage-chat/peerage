@@ -482,14 +482,14 @@ private fun SelectionTopBar(model: AppModel) {
         if (sel.size == 1) {
             BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
                 val ref = sel.first()
-                model.messages[key]?.firstOrNull { it.id == ref.id && it.mine == ref.mine }
+                model.messages[key]?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
                     ?.let { model.startReply(it) }
             }
         }
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
             model.beginForward(key)
         }
-        if (sel.size == 1 && sel.first().mine) {
+        if (sel.size == 1 && model.isMine(sel.first())) {
             val ref = sel.first()
             BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
                 model.messages[key]?.firstOrNull { it.id == ref.id && it.mine }
@@ -499,8 +499,8 @@ private fun SelectionTopBar(model: AppModel) {
         }
         if (sel.size == 1) {
             val ref = sel.first()
-            val msg = model.messages[key]?.firstOrNull { it.id == ref.id && it.mine == ref.mine }
-            val already = model.pinned[key].orEmpty().any { it.id == ref.id && it.mine == ref.mine }
+            val msg = model.messages[key]?.firstOrNull { it.id == ref.id && it.sender == ref.sender }
+            val already = model.pinned[key].orEmpty().any { it.id == ref.id && it.sender == ref.sender }
             BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
                 msg?.let { model.setPinned(key, false, it, !already) }
                 model.clearSelection()
@@ -521,7 +521,7 @@ private fun SelectionTopBar(model: AppModel) {
     }
 
     if (confirmDelete) {
-        val allMine = sel.all { it.mine }
+        val allMine = sel.all { model.isMine(it) }
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text(stringResource(R.string.chat_delete_title, sel.size)) },
@@ -803,7 +803,7 @@ internal fun MessageBubble(
         label = "bubble",
     )
     val selecting = model.selection.isNotEmpty()
-    val selected = MsgRef(m.id, m.mine) in model.selection
+    val selected = MsgRef(m.id, m.sender) in model.selection
     // Мета одна на все ветки пузыря: и когда она встроена в текст, и когда лежит
     // поверх вложения — это один и тот же набор значков.
     val meta: @Composable () -> Unit = { MsgMeta(m.time, m.mine, m.editedAt > 0, m.status) }

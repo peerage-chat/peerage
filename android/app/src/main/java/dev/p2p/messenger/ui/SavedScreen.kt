@@ -84,7 +84,7 @@ internal fun SavedScreen(model: AppModel) {
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
             ) {
                 items(model.notes, key = { it.id }) { n ->
-                    val selected = MsgRef(n.id, n.mine) in selection
+                    val selected = MsgRef(n.id, n.sender) in selection
                     Row(
                         Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s)
                             .background(if (selected) HoloAccent.copy(alpha = 0.16f) else Color.Transparent),
@@ -199,7 +199,7 @@ private fun SavedSelectionBar(model: AppModel) {
         }
         if (sel.size == 1) {
             val ref = sel.first()
-            val note = model.notes.firstOrNull { it.id == ref.id && it.mine == ref.mine }
+            val note = model.notes.firstOrNull { it.id == ref.id && it.sender == ref.sender }
             val already = model.pinned[myKey].orEmpty().any { it.id == ref.id }
             BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
                 note?.let { model.setPinned(myKey, false, it, !already) }

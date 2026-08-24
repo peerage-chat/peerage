@@ -368,8 +368,11 @@ internal fun MessageDto.toModel() = Message(
     downloaded = downloaded,
 )
 
-internal fun GroupMsgDto.toModel() = GroupMsg(
+internal fun GroupMsgDto.toModel() = Message(
     id = id,
+    // Статуса доставки в группе нет: подтверждение приходит от каждого участника
+    // отдельно, и одной галочкой это не выражается.
+    status = "",
     replyTo = replyTo,
     replySender = replySender,
     text = text,

@@ -194,7 +194,7 @@ internal fun GroupChatScreen(model: AppModel) {
                     if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
                     // Склейка блоков. Системная строка — разделитель: у неё нет
                     // отправителя, поэтому соседние сообщения в один блок не сходятся.
-                    val who = { g: GroupMsg -> if (g.system) null else g.sender }
+                    val who = { g: Message -> if (g.system) null else g.sender }
                     val pos = blockPos(
                         withPrev = prev != null && !m.system &&
                             continuesBlock(who(prev), prev.time, m.sender, m.time),
@@ -364,7 +364,7 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
 
 /** Строка группового сообщения: системная / своя / входящая (имя цветом + аватар). */
 @Composable
-internal fun GroupMessageRow(model: AppModel, m: GroupMsg, pos: BlockPos = BlockPos.Solo) {
+internal fun GroupMessageRow(model: AppModel, m: Message, pos: BlockPos = BlockPos.Solo) {
     when {
         m.system -> {
             val who = groupSenderName(model, m.sender)
@@ -526,7 +526,7 @@ private fun GroupSelectionTopBar(model: AppModel) {
 
 /** Полоска «отвечаем на …» над полем ввода группы. */
 @Composable
-private fun GroupReplyStrip(model: AppModel, m: GroupMsg) {
+private fun GroupReplyStrip(model: AppModel, m: Message) {
     val who = if (m.sender == model.me?.pubkey) {
         stringResource(R.string.chat_reply_you)
     } else {
@@ -559,7 +559,7 @@ private fun GroupReplyStrip(model: AppModel, m: GroupMsg) {
 
 /** Цитата в групповом пузыре: имя автора оригинала + начало текста. */
 @Composable
-private fun GroupQuote(model: AppModel, m: GroupMsg, modifier: Modifier = Modifier) {
+private fun GroupQuote(model: AppModel, m: Message, modifier: Modifier = Modifier) {
     val src = model.groupMessages[model.currentGroup]
         ?.firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
     val who = if (m.replySender == model.me?.pubkey) {
@@ -600,7 +600,7 @@ private fun GroupQuote(model: AppModel, m: GroupMsg, modifier: Modifier = Modifi
  *  пузыря; время — в правом нижнем углу (как DM); без галочек. */
 @Composable
 internal fun GroupBubble(
-    m: GroupMsg,
+    m: Message,
     model: AppModel,
     mine: Boolean,
     time: Long,
@@ -612,7 +612,7 @@ internal fun GroupBubble(
     val blobBytes = model.blob(m.blobId)
     var viewer by remember { mutableStateOf(false) }
     val selecting = model.groupSelection.isNotEmpty()
-    val selected = GroupMsgRef(m.id, m.sender) in model.groupSelection
+    val selected = MsgRef(m.id, m.sender) in model.groupSelection
     // В группе галочек нет: доставку каждому из участников мы не отслеживаем, и
     // одна галочка означала бы больше, чем знает движок.
     val meta: @Composable () -> Unit = { MsgMeta(time, mine = false, edited = m.editedAt > 0) }
