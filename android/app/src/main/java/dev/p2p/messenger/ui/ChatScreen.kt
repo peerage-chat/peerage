@@ -60,7 +60,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -904,6 +903,7 @@ internal fun MessageBubble(
                                 onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
                                 bare = photoBubble,
                                 onLongClick = { model.toggleSelect(m) },
+                                cacheKey = m.blobId,
                             )
                             // Видео — тот же кадр, что и фото, плюс метка
                             // длительности: тап открывает просмотрщик, а не отдаёт
@@ -914,6 +914,7 @@ internal fun MessageBubble(
                                 onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
                                 bare = photoBubble,
                                 onLongClick = { model.toggleSelect(m) },
+                                cacheKey = m.blobId,
                             )
                             "voice" -> VoiceAttachment(blobBytes)
                             "file" -> FileAttachment(m.name, blobBytes) { model.toggleSelect(m) }
@@ -988,10 +989,12 @@ internal fun ImageAttachment(
     onOpen: () -> Unit,
     bare: Boolean = false,
     onLongClick: () -> Unit = {},
+    cacheKey: String = "",
 ) {
-    val bmp = bytes?.let {
-        remember(it) { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
-    }
+    // Снимок декодируется под сторону пузыря, а не в оригинале: в ленте он всё
+    // равно не крупнее 240dp, а полноразмерный битмап стоит десятки мегабайт.
+    val side = if (bare) PhotoBubbleSize else 220.dp
+    val bmp = rememberBitmap(bytes, cacheKey, side)
     // [bare] — картинка САМА является пузырём: своё скругление и фон ей не нужны,
     // их даёт пузырь. Иначе внутри пузыря получалась бы вторая скруглённая рамка.
     //
@@ -1029,23 +1032,13 @@ internal fun VideoAttachment(
     onOpen: () -> Unit,
     bare: Boolean = false,
     onLongClick: () -> Unit = {},
+    cacheKey: String = "",
 ) {
-    val frame = bytes?.let {
-        remember(it) {
-            runCatching {
-                // Первый кадр достаём из самих байт: миниатюра могла и не приехать,
-                // а файл уже здесь — значит показать есть что в любом случае.
-                android.media.MediaMetadataRetriever().use { r ->
-                    val f = java.io.File.createTempFile("frame", null)
-                    f.writeBytes(it)
-                    r.setDataSource(f.absolutePath)
-                    val bmp = r.frameAtTime
-                    f.delete()
-                    bmp?.asImageBitmap()
-                }
-            }.getOrNull()
-        }
-    }
+    // Первый кадр достаём из самих байт: миниатюра могла и не приехать, а файл уже
+    // здесь — значит показать есть что в любом случае. Работа фоновая: раньше файл
+    // писался на диск и кадр декодировался прямо в потоке отрисовки.
+    val side = if (bare) PhotoBubbleSize else 220.dp
+    val frame = rememberVideoFrame(bytes, cacheKey, side)
     Box(
         Modifier.size(if (bare) PhotoBubbleSize else 220.dp)
             .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)))
@@ -1229,11 +1222,9 @@ internal fun PendingAttachmentCard(
             Modifier.size(48.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Color.Black.copy(alpha = 0.25f)),
             contentAlignment = Alignment.Center,
         ) {
-            val bmp = remember(thumb) {
-                thumb?.let { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
-            }
+            val bmp = rememberBitmap(thumb, thumbId, 48.dp)
             if (bmp != null) {
-                Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
                 Icon(kindIcon(kind), null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
             }

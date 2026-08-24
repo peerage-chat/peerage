@@ -24,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -158,10 +157,9 @@ internal fun SquareAvatar(
     ring: Color = Tokens.Colors.surface,
     content: (@Composable () -> Unit)? = null,
 ) {
-    // Декод байт аватара (M2) — один раз на набор байт, не на каждую рекомпозицию.
-    val bmp = avatarBytes?.let {
-        remember(it) { runCatching { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
-    }
+    // Аватар декодируется под свою сторону: он бывает и 38dp в шапке, и 96dp в
+    // профиле, а исходник — полноразмерное фото.
+    val bmp = rememberBitmap(avatarBytes, null, size)
     // «квадрат со скруглением» (app-ui.md ~14-15px): пропорция size×0.3, но с кэпом
     // на Tokens.Radius.avatar — иначе крупные аватарки «балонят» до почти-круга.
     val shape = if (circle) {
@@ -354,11 +352,7 @@ internal fun RowScope.QuoteThumb(model: AppModel, blobId: String, thumbId: Strin
     val bytes = thumbId.takeIf { it.isNotEmpty() }?.let { model.mediaBlobs[it] }
         ?: blobId.takeIf { it.isNotEmpty() }?.let { model.mediaBlobs[it] }
         ?: return false
-    val bmp = remember(bytes) {
-        runCatching {
-            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-        }.getOrNull()
-    } ?: return false
+    val bmp = rememberBitmap(bytes, thumbId.ifEmpty { blobId }, 34.dp) ?: return false
     Image(
         bmp,
         null,

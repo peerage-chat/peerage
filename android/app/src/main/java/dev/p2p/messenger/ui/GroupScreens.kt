@@ -684,6 +684,7 @@ internal fun GroupBubble(
                             onOpen = { if (selecting) model.toggleGroupSelect(m) else viewer = true },
                             bare = photoBubble,
                             onLongClick = { model.toggleGroupSelect(m) },
+                            cacheKey = m.blobId,
                         )
                         "video" -> VideoAttachment(
                             blobBytes,
@@ -691,6 +692,7 @@ internal fun GroupBubble(
                             onOpen = { if (selecting) model.toggleGroupSelect(m) else viewer = true },
                             bare = photoBubble,
                             onLongClick = { model.toggleGroupSelect(m) },
+                            cacheKey = m.blobId,
                         )
                         "voice" -> VoiceAttachment(blobBytes)
                         "file" -> FileAttachment(m.name, blobBytes) { model.toggleGroupSelect(m) }

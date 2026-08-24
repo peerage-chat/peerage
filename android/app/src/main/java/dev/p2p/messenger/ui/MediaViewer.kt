@@ -48,7 +48,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEvent
@@ -410,11 +409,9 @@ private fun MediaPage(
             )
             video -> VideoSurface(bytes, item.name, muted, chrome)
             else -> {
-                val bmp = remember(bytes) {
-                    runCatching {
-                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                    }.getOrNull()
-                }
+                // Под размер экрана: зум до 6× работает по этому же битмапу —
+                // держать ради него оригинал на 48 МБ не за что.
+                val bmp = rememberFullscreenBitmap(bytes, item.blobId)
                 if (bmp != null) {
                     Image(
                         bmp,
