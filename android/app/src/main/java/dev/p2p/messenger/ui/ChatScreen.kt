@@ -792,7 +792,7 @@ internal fun MessageBubble(
     animate: Boolean = false,
 ) {
     // M2: байты вложения из реактивного кэша (появятся по докачке без рефреша).
-    val blobBytes = if (m.blobId.isNotEmpty()) model.mediaBlobs[m.blobId] else null
+    val blobBytes = model.blob(m.blobId)
     var viewer by remember { mutableStateOf(false) }
     // Новое сообщение всплывает снизу: видно, что оно ПРИШЛО, а не было всегда.
     var shown by remember(m.id) { mutableStateOf(!animate) }
@@ -1210,7 +1210,7 @@ internal fun PendingAttachmentCard(
     blobId: String,
     onDownload: () -> Unit,
 ) {
-    val thumb = if (thumbId.isNotEmpty()) model.mediaBlobs[thumbId] else null
+    val thumb = model.blob(thumbId)
     // Состояние докачки живёт в движке, а не в этом composable: заказ персистентный,
     // продолжается сам при появлении пира и переживает перезапуск. Отсюда — только показ.
     val progress = model.downloads[blobId]

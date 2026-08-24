@@ -410,14 +410,72 @@ class AppModel private constructor() {
     val contactAvatars = mutableStateMapOf<String, ByteArray>()
 
     /** Байты вложений чата по hex-хэшу блоба (M2). Реактивный кэш: при докачке
-     *  (blob_received) картинка появляется в пузыре без ручного рефреша. */
+     *  (blob_received) картинка появляется в пузыре без ручного рефреша.
+     *
+     *  Читать напрямую НЕ надо — только через [blob]: карта ограничена по объёму и
+     *  вытесняет давнее, а [blob] умеет заказать выселенное обратно. */
     val mediaBlobs = mutableStateMapOf<String, ByteArray>()
+
+    /** Потолок кэша вложений в памяти. Раньше его не было вовсе: чат на два десятка
+     *  фотографий держал в куче все их байты разом и никогда не отпускал. */
+    private val blobCacheLimit = 24L * 1024 * 1024
+
+    /** Порядок обращений для вытеснения (в конце — самые свежие). */
+    private val blobOrder = LinkedHashSet<String>()
+    private var blobBytes = 0L
+
+    /** Блобы, чтение которых уже заказано — чтобы промах не плодил очередь заказов
+     *  на каждую рекомпозицию. */
+    private val blobWanted = mutableSetOf<String>()
+
+    /**
+     * Байты вложения для показа.
+     *
+     * При промахе заказывает чтение с диска и возвращает null: вызывающий рисует
+     * заглушку, а байты приедут в реактивную карту и он перерисуется сам.
+     */
+    fun blob(blobId: String): ByteArray? {
+        if (blobId.isEmpty()) return null
+        val hit = mediaBlobs[blobId]
+        if (hit != null) {
+            synchronized(blobOrder) {
+                blobOrder.remove(blobId)
+                blobOrder.add(blobId)
+            }
+            return hit
+        }
+        val fresh = synchronized(blobWanted) { blobWanted.add(blobId) }
+        if (fresh) ops.execute { cacheBlob(blobId) }
+        return null
+    }
 
     /** Подтянуть байты блоба в кэш, если он уже есть локально (на [ops]). */
     private fun cacheBlob(blobId: String) {
         if (blobId.isNotEmpty() && !mediaBlobs.containsKey(blobId)) {
-            Native.blobRead(sessionPtr, blobId).takeIf { it.isNotEmpty() }?.let { mediaBlobs[blobId] = it }
+            Native.blobRead(sessionPtr, blobId).takeIf { it.isNotEmpty() }?.let { putBlob(blobId, it) }
         }
+        synchronized(blobWanted) { blobWanted.remove(blobId) }
+    }
+
+    /** Положить блоб в кэш, вытеснив самые давние, если вышли за потолок. */
+    private fun putBlob(blobId: String, data: ByteArray) {
+        val evict = synchronized(blobOrder) {
+            if (blobOrder.add(blobId)) blobBytes += data.size
+            val doomed = mutableListOf<String>()
+            val it = blobOrder.iterator()
+            // Свежий блоб не трогаем даже когда он один переполняет кэш: его сейчас
+            // и показывают, а выселить его — значит тут же заказать снова.
+            while (blobBytes > blobCacheLimit && it.hasNext()) {
+                val old = it.next()
+                if (old == blobId) continue
+                it.remove()
+                blobBytes -= (mediaBlobs[old]?.size ?: 0).toLong()
+                doomed += old
+            }
+            doomed
+        }
+        mediaBlobs[blobId] = data
+        evict.forEach { mediaBlobs.remove(it) }
     }
 
     val contacts = mutableStateListOf<Contact>()
@@ -635,6 +693,13 @@ class AppModel private constructor() {
     fun clearAttachments() = ops.execute {
         Native.clearBlobs(sessionPtr)
         mediaBlobs.clear()
+        // Учёт объёма и порядок обращений — часть того же кэша: без сброса они
+        // остались бы считать давно удалённые байты.
+        synchronized(blobOrder) {
+            blobOrder.clear()
+            blobBytes = 0
+        }
+        dev.p2p.messenger.ui.Bitmaps.clear()
         contactAvatars.clear()
         refreshStorage()
     }

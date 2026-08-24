@@ -115,7 +115,7 @@ internal fun MediaViewer(
     val storagePerm = rememberPermissionRunner()
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, items.lastIndex)) { items.size }
     val item = items[pager.currentPage.coerceIn(0, items.lastIndex)]
-    val bytes = model.mediaBlobs[item.blobId]
+    val bytes = model.blob(item.blobId)
     val video = item.mime.startsWith("video/")
 
     var chrome by remember { mutableStateOf(true) }
@@ -146,7 +146,7 @@ internal fun MediaViewer(
                 val it = items[page]
                 MediaPage(
                     it,
-                    model.mediaBlobs[it.blobId],
+                    model.blob(it.blobId),
                     muted,
                     chrome,
                     onChrome = { chrome = !chrome },

@@ -609,7 +609,7 @@ internal fun GroupBubble(
     pos: BlockPos = BlockPos.Solo,
 ) {
     // M2: байты вложения из реактивного кэша (появятся по докачке блоба без рефреша).
-    val blobBytes = if (m.blobId.isNotEmpty()) model.mediaBlobs[m.blobId] else null
+    val blobBytes = model.blob(m.blobId)
     var viewer by remember { mutableStateOf(false) }
     val selecting = model.groupSelection.isNotEmpty()
     val selected = GroupMsgRef(m.id, m.sender) in model.groupSelection

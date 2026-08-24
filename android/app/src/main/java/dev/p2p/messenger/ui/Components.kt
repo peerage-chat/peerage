@@ -349,9 +349,7 @@ internal fun OutlineButton(
 internal fun RowScope.QuoteThumb(model: AppModel, blobId: String, thumbId: String): Boolean {
     // Сначала миниатюра, потом сам блоб: у крупного вложения байт может не быть
     // вовсе, а превью приезжает отдельным мелким блобом сразу.
-    val bytes = thumbId.takeIf { it.isNotEmpty() }?.let { model.mediaBlobs[it] }
-        ?: blobId.takeIf { it.isNotEmpty() }?.let { model.mediaBlobs[it] }
-        ?: return false
+    val bytes = model.blob(thumbId) ?: model.blob(blobId) ?: return false
     val bmp = rememberBitmap(bytes, thumbId.ifEmpty { blobId }, 34.dp) ?: return false
     Image(
         bmp,
