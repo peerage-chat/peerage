@@ -34,3 +34,4 @@ Thumbs.db
 # Secrets — никогда не коммитим приватные ключи
 *.seed
 identity.key
+/scripts/local.env

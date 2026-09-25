@@ -10,11 +10,15 @@
 #   bash scripts/live-two-node.sh [размер_файла_байт]
 set -u
 cd "$(dirname "$0")/.."
+# Машинные настройки (напр. CARGO_TARGET_DIR на другом диске) — в scripts/local.env,
+# он в .gitignore. Без него сборка идёт в ./target, как обычно.
+[ -f scripts/local.env ] && . scripts/local.env
+T="${CARGO_TARGET_DIR:-target}"
 export LD_LIBRARY_PATH="$PWD/ygg/libygg"
 
 SIZE="${1:-30000}"        # по умолчанию 2 полных чанка + хвост
-WORK="$PWD/target/live-nodes"   # внутри target → не мусорим в репо и переживает /tmp
-NODE=./target/debug/examples/mesh_node
+WORK="$T/live-nodes"   # внутри target → не мусорим в репо и переживает /tmp
+NODE="$T/debug/examples/mesh_node"
 
 if [ ! -x "$NODE" ]; then
     echo "Собираю mesh_node…"

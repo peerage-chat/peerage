@@ -7,6 +7,10 @@ export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$PATH"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+# Машинные настройки (напр. CARGO_TARGET_DIR на другом диске) — в scripts/local.env,
+# он в .gitignore. Без него сборка идёт в ./target, как обычно.
+[ -f scripts/local.env ] && . scripts/local.env
+T="${CARGO_TARGET_DIR:-target}"
 
 NDK="${ANDROID_NDK_HOME:-$HOME/android-ndk-r28c}"
 export ANDROID_NDK_HOME="$NDK"
@@ -16,7 +20,7 @@ export CMAKE_GENERATOR="Ninja"
 
 ABI="${1:-arm64-v8a}"
 echo "== Rebuild libp2p_android.so ($ABI) =="
-find target -type d -name build -path '*audiopus_sys*' -exec rm -rf {} + 2>/dev/null || true
+find "$T" -type d -name build -path '*audiopus_sys*' -exec rm -rf {} + 2>/dev/null || true
 cargo ndk -t "$ABI" -o /tmp/p2p-jnilibs build -p p2p-android --release
 
 dst="android/app/src/main/jniLibs/$ABI"

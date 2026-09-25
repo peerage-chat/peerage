@@ -17,6 +17,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+# Машинные настройки (напр. CARGO_TARGET_DIR на другом диске) — в scripts/local.env,
+# он в .gitignore. Без него сборка идёт в ./target, как обычно.
+[ -f scripts/local.env ] && . scripts/local.env
+T="${CARGO_TARGET_DIR:-target}"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 export LD_LIBRARY_PATH="$ROOT/ygg/libygg:${LD_LIBRARY_PATH:-}"

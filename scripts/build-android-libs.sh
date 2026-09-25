@@ -12,6 +12,10 @@ export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$PATH"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+# Машинные настройки (напр. CARGO_TARGET_DIR на другом диске) — в scripts/local.env,
+# он в .gitignore. Без него сборка идёт в ./target, как обычно.
+[ -f scripts/local.env ] && . scripts/local.env
+T="${CARGO_TARGET_DIR:-target}"
 
 # NDK: из окружения, иначе — распакованный setup-android-ndk.sh в $HOME.
 NDK="${ANDROID_NDK_HOME:-$HOME/android-ndk-r28c}"
@@ -39,7 +43,7 @@ export ANDROID_NDK_ROOT="$NDK"
 export ANDROID_NDK="$NDK"
 export CMAKE_GENERATOR="Ninja"
 # Чистим возможный stale CMakeCache от предыдущей сборки (смена генератора/ABI).
-find target/aarch64-linux-android -type d -name build -path '*audiopus_sys*' -exec rm -rf {} + 2>/dev/null || true
+find "$T/$target" -type d -name build -path '*audiopus_sys*' -exec rm -rf {} + 2>/dev/null || true
 cargo ndk -t "$ABI" -o /tmp/p2p-jnilibs build -p p2p-android --release
 
 echo "== 3/3 стейджинг в jniLibs =="
