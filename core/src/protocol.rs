@@ -350,6 +350,9 @@ fn bucket_for(payload: &Payload) -> usize {
     match payload {
         // Прикладные: текст и медиа обязаны быть в ОДНОМ бакете (DoD M5).
         Payload::Text { .. }
+        // Правка несёт новый текст целиком. В control-бакете она округлялась до
+        // кратного 256 Б и выдавала длину текста — и заодно сам факт правки.
+        | Payload::Edit { .. }
         | Payload::Media { .. }
         | Payload::Group { .. }
         | Payload::GroupInvite { .. }
@@ -565,6 +568,9 @@ mod tests {
                 duration_ms: 0, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
             }),
             enc(&Payload::Group { id: 5, data: vec![1u8; 200] }),
+            // Правка своего сообщения: короткая и длинная неотличимы от текста.
+            enc(&Payload::Edit { id: 6, target: 1, text: "ок".into() }),
+            enc(&Payload::Edit { id: 7, target: 1, text: "b".repeat(900) }),
             // Смена адреса (ADR-007) едет здесь же: подпись 64 Б не влезает в
             // control-бакет, зато среди прикладных объявление неотличимо от
             // обычного сообщения — флудер не видит по проводу, что жертва прямо
@@ -575,7 +581,7 @@ mod tests {
         ];
         assert!(
             sizes.iter().all(|s| *s == sizes[0]),
-            "текст/картинка/голосовое/файл/группа/смена-адреса должны быть одного размера, получено {sizes:?}"
+            "текст/правка/картинка/голосовое/файл/группа/смена-адреса должны быть одного размера, получено {sizes:?}"
         );
 
         // Control-класс: начало звонка неотличимо от ack/ping/маячка присутствия.
