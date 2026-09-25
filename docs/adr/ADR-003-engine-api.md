@@ -1,98 +1,108 @@
-# ADR-003: Контракт API движка (фасад Command/Event) и граница движок↔клиент
+# ADR-003: The engine API (a Command/Event facade) and the engine ↔ client boundary
 
-**Статус:** Proposed (предложено, не финализировано)
-**Дата:** 2026-06-27
-**Решает:** владелец проекта
+**Status:** Proposed 2026-06-27; implemented in part (see "State as of 2026-09" at the end).
+**Date:** 2026-06-27
+**Decided by:** project owner
 
-> Что такое ADR — короткая запись одного архитектурного решения: проблема,
-> варианты, выбор и чем за него платим. Чтобы потом не гадать «почему так».
+## Context (the problem)
 
-## Контекст (в чём проблема)
+The principle "logic in Rust crates, UI and JNI are thin adapters" was written down in
+[SUBSYSTEMS.md](../SUBSYSTEMS.md), but **in practice the boundary drifted**. Symptoms:
 
-Принцип «логика — в Rust-крейтах, UI/JNI — тонкие адаптеры» зафиксирован в
-[SUBSYSTEMS.md](../SUBSYSTEMS.md), но **на практике граница поплыла**. Признаки:
+1. **The engine ↔ client interface was ad-hoc JSON over JNI**
+   ([P1](../archive/architecture-review-2026-06-16.md)). There was no typed, versioned
+   contract: every new field = a change to a JSON event in Rust + parsing in Kotlin + UI.
+   Example (2026-06-27): adding the sender to a group message touched 5 files in 3 crates +
+   Kotlin.
+2. **Domain logic leaked into the client.** The offline queue TTL was hard-coded in
+   `Model.kt`; "N members · M online" was computed in Kotlin (`groupMembers ∩ online`); the
+   network statistics (ping, traffic, peer list) were not provided by the engine, so the
+   client drew "—".
+3. **Two call/media engines** (desktop `call` vs Android `androidjni/room_call`). For 1.0 the
+   release client is **Android only**, so full unification is postponed; the release media
+   engine is one (Android).
+4. **No versioning** of the wire (P2) → it could not evolve without breaking.
 
-1. **Интерфейс движок↔клиент — ad-hoc JSON-через-JNI** (это [P1](../archive/architecture-review-2026-06-16.md)).
-   Нет типизированного версионированного контракта: каждое новое поле = правка
-   JSON-события в Rust + парсинг в Kotlin + UI. Пример (2026-06-27): добавление
-   отправителя в групповое сообщение тронуло 5 файлов в 3 крейтах + Kotlin.
-2. **Домейн-логика протекла в клиент.** TTL офлайн-очереди захардкожен в `Model.kt`;
-   «N уч · M в сети» считается в Kotlin (пересечение `groupMembers ∩ online`);
-   группировка по дням/формат времени — в Compose; стат Сети (пинг/трафик/список
-   пиров) движок не отдаёт → клиент рисует «—».
-3. **Два движка звонков/медиа** (десктоп `call` vs Android `androidjni/room_call`) —
-   ADR-001 «раздвоен». Для 1.0 решено: релизный клиент — **Android-only**, поэтому
-   ADR-001 (полное сведение) откладывается; релизный медиа-движок — один (Android).
-4. **Нет версионирования** провода (P2) → нельзя эволюционировать, не ломая.
+Consequence: features went "every which way" — each one reached into internals, and there
+was no single place for them.
 
-Следствие: фичи «вразнобой» — каждая лезет в внутренности, нет одного места.
+## Decision
 
-## Решение
+Introduce **one engine facade with a typed contract** and make it the ONLY surface between
+the engine and any client.
 
-Завести **единый фасад движка с типизированным контрактом** и сделать его
-ЕДИНСТВЕННОЙ поверхностью между движком и любым клиентом.
+### The boundary (one line per rule)
+- **The engine owns all domain logic and state** (identity, contacts, chats, groups, rooms,
+  presence, offline queue, blobs, network statistics, settings).
+- **The client is an adapter:** it renders state and sends intents. It **does not compute**
+  domain logic (no TTLs, no presence intersections, no protocol parsing in Kotlin).
+- **The contract is an API, not scattered JSON strings.** One channel of commands in, one
+  stream of events out, plus a state snapshot query.
 
-### Граница (правило, в одну строку каждое)
-- **Движок владеет всей домейн-логикой и состоянием** (идентичность, контакты,
-  чаты, группы, комнаты, презенс, офлайн-очередь, блобы, стат сети, настройки).
-- **Клиент — адаптер:** рендерит состояние и шлёт намерения. Домейн-логику **не
-  считает** (никаких TTL, пересечений презенса, парсинга протокола в Kotlin).
-- **Контракт — это API, а не JSON-строки врозь.** Один канал команд внутрь, один
-  поток событий наружу, плюс запрос снапшота состояния.
-
-### Форма API
-- `enum Command` — намерения клиента (`SendDm`, `JoinRoom`, `SetRelay`, `RequestBlob`,
-  `OpenChat`, `SetSetting`…). Исчерпывающий, версионированный.
-- `enum Event` — уведомления/изменения состояния наружу (`Message`, `Presence`,
+### Shape of the API
+- `enum Command` — client intents (`SendDm`, `JoinRoom`, `SetRelay`, `RequestBlob`,
+  `OpenChat`, `SetSetting`…). Exhaustive and versioned.
+- `enum Event` — notifications and state changes going out (`Message`, `Presence`,
   `RoomMembers`, `NetStats`, `BlobReady`, `DeliveryStatus`…).
-- **Снапшот/запросы** — текущее состояние списком (контакты, история, участники
-  группы с презенсом, метрики сети) — чтобы клиент не пересобирал его сам.
-- **`protocol_version`** в контракте; эволюция аддитивная (новые варианты/поля не
-  ломают старых клиентов).
+- **Snapshots / queries** — current state as lists (contacts, history, group members with
+  presence, network metrics), so the client does not rebuild it.
+- **`protocol_version`** in the contract; evolution is additive (new variants and fields do
+  not break old clients).
 
-### Где живёт
-Выделить платформо-независимый крейт **`engine`**, в который переезжает оркестрация,
-сейчас размазанная по `androidjni/lib.rs` + `groups.rs` (+ протёкшее из `Model.kt`).
-`androidjni` становится **тонким JNI-кодеком** над `engine` (сериализация Command/Event).
-Десктоп позже может сесть на тот же `engine` (для 1.0 не требуется).
+### Where it lives
+A platform-independent crate **`engine`**, into which the orchestration moves (it was spread
+over `androidjni/lib.rs` + `groups.rs`, plus what leaked into `Model.kt`). `androidjni`
+becomes a **thin JNI codec** over `engine`. The desktop can later sit on the same `engine`
+(not required for 1.0).
 
-### Что репатриировать в движок (из клиента)
-- **Стат сети** — пиры/пинг/трафик/**список адресов пиров** (требует выставить
-  наружу из `transport`; закрывает заглушки экрана «Сеть» честно).
-- **Офлайн-очередь**: TTL и политика → настройка движка; счётчик очереди — из движка.
-- **Презенс групп**: «N уч · M в сети» считает движок, отдаёт готовым.
-- **Модель сообщения**: id/контент-адресация, порядок, дедуп — движок (S7). Формат
-  времени/чипы дат — остаётся презентацией клиента (это UI, не домейн).
-- **Настройки** (энергия/медиа/хранилище/TTL) — единое хранилище в движке (F3).
+### What to bring back into the engine (from the client)
+- **Network statistics** — peers, ping, traffic, the list of peer addresses.
+- **Offline queue:** TTL and policy → an engine setting; the queue counter comes from the engine.
+- **Group presence:** the engine computes "N members · M online" and hands it over ready.
+- **Message model:** ids, ordering, dedup — the engine (S7). Time formatting and date chips
+  stay in the client (that is UI, not domain).
+- **Settings** (energy, media, storage, TTL) — one store in the engine (F3).
 
-## Варианты (что отвергли и почему)
-- **Оставить JSON-per-JNI-вызов как есть** — дёшево сейчас, но именно это и даёт
-  «вразнобой» и блокирует версионирование (P1/P2). Отвергнуто.
-- **Формализовать API прямо в `androidjni`** (без отдельного крейта) — меньше
-  переноса, но привязывает контракт к Android и мешает десктопу/тестам без JNI.
-  Компромисс: можно начать здесь и вынести в `engine`, когда форма устаканится.
-- **Сразу бинарный IPC (flatbuffers/protobuf через JNI)** — лучшая
-  производительность, но преждевременно; начинаем с типизированного Rust-API,
-  кодек через JNI пока может оставаться JSON (узкое место — не он).
+## Options (what we rejected and why)
+- **Keep JSON per JNI call as it was** — cheap now, but exactly what produces the chaos and
+  blocks versioning (P1/P2). Rejected.
+- **Formalise the API inside `androidjni`** (no separate crate) — less moving, but ties the
+  contract to Android and gets in the way of the desktop and of tests without JNI.
+  Compromise: start there and move to `engine` once the shape settles.
+- **Binary IPC right away (flatbuffers/protobuf over JNI)** — best performance, but
+  premature; start with a typed Rust API, and the JNI codec can stay JSON for now (it is not
+  the bottleneck).
 
-## Последствия
-**Плюсы:** одно место на фичу; движок тестируется без устройства (юнит-тесты на
-Command→Event); десктоп переиспользует; версионирование разблокирует эволюцию;
-заглушки Сети закрываются честно.
-**Минусы/цена:** разовый рефактор (вынос `engine`, JNI-кодек); немного boilerplate
-на сериализацию Command/Event; нужно дисциплинированно НЕ протаскивать логику в Kotlin.
+## Consequences
+**Pros:** one place per feature; the engine is tested without a device; the desktop can reuse
+it; versioning unblocks evolution; the network screen stubs get honest data.
+**Cons / cost:** a one-off refactor (extracting `engine`, a JNI codec); some boilerplate for
+serialisation; discipline NOT to push logic into Kotlin.
 
-### Миграция (приложение остаётся рабочим)
-Инкрементально, по подсистемам, не «переписать разом»:
-1. Объявить `Command`/`Event`/`Snapshot` (типы) — сначала отражают текущее поведение.
-2. Вынести оркестрацию из `androidjni` в `engine`; JNI → тонкий кодек.
-3. Репатриировать по одной подсистеме (начать со **стата Сети** и **офлайн-TTL** —
-   они явно протекли и дают быстрый видимый результат), удаляя логику из `Model.kt`.
-4. Каждый шаг — собрать `.so` (WSL) + проверить на эмуляторе, держа фичи живыми.
+### Migration (the app keeps working)
+Incrementally, subsystem by subsystem, not "rewrite everything at once":
+1. Declare `Command`/`Event`/`Snapshot` (types) — first mirroring the current behaviour.
+2. Move orchestration from `androidjni` into `engine`; JNI → a thin codec.
+3. Bring back one subsystem at a time (start with **network statistics** and **offline TTL** —
+   they clearly leaked and give a quick visible result), deleting logic from `Model.kt`.
+4. Every step — build the `.so` + check on the emulator, keeping features alive.
 
-## Открытые вопросы (решить по ходу)
-- Отдельный крейт `engine` сразу vs временно в `androidjni` (склоняюсь к выносу, но
-  можно отложить до устаканивания формы Command/Event).
-- Кодировка FFI: JSON (сейчас) → типизированный бинарный позже, при необходимости.
-- Глубина репатриации до 1.0: что обязательно (стат/TTL/презенс/настройки), что
-  можно после (полная модель сообщения S7).
+## Open questions
+- A separate `engine` crate right away vs temporarily in `androidjni`.
+- FFI encoding: JSON (now) → a typed binary format later, if needed.
+- How deep to go before 1.0: what is mandatory (statistics, TTL, presence, settings) and what
+  can wait (the full message model S7).
+
+## State as of 2026-09
+
+- **Done:** the `p2p-engine` crate holds all device-independent domain logic (`Engine`,
+  the event pump, `GroupManager`, `BlobManager`, `RoomCallEngine`, aggregates); `androidjni`
+  is a thin codec with a panic guard on every entry point. Network statistics, group
+  presence, the offline queue and its policy (now per trust tier), settings and the message
+  model live in the engine. The engine is tested without a device (engine-level integration
+  tests over an in-process transport double).
+- **Done differently:** the event and snapshot shapes are Rust types in `engine/src/dto.rs`,
+  pinned by tests; Kotlin writes only through `WireJson`. Commands are methods of `Engine`,
+  not variants of an `enum Command` — the typed enum was never introduced, and there is no
+  `protocol_version` field in the client contract yet.
+- **Not done:** the desktop client still bypasses the engine.

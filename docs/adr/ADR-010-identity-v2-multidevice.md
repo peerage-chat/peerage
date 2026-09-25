@@ -1,86 +1,85 @@
-# ADR-010: Идентичность 2.0 — несколько устройств на одну личность
+# ADR-010: Identity 2.0 — several devices per identity
 
-**Статус:** Accepted (решение зафиксировано 2026-08-03) — **реализация после 1.0**.
-В 1.0 меняется только то, что позволяет не ломать формат дважды: разделение
-«личность ↔ адрес» уже сделано ([ADR-007](ADR-007-identity-transport-key-split.md)),
-ссылка на сообщение уже не зависит от «моё/чужое» ([ADR-006](ADR-006-chat-extensibility.md),
+**Status:** Accepted (decision recorded 2026-08-03) — **implementation after 1.0**. In 1.0
+only what keeps us from breaking the format twice changes: the identity ↔ address split is
+already done ([ADR-007](ADR-007-identity-transport-key-split.md)), and a message reference
+no longer depends on "mine / theirs" ([ADR-006](ADR-006-chat-extensibility.md),
 [ADR-009](ADR-009-one-message-store.md)).
-**Дата:** 2026-08-03
-**Решает:** владелец проекта
-**Связано с:** [ADR-004](ADR-004-mls-membership-revocation.md) (членство и отзыв в MLS),
-[ADR-009](ADR-009-one-message-store.md) (одна таблица сообщений),
-[ADR-011](ADR-011-post-quantum.md) (постквантовый переход — тот же формат идентичности),
+**Date:** 2026-08-03
+**Decided by:** project owner
+**Related:** [ADR-004](ADR-004-mls-membership-revocation.md) (MLS membership and
+revocation), [ADR-009](ADR-009-one-message-store.md) (one message table),
+[ADR-011](ADR-011-post-quantum.md) (post-quantum transition — the same identity format),
 [v1.0-scope.md](../v1.0-scope.md).
 
-## Контекст (в чём проблема)
+## Context (the problem)
 
-Сегодня личность = одна пара ключей = одно устройство. Переписка живёт только на
-телефоне, копия данных возвращает историю, но не членство в группах, а второй
-телефон завести нельзя вообще. Для мессенджера, которым пользуются каждый день, это
-самое болезненное ограничение — и оно не про удобство: потерянный телефон означает
-потерянный доступ, даже если 24 слова записаны.
+Today an identity = one key pair = one device. Conversations live only on the phone; a
+data backup brings back the history but not group membership, and a second phone cannot be
+set up at all. For a messenger used every day this is the most painful limitation — and it
+is not about convenience: a lost phone means lost access, even if the 24 words are written
+down.
 
-Соблазн решить это «в лоб» — скопировать ключ на второе устройство. **Так делать
-нельзя.** В MLS участник — это leaf с собственным ratchet-состоянием. Два устройства
-под одним leaf расходятся по эпохам, ломают forward secrecy и подвешивают группу для
-ВСЕХ участников, а не только для владельца двух телефонов. Это не «плохо работает» —
-это разрушение групповой криптографии.
+The temptation is to solve it head-on — copy the key to the second device. **That must not
+be done.** In MLS a member is a leaf with its own ratchet state. Two devices under one leaf
+diverge across epochs, break forward secrecy and hang the group for ALL members, not only
+for the owner of two phones. It is not "works badly" — it destroys the group cryptography.
 
-## Решение (модель B: устройства — самостоятельные ключи под общей личностью)
+## Decision (model B: devices are independent keys under a shared identity)
 
-**Три уровня вместо одного:**
+**Three levels instead of one:**
 
-1. **Корневой ключ личности** — те же 24 слова. Хранится офлайн, в повседневной
-   работе НЕ участвует: он только подписывает список устройств.
-2. **Ключ устройства** — свой на каждом телефоне/десктопе. Именно он участвует в MLS
-   (свой leaf), подписывает сообщения и живёт в сети.
-3. **Адрес** — по-прежнему выводится из транспортного ключа (ADR-007), у каждого
-   устройства свой.
+1. **The root identity key** — the same 24 words. Kept offline and NOT used in day-to-day
+   operation: it only signs the list of devices.
+2. **A device key** — one per phone or desktop. This is what takes part in MLS (its own
+   leaf), signs messages and lives on the network.
+3. **The address** — still derived from the transport key (ADR-007); each device has its own.
 
-**Список устройств** — подписанный корневым ключом документ: `{версия, [ключи
-устройств + имена + время добавления], подпись}`. Распространяется тем же путём, что
-профиль сегодня: контакту при коннекте, участникам группы — внутри MLS. Собеседник
-принимает список, только если подпись сходится с корневым ключом, который он уже
-знает по отпечатку. Версия монотонна: старый список не может заменить новый.
+**The device list** is a document signed by the root key: `{version, [device keys + names +
+time added], signature}`. It spreads the same way the profile does today: to a contact on
+connect, to group members inside MLS. A contact accepts the list only if the signature
+verifies against the root key they already know by its fingerprint. The version is
+monotonic: an old list cannot replace a newer one.
 
-**Следствия для групп.** Каждое устройство — отдельный участник MLS. «Добавить в
-группу человека» означает добавить все его устройства; появление нового устройства =
-Add, отзыв = Remove со сменой эпохи (механика ADR-004 уже есть). Личный чат
-становится маленькой группой — это снимает и текущую асимметрию «DM ≠ группа».
+**Consequences for groups.** Each device is a separate MLS member. "Adding a person to a
+group" means adding all of their devices; a new device = Add, a revocation = Remove with an
+epoch change (the ADR-004 machinery already exists). A 1:1 chat becomes a small group —
+which also removes today's asymmetry "DM ≠ group".
 
-**Синхронизация истории — отдельно от членства.** Сообщения у нас иммутабельны и
-адресуются парой «автор + id» (ADR-006), лежат в одной таблице (ADR-009), правки и
-удаления — записи-надгробия. Значит слияние двух устройств не требует арбитра: это
-объединение множеств с разрешением конфликтов по (время, автор, id). Первый обмен
-между своими устройствами — по QR при спаривании, дальше — при встрече в сети.
+**History sync is separate from membership.** Our messages are immutable and addressed by
+the pair "author + id" (ADR-006), they live in one table (ADR-009), and edits and deletions
+are tombstone records. So merging two devices needs no arbiter: it is a set union with
+conflicts resolved by (time, author, id). The first exchange between one's own devices
+happens over QR when pairing, and afterwards whenever they meet on the network.
 
-**Отзыв устройства** (потеряно, украдено): новая версия списка без него + Remove из
-всех групп + ротация. Пока отзыв не разошёлся, устройство остаётся полноправным —
-честная граница, её надо назвать в UI прямо.
+**Revoking a device** (lost, stolen): a new version of the list without it + Remove from all
+groups + rotation. Until the revocation has spread, the device keeps full rights — an honest
+limit, and the UI has to say so plainly.
 
-## Чем платим
+## What we pay
 
-- Число участников MLS-группы умножается на число устройств: 10 человек по 3 устройства
-  — это 30 leaf'ов, а не 10. Для наших размеров групп приемлемо, для «каналов на
-  миллион» — нет (их у нас и не будет).
-- Корневой ключ становится по-настоящему критичным: он подписывает состав устройств.
-  Онбординг обязан объяснять это не хуже, чем сегодняшнее «24 слова = ваша личность».
-- Синхронизация возможна только когда оба устройства в сети: сервера, который подержит
-  историю, у нас нет. Второе устройство после долгого перерыва догоняет не мгновенно.
-- Отпечаток для верификации становится отпечатком КОРНЯ, а не ключа в сети. Экран
-  верификации придётся переписать (и объяснить разницу человеку).
+- The number of MLS members multiplies by the number of devices: 10 people with 3 devices
+  each is 30 leaves, not 10. Acceptable for our group sizes; not for "channels with a million
+  members" (we will not have those).
+- The root key becomes truly critical: it signs the set of devices. Onboarding has to
+  explain this at least as well as today's "24 words = your identity".
+- Sync is possible only when both devices are online: we have no server to hold the history.
+  A second device that was away for a long time does not catch up instantly.
+- The fingerprint for verification becomes the fingerprint of the ROOT, not of the key on the
+  network. The verification screen has to be rewritten (and the difference explained to
+  people).
 
-## Что это открывает, кроме мультидевайса
+## What it enables besides multiple devices
 
-- **Постквантовые подписи** ([ADR-011](ADR-011-post-quantum.md)): корневой ключ можно
-  сделать гибридным (Ed25519 + ML-DSA), не трогая адресацию, потому что адрес выводится
-  из ключа устройства, а не из корня.
-- **Восстановление после потери телефона**: новое устройство добавляется корнем и
-  догоняет историю у остальных — без облака.
-- **Десктоп** как полноправное устройство, а не «второй аккаунт».
+- **Post-quantum signatures** ([ADR-011](ADR-011-post-quantum.md)): the root key can become
+  hybrid (Ed25519 + ML-DSA) without touching addressing, because the address is derived from
+  the device key, not from the root.
+- **Recovery after losing a phone**: a new device is added by the root and catches up on
+  history from the others — without a cloud.
+- **The desktop** as a full device, not "a second account".
 
-## Почему сейчас, если делаем после 1.0
+## Why decide now if we build it after 1.0
 
-Формат идентичности ломается один раз или два. Мультидевайс и PQ-подписи тянут за
-собой одно и то же — разрыв связи «ключ личности = адрес». Решение зафиксировано
-сейчас, чтобы 1.0 не заложил формат, который придётся ломать дважды.
+The identity format breaks once or twice. Multiple devices and PQ signatures both pull the
+same thread — breaking the link "identity key = address". The decision is recorded now so
+that 1.0 does not lay down a format we would have to break twice.

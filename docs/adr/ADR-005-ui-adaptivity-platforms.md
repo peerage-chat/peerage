@@ -1,129 +1,123 @@
-# ADR-005: Адаптивность UI и целевые платформы
+# ADR-005: UI adaptivity and target platforms
 
-**Статус:** Accepted — принято 2026-07-04 (v1.0 реализует только Compact; швы — сейчас,
-раскладки Medium/Expanded и десктоп — аддитивно после гранта)
-**Дата:** 2026-07-04
-**Решает:** владелец проекта
-**Связано с:** [app-ui.md](../design/app-ui.md) (раздел «Адаптив» — источник истины по
-раскладкам), [call-ui.md](../design/call-ui.md) (сетка звонка),
-[ADR-003](ADR-003-engine-api.md) — граница движок↔клиент (Command/Event — фундамент,
-на котором это решение вообще возможно).
+**Status:** Accepted — 2026-07-04 (v1.0 implements only Compact; the seams now, the
+Medium/Expanded layouts and the desktop — additively later)
+**Date:** 2026-07-04
+**Decided by:** project owner
+**Related:** [app-ui.md](../design/app-ui.md) (section "Adaptivity" — the source of truth for
+layouts, Russian), [call-ui.md](../design/call-ui.md) (the call grid),
+[ADR-003](ADR-003-engine-api.md) — the engine ↔ client boundary (the foundation that makes
+this decision possible at all).
 
-> Что такое ADR — короткая запись одного архитектурного решения: проблема,
-> варианты, выбор и чем за него платим.
+## Context (the problem)
 
-## Контекст (в чём проблема)
+The question came from discussing the participant grid in a video call and grew into a
+general one: **how do we build the UI now so that we do not rewrite everything when
+tablets, foldables, landscape and the desktop arrive?** Two traps are easy to fall into:
 
-Вопрос возник из обсуждения сетки участников в видеозвонке и разросся до общего:
-**как строить UI сейчас, чтобы не переписывать всё, когда добавятся планшет, фолд,
-ландшафт, десктоп?** Две ловушки, в которые легко попасть:
+1. **"A layout per device."** Phone portrait, tablet, desktop as separate screens. There are
+   endlessly many devices (foldables, split screen, a desktop window at 40 % width, phone
+   landscape) — a set of layouts for them does not scale and drifts away from the logic.
+2. **Navigation as a stack of screens.** When "open a chat" = `navController.push`, a "list on
+   the left + chat on the right" mode (tablet) requires rewriting navigation rather than
+   re-laying out the same components.
 
-1. **«Лейаут под каждое устройство».** Телефон-портрет, планшет, десктоп как отдельные
-   экраны. Устройств бесконечно (фолды, split-screen, окно десктопа в 40% ширины,
-   телефон-ландшафт) — набор раскладок под них не масштабируется и расходится с логикой.
-2. **Навигация как стек экранов.** Когда «открыть чат» = `navController.push`, режим
-   «список слева + чат справа» (планшет) требует переписывать навигацию, а не
-   до-раскладывать те же компоненты.
+A constraint and an asset of the environment: **the engine ↔ UI boundary is already
+decoupled** (ADR-003). All business logic is in the Rust engine; the UI is a thin projection
+of a state snapshot ([invariants](../architecture/invariants.md) §5). That is the foundation:
+a new platform or layout rewrites **only the presentation**, not the logic.
 
-Ограничение/актив среды: **граница движок↔UI уже развязана** (Command/Event, ADR-003).
-Вся бизнес-логика в Rust-движке, UI — тонкая проекция снапшота состояния (инвариант #4
-из [invariants.md](../architecture/invariants.md)). Это фундамент: новая платформа/
-раскладка переписывает **только представление**, не логику.
+## Decision
 
-## Решение (предлагаемое направление)
+### Platforms (priority)
 
-### Платформы (приоритет)
-
-| Платформа | Вердикт |
+| Platform | Verdict |
 |---|---|
-| **Android, телефон (Compact)** | v1.0, ядро гранта. Единственная полностью реализуемая до релиза. |
-| **Android планшет/фолд/ландшафт** | Приходит почти бесплатно при соблюдении швов ниже. Реализация — **после** гранта. |
-| **Десктоп (Linux/Win/Mac)** | Крейт `desktop` (Slint) уже есть, тот же движок. Вторично, реалистично (на десктопе транспорт даже проще — нет лимитов фона). |
-| **iOS** | **Не цель v1.0 и, вероятно, никогда в текущем виде.** iOS убивает фоновый persistent mesh-узел (лимиты background execution) + трение App Store с P2P. Если делать — только «лёгкий клиент» к чужому узлу, это другая архитектура. Под iOS **не проектируем сейчас**. |
-| **Web** | Невозможно как настоящий mesh-узел (нет raw-сокетов в браузере). Только компаньон к локальному узлу. Пропускаем. |
+| **Android phone (Compact)** | v1.0. The only one fully implemented before release. |
+| **Android tablet / foldable / landscape** | Comes almost for free if the seams below are kept. Implementation — **after** 1.0. |
+| **Desktop (Linux/Windows/macOS)** | Realistic and valuable (on the desktop the transport is even simpler — no background limits). A `desktop` crate (Slint) exists, but it predates the engine and does not currently build; the path is a desktop client on the same engine. |
+| **iOS** | **Not a goal of v1.0 and probably never in the current form.** iOS kills a persistent background mesh node (background execution limits), plus App Store friction with P2P. If ever — only a "light client" to someone else's node, which is a different architecture. We **do not design for iOS now**. |
+| **Web** | Impossible as a real mesh node (no raw sockets in a browser). At most a companion to a local node. Skipped. |
 
-### Раскладки — по size classes, а не по устройствам
+### Layouts by size class, not by device
 
-Считаем **брейкпоинты ширины окна** (Compose `WindowSizeClass`), не устройства:
+We use **window width breakpoints** (Compose `WindowSizeClass`), not devices:
 
-- **Compact** (<600dp): телефон-портрет. Одна панель, меню-свайп, рейл папок сверху.
-- **Medium** (600–840dp): планшет-портрет, фолд, телефон-ландшафт. Nav-rail слева +
-  одна панель контента. (Добавлен к app-ui.md как дешёвая середина — иначе резкий
-  скачок Compact→Expanded.)
-- **Expanded** (>840dp): планшет-ландшафт, десктоп. Три колонки (rail → список → детали).
+- **Compact** (<600dp): phone portrait. One pane.
+- **Medium** (600–840dp): tablet portrait, foldable, phone landscape. A nav rail on the left
+  + one content pane. (Added to app-ui.md as a cheap middle — otherwise the jump
+  Compact → Expanded is abrupt.)
+- **Expanded** (>840dp): tablet landscape, desktop. Three columns (rail → list → details).
 
-**«Сколько лейаутов заготавливать»:** не N раскладок под устройства, а **1 набор
-size-agnostic контент-композаблов + 3 оболочки**, которые их раскладывают.
+**"How many layouts to prepare":** not N layouts per device, but **one set of size-agnostic
+content composables + three shells** that lay them out.
 
-## Слои реализации (что делать в Compose)
+## Implementation layers (what to do in Compose)
 
-Два жёстких яруса композаблов — это ядро решения:
+Two strict tiers of composables are the core of the decision:
 
-**a) Контент-композаблы** (`ChatMessageList`, `CallGrid`, `ContactRow`, `MessageBubble`).
-Ничего не знают про навигацию, панели и размер экрана. Берут данные + колбэки.
-Переиспользуются дословно во всех size classes (концептуально — те же виджеты и в
-десктопном Slint).
+**a) Content composables** (`ChatMessageList`, `CallGrid`, `ContactRow`, `MessageBubble`). They
+know nothing about navigation, panes or screen size. They take data + callbacks and are reused
+verbatim in all size classes (conceptually — the same widgets on the desktop too).
 
-**b) Scaffold/оболочки** (`NavigationSuiteScaffold` / `ListDetailPaneScaffold`).
-**Единственное место, где читается `WindowSizeClass`.** Решают: сколько панелей, где
-навигация. Внутрь кладут контент-композаблы из (a).
+**b) Scaffolds / shells** (`NavigationSuiteScaffold` / `ListDetailPaneScaffold`). **The only
+place where `WindowSizeClass` is read.** They decide how many panes there are and where the
+navigation goes, and put the content composables from (a) inside.
 
-Два правила, без которых (a)/(b) не работают:
+Two rules without which (a)/(b) do not work:
 
-- **Навигация — данные, не стек экранов.** `selectedChatId` живёт в состоянии. В
-  Compact «выбран чат» = pushed destination; в Expanded тот же `selectedChatId` =
-  правая панель. Одно состояние рендерит оба режима без развилок.
-- **Всё сайзинг через `Tokens.*`** (инвариант #5) — плотность/масштаб/шрифт = один
-  рычаг на все size classes.
+- **Navigation is data, not a stack of screens.** `selectedChatId` lives in state. In Compact
+  "a chat is selected" = a pushed destination; in Expanded the same `selectedChatId` = the
+  right pane. One state renders both modes without branches.
+- **All sizing through `Tokens.*`** (CLAUDE.md invariant #5) — density, scale and font are one
+  lever for all size classes.
 
-**Сетка звонка = алгоритм, не набор раскладок.** `CallGrid` вычисляет rows×cols из
-(число участников + aspect ratio контейнера + доступный размер). Один композабл на всё:
-портрет (стопка/2-в-ряд), ландшафт (шире), планшет (больше тайлов), overlay-мини-окно
-(1 активный говорящий). Никаких `if tablet`. Это и есть ответ на исходный вопрос про
-сетку. (Зафиксировать как инвариант сетки в call-ui.md.)
+**The call grid is an algorithm, not a set of layouts.** `CallGrid` computes rows×cols from
+(the number of participants + the container's aspect ratio + the available size). One
+composable for everything: portrait (a stack / two in a row), landscape (wider), tablet (more
+tiles), a mini overlay window (one active speaker). No `if tablet`. That is the answer to the
+original question about the grid.
 
-## Рассмотренные варианты
+## Options considered
 
-1. **Отдельные экраны под телефон/планшет/десктоп.** Отклонено — не масштабируется на
-   реальный зоопарк размеров, дублирует и рассинхронизирует представление, ломается на
-   split-screen/фолдах.
-2. **Только Compact, адаптив «когда-нибудь потом с нуля».** Отклонено — «потом с нуля»
-   на деле = переписать навигацию и все экраны; ровно та цена, которую ADR избегает.
-3. **Полный трёхпанельный планшет уже сейчас.** Отклонено как переинвестиция — не
-   двигает грантовый deliverable (Android-телефон), забирает время у v1.0.
-4. **Швы сейчас, реализация только Compact (выбрано).** Пишем контент-композаблы
-   size-agnostic, заводим одну адаптивную оболочку с реализованной Compact-веткой,
-   навигацию моделируем как данные. Medium/Expanded/десктоп — аддитивная работа потом.
+1. **Separate screens for phone / tablet / desktop.** Rejected — does not scale to the real
+   zoo of sizes, duplicates and desynchronises the presentation, breaks on split screen and
+   foldables.
+2. **Compact only, adaptivity "some day, from scratch".** Rejected — "from scratch later" in
+   practice = rewriting navigation and every screen; exactly the cost this ADR avoids.
+3. **A full three-pane tablet UI right now.** Rejected as over-investment — it does not move
+   the v1.0 deliverable (an Android phone) and takes time away from it.
+4. **Seams now, only Compact implemented (chosen).** Content composables are written
+   size-agnostic, there is one adaptive shell with the Compact branch implemented, and
+   navigation is modelled as data. Medium/Expanded/desktop are additive work later.
 
-## Размен (главное)
+## The trade-off
 
-- **Платим сейчас** дисциплиной: разделение контент/оболочка, навигация-как-данные,
-  строгий `Tokens.*`. Это чуть больше структуры, чем «просто нарисовать экран».
-- **Получаем потом** планшет/фолд/ландшафт/десктоп как *аддитивную* работу (новая
-  ветка в одной оболочке), а не переписывание. iOS/Web сознательно вне периметра —
-  не тратим проектирование на то, что архитектурно чужеродно.
+- **We pay now** with discipline: content/shell separation, navigation as data, strict
+  `Tokens.*`. A little more structure than "just draw the screen".
+- **We get later** tablet / foldable / landscape / desktop as *additive* work (a new branch
+  in one shell), not a rewrite. iOS and Web are deliberately out of scope — we do not spend
+  design on what is architecturally alien.
 
-## Последствия
+## Consequences
 
-- **v1.0 (грант):** реализуется **только Compact**, полностью. Швы заложены, но
-  Expanded/Medium-ветки оболочки НЕ пишем до релиза.
-- Компонентная граница представления фиксируется: контент-композаблы не импортируют
-  навигацию/`WindowSizeClass`; размер читается только в оболочке.
-- app-ui.md дополняется классом **Medium** (был Compact + Expanded).
-- call-ui.md получает инвариант «сетка = алгоритм от места и количества».
-- Десктопный `desktop` (Slint) остаётся живым как доказательство переносимости
-  движка, без обязательств по паритету экранов в v1.0.
+- **v1.0:** **only Compact** is implemented, fully. The seams are laid, but the
+  Expanded/Medium branches of the shell are NOT written before release.
+- The component boundary of the presentation is fixed: content composables do not import
+  navigation or `WindowSizeClass`; size is read only in the shell.
+- app-ui.md gains the **Medium** class (it had Compact + Expanded).
+- call-ui.md gains the invariant "the grid is an algorithm of space and count".
 
 ## Action items
 
-- [x] app-ui.md: добавить **Medium** в раздел «Адаптив» (nav-rail + одна панель). *(2026-07-04)*
-- [x] call-ui.md: зафиксировать инвариант сетки (`CallGrid` считает rows×cols от
-      участников + aspect ratio + размера; никаких раскладок под устройства). *(2026-07-04)*
-- [x] Compose: шов оболочки — `WidthClass` читается только в `MainActivity`, `Root`
-      диспетчеризует по ширине, тело → `CompactShell`. Medium/Expanded — TODO-ветки. *(2026-07-04)*
-- [ ] Compose: при рефайне экранов держать два яруса (контент / оболочка); размер
-      читать только в оболочке. Проверять на ревью новых экранов.
-- [x] Compose: навигация уже «выбор = данные» (`screen`/`activeFilter` в состоянии,
-      `when(screen)` — без `NavController`-стека). Хоистинг выбора в общий холдер —
-      когда появится ExpandedShell (второй потребитель). *(проверено 2026-07-04)*
-- [ ] После v1.0: реализовать Medium/Expanded-ветки оболочки (аддитивно).
+- [x] app-ui.md: add **Medium** to the "Adaptivity" section (nav rail + one pane). *(2026-07-04)*
+- [x] call-ui.md: record the grid invariant (`CallGrid` computes rows×cols from participants +
+      aspect ratio + size; no per-device layouts). *(2026-07-04)*
+- [x] Compose: the shell seam — `WidthClass` is read only in `MainActivity`, `Root` dispatches
+      by width, the body → `CompactShell`. Medium/Expanded are TODO branches. *(2026-07-04)*
+- [ ] Compose: while refining screens, keep the two tiers (content / shell); read size only in
+      the shell. Check on review of new screens.
+- [x] Compose: navigation is already "selection = data" (`screen`/`activeFilter` in state,
+      `when(screen)` — no `NavController` stack). Hoisting the selection into a shared holder —
+      when an ExpandedShell appears (the second consumer). *(checked 2026-07-04)*
+- [ ] After v1.0: implement the Medium/Expanded branches of the shell (additively).

@@ -1,75 +1,74 @@
-# ADR-009: Одно хранилище сообщений на все чаты
+# ADR-009: One message store for all chats
 
-**Статус:** Accepted — принято 2026-08-03; реализовано (таблица `chat_messages`,
-миграции старой таблицы и групповых JSON-файлов, тесты в `core/src/store.rs`
-и `engine/tests/group_flow.rs`).
-**Дата:** 2026-08-03
-**Решает:** владелец проекта
-**Связано с:** [ADR-006](ADR-006-chat-extensibility.md) (фича-по-ссылке: пара
-«автор + id»), [ADR-003](ADR-003-engine-api.md) (граница движок↔клиент),
-[v1.0-scope.md](../v1.0-scope.md) (веха M5.5 — юзабельность).
+**Status:** Accepted 2026-08-03; implemented (table `chat_messages`, migrations of the old
+table and of the group JSON files, tests in `core/src/store.rs` and
+`engine/tests/group_flow.rs`).
+**Date:** 2026-08-03
+**Decided by:** project owner
+**Related:** [ADR-006](ADR-006-chat-extensibility.md) (features by reference: the pair
+"author + id"), [ADR-003](ADR-003-engine-api.md) (engine ↔ client boundary),
+[v1.0-scope.md](../v1.0-scope.md) (milestone M5.5 — everyday usability).
 
-## Контекст (в чём проблема)
+## Context (the problem)
 
-Личные чаты жили в SQLite, а группы — в `Vec<GMsg>` в памяти, который целиком
-переписывался JSON-файлом на каждое сообщение. Две ветки одной сущности «сообщение»
-разошлись по всей вертикали: протокол, хранилище, API движка, JNI, модель клиента,
-экраны. Цена вскрылась на действиях с сообщением (ответ/отзыв/выделение): каждую
-фичу пришлось писать **дважды**, причём вторую — заново отлаживать.
+1:1 chats lived in SQLite, while groups lived in a `Vec<GMsg>` in memory that was rewritten
+in full to a JSON file on every message. Two branches of one entity, "a message", diverged
+through the whole stack: protocol, storage, engine API, JNI, client model, screens. The cost
+showed up on message actions (reply, retract, selection): every feature had to be written
+**twice**, and the second copy debugged from scratch.
 
-Кроме дублирования, у файлового варианта были прямые дефекты:
+Besides the duplication, the file-based variant had direct defects:
 
-- запись O(n) на каждое сообщение и вся история группы в памяти;
-- нет пагинации: открытие чата поднимало переписку целиком и гнало её одним JSON
-  через JNI;
-- нет поиска по сообщениям — искать в файле нечем;
-- **групповая переписка не попадала в резервную копию вообще** (она знала только про
-  таблицу), то есть «восстановился — групповые чаты пропали»;
-- ключ строки в SQLite был `(чат, id, моё)`, а в группе автор — не «я/не я»: два
-  участника с одинаковым id затирали бы друг друга.
+- O(n) writing on every message, and the whole group history in memory;
+- no pagination: opening a chat loaded the entire conversation and pushed it as one JSON
+  through JNI;
+- no search over messages — nothing to search a file with;
+- **group conversations did not make it into the backup at all** (the backup knew only
+  about the table), i.e. "restored — the group chats are gone";
+- the row key in SQLite was `(chat, id, mine)`, but in a group the author is not "me / not
+  me": two members with the same id would overwrite each other.
 
-## Решение
+## Decision
 
-**Одна таблица `chat_messages` на личные чаты, «Сохранённое» и группы.**
+**One table `chat_messages` for 1:1 chats, Saved messages and groups.**
 
-- `chat` — с кем/где: ключ собеседника (32 Б) или gid группы;
-- `scope` — 0 личный чат (в т.ч. заметки себе), 1 группа. Отдельной колонкой, а не
-  «догадкой по длине»: правило «32 байта значит пир» однажды обернётся группой,
-  притворившейся чатом;
-- `sender` — hex автора. Ссылка на сообщение — пара «автор + id» (ADR-006), теперь
-  она читается одинаково в личном чате и в группе. `mine` остаётся как ярлык для UI,
-  но **перестаёт быть частью ключа**;
-- ключ строки: `(chat, scope, sender, id)`;
-- курсор пагинации — `(time, rowid)`: время не уникально, и по одному времени
-  сообщения одной секунды либо терялись бы, либо приходили дважды.
+- `chat` — with whom / where: the peer's key (32 B) or the group id;
+- `scope` — 0 a 1:1 chat (including notes to self), 1 a group. A separate column, not "a
+  guess by length": the rule "32 bytes means a peer" would one day turn into a group
+  pretending to be a chat;
+- `sender` — hex of the author. A message reference is the pair "author + id" (ADR-006), and
+  now it reads the same in a 1:1 chat and in a group. `mine` stays as a label for the UI, but
+  **is no longer part of the key**;
+- the row key: `(chat, scope, sender, id)`;
+- the pagination cursor is `(time, rowid)`: time is not unique, and with time alone messages
+  of the same second would either be lost or come twice.
 
-Слой групп своей истории больше не держит: `GroupManager` получает то же хранилище,
-что и личные чаты, и пишет туда. Тип строки для клиента — один (`StoredMessage`),
-поэтому `GMsg` исчез.
+The group layer no longer keeps its own history: `GroupManager` gets the same store as 1:1
+chats and writes there. There is one row type for the client (`StoredMessage`), so `GMsg` is
+gone.
 
-## Миграции (данные пользователя)
+## Migrations (user data)
 
-Обе разовые, каждая покрыта тестом:
+Both one-off, each covered by a test:
 
-1. **Старая таблица `messages`** → `chat_messages`: автор восстанавливается из флага
-   `mine` (своё → мы, чужое → собеседник), `reply_mine` превращается в `reply_sender`.
-   После переноса старая таблица удаляется, так что второй запуск ничего не задваивает.
-2. **Файл `groups/<gid>.msgs.json`** → хранилище, файл переименовывается в `.bak`
-   (а не удаляется: если разбор чего-то не понял, данные ещё на диске).
+1. **The old `messages` table** → `chat_messages`: the author is restored from the `mine`
+   flag (mine → us, not mine → the peer), and `reply_mine` becomes `reply_sender`. After the
+   move the old table is dropped, so a second run does not duplicate anything.
+2. **The file `groups/<gid>.msgs.json`** → the store; the file is renamed to `.bak` (not
+   deleted: if parsing misunderstood something, the data is still on disk).
 
-## Чем платим
+## What we pay
 
-- Схема шире: `sender`/`reply_sender` лежат hex-текстом (по 64 байта вместо 32).
-  Сознательно: тот же вид, что в DTO и в протоколе групп, и SQL-миграция старой
-  таблицы выражается одним `INSERT ... SELECT` без прохода по строкам в Rust.
-- `GroupManager` теперь зависит от хранилища сообщений (аргумент конструктора) — в
-  тестах группы приходится открывать базу. Взамен группа перестала быть «особенной».
-- История группы больше не лежит человекочитаемым файлом рядом с MLS-состоянием;
-  диагностика идёт через общую базу.
+- A wider schema: `sender`/`reply_sender` are stored as hex text (64 bytes instead of 32).
+  Deliberately: the same form as in the DTO and the group protocol, and the SQL migration of
+  the old table is a single `INSERT ... SELECT` without walking rows in Rust.
+- `GroupManager` now depends on the message store (a constructor argument) — group tests have
+  to open a database. In exchange a group stopped being "special".
+- The group history is no longer a human-readable file next to the MLS state; diagnostics go
+  through the shared database.
 
-## Что это открывает
+## What it enables
 
-Пересылка, закрепы, поиск (FTS5), групповые чаты в резервной копии и пагинация
-делаются **один раз** — на общем пути, а не по разу в каждой ветке. Именно это и было
-целью вехи M5.5: сделать мессенджер пригодным для ежедневного использования, не
-удваивая работу на каждой фиче.
+Forwarding, pins, search (FTS5), group chats in the backup and pagination are done **once** —
+on the shared path, not once in each branch. That was exactly the goal of milestone M5.5: make
+the messenger fit for daily use without doubling the work on every feature.

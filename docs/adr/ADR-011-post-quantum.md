@@ -1,74 +1,76 @@
-# ADR-011: Постквантовый переход — что, в каком порядке и чего ждём от апстрима
+# ADR-011: The post-quantum transition — what, in which order, and what we wait for upstream
 
-**Статус:** Accepted (решение зафиксировано 2026-08-03). В 1.0 входит гибридный KEM
-для личных сообщений и подъём симметричной стойкости MLS; полная замена подписей —
-вместе с [ADR-010](ADR-010-identity-v2-multidevice.md) (общий формат идентичности).
-**Дата:** 2026-08-03
-**Решает:** владелец проекта
-**Связано с:** [ADR-007](ADR-007-identity-transport-key-split.md) (личность vs адрес),
-[ADR-010](ADR-010-identity-v2-multidevice.md), [threat-model](../architecture/threat-model.md),
-[protocol-spec](../protocol-spec.md) (бакеты паддинга M5).
+**Status:** Accepted (decision recorded 2026-08-03). 1.0 includes a hybrid KEM for personal
+messages and raising the symmetric strength of MLS; replacing signatures comes together with
+[ADR-010](ADR-010-identity-v2-multidevice.md) (a shared identity format).
+**Date:** 2026-08-03
+**Decided by:** project owner
+**Related:** [ADR-007](ADR-007-identity-transport-key-split.md) (identity vs address),
+[ADR-010](ADR-010-identity-v2-multidevice.md), [threat model](../architecture/threat-model.md),
+[protocol-spec](../protocol-spec.md) (M5 padding buckets).
 
-## Контекст: что стоит сейчас
+## Context: what we have now
 
-| Слой | Алгоритмы | Устоит против CRQC? |
+| Layer | Algorithms | Survives a CRQC? |
 |---|---|---|
-| Личность, подписи | Ed25519 | **нет** |
-| Личные сообщения | X25519 + XSalsa20-Poly1305 (`crypto_box`) | **нет** (обмен ключом) |
-| Группы (MLS RFC 9420) | `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` | **нет** (HPKE на X25519) |
-| Транспорт (Yggdrasil 0.5.13) | X25519 | **нет** |
-| Копия данных | XChaCha20-Poly1305 + Argon2id | да |
-| База (SQLCipher) | AES-256 | да |
+| Identity, signatures | Ed25519 | **no** |
+| Personal messages | X25519 + XSalsa20-Poly1305 (`crypto_box`) | **no** (key exchange) |
+| Groups (MLS RFC 9420) | `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` | **no** (HPKE on X25519) |
+| Transport (Yggdrasil 0.5.13) | X25519 | **no** |
+| Data backup | XChaCha20-Poly1305 + Argon2id | yes |
+| Database (SQLCipher) | AES-256 | yes |
 
-Симметричная часть в порядке; уязвима **вся асимметрика**. Практическая угроза не
-«когда-нибудь сломают», а **«собрать сейчас — расшифровать потом»**: перехваченный
-сегодня трафик хранится до появления квантового компьютера. Для мессенджера, который
-обещает приватность на годы вперёд, это главный аргумент делать KEM раньше подписей —
-подпись подделывают в момент атаки, а шифрование ломают задним числом.
+The symmetric part is fine; **all asymmetric crypto** is vulnerable. The practical threat is
+not "it will be broken some day" but **"harvest now, decrypt later"**: traffic intercepted
+today is stored until a quantum computer exists. For a messenger that promises privacy for
+years ahead, this is the main argument for doing the KEM before signatures — a signature is
+forged at the moment of attack, while encryption is broken retroactively.
 
-## Решение (порядок работ)
+## Decision (order of work)
 
-**1. Гибридный KEM для личных сообщений — в 1.0, отдельной сессией.**
-X25519 + ML-KEM-768 по схеме X-Wing: общий секрет = KDF(оба). Гибрид, а не чистый
-ML-KEM: решётки моложе эллиптических кривых, и ошибка в новой схеме не должна
-обнулять то, что уже работает. Апстрим не нужен, конверт версионируется, а
-`Payload::Unknown` даёт совместимость со старыми клиентами.
+**1. A hybrid KEM for personal messages — in 1.0, as a separate piece of work.**
+X25519 + ML-KEM-768 following the X-Wing construction: shared secret = KDF(both). Hybrid, not
+pure ML-KEM: lattices are younger than elliptic curves, and a flaw in the new scheme must not
+wipe out what already works. No upstream is needed, the envelope is versioned, and
+`Payload::Unknown` keeps old clients compatible.
 
-**2. Симметричная стойкость MLS — в 1.0, дёшево.**
-Перейти с `MLS_128_*` на 256-битный набор. К квантам отношение косвенное (Гровер), но
-это правка на день и снимает вопрос «почему у вас 128».
+**2. Symmetric strength of MLS — in 1.0, cheap.**
+Move from `MLS_128_*` to the 256-bit suite. It relates to quantum only indirectly (Grover),
+but it is a one-day change and settles the question "why 128 bits".
 
-**3. Подписи (Ed25519 → ML-DSA) — вместе с ADR-010, после 1.0.**
-Не потому что дорого само по себе, а из-за размеров: подпись ML-DSA-44 — 2420 байт
-против 64. Это ломает и адрес (32 байта), и бакеты паддинга M5 (CONTROL 256 Б), то
-есть готовый анти-трафик-анализ. В модели ADR-010 адрес выводится из ключа
-УСТРОЙСТВА, а корневой ключ подписывает список устройств — туда PQ-подпись ложится
-без ломки адресации. Делать это отдельно от ADR-010 значит ломать формат дважды.
+**3. Signatures (Ed25519 → ML-DSA) — together with ADR-010, after 1.0.**
+Not because it is expensive in itself, but because of sizes: an ML-DSA-44 signature is 2420
+bytes against 64. That breaks both the address (32 bytes) and the M5 padding buckets (CONTROL
+256 B), i.e. the anti-traffic-analysis we already have. In the ADR-010 model the address is
+derived from the DEVICE key, and the root key signs the list of devices — a PQ signature fits
+there without breaking addressing. Doing it separately from ADR-010 would break the format
+twice.
 
-**Промежуточный шаг, если нужен эффект раньше:** гибридная подпись отдельным полем.
-Ed25519 остаётся адресом и подписывает всё, а ML-DSA едет рядом в APP-бакете для
-операций, где подделка дороже всего: приглашение в группу, ротация ключей, инвайт-токен.
+**An intermediate step, if the effect is needed earlier:** a hybrid signature as a separate
+field. Ed25519 stays the address and signs everything, and ML-DSA rides alongside in the APP
+bucket for the operations where forgery is most costly: a group invitation, key rotation, an
+invite token.
 
-**4. Группы (MLS) и транспорт — ждём апстрим.**
-PQ-ciphersuites для MLS — черновики IETF, `openmls` их пока не даёт; Yggdrasil свой
-транспорт тоже не менял. Своя реализация MLS-крипты в проекте такого размера — не
-вариант. Смягчает то, что наш E2E лежит ПОВЕРХ транспорта: пробой Yggdrasil раскрывает
-метаданные (кто с кем), но не содержимое.
+**4. Groups (MLS) and the transport — waiting for upstream.**
+PQ ciphersuites for MLS are IETF drafts, and `openmls` does not offer them yet; Yggdrasil has
+not changed its transport either. Our own implementation of MLS crypto in a project this size
+is not an option. What softens this: our E2E sits ON TOP of the transport, so breaking
+Yggdrasil reveals metadata (who talks to whom), not content.
 
-## Чем платим
+## What we pay
 
-- Размер: ML-KEM-768 добавляет ~1.1 КБ к установлению ключа. В бакет APP (4 КБ) влезает,
-  но это надо проверить тестом на неразличимость размеров — иначе PQ-обмен станет
-  заметен на проводе именно там, где мы прячем всё остальное.
-- Скорость: гибрид считает оба обмена. На телефоне незаметно, в тестах — заметно.
-- Зависимость от свежих крейтов (ML-KEM): аудита у них меньше, чем у dalek. Поэтому
-  гибрид — классика остаётся страховкой.
-- Часть картины закрыта не нами (MLS, Yggdrasil). В заявке и в threat-model это надо
-  говорить прямо, а не обещать «полностью постквантовый мессенджер».
+- Size: ML-KEM-768 adds ~1.1 KB to key establishment. It fits into the APP bucket (4 KiB), but
+  this must be checked by a size-indistinguishability test — otherwise the PQ exchange becomes
+  visible on the wire exactly where we hide everything else.
+- Speed: a hybrid computes both exchanges. Unnoticeable on a phone, noticeable in tests.
+- Dependence on young crates (ML-KEM): they have seen less auditing than dalek. Hence the
+  hybrid — the classical part remains the safety net.
+- Part of the picture is not closed by us (MLS, Yggdrasil). The proposal and the threat model
+  must say this plainly, not promise "a fully post-quantum messenger".
 
-## Что зафиксировано этим решением
+## What this decision fixes
 
-- KEM раньше подписей — из-за «собрать сейчас, расшифровать потом».
-- Гибрид, а не чистый PQ, — на всех уровнях, где мы его вводим.
-- Подписи не трогаем, пока не появится формат идентичности из ADR-010.
-- Про то, что MLS и транспорт остаются классическими, говорим честно.
+- The KEM before signatures — because of "harvest now, decrypt later".
+- Hybrid, not pure PQ — at every level where we introduce it.
+- Signatures are not touched until the ADR-010 identity format exists.
+- We say honestly that MLS and the transport stay classical.
