@@ -1665,8 +1665,7 @@ impl Engine {
     // — Свой профиль (M2): имя + аватар (контент-адресный блоб). Хранится в
     // profile_meta.json; рассылается контактам при смене и на коннекте.
     fn store_blob(&self, id: p2p_blob::Hash, content: &[u8]) {
-        let _ = std::fs::create_dir_all(&self.blob_dir);
-        let _ = std::fs::write(self.blob_dir.join(hex::encode(id)), p2p_core::vault::seal(content));
+        write_blob_file(&self.blob_dir, id, content);
     }
 
     fn profile_meta_path(&self) -> PathBuf {
@@ -2393,8 +2392,28 @@ fn read_blob_at(dir: &Path, id_hex: &str) -> Option<Vec<u8>> {
 /// Сохранить блоб на диск по hex-id (принятый или свой отправленный).
 /// Шифрует at-rest (`vault::seal`) — как сообщения/группы.
 fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
-    let _ = std::fs::create_dir_all(&engine.blob_dir);
-    let _ = std::fs::write(engine.blob_dir.join(hex::encode(id)), p2p_core::vault::seal(content));
+    write_blob_file(&engine.blob_dir, id, content);
+}
+
+/// Записать блоб одним буфером — атомарно: во временный файл рядом, затем rename.
+/// Голый `fs::write` сначала создаёт пустой файл и лишь потом пишет, поэтому
+/// читатель (UI опрашивает `blob_read`/`blob_exists`) ловил пустое или обрезанное
+/// вложение, а падение посреди записи оставляло огрызок, который считается
+/// «скачанным» и больше никогда не перекачивается. Крупные блобы так же собираются
+/// в `.part` и переименовываются (`p2p_blob::disk`).
+fn write_blob_file(dir: &Path, id: p2p_blob::Hash, content: &[u8]) {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let _ = std::fs::create_dir_all(dir);
+    let name = hex::encode(id);
+    // Уникальное имя: один и тот же блоб могут писать два потока (свой и принятый).
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!("{name}.{n}.tmp"));
+    if std::fs::write(&tmp, p2p_core::vault::seal(content)).is_ok() {
+        if std::fs::rename(&tmp, dir.join(&name)).is_ok() {
+            return;
+        }
+    }
+    let _ = std::fs::remove_file(&tmp);
 }
 
 /// Сохранить миниатюру группового вложения и раздать её всем участникам, вернув
