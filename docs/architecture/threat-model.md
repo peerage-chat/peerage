@@ -1,275 +1,277 @@
-# Модель угроз
+# Threat model
 
-Статус: черновик v1 (2026-07-02). Область: v1.0 (Android-клиент + Rust-ядро +
-Yggdrasil/Ironwood-транспорт). Сопутствующий детальный разбор находок —
-[security-audit-2026-07-02.md](security-audit-2026-07-02.md).
+Status: draft v1 (2026-07-02, revised through 2026-09). Scope: v1.0 (Android client +
+Rust core + Yggdrasil/Ironwood transport). The detailed findings are in
+[security-audit-2026-07-02.md](security-audit-2026-07-02.md) (Russian); a summary with
+statuses is in [SECURITY.md](../SECURITY.md).
 
-Документ описывает, **что** мы защищаем, **от кого**, какие гарантии даём —
-и, что не менее важно, **чего явно НЕ обещаем**. Честная граница гарантий —
-требование к serverless-мессенджеру и к заявке NGI Zero.
+This document says **what** we protect, **from whom**, which guarantees we give — and,
+just as important, **what we explicitly do not promise**. An honest boundary of
+guarantees is a requirement for a serverless messenger.
 
-## 1. Активы (что защищаем)
+## 1. Assets
 
-| Актив | Где живёт | Худший исход при компрометации |
+| Asset | Where it lives | Worst outcome if compromised |
 |---|---|---|
-| Seed идентичности (ed25519, 32 байта) | `profile.json`, запечатан vault | Полное олицетворение узла; расшифровка всех прошлых и будущих DM (см. ниже) |
-| Ключ vault (at-rest) | Android Keystore / OS keyring | Расшифровка всей БД и файлов групп на устройстве |
-| История DM-сообщений | SQLCipher `messages.db` | Утечка переписки |
-| Состояние MLS-групп (секреты эпох) | `groups/*.group`, запечатано vault | Расшифровка групповой переписки соответствующих эпох |
-| Контент звонков (аудио/видео) | только в полёте (не хранится) | Прослушка звонка |
-| Социальный граф / присутствие | в полёте (маячки, keepalive) | Раскрытие «кто с кем и когда» |
+| Identity seed (ed25519, 32 bytes) | `profile.json`, sealed by the vault | Full impersonation of the node; decryption of all past and future DMs (see below) |
+| Vault key (at rest) | Android Keystore and/or the user's password (Argon2id) | Decryption of the whole database and group files on the device |
+| Message history (DMs, groups, Saved) | SQLCipher `messenger.db` | The conversations leak |
+| MLS group state (epoch secrets) | `groups/*.group`, sealed by the vault | Decryption of group messages of those epochs |
+| Call content (audio/video) | in flight only (never stored) | Eavesdropping on the call |
+| Social graph / presence | in flight (beacons, keepalive) | Disclosure of "who talks to whom, and when" |
 
-## 2. Противники (от кого)
+## 2. Adversaries
 
-- **A1 — пассивный наблюдатель на пути меша.** Промежуточный Yggdrasil-узел или
-  сетевой наблюдатель. Видит зашифрованный транспортом трафик, но знает
-  метаданные маршрутизации (публичные ключи источника/назначения).
-- **A2 — активный сетевой атакующий.** Может ронять, задерживать, переигрывать,
-  инъектировать датаграммы. НЕ может подделать транспортный src-ключ Ironwood
-  (см. корневое допущение).
-- **A3 — злонамеренный/скомпрометированный участник группы.** Легитимно состоит
-  (или состоял) в группе, имеет её секреты эпохи.
-- **A4 — локальный атакующий на устройстве.** Доступ к файловой системе
-  приложения (украденный/рутованный телефон, бэкап), но НЕ к Android Keystore /
-  OS keyring.
-- **A5 — оператор стороннего сервиса** (`ntfy.sh` как delivery/push-релей).
-  Видит то, что проходит через релей.
+- **A1 — passive observer on the mesh path.** An intermediate Yggdrasil node or a network
+  observer. Sees transport-encrypted traffic, but knows routing metadata (the public keys
+  of source and destination).
+- **A2 — active network attacker.** Can drop, delay, replay and inject datagrams. Can NOT
+  forge the Ironwood transport source key (see the root assumption).
+- **A3 — malicious or compromised group member.** Is (or was) legitimately in the group
+  and holds its epoch secrets.
+- **A4 — local attacker on the device.** Has access to the app's file system (a stolen or
+  rooted phone, a backup), but NOT to the Android Keystore / OS keyring.
+- **A5 — operator of a third-party service** (ntfy.sh as a push/delivery relay, if
+  enabled; not wired in today). Sees what passes through the relay.
 
-## 3. Границы доверия и корневое допущение
+## 3. Trust boundaries and the root assumption
 
-Вся аутентичность источника держится на **одном корневом допущении**:
+All source authenticity rests on **one root assumption**:
 
-> **Ironwood/Yggdrasil-транспорт гарантирует, что `src`-ключ принятой датаграммы —
-> это настоящий публичный ключ отправителя, и что содержимое зашифровано между
-> двумя конечными узлами (link-to-link e2e транспорта).**
+> **The Ironwood/Yggdrasil transport guarantees that the `src` key of a received
+> datagram is the sender's real public key, and that the content is encrypted between
+> the two end nodes.**
 
-На этом стоит:
-- анти-спуфинг надёжного канала (`from == src`, `messenger/src/lib.rs`);
-- **вся** конфиденциальность и аутентичность медиа-канала (`CHAN_MEDIA` не имеет
-  прикладного шифрования — см. находку M3).
+Resting on it:
+- anti-spoofing on the reliable channel (`from == src`, `messenger/src/lib.rs`);
+- **all** confidentiality and authenticity of the media channel (`CHAN_MEDIA` has no
+  application-layer encryption — finding SEC-4).
 
-Если это допущение нарушится (регресс в Ironwood, подмена транспорта на не-e2e),
-медиа-звонки теряют конфиденциальность молча. Это — инвариант, а не деталь:
-любая замена транспорта обязана сохранить свойство или добавить прикладной слой.
+If this assumption breaks (a regression in Ironwood, a switch to a transport without
+end-to-end encryption), calls lose confidentiality silently. That is an invariant, not a
+detail: any replacement of the transport must keep the property or add an application layer.
 
-## 4. Гарантии, которые мы даём
+## 4. Guarantees we give
 
-- **G1.** DM- и групповые *текстовые* сообщения зашифрованы E2E; посредник (A1,
-  A5) не читает содержимое.
-- **G2.** Подделка/повреждение сообщения обнаруживается (AEAD-тег NaCl Box / MLS).
-- **G3.** Отправитель аутентичен: сообщение нельзя приписать чужому ключу (G3
-  опирается на корневое допущение).
-- **G4.** At-rest: без ключа из Keystore/keyring (A4) БД и файлы групп нечитаемы.
-- **G5.** Групповое членство при *добавлении* привязано к аутентифицированной
-  идентичности пира (KeyPackage не подменить, `group/src/lib.rs::add`).
-- **G6 (M5, анти-трафик-анализ).** Наблюдатель на пути (A1) не различает **по размеру
-  датаграммы** классы сообщений: текст, картинка, файл, голосовое и групповое
-  сообщение имеют одинаковый размер (бакет 4 КБ); начало звонка (`RoomInvite`)
-  неотличимо от `ack`/`ping`/маячка присутствия (бакет 256 Б); короткий последний
-  чанк блоба добит до полного, поэтому точный размер файла не утекает остатком.
-  Реализация — `core/src/pad.rs` + `bucket_for` в `core/src/protocol.rs`; тест
-  `text_media_and_call_are_indistinguishable_by_size`. **Границы G6 — см. N7.**
+- **G1.** DM and group *text* messages are end-to-end encrypted; an intermediary (A1, A5)
+  cannot read the content.
+- **G2.** Forgery or corruption of a message is detected (AEAD tag of NaCl Box / MLS).
+- **G3.** The sender is authentic: a message cannot be attributed to someone else's key
+  (G3 relies on the root assumption).
+- **G4.** At rest: without the key from the Keystore/keyring (A4), the database and group
+  files are unreadable.
+- **G5.** Group membership on *add* is bound to the peer's authenticated identity (a
+  KeyPackage cannot be substituted, `group/src/lib.rs::add`).
+- **G6 (M5, anti-traffic-analysis).** An on-path observer (A1) cannot tell message classes
+  apart **by datagram size**: text, image, file, voice and group messages have the same
+  size (4 KiB bucket); a call start (`RoomInvite`) is indistinguishable from an
+  ack/ping/presence beacon (256 B bucket); the short last chunk of a blob is padded to a
+  full one, so the exact file size does not leak through the remainder. Implementation:
+  `core/src/pad.rs` + `bucket_for` in `core/src/protocol.rs`; test
+  `text_media_and_call_are_indistinguishable_by_size`. **Limits of G6 — see N7.**
 
-## 5. Чего мы НЕ обещаем (явные не-цели v1.0)
+## 5. What we do NOT promise (explicit non-goals of v1.0)
 
-Эти пункты — сознательные ограничения текущей версии, не баги. Пользователь
-должен понимать их до того, как доверит системе чувствительную переписку.
+These are deliberate limitations of the current version, not bugs. Users should
+understand them before trusting the system with sensitive conversations.
 
-- **N1. Forward secrecy для 1:1 DM держится только на транспортном ратчете.**
-  Прикладной слой DM — статический NaCl Box (сам по себе FS не даёт). FS/PCS
-  обеспечивает ратчет ironwood `iwe` на уровне транспорта (см. SECURITY.md H2).
-  Это работает против наблюдателя на пути (A1), но: (а) вся FS DM = свойство одной
-  внешней зависимости, без запаса в приложении; (б) при апгрейде ironwood свойство
-  надо пере-верифицировать — тихий регресс обнулит FS. (Находка SEC-3.)
-- **~~N2. Нет отзыва участника и нет восстановления после компрометации в группах.~~**
-  **УСТРАНЕНО** (SEC-1, [ADR-004](../adr/ADR-004-mls-membership-revocation.md),
-  реализовано 2026-07-02, проверено на устройствах 2026-07-03): админ-секвенсор
-  делает Remove (отзыв), self-Update (PCS, катящаяся ротация раз в сутки) и
-  resync-лечение отставшего (Remove+Add). Покрыто `engine/tests/group_flow.rs`
-  (kick/leave, в т.ч. под потерями пакетов).
-- **N11. Квантовый противник не входит в модель v1.0.** Вся асимметрика классическая
-  (Ed25519, X25519 — в наших пакетах, в MLS и в транспорте Yggdrasil). Симметричная
-  часть (XChaCha20-Poly1305, AES-256 в базе) держится. Практическая угроза — не
-  «сломают завтра», а **«собрать сейчас, расшифровать потом»**: перехваченный сегодня
-  трафик хранится до появления криптографически значимого квантового компьютера.
-  Порядок работ и что зависит от апстрима (`openmls`, Yggdrasil) — в
-  [ADR-011](../adr/ADR-011-post-quantum.md); в 1.0 закрывается гибридным KEM для
-  личных сообщений, подписи — вместе с новой идентичностью
+- **N1. Forward secrecy for 1:1 DMs relies only on the transport ratchet.** The DM
+  application layer is a static NaCl Box, which gives no FS by itself. FS/PCS comes from
+  the ironwood `iwe` ratchet at the transport layer. That works against an on-path
+  observer (A1), but: (a) all DM forward secrecy is a property of one external dependency,
+  with no margin in the application; (b) on every ironwood upgrade the property must be
+  re-verified — a silent regression would erase FS. (Finding SEC-3.)
+- **~~N2. No member revocation and no post-compromise recovery in groups.~~**
+  **RESOLVED** (SEC-1, [ADR-004](../adr/ADR-004-mls-membership-revocation.md), implemented
+  2026-07-02, tested on devices 2026-07-03): the admin sequencer performs Remove
+  (revocation), self-Update (PCS, a rolling rotation once a day) and resync of a lagging
+  member (Remove + Add). Covered by `engine/tests/group_flow.rs` (kick/leave, including
+  under packet loss).
+- **N3. Metadata is not hidden.** Presence beacons and keepalives (every ~15 s) reveal the
+  social graph and activity patterns to A1. Yggdrasil routes by public keys: source and
+  destination are visible on the path. There is no anonymisation (onion/mixnet).
+- **N4. A relay's operator sees relay metadata.** If `ntfy.sh` is used (A5), its operator
+  sees the topic name, size and time of messages (not the content).
+- **N5. No protection from a malicious member inside a group.** A3 reads all group content
+  within their epochs — a property of any group, not a defect.
+- **N6. Group call media is bound to the roster, but fails open.** SEC-2 is implemented
+  (`Engine::sync_room_members`): only peers from the current MLS roster are admitted to a
+  GROUP call, and a removed member drops out immediately on Remove. Residual limitation:
+  if the roster is not cached yet, the gate lets everyone in (fail-open, so as not to
+  break a legitimate call), and DM rooms are not filtered at all (there is no roster).
+- **N7. Padding (G6) hides SIZE, but not timing, volume or channel.** What A1 still sees
+  despite the buckets:
+  * **timing and rate** — a conversation is recognisable by its packet rhythm; constant
+    cover traffic is deliberately NOT done in 1.0 (mobile battery);
+  * **the channel byte** — the first byte of a datagram openly distinguishes `CHAN_CHAT`
+    from `CHAN_MEDIA`, so **the fact of a call is visible** regardless of the padding of
+    `RoomInvite`. A conscious trade-off: demultiplexing and the ingress budget
+    (anti-abuse, M1/M3) must work BEFORE decryption, otherwise a flood makes the victim
+    spend crypto on every packet. Removing the byte would give up cheap flood protection
+    for protection that timing analysis bypasses anyway (a call is ~50 packets/s);
+  * **volume** — the number and total size of packets reveal "sent a large file"; padding
+    hides only the remainder of the last chunk, not the number of chunks;
+  * **the bucket as a class** — the bucket itself (256 B vs 4 KiB vs 25 KiB) separates
+    control / application / blob body. Full uniformity at one size was rejected: padding
+    a presence beacon (every 2 s) to 4 KiB is ×40 traffic and battery.
+- **N8. Incoming traffic cannot be cut at the application layer.** The ingress budget
+  (`p2p_core::budget::Tier`) drops packets of a blocked or flooding peer BEFORE
+  decryption, so no CPU, battery or storage is spent. But **the bytes have already reached
+  the radio** — the mobile data is already paid for. This is a property of any open
+  addressable network: whoever knows the address can send (like mail reaching a server
+  despite the spam filter), and in a serverless model there is no upstream to filter
+  before us. There is also nothing to cut the link with: libygg has `ygg_add_peer` but no
+  `remove_peer`, and even that would help only if the flooder were our DIRECT peer, not a
+  node behind mesh routing.
+
+  Two scenarios lead here: **a malicious contact** (a modified client sending a stream
+  non-stop) and **an address leaked by carelessness** (a contact disclosed the address to
+  a third party — the flooder is not even in the contact list).
+
+  **Address rotation stops a flood — but ONLY with an offline pause** (2026-08-01, tested
+  on the line `flood_rotation.rs` and on the real public mesh `flood_pubmesh.rs`, analysis
+  in [ADR-007](../adr/ADR-007-identity-transport-key-split.md)). Two modes:
+  * **Rotation "on the fly" (reconnecting within seconds) does NOT help.** Routing
+    information about the old key is still in the tree, the new node inherits its
+    position and keeps receiving the stream: on the real mesh it receives **88–89 %** of
+    the injected traffic (control "flood off" = 0 KB background). Different public peers
+    do not help — the flood follows the destination key.
+  * **Rotation + going offline for ~30 s or longer STOPS the stream.** The old key drops
+    out of the routing tree and the flooder physically stops sending: its output falls
+    from full volume to ~0 (`write()` goes nowhere). This is a property of the protocol:
+    **Yggdrasil cannot route to a key that is not in the network**, and the attacker's
+    modified client cannot get around it. It works even against an already established
+    session of a malicious contact.
+
+  Conditions: an offline pause + the new key is not given to the source of the flood
+  (per-contact ACL). The cost is a minute offline and re-sending the address to contacts;
+  under a persistent attack, round after round. Application-level delivery of the
+  foreign stream is already cut by `Tier::Blocked` before decryption; rotation is needed
+  precisely to stop the traffic itself.
+
+  **What remains of rotation:** a leaked address stops being a way to REACH us, and with
+  separate identity and transport keys this does not cost contacts. Today rotation costs
+  the identity: one ed25519 seed is at once the address, the fingerprint, the MLS
+  credential and the contact record, so changing the address resets all verifications and
+  breaks membership in all groups. Hence the plan:
+  [ADR-007](../adr/ADR-007-identity-transport-key-split.md) separates the **long-term
+  identity (IK)** from the **transport key (TK = address)**. Then rotation is a 200-byte
+  announcement signed by the IK: fingerprint, verifications and groups survive, and **the
+  user chooses the list of recipients** — Bob leaked it, we rotate and do not tell Bob.
+  This contains the damage of a leaked address — but, again, it is about access, not
+  about traffic.
+
+  A separate **address per contact** (N addresses = N keys) was considered and rejected in
+  its original form: there are plenty of addresses, but N addresses = N Yggdrasil nodes on
+  one device (×N keepalives and wake-ups), and the bytes still reach the same radio —
+  analysis in ADR-007.
+
+  Residual limitations of rotation: a contact absent for longer than the grace period
+  loses the connection; a flooding contact left in the recipient list receives the new
+  address along with everyone else.
+
+  **Against traffic with the device's own means (no upstream) there are two moves:** go
+  offline (drop the peerings — stop paying right away, but connectivity is gone too) and
+  change the address with an offline pause (stop the stream for good, without losing
+  contacts). The app must show the flood honestly and offer both. **A personal relay** (a
+  cooperative node in front of the device) would cut the stream without going offline —
+  but that is exactly the upstream the project exists to avoid, so **1.0 has no relay**
+  (owner's decision, 2026-08-01); it is recorded in ADR-007 as post-1.0. 1.0 does not need
+  it: rotation + an offline pause is a working way out.
+
+  Everything else lowers the cost of a flood, not its volume: drop by source key inside
+  libygg (before FFI), no per-packet allocations, the ingress budget before decryption,
+  a guard on mobile data.
+
+  **A side finding of the experiment (not a guarantee!).** A continuous sender delivers
+  NOT ONE application packet to a silent receiver: tested for 200 s at 5 packets/s, zero
+  delivered (`transport/examples/silent_victim.rs`). The cause is in ironwood: a sender
+  without a session sends not the payload but `sessionInit` (~200 B; measured 250 B per
+  attempt instead of 500 B of payload); the receiver absorbs the first init without an ack
+  (`init.seq <= info.seq` right after the session is created), and the sender's buffer
+  timer is reset by every write, so the init keeps the same timestamp forever. It is
+  broken either by a reply from the receiving application or by the sender pausing for
+  more than a minute. Result: the contact gate is propped up by the transport, but **this
+  does not affect the traffic volume** (the bytes arrive), and it is an **implementation
+  detail** — there is a TODO in `session.go` about exactly this spot. Re-check on every
+  ironwood update; nothing may be built on it.
+
+- **N9. A client does not prove that it does transit work.** The code is open (GPL-3.0)
+  and runs on someone else's device, so any self-report from a client ("I relay
+  traffic") is a claim, not proof: relaying can be cut out to save battery while the flag
+  stays on. In 1.0 this is harmless **only because there are no privileges for transit**:
+  `budget::Tier` tiers are assigned by trust (contact/verified), queue priority and TTL
+  too, and there is nothing to lie about yet. As soon as there is a single privilege for
+  transit, the flag becomes a free reward for the cheater at the expense of the honest.
+  The decision is made in advance — [ADR-008](../adr/ADR-008-proof-of-transit.md):
+  privileges are granted only against receipts signed by the recipient (someone else's
+  signature cannot be forged, so a receipt cannot be obtained without delivering the
+  packet). Implementation is post-1.0; 1.0 only reserves a field in the presence beacon,
+  because later it would not fit into the CONTROL bucket of 256 B (N7) without losing
+  size indistinguishability.
+
+- **N10. A data backup is an asset that lives OFF the device.** A `.p2pbak` file by its
+  nature goes to the cloud, to an SD card, to someone else's computer, and is protected
+  only by a password (Argon2id + XChaCha20-Poly1305; the Keystore key is not available
+  there and would not help — the backup has to open on another device). Honestly, that
+  means:
+  * **whoever finds the file gets nothing without the password** — and we give no hints
+    either: no date, no contents in the plaintext header (only magic, version, KDF
+    profile, salt);
+  * **a weak password = a weak backup.** Guessing happens offline, without our limits;
+    the only protection is the cost of an attempt (~1 s on a phone);
+  * **the file contains neither the identity key nor MLS group state** — a leaked backup
+    means "they read the conversations", not "they became you" or "they keep reading your
+    groups";
+  * **the reverse direction is dangerous too:** a file can be PLANTED ("here is your
+    backup, here is the password"). So restoring does not carry over the verification
+    flag: "verified" means "the fingerprint was compared in person", and such a claim is
+    not restored from a file (owner's decision, 2026-08-01). Everything else is merged
+    rather than overwritten: local records newer than the archive win.
+  * **the KDF parameters are recorded in every file** (profile number). Otherwise raising
+    the cost in a future version would make old backups unreadable with a "wrong
+    password" message — and a person would delete their data thinking they mistyped.
+- **N11. A quantum adversary is outside the v1.0 model.** All asymmetric crypto is
+  classical (Ed25519, X25519 — in our packets, in MLS and in the Yggdrasil transport). The
+  symmetric part (XChaCha20-Poly1305, AES-256 in the database) holds. The practical threat
+  is not "broken tomorrow" but **"harvest now, decrypt later"**: traffic intercepted today
+  is kept until a cryptographically relevant quantum computer exists. Order of work and
+  what depends on upstream (`openmls`, Yggdrasil) — [ADR-011](../adr/ADR-011-post-quantum.md);
+  1.0 closes it with a hybrid KEM for personal messages, signatures come with identity 2.0
   ([ADR-010](../adr/ADR-010-identity-v2-multidevice.md)).
-- **N12. Одна личность — одно устройство.** Скопировать ключ на второй телефон нельзя
-  (два устройства под одним MLS-leaf ломают группу для всех участников), а копия
-  данных возвращает историю, но не членство. Решение зафиксировано в
-  [ADR-010](../adr/ADR-010-identity-v2-multidevice.md) и реализуется после 1.0.
-- **N3. Метаданные не скрываются.** Маячки присутствия и keepalive (каждые ~15с)
-  раскрывают A1 социальный граф и паттерны активности. Yggdrasil маршрутизирует
-  по публичным ключам — источник и назначение видны на пути. Анонимизации
-  (onion/mixnet) нет. (Метаданные — вне модели угроз, см. SECURITY.md.)
-- **N7. Паддинг (G6) скрывает РАЗМЕР, но не тайминг, не объём и не канал.** Что
-  остаётся видно A1 даже с бакетами:
-  * **тайминг и частота** — переписка узнаётся по ритму пакетов; cover-traffic
-    (постоянный фон) в 1.0 сознательно НЕ делаем (батарея мобильного);
-  * **байт канала** — первый байт датаграммы открыто различает `CHAN_CHAT` и
-    `CHAN_MEDIA`, поэтому **факт звонка виден** независимо от паддинга `RoomInvite`.
-    Это осознанный размен: демукс и ingress-бюджет (анти-abuse, M1/M3) обязаны
-    работать ДО расшифровки, иначе флуд заставляет жертву тратить крипто на каждый
-    пакет. Убрать байт = отдать дешёвую защиту от флуда ради защиты, которую всё
-    равно обходит тайминг-анализ (звонок = ~50 пакетов/с);
-  * **объём** — число и суммарный размер пакетов выдают «переслали большой файл»;
-    паддинг прячет лишь остаток последнего чанка, не количество чанков;
-  * **бакет как класс** — сам по себе бакет (256 Б vs 4 КБ vs 25 КБ) разделяет
-    control / прикладное / тело блоба. Полная униформа одного размера отвергнута:
-    добивать маячок присутствия (каждые 2 с) до 4 КБ — это ×40 трафика и батареи.
-- **N4. Метаданные релея видны его оператору.** При использовании `ntfy.sh` (A5)
-  оператор видит имя топика, размер и время сообщений (не содержимое).
-- **N5. Нет защиты от вредоносного участника внутри группы.** A3 в пределах своих
-  эпох читает всё групповое содержимое — это свойство любой группы, не дефект.
-- **N6. Доступ к медиа звонка групповой комнаты привязан к ростеру, но fail-open.**
-  SEC-2 реализован (`Engine::sync_room_members`): в состав ГРУППОВОГО звонка
-  допускаются только пиры из текущего MLS-ростера, отозванный выбывает из звонка
-  сразу при Remove. Остаточное ограничение: если ростер ещё не в кэше, гейт
-  пропускает всех (fail-open — чтобы не рвать легитимный звонок), а DM-комнаты не
-  фильтруются вовсе (там ростера нет).
+- **N12. One identity — one device.** A key cannot be copied to a second phone (two devices
+  under one MLS leaf break the group for all members), and a data backup brings back the
+  history but not the membership. The solution is recorded in
+  [ADR-010](../adr/ADR-010-identity-v2-multidevice.md) and will be implemented after 1.0.
 
-- **N8. Входящий трафик нельзя срезать на прикладном уровне.** Приёмный бюджет
-  (`p2p_core::budget::Tier`) дропает пакеты заблокированного/флудящего пира ДО
-  расшифровки, поэтому не тратятся CPU, батарея и хранилище. Но **байты уже долетели
-  до радио** — мобильный трафик за них списан. Это свойство любой открытой
-  адресуемой сети: кто знает адрес, тот может слать (как письмо долетает до сервера
-  вопреки спам-фильтру), а в serverless-модели нет апстрима, который отфильтровал бы
-  до нас. Разорвать линк тоже нечем: в libygg есть `ygg_add_peer`, но нет
-  `remove_peer`; и даже он помог бы, только если флудер — наш ПРЯМОЙ пир, а не узел
-  за маршрутизацией меша.
+## 6. Hardening priorities (security roadmap)
 
-  Два сценария приводят сюда: **злонамеренный контакт** (модифицированный клиент
-  шлёт поток без остановки) и **утечка адреса по неосторожности** (контакт раскрыл
-  адрес третьему лицу — флудер даже не в списке контактов).
+In order of return on risk (details in the [audit document](security-audit-2026-07-02.md)):
 
-  **Ротация адреса сбрасывает флуд — но ТОЛЬКО с паузой офлайн** (2026-08-01, проверено
-  на линии `flood_rotation.rs` и на реальном публичном меше `flood_pubmesh.rs`, разбор
-  в [ADR-007](../adr/ADR-007-identity-transport-key-split.md)). Два режима:
-  * **Ротация «на ходу» (перезаход за секунды) НЕ спасает.** Маршрутная информация о
-    старом ключе ещё в дереве, новый узел наследует её позицию и продолжает получать
-    поток: на настоящем меше принимает **88–89 %** влитого (контроль «флуд выкл» = 0 КБ
-    фона). Разные публичные пиры не помогают — флуд идёт за ключом назначения.
-  * **Ротация + уход офлайн на ~30 с и дольше — СБРАСЫВАЕТ поток.** Старый ключ
-    выпадает из дерева маршрутизации, и флудер физически перестаёт слать: его вывод в
-    сеть падает с полного объёма до ~0 (`write()` уходит в никуда). Это свойство
-    протокола: **в Yggdrasil нельзя маршрутизировать к отсутствующему в сети ключу**, и
-    модифицированный клиент атакующего это не обходит. Работает даже против уже
-    установленной сессии злонамеренного контакта.
-
-  Условия работоспособности: пауза офлайн + новый ключ не сообщён источнику флуда
-  (per-contact ACL). Цена — минутный офлайн и пере-рассылка адреса контактам; при
-  устойчивой атаке раунд за раундом. Прикладная доставка чужого потока и так режется
-  `Tier::Blocked` до расшифровки; ротация нужна именно чтобы оборвать сам трафик.
-
-  **Что остаётся от ротации:** утёкший адрес перестаёт быть способом ДОСТУЧАТЬСЯ до
-  нас, и при разделении личности/транспортного ключа это не стоит контактов. Сегодня
-  ротация стоит личности: один ed25519-seed — это одновременно адрес, fingerprint, MLS-credential и
-  запись контакта, поэтому смена адреса сбрасывает все верификации и рвёт членство во
-  всех группах. Отсюда план:
-  [ADR-007](../adr/ADR-007-identity-transport-key-split.md) разводит **долговременную
-  личность (IK)** и **транспортный ключ (TK = адрес)**. Тогда ротация — это рассылка
-  200-байтного объявления, подписанного IK: fingerprint, верификации и группы целы, а
-  **список получателей выбирает пользователь** — слил Боб, ротируем и не сообщаем
-  Бобу. Так локализуется ущерб от утёкшего адреса — но, повторим, это про доступ, а не
-  про трафик.
-
-  Отдельный **адрес на каждый контакт** (N адресов = N ключей) рассмотрен и отклонён
-  в исходном виде: адресов действительно много, но N адресов = N узлов Yggdrasil на
-  одном устройстве (×N keepalive и пробуждений), а байты всё равно доходят до того же
-  радио — разбор в ADR-007.
-
-  Остаточные ограничения ротации: контакт, отсутствовавший дольше грейс-периода,
-  теряет связь; флудер-контакт, оставленный в списке получателей, получит новый адрес
-  вместе со всеми.
-
-  **Против трафика силами устройства (без апстрима) есть два хода:** уйти в офлайн
-  (порвать пиринги — перестать платить сейчас же, но и связь пропадает) и сменить
-  адрес с паузой офлайн (оборвать поток насовсем, не теряя контактов). Приложение
-  обязано честно показывать флуд и давать оба. **Личный релей** (кооперативный узел
-  впереди устройства) отсёк бы поток вообще без офлайна — но это тот самый апстрим,
-  ради отказа от которого проект существует, поэтому **в 1.0 релея НЕ будет** (решение
-  владельца 2026-08-01); записан в ADR-007 как post-1.0. Для 1.0 он и не требуется:
-  ротация + пауза офлайн дают работающий выход.
-
-  Остальное снижает цену флуда, но не его объём: дроп по ключу источника внутри libygg
-  (до FFI), отсутствие аллокаций на пакет, ingress-бюджет до расшифровки, гард на
-  мобильной сети.
-
-  **Побочная находка эксперимента (не гарантия!).** Молчащему получателю непрерывный
-  отправитель не доставляет НИ ОДНОГО прикладного пакета: проверено 200 с при 5 пкт/с,
-  доставлено ноль (`transport/examples/silent_victim.rs`). Причина — в ironwood:
-  отправитель без сессии шлёт не нагрузку, а `sessionInit` (~200 Б, замерено 250 Б на
-  попытку вместо 500 Б нагрузки); получатель первый init поглощает без ack
-  (`init.seq <= info.seq` сразу после создания сессии), а таймер буфера у отправителя
-  сбрасывается каждой записью, поэтому init навсегда остаётся с тем же timestamp.
-  Размыкается либо ответом приложения получателя, либо паузой отправителя дольше
-  минуты. Итог: гейт контактов подпирается транспортом, но **на объём трафика это не
-  влияет** (байты долетают), и это **деталь реализации** — в `session.go` висит TODO
-  ровно про это место. При обновлении ironwood проверять заново; строить защиту на
-  этом нельзя.
-
-- **N9. Клиент не доказывает, что он выполняет работу транзитного узла.** Код
-  открыт (GPL-3.0) и исполняется на чужом устройстве, поэтому любой самоотчёт клиента
-  («я ретранслирую трафик») — утверждение, а не доказательство: ретрансляцию можно
-  вырезать ради батареи, оставив флаг. В 1.0 это ничем не грозит **только потому, что
-  привилегий за транзит не существует**: тиры `budget::Tier` назначаются по доверию
-  (контакт/верифицирован), приоритет очереди и TTL — тоже, и врать сейчас не о чем.
-  Как только появится хоть одна привилегия за транзит, флаг станет бесплатной
-  наградой честным за счёт читера. Решение принято заранее —
-  [ADR-008](../adr/ADR-008-proof-of-transit.md): привилегии выдаются только под
-  квитанции, подписанные получателем (подделать чужую подпись нельзя, значит нельзя
-  получить квитанцию, не доставив пакет). Реализация post-1.0; в 1.0 внесено лишь
-  резервирование поля в маячке присутствия, потому что позже оно не влезло бы в бакет
-  CONTROL 256 Б (N7) без потери размерной неразличимости.
-
-- **N10. Резервная копия данных — актив, живущий ВНЕ устройства.** Файл `.p2pbak`
-  по смыслу уезжает в облако, на карту, на чужой компьютер, и защищён только паролем
-  (Argon2id + XChaCha20-Poly1305; ключ Keystore там недоступен и не помог бы —
-  открывать копию нужно на другом устройстве). Что это значит честно:
-  * **тот, кто нашёл файл, не получает ничего без пароля** — но и мы не даём подсказок:
-    ни даты, ни состава в открытом заголовке (только magic, версия, профиль KDF, соль);
-  * **слабый пароль = слабая копия.** Перебор идёт офлайн, без наших ограничений;
-    единственная защита — стоимость попытки (~1 с на телефоне);
-  * **в файле нет ключа личности и MLS-состояния групп** — утечка копии это «прочитали
-    переписку», а не «стали вами» и не «читают ваши группы дальше»;
-  * **обратное направление тоже опасно:** файл могут ПОДСУНУТЬ («вот твоя копия, вот
-    пароль»). Поэтому восстановление не переносит признак верификации: «сверено»
-    означает «отпечаток сверили вживую», и из файла такое утверждение не
-    восстанавливается (решение владельца 2026-08-01). Всё остальное восстановление
-    сливает, а не затирает: локальные записи новее архивных.
-  * **параметры KDF записаны в каждом файле** (номер профиля). Иначе повышение
-    стоимости в будущей версии сделало бы старые копии нечитаемыми с сообщением
-    «неверный пароль» — и человек стёр бы данные, решив, что перепутал пароль.
-
-## 6. Приоритеты усиления (дорожная карта безопасности)
-
-В порядке отдачи на риск (детали — в [audit-документе](security-audit-2026-07-02.md)):
-
-1. ✅ **SEC-1** — MLS Remove + периодический self-Update → отзыв и PCS
-   ([ADR-004](../adr/ADR-004-mls-membership-revocation.md)). Сделано 2026-07-02/03.
-2. ✅ **SEC-2** — членство в звонке от MLS-ростера. Сделано (fail-open, см. N6).
-3. **SEC-3** — закрепить/пере-верифицировать ironwood `iwe`; рассмотреть MLS-1:1
-   (FS/PCS в самом приложении, без единоточечной зависимости от транспорта).
-4. **SEC-5** — доменное разделение ключей (отдельный ключ подписи MLS).
-5. **SEC-4** — паритет шифрования медиа (ключ из MLS/Box exporter); метаданные в UI.
-6. **N8, флуд** — по итогам экспериментов 2026-08-01 (ADR-007) порядок такой:
-   (а) дешёвое усиление приёма + честный UX флуда: кнопки «в офлайн» и «сменить адрес»;
-   (б) разделение личности и транспортного ключа — это И компартментализация утёкшего
-   адреса, И работающий обрыв флуда (ротация + пауза офлайн, старый ключ выпадает из
-   дерева). Релей (post-1.0, не в план) отсёк бы поток без офлайна, но апстрим в
-   serverless не тащим.
-7. **N11, постквант** ([ADR-011](../adr/ADR-011-post-quantum.md)): гибридный KEM
-   (X25519 + ML-KEM-768) для личных сообщений и 256-битный набор MLS — в 1.0; подписи
-   (ML-DSA) — вместе с идентичностью 2.0, иначе формат ломается дважды. MLS и
-   транспорт остаются классическими до апстрима, и это говорится прямо.
-8. **N12, мультидевайс** ([ADR-010](../adr/ADR-010-identity-v2-multidevice.md)):
-   корень подписывает список устройств, каждое устройство — свой leaf в MLS. После 1.0.
-9. **N9, стимулы за транзит** (post-1.0, [ADR-008](../adr/ADR-008-proof-of-transit.md)):
-   квитанции proof-of-transit. Делать вместе с первой привилегией за транзит — раньше
-   нечего распределять, позже уже поздно (флаг успеет стать нормой). Место в протоколе
-   зарезервировано в 1.0.
+1. ✅ **SEC-1** — MLS Remove + periodic self-Update → revocation and PCS
+   ([ADR-004](../adr/ADR-004-mls-membership-revocation.md)). Done 2026-07-02/03.
+2. ✅ **SEC-2** — call membership from the MLS roster. Done (fail-open, see N6).
+3. **SEC-3** — pin/re-verify ironwood `iwe`; consider MLS for 1:1 (FS/PCS in the
+   application itself, without a single-point dependency on the transport).
+4. **SEC-5** — domain separation of keys (a separate MLS signing key). The derivation
+   primitive and the policy for new keys are done.
+5. **SEC-4** — encryption parity for media (a key from the MLS/Box exporter); metadata in the UI.
+6. **N8, flooding** — after the 2026-08-01 experiments (ADR-007) the order is:
+   (a) cheap hardening of the receive path + an honest flood UX: "go offline" and "change
+   address" buttons; (b) separation of identity and transport keys — both containment of
+   a leaked address AND a working way to stop a flood (rotation + an offline pause, the
+   old key drops out of the tree). A relay (post-1.0, not planned) would cut the stream
+   without going offline, but we do not bring an upstream into a serverless design.
+7. **N11, post-quantum** ([ADR-011](../adr/ADR-011-post-quantum.md)): a hybrid KEM
+   (X25519 + ML-KEM-768) for personal messages and the 256-bit MLS suite — in 1.0;
+   signatures (ML-DSA) together with identity 2.0, otherwise the format breaks twice. MLS
+   and the transport stay classical until upstream moves, and we say so plainly.
+8. **N12, multi-device** ([ADR-010](../adr/ADR-010-identity-v2-multidevice.md)): the root
+   signs the list of devices, each device is its own leaf in MLS. After 1.0.
+9. **N9, transit incentives** (post-1.0, [ADR-008](../adr/ADR-008-proof-of-transit.md)):
+   proof-of-transit receipts. To be done together with the first privilege for transit —
+   earlier there is nothing to distribute, later is too late (the flag would already be
+   the norm). The place in the protocol is reserved in 1.0.
 
 ---
-Ревизия проводится при изменении крипто-слоя, транспорта или модели членства.
+Revised whenever the crypto layer, the transport or the membership model changes.

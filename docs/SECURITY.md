@@ -1,120 +1,108 @@
-# Безопасность
+# Security
 
-Документ фиксирует модель угроз, проведённый аудит ядра и десктоп-клиента и
-статус каждой находки. Аудит выполнен перед началом работы над Android-клиентом.
+This page summarises the security model, the audits done so far and the status of every
+finding. The detailed documents:
 
-> **Дополняющие документы (2026-07):**
-> [architecture/threat-model.md](architecture/threat-model.md) — структурированная
-> модель (активы/противники/границы/гарантии/не-цели) и дорожная карта усиления;
-> [architecture/security-audit-2026-07-02.md](architecture/security-audit-2026-07-02.md)
-> — повторный проход по крипто-свойствам протокола (MLS Remove/Update, членство
-> звонков, расслоение FS). Уточняют часть статусов ниже.
+- [architecture/threat-model.md](architecture/threat-model.md) — assets, adversaries,
+  trust boundaries, what we guarantee (G1–G6) and what we explicitly do not (N1–N12);
+- [architecture/security-audit-2026-07-02.md](architecture/security-audit-2026-07-02.md) —
+  the second, protocol-level pass (MLS membership, call membership, FS layering);
+- [plans/security-hardening.md](plans/security-hardening.md) — the hardening plan.
 
-## Модель угроз
+All audits so far are internal. There has been no external audit.
 
-- **E2E-конфиденциальность.** Содержимое сообщений и медиапотоков доступно только
-  участникам. Транспорт (Yggdrasil/ironwood) не доверенный — он лишь маршрутизирует
-  датаграммы, адресованные по ed25519-ключу.
-- **Forward secrecy + post-compromise security.** Компрометация долговременного
-  ключа не раскрывает прошлые сессии; восстановление безопасности после компрометации.
-- **Защита от MITM при первом контакте.** Пользователь может сверить fingerprint
-  вне канала (8 BIP39-слов) и пометить контакт проверенным.
-- **At-rest.** Доступ к диску (украденный/конфискованный ноутбук) не выдаёт ключ
-  идентичности и историю переписки.
-- **Целостность групп (MLS).** Только участники могут читать групповые сообщения;
-  членство криптографически привязано к идентичности.
+## Security goals
 
-Вне модели: метаданные на уровне маршрутизации Yggdrasil (факт связи между узлами),
-защита от компрометации самой ОС/keyring, физический доступ к разблокированному
-устройству.
+- **End-to-end confidentiality.** Message content and media are readable only by the
+  participants. The transport (Yggdrasil/ironwood) is not trusted; it only routes
+  datagrams addressed by ed25519 key.
+- **Forward secrecy and post-compromise security.** In groups this comes from MLS. For
+  1:1 messages it currently comes only from the transport ratchet — see SEC-3 below.
+- **Protection from a man in the middle at first contact.** Users can compare a visual
+  fingerprint out of band (in person or by QR) and mark the contact verified.
+- **At rest.** A seized or stolen device does not give away the identity key or the
+  history without the key from the Android Keystore and/or the user's password.
+- **Group integrity (MLS).** Only members read group messages; membership is bound
+  to authenticated identities, and removed members lose access to new messages.
 
-## Криптографические основы
+Out of scope: hiding who talks to whom (Yggdrasil routes by public key, and presence
+reveals activity), a compromised operating system, physical access to an unlocked device.
 
-- **Идентичность:** ed25519. Yggdrasil-адрес = `AddrForKey(pub)`. Для NaCl Box —
-  конверсия в Curve25519, x25519-секрет = `SHA512(seed)[:32]`.
-- **1:1 E2E:** NaCl Box (XSalsa20-Poly1305), случайный 24-байтный nonce на сообщение.
-- **Группы:** MLS (RFC 9420, openmls) — TreeKEM, FS/PCS, подпись привязана к ed25519.
-- **Транспорт:** ironwood `iwe` — ratchet-слой (FS, PCS, anti-replay) поверх mesh.
-- **At-rest:** XChaCha20-Poly1305, ключ в keyring ОС (Credential Manager / Keychain /
-  Secret Service) или keyfile (Android — файл `vault.key` в приватном каталоге),
-  отдельно от данных.
+## Cryptographic building blocks
 
-## Находки аудита и статус
+- **Identity:** ed25519. Yggdrasil address = `AddrForKey(pub)`. For NaCl Box the key is
+  converted to Curve25519 (x25519 secret = `SHA512(seed)[:32]`). New sub-keys are derived
+  with domain separation (`Identity::derive_subkey`, BLAKE3).
+- **1:1:** NaCl Box (XSalsa20-Poly1305) with a random 24-byte nonce per message.
+- **Groups:** MLS (RFC 9420, openmls 0.8) — TreeKEM, FS/PCS, signatures bound to ed25519.
+- **Transport:** the ironwood `iwe` session layer (ratchet, FS, anti-replay) over the mesh.
+- **Wire padding:** every payload is padded to one of three size buckets (256 B / 4 KiB /
+  25 KiB), so message classes are indistinguishable by size (threat model G6/N7).
+- **At rest:** XChaCha20-Poly1305 for files, SQLCipher for the database. On Android the
+  key is wrapped by the Keystore, derived from a password with Argon2id, or both. State
+  files are written crash-safely (temp → fsync → rename); key and seed files are 0600.
 
-| ID | Серьёзность | Описание | Статус |
-|----|-------------|----------|--------|
-| H1 | High | Добавление участника в MLS-группу не проверяло, что identity/sig-key в KeyPackage соответствуют ожидаемому пиру (риск подмены участника). | **Исправлено** — `Member::add` сверяет identity и signature key с `expected_identity`, иначе `IdentityMismatch`. |
-| H2 | High | Нужна forward secrecy / post-compromise security на 1:1-канале. | **Закрыто** — обеспечивается ratchet-слоем ironwood `iwe` (проверено по исходникам); отдельный Double Ratchet не требуется. |
-| M1 | Medium | История, профиль и группы хранились на диске открытым текстом. | **Исправлено** — at-rest шифрование (`core/src/vault.rs`), все save/load обёрнуты в `vault::seal/open`. |
-| M2 | Medium | В звонке/групповом звонке принимались медиапакеты от любого источника. | **Исправлено** — `Call`/`GroupCall` фильтруют по разрешённому пиру/списку участников. |
-| M3 | Medium | Отсутствие защиты от повторной доставки на уровне мессенджера. | **Исправлено** — кольцевой dedup-буфер (SEEN_CAP=4096) во `receive_loop`. |
-| L1 | Low | Парсинг group blob мог выйти за границы буфера. | **Исправлено** — проверка `4 + glen > data.len()`. |
-| L2 | Low | Секретные файлы писались без ограничения прав. | **Исправлено** — `write_secret` (атомарная запись, 0600 на unix). |
-| L3 | Low | `unsafe` в FFI-транспорте. | **Принято** — весь `unsafe` сосредоточен в `transport/src/lib.rs`, обёрнут безопасным API, длины клампятся на стороне Go. |
-| L4 | Low | Не было индикации, что fingerprint контакта сверен вне канала. | **Исправлено** — флаг `verified` у контакта, статус и кнопка в UI, галочка в списке. |
-| INFO | Info | Нет автоматического скана зависимостей. | **Добавлено** — `deny.toml` + `scripts/audit-deps.sh` (cargo-deny). |
-| DEP1 | High | hpke-rs 0.2 в MLS: nonce reuse, all-zero X25519 shared secret, ошибка длины KDF, паника (RUSTSEC-2026-0069/0070/0071/0072). | **Исправлено** — `openmls` 0.6→0.8 → `hpke-rs` 0.6.1 (libcrux-бэкенд). |
-| DEP2 | High | openh264-sys2 0.6: heap overflow при декодировании (недоверенное видео от пира, RUSTSEC-2025-0008). | **Исправлено** — `openh264` 0.6→0.9 → `openh264-sys2` 0.9.6. |
-| DEP3 | Info | unmaintained: `audiopus_sys`, `paste`, `proc-macro-error2`. | **Принято** — не уязвимости, безопасного апгрейда нет (глубокие транзитивные), занесены в `ignore` в `deny.toml` с обоснованием. |
+## First audit (core and desktop, before the Android client)
 
-## Новая поверхность (после основного аудита)
+| ID | Severity | Finding | Status |
+|----|----------|---------|--------|
+| H1 | High | Adding a member to an MLS group did not check that the identity and signature key in the KeyPackage belong to the expected peer (member substitution). | **Fixed** — `Member::add` compares both with `expected_identity`, otherwise `IdentityMismatch`. |
+| H2 | High | Forward secrecy / PCS for 1:1. | **Delegated to the transport** (ironwood `iwe` ratchet, checked against its source). The second audit reopened this as SEC-3: FS for 1:1 depends on one external component. |
+| M1 | Medium | History, profile and groups were stored in plaintext. | **Fixed** — at-rest encryption (`core/src/vault.rs`); every save/load goes through `vault::seal/open`. |
+| M2 | Medium | Calls accepted media packets from any source. | **Fixed** — calls filter by the allowed peer / participant list. |
+| M3 | Medium | No replay protection at the messenger layer. | **Fixed** — a dedup ring (4096 entries) in the receive loop. |
+| L1 | Low | Parsing a group blob could read past the buffer. | **Fixed** — bounds check `4 + glen > data.len()`. |
+| L2 | Low | Secret files were written without restricting permissions. | **Fixed** — 0600 on unix. The write was not actually atomic until 2026-09-25; now it is (`core::fsutil`). |
+| L3 | Low | `unsafe` in the FFI transport. | **Accepted** — all `unsafe` is contained in `transport/src/lib.rs` behind a safe API; lengths are clamped on the Go side. |
+| L4 | Low | No indication that a contact's fingerprint was verified. | **Fixed** — a `verified` flag, shown in the UI. |
+| INFO | Info | No automated dependency scan. | **Added** — `deny.toml` + `scripts/audit-deps.sh` (cargo-deny). |
+| DEP1 | High | hpke-rs 0.2 under MLS: nonce reuse, all-zero X25519 shared secret, KDF length bug, panic (RUSTSEC-2026-0069/0070/0071/0072). | **Fixed** — openmls 0.6 → 0.8, hpke-rs 0.6.1 (libcrux backend). |
+| DEP2 | High | openh264-sys2 0.6: heap overflow while decoding untrusted video (RUSTSEC-2025-0008). | **Fixed** — openh264 0.9 (openh264-sys2 0.9.6). Android decodes with the platform MediaCodec. |
+| DEP3 | Info | Unmaintained: `audiopus_sys`, `paste`, `proc-macro-error2`. | **Accepted** — not vulnerabilities; no safe upgrade path (deep transitive); listed in `deny.toml` with a reason. |
 
-После основного аудита добавлены подсистемы, расширяющие атаковую поверхность.
-Полный повторный аудит — в фазе H6. Ниже — предварительный список рисков.
+## Second audit (2026-07-02, protocol level)
 
-### Комнаты-звонки (H1)
+| ID | Severity | Finding | Status |
+|----|----------|---------|--------|
+| SEC-1 | High | No MLS Remove/Update: nobody could be revoked, and PCS never recovered. | **Fixed** ([ADR-004](adr/ADR-004-mls-membership-revocation.md)): Remove, daily self-update, resync of lagging members. Tested on devices. |
+| SEC-2 | Medium | Group call media was not bound to the MLS roster. | **Fixed** — only roster members are admitted. Fails open while the roster is not cached (N6). |
+| SEC-3 | Medium | FS for 1:1 relies only on the transport ratchet; the application layer is a static Box. | **Open.** The hybrid post-quantum exchange for 1:1 ([ADR-011](adr/ADR-011-post-quantum.md)) changes the same layer, so the two are best designed together. |
+| SEC-4 | Medium | Call media confidentiality relies only on the transport. | **Open** — plan: a media key from the MLS/Box exporter secret. |
+| SEC-5 | Medium | One key reused across protocols. | **Mitigated** — domain-separated derivation for all new keys ([invariants §6](architecture/invariants.md)); the identity/transport split is designed in [ADR-007](adr/ADR-007-identity-transport-key-split.md). |
+| SEC-L1…L4 | Low | Bounded replay ring; unauthenticated envelope time; plaintext fallback on the desktop when the vault is unavailable; a wipe footgun on vault mismatch. | Open, low. |
 
-- **Спуфинг room presence.** Любой участник MLS-группы может шлёпать фальшивые
-  маячки (произвольные A/V-флаги, чужой gid). Текущая защита: маячки идут по
-  надёжному каналу (NaCl Box), src сверяется с конвертом. Но содержимое маячка
-  (flags, gid) не подписано отдельно — MITM внутри группы может подменить. При
-  добавлении авторизации входа в комнату (H6) — закрыть.
-- **DoS через частые маячки.** Злоумышленник в группе шлёт маячки чаще интервала →
-  приёмник тратит CPU на парсинг. Mitigation: rate-limit на source per gid (не
-  реализовано, low priority).
-- **Утечка присутствия.** Маячки показывают, кто в комнате и когда. Это by-design
-  (как в Discord), но стоит задокументировать как метаданные вне модели угроз.
+## Surface added after the audits (not yet re-audited)
 
-### Android JNI-мост (G1–G4)
+- **Room presence.** Beacons travel on the reliable, encrypted channel and the source is
+  checked against the envelope, but their content (flags, room id) is not separately
+  signed, and there is no per-source rate limit on beacons. Presence reveals who is in a
+  room and when — by design, and outside the threat model.
+- **JNI bridge.** All input from Kotlin is parsed in Rust; bad hex keys become `None`.
+  Every entry point is wrapped in a panic guard, enforced by a unit test. The engine
+  lives behind a session pointer; there is no global mutable state in the bridge.
+- **Hardware H.264 (MediaCodec).** Vendor decoders may have their own vulnerabilities
+  (especially on some low-cost chipsets). The decoder parses untrusted video from peers;
+  Android's media sandboxing limits the blast radius.
+- **Blobs.** Chunks are verified with BLAKE3 one by one and as a whole; size and chunk
+  count are limited; downloads above a threshold need the user's consent. Property tests
+  cover the parsers; fuzzing with `cargo-fuzz` and Kani proofs are planned (milestone M6).
 
-- **JNI boundary.** Все входные данные от Kotlin (hex-ключи, текст) парсятся в Rust.
-  Некорректный hex → `parse_key()` возвращает `None` → безопасно. Но нет sanity
-  check на длину текстовых сообщений (ограничение — MTU датаграммы Yggdrasil ~1300Б,
-  но это ограничение транспорта, не приложения).
-- **Глобальное состояние (`static`).** Глобальные мьютексы (`CALL`, `ROOM_CALL`,
-  `APP`) — если JNI-вызов удерживает мьютекс и блокирует (network I/O), возможен
-  deadlock. Смягчено: мьютекс берётся только для clone/drop Arc, не на время I/O.
-  Полное исправление — переход на сессии (см. archive/architecture-review-2026-06-16.md, P5).
+## Dependency scan (cargo-deny)
 
-### Аппаратный H.264 на Android (MediaCodec)
+`cargo deny check` (advisories, bans, licenses, sources) passes. Real advisories (DEP1,
+DEP2) were fixed by upgrades; the remaining `unmaintained` warnings are documented as
+accepted. The project license is **GPL-3.0-only**; the allowed dependency licenses are
+listed in `deny.toml`.
 
-- **Ненадёжный декодер.** MediaCodec API не гарантирует отсутствие CVE в
-  проприетарных декодерах (особенно на китайских чипах: MTK, Unisoc). Mitigation:
-  недоверенный видео-поток от пира, H.264 парсится декодером. Sandbox Android
-  изолирует краш декодера от нашего процесса. DEP2 (openh264 heap overflow)
-  больше не актуален для Android-пути (openh264 убран).
-- **Surface leak.** Input-surface энкодера и output-surface декодера создаются в
-  Kotlin. Утечка Surface → утечка GPU-памяти. Текущее смягчение: Surface живёт
-  пока жив соответствующий MediaCodec, который релизится при stop().
-
-## Скан зависимостей (cargo-deny)
-
-`cargo deny check` (advisories/bans/licenses/sources) проходит полностью.
-Реальные vulnerability-адвизори (DEP1, DEP2) закрыты апгрейдами. Остаточные
-`unmaintained`-предупреждения задокументированы как принятые.
-
-Лицензия проекта — **GPL-3.0-only** (используем GPL-вариант три-лицензии Slint),
-поэтому исходники остаются открытыми и проверяемыми — важное свойство для
-приватного мессенджера. Список разрешённых лицензий зависимостей — в `deny.toml`.
-
-## Запуск проверок
+## Running the checks
 
 ```bash
-cargo test -p p2p-core          # тесты ядра
-bash scripts/audit-deps.sh      # уязвимости/лицензии зависимостей (cargo-deny)
+scripts/test-all.sh             # the whole Rust suite (Linux/WSL)
+bash scripts/audit-deps.sh      # dependency vulnerabilities and licenses (cargo-deny)
 ```
 
-## Сообщить об уязвимости
+## Reporting a vulnerability
 
-Свяжитесь с мейнтейнером приватно (см. контакт в README), не открывайте публичный issue
-до согласования раскрытия.
+Please report privately through GitHub's "Report a vulnerability" (Security tab of the
+repository) rather than opening a public issue, and allow time for a fix before
+disclosure.

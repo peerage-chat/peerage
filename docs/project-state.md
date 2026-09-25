@@ -14,8 +14,9 @@ mesh (an end-to-end encrypted IPv6 overlay routed by public keys). Groups use ML
 (RFC 9420, via `openmls`). The domain logic lives in a Rust engine; the Android client
 (Jetpack Compose) only renders state and sends commands. License: GPL-3.0-only.
 
-The only optional external dependency is a push wake-up (ntfy) for devices that are
-asleep; it sees opaque bytes only.
+On Android a foreground service keeps the node online in the background. A client for
+push wake-up through ntfy.sh exists as a crate (`ntfy/`) but is not wired into any
+client yet, so there is currently no external service involved at all.
 
 ## 2. Numbers
 
