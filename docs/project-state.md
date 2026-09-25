@@ -134,11 +134,16 @@ Code-level:
   truncate-then-write. Android can kill the app between the two steps; that would have
   left a group that can no longer be loaded, or a lost identity. Every state file now
   goes through one helper (`core::fsutil`: temp file → fsync → rename).
+- **Padding leak for edits — fixed 2026-09-25.** Message editing was added after the
+  anti-traffic-analysis milestone and fell into the 256-byte CONTROL bucket, so an edit's
+  size revealed the length of the new text in 256-byte steps. Edits are now in the same
+  bucket as text, and the size-indistinguishability test covers them.
 - **Fuzzing is partial:** property tests (`proptest`) cover the wire, media and blob
   parsers; there is no `cargo-fuzz` and no Kani harnesses yet.
 - **No reproducible build, no F-Droid package.**
-- **Most documentation is in Russian.** This file, the README and the core technical
-  documents are being translated.
+- **Some documentation is in Russian.** The README, architecture, protocol
+  specification, security documents, invariants and all ADRs are in English; the design
+  documents, plans, bug notes, roadmap and the July audit report are still in Russian.
 
 Behaviour:
 
