@@ -1,133 +1,126 @@
-# ADR-008: Стимулы за транзит — квитанции (proof-of-transit), а не флаг «я транзитный узел»
+# ADR-008: Transit incentives — receipts (proof of transit), not an "I am a relay" flag
 
-**Статус:** Accepted (решение принято), **реализация — после 1.0.** В 1.0 внесено
-только резервирование поля в протоколе (`Payload::Ping/Pong.transit`), чтобы позже не
-ломать формат маячка присутствия.
-**Дата:** 2026-08-01
-**Решает:** владелец проекта
-**Связано:** [threat-model](../architecture/threat-model.md) N8 (входящий трафик),
-`core/src/budget.rs` (M3, тиры и лимиты), `core/src/outbox.rs` (TTL офлайн-очереди),
-[ADR-007](ADR-007-identity-transport-key-split.md) (личность ≠ адрес),
-`core/src/pad.rs` + M5 (размерные бакеты).
+**Status:** Accepted (decision made), **implementation after 1.0.** 1.0 only reserves a field in
+the protocol (`Payload::Ping/Pong.transit`) so that the presence beacon format does not have to
+break later.
+**Date:** 2026-08-01
+**Decided by:** project owner
+**Related:** [threat model](../architecture/threat-model.md) N8 (incoming traffic),
+`core/src/budget.rs` (M3, tiers and limits), `core/src/outbox.rs` (outbox lifetime),
+[ADR-007](ADR-007-identity-transport-key-split.md) (identity ≠ address), `core/src/pad.rs` + M5
+(size buckets).
 
-> Что такое ADR — короткая запись одного архитектурного решения: проблема,
-> варианты, выбор и чем за него платим.
+## Context (the problem)
 
-## Контекст (в чём проблема)
+The network stands on nodes that relay other people's traffic. That costs battery and mobile
+data, so it makes sense to grant privileges for transit: priority in the delivery queue, a longer
+outbox lifetime, a higher ingress budget.
 
-Сеть держится на узлах, которые ретранслируют чужой трафик. Это стоит батареи и
-мобильного трафика, поэтому за транзит логично давать привилегии: приоритет в очереди
-доставки, увеличенный TTL офлайн-очереди, более высокий ingress-бюджет.
+**The trap is that the client is open (GPL-3.0) and runs on the user's device.** Anyone can make
+a build where relaying is cut out and the "I am a relay" flag is kept — and get the privileges
+while spending nothing. This is not a hypothesis about a villain: saving battery motivates
+exactly this, and the first such build would spread across forums. Worse, the incentive works
+backwards: the honest node pays with battery, the cheater does not, and their privileges are the
+same.
 
-**Ловушка в том, что клиент открытый (GPL-3.0) и исполняется на устройстве
-пользователя.** Любой может собрать сборку, где ретрансляция вырезана, а флаг «я
-транзитный узел» остался, — и получать привилегии, не тратя ничего. Это не гипотеза
-про злодея: экономия батареи мотивирует ровно к этому, и первая же такая сборка
-разойдётся по форумам. Хуже того, стимул устроен наоборот: честный узел платит
-батареей, читер — нет, а привилегии у них одинаковые.
+The general rule everything follows from: **a client's self-report is not proof.** We can neither
+trust the flag nor "check the build" — code on someone else's device can always be changed, and
+attempts to prevent it (attestation, obfuscation) come down to fighting one's own user, which
+contradicts both the license and the point of the project.
 
-Общее правило, из которого всё следует: **самоотчёт клиента не является
-доказательством.** Мы не можем ни доверять флагу, ни «проверить сборку» — код на
-чужом устройстве всегда можно изменить, и попытки этому помешать (аттестация,
-обфускация) сводятся к борьбе с собственным пользователем, что противоречит и
-лицензии, и смыслу проекта.
+## Options
 
-## Варианты
+### 1. Local reputation in SQLite
 
-### 1. Локальная репутация в SQLite
+Each node counts how much useful work a neighbour did and raises its tier. The mechanics partly
+exist: `contacts.helpful` (M3) counts blobs served to us.
 
-Каждый узел сам считает, сколько полезного сделал сосед, и повышает ему тир.
-Механика уже есть частично: `contacts.helpful` (M3) считает отданные нам блобы.
+*Pro:* simple, works offline, nothing to coordinate.
+*Con:* **selective defection.** A cheater only needs to serve those who are watching and ignore
+the rest. Reputation is local — everyone has their own, and nobody has the full picture of "he
+helps everyone".
 
-*Плюс:* просто, работает офлайн, ничего не надо согласовывать.
-*Минус:* **selective defection.** Читеру достаточно обслуживать тех, кто на него
-смотрит, и игнорировать остальных. Репутация локальна — у каждого своя, и общей
-картины «он помогает всем» ни у кого нет.
+### 2. Active probing
 
-### 2. Активное зондирование (probe-пакеты)
+Periodically send a test packet through the candidate and see whether it arrived.
 
-Периодически слать через кандидата тестовый пакет и смотреть, дошёл ли он.
+*Pro:* a direct check of the work being done.
+*Con:* **it works only while a probe is indistinguishable from ordinary traffic.** A cheater who
+can tell a probe apart (by size, rate, source, pattern) serves probes and drops the rest — the
+same selective defection, only cheaper. And we cannot make a probe guaranteed indistinguishable:
+by definition we generate it. On top of that the scheme adds traffic paid for by the verifier.
 
-*Плюс:* прямая проверка факта работы.
-*Минус:* **работает, только пока probe неотличим от обычного трафика.** Читер,
-который умеет отличать пробу (по размеру, частоте, источнику, шаблону), обслуживает
-пробы и дропает остальное — то есть тот же selective defection, но дешевле. А сделать
-пробу гарантированно неотличимой мы не можем: она по определению генерируется нами.
-Плюс сама схема добавляет трафик, за который платит проверяющий.
+### 3. Proof of transit: receipts signed by the recipient
 
-### 3. Proof-of-transit: квитанции с подписью получателя
+When node A relays a packet from Alice to Bob, **Bob** signs with his key a tiny receipt "the
+packet with such-and-such hash came through A" and gives it to A. A collects receipts and
+presents them as proof of work.
 
-Когда узел A ретранслирует пакет от Алисы к Бобу, **Боб** подписывает своим ключом
-крошечную квитанцию «пакет с таким-то хэшем пришёл через A» и отдаёт её A. A копит
-квитанции и предъявляет их как доказательство работы.
+*Pro:* **it cannot be forged.** A cannot forge Bob's signature, and there is no way to get it
+other than delivering the packet to Bob. This is the only one of the three options where the
+privilege is tied to an event that would not happen without real work, rather than to the
+client's claim about itself.
+*Con:* more expensive — a signature per transit (or per batch), a settlement period, a protocol
+for presenting and storing receipts. Some attacks remain — collusion (two cheaters signing
+receipts for each other) and inflation with one's own "Bobs" — and they are handled by weighting
+by the signer's tier: a receipt from a verified contact weighs more than one from a fresh key.
 
-*Плюс:* **подделать нельзя.** Подпись Боба A не подделает, а получить её иначе, чем
-доставив пакет Бобу, невозможно. Это единственный из трёх вариантов, где привилегия
-привязана к событию, которого не было бы без реальной работы, а не к утверждению
-клиента о себе.
-*Минус:* дороже — подпись на каждый транзит (или на пачку), нужен расчётный период,
-нужен протокол предъявления и хранение квитанций. Остаются частные атаки — сговор
-(два читера подписывают квитанции друг другу) и накрутка на собственных «Бобах», —
-они лечатся весом от тира подписанта: квитанция от верифицированного контакта весит
-больше, чем от свежесозданного ключа.
+## Decision
 
-## Решение
+**Option 3.** It is the only mathematically honest one: the other two rely on the good faith of
+code we do not control. Options 1 and 2 are not thrown away — they are fine as a cheap heuristic
+*on top of* receipts, but not as a basis for privileges.
 
-**Вариант 3.** Он единственный математически честный: остальные два опираются на
-добросовестность кода, который мы не контролируем. Варианты 1 и 2 при этом не
-выбрасываются — они годятся как дешёвая эвристика *поверх* квитанций, но не как
-основание для привилегий.
+**Implementation is deferred past 1.0.** Reason: before 1.0 we have no privilege worth
+protecting — tiers (`budget::Tier`) are assigned by trust (contact / verified), not by transit,
+and there is nothing to cheat. Building a settlement system before there is anything for it to
+distribute is working ahead of the problem.
 
-**Реализация откладывается за 1.0.** Причина: до 1.0 у нас нет ни одной привилегии,
-которую стоило бы защищать, — тиры (`budget::Tier`) назначаются по доверию
-(контакт/верифицирован), а не по транзиту, и обмануть тут нечего. Строить расчётную
-систему раньше, чем появится то, что ей распределять, — работа вперёд задачи.
+**But one thing goes into 1.0 now: reserving space in the protocol.**
 
-**Но одно вносится в 1.0 сейчас: резервирование места в протоколе.**
+## What exactly is reserved (and why it could not wait)
 
-## Что именно зарезервировано (и почему это нельзя было отложить)
-
-`Payload::Ping` и `Payload::Pong` (маячок присутствия) получили поле:
+`Payload::Ping` and `Payload::Pong` (the presence beacon) got a field:
 
 ```rust
 pub struct TransitClaim {
-    digest: Vec<u8>,  // BLAKE3 пачки квитанций за период
-    count:  u32,      // сколько квитанций в пачке
-    epoch:  u32,      // номер расчётного периода
+    digest: Vec<u8>,  // BLAKE3 of the batch of receipts for the period
+    count:  u32,      // how many receipts are in the batch
+    epoch:  u32,      // settlement period number
 }
 ```
 
-Три причины, по которым это делается заранее, а не потом:
+Three reasons to do this in advance rather than later:
 
-1. **Бакет CONTROL 256 Б (M5).** Маячок присутствия обязан быть неотличим по размеру
-   от `Ack` — иначе наблюдатель меша начинает видеть, кто в сети, и свойство,
-   закрытое в M5, ломается задним числом. Добавив поле позже, мы обнаружили бы, что
-   оно туда не влезает. Тест `presence_with_transit_claim_stays_in_control_bucket`
-   фиксирует это уже сейчас: маячок с ЗАПОЛНЕННОЙ заявкой равен по размеру `Ack`.
-2. **Отдельный пакет «я транзитный узел» был бы новым различимым классом трафика** —
-   регулярным, отличимым по размеру и адресуемым. Заявка обязана ехать внутри уже
-   существующего маячка.
-3. **В маячке едет дайджест, а не сами квитанции.** Одна квитанция — подпись 64 Б плюс
-   ключ, в hex-JSON это ~200 Б: даже одна не влезает в 256 Б. Поэтому в маячке —
-   только обязательство (хэш пачки и её размер), а сами квитанции запрашивает тот,
-   кому есть смысл проверять. Побочно это ограничивает и объём вранья: заявленное
-   число подтверждается только предъявленной пачкой.
+1. **The CONTROL bucket of 256 B (M5).** A presence beacon must be indistinguishable by size from
+   an `Ack` — otherwise a mesh observer starts seeing who is online, and the property closed in M5
+   breaks retroactively. Adding the field later, we would find it does not fit. The test
+   `presence_with_transit_claim_stays_in_control_bucket` pins this already: a beacon with a
+   FILLED claim is the same size as an `Ack`.
+2. **A separate "I am a relay" packet would be a new distinguishable class of traffic** —
+   regular, distinguishable by size and addressable. The claim has to ride inside the existing
+   beacon.
+3. **The beacon carries a digest, not the receipts.** One receipt is a 64-byte signature plus a
+   key, ~200 B in hex JSON: not even one fits into 256 B. So the beacon carries only a commitment
+   (the hash of the batch and its size), and whoever has reason to check requests the receipts.
+   As a side effect this also limits how much one can lie: the claimed number is confirmed only
+   by a presented batch.
 
-Поле опционально и **не сериализуется, пока пусто** (`skip_serializing_if`), поэтому
-байты на проводе в 1.0 не меняются — на это тоже есть тест.
+The field is optional and **not serialised while empty** (`skip_serializing_if`), so the bytes on
+the wire do not change in 1.0 — there is a test for that too.
 
-## Чем платим
+## What we pay
 
-* Резервирование живёт в протоколе без реализации — читатель кода видит поле, которое
-  никто не заполняет. Смягчено: и тип, и оба поля помечены ссылкой на этот ADR.
-* Приёмная сторона в 1.0 **обязана игнорировать** заявку: непроверенной заявке цена
-  ноль, а «немного доверять» — ровно та дыра, ради которой всё затевалось.
-* Полноценная схема потребует хранения квитанций и расчётного периода — это отдельная
-  работа со своими лимитами (иначе квитанции сами станут вектором раздувания базы).
+* The reservation lives in the protocol without an implementation — a reader sees a field that
+  nobody fills. Mitigated: the type and both fields reference this ADR.
+* In 1.0 the receiver **must ignore** the claim: an unverified claim is worth zero, and "trust it
+  a little" is exactly the hole this whole decision is about.
+* The full scheme will need receipt storage and a settlement period — separate work with its own
+  limits (otherwise receipts themselves become a way to bloat the database).
 
-## Как проверить, что решение соблюдается
+## How to check the decision is followed
 
 * `core/src/protocol.rs`: `presence_with_transit_claim_stays_in_control_bucket`,
   `empty_transit_field_is_absent_on_the_wire`.
-* В 1.0 не должно существовать кода, который читает `transit` и меняет из-за него
-  тир, приоритет или TTL. Grep по `transit` в `messenger/`, `engine/`, `core/budget`.
+* In 1.0 there must be no code that reads `transit` and changes a tier, priority or TTL because of
+  it. Grep for `transit` in `messenger/`, `engine/`, `core/budget`.

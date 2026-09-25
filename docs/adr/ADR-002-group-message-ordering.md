@@ -1,172 +1,164 @@
-# ADR-002: Порядок групповых сообщений под партицией и при сбое админа
+# ADR-002: Group message order under partition and when the admin fails
 
-**Статус:** Accepted — направление зафиксировано (2026-07-02); **реализация post-1.0**
-(в 1.0 остаётся admin-sequencer, см. [v1.0-scope](../v1.0-scope.md) «Отложить за 1.0»).
-**Дата:** 2026-06-24 · финализация открытых вопросов — 2026-07-02
-**Решает:** владелец проекта
+**Status:** Accepted — direction recorded (2026-07-02); **implementation after 1.0** (1.0 keeps
+the admin sequencer, see [v1.0-scope](../v1.0-scope.md) "Deferred past 1.0").
+**Date:** 2026-06-24 · open questions settled 2026-07-02
+**Decided by:** project owner
 
-> Что такое ADR — короткая запись одного архитектурного решения: проблема,
-> варианты, выбор и чем за него платим. Чтобы потом не гадать «почему так».
+## Context (the problem)
 
-## Контекст (в чём проблема)
+In a group, messages from different people must be shown **in the same order for everyone**.
+Otherwise Anna sees the conversation as "question → answer" and Boris as "answer → question".
 
-В группе сообщения от разных людей должны показываться **в одном и том же порядке
-у всех**. Иначе у Ани диалог выглядит «вопрос → ответ», а у Бори «ответ → вопрос».
+Today the order is set by an **admin sequencer**: one designated member (the admin) numbers
+every message in turn, and the others follow those numbers. Simple, and it works **as long as
+the admin is online and the network is not split**. The weak spots are exactly the ones a
+friend pointed out:
 
-Сейчас порядок задаёт **админ-секвенсор**: один назначенный участник (админ)
-проставляет каждому сообщению номер по порядку, остальные следуют этим номерам.
-Просто и работает, **пока админ онлайн и сеть не разорвана**. Слабые места — ровно
-те, на которые указал друг:
+1. **The admin is offline** → nobody numbers new messages → the order "hangs".
+2. **A network partition** (some members cut off, the admin on one side) → the other side
+   cannot get numbers → it cannot agree on an order.
+3. **A malicious or buggy admin** sends **different orders to different people**
+   ("equivocation") → members' versions of history diverge.
 
-1. **Админ офлайн** → новые сообщения некому нумеровать → порядок «зависает».
-2. **Партиция сети** (часть участников отрезана, админ на одной стороне) → вторая
-   сторона не может получить номера → не может согласовать порядок.
-3. **Злонамеренный/глючный админ** шлёт **разным людям разный порядок**
-   («эквивокация») → у участников расходятся версии истории.
+On a P2P network of phones, partitions and being offline are **the norm**, not a rare failure.
+Tying correctness to "the admin is always reachable and honest" is fragile.
 
-P2P-сеть на телефонах = партиции и офлайн это **норма**, а не редкий сбой. Значит
-завязывать корректность на «админ всегда доступен и честен» — хрупко.
+## Decision (the direction)
 
-## Решение (предлагаемое направление)
+Keep the admin sequencer as the **fast path** for the ordinary case, but add a
+**self-healing fallback** so that the group keeps working and converges to a common view
+**without the admin**. Concretely — a **signed hash chain (causal order):**
 
-Оставить админ-секвенсор как **быстрый путь** для обычного случая, но добавить
-**самовосстанавливающийся запасной механизм**, чтобы группа продолжала работать и
-сходилась к общему виду **без админа**. Конкретно — **подписанная хэш-цепочка
-(причинный порядок):**
+- Every message **references the hash(es) of the messages its author saw before it**
+  ("parents"). That forms a graph (a DAG) of what follows what.
+- **Causal order without a leader:** if message B saw A, B is shown after A. Everyone
+  computes this locally, without the admin.
+- **Tamper protection:** history cannot be rewritten without breaking hashes. Equivocation
+  becomes **visible** — a "fork" in the chain (two messages from one author with the same
+  parent) — and is detected automatically.
+- The admin sequencer becomes an **optional "finaliser"**: when two messages are causally
+  concurrent (neither saw the other), the display order is decided either by the admin or by
+  a deterministic rule (e.g. by hash) — no longer a critical dependency, just "how to show it
+  neatly".
 
-- Каждое сообщение **ссылается на хэш(и) сообщений, которые автор видел перед ним**
-  («родители»). Получается граф (DAG) — кто за кем следует по смыслу.
-- **Причинный порядок без лидера:** если сообщение Б видело А, значит Б показываем
-  после А. Это каждый вычисляет сам, локально, без админа.
-- **Защита от подделки:** нельзя переписать историю, не сломав хэши. Эквивокация
-  становится **видимой** — это «развилка» в цепочке (два сообщения от одного автора
-  с одним родителем) → детектируется автоматически.
-- Админ-секвенсор превращается в **необязательного «финализатора»**: когда два
-  сообщения причинно-параллельны (никто не видел другого), порядок их показа решает
-  либо админ, либо детерминированное правило (напр. по хэшу) — но это уже не
-  критическая зависимость, а лишь «как ровнее показать».
+Result: **the hash chain gives safety and convergence; the admin or a rule gives a neat final
+order on top.** The idea matches the "signed chain head" already planned for channels — so it
+is not foreign to the project.
 
-Итог: **хэш-цепочка даёт безопасность и сходимость, админ/правило — ровный
-итоговый порядок сверху.** Идея совпадает с уже задуманной «подписанной головой
-цепочки» в заметках по архитектуре каналов — то есть не чужеродна проекту.
+## Options considered
 
-## Рассмотренные варианты
-
-### A. Только админ-секвенсор (как сейчас)
-| Параметр | Оценка |
+### A. Admin sequencer only (as now)
+| Parameter | Assessment |
 |---|---|
-| Сложность | Низкая |
-| Под партицией | Зависает / расходится |
-| Доверие к админу | Полное (слепое) |
+| Complexity | Low |
+| Under partition | Hangs / diverges |
+| Trust in the admin | Full (blind) |
 
-**Плюсы:** просто, уже работает. **Минусы:** хрупко ровно к нашим отказам.
+**Pros:** simple, already works. **Cons:** fragile exactly against our failure modes.
 
-### B. Чистый причинный порядок (vector clocks / хэш-DAG), без лидера
-| Параметр | Оценка |
+### B. Pure causal order (vector clocks / hash DAG), no leader
+| Parameter | Assessment |
 |---|---|
-| Сложность | Средняя |
-| Под партицией | Сходится сам |
-| Доверие к админу | Не нужен |
+| Complexity | Medium |
+| Under partition | Converges by itself |
+| Trust in the admin | Not needed |
 
-**Плюсы:** leaderless, переживает партицию, эквивокация видна. **Минусы:** порядок
-показа **параллельных** сообщений неоднозначен → нужно детерминированное правило;
-UI должен уметь «достраивать» порядок, когда сообщения приходят не строго в линию.
+**Pros:** leaderless, survives partitions, equivocation is visible. **Cons:** the display
+order of **concurrent** messages is ambiguous → a deterministic rule is needed; the UI must be
+able to "complete" the order when messages arrive out of line.
 
-### C. Гибрид (рекомендуется)
-Хэш-цепочка (безопасность + сходимость) **+** админ или детерминированное правило
-для ровного итогового порядка.
+### C. Hybrid (recommended)
+A hash chain (safety + convergence) **+** the admin or a deterministic rule for a neat final
+order.
 
-**Плюсы:** лучшее из A и B; переживает офлайн админа/партицию; даёт детект
-эквивокации и дедуп бесплатно. **Минусы:** больше «движущихся частей», чем у A.
+**Pros:** the best of A and B; survives the admin being offline and partitions; gives
+equivocation detection and dedup for free. **Cons:** more moving parts than A.
 
-### D. Полный BFT-консенсус (как в блокчейне)
-**Отклонено.** Сильнейшие гарантии, но огромная сложность. Нам **не нужно** согласие
-N взаимно-недоверяющих сторон на одном значении — нужны сходимость + защита от
-подделки. Это перебор.
+### D. Full BFT consensus (as in blockchains)
+**Rejected.** The strongest guarantees, but enormous complexity. We do **not** need N mutually
+distrustful parties to agree on one value — we need convergence + tamper protection. Overkill.
 
-## Размен (главное)
+## The trade-off
 
-A — самый простой, но ломается именно там, где нам важно. C добавляет хэш-цепочку
-(каждое сообщение несёт хэши родителей; клиент собирает DAG и применяет
-детерминированное правило для показа) — это умеренная сложность, **но именно она
-делает группу живучей при партиции и потере админа, и попутно даёт детект
-эквивокации.** Поскольку хэш-цепочка уже была в задумке каналов, порог входа ниже.
+A is the simplest but breaks exactly where it matters to us. C adds a hash chain (each message
+carries its parents' hashes; the client builds the DAG and applies a deterministic display
+rule) — moderate complexity, **but it is exactly what keeps a group alive through partitions
+and loss of the admin, and it detects equivocation along the way.** Since the hash chain was
+already planned for channels, the entry cost is lower.
 
-## Последствия
+## Consequences
 
-**Станет проще / надёжнее:**
-- Группа переживает офлайн админа и партицию (сходится сама).
-- Эквивокация детектируется; история защищена от подделки.
-- Дедупликация (контент-адресация) идёт в комплекте.
+**Simpler / more reliable:**
+- A group survives the admin being offline and partitions (it converges by itself).
+- Equivocation is detected; history is protected from tampering.
+- Deduplication (content addressing) comes with it.
 
-**Станет сложнее:**
-- Схема сообщения растёт (хэши родителей, подпись автора) — это подсистема S7.
-- Клиент должен собирать DAG и применять детерминированное правило показа.
-- UI обязан показывать **стабильный** порядок, даже когда параллельные сообщения
-  дособираются.
+**Harder:**
+- The message schema grows (parent hashes) — subsystem S7.
+- The client must build the DAG and apply a deterministic display rule.
+- The UI must show a **stable** order even while concurrent messages are still being filled in.
 
-**Пересмотреть позже:**
-- Точное правило для параллельных (админ-финализатор vs чисто детерминированно).
-- Сколько истории носить/синхронизировать (связано с S5 блобами/синком).
-- Политику реакции на обнаруженную эквивокацию.
+**To revisit later:**
+- How much history to carry and sync (related to blobs and sync).
+- The policy for reacting to detected equivocation.
 
-## Решение по открытым вопросам (финализация 2026-07-02)
+## Open questions settled (2026-07-02)
 
-### 1. Правило порядка параллельных = детерминированное, БЕЗ лидера
-**Выбрано: `(lamport, blake3_hash)` — Lamport-таймстамп, тай-брейк по хэшу.** НЕ
-админ-финализатор.
+### 1. The order of concurrent messages = deterministic, WITHOUT a leader
+**Chosen: `(lamport, blake3_hash)` — a Lamport timestamp, ties broken by hash.** NOT an admin
+finaliser.
 
-- Каждое сообщение несёт **Lamport-часы** `lamport = 1 + max(lamport родителей)`
-  (0, если родителей нет). Итоговый порядок показа = сортировка по `lamport`, при
-  равенстве — по `blake3(содержимое)`. Все клиенты вычисляют одинаково, локально.
-- **Почему не админ-финализатор:** он тянет обратно ту самую зависимость от
-  доступности админа, ради устранения которой всё и затевалось. При офлайн-админе
-  параллельные сообщения снова «зависли бы». Детерминированное правило снимает эту
-  зависимость полностью — **админ перестаёт быть критичным для порядка** (остаётся
-  лишь быстрым путём для причинно-линейного обычного случая).
-- **Почему Lamport, а не чистый хэш:** чистый хэш дал бы согласованный, но
-  «случайный» порядок, игнорирующий логическую причинность. Lamport уважает
-  «логически позже» в тотальном порядке; хэш ломает лишь настоящие ничьи
-  (истинно-параллельные сообщения — их и так никто не видел раньше другого).
-- BLAKE3 выбран намеренно — тот же хэш, что у контент-адресных блобов (H2/M2),
-  переиспользуем примитив и получаем дедуп «бесплатно».
+- Every message carries a **Lamport clock** `lamport = 1 + max(lamport of parents)` (0 if
+  there are no parents). The final display order = sort by `lamport`, ties by
+  `blake3(content)`. All clients compute the same thing, locally.
+- **Why not an admin finaliser:** it would bring back exactly the dependency on the admin's
+  availability that this whole effort removes. With the admin offline, concurrent messages
+  would "hang" again. A deterministic rule removes the dependency entirely — **the admin stops
+  being critical for order** (it remains only a fast path for the causally linear ordinary
+  case).
+- **Why Lamport rather than a pure hash:** a pure hash gives a consistent but "random" order
+  that ignores logical causality. Lamport respects "logically later" in a total order; the
+  hash only breaks genuine ties (truly concurrent messages — nobody saw one before the other
+  anyway).
+- BLAKE3 is chosen on purpose — the same hash as content-addressed blobs; we reuse the
+  primitive and get dedup "for free".
 
-### 2. Схема сообщения: MLS уже аутентифицирует → отдельная подпись НЕ нужна
-Внутри MLS-группы прикладные сообщения **уже** аутентифицированы отправителем и
-защищены по целостности (MLS). Поэтому узлу DAG нужны только **`parents: Vec<Hash>`
-(BLAKE3 виденных родителей) + `lamport: u64`**, переносимые ВНУТРИ MLS-шифрованного
-payload. Отдельная подпись автора (как предполагалось) избыточна — снимаем из скоупа
-S7, экономим байты и сложность.
+### 2. Message schema: MLS already authenticates → no separate signature
+Inside an MLS group, application messages are **already** authenticated by the sender and
+integrity-protected (by MLS). So a DAG node needs only **`parents: Vec<Hash>` (BLAKE3 of the
+parents seen) + `lamport: u64`**, carried INSIDE the MLS-encrypted payload. A separate author
+signature (as originally assumed) is redundant — removed from the scope of S7, saving bytes
+and complexity.
 
-### 3. Эквивокация: детект → предупредить (1.0-стиль), авто-отзыв — post-1.0
-Два сообщения от одного автора с одним родителем = видимая «развилка» DAG →
-детектируется. Политика: **предупредить в UI** (пометить ветку), НЕ авто-исключать
-(авто-wipe участника — footgun). Post-1.0: обнаруженного эквивокатора можно
-**отозвать через [ADR-004](ADR-004-mls-membership-revocation.md) Remove** —
-механизм уже спроектирован; это естественная связка DAG-детекта и отзыва.
+### 3. Equivocation: detect → warn (in 1.0 style), automatic removal — after 1.0
+Two messages from one author with the same parent = a visible "fork" in the DAG → detected.
+Policy: **warn in the UI** (mark the branch), do NOT exclude automatically (auto-wiping a
+member is a footgun). After 1.0: a detected equivocator can be **revoked through
+[ADR-004](ADR-004-mls-membership-revocation.md) Remove** — the mechanism is already designed;
+it is the natural link between DAG detection and revocation.
 
-### 4. Связь с ADR-004 (разделение ответственности)
-ADR-002 упорядочивает **прикладные** сообщения (DAG причинности). ADR-004 отвечает
-за доставку/восстановление **Commit** (членство/эпохи) и лечение отставших. Оба
-поверх одного надёжного Group-канала. Долгосрочно DAG мог бы охватить и Commit-
-порядок, но в v1.0 их разделяем: membership — admin-sequencer + resync (ADR-004),
-application-order — admin fast-path сейчас, Lamport-DAG post-1.0.
+### 4. Relation to ADR-004 (separation of responsibility)
+ADR-002 orders **application** messages (the causality DAG). ADR-004 is responsible for
+delivering and recovering **Commits** (membership and epochs) and healing laggards. Both sit
+on the same reliable group channel. In the long term the DAG could cover Commit order too,
+but in v1.0 they are separate: membership — admin sequencer + resync (ADR-004); application
+order — the admin fast path now, a Lamport DAG after 1.0.
 
 ## Action items
 
-1. [x] **Правило параллельных — РЕШЕНО:** `(lamport, blake3_hash)`, детерминированно,
-       без лидера (см. выше).
-2. [x] **Схема — РЕШЕНО:** `parents: Vec<blake3::Hash>` + `lamport: u64` внутри
-       MLS-payload; отдельная подпись не нужна (MLS аутентифицирует).
-3. [ ] Прототип сборки DAG + детерминированного итогового порядка в крейте `groupchat`
-       (post-1.0; юнит-тест: расходящиеся истории сходятся к одному порядку).
-4. [x] **Эквивокация — РЕШЕНО:** детект → предупредить; авто-отзыв через ADR-004
-       Remove — post-1.0.
-5. [ ] Глубина истории / стратегия синхронизации — вместе с блобами (M2/H2): узлы
-       адресуются по BLAKE3 → sync тем же pull-механизмом, что и блобы. Детали — при
-       проектировании M2.
+1. [x] **Rule for concurrent messages — DECIDED:** `(lamport, blake3_hash)`, deterministic,
+       without a leader.
+2. [x] **Schema — DECIDED:** `parents: Vec<blake3::Hash>` + `lamport: u64` inside the MLS
+       payload; no separate signature (MLS authenticates).
+3. [ ] A prototype of DAG assembly + the deterministic final order in the `groupchat` crate
+       (after 1.0; a unit test: diverging histories converge to one order).
+4. [x] **Equivocation — DECIDED:** detect → warn; automatic revocation through ADR-004 Remove
+       — after 1.0.
+5. [ ] History depth / sync strategy — together with blobs: nodes are addressed by BLAKE3 →
+       sync through the same pull mechanism as blobs.
 
 ---
 
-*ADR-001 (зарезервирован): унификация call/медиа-движка десктоп+Android — будет
-оформлен отдельно.*
+*ADR-001 (reserved): unifying the desktop and Android call/media engine — to be written
+separately.*

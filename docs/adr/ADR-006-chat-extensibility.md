@@ -1,102 +1,109 @@
-# ADR-006: Расширяемость чата — фичи-по-ссылке без переписи
+# ADR-006: Chat extensibility — features by reference, without rewrites
 
-**Статус:** Accepted — принято 2026-07-05; forward-compat-замок (Payload::Unknown)
-реализован и проверен (тест `unknown_payload_type_is_ignored_not_error`).
-**Дата:** 2026-07-05
-**Решает:** владелец проекта
-**Связано с:** [ADR-003](ADR-003-engine-api.md) (граница движок↔клиент — фундамент
-аддитивности), [v1.0-scope.md](../v1.0-scope.md) (что в 1.0 vs отложено),
-[app-ui.md](../design/app-ui.md) + [mockups/](../design/mockups/) (макет-северная-звезда).
+**Status:** Accepted 2026-07-05; the forward-compatibility lock (`Payload::Unknown`) is
+implemented and tested (`unknown_payload_type_is_ignored_not_error`).
+**Date:** 2026-07-05
+**Decided by:** project owner
+**Related:** [ADR-003](ADR-003-engine-api.md) (the engine ↔ client boundary — the foundation of
+additivity), [v1.0-scope.md](../v1.0-scope.md) (what is in 1.0 vs deferred),
+[app-ui.md](../design/app-ui.md) + [mockups/](../design/mockups/) (the north-star mock-up).
 
-> Что такое ADR — короткая запись одного архитектурного решения: проблема,
-> варианты, выбор и чем за него платим.
+## Context (the problem)
 
-## Контекст (в чём проблема)
+The v1.0 chat was to be **minimal** (text / voice / image / file + status + reply), and the
+social features of Telegram (reactions, pins, forwarding, edits) **deferred**. The reason is not
+laziness but the architecture: **we have no server acting as arbiter**. Each such "UI feature" is
+really a distributed problem (delivering, ordering and keeping shared state consistent over a
+lossy mesh through MLS epochs), not a button. Building them right away would multiply the pain we
+went through for plain text and pull focus from what sets us apart (serverless + privacy).
 
-v1.0-чат делаем **минимальным** (текст/голос/картинка/файл + статус + ответ), а
-соц-фичи Telegram (реакции, закрепы, пересылки, правки) — **откладываем**. Причина
-не «лень», а суть архитектуры: **у нас нет сервера-арбитра**. Каждая такая «UI-фича» —
-на деле распределённая задача (доставка/порядок/консистентность общего состояния по
-лоссовому мешу через MLS-эпохи), а не кнопка. Строить их сейчас = умножить боль,
-которую мы прошли ради простого текста, и увести фокус с рва (serverless+приватность).
+But deferring must not mean painting ourselves into a corner. The owner stated the requirement
+plainly: **a clear 1.0 scope + code that lets us add the rest without rewriting thousands of
+lines.** So we need a recorded **extensibility contract**: which seams guarantee that deferred
+features land additively.
 
-Но отложить — не значит «загнать себя в угол». Владелец прямо поставил требование:
-**чёткий скоуп 1.0 + код, который позволит добавить остальное без переписи тысяч строк.**
-Значит нужен зафиксированный **контракт расширяемости**: какие швы гарантируют, что
-отложенные фичи лягут аддитивно.
+## Decision (the extensibility contract)
 
-## Решение (контракт расширяемости)
+The model for ALL deferred chat features: **a feature by reference**. A reaction / reply / edit /
+pin does not change the original message — it **references** it and lives next to it. The
+reference is the stable pair `(author, id)` (every message already has an `id: u64`, seeded from
+time and stored by both sides for dedup).
 
-Модель для ВСЕХ отложенных чат-фич: **фича-по-ссылке**. Реакция/ответ/правка/закреп
-не меняют исходное сообщение — они **ссылаются** на него и живут рядом. Ссылка —
-стабильная пара `(from_pubkey, id)` (у каждого сообщения уже есть `id: u64`,
-посеянный от времени и хранимый обеими сторонами для дедупа).
+A new feature is added through **four additive seams**, none of which rewrites the core:
 
-Новая фича добавляется через **четыре аддитивных шва**, ни один не переписывает ядро:
+1. **Protocol — a new `Payload` variant, NOT a bump of the envelope version.** `Payload` is an
+   internally tagged enum (`#[serde(tag="type")]`). A future feature = a new variant
+   (`Reaction { target, emoji }`, `Edit { target, text }`, `Pin { target }`, …). **The
+   forward-compatibility lock is already in place:** the `Payload::Unknown` variant
+   (`#[serde(other)]`) — an old client that receives an unfamiliar type **ignores** it instead of
+   failing in `decode`. Without it, the day reactions ship would crash every old client; with it,
+   new types are additive (`core/src/protocol.rs`; test `unknown_payload_type_is_ignored_not_error`).
 
-1. **Протокол — новый вариант `Payload`, НЕ бамп версии конверта.**
-   `Payload` — внутренне-тегированный enum (`#[serde(tag="type")]`). Будущая фича =
-   новый вариант (`Reaction { target: (Key,u64), emoji: String }`, `Edit { target, text }`,
-   `Pin { target }`, `Forward { … }`). **Замок forward-compat уже стоит:** вариант
-   `Payload::Unknown` (`#[serde(other)]`) — старый клиент, получив незнакомый тип,
-   **игнорирует** его, а не падает на `decode`. Без этого день выката реакций ронял бы
-   все старые клиенты; с ним — новые типы аддитивны. (core/src/protocol.rs; тест
-   `unknown_payload_type_is_ignored_not_error`.)
+2. **Engine — new commands and events (ADR-003).** The UI is a projection of the snapshot and
+   computes no domain logic. A feature adds its command and event; existing ones are not touched.
 
-2. **Движок — новые `Command`/`Event` (ADR-003).** UI — проекция снапшота, домейн-логики
-   не считает. Фича добавляет `Command::React{target,emoji}` / `Event::ReactionAdded{…}`;
-   существующие не трогаются.
+3. **Storage — a side table keyed by the reference, an idempotent migration.** Reactions, edits
+   and pins are separate tables keyed by the reference. The message table is not migrated. (The
+   pattern was already used: `outbox`.)
 
-3. **Хранилище — side-таблица по ссылке, идемпотентная ALTER-миграция.** Реакции/правки/
-   закрепы — отдельные таблицы, ключ = `(peer, msg_id)`. Таблица `messages` не мигрирует.
-   (Паттерн уже применён: `outbox`, ALTER `msg_id`.)
+4. **UI — optional model fields + a slot in the row composable.** `Message` (Kotlin) gains
+   `replyTo? / reactions? / edited? / pinned?`; the message row has slots for them. **The
+   north-star mock-up** ([mockups/chat.html](../design/mockups/chat.html)) already shows the layout
+   with these elements → the layout is not redone, only data rendering is added.
 
-4. **UI — опциональные поля модели + слот в композабле ряда.** `Message` (Kotlin) обретает
-   `replyTo?/reactions?/edited?/pinned?`; ряд сообщения — слоты под них. **Макет-северная-
-   звезда** ([mockups/chat.html](../design/mockups/chat.html)) уже показывает раскладку с
-   этими элементами → верстка не переверстывается, добавляется рендер данных.
+## Implementation layers (example: reactions, after 1.0)
 
-## Слои реализации (пример: реакции, post-1.0)
+- `Payload::Reaction { target, emoji, remove: bool }` + `Ack`.
+- A command to react / an event "reaction changed"; in groups — through the same MLS envelope (no
+  Commit needed, it is an application message of the epoch).
+- A table `reactions(chat, target, author, emoji)`; an "emoji → count" aggregate in the snapshot.
+- Chips rendered under the bubble (the mock-up has the space). Order and conflicts —
+  last-writer-wins per `(author, target)`; divergence is not critical (a reaction does not affect
+  decryption).
 
-- `Payload::Reaction { target: (Key, u64), emoji: String, remove: bool }` + `Ack`.
-- `Command::React` / `Event::ReactionChanged`; в группах — через тот же MLS-конверт
-  (Commit не нужен, это прикладное сообщение эпохи).
-- Таблица `reactions(peer, msg_id, author, emoji)`; агрегат «эмодзи→счётчик» в снапшоте.
-- Рендер чипов под пузырём (место в макете есть). Порядок/конфликты — last-writer-wins
-  по `(author, target)`; расхождение — не критично (реакция не влияет на дешифровку).
+## Options considered
 
-## Рассмотренные варианты
+1. **Build the social features in 1.0.** Rejected — distributed problems without an arbiter, not
+   what sets us apart; they pull focus and milestone budget.
+2. **Defer WITHOUT a contract ("we will figure it out later").** Rejected — "later" turns into
+   rewriting the protocol, storage and matching; exactly the cost this ADR avoids. And without
+   `Unknown`, shipping a new type = a breaking migration of every old client.
+3. **One extensible "super envelope" with a bag of fields (map<string, any>).** Rejected — it
+   loses type safety and the ability to check the parser with Kani/proptest (important for the
+   audit, M6); a tagged enum + `Unknown` gives both additivity and strict parsing.
+4. **A tagged enum + an `Unknown` fallback + features by reference (chosen).** Additive,
+   type-safe, forward-compatible, no core rewrite.
 
-1. **Строить соц-фичи в 1.0.** Отклонено — распределённые задачи без арбитра, не ров,
-   уводят фокус и бюджет вех от гранта.
-2. **Отложить БЕЗ контракта («потом придумаем»).** Отклонено — «потом» превращается в
-   переписку протокола/хранилища/матчей; ровно та цена, которую ADR избегает. Плюс без
-   `Unknown` выкат нового типа = ломающая миграция всех старых клиентов.
-3. **Один расширяемый «супер-конверт» с bag-of-fields (map<string,any>).** Отклонено —
-   теряется типобезопасность и Kani/proptest-проверяемость парсера (важно для аудита,
-   M6); тегированный enum + `Unknown` даёт и аддитивность, и строгий разбор.
-4. **Тегированный enum + `Unknown`-fallback + фича-по-ссылке (выбрано).** Аддитивно,
-   типобезопасно, forward-compat, без переписи ядра.
+## The trade-off
 
-## Размен (главное)
+- **We pay now** with one small lock (the `Unknown` variant, ~10 lines + a test) and the
+  discipline "feature = variant + command/event + side table + slot", not changes to the core.
+- **We get** every deferred feature as additive work and **backward compatibility on the wire**
+  (old clients do not crash on new messages).
+- An honest limit: `Unknown` saves from a *crash*, but an old client will not *show* the feature
+  — that is expected graceful degradation, not a regression.
 
-- **Платим сейчас** одним маленьким замком (`Unknown`-вариант, ~10 строк + тест) и
-  дисциплиной «фича = вариант+Command/Event+side-таблица+слот», а не правкой ядра.
-- **Получаем** каждую отложенную фичу как аддитивную работу и **обратную
-  совместимость по проводу** (старые клиенты не падают на новых сообщениях).
-- Честный предел: `Unknown` спасает от *краша*, но старый клиент фичу не *покажет* —
-  это ожидаемо (graceful degradation), а не регресс.
+## Consequences
 
-## Последствия
+- Deferred features are outside 1.0 but **unblocked** architecturally; the order in which they are
+  added is a product decision, not a rewrite.
+- Any new `Payload` MUST stay compatible: a receiver that does not understand the type must not
+  depend on it for the correctness of features it already supports.
+- No `Ack` is sent for unknown types → the sender's retry expires by TTL (safe).
 
-- Отложенные фичи (реакции/закрепы/пересылки/правки) — вне 1.0, но **разблокированы**
-  архитектурно; порядок их добавления — продуктовое решение, не переписка.
-- Любой новый `Payload` ОБЯЗАН оставаться совместимым: получатель, не понимающий тип,
-  не должен зависеть от него для корректности уже поддержанных фич.
-- `Ack` для неизвестных типов НЕ шлётся → отправитель гасит ретрай по TTL (безопасно).
+## State as of 2026-09
+
+The contract was tested in practice sooner than planned: reply, retraction, forwarding (optionally
+without the author), pins and edits were added in August for both 1:1 chats and groups, each as a
+new `Payload`/`AppMsg` variant plus side data, without touching the core. Two refinements came out
+of that work: the reference became the pair "author + id" in a single message table
+([ADR-009](ADR-009-one-message-store.md)), and commands are `Engine` methods rather than
+`enum Command` variants (see ADR-003). The forward-compatibility rule is described in
+[protocol-spec §2](../protocol-spec.md). Reactions remain deferred.
 
 ## Action items
 
-- [x] `Payload::Unknown` (`#[serde(other)]`) + арм в receive-loop + тест. *(2026-07-05)*
-- [ ] Спека протокола: раздел «forward-compat и правило новых типов».
-- [ ] При добавлении первой фичи-по-ссылке — зафиксировать формат `target` в спеке.
+- [x] `Payload::Unknown` (`#[serde(other)]`) + an arm in the receive loop + a test. *(2026-07-05)*
+- [x] Protocol spec: a section on forward compatibility and the rule for new types. *(2026-09)*
+- [x] When adding the first feature by reference — fix the `target` format in the spec. *(done
+      with replies and pins)*

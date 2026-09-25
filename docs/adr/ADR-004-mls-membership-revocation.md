@@ -1,206 +1,186 @@
-# ADR-004: Отзыв участника MLS, ротация ключа (PCS) и лечение отставших
+# ADR-004: MLS member revocation, key rotation (PCS) and healing laggards
 
-**Статус:** Accepted — реализован 2026-07-02, **проверен на 2 устройствах 2026-07-03**
-(инвайт/kick/leave работают телефон↔эмулятор; остаётся UI/UX-полиш)
-**Дата:** 2026-07-02
-**Решает:** владелец проекта
-**Закрывает находки:** [SEC-1](../architecture/security-audit-2026-07-02.md) (High —
-нет Remove/Update), [SEC-2](../architecture/security-audit-2026-07-02.md) (членство
-звонка от ростера). Связано с [ADR-002](ADR-002-group-message-ordering.md) (порядок/
-доставка), симптомом «старые группы не лечатся» ([[group-message-reliability]]).
+**Status:** Accepted — implemented 2026-07-02, **tested on two devices 2026-07-03** (invite /
+kick / leave work phone ↔ emulator)
+**Date:** 2026-07-02
+**Decided by:** project owner
+**Closes findings:** [SEC-1](../architecture/security-audit-2026-07-02.md) (High — no
+Remove/Update), [SEC-2](../architecture/security-audit-2026-07-02.md) (call membership from the
+roster). Related to [ADR-002](ADR-002-group-message-ordering.md) (order and delivery) and the
+symptom "old groups do not heal".
 
-> Что такое ADR — короткая запись одного архитектурного решения: проблема,
-> варианты, выбор и чем за него платим.
+## Context (the problem)
 
-## Контекст (в чём проблема)
+MLS was chosen for two properties: **forward secrecy** and **post-compromise security**
+(recovering security AFTER a member's state leaks), plus the ability to **revoke a member**.
+At the time the code (`group/src/lib.rs`) had `add`/`create`/`process`, but **no
+`remove_member` and no self-`Update`**. The consequences were three intertwined defects:
 
-MLS выбран ради двух свойств: **Forward Secrecy** и **Post-Compromise Security**
-(восстановление безопасности ПОСЛЕ утечки состояния участника), плюс возможность
-**отозвать участника**. Сегодня в коде (`group/src/lib.rs`) есть `add`/`create`/
-`process`, но **нет `remove_member` и нет self-`Update`**. Последствия — три
-переплетённых дефекта:
+1. **Nobody could be revoked (SEC-1).** A member who left or was compromised stayed in the
+   group forever. The membership only grew.
+2. **PCS never recovered (SEC-1).** The epoch advanced only when a member was added; there was
+   no key rotation on demand. A leaked epoch secret stayed readable for the attacker
+   indefinitely.
+3. **A group could not "heal" from desync.** MLS requires Commits to be processed **strictly in
+   order**. Whoever missed a Commit (was offline longer than the offline queue TTL, reinstalled
+   the app) got stuck on an old epoch, hit "secret deleted" and could no longer decrypt new
+   messages. The only workaround was to **re-create the group**. That is the complaint "old
+   groups do not heal".
 
-1. **Отозвать никого нельзя (SEC-1).** Ушедший или скомпрометированный участник
-   остаётся в группе навсегда. Состав только растёт.
-2. **PCS не восстанавливается (SEC-1).** Эпоха продвигается только при добавлении
-   участника; ротации ключа по требованию нет. Утёкший секрет эпохи читается
-   атакующим сколь угодно долго.
-3. **Группа не «лечится» от рассинхрона.** MLS требует обработки Commit **строго по
-   порядку**. Кто пропустил Commit (был офлайн дольше TTL офлайн-очереди,
-   переустановил приложение) — застревает на старой эпохе, ловит «secret deleted» и
-   больше не может расшифровать новые сообщения. Единственный текущий обходной путь —
-   **пересоздать группу**. Это и есть жалоба «старые группы не лечатся».
+These three are **one root problem**: the MLS membership/epoch lifecycle was implemented only
+"forward, for adding", without revocation, rotation or recovery. On top of that, membership in
+a **call** was taken from presence beacons rather than from the MLS roster (SEC-2) — which
+would become a hole exactly when revocation starts working (a revoked member knowing the `gid`
+would keep joining calls).
 
-Эти три — **одна корневая проблема**: жизненный цикл членства/эпох MLS реализован
-только «вперёд на добавление», без отзыва, ротации и восстановления. Плюс: членство
-в **звонке** берётся из маячков присутствия, а не из MLS-ростера (SEC-2) — что
-станет дырой ровно тогда, когда отзыв заработает (отозванный, зная `gid`, продолжит
-входить в звонки).
+A constraint of the environment (as in ADR-002): P2P on phones = **being offline and partitions
+are the norm**. So correctness must not depend on "the admin is always online", and stragglers
+must be **healed**, not abandoned.
 
-Ограничение среды (как в ADR-002): P2P на телефонах = **офлайн и партиции — норма**.
-Значит корректность нельзя завязывать на «админ всегда онлайн», а straggler-ов
-(отставших) надо уметь **лечить**, а не бросать.
+## Decision
 
-## Решение (предлагаемое направление)
+Introduce the **full membership lifecycle through one sequencer-admin** (the group creator — as
+already established for adding and for order in ADR-002), plus **self-healing of laggards**.
+Three primitives, all on top of the existing reliable channel `Payload::Group` (retry until ack):
 
-Ввести **полный жизненный цикл членства через одного секвенсора-админа** (создатель
-группы — как уже сложилось для добавления и порядка в ADR-002), плюс
-**самолечение отставших**. Три примитива, все поверх готового надёжного канала
-`Payload::Group` (retry-until-Ack):
+### 1. Remove (revocation) — admin only
+The admin builds an MLS Commit removing the member's leaf (`remove_members` in openmls) and
+sends it **to all current members, including the one being removed**. The removed member,
+having processed the Commit, finds they are no longer there → wipes the local group state and
+shows "You were removed". Admin only = no concurrent Commits (consistent with the ADR-002
+sequencer).
 
-### 1. Remove (отзыв) — только админ
-Админ строит MLS-Commit удаления leaf-а участника (`remove_members` в openmls) и
-рассылает его **всем текущим участникам, включая удаляемого**. Удаляемый, обработав
-Commit, обнаруживает, что его больше нет → чистит локальное состояние группы и
-показывает «Вы были удалены». Только-админ = нет одновременных Commit (согласуется
-с секвенсором ADR-002).
+### 2. Update (key rotation, PCS) — proposed by anyone, committed by the admin
+Any member who suspects compromise sends the admin an **Update proposal** (a new leaf key); the
+admin includes it in a Commit → the epoch changes, the old secret is useless → PCS is restored
+for that member. Plus a **periodic admin rekey** (a self-Update of the admin on schedule / at
+start-up) gives the whole group a "rolling" PCS. A forced rotation of a specific member by a
+button — after 1.0.
 
-### 2. Update (ротация ключа, PCS) — по предложению, коммитит админ
-Любой участник, подозревающий компрометацию, шлёт админу **Update-предложение**
-(новый leaf-ключ); админ включает его в Commit → эпоха сменилась, старый секрет
-бесполезен → PCS восстановлен для этого участника. Плюс **периодический
-admin-rekey** (self-Update админа по расписанию/при заходе) даёт «катящийся» PCS
-всей группе. Форс-ротация конкретного участника по кнопке — post-1.0.
+### 3. Resync (healing a laggard) = Remove + Add in one Commit
+The key new mechanism. A member who hits an epoch desync error in `process_message` sends the
+admin **`GroupResyncRequest{gid}`**. The admin:
+- checks that the requester is **in the current roster** (otherwise refuses: a revoked member
+  must not "heal" their way back in);
+- asks them for a fresh KeyPackage (reusing `GroupKeyRequest/Reply`);
+- makes a **Commit `remove(old leaf) + add(new KeyPackage)`** — the member re-enters from the
+  current epoch through a Welcome. The group is "healed" without being re-created.
 
-### 3. Resync (лечение отставшего) = Remove + Add в одном Commit
-Ключевой новый механизм. Участник, поймавший ошибку рассинхрона эпох на
-`process_message`, шлёт админу **`GroupResyncRequest{gid}`**. Админ:
-- проверяет, что проситель **в текущем ростере** (иначе — отказ: отозванный не
-  должен «влечиться» обратно);
-- запрашивает у него свежий KeyPackage (переиспользуем `GroupKeyRequest/Reply`);
-- делает **Commit `remove(старый leaf) + add(новый KeyPackage)`** — участник входит
-  заново с текущей эпохи, получив Welcome. Группа «вылечена» без пересоздания.
+So `Remove` is the basic primitive, `Update` gives PCS, and `Resync` (Remove + Add) reuses
+`Remove` for healing. All admin-sequenced, all over the reliable channel.
 
-Так `Remove` — базовый примитив, `Update` даёт PCS, а `Resync` (Remove+Add)
-переиспользует `Remove` для лечения. Всё — админ-секвенсировано, всё по надёжному
-каналу.
+**Leave (leaving voluntarily)** is a special case: the member asks the admin to leave → the
+admin does `Remove`. If the admin is offline — a **soft leave** (forget the group locally, stop
+sending beacons), marked "not cryptographically revoked until the admin confirms" (it completes
+when the admin is next reachable).
 
-**Leave (самостоятельный выход)** = частный случай: участник шлёт админу запрос на
-выход → админ делает `Remove`. Если админ офлайн — **мягкий выход** (локально забыть
-группу, перестать слать маячки), помеченный «не отозван криптографически до
-подтверждения админом» (докрутится при следующей доступности админа).
+## Implementation layers (through the whole stack)
 
-## Слои реализации (сквозь весь стек)
-
-| Слой | Что добавить |
+| Layer | What to add |
 |---|---|
-| `core/protocol.rs` | Новый `Payload::GroupResyncRequest { gid: Vec<u8> }` (участник→админ). Commit-ы удаления/ротации идут по существующему `Payload::Group{id,data}` — новых типов не нужно. `GroupKeyRequest/Reply` переиспользуются для KeyPackage при resync. |
-| `group/lib.rs` (`Member`) | `remove(&mut, leaf_identity: &[u8;32]) -> commit`; `update_self(&mut) -> commit`; `leaf_index_of(identity)`; `process` различает **«меня удалили»** → `Incoming::SelfRemoved` и **рассинхрон эпохи** → `GroupError::EpochMismatch` (чтобы верхний слой инициировал resync, а не глотал). Обязательный `save` после каждого mutating-commit (инвариант MLS). |
-| `groupchat/lib.rs` (`GroupChat`) | `remove_member(peer)` (админ: commit → всем оставшимся); `rekey_self()`; `request_resync()` (шлёт `GroupResyncRequest` админу); обработка входящего: `SelfRemoved` → отдать наверх «drop group»; `EpochMismatch` при `handle` → авто-`request_resync()`. Админ-сторона: на `GroupResyncRequest` от пира-в-ростере → инициировать KeyPackage-обмен → `remove+add` commit. |
-| `engine/groups.rs` (`GroupManager`) | Хранить **админа группы** (creator pubkey) в `index.json` + флаг `am_admin`. Команды `remove_member(gid, peer)`, `rekey(gid)`, `leave(gid)`. События: `on_resync_request(peer, gid)`; `Incoming::SelfRemoved` → удалить группу с диска + `groups_changed` + системное сообщение. **Rate-limit resync** per (peer,gid). |
-| `engine/lib.rs` | **SEC-2:** в `sync_room_members` для группового `gid` фильтровать presence-пиров через `groups.members(gid)` (для DM — как есть). Проброс новых команд/событий. |
-| `androidjni` | `groupRemoveMember(gid, peerHex)`, `groupRekey(gid)`, `groupLeave(gid)`; новые события в `pollEvent` JSON (`group_member_removed`, `you_were_removed`, `group_resyncing`). |
-| Android UI (Compose) | **Админка группы**: список участников + «удалить» (видна только админу — `am_admin`). Системные строки «X удалён», «Вы были удалены из группы» (экран → выход в список). Resync — **тихий** (максимум хинт «синхронизация…»). Кнопка «Выйти из группы». |
+| `core/protocol.rs` | A new `Payload::GroupResyncRequest { gid: Vec<u8> }` (member → admin). Removal/rotation Commits go over the existing `Payload::Group{id,data}` — no new types needed. `GroupKeyRequest/Reply` are reused for the KeyPackage on resync. |
+| `group/lib.rs` (`Member`) | `remove(&mut, leaf_identity: &[u8;32]) -> commit`; `update_self(&mut) -> commit`; `leaf_index_of(identity)`; `process` distinguishes **"I was removed"** → `Incoming::SelfRemoved` and **epoch desync** → `GroupError::EpochMismatch` (so the upper layer starts a resync instead of swallowing it). A mandatory `save` after every mutating commit (the MLS invariant). |
+| `groupchat/lib.rs` (`GroupChat`) | `remove_member(peer)` (admin: commit → to all remaining); `rekey_self()`; `request_resync()` (sends `GroupResyncRequest` to the admin); incoming: `SelfRemoved` → report "drop group" upwards; `EpochMismatch` in `handle` → automatic `request_resync()`. Admin side: on `GroupResyncRequest` from a peer in the roster → start the KeyPackage exchange → `remove+add` commit. |
+| `engine/groups.rs` (`GroupManager`) | Store the **group admin** (creator pubkey) + an `am_admin` flag. Commands `remove_member(gid, peer)`, `rekey(gid)`, `leave(gid)`. Events: `on_resync_request(peer, gid)`; `Incoming::SelfRemoved` → delete the group from disk + `groups_changed` + a system message. **Rate-limit resync** per (peer, gid). |
+| `engine/lib.rs` | **SEC-2:** in `sync_room_members`, filter presence peers for a group `gid` through `groups.members(gid)` (DMs as before). Plumb the new commands and events. |
+| `androidjni` | `groupRemoveMember(gid, peerHex)`, `groupRekey(gid)`, `groupLeave(gid)`; new events in the `pollEvent` JSON (`group_member_removed`, `you_were_removed`, `group_resyncing`). |
+| Android UI (Compose) | **Group admin screen**: the member list + "remove" (visible to the admin only). System lines "X was removed", "You were removed from the group" (screen → back to the list). Resync is **silent** (at most a "syncing…" hint). A "Leave group" button. |
 
-## Рассмотренные варианты
+## Options considered
 
-### A. Оставить как есть (только Add), лечить пересозданием
-| Параметр | Оценка |
+### A. Leave as is (Add only), heal by re-creating
+| Parameter | Assessment |
 |---|---|
-| Сложность | Нулевая |
-| Отзыв / PCS | Нет |
-| Лечение | Пересоздать группу (теряется история/состав) |
+| Complexity | None |
+| Revocation / PCS | No |
+| Healing | Re-create the group (history and membership lost) |
 
-**Отклонено:** ровно текущая боль; MLS взят зря.
+**Rejected:** exactly the current pain; MLS would have been chosen for nothing.
 
-### B. Leaderless-отзыв (любой участник коммитит Remove/Update)
-| Параметр | Оценка |
+### B. Leaderless revocation (any member commits Remove/Update)
+| Parameter | Assessment |
 |---|---|
-| Доступность | Не зависит от админа |
-| Одновременные Commit | Часты → расхождение эпох, гонки |
-| Сложность | Высокая (нужен DAG-порядok Commit из ADR-002 **сейчас**) |
+| Availability | Does not depend on the admin |
+| Concurrent Commits | Frequent → diverging epochs, races |
+| Complexity | High (needs the ADR-002 DAG order of Commits **now**) |
 
-**Отклонено для v1.0:** удаление особенно требует единой власти — иначе «раскол
-ростера» (у половины X удалён, у половины нет). Совместить с ADR-002-DAG — post-1.0.
+**Rejected for v1.0:** removal especially needs a single authority — otherwise a "split roster"
+(X removed for half of the members, not for the other half). Combining it with the ADR-002 DAG
+— after 1.0.
 
-### C. Админ-секвенсор + resync-лечение (рекомендуется)
-Removal/rekey коммитит только админ (нет гонок); отставшие лечатся через Remove+Add;
-удаление отозванного проверяется по ростеру. Переиспользует готовые примитивы (Add,
-надёжный Group-канал, KeyPackage-обмен).
+### C. Admin sequencer + resync healing (recommended)
+Removal and rekeying are committed only by the admin (no races); laggards heal through
+Remove + Add; the removed member is checked against the roster. Reuses existing primitives
+(Add, the reliable group channel, the KeyPackage exchange).
 
-**Плюсы:** закрывает SEC-1, лечит «старые группы», разблокирует SEC-2, минимум новых
-типов протокола. **Минусы:** отзыв/ротация недоступны, пока админ офлайн (тот же
-предел доступности, что у ADR-002); нужна аккуратная обработка «меня удалили» и
-рассинхрона.
+**Pros:** closes SEC-1, heals "old groups", unblocks SEC-2, a minimum of new protocol types.
+**Cons:** revocation and rotation are unavailable while the admin is offline (the same
+availability limit as ADR-002); "I was removed" and desync need careful handling.
 
-### D. Полный BFT/консенсус по ростеру
-**Отклонено:** избыточно (как и в ADR-002) — нужна не N-сторонняя договорённость, а
-единый секвенсор + сходимость.
+### D. Full BFT / consensus on the roster
+**Rejected:** overkill (as in ADR-002) — we need not an N-party agreement but a single
+sequencer + convergence.
 
-## Размен (главное)
+## The trade-off
 
-Вариант C добавляет ~1 тип протокола (`GroupResyncRequest`), три метода в `Member`,
-их проброс по слоям и админку в UI — **умеренная сложность**. За это: реальный отзыв
-участника, восстановление PCS, и — что чинит живую боль — **самолечение отставших
-без пересоздания группы**. Админ-централизация отзыва сознательна: она убирает
-гонки Commit ценой зависимости от доступности админа (принято до post-1.0-DAG).
+Option C adds ~1 protocol type (`GroupResyncRequest`), three methods in `Member`, their
+plumbing through the layers and an admin screen in the UI — **moderate complexity**. In return:
+real member revocation, restored PCS, and — which fixes a live pain — **self-healing of laggards
+without re-creating the group**. Centralising revocation in the admin is deliberate: it removes
+Commit races at the cost of depending on the admin's availability (accepted until the post-1.0
+DAG).
 
-## Последствия
+## Consequences
 
-**Станет надёжнее / безопаснее:**
-- Отозванный теряет доступ к новым сообщениям И (через SEC-2) к звонкам группы.
-- PCS восстанавливается (по требованию + периодически).
-- Группа лечится сама — «пересоздавать» больше не нужно.
-- Ростер становится источником истины для членства в звонке (SEC-2).
+**More reliable / more secure:**
+- A revoked member loses access to new messages AND (through SEC-2) to the group's calls.
+- PCS recovers (on demand + periodically).
+- A group heals itself — "re-create it" is no longer needed.
+- The roster becomes the source of truth for call membership (SEC-2).
 
-**Станет сложнее:**
-- Обработка «меня удалили» и «я отстал» — новые состояния в `groupchat`/UI.
-- Нужно хранить и проверять «кто админ группы».
-- Resync-амплификация → обязателен rate-limit запросов.
+**Harder:**
+- Handling "I was removed" and "I fell behind" — new states in `groupchat` and the UI.
+- "Who is the group admin" must be stored and checked.
+- Resync amplification → rate-limiting requests is mandatory.
 
-**Риски и как гасим:**
-- *Админ офлайн* → отзыв/ротация ждут (задокументировать; post-1.0 DAG).
-- *Гонка Commit* при member-Update → админ коммитит предложения серийно; out-of-epoch
-  Commit отвергается получателем → авто-resync.
-- *Отозванный пытается влечиться* → resync отдаётся только пирам в текущем ростере.
-- *FS/PCS медиа звонка* → отдельно (SEC-4/security-hardening S5): в идеале A/V-ключ
-  из MLS exporter secret, тогда отзыв автоматически перекрывает и медиа.
+**Risks and how we contain them:**
+- *The admin is offline* → revocation and rotation wait (documented; post-1.0 DAG).
+- *A Commit race* on a member Update → the admin commits proposals serially; an out-of-epoch
+  Commit is rejected by the receiver → automatic resync.
+- *A revoked member tries to heal back in* → resync is served only to peers in the current roster.
+- *FS/PCS of call media* → separately (SEC-4 / security-hardening S5): ideally the A/V key comes
+  from the MLS exporter secret, and then revocation automatically covers media too.
 
 ## Action items
 
-1. [x] **`Member` (крипто-ядро) — СДЕЛАНО 2026-07-02.** `remove`, `update_self`,
-       `leaf_index_of`; `process` различает `SelfRemoved` (через `staged.self_removed()`)
-       / `Rekeyed` (только Update, без смены состава) / `MembershipChanged` и
-       возвращает `EpochMismatch` на `WrongEpoch`/`NoPastEpochData`. 3 юнит-теста
-       (revoke; rekey; missed-commit→EpochMismatch) — `cargo test -p p2p-group` 7/7 ✓.
-2. [~] **`GroupChat` — ЧАСТИЧНО 2026-07-02.** `remove_member` (Commit всем, включая
-       удаляемого — список снят ДО удаления), `rekey_self`; `handle` исчерпывающе
-       мапит новые варианты → `Inbound::{SelfRemoved, NeedsResync, None}`. Проверено
-       `cargo check -p p2p-groupchat`/`-p p2p-engine` (WSL) ✓. **Осталось:**
-       `request_resync` + админ-обработка `GroupResyncRequest` (пункт 3).
-3. [x] **Resync-протокол — СДЕЛАНО 2026-07-02.** `Payload::GroupResyncRequest` +
-       `Event` + dispatch; `request_resync` (broadcast ростеру), `on_resync_request`
-       (админ-гейт + «в ростере» + троттлинг 10с → KeyPackage-обмен, помечен re-add);
-       `on_key_reply` для resync делает Remove+Add; Welcome для известной группы =
-       тихий merge (сохраняет имя+историю). Проверено `cargo test -p p2p-core` +
-       `cargo check -p p2p-android` (WSL).
-4. [x] **`GroupManager` — СДЕЛАНО 2026-07-02.** `remove_member` (только админ, флаг
-       из `admins.json` — не ломает `index.json`), `rekey`, `is_admin`, `leave`
-       (GroupLeaveRequest → админ отзывает; иначе мягкий локальный выход) +
-       `on_leave_request`; на `Inbound::SelfRemoved` — `delete_group` + событие
-       `group_removed`; `NeedsResync` → `request_resync`. `GroupCmd::RemoveMember/
-       Rekey/Leave` + fire-and-forget. `list_json` отдаёт `admin`.
-5. [x] **SEC-2 — СДЕЛАНО 2026-07-02.** `sync_room_members` пересекает presence с
-       `group_roster_set` для групп (DM — как есть), fail-open при холодном кэше.
-6. [x] **JNI + Compose-админка — СДЕЛАНО 2026-07-02.** `groupRemoveMember`/
-       `groupRekey` + `Native.kt`; экран управления (секции УЧАСТНИКИ с kick для
-       админа + ДОБАВИТЬ); `group_removed` → Toast + выход из группы. Проверено на
-       эмуляторе (рендер, роутер участников, гейт админа). Позитивный kick — 2 девайса.
-       Мелочь: пре-существующие группы без `admins.json` показаны не-админскими.
-7. [x] **Периодический admin-rekey — СДЕЛАНО 2026-07-02.** При старте админ
-       ротирует ключ своих групп, где прошло >24ч (`rekey.json`) — катящийся PCS
-       без таймер-потока; отставшие вылечатся resync'ом.
-8. [~] Доки: SECURITY.md/threat-model/ROADMAP/security-hardening обновлены доп-
-       аудитом (SEC-*); финальную правку статусов — по факту закрытия пунктов.
+1. [x] **`Member` (crypto core) — DONE 2026-07-02.** `remove`, `update_self`, `leaf_index_of`;
+       `process` distinguishes `SelfRemoved` (via `staged.self_removed()`) / `Rekeyed` (Update
+       only, membership unchanged) / `MembershipChanged` and returns `EpochMismatch` on
+       `WrongEpoch`/`NoPastEpochData`. 3 unit tests (revoke; rekey; missed commit →
+       EpochMismatch).
+2. [x] **`GroupChat` — DONE 2026-07-02.** `remove_member` (Commit to all, including the one
+       being removed — the list is taken BEFORE removal), `rekey_self`; `handle` maps the new
+       variants exhaustively → `Inbound::{SelfRemoved, NeedsResync, None}`; `request_resync`.
+3. [x] **Resync protocol — DONE 2026-07-02.** `Payload::GroupResyncRequest` + event + dispatch;
+       `request_resync` (broadcast to the roster), `on_resync_request` (admin gate + "in the
+       roster" + a 10 s throttle → KeyPackage exchange marked as re-add); `on_key_reply` for a
+       resync does Remove + Add; a Welcome for a known group = a silent merge (keeps the name
+       and history).
+4. [x] **`GroupManager` — DONE 2026-07-02.** `remove_member` (admin only, the flag from
+       `admins.json`), `rekey`, `is_admin`, `leave` (GroupLeaveRequest → the admin revokes;
+       otherwise a soft local leave) + `on_leave_request`; on `Inbound::SelfRemoved` —
+       `delete_group` + the event `group_removed`; `NeedsResync` → `request_resync`.
+5. [x] **SEC-2 — DONE 2026-07-02.** `sync_room_members` intersects presence with the group
+       roster (DMs as before), fail-open on a cold cache.
+6. [x] **JNI + Compose admin screen — DONE 2026-07-02.** `groupRemoveMember`/`groupRekey`; a
+       management screen (MEMBERS with kick for the admin + ADD); `group_removed` → a toast +
+       leaving the group.
+7. [x] **Periodic admin rekey — DONE 2026-07-02.** At start-up the admin rotates the key of its
+       groups where more than 24 h have passed (`rekey.json`) — a rolling PCS without a timer
+       thread; laggards heal through resync.
 
-**Порядок:** 1→2→3→4 (крипто-ядро и протокол, юнит-тестируемо без устройства) →
-5 (SEC-2, дешёвый) → 6 (UI) → 7 (полировка PCS).
-
-**Статус 2026-07-03: ADR-004 РЕАЛИЗОВАН И ПРОВЕРЕН** — все пункты 1–7 закрыты; юнит-
-тесты (`p2p-group` 7/7, `p2p-core` roundtrip, loopback invite/kick/leave) + **живой
-прогон телефон↔эмулятор**: инвайт в группу (бывший блокер) работает, kick → «вы
-удалены» + выход, leave → отзыв админом — подтверждено вживую 2026-07-03.
-**Осталось:**
-- **UI/UX-полиш** группового инвайта/админки (владелец: «допиливать и допиливать») —
-  P2 completion-plan (инвайты-как-сообщения, карточка вступления, полиш админки).
-- Мелочь: пре-существующие группы без `admins.json` — не-админские (не мигрируемо).
+**Status 2026-07-03: ADR-004 IMPLEMENTED AND VERIFIED** — items 1–7 closed; unit tests
+(`p2p-group`, `p2p-core` roundtrip, loopback invite/kick/leave, `engine/tests/group_flow.rs`
+including packet loss) + **a live run phone ↔ emulator**: a group invitation (the former
+blocker) works, kick → "you were removed" + leaving, leave → revocation by the admin. Groups
+created before `admins.json` existed show up as non-admin (not migratable).

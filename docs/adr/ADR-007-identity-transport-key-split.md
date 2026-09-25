@@ -1,415 +1,394 @@
-# ADR-007: Разделение долговременной личности и транспортного ключа; управляемая ротация адреса
+# ADR-007: Separating the long-term identity from the transport key; controlled address rotation
 
-**Статус:** Proposed, **уточнён экспериментами 2026-08-01.** Ротация работает против
-флуда ТОЛЬКО в связке с короткой паузой офлайн (иначе новый узел наследует маршрутную
-позицию старого ключа); с паузой — реально сбрасывает поток. См. «Результаты
-эксперимента» и «Проверка на публичном меше».
-**Дата:** 2026-07-29 (эксперименты и уточнение — 2026-08-01)
-**Решает:** владелец проекта
-**Связано:** [N8](../architecture/threat-model.md) (входящий трафик нельзя срезать
-на прикладном уровне), [SEC-5](../architecture/security-audit-2026-07-02.md)
-(доменное разделение ключей, Low-accepted), [invariants.md](../architecture/invariants.md)
-§6 (новые ключи — только доменно), `core/src/budget.rs` (M3, ingress-бюджет).
+**Status:** Proposed 2026-07-29, **refined by experiments 2026-08-01**, implemented (see Action
+items). Rotation works against a flood ONLY together with a short offline pause (otherwise the
+new node inherits the routing position of the old key); with the pause it really stops the
+stream. See "Experiment results" and "Check on the public mesh".
+**Date:** 2026-07-29 (experiments and refinement — 2026-08-01)
+**Decided by:** project owner
+**Related:** [N8](../architecture/threat-model.md) (incoming traffic cannot be cut at the
+application layer), [SEC-5](../architecture/security-audit-2026-07-02.md) (domain separation of
+keys), [invariants.md](../architecture/invariants.md) §6 (new keys — only with domain
+separation), `core/src/budget.rs` (M3, the ingress budget).
 
-> Что такое ADR — короткая запись одного архитектурного решения: проблема,
-> варианты, выбор и чем за него платим.
+## Context (the problem)
 
-## Контекст (в чём проблема)
+Two scenarios lead to the same result — **a stream of bytes into the device that the victim
+cannot stop**:
 
-Два сценария, приводящих к одному и тому же результату — **поток байт в устройство,
-который жертва не может остановить**:
+1. **A malicious contact.** The other person modifies their client and sends packets non-stop.
+   The goal is not to read the conversation but to burn data and battery.
+2. **An address leaked by carelessness.** A contact (without ill intent) discloses the address to
+   a third party. Then the same thing, but the flooder is not even in the contact list.
 
-1. **Злонамеренный контакт.** Собеседник модифицирует клиента и шлёт пакеты без
-   остановки. Его цель — не прочитать переписку, а сжечь трафик и батарею.
-2. **Утечка адреса по неосторожности.** Контакт (без злого умысла) раскрывает адрес
-   третьему лицу. Дальше — то же самое, но флудер вообще не в списке контактов.
+What exists: the ingress budget `budget::Tier` drops packets **before decryption** — no CPU,
+battery on crypto or storage is spent; `Tier::Blocked` = `(0.0, 0.0)`, i.e. everything is cut.
+What does not: **the bytes have already reached the radio**, the mobile data is already paid for.
+In a serverless model there is no upstream to filter the stream before us, and nothing to cut the
+link with — the flooder is usually not our direct peer but a node behind the routing.
 
-Что есть сейчас: ingress-бюджет `budget::Tier` дропает пакеты **до расшифровки** —
-CPU, батарея на крипто и хранилище не тратятся; `Tier::Blocked` = `(0.0, 0.0)`, то
-есть режется всё. Чего нет: **байты уже долетели до радио**, мобильный трафик за них
-списан. В serverless-модели нет апстрима, который отфильтровал бы поток до нас, а
-разорвать линк нечем — флудер обычно не наш прямой пир, а узел за маршрутизацией.
-
-Гипотеза (июль): мера, реально останавливающая поток, — **перестать быть адресуемым
-по тому ключу**, то есть ротация. **Эксперименты 2026-08-01 её УТОЧНИЛИ:** ротация
-«на ходу» флуд не сбрасывает (новый узел наследует маршрутную позицию старого ключа),
-но ротация + короткая пауза офлайн — сбрасывает (старый ключ выпадает из дерева, слать
-некуда). Детали — в разделах «Результаты эксперимента» и «Проверка на публичном меше».
-Отдельный вопрос — почему ротация ДОРОГА и как её удешевить; он и есть предмет этого
-ADR. Итак, цена ротации сегодня:
+Hypothesis (July): the measure that really stops the stream is **to stop being addressable by
+that key**, i.e. rotation. **The 2026-08-01 experiments REFINED it:** rotation "on the fly" does
+not stop a flood (the new node inherits the routing position of the old key), but rotation + a
+short offline pause does (the old key drops out of the tree and there is nowhere to send to).
+Details in "Experiment results" and "Check on the public mesh". A separate question — why
+rotation is EXPENSIVE and how to make it cheap — is the subject of this ADR. The cost of rotation
+at the time:
 
 ```
-один ed25519-seed  →  адрес Yggdrasil (iwt.Addr(pub), ygg.go)
-                   →  fingerprint (8 слов BIP39, QR-верификация)
-                   →  MLS credential (членство в группах)
-                   →  идентичность контакта в contacts-store
+one ed25519 seed  →  the Yggdrasil address (iwt.Addr(pub), ygg.go)
+                  →  the fingerprint (then 8 BIP39 words; now a visual grid), QR verification
+                  →  the MLS credential (group membership)
+                  →  the contact identity in the contacts store
 ```
 
-`Node::start(&identity.seed())` ([engine/src/lib.rs](../../engine/src/lib.rs)) —
-адрес и личность это буквально одно и то же. Поэтому смена адреса = смена личности:
-сбрасываются все верификации, рвётся членство во всех MLS-группах, контакты видят
-«новый незнакомый человек». Аварийный выход, а не инструмент.
+`Node::start(&identity.seed())` ([engine/src/lib.rs](../../engine/src/lib.rs)) — the address and
+the identity were literally the same thing. So changing the address = changing the identity: all
+verifications reset, membership in every MLS group breaks, and contacts see "a new unknown
+person". An emergency exit, not a tool.
 
-### Разобранное предложение: отдельный адрес на каждый контакт
+### A proposal examined: a separate address per contact
 
-Владелец предложил: раз IPv6-адресов квадриллионы, выдавать каждому контакту свой
-адрес — тогда компрометируется ровно один канал, и менять надо только его.
+The owner proposed: since there are quadrillions of IPv6 addresses, give each contact its own
+address — then exactly one channel is compromised, and only it needs changing.
 
-Идея разобрана и **отклонена в исходном виде** — по трём причинам:
+The idea was examined and **rejected in its original form** — for three reasons:
 
-- **Не уменьшает байты.** Все N адресов живут на одном устройстве за одним радио.
-  Флуд по адресу Боба проходит меш и будит то же радио; мы дропаем его дешевле, но
-  платим за трафик ровно столько же. Главная боль сценария не снимается.
-- **Цена умножается на N.** Адрес = функция ключа (`iwt.Addr(ed25519.PublicKey)`),
-  значит N адресов = **N узлов Yggdrasil**: у каждого свои TLS-сессии с публичными
-  пирами, своё участие в дереве, свои keepalive. 20 контактов = ×20 фонового трафика
-  и пробуждений на телефоне — дороже самой атаки.
-- **Развязка частичная.** Оператор публичного пира видит все личности с одного IP:
-  от контактов ты развязан, от сети — нет.
+- **It does not reduce the bytes.** All N addresses live on one device behind one radio. A flood
+  to Bob's address crosses the mesh and wakes the same radio; we drop it more cheaply, but pay
+  exactly the same for the traffic. The main pain of the scenario remains.
+- **The cost multiplies by N.** An address is a function of a key (`iwt.Addr(ed25519.PublicKey)`),
+  so N addresses = **N Yggdrasil nodes**: each with its own TLS sessions to public peers, its own
+  participation in the tree, its own keepalives. 20 contacts = ×20 background traffic and wake-ups
+  on a phone — more expensive than the attack itself.
+- **The separation is partial.** The operator of a public peer sees all the identities from one
+  IP: you are separated from contacts, not from the network.
 
-Но **ценное зерно в предложении есть**: локализация ущерба. «Скомпрометирован один
-канал — чиню один канал» — правильная цель. Оказывается, её можно получить без N
-узлов.
+But **there is a valuable seed in the proposal**: containing the damage. "One channel is
+compromised — I fix one channel" is the right goal. It turns out it can be had without N nodes.
 
-## Решение
+## Decision
 
-Развести **долговременную личность** и **транспортный ключ**.
+Separate the **long-term identity** from the **transport key**.
 
-### 1. Два ключа вместо одного
+### 1. Two keys instead of one
 
 | | **IK — identity key** | **TK — transport key** |
 |---|---|---|
-| Что это | ed25519 из seed/мнемоники | ключ узла Yggdrasil = адрес |
-| Живёт | вечно, не ротируется | расходник, ротируется по требованию |
-| На нём | fingerprint, QR-верификация, MLS credential, запись контакта, подпись | только адресация и маршрутизация |
+| What | ed25519 from the seed/mnemonic | the Yggdrasil node key = the address |
+| Lives | forever, never rotated | consumable, rotated on demand |
+| Carries | fingerprint, QR verification, MLS credential, contact record, signatures | only addressing and routing |
 
-TK выводится доменно из того же seed — по счётчику эпох:
+TK is derived from the same seed with domain separation — by an epoch counter:
 
 ```
-TK_n = Identity::derive_subkey("dev.p2p.transport.v1/" + n)     // BLAKE3-KDF
+TK_n = Identity::derive_subkey("dev.p2p.transport.v1/" + n)     // BLAKE3 KDF
 ```
 
-Детерминированность важна: восстановление из мнемоники продолжает работать (seed +
-номер эпохи = тот же адрес), новый секрет хранить не надо. Согласуется с инвариантом
-§6 «новые ключи — только доменно».
+Determinism matters: restoring from the mnemonic keeps working (seed + epoch number = the same
+address), and no new secret has to be stored. Consistent with invariant §6 "new keys — only with
+domain separation".
 
-**Эпоха 0 — это текущий ключ** (`TK_0 == IK`). Существующие установки не мигрируют:
-пока пользователь не ротировал адрес, всё в точности как сегодня.
+**Epoch 0 is the current key** (`TK_0 == IK`). Existing installations do not migrate: until the
+user rotates the address, everything is exactly as before.
 
-### 2. Объявление нового адреса подписано IK
+### 2. The announcement of a new address is signed by the IK
 
 ```rust
 Payload::TransportRotate { epoch: u32, transport_pub: [u8; 32], sig: [u8; 64] }
 // sig = IK.sign(domain || epoch || transport_pub)
 ```
 
-Контакт принимает объявление, **только если подпись проверяется тем IK, который у
-него уже есть**, и если `epoch > известной`. Это закрывает очевидный вектор («привет,
-я новый ключ Алисы») и replay/downgrade. Запись контакта хранит `(IK, TK, epoch)`;
-отправка резолвит IK → TK.
+A contact accepts the announcement **only if the signature verifies against the IK it already
+has**, and if `epoch > the known one`. That closes the obvious vector ("hi, I am Alice's new
+key") and replay/downgrade. The contact record stores `(IK, TK, epoch)`; sending resolves
+IK → TK.
 
-Размер — бакет **APP 4 КБ**, а не CONTROL (так задумывалось изначально): одна подпись
-занимает 64 Б, плюс ключ — в потолок 256 Б это не влезает. Побочно вышло даже лучше:
-среди прикладных сообщений объявление неотличимо от обычного текста или картинки,
-поэтому флудер не видит по проводу момент, когда жертва уходит на новый адрес.
+Size — the **APP bucket of 4 KiB**, not CONTROL (as originally intended): a signature alone takes
+64 B, plus the key — it does not fit under the 256-byte ceiling. It turned out even better: among
+application messages the announcement is indistinguishable from ordinary text or an image, so the
+flooder cannot see on the wire the moment the victim moves to a new address.
 
-### 3. Здесь живёт идея владельца: per-contact ACL на рассылку
+### 3. Where the owner's idea lives: a per-contact ACL for the announcement
 
-Ротация — не broadcast «всем». Пользователь выбирает, **кто получит новый адрес**.
-Слил Боб — ротируем и рассылаем всем, **кроме Боба**. Результат тот же, что у
-отдельного адреса на контакт:
+Rotation is not a broadcast "to everyone". The user chooses **who gets the new address**. Bob
+leaked it — we rotate and send it to everyone **except Bob**. The result is the same as with a
+separate address per contact:
 
-- у Боба остаётся мёртвый адрес, он теряет связь с нами;
-- остальные контакты не заметили ничего — верификации, история, группы целы;
-- узел по-прежнему один: keepalive и батарея не умножаются на число контактов.
+- Bob is left with a dead address and loses contact with us;
+- the other contacts notice nothing — verifications, history and groups are intact;
+- there is still one node: keepalives and battery do not multiply by the number of contacts.
 
-Отличие от исходной идеи: компартментализация не постоянная (N каналов всегда), а
-**по требованию** (один канал, но дёшево пересоздаётся с выборочным оповещением).
-Плата за это — при каждой ротации адрес меняется у всех, а не у одного; выигрыш —
-цена ротации падает с «потерять личность» до «разослать 200-байтное объявление».
+The difference from the original idea: the compartmentalisation is not permanent (N channels
+always) but **on demand** (one channel, cheaply re-created with selective notification). The price
+— at each rotation the address changes for everyone, not for one; the gain — the cost of rotation
+drops from "lose the identity" to "send a 200-byte announcement".
 
-### 4. Переходный период для офлайн-контактов
+### 4. A transition period for offline contacts
 
-Контакт, отсутствовавший дольше TTL офлайн-очереди, объявления не увидит и потеряет
-связь навсегда. Смягчение: **старый узел живёт параллельно T дней** (кандидат:
-7 суток, как TTL очереди), но с бюджетом `Tier::Stranger` — то есть флуд по нему
-режется, а редкое «я вернулся» проходит и получает объявление. По истечении T старый
-TK гасится окончательно.
+A contact absent longer than the outbox lifetime would not see the announcement and would lose the
+connection forever. The originally proposed mitigation: **keep the old node alive in parallel for
+T days**, with a `Tier::Stranger` budget. Rejected later — see Action item 8a.
 
-Цена честная: во время грейс-периода на устройстве два узла (×2 keepalive), а флудер
-всё это время продолжает жечь наш трафик по старому адресу. Поэтому грейс должен
-быть **отключаемым**: «меня флудят прямо сейчас» — ротация без грейса.
+## Options considered
 
-## Рассмотренные варианты
-
-| Вариант | Почему не он |
+| Option | Why not |
 |---|---|
-| **A. Отдельный адрес на каждый контакт** (исходное предложение) | N узлов Yggdrasil на телефоне: ×N keepalive и пробуждений; байты до радио всё равно доходят; развязка только от контактов, не от сети. **Не отброшен совсем:** после разделения IK/TK это становится естественным расширением (несколько TK одновременно) — разумно для десктопа/всегда-включённого узла, где цена узла мала. Записано как post-ADR опция «персоны». |
-| **B. Глобальная ротация без разделения ключей** (сегодняшний N8) | Работает, но сбрасывает верификации и рвёт членство в MLS-группах → годится как аварийный выход, а не инструмент. Именно это ADR и удешевляет. |
-| **C. Личный релей впереди устройства** | Единственная конструкция, где фильтрация происходит **до** нашего радио. Ортогональна этому ADR и совместима с ним, но требует всегда-включённого узла → не может быть базовым решением в serverless-модели. Остаётся опцией для тех, кому DoS-устойчивость важнее чистоты модели. |
-| **D. Ничего не менять, полагаться на `budget::Tier`** | Статус-кво: экономит CPU/батарею/хранилище, но не трафик. Дешёвое усиление (см. Action items 1) делаем в любом случае, оно не конкурирует с этим ADR. |
-| **E. Ротация «канала» на прикладном уровне (без смены TK)** | Бессмысленно: флудер бьёт по ключу узла, а не по прикладному идентификатору. Как только адрес известен, прикладная ротация не меняет ничего. |
+| **A. A separate address per contact** (the original proposal) | N Yggdrasil nodes on a phone: ×N keepalives and wake-ups; the bytes still reach the radio; separation only from contacts, not from the network. **Not dropped completely:** after the IK/TK split it becomes a natural extension (several TKs at once) — reasonable for a desktop or an always-on node where a node is cheap. Recorded as a post-ADR option, "personas". |
+| **B. Global rotation without separating keys** (the old N8) | Works, but resets verifications and breaks MLS group membership → fit as an emergency exit, not a tool. This ADR is exactly what makes it cheap. |
+| **C. A personal relay in front of the device** | The only construction where filtering happens **before** our radio. Orthogonal to this ADR and compatible with it, but it needs an always-on node → cannot be the base solution in a serverless model. Remains an option for those to whom DoS resistance matters more than purity of the model. |
+| **D. Change nothing, rely on `budget::Tier`** | The status quo: saves CPU, battery and storage, but not traffic. The cheap hardening (Action item 1) is done anyway; it does not compete with this ADR. |
+| **E. Rotating a "channel" at the application layer (without changing the TK)** | Pointless: the flooder hits the node key, not an application identifier. Once the address is known, application-level rotation changes nothing. |
 
-## Размен (главное)
+## The trade-off
 
-**Получаем:** ротация адреса перестаёт стоить личности; ущерб от утёкшего адреса
-локализуется одним контактом; сохраняются fingerprint, верификации и членство в
-группах; одна точка правды об адресации.
+**We get:** address rotation stops costing the identity; the damage from a leaked address is
+contained to one contact; fingerprint, verifications and group membership survive; one source of
+truth for addressing.
 
-**Платим:**
-- по всему коду разъезжается допущение «ключ пира = адрес = личность»: адресация
-  (`messenger`), contacts-store, gate, outbox, ростер MLS (членство по IK, отправка
-  по TK), присутствие в комнатах, блобы;
-- QR-обмен несёт две величины (IK + текущий TK) — формат меняется;
-- ingress-бюджет на входе знает только TK: до сопоставления с IK незнакомец режется
-  как `Stranger` (это и сейчас так, но теперь это осознанная граница);
-- грейс-период = два узла на устройстве;
-- одновременная ротация у обеих сторон, пока обе офлайн, = разрыв связи. Гасится
-  редкостью операции (ручная, не рутинная) + грейсом + ретрансляцией объявления
-  через релей уведомлений (A5), если он включён.
+**We pay:**
+- the assumption "peer key = address = identity" unravels across the code: addressing
+  (`messenger`), the contacts store, the gate, the outbox, the MLS roster (membership by IK,
+  sending by TK), room presence, blobs;
+- the QR exchange carries two values (IK + the current TK) — the format changes;
+- the ingress budget on input knows only the TK: before it is matched to an IK, a stranger is cut
+  as `Stranger` (true before too, but now a conscious boundary);
+- a simultaneous rotation by both sides while both are offline = a lost connection. Mitigated by
+  how rare the operation is (manual, not routine) and by catching up via presence.
 
-## Результаты эксперимента (2026-08-01) — линейный стенд (перезаход БЕЗ паузы)
+## Experiment results (2026-08-01) — a linear bench (reconnecting WITHOUT a pause)
 
-> **Читать вместе со следующим разделом.** Этот стенд ставил жертву обратно в сеть
-> почти сразу (gap≈0). В таком режиме ротация флуд не сбрасывает — что и видно ниже.
-> Публичный прогон (следующий раздел) показал: с паузой офлайн ~30 с вывод
-> переворачивается. Так что «флудер не останавливается» ниже — про режим gap≈0, а не
-> общий закон.
+> **Read together with the next section.** This bench put the victim back on the network almost
+> immediately (gap ≈ 0). In that mode rotation does not stop a flood — as seen below. The public
+> run (next section) showed that with an offline pause of ~30 s the conclusion flips. So "the
+> flooder does not stop" below is about the gap ≈ 0 mode, not a general law.
 
-Стенд: `transport/examples/flood_rotation.rs` (`bash scripts/run-flood-rotation.sh`).
-Три настоящих узла Yggdrasil 0.5.13 в линию **A (флудер) → R (транзит) → B (жертва)**,
-прямого линка A↔B нет. Мерило — накопительные `rx_bytes`/`tx_bytes` линков
-(для этого в `ygg_peers_json` добавлены счётчики байт: сглаженные `*_rate` на границах
-фаз врут). База меряется ПОСЛЕ рукопожатия: сессия ironwood завершается только при
-двустороннем обмене, иначе «базой» окажется недоставляемый поток.
+Bench: `transport/examples/flood_rotation.rs` (`bash scripts/run-flood-rotation.sh`). Three real
+Yggdrasil 0.5.13 nodes in a line **A (flooder) → R (transit) → B (victim)**, no direct A↔B link.
+The measure is the cumulative `rx_bytes`/`tx_bytes` of the links (byte counters were added to
+`ygg_peers_json` for this: smoothed `*_rate` values lie at phase boundaries). The baseline is
+measured AFTER the handshake: an ironwood session completes only with a two-way exchange,
+otherwise the "baseline" would be an undeliverable stream.
 
-Поток 400 пкт/с × 1 КБ ≈ 423 КБ/с, окно замера 12 с.
+Stream 400 packets/s × 1 KB ≈ 423 KB/s, a 12 s measurement window.
 
-| Что мерили | База (жертва со старым ключом) | После ротации (жертва онлайн с новым ключом) | После ухода жертвы из сети |
+| Measured | Baseline (victim with the old key) | After rotation (victim online with a new key) | After the victim left the network |
 |---|---|---|---|
-| A отдаёт в сеть | 5081 КБ (423 КБ/с) | **5081 КБ (100 %)** | **5388 КБ (106 %)** |
-| приходит в линк жертвы | 5081 КБ | **5081 КБ (100 %)** | — (линка нет) |
-| дошло до приложения жертвы | 4620 пакетов | **0** | 0 |
-| жертва отдаёт в ответ | — | **316 КБ (≈6 % потока)** | — |
-| транзит R | пересылает всё вниз | пересылает всё вниз **новому узлу** | поглощает всё сам |
+| A sends into the network | 5081 KB (423 KB/s) | **5081 KB (100 %)** | **5388 KB (106 %)** |
+| arrives on the victim's link | 5081 KB | **5081 KB (100 %)** | — (no link) |
+| reached the victim's application | 4620 packets | **0** | 0 |
+| the victim sends back | — | **316 KB (≈6 % of the stream)** | — |
+| transit R | forwards everything down | forwards everything down **to the new node** | absorbs everything itself |
 
-**Выводы:**
+**Conclusions:**
 
-1. **Флудер не останавливается.** Узел A продолжает отдавать 100 % байт в сеть и
-   после исчезновения ключа-получателя, и после полного ухода жертвы. `write()`
-   принимает все пакеты. Никакой обратной связи «адресат недостижим», которая
-   заставила бы его замолчать, транспорт не даёт. Ожидание «поток умирает на стороне
-   флудера» — **неверно**.
-2. **Ротация не экономит трафик жертвы.** Пока жертва в сети (пусть и под новым
-   ключом), её сосед по мешу продолжает слать ей поток, адресованный мёртвому ключу:
-   в линк приходит 100 % базы. Радио и мобильный трафик оплачиваются полностью.
-3. **Ротация гарантированно даёт ровно одно:** прикладная доставка прекращается
-   (0 пакетов в приложении вместо 4620). Но это же, дешевле и без смены адреса, даёт
-   ingress-бюджет `Tier::Blocked` — он дропает до расшифровки.
-4. **Жертва ещё и платит исходящим:** под чужим потоком её узел отдаёт ~6 % объёма
-   обратно (служебный трафик маршрутизации). То есть флуд стоит ей и upload.
-5. **Байты гасит тот, кто ниже по маршруту.** Когда жертвы в сети нет, весь поток
-   съедает транзит R — довод за «личный релей» (узел ПЕРЕД устройством).
-   **Но:** публичный прогон показал и второй путь погасить поток без релея — уход
-   офлайн, после которого старый ключ выпадает из дерева и слать некуда (см. ниже).
+1. **The flooder does not stop.** Node A keeps sending 100 % of the bytes into the network both
+   after the recipient key disappears and after the victim leaves entirely. `write()` accepts every
+   packet. The transport gives no "destination unreachable" feedback that would make it go quiet.
+   The expectation "the stream dies on the flooder's side" is **wrong**.
+2. **Rotation does not save the victim's traffic.** While the victim is on the network (even under
+   a new key), its mesh neighbour keeps sending it the stream addressed to the dead key: 100 % of
+   the baseline arrives on the link. The radio and the mobile data are paid in full.
+3. **Rotation guarantees exactly one thing:** application delivery stops (0 packets in the app
+   instead of 4620). But the ingress budget `Tier::Blocked` gives the same, cheaper and without
+   changing the address — it drops before decryption.
+4. **The victim also pays in upload:** under someone else's stream its node sends ~6 % of the
+   volume back (routing service traffic).
+5. **The bytes are absorbed by whoever is further down the route.** When the victim is not on the
+   network, transit R eats the whole stream — an argument for a "personal relay" (a node IN FRONT
+   of the device). **But:** the public run showed a second way to kill the stream without a relay
+   — going offline, after which the old key drops out of the tree and there is nowhere to send to
+   (below).
 
-**Проверка на публичном меше (2026-08-01) — вывод УТОЧНИЛСЯ, ротация частично
-реабилитирована.** Проверено на НАСТОЯЩЕМ Yggdrasil: `transport/examples/flood_pubmesh.rs`,
-узлы A и B входят в глобальную сеть через публичные пиры, прямого линка нет, маршрут
-строит реальное дерево. Темп щадящий (50 пкт/с) — через чужую волонтёрскую
-инфраструктуру. Контроль: приём нового узла меряется с ВЫКЛЮЧЕННЫМ и включённым флудом
-(линки ловят и чужой транзит, без контроля цифра ни о чём). Решающим оказался параметр,
-который линейный стенд не изолировал: **сколько узел жертвы держится ПОЛНОСТЬЮ офлайн**
-между гашением старого ключа и входом под новым (`--gap`).
+**Check on the public mesh (2026-08-01) — the conclusion was REFINED, rotation partly
+rehabilitated.** Tested on the REAL Yggdrasil: `transport/examples/flood_pubmesh.rs`, nodes A and
+B join the global network through public peers, no direct link, the route is built by the real
+tree. A gentle rate (50 packets/s) — through someone else's volunteer infrastructure. Control: the
+new node's intake is measured with the flood OFF and ON (links also catch unrelated transit;
+without a control the number means nothing). The decisive parameter was one the linear bench did
+not isolate: **how long the victim's node stays COMPLETELY offline** between shutting down the old
+key and coming back under the new one (`--gap`).
 
-| Пауза офлайн | флудер A отдаёт в сеть | доходит до нового узла | итог |
+| Offline pause | flooder A sends into the network | reaches the new node | result |
 |---|---|---|---|
-| ~5 с (мгновенный перезаход), общие пиры | полный объём | **89 % влитого** | ротация НЕ спасает |
-| ~5 с, непересекающиеся пиры | полный объём | **88 %** | разные пиры не помогают |
-| **30 с** | **~0 (1 КБ за 12 с)** | **0** | флуд СБРОШЕН |
-| **60 с** | **~0** | **0** | флуд СБРОШЕН |
-| **120 с** | **~0** | **0** | флуд СБРОШЕН |
+| ~5 s (instant reconnect), shared peers | full volume | **89 % of the injected** | rotation does NOT help |
+| ~5 s, disjoint peers | full volume | **88 %** | different peers do not help |
+| **30 s** | **~0 (1 KB in 12 s)** | **0** | flood STOPPED |
+| **60 s** | **~0** | **0** | flood STOPPED |
+| **120 s** | **~0** | **0** | flood STOPPED |
 
-Два режима:
+Two modes:
 
-- **Мгновенный перезаход (gap≈0–5 с).** Маршрутная информация о старом ключе в дереве
-  ещё жива; новый узел, подключившись, наследует её позицию — пакеты на старый ключ
-  садятся на него (88–89 %). Разные публичные пиры не спасают: флуд идёт за ключом
-  назначения, а не за точкой входа. Это и совпало с линейным стендом (там новый узел
-  мгновенно перезаходил на тот же транзит) — то есть линейный «100 %» был случаем
-  gap≈0, а не общим правилом.
-- **Уход офлайн на ~30 с и дольше.** Старый ключ **выпадает из дерева маршрутизации**,
-  и флудер физически перестаёт слать: его вывод в сеть падает с полного объёма до ~0
-  (`write()` уходит в никуда — маршрута к исчезнувшему ключу нет ни у кого). Порог
-  быстрее `sessionTimeout` ironwood (60 с): дело не в тайм-ауте сессии, а в истечении
-  анонса ключа в дереве.
+- **Instant reconnect (gap ≈ 0–5 s).** Routing information about the old key is still alive in the
+  tree; the new node, once connected, inherits its position — packets to the old key land on it
+  (88–89 %). Different public peers do not help: the flood follows the destination key, not the
+  entry point. This matches the linear bench (where the new node instantly reconnected to the same
+  transit) — so the linear "100 %" was the gap ≈ 0 case, not a general rule.
+- **Going offline for ~30 s or longer.** The old key **drops out of the routing tree**, and the
+  flooder physically stops sending: its output falls from full volume to ~0 (`write()` goes nowhere
+  — nobody has a route to the vanished key). The threshold is faster than ironwood's
+  `sessionTimeout` (60 s): it is not the session timeout but the expiry of the key's announcement
+  in the tree.
 
-Ключевое: **в Yggdrasil нельзя маршрутизировать к ключу, которого нет в сети** — это
-свойство протокола, а не вежливость клиента. Модифицированный клиент атакующего обойти
-это не может: заставить меш проложить маршрут к отсутствующему ключу нельзя. Значит
-**ротация + короткая пауза офлайн + не-сообщение нового ключа флудеру** (тот самый
-per-contact ACL) реально останавливают поток — в том числе уже установленную сессию
-злонамеренного контакта.
+The key point: **Yggdrasil cannot route to a key that is not in the network** — a property of the
+protocol, not the client's politeness. The attacker's modified client cannot get around it: the
+mesh cannot be made to build a route to an absent key. So **rotation + a short offline pause + not
+giving the new key to the flooder** (the per-contact ACL) really stop the stream — including an
+already established session of a malicious contact.
 
-### Побочная находка: молчание получателя блокирует прикладную доставку
+### A side finding: a silent receiver blocks application delivery
 
-Стенд `transport/examples/silent_victim.rs`: отправитель льёт 5 пкт/с, приложение
-получателя только читает и не пишет **ни одного** пакета. Результат — за 200 секунд
-доставлено **ноль**. Механизм (ironwood `encrypted/session.go`, разобран по коду):
+Bench `transport/examples/silent_victim.rs`: the sender pours 5 packets/s, the receiving
+application only reads and writes **not a single** packet. Result — **zero** delivered in 200
+seconds. The mechanism (ironwood `encrypted/session.go`, analysed from the code):
 
-1. Отправитель без сессии **не кладёт полезную нагрузку в сеть вовсе**: она уходит в
-   буфер (хранится только ПОСЛЕДНЕЕ сообщение), а в провод идёт `sessionInit` ≈200 Б.
-   Замерено: 250 Б на попытку записи при 500 Б нагрузки.
-2. Получатель на первый init заводит сессию с `seq = init.seq` — и тут же отбрасывает
-   этот же init проверкой `init.seq <= info.seq`, **не отправив ack**.
-3. `init.seq` — unix-время с точностью до секунды, а `buf.init` создаётся один раз на
-   буфер. Буфер живёт `sessionTimeout = 1 минуту`, но **таймер сбрасывается на каждой
-   записи** — у непрерывно шлющего он не протухает никогда. Значит отправитель вечно
-   повторяет один и тот же init, а получатель вечно его игнорирует.
-4. Тупик размыкается двумя способами: приложение получателя пишет в ответ (сессия у
-   него уже есть → traffic → отправитель отвечает свежим init → seq новее → ack) либо
-   отправитель делает паузу дольше минуты.
+1. A sender without a session **does not put the payload on the network at all**: it goes into a
+   buffer (only the LAST message is kept), and a `sessionInit` of ≈200 B goes on the wire.
+   Measured: 250 B per write attempt with a 500 B payload.
+2. On the first init the receiver creates a session with `seq = init.seq` — and immediately
+   discards that same init by the check `init.seq <= info.seq`, **without sending an ack**.
+3. `init.seq` is unix time to the second, and `buf.init` is created once per buffer. The buffer
+   lives `sessionTimeout = 1 minute`, but **the timer is reset on every write** — for a
+   continuously sending peer it never expires. So the sender repeats the same init forever, and the
+   receiver ignores it forever.
+4. The deadlock is broken in two ways: the receiving application writes back (it already has a
+   session → traffic → the sender replies with a fresh init → newer seq → ack), or the sender pauses
+   for more than a minute.
 
-**Что это значит.** Непрерывный флудер не может доставить молчащему получателю ни
-одного прикладного пакета — гейт контактов подпирается транспортом. Но:
+**What it means.** A continuous flooder cannot deliver a single application packet to a silent
+receiver — the contact gate is propped up by the transport. But:
 
-- **на трафик это не влияет**: 250 Б на попытку всё равно долетают до жертвы, DoS по
-  байтам работает и здесь;
-- **это деталь реализации, а не гарантия протокола.** В шапке `session.go` висит TODO
-  ровно про эту область (сохранять приватные ключи посланных init'ов / отвечать ack на
-  ack). Строить на этом защиту нельзя, при обновлении ironwood — перепроверять
+- **it does not affect traffic**: 250 B per attempt still reach the victim; a DoS by bytes works
+  here too;
+- **it is an implementation detail, not a protocol guarantee.** The header of `session.go` has a
+  TODO about exactly this area (keep the private keys of sent inits / answer an ack with an ack).
+  Nothing may be built on it; re-check on every ironwood update
   (`cargo run -p p2p-ygg --example silent_victim`).
 
-## Ревизия решения после экспериментов
+## Revision of the decision after the experiments
 
-Итоговая картина после публичного прогона: разделение IK/TK — **и компартментализация,
-и работающая анти-DoS мера, но с обязательным условием — паузой офлайн**.
+The overall picture after the public run: the IK/TK split is **both compartmentalisation and a
+working anti-DoS measure, but with a mandatory condition — an offline pause**.
 
-- ✓ **Ротация СБРАСЫВАЕТ флуд — при короткой паузе офлайн.** Уточнение к июльскому
-  «единственная мера, останавливающая поток»: без паузы (перезаход на ходу) новый узел
-  наследует маршрутную позицию старого ключа и продолжает получать флуд; но если уйти
-  офлайн на ~30 с, старый ключ выпадает из дерева и слать на него становится некуда —
-  флудер физически замолкает. Работает и против уже установленной сессии
-  злонамеренного контакта, потому что маршрут к отсутствующему ключу не проложить.
-  Условия: (а) пауза офлайн; (б) новый ключ не сообщён флудеру (per-contact ACL).
-- ✓ **Компартментализация.** Утёкший адрес перестаёт быть способом ДОСТУЧАТЬСЯ до нас,
-  контакты при этом не теряются, верификации и группы целы. Ответ на «друг слил адрес».
-- ✓ **Развязка личности и адреса** как гигиена (SEC-5) и предпосылка для будущих
-  «персон» (несколько TK на всегда-включённом узле).
-- ⚠ **Цена, которую честно назвать в UX:** ротация против флуда = «уйти офлайн на
-  ~минуту, вернуться под новым адресом, разослать его всем контактам, КРОМЕ источника
-  флуда». Не мгновенно и не бесплатно (при устойчивой атаке — раунд за раундом), но это
-  РАБОТАЮЩИЙ выход силами самого устройства, без апстрима. Плюс: во время паузы жертва
-  и так офлайн — за флуд в этот момент не платит.
-- ~~↑ **Повышен в приоритете:** личный релей (вариант C).~~ **НЕ в 1.0 (решение
-  владельца, 2026-08-01).** Эксперимент показал, где гибнут байты — на узле ПЕРЕД
-  жертвой, то есть отсечь поток до радио может только кооперативный сосед. Но
-  промежуточный фильтрующий узел — это ровно тот апстрим, ради отказа от которого
-  проект и существует; тащить его в 1.0 не будем. Идея остаётся записанной на будущее
-  (в т.ч. частный случай «подсказка доверенным соседям: этот ключ мёртв» — работает
-  лишь с пирами на нашем софте), но как post-1.0 опция, не как план.
-- ↑ **Повышено:** честный UX флуда. Пользователь обязан видеть, что его флудят, и
-  иметь два выхода: «уйти в офлайн» (перестать платить прямо сейчас) и «сменить
-  адрес» (пауза офлайн → новый TK → рассылка всем, кроме источника флуда).
+- ✓ **Rotation STOPS a flood — with a short offline pause.** Without the pause (reconnecting on the
+  fly) the new node inherits the routing position of the old key and keeps receiving the flood; but
+  after going offline for ~30 s the old key drops out of the tree and there is nowhere to send to —
+  the flooder physically goes quiet. It works even against an already established session of a
+  malicious contact, because a route to an absent key cannot be built. Conditions: (a) an offline
+  pause; (b) the new key is not given to the flooder (the per-contact ACL).
+- ✓ **Compartmentalisation.** A leaked address stops being a way to REACH us, while contacts are not
+  lost, and verifications and groups survive. The answer to "a friend leaked my address".
+- ✓ **Separating identity and address** as hygiene (SEC-5) and a prerequisite for future "personas"
+  (several TKs on an always-on node).
+- ⚠ **The cost to name honestly in the UX:** rotation against a flood = "go offline for about a
+  minute, come back under a new address, send it to all contacts EXCEPT the source of the flood".
+  Not instant and not free (under a persistent attack — round after round), but a WORKING way out
+  with the device's own means, without an upstream. And during the pause the victim is offline
+  anyway — it does not pay for the flood at that moment.
+- ~~↑ **Raised in priority:** a personal relay (option C).~~ **NOT in 1.0 (owner's decision,
+  2026-08-01).** The experiment showed where the bytes die — on the node BEFORE the victim, i.e.
+  only a cooperative neighbour can cut the stream before the radio. But an intermediate filtering
+  node is exactly the upstream the project exists to avoid; we will not bring it into 1.0. The idea
+  stays recorded for the future (including the special case "a hint to trusted neighbours: this key
+  is dead" — which works only with peers running our software), as a post-1.0 option, not a plan.
+- ↑ **Raised:** an honest flood UX. The user must see that they are being flooded and have two ways
+  out: "go offline" (stop paying right now) and "change address" (offline pause → new TK → send to
+  everyone except the source of the flood).
 
-Итого: разделение ключей — не просто рефакторинг, а основа работающего ответа на флуд
-силами устройства (ротация + пауза офлайн + селективная рассылка). Приоритет: сперва
-дешёвое усиление приёма и UX (пункт 1), затем — само разделение (пункты 2–9). Релей в
-1.0 сознательно НЕ входит, и теперь это не потеря: устройство может оборвать поток
-само, пусть и ценой минутного офлайна и пере-рассылки адреса.
+In sum: the key split is not just a refactoring but the basis of a working answer to a flood with
+the device's own means (rotation + an offline pause + selective notification). Priority: first the
+cheap receive-path hardening and UX (item 1), then the split itself (items 2–9). A relay is
+deliberately NOT in 1.0, and that is no longer a loss: the device can cut off the stream itself,
+at the cost of a minute offline and re-sending the address.
 
 ## Action items
 
-0. [x] **Эксперименты выполнены 2026-08-01.** Итог: ротация «на ходу» флуд не
-       сбрасывает, ротация + пауза офлайн ~30 с — сбрасывает (старый ключ выпадает из
-       дерева, слать некуда). Стенды в репозитории: `flood_rotation.rs` (линия,
-       `bash scripts/run-flood-rotation.sh`), `flood_pubmesh.rs` (настоящий меш,
-       `bash scripts/run-flood-pubmesh.sh --gap N`), `silent_victim.rs` (поведение
-       сессии при молчащем получателе).
-1a. [ ] **Учесть в реализации ротации (пункт 5):** ротация против флуда обязана
-       включать паузу офлайн (гашение старого TK → выждать истечение анонса в дереве →
-       поднять новый TK), иначе новый узел унаследует поток на старый ключ.
-1. [ ] **Дешёвое усиление, независимое от ADR** (можно делать сразу):
-       - дроп по ключу источника **внутри libygg**, до пересечения FFI;
-       - убрать аллокацию 64 КБ на каждую входящую датаграмму (`ygg_read`);
-       - детектор флуда → авто-`Blocked` + честный экран «вас флудит X, N пкт/с» с
-         выбором: уйти в офлайн (единственный способ перестать платить за трафик)
-         или ротировать адрес;
-       - гард на мобильной (metered) сети.
-2. [x] **`Identity` — СДЕЛАНО 2026-08-01.** `transport_seed(epoch)`/`transport_public`
-       через `derive_subkey`; `TK_0 == IK` (миграции не нужно);
-       `sign_transport_rotate` + свободная `verify_transport_rotate` (домен в
-       подписываемых байтах, эпоха под подписью). 3 юнит-теста.
-3. [x] **Contacts-store — СДЕЛАНО 2026-08-01.** Колонки `transport_key`/
-       `transport_epoch` (ALTER, пусто = эпоха 0), `apply_transport_rotate` (подпись +
-       строгая монотонность эпохи + неизвестный контакт = отказ), `transport_of`.
-       2 теста, включая антиреплей и попытку захвата чужой личностью.
-4. [x] **Протокол — СДЕЛАНО 2026-08-01.** `Payload::TransportRotate {id, epoch,
-       transport_pub, sig}`, надёжная доставка (id → retry-until-Ack + офлайн-очередь).
-       **Бакет APP, а не CONTROL:** одна подпись 64 Б несовместима с потолком 256 Б;
-       среди прикладных объявление вдобавок неотличимо от обычного сообщения, так что
-       флудер не видит момент ротации. Тест размерной неразличимости расширен.
-4a. [x] **Приёмная сторона — СДЕЛАНО 2026-08-01** (частично п.5). Анти-спуфинг
-       переписан под разделение ключей: пакет принимается, если `from == src` (эпоха 0/
-       незнакомец), ЛИБО `src` — известный адрес этой личности, ЛИБО это само
-       объявление, чья подпись связывает `from → src` (иначе новый адрес узнать
-       невозможно — он приходит уже с него). Пир везде идентифицируется ЛИЧНОСТЬЮ.
-       `Shared.transports` (IK→TK) + `set_peer_transports`; `send` шифрует ЛИЧНОСТИ,
-       а пишет на АДРЕС. Движок применяет объявление через стор и обновляет карту
-       (`refresh_transports`, в т.ч. при старте). Тесты `engine/tests/rotate.rs`.
-5. [x] **Движок, отправная сторона — СДЕЛАНО 2026-08-01.** Узел стартует на TK
-       текущей эпохи (`transport.json`); `rotate_transport(recipients, gap_secs)` в
-       отдельном потоке: гашение узла → **пауза офлайн** → подъём на новом TK →
-       возврат к публичным пирам → фиксация эпохи → рассылка подписанного
-       объявления ВЫБРАННЫМ контактам. Тем, кто был офлайн, досылаем по presence
-       (`announce_rotation_to`). Транспорт стал заменяемым на ходу
-       (`Messenger::swap_transport` + приёмный цикл переживает подмену), для тестов
-       заведена фабрика транспорта. Событие `TransportRotated` в UI.
-       **Осталось от пункта:** грейс-период старого узла (второй узел на
-       `Tier::Stranger` на несколько суток) — для контактов, отсутствовавших дольше
-       времени жизни ретраев.
-5a. [x] **Побочно найдено и починено 2026-08-01.** Диспетчер приёма опознавал пира по
-       АДРЕСУ (`src`), а не по личности: после ротации история писалась под
-       транспортным ключом, а `Ack` шифровался не тому ключу. Теперь после проверки
-       подлинности пир везде — личность. Там же: тир доверия и блок-лист заведены на
-       личность, но искались по адресу, поэтому сменивший адрес контакт разжаловался
-       бы в незнакомцы, а заблокированный ушёл бы из-под блока. Добавлена обратная
-       карта адрес→личность, ранний дроп libygg переставляется на актуальные адреса,
-       а объявление от заблокированного не применяется вовсе. Покрыто тестом
+0. [x] **Experiments done 2026-08-01.** Result: rotation "on the fly" does not stop a flood;
+       rotation + an offline pause of ~30 s does (the old key drops out of the tree, there is
+       nowhere to send to). The benches are in the repository: `flood_rotation.rs` (a line,
+       `bash scripts/run-flood-rotation.sh`), `flood_pubmesh.rs` (the real mesh,
+       `bash scripts/run-flood-pubmesh.sh --gap N`), `silent_victim.rs` (session behaviour with a
+       silent receiver).
+1a. [x] **Taken into account in the rotation implementation (item 5):** rotation against a flood
+       includes an offline pause (shut down the old TK → wait for the announcement in the tree to
+       expire → bring up the new TK); otherwise the new node would inherit the stream to the old key.
+1. [~] **Cheap hardening, independent of this ADR:**
+       - drop by source key **inside libygg**, before crossing FFI — done
+         (`transport/tests/blocklist.rs`);
+       - remove the 64 KB allocation for every incoming datagram (`ygg_read`) — done (a
+         `sync.Pool` of read buffers in `ygg.go`);
+       - a flood detector + an honest screen "X is flooding you, N packets/s" with a choice: go
+         offline (the only way to stop paying for the traffic) or rotate the address — done (per-
+         source flood statistics in `messenger`, UI in item 8); blocking stays a user action, not
+         automatic;
+       - a guard on mobile (metered) networks.
+2. [x] **`Identity` — DONE 2026-08-01.** `transport_seed(epoch)`/`transport_public` via
+       `derive_subkey`; `TK_0 == IK` (no migration needed); `sign_transport_rotate` + a free
+       `verify_transport_rotate` (the domain in the signed bytes, the epoch under the signature).
+       3 unit tests.
+3. [x] **Contacts store — DONE 2026-08-01.** Columns `transport_key`/`transport_epoch` (ALTER,
+       empty = epoch 0), `apply_transport_rotate` (signature + strictly monotonic epoch + unknown
+       contact = refusal), `transport_of`. 2 tests, including anti-replay and an attempt to hijack
+       with someone else's identity.
+4. [x] **Protocol — DONE 2026-08-01.** `Payload::TransportRotate {id, epoch, transport_pub, sig}`,
+       reliable delivery (id → retry until ack + the outbox). **APP bucket, not CONTROL:** a single
+       64-byte signature is incompatible with the 256-byte ceiling; among application messages the
+       announcement is also indistinguishable from an ordinary message, so the flooder cannot see
+       the moment of rotation. The size-indistinguishability test was extended.
+4a. [x] **Receiving side — DONE 2026-08-01.** Anti-spoofing rewritten for the key split: a packet
+       is accepted if `from == src` (epoch 0 / a stranger), OR `src` is a known address of that
+       identity, OR it is the announcement itself whose signature binds `from → src` (otherwise the
+       new address could not be learned — it already arrives from it). The peer is identified by
+       the IDENTITY everywhere. `Shared.transports` (IK → TK) + `set_peer_transports`; `send`
+       encrypts to the IDENTITY and writes to the ADDRESS. The engine applies the announcement
+       through the store and updates the map (`refresh_transports`, including at start-up). Tests
+       in `engine/tests/rotate.rs`.
+5. [x] **Engine, sending side — DONE 2026-08-01.** The node starts on the TK of the current epoch
+       (`transport.json`); `rotate_transport(recipients, gap_secs)` in a separate thread: shut down
+       the node → **offline pause** → bring it up on the new TK → reconnect to public peers → commit
+       the epoch → send the signed announcement to the SELECTED contacts. Those who were offline
+       get it via presence (`announce_rotation_to`). The transport became replaceable on the fly
+       (`Messenger::swap_transport` + the receive loop survives the swap); a transport factory was
+       added for tests. The event `TransportRotated` for the UI.
+5a. [x] **Found and fixed along the way 2026-08-01.** The receive dispatcher identified the peer by
+       ADDRESS (`src`), not by identity: after a rotation, history was written under the transport
+       key and the `Ack` was encrypted to the wrong key. Now, after authenticity is checked, the
+       peer is the identity everywhere. Also: the trust tier and the blocklist were keyed by
+       identity but looked up by address, so a contact who changed address would have been demoted
+       to a stranger, and a blocked one would have escaped the block. A reverse address → identity
+       map was added, the early libygg drop is moved to the current addresses, and an announcement
+       from a blocked peer is not applied at all. Covered by the test
        `blocked_contact_cannot_escape_by_rotating`.
-6. [x] **Группы — СДЕЛАНО 2026-08-01** (правки не потребовались, проверено тестом
-       `group_survives_member_rotation`): членство MLS ведётся по личностям, а
-       отправка резолвит адрес в единственной точке (`Shared::send`), поэтому
-       групповая переписка переживает ротацию участника без пересоздания группы.
-7. [x] **Код обмена — СДЕЛАНО 2026-08-01.** `my_contact_code()`: до ротации это
-       прежний голый hex личности (старые QR и сканеры продолжают работать), после —
-       `личность:эпоха:адрес:подпись`. `add_contact_code()` принимает обе формы и
-       записывает привязку только с верной подписью: код часто пересылают через
-       третьи руки, и без подписи посредник подменил бы адрес, оставив личность.
-       JNI `myContactCode`, QR в приложении рисуется по коду.
-8. [x] **UI — СДЕЛАНО 2026-08-01** по макету
-       [address-rotation.html](../design/mockups/address-rotation.html): карточка
-       потока на «Сети», экран «Поток трафика» (источники + два действия), «Сменить
-       адрес» с чекбоксами (источник снят по умолчанию, но галочка кликабельна),
-       ход операции с обратным отсчётом и итогом. Уведомления: эпизод флуда (один
-       раз на эпизод) и постоянное «вы офлайн». Тон текстов прямой: «содержимое не
-       доходит, но трафик уже списан», без обещаний несуществующей защиты.
-8a. [x] **Грейс-период ОТВЕРГНУТ** (решение владельца 2026-08-01). Держать старый
-       узел живым = оставить старый ключ в дереве маршрутизации, то есть отменить
-       весь эффект ротации на срок грейса, да ещё и ×2 keepalive. Вместо него —
-       персистентный список «кому ещё не сообщили»: контакт, отсутствовавший хоть
-       месяц, получит новый адрес при первом появлении (догон по presence). Не
-       покрывается лишь случай, когда обе стороны сменили адрес, пока не виделись —
-       тогда нужен внешний пере-обмен кодом.
-9. [ ] Доки: переписать N8 в threat-model (сделано этим ADR), обновить
-       protocol-spec (новый Payload) и invariants (новый инвариант: «идентичность —
-       IK, адресация — TK; не путать»).
+6. [x] **Groups — DONE 2026-08-01** (no changes needed, verified by the test
+       `group_survives_member_rotation`): MLS membership is tracked by identities, and sending
+       resolves the address in a single place (`Shared::send`), so group conversations survive a
+       member's rotation without re-creating the group.
+7. [x] **Exchange code — DONE 2026-08-01.** `my_contact_code()`: before a rotation, the old bare
+       hex of the identity (old QR codes and scanners keep working); after — `identity:epoch:
+       address:signature`. `add_contact_code()` accepts both forms and records the binding only
+       with a valid signature: codes are often passed on through third parties, and without a
+       signature an intermediary could substitute the address while keeping the identity.
+8. [x] **UI — DONE 2026-08-01** following the mock-up
+       [address-rotation.html](../design/mockups/address-rotation.html): a traffic card on the
+       Network screen, a "Traffic stream" screen (sources + two actions), "Change address" with
+       checkboxes (the source is unchecked by default, but the box is clickable), the progress of
+       the operation with a countdown and a result. Notifications: a flood episode (once per
+       episode) and a persistent "you are offline". The tone of the texts is direct: "the content
+       does not get through, but the traffic is already paid for", without promising protection
+       that does not exist.
+8a. [x] **The grace period REJECTED** (owner's decision 2026-08-01). Keeping the old node alive =
+       keeping the old key in the routing tree, i.e. cancelling the whole effect of rotation for
+       the length of the grace period, plus ×2 keepalives. Instead — a persistent list of "who has
+       not been told yet": a contact absent even for a month gets the new address when they first
+       appear (catch-up via presence). The only uncovered case is when both sides changed address
+       while they did not see each other — then an external re-exchange of codes is needed.
+9. [x] Docs: N8 in the threat model rewritten; protocol-spec (the new Payload) and invariants (§7:
+       "identity is the IK, addressing is the TK; do not mix them up") updated.
+10. [~] **A personal relay (option C) — NOT in 1.0** (owner's decision 2026-08-01). The only place
+       where the stream is killed before the radio, but it is exactly the upstream the project
+       exists to avoid. Recorded for after 1.0; if ever done — a separate ADR (the trust model: who
+       allows whom to filter).
 
-10. [~] **Личный релей (вариант C) — НЕ в 1.0** (решение владельца 2026-08-01).
-       Единственное место, где поток гасится до радио, но это и есть апстрим, ради
-       отказа от которого проект существует. Записано на post-1.0; если делать —
-       отдельным ADR (модель доверия, кто кому разрешает фильтровать).
-
-**Порядок после ревизии:** 1 (дешёвое усиление приёма + UX флуда — единственный
-доступный в 1.0 ответ на флуд по трафику) → 2–9 (разделение ключей как
-компартментализация и гигиена, без обещаний про DoS). Релей (10) — за пределами 1.0.
+**Order after the revision:** 1 (cheap receive-path hardening + flood UX — the only answer to a
+flood by traffic available in 1.0) → 2–9 (the key split as compartmentalisation and hygiene). The
+relay (10) — outside 1.0.
