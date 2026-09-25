@@ -1,186 +1,180 @@
-# Карта подсистем
+# Subsystem map
 
-Концептуальный индекс проекта. Идея: **фичи — это комбинации небольшого набора
-подсистем (примитивов), а не отдельные колонны кода.** Новая хотелка → раскладывается
-на существующие подсистемы. Если ни на одну не ложится — это сигнал, что появился
-настоящий новый примитив (редко, требует обсуждения).
+The conceptual index of the project. The idea: **features are combinations of a small set
+of subsystems (primitives), not separate columns of code.** A new wish is decomposed onto
+existing subsystems. If it fits none of them, that is a signal a genuinely new primitive
+has appeared (rare, and it needs a discussion).
 
-Эта карта — общий хребет для трёх плоскостей:
-- **Код** — границы крейтов/модулей (где живёт логика; UI/JNI — тонкие адаптеры).
-- **План** — порядок работ = фундамент → фичи → полировка (см. [ROADMAP](ROADMAP.md)).
-- **Интерфейс** — поверхности UI вырастают из подсистем, не наоборот.
+This map is the common spine of three planes:
+- **Code** — crate and module boundaries (where logic lives; UI and JNI are thin adapters).
+- **Plan** — the order of work: foundation → features → polish
+  ([v1.0-scope](v1.0-scope.md)).
+- **Interface** — UI surfaces grow out of subsystems, not the other way round.
 
-Принцип кода: логика фичи — платформо-независимая, живёт в Rust-крейтах
-(`core`/`messenger`/`media`/`call`/`group`/будущий `blob`). `androidjni` (JNI) и
-`desktop`/Compose — тонкие адаптеры. Десктоп (Slint) — эталон, Android — порт.
-
----
-
-## Подсистемы (снизу вверх)
-
-### F1. Идентичность и крипто  ✅
-- **Что:** ed25519 → Curve25519, BIP39, NaCl Box, at-rest vault. Плюс **адрес,
-  отделённый от личности** (ADR-007): транспортный ключ выводится доменно по эпохам,
-  эпоха 0 = сама личность, смена адреса объявляется подписью личности.
-- **Где:** `core` (`identity.rs`, `crypto.rs`, `vault.rs`).
-- **Открывает:** всё остальное; верификация контактов, безопасное хранилище, обрыв
-  чужого флуда сменой адреса без потери контактов.
-
-### F2. Транспорт (mesh)  ✅
-- **Что:** Yggdrasil поверх FFI (без TUN/root), вход в глобальную сеть; демукс
-  надёжный/медиа-канал, QoS-очереди (audio/chat blocking, video drop-on-full).
-- **Где:** `transport` (libygg.so, Linux/WSL), `core/protocol.rs`.
-- **Также:** чёрный список источников внутри libygg — пакеты заблокированного
-  отбрасываются до пересечения FFI; узел заменяем на ходу (смена адреса).
-- **Открывает:** любую доставку байт между пирами.
-
-### F3. Хранилище  ✅
-- **Что:** контакты (TOFU), история сообщений, профиль, настройки; SQLCipher.
-- **Где:** `core` (`store.rs`, `db.rs`, `settings.rs`). Вся переписка — одной
-  таблицей `chat_messages` (личные чаты, «Сохранённое», группы), см.
-  [ADR-009](adr/ADR-009-one-message-store.md).
-- **Также:** **ключ из пароля** (`kdf.rs`, Argon2id с номером профиля в каждом файле)
-  и **резервная копия ДАННЫХ** — контейнер `core/backup.rs` (кадры,
-  XChaCha20-Poly1305, номер кадра в AAD) + состав и слияние `engine/backup.rs`.
-  Копия данных ≠ копия ключа: ключ возвращает личность, копия — переписку.
-- **Открывает:** персистентность всего; офлайн-доступ; перенос переписки на новое
-  устройство и уровни at-rest (Keystore / пароль / оба).
-
-### S1. Мессенджинг (надёжный канал)  ✅
-- **Что:** сессии, события, presence/keepalive, надёжная доставка (retry до Ack),
-  анти-replay.
-- **Где:** `messenger`.
-- **Открывает:** 1:1 чат, сигнализацию звонков (invite/accept/decline), presence.
-
-### S2. Группы (MLS)  ✅
-- **Что:** крипто-членство (openmls), serverless-упорядочивание (admin-sequencer),
-  онбординг по KeyPackage, персистентность состояния.
-- **Где:** `group` (крипто), `groupchat` (упорядочивание).
-- **Открывает:** групповой чат, комнаты-звонки, каналы (см. ниже).
-
-### S3. Медиа-движок  ✅ (полировка идёт)
-- **Что:** Opus (аудио), H.264 (видео), джиттер-буфер (адаптивный, BURST_HEADROOM),
-  фрагментация/реассемблер кадров, оркестрация звонка.
-- **Где:** `media` (`codec.rs`, `jitter.rs`, `video.rs`), `core/media.rs`
-  (фрагментация), `call` (`capture.rs`, `group_call.rs` — десктоп), `androidjni`
-  (`room_call.rs`, `call_jni.rs` — Android).
-- **Долг:** ADR-001 — единый call/медиа-движок десктоп+Android (сейчас раздвоен).
-- **Открывает:** 1:1 и групповые звонки, шаринг экрана, торрент-стрим (голос).
-
-### S4. Комнаты + присутствие  ✅ (H1.2/H1.3 в работе)
-- **Что:** комната = MLS-группа + маячок присутствия (Discord-style), join anytime,
-  без хоста, instant-leave, TTL. Комната СТАБИЛЬНА (детерминированный room_id).
-  Модель и план фиксов lifecycle — в [BUGS](BUGS.md).
-- **Где:** `androidjni` (presence в `lib.rs`/`call_jni.rs`), `messenger`.
-- **Открывает:** звонки-комнаты, сетку участников, каналы, «кто в сети сейчас».
-
-### S5. Контент-адресные блобы  ⏳ (H2, не начато)
-- **Что:** чанки с адресацией по хэшу (BLAKE3), pull «дай блоб X», возобновляемо,
-  лимиты размера/типа (анти-DoS), прямая тяга с устройства собеседника.
-- **Где (план):** новый крейт `blob` + интеграция в `messenger`.
-- **Открывает:** аватарки, картинки, видео, файлы, превью ссылок, голосовые,
-  стикеры — **одна подсистема, ~6 фич почти бесплатно.**
-
-### S6. Офлайн-доставка  ✅ базово (H3 — усиление)
-- **Что:** очередь исходящих на диске (TTL 7 дней), флаш по presence «пир в сети».
-- **Где:** `messenger` + Android `Model.kt` (TTL захардкожен — вынести в настройки).
-- **Открывает:** надёжный serverless-обмен без онлайна обоих сразу.
-
-### S7. Модель сообщения  ⏳ (частично: контент-адресация есть)
-- **Что:** схема и семантика сообщения, а не транспорт (тот — S1). Контент-адресация
-  (хэш = id → дедуп + целостность), подписанная голова цепочки (частичный порядок +
-  tamper-evidence), метаданные. Расширения: реакции, ответы/
-  треды, правки, статусы прочтения, закреп.
-- **Где:** `core/protocol.rs`, `core/media.rs` (фрагментация/адресация), `messenger`;
-  будущие поля в `core/store.rs`. Логически растёт на S1.
-- **Открывает:** реакции/ответы/правки/прочитано/закреп — все как расширения ОДНОЙ
-  модели, не отдельные колонны. Дедуп при ретраях/мультипути.
-
-### P1. Платформенная оболочка  ✅ (H4 — редизайн)
-- **Что:** foreground-сервис / энергорежим (режим A), JNI-мост, UI (Compose/Slint),
-  overlay-окно звонка, уведомления.
-- **Где:** `androidjni`, `android/` (Compose), `desktop` (Slint), `ntfy` (push mode B).
-- **Открывает:** все экраны; overlay-звонок; пробуждение в фоне.
+Code principle: feature logic is platform-independent and lives in Rust crates (`core`,
+`messenger`, `media`, `group`, `groupchat`, `blob`, `engine`). `androidjni` and the
+Compose UI are thin adapters.
 
 ---
 
-## Фича → подсистема (как раскладывается)
+## Subsystems (bottom up)
 
-| Фича | Подсистемы | Статус |
+### F1. Identity and crypto ✅
+- **What:** ed25519 → Curve25519, the 24-word recovery phrase, NaCl Box, the at-rest
+  vault, the visual fingerprint. Plus **an address separate from the identity** (ADR-007):
+  the transport key is derived per epoch with domain separation, epoch 0 is the identity
+  itself, and an address change is announced with the identity's signature.
+- **Where:** `core` (`identity.rs`, `crypto.rs`, `vault.rs`, `kdf.rs`).
+- **Enables:** everything else; contact verification, secure storage, cutting off a flood
+  by changing the address without losing contacts.
+
+### F2. Transport (mesh) ✅
+- **What:** Yggdrasil over FFI (no TUN, no root), joining the global mesh; demultiplexing
+  of the reliable and media channels; QoS queues (audio/chat blocking, video
+  drop-on-full); size padding.
+- **Where:** `transport` (libygg.so), `core/protocol.rs`, `core/pad.rs`.
+- **Also:** a blocklist of sources inside libygg — packets from a blocked source are
+  dropped before crossing FFI; the node can be replaced on the fly (address change).
+- **Enables:** any delivery of bytes between peers.
+
+### F3. Storage ✅
+- **What:** contacts, message history, profile, settings; SQLCipher; crash-safe state
+  files (`fsutil`).
+- **Where:** `core` (`store.rs`, `db.rs`, `settings.rs`, `fsutil.rs`). All conversations
+  are one table, `chat_messages` (1:1 chats, Saved, groups) — [ADR-009](adr/ADR-009-one-message-store.md).
+- **Also:** **a key from a password** (`kdf.rs`, Argon2id with the profile number in every
+  file) and **the data backup** — the container `core/backup.rs` (frames,
+  XChaCha20-Poly1305, frame number in the AAD) plus contents and merging in
+  `engine/backup.rs`. A data backup ≠ a key backup: the key restores the identity, the
+  data backup restores the conversations.
+- **Enables:** persistence of everything; moving conversations to a new device; at-rest
+  levels (Keystore / password / both).
+
+### S1. Messaging (reliable channel) ✅
+- **What:** sessions, events, presence/keepalive, reliable delivery (retry until ack),
+  anti-replay.
+- **Where:** `messenger`.
+- **Enables:** 1:1 chat, call signalling (invite/decline), presence.
+
+### S2. Groups (MLS) ✅
+- **What:** cryptographic membership (openmls), serverless ordering (admin sequencer),
+  onboarding by KeyPackage, removal and key rotation (ADR-004), persisted state.
+- **Where:** `group` (crypto), `groupchat` (ordering), `engine/groups.rs` (the actor).
+- **Enables:** group chat, group rooms, channels later.
+
+### S3. Media engine ✅ (polish ongoing)
+- **What:** Opus (audio), H.264 (video), adaptive jitter buffer, frame fragmentation and
+  reassembly, call orchestration.
+- **Where:** `media` (`codec.rs`, `jitter.rs`, `video.rs`), `core/media.rs`
+  (fragmentation), `engine/room_call.rs`; on Android the capture and codecs are
+  platform APIs (`CallAudio`, `VideoSender`, `VideoReceiver`).
+- **Debt:** the desktop has its own call engine (`call`); unifying it with the engine is
+  part of the desktop work.
+- **Enables:** 1:1 and group calls; later screen sharing.
+
+### S4. Rooms and presence ✅
+- **What:** a room = a group (or a DM pair) + a presence beacon, Discord-style: join any
+  time, no host, instant leave, TTL. A room is STABLE (deterministic room id). In a group
+  room, only the current MLS roster is admitted.
+- **Where:** `engine` (rooms, presence), `messenger`.
+- **Enables:** call rooms, the participant grid, "who is online now".
+
+### S5. Content-addressed blobs ✅
+- **What:** chunks addressed by hash (BLAKE3), pull ("give me blob X"), resumable, size and
+  type limits (anti-DoS), fetched directly from the other person's device; EXIF/GPS
+  scrubbing; streaming on both sides; thumbnails as separate small blobs; downloads above a
+  threshold need consent.
+- **Where:** crate `blob`, `engine/blobs.rs`.
+- **Enables:** avatars, images, video, files, voice messages — one subsystem, many
+  features.
+
+### S6. Offline delivery ✅
+- **What:** a persistent outbox in SQLite, flushed when the peer comes online and at
+  start-up; size and lifetime per trust tier (contacts' messages do not expire).
+- **Where:** `core/outbox.rs`, `messenger`, `engine`.
+- **Enables:** serverless messaging without both sides being online at once.
+
+### S7. Message model ✅ partly
+- **What:** the schema and semantics of a message, not the transport (that is S1).
+  References are the pair "author + id" (ADR-006); unknown payload types are ignored, so
+  extensions are additive.
+- **Done:** replies, edits, retraction ("delete for everyone"), forwarding (optionally
+  without the author), pins, captions.
+- **Not yet:** reactions, read receipts, typing indicator, mentions.
+- **Where:** `core/protocol.rs`, `groupchat` (`AppMsg`), `core/store.rs`.
+
+### P1. Platform shell ✅
+- **What:** a foreground service that keeps the node online, the JNI bridge, the Compose
+  UI, notifications.
+- **Where:** `androidjni`, `android/`. Push wake-up (`ntfy`) is written but not wired in.
+- **Enables:** all screens; staying reachable in the background.
+
+---
+
+## Feature → subsystems
+
+| Feature | Subsystems | Status |
 |---|---|---|
-| 1:1 чат | S1 + F3 | ✅ |
-| Группы / каналы | S2 (+ S4 для presence) | ✅ / канал-полировка ⏳ |
-| 1:1 и групповые звонки | S3 + S4 | ✅ |
-| Сетка участников, «ты один» | S4 + P1(UI) | ⏳ H1.2 |
-| Аватарки | **S5** + S4 (сверка хэша) | ⏳ H2 |
-| Картинки / видео / файлы в чате | **S5** + S7 | ⏳ H5 (на S5) |
-| Стикеры / превью ссылок / голосовые | **S5** + S7 + UI | ⏳ (на S5) |
-| Реакции / ответы / редактирование / прочитано | **S7** (расширение модели) | ⏳ |
-| Шаринг экрана (Android) | S3 (PushSource готов) + P1 | ⏳ |
-| Торрент-стрим / совместный просмотр | **S5**-подобный + S3 (голос) | ⏳ Фаза F |
-| Режимы peer/leech, стимулы | F2/S6 (приоритеты очередей, TTL) | ⏳ |
-| Настройки (медиа/камера/энергия/TTL) | P1(UI) + F3 | ⏳ назрело |
-
-Жирным — **где фича в основном «бесплатна» поверх готового фундамента**.
-
----
-
-## Согласованность и отказы (распределённая модель)
-
-Это распределённая система — партиции, византийские отказы, рассинхрон часов
-реальны. Принцип: **НЕ пытаться «решить всю распределённую науку заранее»** (это
-паралич), а ЯВНО зафиксировать, какие гарантии даём/не даём и какие отказы
-предполагаем — это превращает «куча проблем» в ограниченный список решений.
-
-**Модель: AP + eventual consistency.** Для мессенджера это правильный выбор —
-сообщения доходят и сходятся со временем, а не блокируются ради строгой
-консистентности. Приоритет — **безопасность** (не искажать/не путать авторство);
-живость слабая (сообщение может задержаться при партиции — это ок, оно в очереди).
-FLP: в асинхронной сети с отказами нельзя гарантировать и то и другое сразу.
-
-**Уже снято дизайном (не случайно):**
-- **Партиции/офлайн** → офлайн-очередь (S6) + presence-TTL + доставка по возвращении.
-  Партиция — норма, не отказ.
-- **Рассинхрон часов** → для КОРРЕКТНОСТИ wall-clock не используем. Локальные тайминги
-  монотонные (`Instant`: джиттер, presence-TTL). Wall-clock — только косметика (время в
-  UI) и грубый TTL очереди (7 дней, skew-устойчив). Порядок — логический, не по часам.
-- **Византийские/злонамеренные пиры** (частично) → подписи (E2E, MLS) =
-  аутентичность/целостность; анти-replay; валидация парсеров (аудит). Полный
-  BFT-консенсус НЕ нужен — он для согласия N взаимно-недоверяющих на одном значении
-  (блокчейн), не наш кейс.
-- **Дубли/ретраи** → контент-адресация (S7): одинаковый контент → одинаковый хэш → дедуп.
-
-**Реально открытые узлы (думать предметно, отдельный ADR — НЕ «всё сразу»):**
-- **Порядок групповых сообщений под партицией + отсутствующий/неисправный
-  admin-sequencer** → [ADR-002](adr/ADR-002-group-message-ordering.md).
-  Сейчас порядок задаёт админ (мягкий лидер): просто, но админ
-  офлайн → прогресс? партиция, где админ на одной стороне? Варианты: sequencer +
-  догон пробелов; causal-порядок (vector clocks / CRDT, leaderless, сходится сам);
-  подписанная хэш-цепочка как частичный порядок.
-- **Эквивокация** — злонамеренный шлёт разные версии разным. Детектируется
-  хэш-цепочкой/подписями (расхождение видно), но политика реакции — открытый вопрос.
+| 1:1 chat | S1 + F3 + S6 | ✅ |
+| Groups | S2 (+ S4 for presence) | ✅ |
+| 1:1 and group calls | S3 + S4 | ✅ |
+| Participant grid, "you are alone" | S4 + P1 | ✅ |
+| Avatars | S5 + S4 (hash check) | ✅ |
+| Images / video / files / voice messages | S5 + S7 | ✅ |
+| Replies / edits / forwarding / pins | S7 | ✅ |
+| Reactions / read receipts / typing / mentions | S7 | ⏳ |
+| Search | F3 (FTS5) | ✅ |
+| Data backup | F3 | ✅ |
+| Settings (media/camera/energy/storage/at rest) | P1 + F3 | ✅ |
+| Multiple devices per identity | F1 + S2 + F3 (ADR-010) | ⏳ after 1.0 |
+| Screen sharing (Android) | S3 + P1 | ⏳ after 1.0 |
+| Stickers / link previews | S5 + S7 + UI | ⏳ after 1.0 |
+| Relay incentives | F2 + S6 (ADR-008) | ⏳ after 1.0 |
 
 ---
 
-## Порядок и горизонт
+## Consistency and failures (the distributed model)
 
-**Три яруса, не перемешивать:** (1) фундаменты/подсистемы дороги и открывают много →
-(2) фичи дёшевы поверх → (3) полировка. Сначала фундамент, потом фичи сыплются.
+This is a distributed system — partitions, Byzantine failures and clock skew are real. The
+principle: **do NOT try to "solve all of distributed systems up front"** (that is
+paralysis), but EXPLICITLY state which guarantees we give or do not give and which
+failures we assume. That turns "a pile of problems" into a bounded list of decisions.
 
-- **Now:** S4 lifecycle комнат (реентри/зависшая картинка) + H1.2 сетка участников.
-- **Next:** S5 блобы (H2) → аватарки как первый потребитель.
-- **Later:** H3 (усиление S6), H4 (редизайн P1: overlay + тёмный стиль), H5 (богатые
-  сообщения на S5), H6 (аудит новой поверхности), Фаза F (торрент).
+**Model: AP + eventual consistency.** For a messenger that is the right choice — messages
+arrive and converge over time rather than blocking for strict consistency. The priority is
+**safety** (never distort or confuse authorship); liveness is weak (a message may be
+delayed during a partition — fine, it waits in the queue). FLP: in an asynchronous network
+with failures you cannot guarantee both at once.
 
-Детализируем только текущий ярус; дальше — крупными мазками (см. ROADMAP).
+**Already handled by design (not by accident):**
+- **Partitions / offline** → the outbox (S6) + presence TTL + delivery on return. A
+  partition is the norm, not a failure.
+- **Clock skew** → wall-clock time is NOT used for CORRECTNESS. Local timing is monotonic
+  (`Instant`: jitter, presence TTL). Wall-clock time is only cosmetic (time in the UI) and
+  a coarse outbox lifetime for strangers (one day, tolerant of skew). Order is logical, not
+  by clock.
+- **Byzantine / malicious peers** (partly) → signatures and AEAD (E2E, MLS) give
+  authenticity and integrity; anti-replay; parser validation (property tests). Full BFT
+  consensus is NOT needed — it is for N mutually distrustful parties agreeing on one value
+  (blockchains), not our case.
+- **Duplicates / retries** → every reliable message has a per-sender id; the receiver
+  deduplicates (a replay ring in the messenger, the MLS generation in groups).
+
+**Genuinely open questions (each gets its own ADR, not "everything at once"):**
+- **Group message order under a partition, and a missing or faulty admin sequencer** →
+  [ADR-002](adr/ADR-002-group-message-ordering.md). Today the admin sets the order (a soft
+  leader): simple, but what if the admin is offline, or on one side of a partition? The
+  chosen direction is decided; implementation is after 1.0.
+- **Equivocation** — a malicious member sends different versions to different people.
+  Detectable with a hash chain or signatures (the divergence becomes visible), but the
+  policy for reacting to it is an open question.
 
 ---
 
-## Сквозные поверхности UI (проектировать как слои, не как экраны)
+## Cross-cutting UI surfaces (design them as layers, not screens)
 
-- **Overlay/PiP-окно звонка** (H4) — постоянный слой поверх, не привязан к экрану.
-- **Настройки** — единая архитектура с секциями. Уже назрело: разрешение камеры
-  (под найденную причину чёрного экрана), медиа-качество, энергорежим
-  ([power model](BUGS.md)), TTL офлайн-очереди. Сейчас разрознено/захардкожено.
-- **Навигационный скелет** (H4): список чатов / чат / комнаты-звонки / контакты /
-  настройки / overlay. Решить рано — фичи встают в слоты.
+- **The call window** — a persistent layer above the rest, not tied to one screen.
+- **Settings** — one architecture with sections (media quality, camera, energy, storage,
+  at-rest level).
+- **The navigation skeleton** — chats / chat / call rooms / contacts / settings. Decided
+  early, so features slot in. Details: [design/app-ui.md](design/app-ui.md) (Russian).
