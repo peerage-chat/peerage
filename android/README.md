@@ -1,73 +1,58 @@
-# Android-клиент
+# Android client
 
-Compose-приложение (Holo-тема) поверх того же Rust-ядра, что и десктоп. UI на
-Kotlin; вся логика (идентичность, крипто, мессенджер, MLS) — в `p2p-core`/
-`p2p-messenger`, вызывается через JNI-мост `androidjni` (cdylib `libp2p_android.so`).
+A Jetpack Compose app on top of the Rust engine. The UI is Kotlin; all domain logic
+(identity, crypto, messaging, MLS groups, blobs, rooms) lives in the `p2p-engine` crate and
+is reached through the thin JNI bridge `androidjni` (cdylib `libp2p_android.so`).
 
 ```
-Kotlin/Compose  ──JNI──▶  libp2p_android.so (androidjni)
+Kotlin/Compose  ──JNI──▶  libp2p_android.so (androidjni → p2p-engine)
                               │ depends on
                               ▼
                           libygg.so (Go c-shared, Yggdrasil)
 ```
 
-## Что готово (фаза G2)
+The UI never calls `Native.*` on the main thread; see
+[ARCHITECTURE.md §9](../docs/ARCHITECTURE.md#9-android-client-kotlincompose). What the app
+can do and how it was verified: [project-state.md](../docs/project-state.md).
 
-- JNI-мост: идентичность, контакты (TOFU, верификация), 1:1 текст-чат, статусы
-  доставки, онлайн-присутствие, история — паритет с десктоп-чатом.
-- Compose-экраны: список контактов, чат, добавление, «мой код», инфо о контакте.
-- Модель событий — поллинг `Native.pollEvent()`; источник истины — Rust-ядро.
+## Building the native libraries
 
-Звонки (G3) и группы (G4) — следующие фазы.
+Each ABI needs **two** libraries: `libygg.so` (Go) and `libp2p_android.so` (Rust). They are
+built on Linux or WSL (Go's cgo needs the Linux NDK).
 
-## Сборка нативных библиотек
-
-Нужны **две** .so на каждый ABI: `libygg.so` (Go) и `libp2p_android.so` (Rust).
-Собираются из WSL/Linux (Go cgo требует Linux-NDK).
-
-### Однократная настройка тулчейна (в WSL)
+### One-time toolchain setup (Linux / WSL)
 
 ```bash
-# 1. Linux-NDK (Windows-NDK из Android Studio не годится для Go cgo):
+# 1. The Linux NDK (the Windows NDK from Android Studio does not work for Go cgo):
 cd ~ && wget https://dl.google.com/android/repository/android-ndk-r28c-linux.zip
 unzip -q android-ndk-r28c-linux.zip
-export ANDROID_NDK_HOME=$HOME/android-ndk-r28c   # добавьте в ~/.bashrc
+export ANDROID_NDK_HOME=$HOME/android-ndk-r28c   # add to ~/.bashrc
 
-# 2. Rust-таргет + cargo-ndk:
-rustup target add aarch64-linux-android
+# 2. Rust targets + cargo-ndk:
+rustup target add aarch64-linux-android x86_64-linux-android
 cargo install cargo-ndk
 ```
 
-### Сборка (каждый раз)
+### Build
 
 ```bash
-ANDROID_NDK_HOME=$HOME/android-ndk-r28c bash scripts/build-android-libs.sh arm64-v8a
+bash scripts/build-android-libs.sh arm64-v8a   # phones; x86_64 for the emulator
+bash scripts/rebuild-p2p-android.sh x86_64     # faster: only the Rust library
 ```
 
-Скрипт собирает обе библиотеки и кладёт их в
-`android/app/src/main/jniLibs/arm64-v8a/`. Для эмулятора добавьте `x86_64`.
+The scripts put the libraries into `android/app/src/main/jniLibs/<ABI>/` (not in git).
+Build them BEFORE Gradle.
 
-## Сборка APK
-
-Откройте каталог `android/` в Android Studio (нужен встроенный JDK 17 и SDK 34)
-и запустите на устройстве/эмуляторе, либо из консоли:
+## Building the APK
 
 ```bash
 cd android && ./gradlew assembleDebug
 ```
 
-Gradle берёт готовые `.so` из `jniLibs` (см. `app/build.gradle.kts`). Нативные
-библиотеки нужно собрать ДО Gradle (шаг выше).
+Or open `android/` in Android Studio. Run `./gradlew ktlintFormat` before committing Kotlin,
+and `./gradlew testDebugUnitTest` for the unit tests.
 
-## Статус сборки
+## Toolchain versions
 
-Проверено end-to-end: нативные .so кросс-компилируются (libygg.so + libp2p_android.so,
-AArch64; libp2p_android корректно линкуется с libygg, все 14 JNI-символов
-экспортированы) и `gradle assembleDebug` собирает установочный `app-debug.apk`
-(~16 МБ, обе .so внутри `lib/arm64-v8a/`). На реальном устройстве ещё не запускалось.
-
-Сборка APK проверена с Gradle 8.9 + JBR от Android Studio (JDK 21).
-
-## Версии тулчейна
-
-AGP 8.5.2 · Kotlin 1.9.25 · Compose compiler 1.5.15 · compileSdk 34 · minSdk 24.
+AGP 8.5.2 · Kotlin 1.9.25 · Compose compiler 1.5.15 · compileSdk 34 · minSdk 24 · JDK 21
+(the one bundled with Android Studio).

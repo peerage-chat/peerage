@@ -23,6 +23,8 @@ Android Jetpack Compose. GPL-3.0. Цель — v1.0 под грант NLnet/NGI 
 4. **UI:** Compose НИКОГДА не зовёт `Native.*` напрямую — только через фоновые потоки
    (`pollThread`/`tickerThread`/`ops`); состояние — snapshot-state.
 5. **UI-токены:** новый код — на `Tokens.*`, не на инлайн-хекс/магические dp.
+6. **Файлы состояния — только атомарно:** `p2p_core::fsutil::write_atomic` (ключи/сиды —
+   `write_atomic_private`), не голый `fs::write`: Android убивает процесс посреди записи.
 
 ## Процесс
 

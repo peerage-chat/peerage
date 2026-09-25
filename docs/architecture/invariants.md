@@ -1,185 +1,203 @@
-# Архитектурные инварианты
+# Architecture invariants
 
-Сквозные правила, нарушение которых даёт *тихие* или *катастрофические* баги
-(нативный краш всего процесса, рассинхрон шифрования, потеря сообщений). Держать в
-голове при любой правке соответствующих зон. Это же — «правила для Клода»: будущие
-сессии обязаны их соблюдать.
+Cross-cutting rules whose violation causes *silent* or *catastrophic* bugs (a native crash
+of the whole process, encryption state falling out of sync, lost messages). Keep them in
+mind for any change in the affected areas. Every contributor — human or AI-assisted
+session — must follow them.
 
-Статус каждого: ✅ соблюдается в коде / ⚠️ частично / 📋 правило на будущее.
+Status of each: ✅ holds in the code / ⚠️ partly / 📋 a rule for the future.
 
 ---
 
-## 1. Граница FFI/JNI (Rust ↔ Kotlin) — самая хрупкая зона
+## 1. The FFI/JNI boundary (Rust ↔ Kotlin) — the most fragile area
 
-Паника в Rust на границе JNI = **нативный краш всего Android-процесса** (без
-Java-стектрейса). 
+A Rust panic at the JNI boundary = **a native crash of the whole Android process** (without
+a Java stack trace).
 
-- ✅ **`catch_unwind` на КАЖДОЙ точке входа JNI.** Есть макрос в
-  `androidjni/src/lib.rs` — он оборачивает тело функции, превращая панику в лог +
-  безопасный дефолт. Новые JNI-функции **обязаны** идти через него.
-- ⚠️ **Никаких `unwrap()`/`expect()` на fallible-операциях в FFI-коде.** Возвращать
-  C-совместимый результат (код/статус/пустой массив), а не паниковать. Остаточные
-  `.unwrap()` (напр. `env.new_byte_array().unwrap()` в `call_jni.rs`) под макросом —
-  паника ловится, но правило: не плодить новые, проаудитить старые.
-- 📋 **Владение памятью: кто выделил — тот и освобождает.** Буфер, созданный в Rust,
-  Kotlin не удаляет напрямую — только через деструктор/возврат в Rust. И наоборот.
+- ✅ **`catch_unwind` on EVERY JNI entry point.** The macro `jni_safe!` in
+  `androidjni/src/lib.rs` wraps the body and turns a panic into a log line plus a safe
+  default. New JNI functions **must** go through it; the unit test
+  `every_jni_entry_point_is_guarded` fails the build otherwise.
+- ✅ **No `unwrap()`/`expect()` on fallible operations in FFI code.** Return a C-compatible
+  result (a code, a status, an empty array — `empty_bytes()`), never panic.
+- 📋 **Memory ownership: whoever allocated it frees it.** A buffer created in Rust is not
+  freed by Kotlin directly — only through a destructor or a call back into Rust. And vice
+  versa.
 
-## 2. Дисциплина каналов транспорта (Yggdrasil-датаграммы) — ✅
+## 2. Transport channel discipline (Yggdrasil datagrams) — ✅
 
-Два канала по первому байту датаграммы (`core/src/media.rs`):
+Two channels, by the first byte of the datagram (`core/src/media.rs`):
 `CHAN_CHAT = 0x01`, `CHAN_MEDIA = 0x02`.
 
-- **CHAN_CHAT** — надёжный: id + ACK + повтор-до-подтверждения (`send_reliable` в
-  `messenger/src/lib.rs`). Сюда: сообщения чата, ключи (MLS Welcome/KeyPackage),
-  управление (RoomInvite, Ack, presence-control).
-- **CHAN_MEDIA** — быстрый: лёгкие датаграммы **без ACK**, потеря допустима. Сюда:
-  только аудио/видео реального времени.
+- **CHAN_CHAT** — reliable: id + ack + retry until confirmed (`send_reliable` in
+  `messenger/src/lib.rs`). For: chat messages, keys (MLS Welcome/KeyPackage), control
+  (RoomInvite, Ack, presence control).
+- **CHAN_MEDIA** — fast: light datagrams **without acks**, loss is acceptable. For:
+  real-time audio/video only.
 
-**Запрещено:** слать ключи/чат/файлы по `CHAN_MEDIA`; гнать медиа через надёжный
-ACK-транспорт по `CHAN_CHAT` (ACK на видео = лавина подтверждений, убитая latency).
+**Forbidden:** sending keys, chat or files over `CHAN_MEDIA`; pushing media through the
+reliable ack transport on `CHAN_CHAT` (acks on video = an avalanche of confirmations and
+dead latency).
 
-## 3. SQLite (core: контакты/сообщения/outbox) — ✅/⚠️
+## 3. SQLite (core: contacts / messages / outbox) — ✅/⚠️
 
-`core/src/db.rs`, SQLCipher. **Вся переписка — здесь**, одной таблицей
-`chat_messages`: личные чаты, «Сохранённое» и группы ([ADR-009](../adr/ADR-009-one-message-store.md)).
-Раньше история групп жила отдельно (список в памяти + JSON-файл), и каждая фича чата
-писалась дважды; в `engine/groups` остаются только MLS-состояние и служебные файлы.
+`core/src/db.rs`, SQLCipher. **All conversations live here**, in one table
+`chat_messages`: 1:1 chats, Saved messages and groups ([ADR-009](../adr/ADR-009-one-message-store.md)).
+Group history used to live separately (a list in memory + a JSON file), and every chat
+feature was written twice; `engine/groups` keeps only MLS state and service files.
 
-- ✅ Ключ строки — `(chat, scope, sender, id)`: автор входит в ключ, потому что в
-  группе «моё/не моё» его не заменяет (у двух участников id может совпасть).
-- ✅ Пагинация по курсору `(time, rowid)`, а не по одному времени: время не уникально.
-- ⚠️ Новая колонка истории — это ещё и `MSG_COLS`/`read_msg` в `store.rs`: порядок
-  колонок там общий для всех запросов, разъехавшись — молча перепутает поля.
-- ✅ Поиск идёт через FTS5-индекс `messages_fts` (внешний контент над
-  `chat_messages`, синхронизация триггерами), а при сборке SQLite без FTS5 тихо
-  деградирует до `LIKE`: поиск, который «иногда не собирается», хуже медленного.
-  Переиндексация старых баз — один раз, по `PRAGMA user_version`; считать строки
-  в самом индексе нельзя (у FTS с внешним контентом `COUNT(*)` читает основную
-  таблицу и всегда «не пуст» — из-за этого поиск по старой переписке молчал).
+- ✅ The row key is `(chat, scope, sender, id)`: the author is part of the key, because in
+  a group "mine / not mine" does not replace it (two members' ids can coincide).
+- ✅ Pagination by the cursor `(time, rowid)`, not by time alone: time is not unique.
+- ⚠️ A new history column also means `MSG_COLS`/`read_msg` in `store.rs`: the column order
+  there is shared by all queries, and if they diverge, fields get silently mixed up.
+- ✅ Search goes through the FTS5 index `messages_fts` (external content over
+  `chat_messages`, kept in sync by triggers); on a SQLite build without FTS5 it quietly
+  degrades to `LIKE` — search that "sometimes does not build" is worse than slow search.
+  Old databases are re-indexed once, by `PRAGMA user_version`; you cannot count rows in the
+  index itself (with external content, `COUNT(*)` reads the main table and is never
+  "empty" — which is why search over old conversations used to stay silent).
+- ✅ The encryption key comes from the `vault`; `PRAGMA journal_mode = WAL`;
+  `foreign_keys = ON`.
+- ✅ **`PRAGMA busy_timeout = 5000`** — wait up to 5 s for a lock instead of an immediate
+  `SQLITE_BUSY` (WAL checkpoint contention / a possible second connection).
+- ✅ **Writes are serialised through `Arc<Mutex<Connection>>`** (one connection). That is
+  the *main* protection against concurrent writes; `busy_timeout` is the safety net.
+- 📋 If a second connection ever appears: writes in transactions; on `SQLITE_BUSY` —
+  exponential back-off and retry.
 
-- ✅ Ключ шифрования из `vault`; `PRAGMA journal_mode = WAL`; `foreign_keys = ON`.
-- ✅ **`PRAGMA busy_timeout = 5000`** — ждать блокировку 5с вместо мгновенного
-  `SQLITE_BUSY` (контеншн WAL-checkpoint / будущее 2-е соединение).
-- ✅ **Сериализация записи — `Arc<Mutex<Connection>>`** (одно соединение). Это
-  *основная* защита от конкурентных записей; `busy_timeout` — страховка.
-- 📋 Когда появится outbox-демон (H3) с отдельным соединением: записи — в
-  транзакциях; на `SQLITE_BUSY` — экспоненциальный откат + повтор.
+## 4. Persisting MLS state — ✅ (an iron rule)
 
-## 4. Персистентность MLS-состояния — ✅ (правило железное)
+> **Every operation that moves MLS state (send / receive / commit) MUST save the group
+> (`save_group`).**
 
-> **Любая операция, двигающая MLS-состояние (send / receive / commit), ОБЯЗАНА
-> сохранить группу (`save_group`).**
+The MLS ratchet moves on sending too. If the sending ratchet is not saved, after a restart
+you send from an "old" generation → the receiver has already deleted that secret for
+forward secrecy → `"secret deleted to preserve forward secrecy"` → messages stop arriving.
+See `engine/src/groups.rs` (`send_text`/`on_group`/`on_key_reply` all call `save_group`)
+and the fixes 7e5fc2a/a86248c. Since ADR-004 a lagging member is healed by resync
+(Remove + Add); a group that diverged before that has to be re-created.
 
-MLS-ratchet двигается и при отправке. Не сохранил sending-ratchet → после рестарта
-шлёшь со «старого» поколения → получатель уже удалил секрет ради forward-secrecy →
-`"secret deleted to preserve forward secrecy"` → сообщения перестают доходить.
-См. `engine/src/groups.rs` (`send_text`/`on_group`/`on_key_reply` все зовут
-`save_group`) и историю фиксов 7e5fc2a/a86248c. Разъехавшиеся группы **не лечатся** —
-пересоздавать.
+The save itself must be crash-safe — see §11.
 
-## 5. UI / жизненный цикл Android — ✅/📋
+## 5. UI / Android lifecycle — ✅/📋
 
-- ✅ **UI НИКОГДА не зовёт `Native.*` напрямую.** Любой JNI-вызов может заблокировать
-  (сеть/FFI/диск/мьютексы) → ANR. Всё через фоновые потоки: `pollThread` (события),
-  `tickerThread` (статус), `ops` (single-thread executor, сериализует операции). См.
-  док-блок в `Model.kt`.
-- ✅ **Состояние — Compose snapshot-state** (`mutableStateOf/List/Map`), безопасно
-  писать из фоновых потоков (рекомпозиция планируется сама). Сознательно НЕ StateFlow.
-- 📋 **Узел упал/выключен → UI мгновенно в Offline**, интерактив ввода
-  деактивируется (не копить операции в никуда). Проверить покрытие.
+- ✅ **The UI NEVER calls `Native.*` directly.** Any JNI call may block (network, FFI,
+  disk, mutexes) → ANR. Everything goes through background threads: `pollThread` (events),
+  `tickerThread` (status), `ops` (a single-thread executor that serialises operations). See
+  the doc block in `Model.kt`.
+- ✅ **State is Compose snapshot state** (`mutableStateOf/List/Map`), safe to write from
+  background threads (recomposition is scheduled by itself). StateFlow is deliberately not
+  used.
+- 📋 **The node is down or off → the UI goes Offline immediately**, and input is disabled
+  (do not pile up operations into nowhere). Coverage to be checked.
 
-## 6. Доменное разделение ключей (SEC-5) — ✅ (правило для НОВЫХ ключей)
+## 6. Domain separation of keys (SEC-5) — ✅ (a rule for NEW keys)
 
-> **Любой новый симметричный ключ выводится через `Identity::derive_subkey("dev.p2p.
-> <домен>.vN")` (BLAKE3-KDF), а НЕ переиспользованием seed/идентичности/Box-ключа.**
+> **Every new symmetric key is derived with `Identity::derive_subkey("dev.p2p.<domain>.vN")`
+> (BLAKE3 KDF), NOT by reusing the seed, the identity or the Box key.**
 
-Каждый домен — своя уникальная метка → независимый ключ. Это предотвращает
-cross-protocol-переиспользование (подпись/ключ из одного контекста, валидные в другом).
+Each domain has its own unique label → an independent key. This prevents cross-protocol
+reuse (a signature or key from one context being valid in another).
 
-**Существующие ключи — намеренно НЕ трогаем** (менять = ломать личность/совместимость):
-- **ed25519-идентичность** = MLS-credential + основа контакта и fingerprint. Это и
-  есть личность узла — по определению общая.
-  *Уточнение ADR-007:* транспортный ключ (адрес Yggdrasil) с неё **снят** и выводится
-  доменно по эпохам; эпоха 0 совпадает с личностью, поэтому для не менявших адрес
-  ничего не изменилось. См. §7.
-- **X25519 Box-секрет** = `SHA-512(seed)[..32]` — стандартная конструкция libsodium
-  (`crypto_sign_ed25519_sk_to_curve25519`), крипто-сообществом проанализирована.
-- **MLS-ключ подписи** = идентичность: привязка `sig_key == pubkey` — это H1-аутентификация
-  (leaf подписан ключом контакта). Отделять → post-1.0 (нужна цепочка сертификатов).
+**Existing keys are deliberately NOT touched** (changing them = breaking the identity or
+compatibility):
+- **The ed25519 identity** = the MLS credential + the basis of the contact record and the
+  fingerprint. It is the node's identity — shared by definition.
+  *ADR-007 refinement:* the transport key (the Yggdrasil address) is **no longer** the
+  identity; it is derived per epoch with domain separation; epoch 0 equals the identity, so
+  nothing changed for those who never changed their address. See §7.
+- **The X25519 Box secret** = `SHA-512(seed)[..32]` — the standard libsodium construction
+  (`crypto_sign_ed25519_sk_to_curve25519`), analysed by the crypto community.
+- **The MLS signing key** = the identity: the binding `sig_key == pubkey` is the H1
+  authentication (the leaf is signed by the contact's key). Separating it → after 1.0 (it
+  needs a certificate chain).
 
-## 7. Личность и адрес — разные ключи (ADR-007) — ✅
+## 7. Identity and address are different keys (ADR-007) — ✅
 
-> **Пира идентифицирует ЛИЧНОСТЬ (IK), а не адрес (TK).** Шифруем личности,
-> отправляем на адрес. Всё, что заведено на пира — история, контакты, тир доверия,
-> блок-лист, ростер MLS, события — ключуется личностью.
+> **A peer is identified by its IDENTITY (IK), not by its address (TK).** Encrypt to the
+> identity, send to the address. Everything keyed to a peer — history, contacts, trust
+> tier, blocklist, MLS roster, events — is keyed by the identity.
 
-Адрес Yggdrasil выводится из ключа узла, поэтому «сменить адрес» = «сменить ключ».
-Чтобы это не стоило личности, транспортный ключ отделён: `TK_n =
-derive_subkey("dev.p2p.transport.v1/" + n)`, причём **эпоха 0 — сам ключ личности**
-(установки, где адрес не меняли, работают как раньше).
+A Yggdrasil address is derived from the node key, so "change the address" = "change the
+key". So that this does not cost the identity, the transport key is separate:
+`TK_n = derive_subkey("dev.p2p.transport.v1/" + n)`, and **epoch 0 is the identity key
+itself** (installations that never changed their address work as before).
 
-Практические следствия, каждое оплачено найденной ошибкой:
-- **Приём.** Правило «`from == src`» заменено на «связка подтверждена»: `from == src`,
-  либо `src` — известный адрес этой личности, либо это подписанное объявление о смене,
-  связывающее `from → src`. Дальше по коду — только личность.
-- **Отправка.** Резолв «личность → адрес» живёт в ОДНОЙ точке (`Shared::send`).
-  Добавлять второй путь отправки нельзя: именно единственность точки позволила
-  группам пережить ротацию без единой правки.
-- **Бюджет и блок-лист.** Заведены на личность, но приёмный слой видит адрес →
-  обязателен резолв адрес→личность ПЕРЕД проверкой тира. Иначе контакт после смены
-  адреса разжалуется в незнакомцы, а заблокированный выйдет из-под блока.
-- **Ранний дроп в libygg** режет по адресу, значит при смене адреса блокировку надо
-  переставлять на актуальный ключ (и снимать с брошенного).
+Practical consequences, each paid for by a bug found:
+- **Receiving.** The rule "`from == src`" is replaced by "the binding is confirmed":
+  `from == src`, or `src` is a known address of that identity, or it is a signed change
+  announcement binding `from → src`. After that, the code sees only the identity.
+- **Sending.** Resolving "identity → address" lives in ONE place (`Shared::send`). Do not
+  add a second sending path: the single point is exactly what let groups survive rotation
+  without a single change.
+- **Budget and blocklist.** They are keyed by identity, but the receive layer sees the
+  address → resolving address → identity BEFORE the tier check is mandatory. Otherwise a
+  contact is demoted to a stranger after changing address, and a blocked peer escapes the
+  block.
+- **Early drop in libygg** cuts by address, so on an address change the block must be moved
+  to the current key (and removed from the abandoned one).
 
-Проверяется `engine/tests/rotate.rs` (6 сценариев, включая попытку уйти из-под блока
-ротацией).
+Checked by `engine/tests/rotate.rs` (6 scenarios, including an attempt to escape a block by
+rotating).
 
-## 8. Долгоживущие форматы: параметры защиты — в самом файле
+## 8. Long-lived formats: protection parameters live in the file itself
 
-Любой формат на диске, чья расшифровка зависит от **параметров** (стоимость KDF,
-алгоритм, длина соли), обязан хранить эти параметры (или номер профиля) в себе.
-Держать их только в коде — значит потерять данные при первом же обновлении: ключ,
-выведенный другими параметрами, это ДРУГОЙ ключ, а пользователь увидит «неверный
-пароль» на верном пароле и решит, что виноват сам.
+Any on-disk format whose decryption depends on **parameters** (KDF cost, algorithm, salt
+length) must store those parameters (or a profile number) inside. Keeping them only in code
+means losing data at the first update: a key derived with other parameters is a DIFFERENT
+key, and the user sees "wrong password" for the right password and blames themselves.
 
-Действует для `vault.meta` (третья строка — номер профиля) и заголовка `.p2pbak`
-(байт профиля). Профиль хранится НОМЕРОМ из таблицы `core::kdf::profile`, а не
-числами: числа из файла — это ввод, и «память 4 ГиБ» положит приложение до всякой
-проверки пароля. Менять смысл существующего номера нельзя никогда — только добавлять
-новый (тест `profile_1_parameters_are_frozen`).
+Applies to `vault.meta` (the third line is the profile number) and the `.p2pbak` header
+(the profile byte). The profile is stored as a NUMBER from the table `core::kdf::profile`,
+not as numbers: numbers from a file are input, and "memory 4 GiB" would take the app down
+before any password check. The meaning of an existing number must never change — only new
+ones may be added (test `profile_1_parameters_are_frozen`).
 
-## 9. Kotlin → движок: сериализация только через `WireJson`
+## 9. Kotlin → engine: serialisation only through `WireJson`
 
-`kotlinx.serialization` по умолчанию **не пишет поля, равные значению по умолчанию**.
-Состав резервной копии из-за этого уезжал в ядро пустым `{}` («ничего не класть»), и
-поймано это было живым прогоном, а не тестом: обе стороны по отдельности работали
-верно. Любой DTO, уходящий наружу, сериализуется через `WireJson` (`encodeDefaults =
-true`); `EngineJson` — только для чтения входящего.
+`kotlinx.serialization` by default **does not write fields equal to their default value**.
+Because of this the backup selection reached the core as an empty `{}` ("include nothing"),
+and it was caught by a live run, not by a test: each side worked correctly on its own. Every
+DTO that goes out is serialised through `WireJson` (`encodeDefaults = true`); `EngineJson`
+is only for reading incoming data.
 
-## 10. Ожидание ответа пира обязано иметь СВОЙ повтор
+## 10. Waiting for a peer's answer needs ITS OWN retry
 
-`send_reliable` повторяет неподтверждённое только `message_ttl` = **5 минут**, после
-чего пакет тихо выбрасывается. Этого хватает для «собеседник моргнул связью» и не
-хватает ни для чего, что ждёт человека на той стороне: пригласивший в группу,
-согласившийся на запрос в контакты и т.п. могут вернуться через сутки.
+`send_reliable` resends an unconfirmed packet only for `message_ttl` = **5 minutes**, after
+which it is quietly dropped. That is enough for "the other side's connection blinked" and
+not enough for anything that waits for a human on the other side: the inviter to a group,
+someone who accepted a contact request and so on may come back a day later.
 
-Правило: любой шаг протокола, который ЖДЁТ действия другой стороны, обязан
-1) пережить перезапуск (состояние на диске, не только в памяти),
-2) иметь собственный повтор на маячке (раз в 2 с) с разумным интервалом,
-3) повторять ТОТ ЖЕ криптографический материал, если ответ считается от него
-   (свежий KeyPackage сделал бы Welcome на прежний нерасшифровываемым).
+Rule: every protocol step that WAITS for the other side's action must
+1) survive a restart (state on disk, not only in memory),
+2) have its own retry on the beacon (every 2 s) with a sensible interval,
+3) repeat THE SAME cryptographic material if the answer depends on it (a fresh KeyPackage
+   would make a Welcome for the previous one undecryptable).
 
-Правило симметрично: то же относится к стороне, которая ЖДЁТ чужого ответа. Если мы
-кого-то позвали, «кого и куда» обязано лежать на диске (`groups/sent_invites.json`) —
-иначе после нашего перезапуска пришедший ответ не с чем сопоставить и он молча
-пропадёт. И наоборот: повторное приглашение не должно затирать уже данное согласие.
+The rule is symmetric: it also applies to the side that WAITS for someone else's answer. If
+we invited someone, "whom and where" must be on disk (`groups/sent_invites.json`) —
+otherwise after our restart an incoming answer has nothing to match and silently vanishes.
+And the other way round: a repeated invitation must not overwrite consent already given.
 
-Presence — только ускоритель: он приходит не про всех (не-контакт его не шлёт), и
-строить на нём единственный триггер нельзя. Живой пример и разбор: `BUGS.md`,
-«Приглашение в группу терялось, если пригласивший ушёл офлайн».
+Presence is only an accelerator: it does not arrive for everyone (a non-contact does not
+send it), and it must not be the only trigger. A real example and analysis: `BUGS.md`,
+"a group invitation was lost if the inviter went offline".
+
+## 11. State files are written crash-safely — ✅
+
+Android kills the process at any moment. A plain `fs::write` truncates the file first and
+writes afterwards; being killed in between leaves an empty or cut file — for MLS state that
+is a group that can no longer be loaded, for the profile a lost identity.
+
+> **Every state file is written through `p2p_core::fsutil::write_atomic`** (or
+> `write_atomic_private` for keys and seeds, 0600): a temp file next to the target →
+> `sync_all` → `rename` over it.
+
+The reader sees either the old version or the new one in full. The same applies to blobs
+(small ones through `write_atomic`, large ones are assembled in a `.part` file and renamed).
 
 ---
-Связано: [tokens.md](../design/tokens.md), ADR-003 (граница движок↔клиент),
-[ADR-007](../adr/ADR-007-identity-transport-key-split.md) (личность vs адрес),
-[ADR-008](../adr/ADR-008-proof-of-transit.md) (стимулы за транзит),
-память проекта (`group-message-reliability`, `architecture-cleanup`).
+Related: [tokens.md](../design/tokens.md), [ADR-003](../adr/ADR-003-engine-api.md) (engine
+↔ client boundary), [ADR-007](../adr/ADR-007-identity-transport-key-split.md) (identity vs
+address), [ADR-008](../adr/ADR-008-proof-of-transit.md) (transit incentives).
