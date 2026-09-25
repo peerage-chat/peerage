@@ -7,7 +7,7 @@ use jni::JNIEnv;
 
 use p2p_engine::parse_key;
 
-use crate::{engine, jni_safe, jstr, ret};
+use crate::{empty_bytes, engine, jni_safe, jstr, ret};
 
 /// hex(gid) из JString или ранний возврат дефолта.
 macro_rules! gid_or {
@@ -242,7 +242,9 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetMuted<'local>(
     session_ptr: jlong,
     muted: jboolean,
 ) {
-    if let Some(e) = unsafe { engine(session_ptr) } { e.room_set_muted(muted != JNI_FALSE); }
+    jni_safe!((), {
+        if let Some(e) = unsafe { engine(session_ptr) } { e.room_set_muted(muted != JNI_FALSE); }
+    });
 }
 
 /// Закодированный H264 access-unit → фрагментация + мультикаст всем участникам.
@@ -283,17 +285,13 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullVideoPacket<'local>
     session_ptr: jlong,
     peer_hex: JString<'local>,
 ) -> JByteArray<'local> {
-    let empty = env.new_byte_array(0).unwrap();
-    let Some(e) = (unsafe { engine(session_ptr) }) else { return empty };
-    let Some(key) = parse_key(&jstr(&mut env, &peer_hex)) else { return empty };
-    match e.room_pull_video_packet(&key) {
-        Some(f) => {
-            let arr = env.new_byte_array(f.len() as i32).unwrap();
-            // SAFETY: u8 и i8 одинаковый размер/выравнивание; JNI хранит байты.
-            let signed = unsafe { std::slice::from_raw_parts(f.as_ptr() as *const i8, f.len()) };
-            let _ = env.set_byte_array_region(&arr, 0, signed);
-            arr
+    jni_safe!(empty_bytes(&env), {
+        let empty = empty_bytes(&env);
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return empty };
+        let Some(key) = parse_key(&jstr(&mut env, &peer_hex)) else { return empty };
+        match e.room_pull_video_packet(&key) {
+            Some(f) => env.byte_array_from_slice(&f).unwrap_or(empty),
+            None => empty,
         }
-        None => empty,
-    }
+    })
 }

@@ -47,6 +47,11 @@ pub(crate) fn jstr(env: &mut JNIEnv, s: &JString) -> String {
 pub(crate) fn ret(env: &JNIEnv, s: &str) -> jstring {
     env.new_string(s).map(|v| v.into_raw()).unwrap_or(std::ptr::null_mut())
 }
+/// Пустой `byte[]` — дефолт для функций, возвращающих массив. Если JVM не смогла
+/// выделить даже его (OOM / висящее исключение), отдаём null, а не паникуем.
+pub(crate) fn empty_bytes<'a>(env: &JNIEnv<'a>) -> JByteArray<'a> {
+    env.new_byte_array(0).unwrap_or_default()
+}
 
 /// Разыменовать `session_ptr` в `&Arc<Engine>` (или None, если 0).
 pub(crate) unsafe fn engine<'a>(session_ptr: jlong) -> Option<&'a Arc<Engine>> {
@@ -64,33 +69,35 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
     data_dir: JString<'local>,
     vault_key: JByteArray<'local>,
 ) -> jstring {
-    let _ = android_logger::init_once(
-        android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("p2p"),
-    );
+    jni_safe!(ret(&env, r#"{"error":"panic in start"}"#), {
+        let _ = android_logger::init_once(
+            android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("p2p"),
+        );
 
-    let dir = PathBuf::from(jstr(&mut env, &data_dir));
+        let dir = PathBuf::from(jstr(&mut env, &data_dir));
 
-    // Ключ at-rest из Android Keystore (VaultKeyManager в Kotlin разворачивает его
-    // и передаёт 32 байта plaintext). Неверный размер → at-rest отключено.
-    let key: Option<[u8; 32]> = match env.convert_byte_array(&vault_key) {
-        Ok(raw) if raw.len() == 32 => Some(std::array::from_fn(|i| raw[i])),
-        Ok(raw) => { log::warn!("vault key: неверный размер {} (ожидается 32); at-rest отключено", raw.len()); None }
-        Err(e) => { log::warn!("vault key: ошибка чтения JByteArray ({e}); at-rest отключено"); None }
-    };
+        // Ключ at-rest из Android Keystore (VaultKeyManager в Kotlin разворачивает его
+        // и передаёт 32 байта plaintext). Неверный размер → at-rest отключено.
+        let key: Option<[u8; 32]> = match env.convert_byte_array(&vault_key) {
+            Ok(raw) if raw.len() == 32 => Some(std::array::from_fn(|i| raw[i])),
+            Ok(raw) => { log::warn!("vault key: неверный размер {} (ожидается 32); at-rest отключено", raw.len()); None }
+            Err(e) => { log::warn!("vault key: ошибка чтения JByteArray ({e}); at-rest отключено"); None }
+        };
 
-    match Engine::start(dir, key) {
-        Ok(ok) => {
-            let session_ptr = Box::into_raw(Box::new(ok.engine)) as jlong;
-            let json = serde_json::json!({
-                "session_ptr": session_ptr,
-                "pubkey": hex::encode(ok.pubkey),
-                "address": ok.address,
-                "fingerprint": p2p_core::identity::fingerprint_words(&ok.pubkey).join(" "),
-            });
-            ret(&env, &json.to_string())
+        match Engine::start(dir, key) {
+            Ok(ok) => {
+                let session_ptr = Box::into_raw(Box::new(ok.engine)) as jlong;
+                let json = serde_json::json!({
+                    "session_ptr": session_ptr,
+                    "pubkey": hex::encode(ok.pubkey),
+                    "address": ok.address,
+                    "fingerprint": p2p_core::identity::fingerprint_words(&ok.pubkey).join(" "),
+                });
+                ret(&env, &json.to_string())
+            }
+            Err(e) => ret(&env, &serde_json::json!({"error": e}).to_string()),
         }
-        Err(e) => ret(&env, &serde_json::json!({"error": e}).to_string()),
-    }
+    })
 }
 
 /// Освободить сессию (выгружает Arc<Engine>).
@@ -100,9 +107,11 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_destroySession<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
 ) {
-    if session_ptr != 0 {
-        let _boxed = unsafe { Box::from_raw(session_ptr as *mut Arc<Engine>) };
-    }
+    jni_safe!((), {
+        if session_ptr != 0 {
+            let _boxed = unsafe { Box::from_raw(session_ptr as *mut Arc<Engine>) };
+        }
+    });
 }
 
 /// Следующее событие как JSON-строка, либо "" если очередь пуста.
@@ -727,13 +736,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_blobRead<'local>(
     session_ptr: jlong,
     id_hex: JString<'local>,
 ) -> JByteArray<'local> {
-    let empty = env.new_byte_array(0).unwrap();
-    let Some(e) = (unsafe { engine(session_ptr) }) else { return empty };
-    let id = jstr(&mut env, &id_hex);
-    match e.blob_read(&id) {
-        Some(bytes) => env.byte_array_from_slice(&bytes).unwrap_or(empty),
-        None => empty,
-    }
+    jni_safe!(empty_bytes(&env), {
+        let empty = empty_bytes(&env);
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return empty };
+        let id = jstr(&mut env, &id_hex);
+        match e.blob_read(&id) {
+            Some(bytes) => env.byte_array_from_slice(&bytes).unwrap_or(empty),
+            None => empty,
+        }
+    })
 }
 
 /// Есть ли блоб локально. Нужен, чтобы понять «скачано ли вложение», не читая его
@@ -784,8 +795,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_deriveVaultKey<'local>(
     salt: JByteArray<'local>,
     profile: jint,
 ) -> JByteArray<'local> {
-    let empty = env.new_byte_array(0).unwrap();
-    jni_safe!(env.new_byte_array(0).unwrap(), {
+    let empty = empty_bytes(&env);
+    jni_safe!(empty_bytes(&env), {
         let pass = jstr(&mut env, &password);
         let salt_bytes = env.convert_byte_array(&salt).unwrap_or_default();
         match p2p_core::kdf::derive_key_with(profile.max(0) as u8, &pass, &salt_bytes) {
@@ -805,7 +816,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_currentKdfProfile<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jint {
-    p2p_core::kdf::CURRENT_PROFILE as jint
+    jni_safe!(0, { p2p_core::kdf::CURRENT_PROFILE as jint })
 }
 
 /// Свежая случайная соль для KDF (16 байт).
@@ -814,8 +825,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_newVaultSalt<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> JByteArray<'local> {
-    let empty = env.new_byte_array(0).unwrap();
-    jni_safe!(env.new_byte_array(0).unwrap(), {
+    let empty = empty_bytes(&env);
+    jni_safe!(empty_bytes(&env), {
         env.byte_array_from_slice(&p2p_core::kdf::new_salt()).unwrap_or(empty)
     })
 }
@@ -1341,4 +1352,37 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_reconnectPeers<'local>(
     jni_safe!((), {
         if let Some(e) = unsafe { engine(session_ptr) } { e.reconnect_peers(); }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    /// Инвариант №1: каждая точка входа JNI обёрнута в `jni_safe!`. Паника, прошедшая
+    /// сквозь FFI, роняет весь процесс, а забыть обёртку в новой функции легко —
+    /// поэтому проверяем исходники, а не полагаемся на ревью.
+    #[test]
+    fn every_jni_entry_point_is_guarded() {
+        let sources = [
+            ("lib.rs", include_str!("lib.rs")),
+            ("call_jni.rs", include_str!("call_jni.rs")),
+            ("group_jni.rs", include_str!("group_jni.rs")),
+            ("bench_jni.rs", include_str!("bench_jni.rs")),
+        ];
+        let mut unguarded = Vec::new();
+        let mut total = 0;
+        for (file, src) in sources {
+            let starts: Vec<usize> = src.match_indices("extern \"system\" fn ").map(|(i, _)| i).collect();
+            for (n, &start) in starts.iter().enumerate() {
+                let end = starts.get(n + 1).copied().unwrap_or(src.len());
+                // У последней функции файла «тело» тянется до конца — отрезаем тесты.
+                let body = src[start..end].split("#[cfg(test)]").next().unwrap_or("");
+                total += 1;
+                if !body.contains("jni_safe!") {
+                    let name = body["extern \"system\" fn ".len()..].split(['<', '(']).next().unwrap_or("?");
+                    unguarded.push(format!("{file}: {name}"));
+                }
+            }
+        }
+        assert!(total > 100, "нашлось подозрительно мало точек входа ({total}) — сломан разбор?");
+        assert!(unguarded.is_empty(), "JNI без jni_safe!: {unguarded:#?}");
+    }
 }
