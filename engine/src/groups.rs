@@ -223,7 +223,7 @@ impl GroupManager {
             }
         }
         if let Ok(j) = serde_json::to_vec(&times) {
-            let _ = std::fs::write(self.dir.join("rekey.json"), j);
+            let _ = p2p_core::fsutil::write_atomic(&self.dir.join("rekey.json"), j);
         }
     }
 
@@ -239,7 +239,7 @@ impl GroupManager {
             self.groups.iter().map(|(id, e)| (hex::encode(id), e.name.clone())).collect();
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_vec_pretty(&idx) {
-            let _ = std::fs::write(self.dir.join("index.json"), j);
+            let _ = p2p_core::fsutil::write_atomic(&self.dir.join("index.json"), j);
         }
         self.save_admins();
     }
@@ -254,7 +254,7 @@ impl GroupManager {
             .map(|(id, _)| hex::encode(id))
             .collect();
         if let Ok(j) = serde_json::to_vec(&admins) {
-            let _ = std::fs::write(self.dir.join("admins.json"), j);
+            let _ = p2p_core::fsutil::write_atomic(&self.dir.join("admins.json"), j);
         }
     }
 
@@ -278,7 +278,7 @@ impl GroupManager {
             self.admin_keys.iter().map(|(g, k)| (hex::encode(g), hex::encode(k))).collect();
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_vec(&map) {
-            let _ = std::fs::write(self.admin_keys_path(), j);
+            let _ = p2p_core::fsutil::write_atomic(&self.admin_keys_path(), j);
         }
     }
 
@@ -422,7 +422,7 @@ impl GroupManager {
             self.invites.iter().map(|(p, g)| (hex::encode(p), hex::encode(g))).collect();
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_vec(&map) {
-            let _ = std::fs::write(self.sent_invites_path(), j);
+            let _ = p2p_core::fsutil::write_atomic(&self.sent_invites_path(), j);
         }
     }
 
@@ -461,7 +461,7 @@ impl GroupManager {
             .collect();
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_vec(&map) {
-            let _ = std::fs::write(self.pending_invites_path(), j);
+            let _ = p2p_core::fsutil::write_atomic(&self.pending_invites_path(), j);
         }
     }
 

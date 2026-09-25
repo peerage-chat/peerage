@@ -8,6 +8,7 @@ pub mod backup;
 pub mod budget;
 pub mod crypto;
 pub mod db;
+pub mod fsutil;
 pub mod identity;
 pub mod media;
 pub mod outbox;

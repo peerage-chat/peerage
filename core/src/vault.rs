@@ -74,13 +74,7 @@ fn write_keyfile(path: &std::path::Path, key: &[u8; 32]) -> Result<(), VaultErro
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| VaultError::Keyring(e.to_string()))?;
     }
-    std::fs::write(path, key).map_err(|e| VaultError::Keyring(e.to_string()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+    crate::fsutil::write_atomic_private(path, key).map_err(|e| VaultError::Keyring(e.to_string()))
 }
 
 /// Включено ли шифрование at-rest.

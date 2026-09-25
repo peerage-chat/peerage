@@ -111,7 +111,9 @@ impl Member {
                 std::fs::create_dir_all(parent).map_err(mls)?;
             }
         }
-        std::fs::write(path, p2p_core::vault::seal(&out)).map_err(mls)?;
+        // Атомарно: убитый посреди записи процесс не должен оставить обрезанное
+        // MLS-состояние — такую группу уже не загрузить.
+        p2p_core::fsutil::write_atomic(path, &p2p_core::vault::seal(&out)).map_err(mls)?;
         Ok(())
     }
 

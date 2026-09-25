@@ -1232,7 +1232,7 @@ impl Engine {
         *self.rotate_pending.lock_safe() = peers.iter().copied().collect();
         let hexes: Vec<String> = peers.iter().map(hex::encode).collect();
         if let Ok(v) = serde_json::to_vec(&hexes) {
-            let _ = std::fs::write(self.data_dir.join("rotate_pending.json"), v);
+            let _ = p2p_core::fsutil::write_atomic(&self.data_dir.join("rotate_pending.json"), v);
         }
     }
 
@@ -1681,7 +1681,7 @@ impl Engine {
 
     fn save_profile_meta(&self, m: &ProfileMeta) {
         if let Ok(v) = serde_json::to_vec(m) {
-            let _ = std::fs::write(self.profile_meta_path(), v);
+            let _ = p2p_core::fsutil::write_atomic(&self.profile_meta_path(), v);
         }
     }
 
@@ -2166,7 +2166,7 @@ fn load_transport_epoch(dir: &Path) -> u32 {
 
 fn save_transport_epoch(dir: &Path, epoch: u32) {
     if let Ok(v) = serde_json::to_vec(&TransportMeta { epoch }) {
-        let _ = std::fs::write(transport_meta_path(dir), v);
+        let _ = p2p_core::fsutil::write_atomic(&transport_meta_path(dir), v);
     }
 }
 
@@ -2395,25 +2395,15 @@ fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
     write_blob_file(&engine.blob_dir, id, content);
 }
 
-/// Записать блоб одним буфером — атомарно: во временный файл рядом, затем rename.
-/// Голый `fs::write` сначала создаёт пустой файл и лишь потом пишет, поэтому
-/// читатель (UI опрашивает `blob_read`/`blob_exists`) ловил пустое или обрезанное
-/// вложение, а падение посреди записи оставляло огрызок, который считается
-/// «скачанным» и больше никогда не перекачивается. Крупные блобы так же собираются
-/// в `.part` и переименовываются (`p2p_blob::disk`).
+/// Записать блоб одним буфером — атомарно (`fsutil::write_atomic`). Голый
+/// `fs::write` сначала создаёт пустой файл и лишь потом пишет, поэтому читатель
+/// (UI опрашивает `blob_read`/`blob_exists`) ловил пустое или обрезанное вложение,
+/// а падение посреди записи оставляло огрызок, который считается «скачанным» и
+/// больше никогда не перекачивается. Крупные блобы так же собираются в `.part` и
+/// переименовываются (`p2p_blob::disk`).
 fn write_blob_file(dir: &Path, id: p2p_blob::Hash, content: &[u8]) {
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let _ = std::fs::create_dir_all(dir);
-    let name = hex::encode(id);
-    // Уникальное имя: один и тот же блоб могут писать два потока (свой и принятый).
-    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = dir.join(format!("{name}.{n}.tmp"));
-    if std::fs::write(&tmp, p2p_core::vault::seal(content)).is_ok() {
-        if std::fs::rename(&tmp, dir.join(&name)).is_ok() {
-            return;
-        }
-    }
-    let _ = std::fs::remove_file(&tmp);
+    let _ = p2p_core::fsutil::write_atomic(&dir.join(hex::encode(id)), &p2p_core::vault::seal(content));
 }
 
 /// Сохранить миниатюру группового вложения и раздать её всем участникам, вернув

@@ -69,23 +69,9 @@ impl Profile {
         }
         let pf = ProfileFile { version: 1, seed: hex::encode(self.identity.seed()) };
         let json = serde_json::to_vec_pretty(&pf)?;
-        write_secret(path, &crate::vault::seal(&json))?;
+        crate::fsutil::write_atomic_private(path, &crate::vault::seal(&json))?;
         Ok(())
     }
-}
-
-#[cfg(unix)]
-fn write_secret(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true).create(true).truncate(true).mode(0o600).open(path)?;
-    f.write_all(data)
-}
-
-#[cfg(not(unix))]
-fn write_secret(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    std::fs::write(path, data)
 }
 
 // ---- Контакты (TOFU) -------------------------------------------------------
