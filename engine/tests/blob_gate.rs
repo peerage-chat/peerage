@@ -136,4 +136,11 @@ fn large_file_downloads_by_button() {
     assert!(b.download_media(&a_key, &blob));
     assert!(wait(60, || b.blob_exists(&blob)), "скачалось по кнопке");
     assert_eq!(b.blob_read(&blob).unwrap(), content, "байт-в-байт");
+
+    // R-044: открыть/проиграть — потоковой выгрузкой в файл, без чтения в память.
+    let out = tmpdir("out").join("video.mp4");
+    assert!(b.blob_export(&blob, &out), "выгружено");
+    assert_eq!(std::fs::read(&out).unwrap(), content, "выгрузка байт-в-байт");
+    assert!(!out.with_extension("part").exists(), "временный .part убран");
+    assert!(!b.blob_export("00", &tmpdir("out2").join("x")), "нет блоба — false");
 }

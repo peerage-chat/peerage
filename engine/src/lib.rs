@@ -1672,6 +1672,36 @@ impl Engine {
         read_blob_at(&self.blob_dir, id_hex)
     }
 
+    /// Расшифровать блоб в файл `dst` потоково, по одному чанку: так открывают и
+    /// проигрывают крупные вложения, не поднимая их в память. Пишем через `.part`
+    /// и переименование — читатель не увидит недописанный файл.
+    pub fn blob_export(&self, id_hex: &str, dst: &Path) -> bool {
+        use std::io::Write;
+        let Ok(raw) = hex::decode(id_hex.trim()) else { return false };
+        let src = self.blob_dir.join(hex::encode(raw));
+        let part = dst.with_extension("part");
+        let ok = (|| -> Option<()> {
+            let mut out = std::io::BufWriter::new(std::fs::File::create(&part).ok()?);
+            match p2p_blob::disk::read_header(&src) {
+                Some((_cs, n, _size)) => {
+                    for i in 0..n {
+                        let c = p2p_blob::disk::read_chunk(&src, i, |b| p2p_core::vault::open(b).ok())?;
+                        out.write_all(&c).ok()?;
+                    }
+                }
+                // Мелкий блоб лежит одним запечатанным буфером — он и так невелик.
+                None => out.write_all(&p2p_core::vault::open(&std::fs::read(&src).ok()?).ok()?).ok()?,
+            }
+            out.flush().ok()?;
+            drop(out);
+            std::fs::rename(&part, dst).ok()
+        })();
+        if ok.is_none() {
+            let _ = std::fs::remove_file(&part);
+        }
+        ok.is_some()
+    }
+
     /// Есть ли блоб локально. Отдельно от [`blob_read`], потому что «скачано ли
     /// вложение» нельзя выяснять чтением: у крупного это гигабайт в память ради
     /// одного булева.

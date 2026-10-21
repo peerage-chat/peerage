@@ -146,6 +146,28 @@ class AppModel private constructor() {
         return null
     }
 
+    /** Вложения, докачанные за эту сессию: видео и файлы в память не читаются,
+     *  и «скачано» для пузыря берётся отсюда (и из `downloaded` истории). */
+    val savedBlobs = mutableStateMapOf<String, Boolean>()
+
+    /**
+     * Расшифровать вложение в файл `cacheDir/<dir>/` потоково и отдать путь на
+     * главный поток (`null` — не вышло). Так открывают и проигрывают видео и
+     * файлы: целиком в память они не поднимаются. Файл — открытым текстом, поэтому
+     * вызывающий удаляет его, когда он больше не нужен; забытое чистится на старте.
+     */
+    fun exportBlob(blobId: String, dir: String, name: String, onReady: (java.io.File?) -> Unit) {
+        val ctx = appContext ?: return onReady(null)
+        ops.execute {
+            val folder = File(ctx.cacheDir, dir).apply { mkdirs() }
+            // Имя из сообщения — чужая строка: оставляем только её последний сегмент.
+            val safe = File(name.ifBlank { blobId.take(16) }).name.ifBlank { blobId.take(16) }
+            val f = File(folder, safe)
+            val ok = Native.blobExport(sessionPtr, blobId, f.absolutePath)
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onReady(if (ok) f else null) }
+        }
+    }
+
     /** Подтянуть байты блоба в кэш, если он уже есть локально (на [ops]). */
     private fun cacheBlob(blobId: String) {
         if (blobId.isNotEmpty() && !mediaBlobs.containsKey(blobId)) {
@@ -865,6 +887,9 @@ class AppModel private constructor() {
         migrateSelfNameFromPrefs(dataDir) // разовый перенос имени из старых prefs в движок
         // Файл старой клиентской очереди: недоставленное в нём лежало открытым текстом.
         File(dataDir, "offline_queue.json").delete()
+        // Расшифрованные копии вложений, оставшиеся от прошлого запуска (просмотр,
+        // «открыть», «поделиться»): держать их дольше нужного незачем.
+        appContext?.cacheDir?.let { c -> listOf("viewer", "shared").forEach { File(c, it).deleteRecursively() } }
         startLoops()
         registerNetworkCallback()
         return true
@@ -1815,6 +1840,7 @@ class AppModel private constructor() {
             // положить байты в реактивный кэш (пузырь перерисуется).
             is EngineEvent.BlobReceived -> {
                 downloads.remove(ev.id)
+                savedBlobs[ev.id] = true
                 if (contacts.any { it.avatarId == ev.id }) refreshContactsNow()
                 cacheBlob(ev.id)
             }

@@ -386,10 +386,10 @@ internal fun OutlineButton(
  * снимок, на который отвечают. Миниатюра узнаётся мгновенно.
  */
 @Composable
-internal fun RowScope.QuoteThumb(model: AppModel, blobId: String, thumbId: String): Boolean {
-    // Сначала миниатюра, потом сам блоб: у крупного вложения байт может не быть
-    // вовсе, а превью приезжает отдельным мелким блобом сразу.
-    val bytes = model.blob(thumbId) ?: model.blob(blobId) ?: return false
+internal fun RowScope.QuoteThumb(model: AppModel, blobId: String, thumbId: String, kind: String): Boolean {
+    // Сначала миниатюра; сам блоб — только у фото: у видео и файла это весь файл
+    // в память ради квадратика 34dp.
+    val bytes = model.blob(thumbId) ?: (if (kind == "image") model.blob(blobId) else null) ?: return false
     val bmp = rememberBitmap(bytes, thumbId.ifEmpty { blobId }, 34.dp) ?: return false
     Image(
         bmp,

@@ -763,6 +763,24 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_blobExists<'local>(
     })
 }
 
+/// Расшифровать блоб в файл по пути `path` потоково — для проигрывания и открытия
+/// крупных вложений без чтения их в память. `true` — файл записан целиком.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_blobExport<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    id_hex: JString<'local>,
+    path: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let id = jstr(&mut env, &id_hex);
+        let dst = jstr(&mut env, &path);
+        if e.blob_export(&id, std::path::Path::new(&dst)) { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
 // ── Контакты (TOFU) ─────────────────────────────────────────────────────────
 
 /// Добавить контакт. Возвращает "added" | "known" | "error".

@@ -382,7 +382,7 @@ internal fun QuoteBlock(
         Box(Modifier.width(2.5.dp).fillMaxHeight().background(HoloAccent))
         // Миниатюра слева от подписи — если она у нас есть.
         val hasThumb = src != null && src.kind != "text" &&
-            QuoteThumb(model, src.blobId, src.thumbId)
+            QuoteThumb(model, src.blobId, src.thumbId, src.kind)
         Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
             Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Text(
@@ -888,8 +888,12 @@ internal fun MessageBubble(
     senderName: String? = null,
     senderColor: Color = Color.White,
 ) {
-    // M2: байты вложения из реактивного кэша (появятся по докачке без рефреша).
-    val blobBytes = model.blob(m.blobId)
+    // Байты в память берём только у фото и голосового: видео рисуется миниатюрой,
+    // файл — именем и размером из сообщения. Иначе прокрутка чата с видео тянула
+    // бы в кучу файлы целиком ради одного кадра.
+    val needsBytes = m.kind == "image" || m.kind == "voice"
+    val blobBytes = if (needsBytes) model.blob(m.blobId) else null
+    val ready = m.downloaded || model.savedBlobs[m.blobId] == true
     var viewer by remember { mutableStateOf(false) }
     // Новое сообщение всплывает снизу: видно, что оно ПРИШЛО, а не было всегда.
     var shown by remember(m.id) { mutableStateOf(!animate) }
@@ -919,7 +923,8 @@ internal fun MessageBubble(
     ) {
         // Карточка «скачать» превращается в готовое вложение — это подмена
         // содержимого прямо под пальцем, поэтому переход плавный.
-        val pending = !m.downloaded && blobBytes == null && m.blobId.isNotEmpty() && m.kind != "text"
+        val pending = m.blobId.isNotEmpty() && m.kind != "text" &&
+            if (needsBytes) !m.downloaded && blobBytes == null else !ready
         // Фото без подписи — САМО себе пузырь: рамка вокруг картинки не несёт
         // смысла, только съедает 10dp с каждой стороны и делает снимок меньше.
         // Подпись возвращает подложку — под текстом она нужна. А вот цитата и
@@ -1024,15 +1029,16 @@ internal fun MessageBubble(
                             // длительности: тап открывает просмотрщик, а не отдаёт
                             // файл наружу системному плееру.
                             "video" -> VideoAttachment(
-                                blobBytes,
+                                model.blob(m.thumbId),
+                                ready,
                                 m.durationMs,
                                 onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
                                 bare = photoBubble,
                                 onLongClick = { model.toggleSelect(m) },
-                                cacheKey = m.blobId,
+                                cacheKey = m.thumbId,
                             )
                             "voice" -> VoiceAttachment(blobBytes)
-                            "file" -> FileAttachment(m.name, blobBytes) { model.toggleSelect(m) }
+                            "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready) { model.toggleSelect(m) }
                             // Текст обтекает мету: она едет в конец последней строки
                             // и переносится сама, если та её не вмещает.
                             else -> BubbleText(m.text) { meta() }
@@ -1142,24 +1148,24 @@ internal fun ImageAttachment(
  */
 @Composable
 internal fun VideoAttachment(
-    bytes: ByteArray?,
+    thumb: ByteArray?,
+    ready: Boolean,
     durationMs: Int,
     onOpen: () -> Unit,
     bare: Boolean = false,
     onLongClick: () -> Unit = {},
     cacheKey: String = "",
 ) {
-    // Первый кадр достаём из самих байт: миниатюра могла и не приехать, а файл уже
-    // здесь — значит показать есть что в любом случае. Работа фоновая: раньше файл
-    // писался на диск и кадр декодировался прямо в потоке отрисовки.
+    // Кадр — миниатюра, приехавшая с сообщением. Сам файл ради картинки не
+    // читаем: раньше видео целиком шло в память и расшифрованной копией на диск.
     val side = if (bare) PhotoBubbleSize else 220.dp
-    val frame = rememberVideoFrame(bytes, cacheKey, side)
+    val frame = rememberBitmap(thumb, cacheKey, side)
     Box(
         Modifier.size(if (bare) PhotoBubbleSize else 220.dp)
             .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)))
             .background(Color.Black)
             .combinedClickable(
-                enabled = bytes != null,
+                enabled = ready,
                 onClick = onOpen,
                 onLongClick = onLongClick,
             ),
@@ -1168,7 +1174,7 @@ internal fun VideoAttachment(
         if (frame != null) {
             Image(frame, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-        if (bytes == null) {
+        if (!ready) {
             CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
         } else {
             // Кнопка «play» — на затемнении: кадр бывает светлым, и белый значок
@@ -1195,21 +1201,29 @@ internal fun VideoAttachment(
     }
 }
 
-/** Файл-вложение: иконка + имя + размер; тап (когда скачан) → открыть системой. */
+/** Файл-вложение: иконка + имя + размер; тап (когда скачан) → открыть системой.
+ *  Размер — из сообщения: читать файл ради подписи под иконкой незачем. */
 @Composable
-internal fun FileAttachment(name: String, bytes: ByteArray?, onLongClick: () -> Unit = {}) {
+internal fun FileAttachment(
+    model: AppModel,
+    blobId: String,
+    name: String,
+    size: Long,
+    ready: Boolean,
+    onLongClick: () -> Unit = {},
+) {
     val ctx = LocalContext.current
     Row(
         // Долгое нажатие пробрасывается наружу — иначе своим `clickable` карточка
         // забирала бы жест и выделить сообщение-файл было бы нельзя.
         Modifier.padding(end = 44.dp).widthIn(min = 160.dp).combinedClickable(
-            enabled = bytes != null,
-            onClick = { bytes?.let { openWithSystem(ctx, name, it) } },
+            enabled = ready,
+            onClick = { model.exportBlob(blobId, "shared", name) { f -> f?.let { openWithSystem(ctx, it) } } },
             onLongClick = onLongClick,
         ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (bytes == null) {
+        if (!ready) {
             CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
         } else {
             Icon(Icons.Filled.AttachFile, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
@@ -1218,7 +1232,7 @@ internal fun FileAttachment(name: String, bytes: ByteArray?, onLongClick: () -> 
         Column {
             Text(name.ifBlank { stringResource(R.string.chat_file) }, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                if (bytes != null) fmtSize(bytes.size) else stringResource(R.string.chat_downloading),
+                if (ready) fmtSizeLong(size) else stringResource(R.string.chat_downloading),
                 color = HoloSecondary,
                 fontSize = 11.sp,
             )
@@ -1254,7 +1268,9 @@ internal fun VoiceAttachment(bytes: ByteArray?) {
                         mp.start()
                         playing = true
                     } else if (bytes != null) {
-                        val f = java.io.File(ctx.cacheDir, "play_${bytes.size}.m4a").apply { writeBytes(bytes) }
+                        // В `viewer/`: расшифрованные копии оттуда убираются на старте.
+                        val dir = java.io.File(ctx.cacheDir, "viewer").apply { mkdirs() }
+                        val f = java.io.File(dir, "play_${bytes.size}.m4a").apply { writeBytes(bytes) }
                         val np = android.media.MediaPlayer().apply {
                             setDataSource(f.absolutePath)
                             prepare()
@@ -1295,10 +1311,8 @@ internal fun VoiceAttachment(bytes: ByteArray?) {
 }
 
 /** Открыть скачанный блоб системным приложением через FileProvider. */
-private fun openWithSystem(ctx: android.content.Context, name: String, bytes: ByteArray) {
+private fun openWithSystem(ctx: android.content.Context, f: java.io.File) {
     runCatching {
-        val dir = java.io.File(ctx.cacheDir, "shared").apply { mkdirs() }
-        val f = java.io.File(dir, name.ifBlank { "file" }).apply { writeBytes(bytes) }
         val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
         val mime = ctx.contentResolver.getType(uri) ?: "*/*"
         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)

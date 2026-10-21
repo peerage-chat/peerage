@@ -132,6 +132,9 @@ object Native {
     /** Есть ли блоб локально — без чтения байт (у крупного это гигабайт в память). */
     external fun blobExists(sessionPtr: Long, idHex: String): Boolean
 
+    /** Расшифровать блоб в файл потоково (крупное вложение не идёт в память). */
+    external fun blobExport(sessionPtr: Long, idHex: String, path: String): Boolean
+
     /** Добавить контакт по коду обмена: hex личности либо расширенная форма
      *  `личность:эпоха:адрес:подпись` (ADR-007). Возвращает "added"|"known"|"error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
