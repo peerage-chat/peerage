@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
 import dev.p2p.messenger.HoloSurface
 import dev.p2p.messenger.R
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 // ── Общие элементы ──────────────────────────────────────────────────────────
@@ -622,36 +621,26 @@ internal fun inputColors() = TextFieldDefaults.colors(
 )
 
 /**
- * Догрузка истории ВВЕРХ по мере прокрутки: чат открывается хвостом (движок не
- * поднимает переписку целиком), остальное приезжает страницами.
+ * Догрузка старой истории для ленты, привязанной к НИЗУ (`reverseLayout = true`,
+ * элемент 0 — самое свежее): чат открывается хвостом (движок не поднимает
+ * переписку целиком), остальное приезжает страницами, когда взгляд подходит к
+ * верхнему краю — к последним индексам.
  *
- * Две тонкости, обе видны только на живом экране:
- * - после вставки сверху возвращаем взгляд на то же сообщение, иначе лента дёргается;
- * - если история короче экрана, прокрутки нет вовсе и по одному лишь индексу вторая
- *   страница не запросилась бы никогда — поэтому тянем, пока лента не станет
- *   прокручиваемой или страницы не кончатся.
+ * Компенсировать прокрутку не нужно: старое дописывается в конец списка, то есть
+ * над видимым, и лента не сдвигается. Если история короче экрана, все элементы
+ * видны сразу — условие держится, и страницы тянутся, пока не кончатся (каждая
+ * меняет число элементов и будит поток снова; конец истории отмечает модель).
+ *
+ * Раньше лента строилась сверху вниз: чат на кадр открывался с начала и прыгал в
+ * конец, а это «начало» ещё и запрашивало лишнюю страницу.
  */
 @Composable
-internal fun PagingUp(listState: LazyListState, key: Any?, load: (done: (Int) -> Unit) -> Unit) {
-    val scope = rememberCoroutineScope()
-    fun pull() {
-        val idx = listState.firstVisibleItemIndex
-        val offset = listState.firstVisibleItemScrollOffset
-        load { added ->
-            if (added > 0) {
-                scope.launch {
-                    listState.scrollToItem(idx + added, offset)
-                    if (!listState.canScrollBackward) pull()
-                }
-            }
-        }
-    }
+internal fun PagingOlder(listState: LazyListState, key: Any?, load: () -> Unit) {
     LaunchedEffect(key) {
-        // Следим и за числом элементов: история приезжает асинхронно, и в момент
-        // подписки список ещё пуст — по одному лишь индексу (он всё это время 0)
-        // первая страница не запросилась бы никогда.
-        snapshotFlow { listState.firstVisibleItemIndex to listState.layoutInfo.totalItemsCount }
-            .collect { (idx, count) -> if (idx <= 3 && count > 0) pull() }
+        snapshotFlow {
+            val info = listState.layoutInfo
+            (info.visibleItemsInfo.lastOrNull()?.index ?: -1) to info.totalItemsCount
+        }.collect { (last, count) -> if (count > 0 && last >= count - 4) load() }
     }
 }
 

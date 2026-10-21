@@ -24,7 +24,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -153,22 +152,22 @@ internal fun ChatScreen(model: AppModel) {
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Держим прокрутку у последнего сообщения при появлении НОВЫХ. Ориентир — id
-    // последнего, а не размер списка: догрузка старых сверху тоже меняет размер, и
-    // по нему лента прыгала бы вниз ровно тогда, когда человек листает вверх.
+    // Лента привязана к низу (reverseLayout): элемент 0 — самое свежее, чат с первого
+    // кадра открыт на конце. На НОВОЕ сообщение доводим до низа. Ориентир — id
+    // последнего, а не размер списка: догрузка старых тоже меняет размер.
     val lastId = msgs.lastOrNull()?.id
-    LaunchedEffect(lastId) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+    LaunchedEffect(lastId) { if (msgs.isNotEmpty()) listState.animateScrollToItem(0) }
     // «Показать в чате» из просмотрщика: доводим ленту до сообщения, если оно в
-    // уже загруженной странице истории.
+    // уже загруженной странице истории. Индекс в ленте — от конца.
     LaunchedEffect(model.jumpTo) {
         val target = model.jumpTo
         if (target != 0L) {
             val i = msgs.indexOfFirst { it.id == target }
-            if (i >= 0) listState.animateScrollToItem(i)
+            if (i >= 0) listState.animateScrollToItem(msgs.size - 1 - i)
             model.jumpTo = 0L
         }
     }
-    PagingUp(listState, key) { done -> model.loadOlder(key, done) }
+    PagingOlder(listState, key) { model.loadOlder(key, {}) }
     // Правка начинается с ТЕКУЩЕГО текста: человек исправляет, а не набирает заново.
     LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
     LaunchedEffect(key) { model.refreshPins(key, group = false) }
@@ -220,21 +219,30 @@ internal fun ChatScreen(model: AppModel) {
         PinnedBar(model, key, group = false, canUnpin = true)
         LazyColumn(
             state = listState,
+            reverseLayout = true,
             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
         ) {
-            item { E2EBanner() }
-            itemsIndexed(msgs) { i, m ->
+            // Порядок элементов — от свежего к старому; i — индекс в хронологии.
+            items(msgs.size) { j ->
+                val i = msgs.size - 1 - j
+                val m = msgs[i]
                 val prev = msgs.getOrNull(i - 1)
                 val next = msgs.getOrNull(i + 1)
-                if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
-                // Склейка блоков: в DM «отправитель» — это сторона (я/собеседник).
-                val side = { msg: Message -> if (msg.mine) "me" else "peer" }
-                val pos = blockPos(
-                    withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time),
-                    withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time),
-                )
-                MessageRow(model, m, pos, animate = m.id > appearFrom)
+                // Одна колонка на элемент: дата над пузырём должна остаться НАД ним и
+                // в перевёрнутой ленте.
+                Column {
+                    if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
+                    // Склейка блоков: в DM «отправитель» — это сторона (я/собеседник).
+                    val side = { msg: Message -> if (msg.mine) "me" else "peer" }
+                    val pos = blockPos(
+                        withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time),
+                        withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time),
+                    )
+                    MessageRow(model, m, pos, animate = m.id > appearFrom)
+                }
             }
+            // Последний элемент = верх ленты: баннер над самой старой перепиской.
+            item { E2EBanner() }
         }
         ForwardSheet(model)
         MessageInput(

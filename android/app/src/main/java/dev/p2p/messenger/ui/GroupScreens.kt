@@ -13,7 +13,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -82,19 +81,18 @@ internal fun GroupChatScreen(model: AppModel) {
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Прокрутка вниз — только на НОВОЕ сообщение (см. ChatScreen: по размеру списка
-    // лента прыгала бы при догрузке старых).
+    // Лента привязана к низу, как в ChatScreen: вниз — только на НОВОЕ сообщение.
     val lastKey = msgs.lastOrNull()?.let { it.sender to it.id }
-    LaunchedEffect(lastKey) { if (msgs.isNotEmpty()) listState.animateScrollToItem(msgs.size) }
+    LaunchedEffect(lastKey) { if (msgs.isNotEmpty()) listState.animateScrollToItem(0) }
     LaunchedEffect(model.jumpTo) {
         val target = model.jumpTo
         if (target != 0L) {
             val i = msgs.indexOfFirst { it.id == target }
-            if (i >= 0) listState.animateScrollToItem(i)
+            if (i >= 0) listState.animateScrollToItem(msgs.size - 1 - i)
             model.jumpTo = 0L
         }
     }
-    PagingUp(listState, gid) { done -> model.loadOlder(gid, done, group = true) }
+    PagingOlder(listState, gid) { model.loadOlder(gid, {}, group = true) }
 
     // Вложения в группе — тот же лист, что в DM (движок пушит блоб всем участникам).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -151,22 +149,28 @@ internal fun GroupChatScreen(model: AppModel) {
             PinnedBar(model, gid, group = true, canUnpin = isAdmin)
             LazyColumn(
                 state = listState,
+                reverseLayout = true,
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
             ) {
-                itemsIndexed(msgs) { i, m ->
+                // От свежего к старому; i — индекс в хронологии (см. ChatScreen).
+                items(msgs.size) { j ->
+                    val i = msgs.size - 1 - j
+                    val m = msgs[i]
                     val prev = msgs.getOrNull(i - 1)
                     val next = msgs.getOrNull(i + 1)
-                    if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
-                    // Склейка блоков. Системная строка — разделитель: у неё нет
-                    // отправителя, поэтому соседние сообщения в один блок не сходятся.
-                    val who = { g: Message -> if (g.system) null else g.sender }
-                    val pos = blockPos(
-                        withPrev = prev != null && !m.system &&
-                            continuesBlock(who(prev), prev.time, m.sender, m.time),
-                        withNext = next != null && !m.system && !next.system &&
-                            continuesBlock(m.sender, m.time, next.sender, next.time),
-                    )
-                    MessageRow(model, m, pos, group = true)
+                    Column {
+                        if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
+                        // Склейка блоков. Системная строка — разделитель: у неё нет
+                        // отправителя, поэтому соседние сообщения в один блок не сходятся.
+                        val who = { g: Message -> if (g.system) null else g.sender }
+                        val pos = blockPos(
+                            withPrev = prev != null && !m.system &&
+                                continuesBlock(who(prev), prev.time, m.sender, m.time),
+                            withNext = next != null && !m.system && !next.system &&
+                                continuesBlock(m.sender, m.time, next.sender, next.time),
+                        )
+                        MessageRow(model, m, pos, group = true)
+                    }
                 }
             }
             ForwardSheet(model)

@@ -46,13 +46,12 @@ internal fun SavedScreen(model: AppModel) {
     // (в отличие от чата, где её место занимает общая верхняя панель экрана).
     val selection = model.selection
     LaunchedEffect(Unit) { model.refreshNotes() }
-    // Вниз — только на НОВУЮ заметку: по размеру списка лента прыгала бы и при
-    // догрузке старых (см. ChatScreen).
+    // Лента привязана к низу, как в ChatScreen: вниз — только на НОВУЮ заметку.
     val lastNote = model.notes.lastOrNull()?.id
     LaunchedEffect(lastNote) {
-        if (model.notes.isNotEmpty()) listState.animateScrollToItem(model.notes.size - 1)
+        if (model.notes.isNotEmpty()) listState.animateScrollToItem(0)
     }
-    PagingUp(listState, Unit) { done -> model.loadOlderNotes(done) }
+    PagingOlder(listState, Unit) { model.loadOlderNotes {} }
 
     val me = model.me?.pubkey.orEmpty()
     LaunchedEffect(me) { if (me.isNotEmpty()) model.refreshPins(me, group = false) }
@@ -81,9 +80,11 @@ internal fun SavedScreen(model: AppModel) {
         } else {
             LazyColumn(
                 state = listState,
+                reverseLayout = true,
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
             ) {
-                items(model.notes, key = { it.id }) { n ->
+                // От свежей к старой: лента привязана к низу.
+                items(model.notes.asReversed(), key = { it.id }) { n ->
                     val selected = MsgRef(n.id, n.sender) in selection
                     Row(
                         Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s)
