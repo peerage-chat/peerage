@@ -37,6 +37,7 @@ import dev.p2p.messenger.ui.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.reflect.KProperty
 
 class MainActivity : ComponentActivity() {
     // Синглтон на процесс: переживает пересоздание Activity (фон/возврат), иначе
@@ -227,6 +228,64 @@ internal enum class Screen {
     SettingsAbout,
 }
 
+/**
+ * Текущий экран + откуда на него пришли. Делегат для `var screen by nav`: каждое
+ * `screen = X` запоминает предыдущий экран как источник X, если это переход вперёд.
+ *
+ * Зачем: часть экранов открывается из нескольких мест («Сеть» — с главной, из
+ * настроек и из «Я»; «Контакты» — из «Безопасности»). Зашитый родитель возвращал
+ * на главную, откуда бы ни пришли. Полноценный стек не нужен — после «создать группу»
+ * назад из группы должно вести на главную, а не в форму создания, поэтому источник
+ * учитывают только экраны-разделы ([fromOrigin]), остальные держат своего родителя.
+ */
+internal class NavState(initial: Screen) {
+    var current by mutableStateOf(initial)
+        private set
+    private val cameFrom = HashMap<Screen, Screen>()
+
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): Screen = current
+
+    operator fun setValue(thisRef: Any?, property: KProperty<*>, value: Screen) {
+        if (value == current) return
+        when {
+            // Главная — корень: дальше начинается новая история.
+            value == Screen.Contacts -> cameFrom.clear()
+            // Возврат к тому, откуда пришли, — не новый вход: источник не трогаем.
+            cameFrom[current] == value -> {}
+            else -> cameFrom[value] = current
+        }
+        current = value
+    }
+
+    /** Куда ведёт «назад» с экрана [s] — одно правило и для системной кнопки, и для
+     *  стрелки в шапке. */
+    fun parentOf(s: Screen): Screen = when (s) {
+        Screen.Scanner -> Screen.Add
+        Screen.CreateGroup -> Screen.NewChat
+        Screen.SettingsSecurity, Screen.SettingsPrivacy, Screen.SettingsMedia,
+        Screen.SettingsNotifications, Screen.SettingsAbout,
+        -> Screen.Settings
+        Screen.AddMember -> Screen.GroupChat
+        Screen.Info -> Screen.Chat
+        Screen.Flood, Screen.Outbox -> Screen.Network
+        Screen.RotateAddress -> Screen.Flood
+        Screen.Backup -> Screen.Storage
+        Screen.FolderEdit -> Screen.Folders
+        Screen.VaultLevel -> cameFrom[s] ?: Screen.SettingsSecurity
+        Screen.EditProfile -> cameFrom[s] ?: Screen.Settings
+        in fromOrigin -> cameFrom[s] ?: Screen.Contacts
+        else -> Screen.Contacts
+    }
+
+    private companion object {
+        /** Разделы, открываемые из разных мест: «назад» ведёт туда, откуда пришли. */
+        val fromOrigin = setOf(
+            Screen.Settings, Screen.Network, Screen.Storage, Screen.ContactList,
+            Screen.Calls, Screen.Saved, Screen.Folders, Screen.Groups, Screen.Me,
+        )
+    }
+}
+
 /** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
  *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
 internal enum class WidthClass { Compact, Medium, Expanded }
@@ -251,10 +310,11 @@ private fun CompactShell(model: AppModel) {
     // Каталог данных — тот же, что при старте движка; берём из контекста, чтобы не
     // тащить его параметром через оболочку.
     val dataDir = LocalContext.current.filesDir.absolutePath
-    var screen by remember {
+    val nav = remember {
         val fromNotif = activity?.intent?.getBooleanExtra(FloodNotifier.EXTRA_OPEN_ROTATE, false) == true
-        mutableStateOf(if (fromNotif) Screen.RotateAddress else Screen.Contacts)
+        NavState(if (fromNotif) Screen.RotateAddress else Screen.Contacts)
     }
+    var screen by nav
     // id редактируемой папки (null — создаём новую).
     var editFolder by remember { mutableStateOf<String?>(null) }
     // Ключ контакта, которого пришли СВЕРЯТЬ сканером (null — обычное добавление).
@@ -291,22 +351,15 @@ private fun CompactShell(model: AppModel) {
         when {
             model.incomingCall != null -> {}
             model.dmCallPeer != null -> {}
-            else -> screen = when (screen) {
-                Screen.Scanner -> if (verifyingPeer != null) {
-                    verifyingPeer = null
-                    Screen.Info
-                } else {
-                    Screen.Add
-                }
-                Screen.CreateGroup -> Screen.NewChat
-                Screen.SettingsSecurity, Screen.SettingsPrivacy, Screen.SettingsMedia,
-                Screen.SettingsNotifications, Screen.SettingsAbout,
-                -> Screen.Settings
-                Screen.AddMember -> Screen.GroupChat
-                else -> Screen.Contacts
+            screen == Screen.Scanner && verifyingPeer != null -> {
+                verifyingPeer = null
+                screen = Screen.Info
             }
+            else -> screen = nav.parentOf(screen)
         }
     }
+    // Стрелка в шапке ведёт туда же, куда системная «назад».
+    val goBack: () -> Unit = { screen = nav.parentOf(screen) }
 
     val navigate: (Screen) -> Unit = { dest ->
         if (dest == Screen.Groups) model.refreshGroups()
@@ -361,9 +414,9 @@ private fun CompactShell(model: AppModel) {
                             onProfile = { screen = Screen.Info },
                         )
                         Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = { screen = Screen.Contacts })
-                        Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = { screen = Screen.Contacts })
+                        Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = goBack)
                         Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = { screen = Screen.Chat })
-                        Screen.Groups -> TopBar(stringResource(R.string.title_groups), onBack = { screen = Screen.Contacts }) {
+                        Screen.Groups -> TopBar(stringResource(R.string.title_groups), onBack = goBack) {
                             BarIcon(Icons.Filled.Add, stringResource(R.string.cd_new_group)) { screen = Screen.CreateGroup }
                         }
                         Screen.GroupChat -> GroupChatTopBar(
@@ -374,12 +427,12 @@ private fun CompactShell(model: AppModel) {
                         Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = { screen = Screen.NewChat })
                         Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = { screen = Screen.Contacts })
                         Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = { screen = Screen.GroupChat })
-                        Screen.Settings -> TopBar(stringResource(R.string.menu_settings), onBack = { screen = Screen.Contacts })
-                        Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = { screen = Screen.Settings })
-                        Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = { screen = Screen.Settings })
-                        Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = { screen = Screen.Settings })
-                        Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = { screen = Screen.Settings })
-                        Screen.SettingsAbout -> TopBar(stringResource(R.string.settings_cat_about), onBack = { screen = Screen.Settings })
+                        Screen.Settings -> TopBar(stringResource(R.string.menu_settings), onBack = goBack)
+                        Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = goBack)
+                        Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = goBack)
+                        Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = goBack)
+                        Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = goBack)
+                        Screen.SettingsAbout -> TopBar(stringResource(R.string.settings_cat_about), onBack = goBack)
                         Screen.Scanner -> TopBar(
                             stringResource(if (verifyingPeer != null) R.string.title_verify_qr else R.string.title_scan_qr),
                             onBack = {
@@ -387,23 +440,23 @@ private fun CompactShell(model: AppModel) {
                                 verifyingPeer = null
                             },
                         )
-                        Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = { screen = Screen.Contacts }) {
+                        Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
                             BarIcon(Icons.Filled.PersonAdd, stringResource(R.string.cd_add_contact)) { screen = Screen.Add }
                         }
-                        Screen.Calls -> TopBar(stringResource(R.string.menu_calls), onBack = { screen = Screen.Contacts })
-                        Screen.Network -> TopBar(stringResource(R.string.menu_network), onBack = { screen = Screen.Contacts }) {
+                        Screen.Calls -> TopBar(stringResource(R.string.menu_calls), onBack = goBack)
+                        Screen.Network -> TopBar(stringResource(R.string.menu_network), onBack = goBack) {
                             BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
                         }
-                        Screen.EditProfile -> TopBar(stringResource(R.string.settings_edit_profile), onBack = { screen = Screen.Settings })
-                        Screen.VaultLevel -> TopBar(stringResource(R.string.settings_at_rest), onBack = { screen = Screen.Settings })
-                        Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = { screen = Screen.Network })
-                        Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = { screen = Screen.Flood })
-                        Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = { screen = Screen.Contacts })
-                        Screen.Storage -> TopBar(stringResource(R.string.menu_storage), onBack = { screen = Screen.Contacts })
-                        Screen.Backup -> TopBar(stringResource(R.string.backup_title), onBack = { screen = Screen.Storage })
-                        Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = { screen = Screen.Network })
-                        Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = { screen = Screen.Contacts })
-                        Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = { screen = Screen.Folders })
+                        Screen.EditProfile -> TopBar(stringResource(R.string.settings_edit_profile), onBack = goBack)
+                        Screen.VaultLevel -> TopBar(stringResource(R.string.settings_at_rest), onBack = goBack)
+                        Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
+                        Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = goBack)
+                        Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = goBack)
+                        Screen.Storage -> TopBar(stringResource(R.string.menu_storage), onBack = goBack)
+                        Screen.Backup -> TopBar(stringResource(R.string.backup_title), onBack = goBack)
+                        Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = goBack)
+                        Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = goBack)
+                        Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = goBack)
                         Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = { screen = Screen.Contacts })
                     }
                     // ── Папки табами: только на главном экране ──────────────────────
@@ -539,8 +592,8 @@ private fun CompactShell(model: AppModel) {
                             } else {
                                 RotateAddressScreen(model) {}
                             }
-                            Screen.EditProfile -> EditProfileScreen(model) { screen = Screen.Settings }
-                            Screen.VaultLevel -> VaultLevelScreen(model, dataDir) { screen = Screen.Settings }
+                            Screen.EditProfile -> EditProfileScreen(model) { goBack() }
+                            Screen.VaultLevel -> VaultLevelScreen(model, dataDir) { goBack() }
                             Screen.Saved -> SavedScreen(model)
                             Screen.Storage -> StorageScreen(model) { screen = Screen.Backup }
                             Screen.Backup -> BackupScreen(model) { screen = Screen.Storage }
