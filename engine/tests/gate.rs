@@ -98,6 +98,15 @@ fn accept_makes_blank_named_contact() {
     assert!(request_preview(&b, &a_hex).is_none(), "запрос снят после accept");
     assert!(!b.accept_contact_request(&a_key), "повторный accept — уже нет запроса");
 
+    // Первое сообщение не потерялось: A получил на него Ack и второй раз не пришлёт,
+    // поэтому оно обязано лечь в чат при одобрении — с автором A, как входящее.
+    let hist: serde_json::Value = serde_json::from_str(&b.history_json(&a_key)).unwrap();
+    let hist = hist.as_array().unwrap();
+    assert_eq!(hist.len(), 1, "первое сообщение в чате");
+    assert_eq!(hist[0]["text"], "впустишь?");
+    assert_eq!(hist[0]["sender"], a_hex);
+    assert_eq!(hist[0]["mine"], false);
+
     a.shutdown();
     b.shutdown();
 }

@@ -496,6 +496,18 @@ pub struct ContactRequest {
     #[serde(default)]
     pub preview: String,
     pub time: i64,
+    /// Первое текстовое сообщение целиком — ляжет в чат при одобрении. Наружу (UI)
+    /// не уходит: для решения хватает `preview`.
+    #[serde(skip)]
+    pub first: Option<FirstMessage>,
+}
+
+/// Первое сообщение незнакомца, отложенное до решения по запросу.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirstMessage {
+    pub id: u64,
+    pub text: String,
+    pub time: i64,
 }
 
 /// SQLite-хранилище гейта: `contact_requests` (pending) + `blocklist` (тихий дроп).
@@ -517,20 +529,29 @@ impl GateStore {
         let conn = db::lock(&self.db);
         {
             let mut stmt =
-                conn.prepare("SELECT key, fingerprint, preview, time FROM contact_requests")?;
+                conn.prepare(
+                    "SELECT key, fingerprint, preview, time, first_id, first_text, first_time \
+                     FROM contact_requests",
+                )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, Vec<u8>>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
                 ))
             })?;
             for row in rows {
-                let (kb, fp, preview, time) = row?;
+                let (kb, fp, preview, time, first_id, first_text, first_time) = row?;
+                // Пустой текст — запрос с медиа или из версии до буфера: в чат класть нечего.
+                let first = (!first_text.is_empty())
+                    .then(|| FirstMessage { id: first_id as u64, text: first_text, time: first_time });
                 if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
                     self.requests.insert(key, ContactRequest {
-                        key: hex::encode(key), fingerprint: fp, preview, time,
+                        key: hex::encode(key), fingerprint: fp, preview, time, first,
                     });
                 }
             }
@@ -549,10 +570,18 @@ impl GateStore {
 
     // — Запросы —
 
-    /// Записать/обновить входящий запрос. Первый `preview` сохраняем; повторные
-    /// сообщения до одобрения НЕ копим (анти-DoS) — только двигаем `time`.
+    /// Записать/обновить входящий запрос. Первое сообщение сохраняем (превью и, если
+    /// это текст, `first` целиком — для чата после одобрения); повторные до одобрения
+    /// НЕ копим (анти-DoS) — только двигаем `time`. Так на незнакомца приходится не
+    /// больше одного сообщения, а его размер ограничен протоколом.
     /// Возвращает `true`, если запрос новый (UI показать уведомление).
-    pub fn upsert_request(&mut self, key: &[u8; 32], preview: &str, time: i64) -> Result<bool, StoreError> {
+    pub fn upsert_request(
+        &mut self,
+        key: &[u8; 32],
+        preview: &str,
+        first: Option<FirstMessage>,
+        time: i64,
+    ) -> Result<bool, StoreError> {
         if let Some(existing) = self.requests.get_mut(key) {
             existing.time = time;
             db::lock(&self.db).execute(
@@ -562,12 +591,18 @@ impl GateStore {
             return Ok(false);
         }
         let fingerprint = crate::identity::fingerprint_words(key).join(" ");
+        let (first_id, first_text, first_time) = match &first {
+            Some(m) => (m.id as i64, m.text.as_str(), m.time),
+            None => (0, "", 0),
+        };
         db::lock(&self.db).execute(
-            "INSERT OR IGNORE INTO contact_requests (key, fingerprint, preview, time) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![key.as_slice(), &fingerprint, preview, time],
+            "INSERT OR IGNORE INTO contact_requests \
+             (key, fingerprint, preview, time, first_id, first_text, first_time) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![key.as_slice(), &fingerprint, preview, time, first_id, first_text, first_time],
         )?;
         self.requests.insert(*key, ContactRequest {
-            key: hex::encode(key), fingerprint, preview: preview.to_string(), time,
+            key: hex::encode(key), fingerprint, preview: preview.to_string(), time, first,
         });
         Ok(true)
     }
@@ -1864,12 +1899,14 @@ mod tests {
     fn gate_request_upsert_keeps_first_preview() {
         let k = key();
         let mut g = GateStore::open(db()).unwrap();
-        assert!(g.upsert_request(&k, "привет", 100).unwrap()); // новый
-        assert!(!g.upsert_request(&k, "ещё раз", 200).unwrap()); // повтор → не новый
+        let first = |text: &str, t| Some(FirstMessage { id: 7, text: text.into(), time: t });
+        assert!(g.upsert_request(&k, "привет", first("привет", 100), 100).unwrap()); // новый
+        assert!(!g.upsert_request(&k, "ещё раз", first("ещё раз", 200), 200).unwrap()); // повтор
         assert!(g.has_request(&k));
         let r = g.list_requests();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].preview, "привет"); // первый превью сохранён (анти-DoS)
+        assert_eq!(r[0].first.as_ref().map(|m| m.text.as_str()), Some("привет"), "и первое сообщение");
         assert_eq!(r[0].time, 200); // время подвинуто
     }
 
@@ -1879,12 +1916,26 @@ mod tests {
         let shared = db();
         {
             let mut g = GateStore::open(shared.clone()).unwrap();
-            g.upsert_request(&k, "[image]", 1).unwrap();
+            g.upsert_request(&k, "[image]", None, 1).unwrap();
         }
         let mut g2 = GateStore::open(shared).unwrap();
         assert!(g2.has_request(&k));
         let taken = g2.take_request(&k).unwrap();
         assert_eq!(taken.preview, "[image]");
+        assert_eq!(taken.first, None, "медиа не откладывается текстом");
+    }
+
+    #[test]
+    fn gate_first_message_survives_reopen() {
+        let k = key();
+        let shared = db();
+        let msg = FirstMessage { id: 1_700_000_000_123, text: "здравствуйте, это Лена".into(), time: 42 };
+        {
+            let mut g = GateStore::open(shared.clone()).unwrap();
+            g.upsert_request(&k, "здравствуйте…", Some(msg.clone()), 42).unwrap();
+        }
+        let mut g2 = GateStore::open(shared).unwrap();
+        assert_eq!(g2.take_request(&k).unwrap().first, Some(msg), "переживает перезапуск до решения");
         assert!(!g2.has_request(&k));
         assert!(g2.take_request(&k).is_none()); // повторный take — пусто
     }
@@ -1895,7 +1946,7 @@ mod tests {
         let shared = db();
         {
             let mut g = GateStore::open(shared.clone()).unwrap();
-            g.upsert_request(&k, "спам", 1).unwrap();
+            g.upsert_request(&k, "спам", None, 1).unwrap();
             g.block(&k, 2).unwrap();
             assert!(g.is_blocked(&k));
             assert!(!g.has_request(&k)); // блок снял запрос

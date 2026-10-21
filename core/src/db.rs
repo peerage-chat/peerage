@@ -276,6 +276,11 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN height INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN thumb_id TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE messages ADD COLUMN downloaded INTEGER NOT NULL DEFAULT 0", []);
+    // Первое сообщение незнакомца целиком: при одобрении запроса оно ложится в чат.
+    // Отправитель уже получил Ack и не перешлёт его, так что без этого оно терялось.
+    let _ = conn.execute("ALTER TABLE contact_requests ADD COLUMN first_id INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE contact_requests ADD COLUMN first_text TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE contact_requests ADD COLUMN first_time INTEGER NOT NULL DEFAULT 0", []);
     Ok(())
 }
 

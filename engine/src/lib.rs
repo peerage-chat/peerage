@@ -24,7 +24,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use p2p_core::budget::Tier;
 use p2p_core::settings::AudioSettings;
-use p2p_core::store::{Chat, ContactStore, GateStore, MessageStore, Profile, StoredMessage};
+use p2p_core::store::{Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage};
 use p2p_core::Identity;
 /// Реэкспорт: медиа-вложение группового сообщения — часть контракта движка
 /// (клиенты и тесты собирают его, чтобы отправить вложение в группу).
@@ -1336,14 +1336,26 @@ impl Engine {
     }
 
     /// Одобрить запрос: незнакомец становится контактом, снимаем запрос, шлём ему свой
-    /// профиль и держим коннект. Дальнейшие его сообщения идут в чат как обычно.
-    /// (Первое сообщение-превью в историю не заливаем — это было только для решения.)
+    /// профиль и держим коннект. Его первое сообщение ложится в чат — отправитель
+    /// получил на него Ack и второй раз не пришлёт. Дальше всё идёт как обычно.
     pub fn accept_contact_request(&self, key: &[u8; 32]) -> bool {
-        if self.gate.lock_safe().take_request(key).is_none() {
+        let Some(req) = self.gate.lock_safe().take_request(key) else {
             return false;
-        }
+        };
         // Пустое локальное имя → покажется самоназвание пира или hex (см. Contact.displayName).
         let _ = self.contacts.lock_safe().add(key, "", now());
+        if let Some(m) = req.first {
+            let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
+                id: m.id,
+                text: m.text,
+                mine: false,
+                time: m.time,
+                status: String::new(),
+                sender: hex::encode(key),
+                kind: "text".into(),
+                ..Default::default()
+            });
+        }
         self.refresh_budgets();
         spawn_connect(self.messenger.clone(), *key);
         let m = self.load_profile_meta();
@@ -2204,9 +2216,9 @@ fn gate_of(engine: &Engine, peer: &[u8; 32]) -> Gate {
 /// Записать входящий запрос от незнакомца и (если новый) уведомить UI. Превью —
 /// короткая выжимка первого сообщения для осознанного решения. Повторные до
 /// одобрения не копим (анти-DoS).
-fn record_request(engine: &Arc<Engine>, peer: [u8; 32], preview: &str) {
+fn record_request(engine: &Arc<Engine>, peer: [u8; 32], preview: &str, first: Option<FirstMessage>) {
     let preview: String = preview.chars().take(200).collect();
-    let is_new = engine.gate.lock_safe().upsert_request(&peer, &preview, now()).unwrap_or(false);
+    let is_new = engine.gate.lock_safe().upsert_request(&peer, &preview, first, now()).unwrap_or(false);
     push_event(engine, dto::UiEvent::ContactRequest { peer: hex::encode(peer), new: is_new });
 }
 
@@ -2532,7 +2544,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
-                    record_request(engine, peer, &text);
+                    // Откладываем сам текст. Ответ незнакомцу ссылаться не на что, а
+                    // пометку «переслано» первого сообщения не храним — не стоит
+                    // отдельной схемы.
+                    let first = FirstMessage { id, text: text.clone(), time: now() };
+                    record_request(engine, peer, &text, Some(first));
                     return;
                 }
                 Gate::Contact => {}
@@ -2606,7 +2622,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
-                    record_request(engine, peer, &format!("[{}]", Engine::media_kind(&mime)));
+                    record_request(engine, peer, &format!("[{}]", Engine::media_kind(&mime)), None);
                     return;
                 }
                 Gate::Contact => {}

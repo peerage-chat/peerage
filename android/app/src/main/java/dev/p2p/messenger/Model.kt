@@ -1611,6 +1611,8 @@ class AppModel private constructor() {
         if (Native.acceptContactRequest(sessionPtr, key)) {
             refreshRequestsNow()
             refreshContactsNow()
+            // Движок положил первое сообщение незнакомца в чат — показать его в списке.
+            refreshChatSummariesNow()
         }
     }
 
