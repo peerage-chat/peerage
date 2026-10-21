@@ -137,6 +137,10 @@ pub struct GroupManager {
     /// KeyPackage текущего вступления. Повторяем ИМЕННО его: новый сделал бы
     /// Welcome на прежний нерасшифровываемым (pending-состояние у нас одно).
     pending_kp: Option<Vec<u8>>,
+    /// От кого ждём Welcome и в какие группы согласны по нему войти. Welcome
+    /// от кого-то другого или в другую группу не принимаем: иначе любой, кто
+    /// дождался нашего KeyPackage, вписал бы нас в группу, куда мы не шли.
+    pending_from: Option<([u8; 32], Vec<Vec<u8>>)>,
     /// Когда последний раз повторяли KeyPackage — троттлинг маячка.
     last_join_retry: Option<Instant>,
     identity: Identity,
@@ -176,6 +180,7 @@ impl GroupManager {
             resyncing: HashSet::new(),
             resync_last: HashMap::new(),
             pending_kp: None,
+            pending_from: None,
             last_join_retry: None,
             identity,
             messenger,
@@ -526,16 +531,17 @@ impl GroupManager {
             // Уже идёт другое вступление — этим займёмся, когда освободимся.
             return false;
         }
-        self.send_key_package_to(inviter, name)
+        self.send_key_package_to(inviter, gid.to_vec(), name)
     }
 
     /// Отправить свой KeyPackage пригласившему и начать ожидание Welcome.
-    fn send_key_package_to(&mut self, inviter: [u8; 32], name: String) -> bool {
+    fn send_key_package_to(&mut self, inviter: [u8; 32], gid: Vec<u8>, name: String) -> bool {
         match GroupChat::pending(&self.identity, self.messenger.clone()) {
             Ok((pending, kp)) => {
                 let _ = self.messenger.send_group_key_reply(&inviter, &kp);
                 self.pending = Some(pending);
                 self.pending_kp = Some(kp);
+                self.pending_from = Some((inviter, vec![gid]));
                 self.pending_join_name = Some(name);
                 self.last_join_retry = Some(Instant::now());
                 true
@@ -567,7 +573,7 @@ impl GroupManager {
             // Состояние потеряно (перезапуск приложения) — начинаем вступление заново.
             _ => {
                 log::info!("group {}: возобновляю вступление после перезапуска", hex::encode(&gid));
-                self.send_key_package_to(inviter, name);
+                self.send_key_package_to(inviter, gid, name);
             }
         }
     }
@@ -866,14 +872,28 @@ impl GroupManager {
 
     // ── События мессенджера ───────────────────────────────────────────────
 
-    /// Контакт просит наш KeyPackage (нас приглашают) — отвечаем и ждём Welcome.
+    /// Админ нашей группы просит свежий KeyPackage — это resync (ADR-004): он
+    /// перевыпустит нас в группу. Отвечаем только админу и только для его групп:
+    /// KeyPackage + принятый Welcome — это вступление, и проситься в него вправе
+    /// лишь тот, кто и так ведёт нашу группу. Новые группы идут через карточку.
     pub fn on_key_request(&mut self, peer: [u8; 32]) {
         if self.pending.is_some() {
+            return;
+        }
+        let gids: Vec<Vec<u8>> = self
+            .admin_keys
+            .iter()
+            .filter(|(gid, admin)| **admin == peer && self.groups.contains_key(*gid))
+            .map(|(gid, _)| gid.clone())
+            .collect();
+        if gids.is_empty() {
+            log::warn!("запрос KeyPackage от {} — не админ наших групп, игнорирую", hex::encode(peer));
             return;
         }
         if let Ok((pending, kp)) = GroupChat::pending(&self.identity, self.messenger.clone()) {
             let _ = self.messenger.send_group_key_reply(&peer, &kp);
             self.pending = Some(pending);
+            self.pending_from = Some((peer, gids));
         }
     }
 
@@ -910,7 +930,7 @@ impl GroupManager {
 
     /// Входящее групповое сообщение. Возвращает Some((gid_hex, text)) для
     /// прикладного сообщения (чтобы UI показал), либо None (Commit/Welcome).
-    pub fn on_group(&mut self, data: &[u8]) -> GroupOutcome {
+    pub fn on_group(&mut self, peer: [u8; 32], data: &[u8]) -> GroupOutcome {
         use p2p_groupchat::Inbound;
         // Известная группа? (Commit или прикладное сообщение)
         let known = peek_group_id(data).filter(|g| self.groups.contains_key(g));
@@ -1057,14 +1077,28 @@ impl GroupManager {
             self.save_group(&gid);
             return outcome;
         }
-        // Иначе — возможно Welcome для ожидающего вступления.
+        // Иначе — возможно Welcome для ожидающего вступления. Только от того, кому
+        // мы отдали KeyPackage: чужой Welcome даже не трогает pending-состояние.
+        let Some(allowed) = self.pending_from.as_ref().filter(|(from, _)| *from == peer).map(|(_, g)| g.clone()) else {
+            return GroupOutcome::default();
+        };
         let joined_gid = self.pending.as_mut().and_then(|p| {
             let _ = p.handle(data);
             p.group_id()
         });
         if let Some(id) = joined_gid {
+            if !allowed.contains(&id) {
+                // Нужный отправитель, но не та группа. Pending уже израсходован этим
+                // Welcome — сбрасываем вступление, маячок начнёт его заново.
+                log::warn!("Welcome от {} в чужую группу {} — отвергнут", hex::encode(peer), hex::encode(&id));
+                self.pending = None;
+                self.pending_kp = None;
+                self.pending_from = None;
+                return GroupOutcome::default();
+            }
             if let Some(chat) = self.pending.take() {
                 self.pending_kp = None;
+                self.pending_from = None;
                 self.last_join_retry = None;
                 for m in chat.members() {
                     crate::spawn_connect(self.messenger.clone(), m);

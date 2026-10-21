@@ -2790,7 +2790,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             room_id: hex::encode(&room_id),
         }),
         Event::Group { peer, data } => {
-            let out = groups.on_group(&data);
+            let out = groups.on_group(peer, &data);
             if let Some(gid) = &out.gid {
                 if out.text.is_some() || out.system || out.media.is_some() {
                     // M2: докачка блоба по хэшу от отправителя, если его у нас нет.
@@ -2888,6 +2888,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }
         Event::GroupKeyRequest { peer } => groups.on_key_request(peer),
         Event::GroupInvite { peer, gid, name } => {
+            // Звать в группу может только контакт: иначе незнакомец обходил бы гейт
+            // карточками с любым названием, сколько позволит общая корзина чужих.
+            if !matches!(gate_of(engine, &peer), Gate::Contact) {
+                return;
+            }
             // Приглашение-карточка: не вступаем молча — кладём в очередь, уведомляем UI.
             if groups.on_invite(peer, gid, name) {
                 refresh_group_cache(engine, groups);

@@ -53,8 +53,8 @@ fn dispatch(gm: &mut GroupManager, ev: Event) {
         Event::GroupKeyReply { peer, key_package } => {
             gm.on_key_reply(peer, &key_package);
         }
-        Event::Group { data, .. } => {
-            gm.on_group(&data);
+        Event::Group { peer, data } => {
+            gm.on_group(peer, &data);
         }
         Event::GroupResyncRequest { peer, gid } => gm.on_resync_request(peer, &gid),
         Event::GroupLeaveRequest { peer, gid } => {
@@ -640,4 +640,65 @@ fn only_admin_can_pin_in_a_group() {
     assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, _| {
         store_b.lock().unwrap().pinned(Chat::Group(&gid)).is_empty()
     }));
+}
+
+/// Есть ли в истории группы у `gm` текст `text`?
+fn has_text(gm: &GroupManager, gid: &[u8], text: &str) -> bool {
+    let h: serde_json::Value = serde_json::from_str(&gm.history_json(gid)).unwrap_or_default();
+    h.as_array().map(|a| a.iter().any(|m| m["text"] == text)).unwrap_or(false)
+}
+
+/// R-002: resync по-прежнему работает — админ просит KeyPackage, перевыпускает
+/// участника, и тот продолжает читать группу.
+#[test]
+fn admin_resync_still_rejoins_member() {
+    let mut c = setup_and_join(0);
+    let gid = c.gid.clone();
+    c.gm_a.on_resync_request(c.b_key, &gid);
+    // Даём обмену KeyPackage → Remove+Add → Welcome пройти, затем проверяем чтение.
+    pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, _| false);
+    assert!(c.gm_b.group_ids().contains(&gid), "B остался в группе после resync");
+    assert!(c.gm_a.send_text(&gid, "после resync"));
+    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, b| has_text(b, &gid, "после resync"));
+    assert!(ok, "B читает группу после перевыпуска");
+}
+
+/// R-002: KeyPackage по запросу отдаём только админу своей группы. Посторонний,
+/// получивший его, мог бы вписать нас в свою группу без всякой карточки.
+#[test]
+fn key_request_from_non_admin_is_ignored() {
+    let net = LoopbackNet::new();
+    let (m_id, v_id) = (id(31), id(32));
+    let (m_key, v_key) = (m_id.public_key_bytes(), v_id.public_key_bytes());
+    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
+    let (m_msgr, m_rx) = Messenger::start_with_transport(m_id, net.endpoint(m_key), cfg.clone());
+    let (v_msgr, v_rx) = Messenger::start_with_transport(v_id.clone(), net.endpoint(v_key), cfg);
+    let mut gm_v = manager(v_id, Arc::new(v_msgr), tmpdir("v"));
+    m_msgr.send_group_key_request(&v_key).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut leaked = false;
+    while Instant::now() < deadline {
+        while let Ok(ev) = v_rx.try_recv() {
+            dispatch(&mut gm_v, ev);
+        }
+        while let Ok(ev) = m_rx.try_recv() {
+            leaked |= matches!(ev, Event::GroupKeyReply { .. });
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!leaked, "посторонний не получил KeyPackage");
+}
+
+/// R-002: даже админ нашей группы не впишет нас в ДРУГУЮ свою группу: KeyPackage,
+/// отданный на resync, годится только для групп, где он нас и ведёт.
+#[test]
+fn resync_key_package_cannot_join_another_group() {
+    let mut c = setup_and_join(0);
+    let other = c.gm_a.create("чужая").expect("вторая группа");
+    c.gm_a.on_resync_request(c.b_key, &c.gid);
+    // Подменяем адрес: KeyPackage от B админ применит ко второй группе.
+    c.gm_a.invite(&other, c.b_key);
+    pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, _| false);
+    assert!(!c.gm_b.group_ids().contains(&other), "B не вписан во вторую группу");
+    assert!(c.gm_b.group_ids().contains(&c.gid), "первая группа на месте");
 }
