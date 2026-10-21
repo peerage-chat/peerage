@@ -101,6 +101,8 @@ pub(crate) enum Job {
     GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String, info: MediaInfo },
     /// То же ФАЙЛОМ: манифест считается потоково, чанки читаются с диска.
     GroupMediaFile { gid: Vec<u8>, path: PathBuf, mime: String, name: String, info: MediaInfo },
+    /// Ссылка на блоб, который уже у нас (пересылка): байты не трогаем.
+    GroupMediaRef { gid: Vec<u8>, media: MediaBody },
 }
 
 /// До этого размера вложение скачивается автоматически (фото, голосовое — их ждут
@@ -677,30 +679,51 @@ impl Engine {
     }
 
     fn forward_media(&self, dst: &ChatKey, m: &StoredMessage, origin: &str, anon: bool) -> bool {
-        // Байты берём из своего хранилища: пересылать ссылку, за которой у нас
-        // ничего нет, значит отправить получателю тупик.
-        let Some(bytes) = self.blob_read(&m.blob_id) else { return false };
-        let thumb = if m.thumb_id.is_empty() { None } else { self.blob_read(&m.thumb_id) };
-        let info = MediaInfo {
-            duration_ms: m.duration_ms,
-            width: m.width,
-            height: m.height,
-            thumb,
-            caption: m.text.clone(),
-            fwd_from: origin.to_string(),
-            fwd_anon: anon,
-            // Пересылка не тащит цитату: ответ имеет смысл только в том чате, где
-            // лежит оригинал, а в новом эта ссылка указывала бы в пустоту.
-            reply_to: 0,
-            reply_sender: String::new(),
-        };
+        // Пересылаем ССЫЛКУ на блоб, который уже у нас: получатель запросит байты
+        // сам. Читать и перешифровывать файл ради пересылки незачем — у видео это
+        // гигабайт в память. Блоба у нас нет — ссылка вела бы получателя в тупик.
+        if !self.blob_exists(&m.blob_id) {
+            return false;
+        }
+        let as_hash = |h: &str| hex::decode(h).ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());
+        let Some(hash) = as_hash(&m.blob_id) else { return false };
+        let thumb = as_hash(&m.thumb_id).filter(|_| self.blob_exists(&m.thumb_id));
         match dst {
             ChatKey::Dm(peer) => {
-                self.send_media_with(peer, bytes, &m.mime, &m.name, info).is_some()
+                let info = MediaInfo {
+                    duration_ms: m.duration_ms,
+                    width: m.width,
+                    height: m.height,
+                    thumb: None,
+                    caption: m.text.clone(),
+                    fwd_from: origin.to_string(),
+                    fwd_anon: anon,
+                    // Пересылка не тащит цитату: ответ имеет смысл только в том чате,
+                    // где лежит оригинал, а в новом эта ссылка указывала бы в пустоту.
+                    reply_to: 0,
+                    reply_sender: String::new(),
+                };
+                self.send_media_ref(peer, hash, m.size, &m.mime, &m.name, thumb, &info).is_some()
             }
             ChatKey::Group(gid) => {
-                self.group_send_media(gid.clone(), bytes, m.mime.clone(), m.name.clone(), info);
-                true
+                let media = MediaBody {
+                    id: 0,
+                    fwd_from: origin.to_string(),
+                    fwd_anon: anon,
+                    reply_to: 0,
+                    reply_sender: String::new(),
+                    kind: Self::media_kind(&m.mime).into(),
+                    hash: m.blob_id.clone(),
+                    mime: m.mime.clone(),
+                    name: m.name.clone(),
+                    caption: m.text.clone(),
+                    size: m.size,
+                    duration_ms: m.duration_ms,
+                    width: m.width,
+                    height: m.height,
+                    thumb: thumb.map(hex::encode).unwrap_or_default(),
+                };
+                self.jobs.send(Job::GroupMediaRef { gid: gid.clone(), media }).is_ok()
             }
         }
     }
@@ -788,7 +811,6 @@ impl Engine {
             content
         };
         let hash = p2p_blob::blob_id(&bytes);
-        let kind = Self::media_kind(mime);
         let size = bytes.len() as u64;
         // Миниатюру сохраняем; ни её, ни сам файл не толкаем: получатель запросит
         // по хэшу из сообщения — миниатюру и мелкое сразу, крупное по кнопке.
@@ -799,7 +821,23 @@ impl Engine {
         });
         // Сохраняем локально, чтобы показывать своё вложение сразу и после рестарта.
         self.store_blob(hash, &bytes);
-        let id_hex = hex::encode(hash);
+        self.send_media_ref(key, hash, size, mime, name, thumb_hash, &info)
+    }
+
+    /// Отправить медиа-сообщение со ссылкой на блоб, который УЖЕ лежит у нас, и
+    /// записать его в историю. Общий хвост отправки вложения и пересылки: байты
+    /// получатель запросит сам по хэшу.
+    #[allow(clippy::too_many_arguments)]
+    fn send_media_ref(
+        &self,
+        key: &[u8; 32],
+        hash: p2p_blob::Hash,
+        size: u64,
+        mime: &str,
+        name: &str,
+        thumb: Option<p2p_blob::Hash>,
+        info: &MediaInfo,
+    ) -> Option<i64> {
         let meta = p2p_messenger::MediaMeta {
             fwd_from: info.fwd_from.clone(),
             fwd_anon: info.fwd_anon,
@@ -807,36 +845,32 @@ impl Engine {
             duration_ms: info.duration_ms,
             width: info.width,
             height: info.height,
-            thumb: thumb_hash.map(|h| h.to_vec()).unwrap_or_default(),
+            thumb: thumb.map(|h| h.to_vec()).unwrap_or_default(),
             caption: info.caption.clone(),
             reply_to: info.reply_to,
             // На проводе «чьё» едет с точки зрения отправителя: наш ответ на своё
             // сообщение для получателя — ответ на наше.
             reply_mine: info.reply_sender == self.me_hex(),
         };
-        match self.messenger.send_media_message(key, &hash, mime, name, meta.clone()) {
-            Ok(id) => {
-                let t = now();
-                let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
-                    // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
-                    // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
-                    id, mine: true, time: t, status: "sent".into(), sender: self.me_hex(),
-                    fwd_from: info.fwd_from.clone(),
-                    // Подпись живёт в `text`: у медиа-сообщения это поле свободно,
-                    // и тогда поиск и история работают с ней как с обычным текстом.
-                    text: info.caption.clone(),
-                    kind: kind.into(), blob_id: id_hex.clone(), mime: mime.into(), name: name.into(),
-                    size, duration_ms: info.duration_ms, width: info.width, height: info.height,
-                    thumb_id: hex::encode(&meta.thumb),
-                    downloaded: true, // своё вложение уже у нас
-                    reply_to: info.reply_to,
-                    reply_sender: info.reply_sender.clone(),
-                    ..Default::default()
-                });
-                Some(id as i64)
-            }
-            Err(_) => None,
-        }
+        let id = self.messenger.send_media_message(key, &hash, mime, name, meta.clone()).ok()?;
+        let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
+            // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
+            // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
+            id, mine: true, time: now(), status: "sent".into(), sender: self.me_hex(),
+            fwd_from: info.fwd_from.clone(),
+            fwd_anon: info.fwd_anon,
+            // Подпись живёт в `text`: у медиа-сообщения это поле свободно,
+            // и тогда поиск и история работают с ней как с обычным текстом.
+            text: info.caption.clone(),
+            kind: Self::media_kind(mime).into(), blob_id: hex::encode(hash), mime: mime.into(), name: name.into(),
+            size, duration_ms: info.duration_ms, width: info.width, height: info.height,
+            thumb_id: hex::encode(&meta.thumb),
+            downloaded: true, // своё вложение уже у нас
+            reply_to: info.reply_to,
+            reply_sender: info.reply_sender.clone(),
+            ..Default::default()
+        });
+        Some(id as i64)
     }
 
     /// Отправить вложение, лежащее ФАЙЛОМ, не поднимая его в память.
@@ -861,7 +895,6 @@ impl Engine {
         let hash = manifest.id;
         let size = manifest.size;
         let id_hex = hex::encode(hash);
-        let kind = Self::media_kind(mime);
 
         // Своя копия — тем же потоком, чанками и зашифрованной at-rest. Без неё
         // отправитель не сможет ни показать вложение, ни дослать его после рестарта.
@@ -874,34 +907,7 @@ impl Engine {
             self.store_blob(h, t);
             h
         });
-        let meta = p2p_messenger::MediaMeta {
-            fwd_from: String::new(),
-            fwd_anon: false,
-            size,
-            duration_ms: info.duration_ms,
-            width: info.width,
-            height: info.height,
-            thumb: thumb_hash.map(|h| h.to_vec()).unwrap_or_default(),
-            caption: info.caption.clone(),
-            reply_to: info.reply_to,
-            // На проводе «чьё» едет с точки зрения отправителя: наш ответ на своё
-            // сообщение для получателя — ответ на наше.
-            reply_mine: info.reply_sender == self.me_hex(),
-        };
-        let id = self.messenger.send_media_message(key, &hash, mime, name, meta.clone()).ok()?;
-        let t = now();
-        let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
-            id, mine: true, time: t, status: "sent".into(), sender: self.me_hex(),
-            text: info.caption.clone(),
-            kind: kind.into(), blob_id: id_hex.clone(), mime: mime.into(), name: name.into(),
-            size, duration_ms: info.duration_ms, width: info.width, height: info.height,
-            thumb_id: hex::encode(&meta.thumb),
-            downloaded: true,
-            reply_to: info.reply_to,
-            reply_sender: info.reply_sender.clone(),
-            ..Default::default()
-        });
-        Some(id as i64)
+        self.send_media_ref(key, hash, size, mime, name, thumb_hash, &info)
     }
 
     /// Записать свою копию блоба на диск потоково, в том же чанкованном формате, что
@@ -2369,6 +2375,11 @@ fn event_pump(
                 };
                 // MLS-ссылка всем; байты каждый участник запросит сам — мелкое
                 // сразу, крупное по кнопке.
+                if groups.send_media(&gid, &media) {
+                    push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
+                }
+            }
+            Ok(Job::GroupMediaRef { gid, media }) => {
                 if groups.send_media(&gid, &media) {
                     push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
                 }

@@ -404,3 +404,46 @@ fn clearing_history_is_local_and_takes_pins_and_queue_with_it() {
 fn json_field(s: &str, key: &str) -> u64 {
     serde_json::from_str::<serde_json::Value>(s).unwrap()[key].as_u64().unwrap_or(0)
 }
+
+/// R-056: пересылка вложения — ссылка на блоб, который у пересылающего уже есть:
+/// файл не перечитывается и не перешифровывается, а новый получатель тянет байты
+/// у пересылающего по кнопке.
+#[test]
+fn forwarded_attachment_is_a_reference_the_recipient_pulls() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id, c_id) = (id(34), id(35), id(36));
+    let (a_key, b_key, c_key) =
+        (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("fwdm-a"));
+    let b = start(&net, b_id, tmpdir("fwdm-b"));
+    let c = start(&net, c_id, tmpdir("fwdm-c"));
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Аня");
+    b.add_contact(&c_key, "Вера");
+    c.add_contact(&b_key, "Боб");
+    std::mem::forget(net);
+
+    // Крупнее порога автодокачки: Боб качает по кнопке у Ани.
+    let content: Vec<u8> = (0..2_500_000u32).map(|i| (i % 241) as u8).collect();
+    let blob = hex::encode(p2p_blob::blob_id(&content));
+    let src = tmpdir("fwdm-src").join("clip.mp4");
+    std::fs::write(&src, &content).unwrap();
+    a.send_media_file(&b_key, &src, "video/mp4", "clip.mp4", p2p_engine::MediaInfo::default()).unwrap();
+    assert!(wait(10, || !history(&b, &a_key).is_empty()), "карточка дошла до Боба");
+    assert!(b.download_media(&a_key, &blob));
+    assert!(wait(60, || b.blob_exists(&blob)), "Боб скачал");
+
+    let msg = &history(&b, &a_key)[0];
+    let refs = vec![(msg["id"].as_u64().unwrap(), msg["sender"].as_str().unwrap().to_string())];
+    let sent = b.forward_messages(p2p_engine::ChatKey::Dm(a_key), &refs, p2p_engine::ChatKey::Dm(c_key), false);
+    assert_eq!(sent, 1);
+    assert!(wait(10, || !history(&c, &b_key).is_empty()), "пересланное дошло до Веры");
+    let fwd = &history(&c, &b_key)[0];
+    assert_eq!(fwd["blob_id"].as_str(), Some(blob.as_str()), "тот же блоб — ссылка, а не новый файл");
+    assert_eq!(fwd["size"].as_u64(), Some(content.len() as u64), "размер для карточки на месте");
+    assert_eq!(fwd["fwd_from"].as_str(), Some(hex::encode(a_key).as_str()));
+
+    assert!(c.download_media(&b_key, &blob));
+    assert!(wait(60, || c.blob_exists(&blob)), "Вера скачала у Боба");
+    assert_eq!(c.blob_read(&blob).unwrap(), content, "байт-в-байт");
+}
