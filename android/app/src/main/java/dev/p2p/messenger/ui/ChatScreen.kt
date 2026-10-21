@@ -12,10 +12,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -620,10 +620,20 @@ internal fun MessageInput(
         replyStrip?.invoke()
         // Панель ВЫЕЗЖАЕТ из строки ввода: движение объясняет, откуда она взялась.
         // Появление «из ниоткуда» читается как подмена экрана.
+        //
+        // Анимируется ВЫСОТА (expand/shrink), а не только сдвиг содержимого: со
+        // сдвигом место под панель выделялось сразу целиком, и лента прыгала вверх
+        // мгновенно, а меню догоняло плавно. Содержимое прижато к низу растущей
+        // области — поэтому оно по-прежнему выезжает из строки ввода, а лента едет
+        // вместе с ним.
+        val panelEnter = expandVertically(tween(Tokens.Anim.normal), expandFrom = Alignment.Bottom) +
+            fadeIn(tween(Tokens.Anim.normal))
+        val panelExit = shrinkVertically(tween(Tokens.Anim.normal), shrinkTowards = Alignment.Bottom) +
+            fadeOut(tween(Tokens.Anim.fast))
         AnimatedVisibility(
             visible = attachOpen,
-            enter = slideInVertically(tween(Tokens.Anim.normal)) { it } + fadeIn(tween(Tokens.Anim.normal)),
-            exit = slideOutVertically(tween(Tokens.Anim.normal)) { it } + fadeOut(tween(Tokens.Anim.fast)),
+            enter = panelEnter,
+            exit = panelExit,
         ) {
             AttachSheet(
                 selected = picked,
@@ -641,8 +651,8 @@ internal fun MessageInput(
         }
         AnimatedVisibility(
             visible = emojiOpen,
-            enter = slideInVertically(tween(Tokens.Anim.normal)) { it } + fadeIn(tween(Tokens.Anim.normal)),
-            exit = slideOutVertically(tween(Tokens.Anim.normal)) { it } + fadeOut(tween(Tokens.Anim.fast)),
+            enter = panelEnter,
+            exit = panelExit,
         ) {
             EmojiPanel(
                 recent = model?.recentEmoji ?: emptyList(),
