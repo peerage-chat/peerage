@@ -266,6 +266,8 @@ pub enum MessengerError {
     HandshakeTimeout,
     #[error("медиа-пакет больше лимита датаграммы")]
     MediaTooLarge,
+    #[error("очередь исходящих: {0}")]
+    Spool(String),
 }
 
 struct PeerState {
@@ -282,7 +284,23 @@ struct Pending {
     /// Уведомлять ли UI о доставке/недоставке (`Ack`/`Undelivered`). true для DM,
     /// false для групповых (статус по участникам в UI не показывается).
     notify: bool,
+    /// Лежит в персистентной очереди: на Ack снимаем и оттуда и подтягиваем
+    /// следующее в окно.
+    durable: bool,
 }
+
+/// Сколько сообщений одному пиру держим в полёте. Остальные ждут в очереди и
+/// уходят по мере подтверждений: тысяча накопленных сообщений не вылетает разом.
+const SEND_WINDOW: usize = 32;
+
+/// Сколько НОВЫХ сообщений из очереди уходит одному пиру в секунду. Ниже
+/// ingress-бюджета контакта (30/с): иначе приёмник режет всплеск, отрезанное
+/// приходит ретраем позже — и сообщения в чате встают не по порядку.
+const SEND_RATE: usize = 20;
+
+/// Тип записи в очереди: сериализованный `Payload` + уведомлять ли UI о доставке.
+const SPOOL_NOTIFY: &str = "payload";
+const SPOOL_QUIET: &str = "payload-quiet";
 
 struct Shared {
     identity: Identity,
@@ -293,6 +311,17 @@ struct Shared {
     cfg: Config,
     peers: Mutex<HashMap<PeerKey, PeerState>>,
     pending: Mutex<HashMap<u64, Pending>>,
+    /// Персистентная очередь исходящих (ставит движок). Без неё — только память
+    /// (`message_ttl`), как у голого мессенджера в тестах.
+    outbox: std::sync::OnceLock<p2p_core::outbox::OutboxStore>,
+    /// Темп досылки по пирам: (начало текущей секунды, сколько ушло в ней).
+    pace: Mutex<HashMap<PeerKey, (Instant, usize)>>,
+    /// Пиры, кому из очереди осталось что слать сверх темпа: дотягивает maintenance.
+    backlog: Mutex<std::collections::HashSet<PeerKey>>,
+    /// Ретраи и досылка шлют под одним замком. Иначе досылка по Ack из приёмного
+    /// потока вклинивается в середину пачки ретраев, и новое сообщение обгоняет
+    /// старое, которое как раз переотправляется.
+    send_order: Mutex<()>,
     next_id: AtomicU64,
     running: AtomicBool,
     tx: Sender<Event>,
@@ -410,6 +439,9 @@ impl Shared {
     /// (DM: true → Ack/Undelivered-события; группы: false — молча).
     /// Чтобы сделать надёжным новый тип сообщения: добавь ему поле `id`, шли через
     /// этот метод и ответь `Ack{id}` на приёме. Возвращает id.
+    ///
+    /// Ошибка записи в транспорт — не повод терять сообщение: оно уже в `pending`,
+    /// ретрай дожмёт, когда узел поднимется (например, посреди смены адреса).
     fn send_reliable(
         &self,
         peer: &PeerKey,
@@ -419,34 +451,101 @@ impl Shared {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let payload = mk(id);
         self.track(peer);
-        self.send(peer, &payload)?;
         let now = Instant::now();
         self.pending.lock().unwrap().insert(
             id,
-            Pending { peer: *peer, payload, created: now, last_sent: now, notify },
+            Pending { peer: *peer, payload: payload.clone(), created: now, last_sent: now, notify, durable: false },
         );
+        if let Err(e) = self.send(peer, &payload) {
+            log::warn!("send id={id}: транспорт не принял ({e}), дожмёт ретрай");
+        }
         Ok(id)
     }
 
-    /// Как [`send_reliable`], но с ЗАДАННЫМ `id` (для пере-отправки из офлайн-очереди:
-    /// тот же id → получатель дедуплицирует, дублей нет). Пере-вставка в `pending` с
-    /// тем же id идемпотентна.
-    fn send_reliable_with_id(
+    /// Надёжно И переживая офлайн получателя и наш перезапуск: сообщение целиком
+    /// ложится в персистентную очередь и уходит в порядке постановки, не больше
+    /// [`SEND_WINDOW`] в полёте. Для всего, что меняет переписку (текст, вложение,
+    /// правка, отзыв, закреп, групповое MLS): потеря такого пакета — расхождение
+    /// историй, которое уже ничем не чинится.
+    fn send_durable(
         &self,
         peer: &PeerKey,
-        id: u64,
         notify: bool,
         mk: impl FnOnce(u64) -> Payload,
-    ) -> Result<(), MessengerError> {
+    ) -> Result<u64, MessengerError> {
+        let Some(outbox) = self.outbox.get() else {
+            return self.send_reliable(peer, notify, mk);
+        };
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let payload = mk(id);
+        let body = serde_json::to_vec(&payload).map_err(|e| MessengerError::Spool(e.to_string()))?;
+        let kind = if notify { SPOOL_NOTIFY } else { SPOOL_QUIET };
+        outbox
+            .enqueue(peer, id, kind, &body, Self::now_unix())
+            .map_err(|e| MessengerError::Spool(e.to_string()))?;
         self.track(peer);
-        self.send(peer, &payload)?;
+        self.pump(peer);
+        Ok(id)
+    }
+
+    /// Дотянуть окно пира из очереди: голова очереди (первые [`SEND_WINDOW`]) —
+    /// это ровно то, что должно быть в полёте; чего из неё нет в `pending`, то и
+    /// отправляем, не быстрее [`SEND_RATE`]. Зовётся на постановку, Ack, появление
+    /// пира и старт; упёрлись в темп — пира дотянет maintenance.
+    fn pump(&self, peer: &PeerKey) {
+        let Some(outbox) = self.outbox.get() else { return };
+        let _order = self.send_order.lock().unwrap();
+        let Ok(head) = outbox.head_for(peer, SEND_WINDOW) else { return };
         let now = Instant::now();
-        self.pending.lock().unwrap().insert(
-            id,
-            Pending { peer: *peer, payload, created: now, last_sent: now, notify },
-        );
-        Ok(())
+        let budget = {
+            let mut pace = self.pace.lock().unwrap();
+            let slot = pace.entry(*peer).or_insert((now, 0));
+            if now.duration_since(slot.0) >= Duration::from_secs(1) {
+                *slot = (now, 0);
+            }
+            SEND_RATE.saturating_sub(slot.1)
+        };
+        let mut to_send = Vec::new();
+        let mut broken = Vec::new();
+        let mut deferred = false;
+        {
+            let mut pending = self.pending.lock().unwrap();
+            for e in head {
+                if pending.contains_key(&e.msg_id) {
+                    continue;
+                }
+                if to_send.len() >= budget {
+                    deferred = true;
+                    break;
+                }
+                let Ok(payload) = serde_json::from_slice::<Payload>(&e.payload) else {
+                    broken.push(e.id);
+                    continue;
+                };
+                let notify = e.payload_type == SPOOL_NOTIFY;
+                pending.insert(
+                    e.msg_id,
+                    Pending { peer: *peer, payload: payload.clone(), created: now, last_sent: now, notify, durable: true },
+                );
+                to_send.push(payload);
+            }
+        }
+        // Нечитаемая запись (формат сменился) застряла бы в голове навсегда и
+        // заперла окно — выбрасываем.
+        for id in broken {
+            let _ = outbox.remove(id);
+        }
+        if let Some(slot) = self.pace.lock().unwrap().get_mut(peer) {
+            slot.1 += to_send.len();
+        }
+        if deferred {
+            self.backlog.lock().unwrap().insert(*peer);
+        }
+        for payload in to_send {
+            if let Err(e) = self.send(peer, &payload) {
+                log::warn!("досылка пиру {:02x?}: транспорт не принял ({e})", &peer[..4]);
+            }
+        }
     }
 
     fn is_online(&self, peer: &PeerKey) -> bool {
@@ -514,6 +613,10 @@ impl Messenger {
             cfg,
             peers: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
+            outbox: std::sync::OnceLock::new(),
+            pace: Mutex::new(HashMap::new()),
+            backlog: Mutex::new(std::collections::HashSet::new()),
+            send_order: Mutex::new(()),
             // Сеем от времени (мс с эпохи), а НЕ с 1: id монотонно растут между
             // перезапусками и не рециклируются. Иначе после рестарта id снова 1..N
             // сталкивались бы со старыми сообщениями в базе получателя → затирание
@@ -547,6 +650,35 @@ impl Messenger {
     }
 
     /// Наш публичный ключ.
+    /// Подключить персистентную очередь исходящих и дослать всё, что в ней ждёт.
+    /// Один раз за жизнь мессенджера; до этого надёжные сообщения живут только в
+    /// памяти.
+    pub fn set_outbox(&self, store: p2p_core::outbox::OutboxStore) {
+        let peers = store.peers().unwrap_or_default();
+        if self.shared.outbox.set(store).is_err() {
+            return;
+        }
+        for peer in peers {
+            self.shared.track(&peer);
+            self.shared.pump(&peer);
+        }
+    }
+
+    /// Больше не доставлять сообщение `id` пиру `peer` (например, его отозвали, пока
+    /// оно ждало в очереди): убрать и из очереди, и из ретраев.
+    pub fn forget(&self, peer: &PeerKey, id: u64) {
+        let removed = {
+            let mut pending = self.shared.pending.lock().unwrap();
+            pending.get(&id).filter(|p| p.peer == *peer).is_some() && pending.remove(&id).is_some()
+        };
+        if let Some(ob) = self.shared.outbox.get() {
+            let _ = ob.remove_by_msg(peer, id);
+        }
+        if removed {
+            self.shared.pump(peer);
+        }
+    }
+
     pub fn public_key(&self) -> PeerKey {
         self.shared.identity.public_key_bytes()
     }
@@ -709,7 +841,7 @@ impl Messenger {
         let text = text.to_string();
         let fwd_from = fwd_from.to_string();
         // DM: notify=true → UI получает Ack/Undelivered (✓✓ / ошибка).
-        self.shared.send_reliable(peer, true, move |id| Payload::Text {
+        self.shared.send_durable(peer, true, move |id| Payload::Text {
             id,
             text,
             reply_to,
@@ -723,7 +855,7 @@ impl Messenger {
     /// Надёжно, как текст: просьба, отправленная в момент, когда собеседник офлайн,
     /// обязана доехать позже — иначе «удалил» означало бы «удалил, если повезло».
     pub fn send_retract(&self, peer: &PeerKey, target: u64) -> Result<u64, MessengerError> {
-        self.shared.send_reliable(peer, false, move |id| Payload::Retract { id, target })
+        self.shared.send_durable(peer, false, move |id| Payload::Retract { id, target })
     }
 
     /// Исправить СВОЁ сообщение. Надёжно, как отзыв: правка, сделанная пока
@@ -731,7 +863,7 @@ impl Messenger {
     /// сообщения, и это хуже, чем отсутствие правки вовсе.
     pub fn send_edit(&self, peer: &PeerKey, target: u64, text: &str) -> Result<u64, MessengerError> {
         let text = text.to_string();
-        self.shared.send_reliable(peer, false, move |id| Payload::Edit { id, target, text })
+        self.shared.send_durable(peer, false, move |id| Payload::Edit { id, target, text })
     }
 
     /// Закрепить/открепить сообщение в личном чате. Надёжно, как отзыв: закреп,
@@ -745,7 +877,7 @@ impl Messenger {
         on: bool,
     ) -> Result<u64, MessengerError> {
         self.shared
-            .send_reliable(peer, false, move |id| Payload::Pin { id, target, target_mine, on })
+            .send_durable(peer, false, move |id| Payload::Pin { id, target, target_mine, on })
     }
 
     /// Объявить контакту смену своего АДРЕСА (ADR-007). Надёжно, как текст:
@@ -772,20 +904,6 @@ impl Messenger {
         })
     }
 
-    /// Пере-отправить текст с ТЕМ ЖЕ `id` (офлайн-досылка): получатель дедуплицирует
-    /// по (peer, id), поэтому дублей нет. Используется [`p2p_core`]-очередью через движок.
-    pub fn resend_text(&self, peer: &PeerKey, id: u64, text: &str) -> Result<(), MessengerError> {
-        let text = text.to_string();
-        self.shared.send_reliable_with_id(peer, id, true, move |id| Payload::Text {
-            id,
-            text,
-            reply_to: 0,
-            reply_mine: false,
-            fwd_from: String::new(),
-            fwd_anon: false,
-        })
-    }
-
     /// Отправить медиа-СООБЩЕНИЕ чата (M2): ссылка на блоб по хэшу. Надёжно
     /// (retry-until-Ack), как текст; сами байты идут блоб-каналом отдельно.
     /// (Отличать от [`Messenger::send_media`] — realtime-датаграммы звонка.)
@@ -801,35 +919,7 @@ impl Messenger {
         // Режем подпись здесь, а не в UI: за размер пакета отвечает отправляющий
         // слой, и обойти его через другой клиент не должно получаться.
         let caption = truncate_caption(&meta.caption);
-        self.shared.send_reliable(peer, true, move |id| Payload::Media {
-            id, hash, mime, name,
-            size: meta.size,
-            duration_ms: meta.duration_ms,
-            width: meta.width,
-            height: meta.height,
-            caption: caption.clone(),
-            thumb: meta.thumb.clone(),
-            fwd_from: meta.fwd_from.clone(),
-            fwd_anon: meta.fwd_anon,
-            reply_to: meta.reply_to,
-            reply_mine: meta.reply_mine,
-        })
-    }
-
-    /// Повторно отправить медиа-СООБЩЕНИЕ с тем же id (досылка из офлайн-очереди).
-    /// Стабильный id → получатель дедуплицирует, дублей в чате не будет.
-    pub fn resend_media_message(
-        &self,
-        peer: &PeerKey,
-        id: u64,
-        hash: &[u8],
-        mime: &str,
-        name: &str,
-        meta: MediaMeta,
-    ) -> Result<(), MessengerError> {
-        let (hash, mime, name) = (hash.to_vec(), mime.to_string(), name.to_string());
-        let caption = truncate_caption(&meta.caption);
-        self.shared.send_reliable_with_id(peer, id, true, move |id| Payload::Media {
+        self.shared.send_durable(peer, true, move |id| Payload::Media {
             id, hash, mime, name,
             size: meta.size,
             duration_ms: meta.duration_ms,
@@ -901,7 +991,7 @@ impl Messenger {
         let data = data.to_vec();
         // Группа: notify=false (статус по участникам в UI не показываем). Каждому
         // получателю — свой id, одно и то же data; дедуп повторов делает MLS.
-        self.shared.send_reliable(peer, false, move |id| Payload::Group { id, data })?;
+        self.shared.send_durable(peer, false, move |id| Payload::Group { id, data })?;
         Ok(())
     }
 
@@ -918,7 +1008,7 @@ impl Messenger {
     /// (retry-until-Ack). Получатель решает вступать; тогда шлёт KeyPackage.
     pub fn send_group_invite(&self, peer: &PeerKey, gid: &[u8], name: &str) -> Result<(), MessengerError> {
         let (gid, name) = (gid.to_vec(), name.to_string());
-        self.shared.send_reliable(peer, false, move |id| Payload::GroupInvite { id, gid, name })?;
+        self.shared.send_durable(peer, false, move |id| Payload::GroupInvite { id, gid, name })?;
         Ok(())
     }
 
@@ -1217,6 +1307,7 @@ fn receive_loop(shared: Arc<Shared>) {
         // Любой трафик от пира = он онлайн.
         if shared.mark_seen(&peer_id) {
             shared.emit(Event::Presence { peer: peer_id, online: true });
+            shared.pump(&peer_id); // вернулся — досылаем накопленное
         }
 
         match payload {
@@ -1273,13 +1364,21 @@ fn receive_loop(shared: Arc<Shared>) {
                 let acked = {
                     let mut pending = shared.pending.lock().unwrap();
                     if pending.get(&id).map(|p| p.peer) == Some(peer_id) {
-                        pending.remove(&id).map(|p| p.notify)
+                        pending.remove(&id).map(|p| (p.notify, p.durable))
                     } else {
                         None
                     }
                 };
-                if acked == Some(true) {
-                    shared.emit(Event::Ack { peer: peer_id, id });
+                if let Some((notify, durable)) = acked {
+                    if durable {
+                        if let Some(ob) = shared.outbox.get() {
+                            let _ = ob.remove_by_msg(&peer_id, id);
+                        }
+                        shared.pump(&peer_id); // место в окне освободилось
+                    }
+                    if notify {
+                        shared.emit(Event::Ack { peer: peer_id, id });
+                    }
                 }
             }
             Payload::Ping { .. } => {
@@ -1393,7 +1492,9 @@ fn maintenance_loop(shared: Arc<Shared>) {
             let _ = shared.send(&key, &Payload::Ping { transit: None });
         }
 
-        // Повтор недоставленных сообщений; отсев по TTL.
+        // Повтор недоставленных сообщений; отсев по TTL. Выбор и отправка — под
+        // `send_order`, чтобы досылка не вклинилась в середину пачки.
+        let order = shared.send_order.lock().unwrap();
         let mut to_retry: Vec<(u64, PeerKey, Payload)> = Vec::new();
         let mut expired = Vec::new();
         {
@@ -1420,6 +1521,13 @@ fn maintenance_loop(shared: Arc<Shared>) {
         to_retry.sort_by_key(|(id, _, _)| *id);
         for (_, peer, payload) in to_retry {
             let _ = shared.send(&peer, &payload);
+        }
+        drop(order);
+
+        // Очередь, упёршаяся в темп досылки, — дотягиваем.
+        let backlog: Vec<PeerKey> = shared.backlog.lock().unwrap().drain().collect();
+        for peer in backlog {
+            shared.pump(&peer);
         }
     }
 }

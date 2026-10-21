@@ -139,7 +139,7 @@ fn undelivered_message_is_queued_not_failed() {
 
 /// РЕГРЕССИЯ (баг «не пережила рестарт»): A шлёт, пока B офлайн; A перезапускается
 /// (in-memory pending теряется, остаётся только персистентный outbox); B возвращается
-/// → сообщение догоняется из outbox on_start.
+/// → сообщение догоняется из персистентной очереди мессенджера.
 #[test]
 fn offline_message_survives_sender_restart() {
     let net = LoopbackNet::new();

@@ -461,10 +461,8 @@ impl Engine {
                     kind: "text".into(),
                     ..Default::default()
                 });
-                // M3: в офлайн-очередь — если не дойдёт, дошлём при онлайне/рестарте.
-                let ob = self.outbox.lock_safe();
-                ob.on_sent(key, id, text, t);
-                log::info!("outbox: enqueued id={} peer={:02x?} count={}", id, &key[..4], ob.pending_count());
+                // В офлайн-очередь сообщение положил сам мессенджер — целиком, с
+                // цитатой и пометкой пересылки.
                 Some(id as i64)
             }
             Err(_) => None,
@@ -737,12 +735,10 @@ impl Engine {
                 sent += 1;
             }
         }
-        // Из своей очереди тоже убираем: иначе ретрай досылал бы уже отозванное.
-        let ob = self.outbox.lock_safe();
+        // Из очереди тоже убираем: иначе досылка доставила бы уже отозванное.
         for id in ids {
-            ob.on_ack(key, *id);
+            self.messenger.forget(key, *id);
         }
-        drop(ob);
         let refs: Vec<(u64, bool)> = ids.iter().map(|id| (*id, true)).collect();
         self.delete_messages(key, &refs);
         sent
@@ -836,21 +832,6 @@ impl Engine {
                     reply_sender: info.reply_sender.clone(),
                     ..Default::default()
                 });
-                // В офлайн-очередь — как текст: если получатель сейчас недоступен,
-                // дошлём при его возвращении/после рестарта. Байты уже сохранены
-                // локально, в очереди лежит только ссылка на них.
-                self.outbox.lock_safe().on_sent_media(
-                    key, id, &id_hex, mime, name,
-                    &p2p_core::outbox::MediaRef {
-                        size,
-                        duration_ms: info.duration_ms,
-                        width: info.width,
-                        height: info.height,
-                        thumb_hex: hex::encode(&meta.thumb),
-                        caption: info.caption.clone(),
-                    },
-                    t,
-                );
                 Some(id as i64)
             }
             Err(_) => None,
@@ -924,18 +905,6 @@ impl Engine {
             reply_sender: info.reply_sender.clone(),
             ..Default::default()
         });
-        self.outbox.lock_safe().on_sent_media(
-            key, id, &id_hex, mime, name,
-            &p2p_core::outbox::MediaRef {
-                size,
-                duration_ms: info.duration_ms,
-                width: info.width,
-                height: info.height,
-                thumb_hex: hex::encode(&meta.thumb),
-                caption: info.caption.clone(),
-            },
-            t,
-        );
         Some(id as i64)
     }
 
@@ -2309,11 +2278,6 @@ fn event_pump(
     let blob_dir = data_dir.join("blobs");
     let mut groups = GroupManager::new(identity, messenger.clone(), data_dir, engine.messages.clone());
     let mut blobs = blobs::BlobManager::new(messenger.clone(), p2p_blob::Limits::default(), blob_dir);
-    {
-        let ob = engine.outbox.lock_safe();
-        log::info!("outbox on_start: pending={} (до prune+досылки)", ob.pending_count());
-    }
-    engine.outbox.lock_safe().on_start(now()); // M3: prune TTL + дослать недоставленное
     engine.resume_all_wanted(); // докачки, начатые до перезапуска
     refresh_group_cache(&engine, &groups); // прайм кэша
     push_event(&engine, dto::UiEvent::GroupsChanged);
@@ -2579,7 +2543,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
     match ev {
         Event::Presence { peer, online } => {
             if online {
-                // Профиль и досылку — ТОЛЬКО контактам (не светим профиль незнакомцам,
+                // Профиль — ТОЛЬКО контактам (не светим профиль незнакомцам,
                 // presence сам по себе больше не добавляет в контакты — нужен явный запрос).
                 let is_contact = engine.contacts.lock_safe().contains(&peer);
                 if is_contact {
@@ -2589,12 +2553,6 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     let _ = engine.messenger.send_profile_update(&peer, &m.name, &hash);
                     // Продолжаем то, что пользователь просил скачать у этого пира.
                     engine.resume_wanted(&peer);
-                    let mut ob = engine.outbox.lock_safe();
-                    let c = ob.pending_count();
-                    ob.on_online(&peer); // M3: дослать ожидающее пиру
-                    if c > 0 {
-                        log::info!("outbox on_online peer={:02x?}: досылка (в очереди {})", &peer[..4], c);
-                    }
                 }
             }
             if online {
@@ -2762,7 +2720,6 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }
         Event::Ack { peer, id } => {
             let _ = engine.messages.lock_safe().set_status(Chat::Dm(&peer), id, "delivered");
-            engine.outbox.lock_safe().on_ack(&peer, id); // M3: снять из очереди
             push_event(engine, dto::UiEvent::Ack { peer: hex::encode(peer), id });
         }
         Event::Undelivered { peer, id } => {
@@ -3250,58 +3207,12 @@ impl Engine {
         // ссылаться; `refresh_budgets` держит кэш в актуальном состоянии.
         let tier_cache: Arc<Mutex<HashMap<[u8; 32], Tier>>> = Arc::new(Mutex::new(HashMap::new()));
 
-        // Офлайн-очередь (M3): досылка с ТЕМ ЖЕ id → получатель дедуплицирует.
+        // Офлайн-очередь (M3): ставит и досылает мессенджер; движку — сроки по тиру,
+        // статистика и ручной сброс.
         let outbox = {
-            let m = messenger.clone();
             let tc = tier_cache.clone();
-            let blobs_dir = dir.join("blobs");
-            let resend_jobs = job_tx.clone();
             p2p_core::outbox::OutboxManager::new(
                 p2p_core::outbox::OutboxStore::new(db.clone()),
-                Box::new(move |peer, id, kind, payload| match kind {
-                    "text" => {
-                        if let Ok(text) = std::str::from_utf8(payload) {
-                            let _ = m.resend_text(peer, id, text);
-                        }
-                    }
-                    // Вложение: заново предлагаем блоб (байты лежат у нас) и повторяем
-                    // ссылку. Если блоба уже нет на диске — досылать нечего, пропускаем.
-                    "media" => {
-                        let Ok(v) = serde_json::from_slice::<serde_json::Value>(payload) else { return };
-                        let (Some(blob_hex), Some(mime), Some(name)) = (
-                            v["blob"].as_str(),
-                            v["mime"].as_str(),
-                            v["name"].as_str(),
-                        ) else { return };
-                        let Ok(hash) = hex::decode(blob_hex) else { return };
-                        // Блоб предлагаем через актора (BlobManager живёт в его потоке).
-                        if let Some(bytes) = read_blob_at(&blobs_dir, blob_hex) {
-                            let _ = resend_jobs.send(Job::BlobOffer {
-                                peer: *peer,
-                                content: bytes,
-                                mime: mime.to_string(),
-                            });
-                        }
-                        let meta = p2p_messenger::MediaMeta {
-                            // Досылка из очереди: пересылка (если была) уже записана
-                            // в истории, а очередь хранит только сам файл и подпись.
-                            fwd_from: String::new(),
-                            fwd_anon: false,
-                            size: v["size"].as_u64().unwrap_or(0),
-                            duration_ms: v["duration_ms"].as_u64().unwrap_or(0) as u32,
-                            width: v["width"].as_u64().unwrap_or(0) as u32,
-                            height: v["height"].as_u64().unwrap_or(0) as u32,
-                            thumb: v["thumb"].as_str().and_then(|t| hex::decode(t).ok()).unwrap_or_default(),
-                            caption: v["caption"].as_str().unwrap_or_default().to_string(),
-                            // Ссылка ответа в очередь не пишется — как и пересылка,
-                            // она уже в истории; дублировать её в досылке нечем.
-                            reply_to: 0,
-                            reply_mine: false,
-                        };
-                        let _ = m.resend_media_message(peer, id, &hash, mime, name, meta);
-                    }
-                    _ => {}
-                }),
                 // Cap/TTL очереди — из того же бюджета, что и ingress (единая точка).
                 Box::new(move |peer| {
                     tc.lock()
@@ -3346,6 +3257,11 @@ impl Engine {
         // ADR-007: адреса контактов, сменивших ключ. Тоже до приёмного цикла —
         // иначе первые исходящие ушли бы на покинутые адреса.
         engine.refresh_transports();
+        // Офлайн-очередь: сперва выбросить просроченное по тиру (тиры уже залиты),
+        // потом отдать её мессенджеру — он и дошлёт оставшееся.
+        let dropped = engine.outbox.lock_safe().prune_expired(now());
+        log::info!("outbox: выброшено просроченных {dropped}, ждёт {}", engine.outbox.lock_safe().pending_count());
+        engine.messenger.set_outbox(p2p_core::outbox::OutboxStore::new(db.clone()));
 
         let pump_engine = engine.clone();
         let groups_dir = dir.clone();

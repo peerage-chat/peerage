@@ -2,11 +2,11 @@
 //!
 //! In-memory надёжная доставка мессенджера (retry-until-Ack, ~5 мин) переживает
 //! короткие провалы, но НЕ переживает перезапуск приложения и долгий офлайн пира.
-//! Этот слой персистит недоставленное в SQLite (`outbox`), досылает при возвращении
-//! пира и на старте, выбрасывает протухшее по TTL. Опирается на общий [`crate::db::Db`].
+//! Этот слой персистит недоставленное в SQLite (`outbox`); ставит в очередь, снимает
+//! по Ack и досылает сам мессенджер, окном по порядку постановки. Здесь — хранилище
+//! и то, что нужно движку и UI: сроки по тиру, статистика, ручной сброс.
 //!
-//! Хранит непрозрачные `(payload_type, payload)` — кодирование выбирает верхний слой
-//! (движок): что именно сериализуется в `payload`, здесь не важно.
+//! Хранит непрозрачные `(payload_type, payload)` — кодирование выбирает мессенджер.
 
 use crate::budget::Tier;
 use crate::db::{self, Db};
@@ -59,9 +59,44 @@ impl OutboxStore {
         self.query(Some(peer))
     }
 
-    /// Все ожидающие записи (для досылки при старте приложения).
+    /// Все ожидающие записи (статистика, прунинг по сроку).
     pub fn pending_all(&self) -> Result<Vec<OutboxEntry>, StoreError> {
         self.query(None)
+    }
+
+    /// Первые `limit` записей пира в порядке постановки — окно, которое должно быть
+    /// в полёте. Порядок — по rowid: часы могут прыгнуть назад, очередь — нет.
+    pub fn head_for(&self, peer: &[u8; 32], limit: usize) -> Result<Vec<OutboxEntry>, StoreError> {
+        let conn = db::lock(&self.db);
+        let mut stmt = conn.prepare(
+            "SELECT id, peer, msg_id, payload_type, payload, created_at FROM outbox
+             WHERE peer = ?1 AND status = 'pending' ORDER BY id LIMIT ?2",
+        )?;
+        let rows = stmt
+            .query_map(rusqlite::params![peer.as_slice(), limit as i64], |row| {
+                let peer_blob: Vec<u8> = row.get(1)?;
+                Ok(OutboxEntry {
+                    id: row.get(0)?,
+                    peer: <[u8; 32]>::try_from(peer_blob.as_slice()).unwrap_or([0u8; 32]),
+                    msg_id: row.get::<_, i64>(2)? as u64,
+                    payload_type: row.get(3)?,
+                    payload: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Кому вообще что-то ждёт — с них начинается досылка на старте.
+    pub fn peers(&self) -> Result<Vec<[u8; 32]>, StoreError> {
+        let conn = db::lock(&self.db);
+        let mut stmt = conn.prepare("SELECT DISTINCT peer FROM outbox WHERE status = 'pending'")?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, Vec<u8>>(0))?
+            .filter_map(|r| r.ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok()))
+            .collect();
+        Ok(rows)
     }
 
     fn query(&self, peer: Option<&[u8; 32]>) -> Result<Vec<OutboxEntry>, StoreError> {
@@ -160,100 +195,18 @@ impl OutboxStats {
     }
 }
 
-/// Оркестратор офлайн-очереди: персистит исходящий текст, снимает по Ack, досылает
-/// при возвращении пира и на старте, чистит по TTL. Отправку делает через
-/// callback (в движке = `Messenger::resend_text`), поэтому вся логика тестируема без
-/// сети. Досылка — с тем же `msg_id`, так что получатель дедуплицирует (нет дублей).
-/// Что досылать: тип payload + его тело (кодирование выбирает верхний слой —
-/// для текста это UTF-8, для медиа JSON-ссылка на блоб).
-pub type ResendFn = Box<dyn FnMut(&[u8; 32], u64, &str, &[u8]) + Send>;
-
-/// Метаданные вложения, которые кладём в очередь вместе со ссылкой: при досылке
-/// карточка у получателя должна быть такой же, как при первой отправке.
-#[derive(Debug, Clone, Default)]
-/// Тело медиа-записи в очереди. Формат СВОЙ, не протокольный: он читается только
-/// нами же при досылке, но схема всё равно должна жить в типе, а не в литерале.
-#[derive(serde::Serialize)]
-struct QueuedMedia<'a> {
-    blob: &'a str,
-    mime: &'a str,
-    name: &'a str,
-    size: u64,
-    duration_ms: u32,
-    caption: &'a str,
-    width: u32,
-    height: u32,
-    thumb: &'a str,
-}
-
-#[derive(Default)]
-pub struct MediaRef {
-    pub size: u64,
-    pub duration_ms: u32,
-    pub width: u32,
-    pub height: u32,
-    pub thumb_hex: String,
-    /// Подпись — часть сообщения, поэтому обязана пережить офлайн-очередь.
-    pub caption: String,
-}
-
+/// Взгляд движка на очередь: сроки хранения по тиру, статистика для UI, ручной
+/// сброс. Ставит и досылает мессенджер — он же владеет окном в полёте.
 pub struct OutboxManager {
     store: OutboxStore,
-    send: ResendFn,
     /// Тир пира — единый бюджет (M3). Задаёт, сколько и как долго хранить.
     /// Движок отдаёт актуальный тир из контактов/блок-листа.
     tier_of: Box<dyn Fn(&[u8; 32]) -> Tier + Send>,
 }
 
 impl OutboxManager {
-    pub fn new(
-        store: OutboxStore,
-        send: ResendFn,
-        tier_of: Box<dyn Fn(&[u8; 32]) -> Tier + Send>,
-    ) -> Self {
-        Self { store, send, tier_of }
-    }
-
-    /// Запомнить отправленный текст (на случай, если не дойдёт).
-    ///
-    /// НИЧЕГО НЕ ВЫТЕСНЯЕМ: очередь состоит из СОБСТВЕННЫХ сообщений пользователя, и
-    /// удалить их — значит соврать задним числом (они уже показаны как отправленные).
-    /// Раньше здесь стоял cap с выбрасыванием старейших, т.е. терялось начало
-    /// разговора. Объём не страшен: в очереди только тексты (сотни байт), гигабайт —
-    /// это миллионы сообщений. Разрастание — повод ПРЕДУПРЕДИТЬ (см. [`Self::stats`]),
-    /// а не молча удалять.
-    pub fn on_sent(&self, peer: &[u8; 32], msg_id: u64, text: &str, now: i64) {
-        let _ = self.store.enqueue(peer, msg_id, "text", text.as_bytes(), now);
-    }
-
-    /// Запомнить отправленное ВЛОЖЕНИЕ. В очередь кладём только ССЫЛКУ (хэш блоба +
-    /// mime + имя) — сами байты уже лежат в blob-хранилище, дублировать их незачем,
-    /// поэтому запись остаётся крошечной. При досылке верхний слой снова предложит
-    /// блоб и повторит медиа-сообщение с тем же id.
-    #[allow(clippy::too_many_arguments)]
-    pub fn on_sent_media(
-        &self,
-        peer: &[u8; 32],
-        msg_id: u64,
-        blob_id_hex: &str,
-        mime: &str,
-        name: &str,
-        meta: &MediaRef,
-        now: i64,
-    ) {
-        let body = QueuedMedia {
-            blob: blob_id_hex,
-            mime,
-            name,
-            size: meta.size,
-            duration_ms: meta.duration_ms,
-            caption: &meta.caption,
-            width: meta.width,
-            height: meta.height,
-            thumb: &meta.thumb_hex,
-        };
-        let Ok(payload) = serde_json::to_vec(&body) else { return };
-        let _ = self.store.enqueue(peer, msg_id, "media", &payload, now);
+    pub fn new(store: OutboxStore, tier_of: Box<dyn Fn(&[u8; 32]) -> Tier + Send>) -> Self {
+        Self { store, tier_of }
     }
 
     /// Снимок очереди для UI: сколько ждёт и сколько занимает. По нему клиент решает,
@@ -291,11 +244,6 @@ impl OutboxManager {
         peers.iter().map(|p| self.clear_peer(p)).sum()
     }
 
-    /// Доставка подтверждена (Ack) — снять из очереди.
-    pub fn on_ack(&self, peer: &[u8; 32], msg_id: u64) {
-        let _ = self.store.remove_by_msg(peer, msg_id);
-    }
-
     /// Число ожидающих записей (диагностика).
     pub fn pending_count(&self) -> i64 {
         self.store.count().unwrap_or(-1)
@@ -306,43 +254,22 @@ impl OutboxManager {
         self.store.clear_peer(peer).unwrap_or(0)
     }
 
-    /// Пир вышел в онлайн — дослать всё ожидающее ему (тем же msg_id).
-    pub fn on_online(&mut self, peer: &[u8; 32]) {
-        if let Ok(entries) = self.store.pending_for(peer) {
-            self.resend(entries);
-        }
-    }
-
-    /// Старт приложения: выбросить протухшее и дослать оставшееся. TTL — per-peer по
-    /// тиру: доверенному держим дольше, незнакомцу сутки, заблокированному ничего.
-    pub fn on_start(&mut self, now: i64) {
-        let Ok(entries) = self.store.pending_all() else { return };
-        let mut alive = Vec::with_capacity(entries.len());
+    /// Старт приложения, ДО того как мессенджер начнёт досылку: выбросить то, чему
+    /// вышел срок. TTL — per-peer по тиру: контакту бессрочно, незнакомцу сутки,
+    /// заблокированному ничего. Возвращает число выброшенных.
+    pub fn prune_expired(&self, now: i64) -> usize {
+        let Ok(entries) = self.store.pending_all() else { return 0 };
+        let mut dropped = 0;
         for e in entries {
             let tier = (self.tier_of)(&e.peer);
             // Заблокированному не досылаем вообще — это решение пользователя, а не срок.
-            if tier.is_blocked() {
-                let _ = self.store.remove(e.id);
-                continue;
-            }
-            // None = без срока (контакты): держим, пока влезает в cap.
-            match tier.outbox_ttl_secs() {
-                Some(ttl) if now.saturating_sub(e.created_at) > ttl => {
-                    let _ = self.store.remove(e.id);
-                }
-                _ => alive.push(e),
+            let expired = tier.is_blocked()
+                || tier.outbox_ttl_secs().is_some_and(|ttl| now.saturating_sub(e.created_at) > ttl);
+            if expired && self.store.remove(e.id).is_ok() {
+                dropped += 1;
             }
         }
-        self.resend(alive);
-    }
-
-    /// Досылка: тип payload передаём наверх как есть — там знают, как его отправить
-    /// (текст → Text, медиа → повторный blob_offer + ссылка). Неизвестные типы просто
-    /// проходят мимо, поэтому старые записи не роняют досылку после апгрейда.
-    fn resend(&mut self, entries: Vec<OutboxEntry>) {
-        for e in entries {
-            (self.send)(&e.peer, e.msg_id, &e.payload_type, &e.payload);
-        }
+        dropped
     }
 }
 
@@ -350,29 +277,14 @@ impl OutboxManager {
 mod tests {
     use super::*;
     use crate::db;
-    use std::sync::{Arc, Mutex};
 
     fn store() -> OutboxStore {
         OutboxStore::new(db::open_in_memory().unwrap())
     }
 
-    type Log = Arc<Mutex<Vec<([u8; 32], u64, String)>>>;
-
-    /// Менеджер над свежим стором + журнал вызовов отправки (записывающий callback).
-    /// Все пиры — `Contact` (историческое поведение: cap 500 / TTL 7 дней).
-    fn mgr_with(store: OutboxStore) -> (OutboxManager, Log) {
-        mgr_with_tier(store, Tier::Contact)
-    }
-
-    /// То же, но с заданным тиром для ВСЕХ пиров — для проверки градуировки бюджета.
-    fn mgr_with_tier(store: OutboxStore, tier: Tier) -> (OutboxManager, Log) {
-        let log: Log = Arc::new(Mutex::new(Vec::new()));
-        let l2 = log.clone();
-        // В журнал пишем тело как строку — тестам хватает (текст и JSON-ссылка медиа).
-        let send = Box::new(move |p: &[u8; 32], id: u64, _kind: &str, body: &[u8]| {
-            l2.lock().unwrap().push((*p, id, String::from_utf8_lossy(body).into_owned()));
-        });
-        (OutboxManager::new(store, send, Box::new(move |_| tier)), log)
+    /// Менеджер с заданным тиром для ВСЕХ пиров — для проверки градуировки бюджета.
+    fn mgr_with_tier(store: OutboxStore, tier: Tier) -> OutboxManager {
+        OutboxManager::new(store, Box::new(move |_| tier))
     }
 
     fn peer(n: u8) -> [u8; 32] {
@@ -461,115 +373,68 @@ mod tests {
         assert_eq!(s.pending_for(&peer(2)).unwrap().len(), 1);
     }
 
+    /// Окно в полёте — голова очереди пира по порядку постановки, не больше `limit`.
+    #[test]
+    fn head_for_is_ordered_and_limited() {
+        let s = store();
+        for i in 0..5u64 {
+            // created_at убывает: порядок задаёт постановка, а не часы.
+            s.enqueue(&peer(1), 100 + i, "payload", b"x", 50 - i as i64).unwrap();
+        }
+        s.enqueue(&peer(2), 1, "payload", b"y", 0).unwrap();
+        let head: Vec<u64> = s.head_for(&peer(1), 3).unwrap().iter().map(|e| e.msg_id).collect();
+        assert_eq!(head, vec![100, 101, 102]);
+        let mut peers = s.peers().unwrap();
+        peers.sort();
+        assert_eq!(peers, vec![peer(1), peer(2)]);
+    }
+
     // ── OutboxManager ────────────────────────────────────────────────────────
 
-    #[test]
-    fn manager_resends_on_online_with_stable_id() {
-        let (mut m, log) = mgr_with(store());
-        m.on_sent(&peer(1), 5, "привет", 100);
-        m.on_online(&peer(1));
-        // Дослано с тем же msg_id (получатель дедуплицирует).
-        assert_eq!(*log.lock().unwrap(), vec![(peer(1), 5, "привет".to_string())]);
-    }
-
-    #[test]
-    fn manager_ack_stops_resend() {
-        let (mut m, log) = mgr_with(store());
-        m.on_sent(&peer(1), 5, "hi", 100);
-        m.on_ack(&peer(1), 5); // доставлено → снято из очереди
-        log.lock().unwrap().clear();
-        m.on_online(&peer(1));
-        assert!(log.lock().unwrap().is_empty(), "после Ack досылки быть не должно");
-    }
-
-    #[test]
-    fn manager_online_targets_only_that_peer() {
-        let (mut m, log) = mgr_with(store());
-        m.on_sent(&peer(1), 1, "to1", 10);
-        m.on_sent(&peer(2), 2, "to2", 10);
-        m.on_online(&peer(1));
-        assert_eq!(*log.lock().unwrap(), vec![(peer(1), 1, "to1".to_string())]);
-    }
-
     /// Прунинг по сроку остался только у тиров со сроком (незнакомец): старое
-    /// выбрасывается, свежее досылается.
+    /// выбрасывается, свежее остаётся ждать.
     #[test]
-    fn manager_start_prunes_expired_and_resends_rest() {
+    fn manager_prunes_expired_only() {
         let s = store();
         let ttl = Tier::Stranger.outbox_ttl_secs().expect("у незнакомца срок есть");
-        s.enqueue(&peer(1), 1, "text", b"old", 0).unwrap();
+        s.enqueue(&peer(1), 1, "payload", b"old", 0).unwrap();
         let now = ttl + 1000;
-        s.enqueue(&peer(1), 2, "text", b"fresh", now - 10).unwrap();
-        let (mut m, log) = mgr_with_tier(s, Tier::Stranger);
-        m.on_start(now);
-        assert_eq!(*log.lock().unwrap(), vec![(peer(1), 2, "fresh".to_string())]);
+        s.enqueue(&peer(1), 2, "payload", b"fresh", now - 10).unwrap();
+        let m = mgr_with_tier(s, Tier::Stranger);
+        assert_eq!(m.prune_expired(now), 1);
+        assert_eq!(m.pending_count(), 1);
     }
 
     /// M3: срок хранения — из бюджета тира. Контакту НЕ истекает (сервера, который
     /// сохранит за нас, нет — иначе уехавший на месяц молча теряет сообщение);
     /// незнакомцу сутки, заблокированному — ничего.
     #[test]
-    fn start_ttl_follows_peer_tier() {
+    fn ttl_follows_peer_tier() {
         let month = 30 * 24 * 3600; // «человек вернулся через месяц»
-        let resent_after = |tier: Tier, age: i64| {
+        let kept_after = |tier: Tier, age: i64| {
             let s = store();
-            s.enqueue(&peer(1), 1, "text", b"msg", 0).unwrap();
-            let (mut m, log) = mgr_with_tier(s, tier);
-            m.on_start(age);
-            let resent = !log.lock().unwrap().is_empty();
-            resent
+            s.enqueue(&peer(1), 1, "payload", b"msg", 0).unwrap();
+            let m = mgr_with_tier(s, tier);
+            m.prune_expired(age);
+            m.pending_count() == 1
         };
-        assert!(resent_after(Tier::Verified, month), "сверенному храним бессрочно");
-        assert!(resent_after(Tier::Contact, month), "контакт вернулся через месяц — сообщение ждёт");
-        assert!(!resent_after(Tier::Stranger, month), "незнакомцу — сутки");
-        assert!(!resent_after(Tier::Blocked, 0), "заблокированному не храним вовсе");
-    }
-
-    /// Свои сообщения НЕ вытесняются: сколько написал — столько и ждёт доставки.
-    /// (Раньше тут стоял cap, выбрасывавший начало разговора.)
-    #[test]
-    fn own_messages_are_never_evicted() {
-        let (m, _log) = mgr_with(store());
-        let n = 2_000; // заведомо больше любого прежнего cap
-        for i in 0..n {
-            m.on_sent(&peer(1), i as u64, "письмо", 100);
-        }
-        assert_eq!(m.pending_count() as usize, n, "ни одно своё сообщение не потеряно");
-    }
-
-    /// Вложение тоже переживает офлайн: в очередь кладём ССЫЛКУ на блоб (не байты),
-    /// и при возвращении пира она досылается вместе с текстом.
-    #[test]
-    fn media_is_queued_as_reference_and_resent() {
-        let (mut m, log) = mgr_with(store());
-        m.on_sent(&peer(1), 1, "привет", 10);
-        m.on_sent_media(&peer(1), 2, "ab12cd", "image/jpeg", "photo.jpg", &MediaRef::default(), 11);
-
-        // Запись компактная — байты картинки в очередь не попали.
-        assert!(m.stats().bytes < 200, "в очереди ссылка, а не содержимое файла");
-
-        m.on_online(&peer(1));
-        let sent = log.lock().unwrap().clone();
-        assert_eq!(sent.len(), 2, "дослано и текстовое, и вложение");
-        assert!(sent[1].2.contains("ab12cd"), "ссылка на блоб доехала: {:?}", sent[1]);
-        assert!(sent[1].2.contains("photo.jpg"));
+        assert!(kept_after(Tier::Verified, month), "сверенному храним бессрочно");
+        assert!(kept_after(Tier::Contact, month), "контакт вернулся через месяц — сообщение ждёт");
+        assert!(!kept_after(Tier::Stranger, month), "незнакомцу — сутки");
+        assert!(!kept_after(Tier::Blocked, 0), "заблокированному не храним вовсе");
     }
 
     /// Разрастание очереди — повод предупредить, а не удалять.
     #[test]
     fn stats_report_growth_and_warn_threshold() {
-        let (m, _log) = mgr_with(store());
-        m.on_sent(&peer(1), 1, "раз", 10);
-        m.on_sent(&peer(2), 2, "два", 10);
-        let s = m.stats();
-        assert_eq!(s.pending, 2);
-        assert_eq!(s.peers, 2, "считаем и получателей");
-        assert!(s.bytes > 0);
-        assert!(!s.should_warn(), "две штуки — не повод для плашки");
-
-        for i in 0..OUTBOX_WARN_PENDING {
-            m.on_sent(&peer(3), 100 + i as u64, "много", 10);
-        }
-        assert!(m.stats().should_warn(), "после порога предупреждаем");
+        let s = store();
+        s.enqueue(&peer(1), 1, "payload", b"one", 10).unwrap();
+        s.enqueue(&peer(2), 2, "payload", b"two", 10).unwrap();
+        let m = mgr_with_tier(s, Tier::Contact);
+        let st = m.stats();
+        assert_eq!(st.pending, 2);
+        assert_eq!(st.peers, 2, "считаем и получателей");
+        assert!(st.bytes > 0);
+        assert!(!st.should_warn(), "две штуки — не повод для плашки");
     }
 }

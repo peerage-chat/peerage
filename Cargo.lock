@@ -5250,6 +5250,7 @@ dependencies = [
  "log",
  "p2p-core",
  "p2p-ygg",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
