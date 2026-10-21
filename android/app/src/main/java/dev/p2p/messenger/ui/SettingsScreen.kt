@@ -8,9 +8,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CameraFront
+import androidx.compose.material.icons.filled.CameraRear
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
@@ -18,20 +25,24 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +50,7 @@ import dev.p2p.messenger.*
 import dev.p2p.messenger.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * Настройки (M4) — по app-ui.md: профиль-шапка, затем группы «Конфиденциальность»,
@@ -231,48 +243,241 @@ internal fun SettingsPrivacyScreen() {
     }
 }
 
-/** Медиа и звонки: качество исходящего видео. */
+/**
+ * Медиа и звонки: значения ПО УМОЛЧАНИЮ для всех звонков. Те же элементы, что на
+ * экранах «Показать видео» и «Звук» внутри звонка (call-ui.md, «Настройки по
+ * умолчанию»), только без превью и без кнопки «Применить»: выбор сохраняется сразу
+ * и действует со следующего звонка.
+ *
+ * Разрешения и 60 fps — только то, что реально отдаёт камера ([CameraCaps]):
+ * раньше здесь был жёсткий список пресетов, и неподдерживаемое разрешение давало
+ * чёрный экран вместо видео.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SettingsMediaScreen(model: AppModel) {
+    val ctx = LocalContext.current
+    val q = model.videoQuality
+    val front = model.cameraFront
+    val resolutions = remember(front) { CameraCaps.resolutions(ctx, front) }
+    val has60 = remember(front) { CameraCaps.supports60(ctx, front) }
+    // Сохранённое значение может быть недоступно этой камере (старый пресет 480p,
+    // смена камеры) — тогда берём первое честное разрешение и 30 fps.
+    LaunchedEffect(resolutions, has60) {
+        val resOk = resolutions.isEmpty() || resolutions.any { it.width == q.width && it.height == q.height }
+        val fpsOk = q.fps == 30 || has60
+        if (!resOk || !fpsOk) {
+            val r = resolutions.firstOrNull { it.width == q.width && it.height == q.height } ?: resolutions.first()
+            model.setVideoDefaults(w = r.width, h = r.height, fps = if (fpsOk) q.fps else 30)
+        }
+    }
+    val outs = model.availableAudioOuts()
+    val ins = model.availableAudioIns()
+
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
     ) {
-        SectionTitle(stringResource(R.string.settings_video_quality))
+        SectionTitle(stringResource(R.string.media_video_section))
         CardSection {
-            VideoQuality.presets.forEachIndexed { i, preset ->
-                val selected = model.videoQuality == preset
-                CardRow(onClick = { model.changeVideoQuality(preset) }, divider = i > 0) {
-                    RadioButton(
-                        selected = selected,
-                        onClick = { model.changeVideoQuality(preset) },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = HoloAccent,
-                            unselectedColor = Tokens.Colors.tertiary,
-                        ),
-                    )
-                    Spacer(Modifier.width(Tokens.Space.s))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            preset.label,
-                            color = if (selected) HoloAccent else Color.White,
-                            fontSize = 15.sp,
-                            fontFamily = FontFamily.Monospace,
-                        )
-                        Text(
-                            stringResource(R.string.settings_bitrate, "%.0f".format(preset.bitrate / 1_000_000.0)),
-                            color = Tokens.Colors.secondary,
-                            fontSize = 12.sp,
-                        )
+            OptionBlock(stringResource(R.string.media_camera), divider = false) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                    OptionChip(stringResource(R.string.media_camera_front), front, Modifier.weight(1f), Icons.Filled.CameraFront) {
+                        model.setVideoDefaults(front = true)
+                    }
+                    OptionChip(stringResource(R.string.media_camera_back), !front, Modifier.weight(1f), Icons.Filled.CameraRear) {
+                        model.setVideoDefaults(front = false)
+                    }
+                }
+            }
+            OptionBlock(stringResource(R.string.share_resolution), badge = stringResource(R.string.share_available_on_device)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                ) {
+                    resolutions.forEach { r ->
+                        OptionChip(r.label, q.width == r.width && q.height == r.height) {
+                            model.setVideoDefaults(w = r.width, h = r.height)
+                        }
+                    }
+                }
+            }
+            OptionBlock(stringResource(R.string.share_fps)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                    OptionChip(stringResource(R.string.share_fps_value, 30), q.fps == 30) { model.setVideoDefaults(fps = 30) }
+                    if (has60) {
+                        OptionChip(stringResource(R.string.share_fps_value, 60), q.fps == 60) { model.setVideoDefaults(fps = 60) }
+                    }
+                }
+            }
+            OptionBlock(
+                stringResource(R.string.share_bitrate),
+                trailing = {
+                    OptionChip(stringResource(R.string.share_auto), model.videoBitrateAuto, icon = Icons.Filled.Bolt, compact = true) {
+                        model.setVideoDefaults(bitrateAuto = true)
+                    }
+                },
+            ) {
+                Row(
+                    Modifier.alpha(if (model.videoBitrateAuto) 0.45f else 1f),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                ) {
+                    model.bitrateOptions(q.width, q.height, q.fps).forEachIndexed { i, bps ->
+                        OptionChip(
+                            stringResource(R.string.share_bitrate_value, bps / 1_000_000),
+                            !model.videoBitrateAuto && model.videoBitrateIdx == i,
+                        ) { model.setVideoDefaults(bitrateAuto = false, bitrateIdx = i) }
                     }
                 }
             }
         }
+
+        SectionTitle(stringResource(R.string.media_audio_section))
+        CardSection {
+            OptionBlock(stringResource(R.string.audio_input), divider = false) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                ) {
+                    if ("builtin" in ins) {
+                        OptionChip(stringResource(R.string.audio_dev_builtin), model.audioIn == "builtin", icon = Icons.Filled.Smartphone) {
+                            model.pickAudioIn("builtin")
+                        }
+                    }
+                    if ("headset" in ins) {
+                        OptionChip(stringResource(R.string.audio_dev_headset), model.audioIn == "headset", icon = Icons.Filled.Headset) {
+                            model.pickAudioIn("headset")
+                        }
+                    }
+                    if ("bluetooth" in ins) {
+                        OptionChip(stringResource(R.string.audio_dev_bluetooth), model.audioIn == "bluetooth", icon = Icons.Filled.Bluetooth) {
+                            model.pickAudioIn("bluetooth")
+                        }
+                    }
+                }
+            }
+            OptionBlock(stringResource(R.string.audio_output)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                ) {
+                    if ("builtin" in outs) {
+                        OptionChip(stringResource(R.string.audio_dev_builtin), model.audioOut == "builtin", icon = Icons.Filled.Smartphone) {
+                            model.pickAudioOut("builtin")
+                        }
+                    }
+                    if ("speaker" in outs) {
+                        OptionChip(stringResource(R.string.audio_dev_speaker), model.audioOut == "speaker", icon = Icons.Filled.VolumeUp) {
+                            model.pickAudioOut("speaker")
+                        }
+                    }
+                    if ("bluetooth" in outs) {
+                        OptionChip(stringResource(R.string.audio_dev_bluetooth), model.audioOut == "bluetooth", icon = Icons.Filled.Bluetooth) {
+                            model.pickAudioOut("bluetooth")
+                        }
+                    }
+                }
+            }
+            OptionBlock(
+                stringResource(R.string.audio_quality),
+                trailing = {
+                    OptionChip(stringResource(R.string.audio_quality_auto), model.audioQualityAuto, icon = Icons.Filled.Bolt, compact = true) {
+                        model.setAudioQuality(!model.audioQualityAuto)
+                    }
+                },
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(stringResource(R.string.audio_quality_voice), color = Tokens.Colors.secondary, fontSize = 11.sp)
+                    Text(stringResource(R.string.audio_quality_audio), color = Tokens.Colors.secondary, fontSize = 11.sp)
+                }
+                Slider(
+                    value = model.audioBitrate.toFloat(),
+                    onValueChange = { model.setAudioQuality(false, it.roundToInt()) },
+                    valueRange = 16_000f..48_000f,
+                    enabled = !model.audioQualityAuto,
+                    // Дорожка — tertiary: цвет тайла сливается с фоном карточки, и в
+                    // режиме «авто» ползунок висел в пустоте.
+                    colors = SliderDefaults.colors(
+                        thumbColor = Tokens.Colors.accent,
+                        activeTrackColor = Tokens.Colors.accent,
+                        inactiveTrackColor = Tokens.Colors.divider,
+                        disabledThumbColor = Tokens.Colors.tertiary,
+                        disabledActiveTrackColor = Tokens.Colors.tertiary,
+                        disabledInactiveTrackColor = Tokens.Colors.divider,
+                    ),
+                )
+                Text(
+                    if (model.audioQualityAuto) {
+                        stringResource(R.string.audio_quality_adaptive, 16, 48)
+                    } else {
+                        stringResource(R.string.audio_quality_rate, model.audioBitrate / 1000)
+                    },
+                    color = Tokens.Colors.secondary,
+                    fontSize = 12.sp,
+                )
+            }
+        }
+
+        SectionTitle(stringResource(R.string.audio_processing))
+        CardSection {
+            SettingSwitchRow(Icons.Filled.GraphicEq, stringResource(R.string.audio_ns), null, model.audioFx.ns, divider = false) {
+                model.setAudioFx(ns = it)
+            }
+            SettingSwitchRow(Icons.Filled.SurroundSound, stringResource(R.string.audio_aec), null, model.audioFx.aec) {
+                model.setAudioFx(aec = it)
+            }
+            SettingSwitchRow(Icons.Filled.VolumeUp, stringResource(R.string.audio_agc), null, model.audioFx.agc) {
+                model.setAudioFx(agc = it)
+            }
+        }
         Text(
-            stringResource(R.string.settings_video_apply),
+            stringResource(R.string.media_defaults_hint),
             color = Tokens.Colors.secondary,
             fontSize = 12.sp,
             modifier = Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         )
+    }
+}
+
+/**
+ * Блок внутри карточки: подпись (+ значок «доступно на устройстве», + элемент справа,
+ * напр. «авто») и варианты под ней. Разделитель сверху — как у строк [CardRow].
+ */
+@Composable
+private fun OptionBlock(
+    label: String,
+    divider: Boolean = true,
+    badge: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    if (divider) {
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = Tokens.Colors.divider,
+            modifier = Modifier.padding(start = Tokens.Space.m),
+        )
+    }
+    Column(Modifier.fillMaxWidth().padding(Tokens.Space.m)) {
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+        ) {
+            Text(label, color = Color.White, fontSize = 15.sp)
+            if (badge != null) {
+                Text(
+                    badge,
+                    color = Tokens.Colors.accent,
+                    fontSize = 10.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(Tokens.Radius.badge))
+                        .background(Tokens.Colors.accentBadge)
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            trailing?.invoke()
+        }
+        content()
     }
 }
 

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.Mic
@@ -34,8 +35,6 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -243,29 +242,32 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
             )
         }
 
-        Spacer(Modifier.height(22.dp))
-        Text(stringResource(R.string.settings_video_quality), color = HoloSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(6.dp))
-        VideoQuality.presets.forEach { preset ->
-            val selected = model.videoQuality == preset
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip))
-                    .clickable { model.changeVideoQuality(preset) }
-                    .background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                RadioButton(
-                    selected = selected,
-                    onClick = { model.changeVideoQuality(preset) },
-                    colors = RadioButtonDefaults.colors(selectedColor = HoloAccent, unselectedColor = HoloSecondary),
+        // Видео — на полноценный экран «Показать видео» (разрешения из камеры, fps,
+        // битрейт): здесь раньше был жёсткий список пресетов, предлагавший и то, что
+        // камера не умеет.
+        Spacer(Modifier.height(10.dp))
+        val vq = model.videoQuality
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip))
+                .clickable {
+                    onClose()
+                    model.openVideoShare()
+                }
+                .background(Tokens.Colors.tile).padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.call_video_settings), color = Color.White, fontSize = 15.sp)
+                Text(
+                    "${vq.height}p · ${stringResource(R.string.share_fps_value, vq.fps)}",
+                    color = HoloSecondary,
+                    fontSize = 12.sp,
                 )
-                Text(preset.label, color = if (selected) HoloAccent else Color.White, fontSize = 15.sp)
             }
-            Spacer(Modifier.height(6.dp))
+            Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(20.dp))
         }
-        Text(stringResource(R.string.settings_video_apply), color = HoloSecondary, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 

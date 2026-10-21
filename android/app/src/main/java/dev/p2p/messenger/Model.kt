@@ -251,14 +251,48 @@ class AppModel private constructor() {
      *  Заполняется даже когда мы сами не в комнате (peer слал нам RoomPresence). */
     val groupPresence = mutableStateMapOf<String, List<RoomMember>>()
 
-    // Качество видео — загружается из SharedPreferences при start().
+    // Видео по умолчанию для звонков — загружается из SharedPreferences при start().
+    // Меняется в «Настройки → Медиа и звонки» и при «Применить» на экране «Показать
+    // видео» в звонке; оба пути пишут одно и то же.
     var videoQuality by mutableStateOf(VideoQuality.default)
         private set
 
-    fun changeVideoQuality(q: VideoQuality) {
-        videoQuality = q
-        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
-            ?.edit()?.putString("video_quality", q.key)?.apply()
+    /** Битрейт видео: «авто» (рекомендация под разрешение/fps) или вариант 0/1/2 из
+     *  [bitrateOptions] — относительный, переживает смену разрешения. */
+    var videoBitrateAuto by mutableStateOf(true)
+        private set
+    var videoBitrateIdx by mutableStateOf(1)
+        private set
+
+    /** Три варианта битрейта (бит/с) под разрешение/fps: ниже · рекоменд. · выше. */
+    fun bitrateOptions(w: Int, h: Int, fps: Int): List<Int> {
+        val a = autoBitrate(w, h, fps)
+        return listOf(a * 6 / 10, a, a * 3 / 2).map { (it / 1_000_000).coerceAtLeast(1) * 1_000_000 }
+    }
+
+    /** Изменить видео по умолчанию (что не передано — остаётся) и сохранить. */
+    fun setVideoDefaults(
+        front: Boolean = cameraFront,
+        w: Int = videoQuality.width,
+        h: Int = videoQuality.height,
+        fps: Int = videoQuality.fps,
+        bitrateAuto: Boolean = videoBitrateAuto,
+        bitrateIdx: Int = videoBitrateIdx,
+    ) {
+        cameraFront = front
+        videoBitrateAuto = bitrateAuto
+        videoBitrateIdx = bitrateIdx.coerceIn(0, 2)
+        val bps = bitrateOptions(w, h, fps)[if (bitrateAuto) 1 else videoBitrateIdx]
+        videoQuality = VideoQuality("${h}p", w, h, fps, bps)
+        appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)?.edit()
+            ?.putBoolean("video_front", front)
+            ?.putInt("video_w", w)
+            ?.putInt("video_h", h)
+            ?.putInt("video_fps", fps)
+            ?.putBoolean("video_br_auto", videoBitrateAuto)
+            ?.putInt("video_br_idx", videoBitrateIdx)
+            ?.remove("video_quality") // старый формат: ключ пресета
+            ?.apply()
     }
 
     /** Тех-инфо оверлей в звонке (пинг/разрешение/fps/битрейт на тайлах). Тумблер в ⚙️. */
@@ -495,8 +529,22 @@ class AppModel private constructor() {
         showTechInfo = prefs.getBoolean("tech_info", false)
         recentEmoji = prefs.getString("recent_emoji", "")?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
         warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
-        val key = prefs.getString("video_quality", null) ?: return
-        videoQuality = VideoQuality.presets.find { it.key == key } ?: VideoQuality.default
+        // Раньше хранился ключ пресета «WxH@fps», и всё вне списка пресетов (1440p,
+        // свой битрейт из звонка) после перезапуска сбрасывалось на 720p.
+        val legacy = prefs.getString("video_quality", null)?.let { key ->
+            Regex("""(\d+)x(\d+)@(\d+)""").matchEntire(key)?.destructured
+        }
+        val (w, h, fps) = legacy?.let { (w, h, f) -> Triple(w.toInt(), h.toInt(), f.toInt()) }
+            ?: Triple(
+                prefs.getInt("video_w", VideoQuality.default.width),
+                prefs.getInt("video_h", VideoQuality.default.height),
+                prefs.getInt("video_fps", VideoQuality.default.fps),
+            )
+        cameraFront = prefs.getBoolean("video_front", true)
+        videoBitrateAuto = prefs.getBoolean("video_br_auto", true)
+        videoBitrateIdx = prefs.getInt("video_br_idx", 1).coerceIn(0, 2)
+        val bps = bitrateOptions(w, h, fps)[if (videoBitrateAuto) 1 else videoBitrateIdx]
+        videoQuality = VideoQuality("${h}p", w, h, fps, bps)
     }
 
     // ── Экран шаринга видео (долгий тап «Видео» в звонке). ──────────────────────
@@ -525,10 +573,7 @@ class AppModel private constructor() {
         (w.toLong() * h * fps * 0.08).toInt().coerceIn(1_000_000, 40_000_000)
 
     /** Три варианта битрейта (бит/с) под текущее разрешение/fps: ниже · рекоменд. · выше. */
-    fun shareBitrateOptions(): List<Int> {
-        val a = autoBitrate(shareResW, shareResH, shareFps)
-        return listOf(a * 6 / 10, a, a * 3 / 2).map { (it / 1_000_000).coerceAtLeast(1) * 1_000_000 }
-    }
+    fun shareBitrateOptions(): List<Int> = bitrateOptions(shareResW, shareResH, shareFps)
 
     /** Применяемый битрейт: рекомендация (idx 1) при «Авто», иначе выбранный вариант. */
     fun shareBitrateBps(): Int = shareBitrateOptions()[if (shareBitrateAuto) 1 else shareBitrateIdx]
@@ -539,8 +584,8 @@ class AppModel private constructor() {
         shareResW = videoQuality.width
         shareResH = videoQuality.height
         shareFps = videoQuality.fps
-        shareBitrateAuto = true
-        shareBitrateIdx = 1
+        shareBitrateAuto = videoBitrateAuto
+        shareBitrateIdx = videoBitrateIdx
         showVideoShare = true
     }
 
@@ -578,8 +623,8 @@ class AppModel private constructor() {
     fun applyVideoShare() {
         showVideoShare = false
         if (shareScreenMode) return // шаринг экрана (MediaProjection) — отдельная фича, пока no-op
-        cameraFront = shareFront
-        changeVideoQuality(VideoQuality("${shareResH}p", shareResW, shareResH, shareFps, shareBitrateBps()))
+        // Выбор в звонке становится и новым значением по умолчанию — как в настройках.
+        setVideoDefaults(shareFront, shareResW, shareResH, shareFps, shareBitrateAuto, shareBitrateIdx)
         if (videoActive) {
             // видео уже идёт → пересобрать отправитель с новыми параметрами
             stopVideoSender()

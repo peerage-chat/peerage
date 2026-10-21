@@ -272,9 +272,6 @@
     <string name="qr_scan_hint">Наведите камеру на QR-код</string>
 
     <!-- ── Настройки ───────────────────────────────────────────────────── -->
-    <string name="settings_video_quality">Качество видеозвонка</string>
-    <string name="settings_bitrate">%1$s Мбит/с</string>
-    <string name="settings_video_apply">Изменение применяется к следующему звонку.</string>
     <string name="settings_about">О приложении</string>
     <string name="settings_version_label">Версия</string>
     <string name="settings_version_value">0.1.0 (dev)</string>
@@ -712,7 +709,14 @@
     <string name="settings_cat_privacy">Приватность</string>
     <string name="settings_cat_privacy_desc">Что мы не отправляем о вас</string>
     <string name="settings_cat_media">Медиа и звонки</string>
-    <string name="settings_cat_media_desc">Качество видео</string>
+    <string name="settings_cat_media_desc">Видео и звук звонков по умолчанию</string>
+    <string name="media_video_section">Видео</string>
+    <string name="media_audio_section">Звук</string>
+    <string name="media_camera">Камера</string>
+    <string name="media_camera_front">Фронтальная</string>
+    <string name="media_camera_back">Тыловая</string>
+    <string name="media_defaults_hint">Действует со следующего звонка. Во время звонка — долгое нажатие на кнопку «Видео» или «Микрофон».</string>
+    <string name="call_video_settings">Настройки видео</string>
     <string name="settings_cat_notifications">Уведомления</string>
     <string name="settings_cat_notifications_desc">Что показывать помимо сообщений</string>
     <string name="settings_cat_about">О приложении</string>

@@ -302,6 +302,47 @@ internal fun CardRow(
     )
 }
 
+/**
+ * Пилюля выбора варианта (разрешение, fps, устройство звука, «авто»). Одна на все
+ * экраны: в звонке и в настройках варианты выглядят одинаково — так и задумано
+ * (call-ui.md, «Настройки по умолчанию»: те же элементы, что во время звонка).
+ * [compact] — мелкий вариант для переключателя «авто» рядом с заголовком.
+ */
+@Composable
+internal fun OptionChip(
+    text: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    compact: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(Tokens.Radius.chip)
+    val fg = if (selected) Tokens.Colors.accent else Color.White
+    Row(
+        modifier.clip(shape)
+            .background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
+            .then(if (selected) Modifier.border(1.5.dp, Tokens.Colors.accent, shape) else Modifier)
+            .clickable { onClick() }
+            .padding(
+                horizontal = if (compact) 11.dp else 14.dp,
+                vertical = if (compact) 5.dp else 10.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+    ) {
+        if (icon != null) {
+            Icon(
+                icon,
+                null,
+                tint = if (selected) Tokens.Colors.accent else Tokens.Colors.secondary,
+                modifier = Modifier.size(if (compact) 13.dp else 16.dp),
+            )
+        }
+        Text(text, color = fg, fontSize = if (compact) 11.sp else 14.sp, maxLines = 1)
+    }
+}
+
 @Composable
 internal fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(

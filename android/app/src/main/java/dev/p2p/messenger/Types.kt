@@ -20,17 +20,10 @@ data class VideoQuality(
     val fps: Int,
     val bitrate: Int,
 ) {
-    val key get() = "${width}x$height@$fps"
-
     companion object {
-        val presets = listOf(
-            VideoQuality("480p  30fps", 854, 480, 30, 1_000_000),
-            VideoQuality("720p  30fps", 1280, 720, 30, 2_000_000),
-            VideoQuality("720p  60fps", 1280, 720, 60, 4_000_000),
-            VideoQuality("1080p 30fps", 1920, 1080, 30, 4_000_000),
-            VideoQuality("1080p 60fps", 1920, 1080, 60, 8_000_000),
-        )
-        val default get() = presets[1] // 720p 30fps
+        /** 720p 30 fps — есть у любой камеры. Список вариантов не хардкодим: он берётся
+         *  из возможностей камеры ([CameraCaps]), иначе предлагали бы то, что она не умеет. */
+        val default = VideoQuality("720p", 1280, 720, 30, 2_000_000)
     }
 }
 

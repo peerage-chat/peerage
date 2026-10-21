@@ -278,9 +278,6 @@
     <string name="qr_scan_hint">Point the camera at a QR code</string>
 
     <!-- ── Settings ────────────────────────────────────────────────────── -->
-    <string name="settings_video_quality">Video call quality</string>
-    <string name="settings_bitrate">%1$s Mbps</string>
-    <string name="settings_video_apply">Applies to the next call.</string>
     <string name="settings_about">About</string>
     <string name="settings_version_label">Version</string>
     <string name="settings_version_value">0.1.0 (dev)</string>
@@ -718,7 +715,14 @@
     <string name="settings_cat_privacy">Privacy</string>
     <string name="settings_cat_privacy_desc">What we never send about you</string>
     <string name="settings_cat_media">Media and calls</string>
-    <string name="settings_cat_media_desc">Video quality</string>
+    <string name="settings_cat_media_desc">Default video and sound for calls</string>
+    <string name="media_video_section">Video</string>
+    <string name="media_audio_section">Sound</string>
+    <string name="media_camera">Camera</string>
+    <string name="media_camera_front">Front</string>
+    <string name="media_camera_back">Back</string>
+    <string name="media_defaults_hint">Applies to the next calls. During a call, long-press the Video or Microphone button.</string>
+    <string name="call_video_settings">Video settings</string>
     <string name="settings_cat_notifications">Notifications</string>
     <string name="settings_cat_notifications_desc">What to show besides messages</string>
     <string name="settings_cat_about">About</string>
