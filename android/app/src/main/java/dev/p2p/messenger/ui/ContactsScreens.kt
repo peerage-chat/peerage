@@ -15,7 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -83,21 +83,13 @@ private data class ChatRowUi(
 @Composable
 internal fun ChatsPager(
     model: AppModel,
-    activeFilter: String,
-    onFilter: (String) -> Unit,
+    pager: PagerState,
     onOpenDm: (String) -> Unit,
     onOpenGroup: (String) -> Unit,
 ) {
+    // Состояние пейджера живёт выше (MainActivity): по нему же рисуются табы, так что
+    // синхронизировать нечего — и драться двум эффектам тоже нечему.
     val keys = folderKeys(model)
-    val target = keys.indexOf(activeFilter).coerceAtLeast(0)
-    val pager = rememberPagerState(initialPage = target) { keys.size }
-    // Синхронизация в обе стороны: тап по табу листает страницу, свайп меняет таб.
-    LaunchedEffect(target) {
-        if (pager.currentPage != target) pager.animateScrollToPage(target)
-    }
-    LaunchedEffect(pager.settledPage) {
-        keys.getOrNull(pager.settledPage)?.let { if (it != activeFilter) onFilter(it) }
-    }
     HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
         ContactsScreen(model, keys.getOrElse(page) { "all" }, onOpenDm, onOpenGroup)
     }

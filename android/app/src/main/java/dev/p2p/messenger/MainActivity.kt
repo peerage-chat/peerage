@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
@@ -241,7 +242,7 @@ private fun Root(model: AppModel, width: WidthClass) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun CompactShell(model: AppModel) {
     val activity = LocalContext.current as? android.app.Activity
@@ -266,9 +267,20 @@ private fun CompactShell(model: AppModel) {
         }
     }
     var scanResult by remember { mutableStateOf<String?>(null) }
-    var activeFilter by remember { mutableStateOf("all") }
+    // Папки: единственный источник правды — страница пейджера. Таб и заголовок только
+    // читают её (targetPage — куда пейджер движется, поэтому таб переключается сразу,
+    // а не после остановки), тап по табу только листает. Раньше таб и страница
+    // синхронизировались двумя эффектами навстречу друг другу, и при быстрых
+    // действиях опоздавший эффект утаскивал страницу назад посреди жеста.
+    val folders = folderKeys(model)
+    val folderPager = rememberPagerState { folders.size }
+    val activeFilter = folders.getOrElse(folderPager.targetPage) { "all" }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val selectFolder: (String) -> Unit = { key ->
+        val i = folders.indexOf(key)
+        if (i >= 0) scope.launch { folderPager.animateScrollToPage(i) }
+    }
 
     // Системная «назад» — навигация по приложению, а не выход. Во время звонка/
     // входящего гасим (не выходим), открытое меню закрываем, иначе возврат к родителю.
@@ -399,7 +411,7 @@ private fun CompactShell(model: AppModel) {
                         FolderTabs(
                             model,
                             activeFilter,
-                            onFilter = { activeFilter = it },
+                            onFilter = selectFolder,
                             onManage = { screen = Screen.Folders },
                         )
                     }
@@ -411,8 +423,7 @@ private fun CompactShell(model: AppModel) {
                         when (screen) {
                             Screen.Contacts -> ChatsPager(
                                 model,
-                                activeFilter,
-                                onFilter = { activeFilter = it },
+                                folderPager,
                                 onOpenDm = {
                                     model.openChat(it)
                                     screen = Screen.Chat
