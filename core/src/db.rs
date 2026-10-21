@@ -7,7 +7,7 @@
 //! Схема:
 //!   contacts   — TOFU-контакты
 //!   messages   — история сообщений
-//!   outbox     — очередь исходящих (H3, сейчас только таблица)
+//!   outbox     — офлайн-очередь исходящих (см. `outbox`)
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -115,8 +115,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             msg_id       INTEGER NOT NULL DEFAULT 0,
             payload_type TEXT    NOT NULL,
             payload      BLOB    NOT NULL,
-            created_at   INTEGER NOT NULL,
-            status       TEXT    NOT NULL DEFAULT 'pending'
+            created_at   INTEGER NOT NULL
         );
 
         -- Гейт контактов (замена TOFU-автодобавления): первое сообщение незнакомца

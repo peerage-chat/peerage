@@ -45,8 +45,13 @@ unix time (cosmetic); correctness timing uses monotonic clocks inside the engine
 ## 2. Wire protocol overview
 
 Every datagram starts with a channel byte (`CHAN_CHAT = 0x01`, reliable;
-`CHAN_MEDIA = 0x02`, real-time). On `CHAN_CHAT` the body is a JSON envelope carrying a
-NaCl Box ciphertext of a padded, serialised `Payload` (`core/src/protocol.rs`).
+`CHAN_MEDIA = 0x02`, real-time). On `CHAN_CHAT` the body is a binary envelope
+`[v:1][from:32][nonce:24][ciphertext]` (version 2), where the ciphertext is a NaCl Box of
+the padded `Payload` serialised as MessagePack with field names (`core/src/protocol.rs`).
+No send time travels in the clear, and bytes travel as bytes — no hex and no JSON arrays
+of numbers, so a 12 KiB blob chunk costs about 12.3 KiB on the wire. The same MessagePack
+form is what the offline queue stores. Shared Box keys are cached per peer (bounded), so
+the X25519 exchange is not redone for every packet.
 
 | Group | Payloads |
 |---|---|
@@ -335,11 +340,12 @@ reveal the TYPE of a message, the plaintext is padded to a bucket **before** enc
 |---|---|---|---|
 | CONTROL | 256 B | `Ack`/`Ping`/`Pong`/`RoomPresence`/`Hello`, **`RoomInvite`/`RoomDecline`**, `Retract`, `Pin`, key request, resync/leave, blob request | a call start is indistinguishable from an ack/ping |
 | APP | 4 KiB | `Text`, **`Edit`**, **`Media`**, `Group`, `GroupInvite`, `GroupKeyReply`, `ProfileUpdate`, `TransportRotate`, `BlobManifest` | an image/voice/file is indistinguishable from text; text length and file name are hidden |
-| CHUNK | 25 KiB | `BlobChunk` | the remainder of the last chunk (the exact file size) |
+| CHUNK | 12 KiB + 256 B | `BlobChunk` | the remainder of the last chunk (the exact file size) |
 
 `unpad` reads the length from the prefix and does not depend on the bucket, so changing
-buckets is **compatible in both directions** with old clients. The envelope with its hex
-overhead stays below the 65535-byte datagram (test `padded_blob_chunk_fits_datagram`).
+buckets is **compatible in both directions** with old clients. A full chunk fits its bucket
+and the envelope stays far below the 65535-byte datagram (test
+`padded_blob_chunk_fits_datagram`).
 
 **Limits (honestly, see [threat model N7](architecture/threat-model.md)):** only size is
 hidden. Timing and rate of packets, volume (the number of chunks) and **the open first
@@ -358,8 +364,9 @@ Why it exists already: privileges for relaying (queue priority, longer TTL) cann
 granted on self-report — the code is open, and relaying is easy to cut out while keeping
 the flag. The honest scheme — receipts signed by the recipient
 ([ADR-008](adr/ADR-008-proof-of-transit.md)) — comes after 1.0, but the SPACE for it must
-be ready now: the presence beacon has to stay in the 256-byte CONTROL bucket, and a single
-receipt in hex JSON (~200 B) already does not fit. So the beacon carries only the digest of
+be ready now: the presence beacon has to stay in the 256-byte CONTROL bucket, and a
+receipt (a 64-byte signature plus a key) is about a hundred bytes, so two of them already
+do not fit. So the beacon carries only the digest of
 a batch, and the receipts themselves are requested separately.
 
 Tests that hold this property (`core/src/protocol.rs`):

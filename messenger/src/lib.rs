@@ -433,7 +433,7 @@ impl Shared {
         // ключи с ADR-007, и путать их нельзя: зашифруешь адресу — получатель не
         // расшифрует (у него другой Box-ключ), пошлёшь личности — пакет уйдёт на
         // покинутый адрес.
-        let body = encode(&self.identity, peer, payload, Self::now_unix())?;
+        let body = encode(&self.identity, peer, payload)?;
         // Префикс канала чата (демукс с медиа на приёме).
         let mut dg = Vec::with_capacity(1 + body.len());
         dg.push(CHAN_CHAT);
@@ -493,7 +493,7 @@ impl Shared {
         };
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let payload = mk(id);
-        let body = serde_json::to_vec(&payload).map_err(|e| MessengerError::Spool(e.to_string()))?;
+        let body = payload.to_bytes()?;
         let kind = if notify { SPOOL_NOTIFY } else { SPOOL_QUIET };
         outbox
             .enqueue(peer, id, kind, &body, Self::now_unix())
@@ -533,7 +533,7 @@ impl Shared {
                     deferred = true;
                     break;
                 }
-                let Ok(payload) = serde_json::from_slice::<Payload>(&e.payload) else {
+                let Ok(payload) = Payload::from_bytes(&e.payload) else {
                     broken.push(e.id);
                     continue;
                 };
@@ -724,9 +724,6 @@ impl Messenger {
         self.shared.identity.public_key_bytes()
     }
 
-    /// Залить бюджеты пиров (M3): тир доверия + заслуги (`helpful`). Кого нет в
-    /// списке — [`Tier::Stranger`] без заслуг. Зовётся движком при старте и любой
-    /// смене контактов/блок-листа/репутации.
     /// Временно поднять ingress-бюджет пира: мы сами запросили у него данные
     /// (докачка вложения по кнопке). Истекает само — продлевается новыми запросами.
     pub fn boost_peer(&self, peer: &PeerKey, until: Duration) {
@@ -799,6 +796,9 @@ impl Messenger {
         *applied = want;
     }
 
+    /// Залить бюджеты пиров (M3): тир доверия + заслуги (`helpful`). Кого нет в
+    /// списке — [`Tier::Stranger`] без заслуг. Зовётся движком при старте и любой
+    /// смене контактов/блок-листа/репутации.
     pub fn set_peer_tiers(&self, tiers: &[(PeerKey, Tier, u32)]) {
         *self.shared.tiers.lock().unwrap() =
             tiers.iter().map(|(k, t, h)| (*k, (*t, *h))).collect();
@@ -978,7 +978,6 @@ impl Messenger {
 
     /// Отправить медиа-датаграмму (реалтайм-канал): без Ack/повторов/шифрования
     /// приложения — конфиденциальность даёт E2E-шифрование транспорта Yggdrasil.
-    /// Собирается в стековый буфер без аллокаций кучи.
     pub fn send_media(
         &self,
         peer: &PeerKey,

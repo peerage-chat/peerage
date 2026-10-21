@@ -20,6 +20,10 @@ hex.workspace = true
 bip39.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Payload на проводе и в офлайн-очереди: самоописывающий бинарный формат
+# (неизвестные типы/поля читаются, байты — байтами).
+rmp-serde = "1.3"
+serde_bytes = "0.11"
 blake3.workspace = true
 chacha20poly1305 = "0.10"
 # Argon2id для уровня at-rest «пароль» (KDF от того, что пользователь ЗНАЕТ).

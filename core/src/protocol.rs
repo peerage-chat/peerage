@@ -1,22 +1,25 @@
 //! Протокол сообщений.
 //!
 //! Два слоя:
-//!   * [`Payload`] — внутреннее сообщение (тип + данные). Сериализуется и
-//!     ШИФРУЕТСЯ (NaCl Box), поэтому тип сообщения не виден снаружи.
-//!   * [`Envelope`] — внешний конверт (версия, отправитель, время + запечатанный
-//!     payload). Передаётся как датаграмма через транспорт.
+//!   * [`Payload`] — внутреннее сообщение (тип + данные). Сериализуется в
+//!     MessagePack и ШИФРУЕТСЯ (NaCl Box), поэтому тип сообщения не виден снаружи.
+//!   * Конверт — бинарный заголовок `[v:1][from:32]` и за ним запечатанный payload
+//!     `nonce(24) || ciphertext`. Передаётся как датаграмма через транспорт.
 //!
 //! Отклонение от ТЗ: `type` сообщения убран в зашифрованную часть (приватность
-//! метаданных), а `payload` = `nonce || ciphertext`. Поля `from`/`time`/версия —
-//! как в ТЗ. Кодирование конверта — JSON (отлаживаемо; для медиа позже бинарь).
+//! метаданных), времени отправки в конверте нет (его некому читать, а открытым
+//! текстом оно лишь метаданные). Формат самоописывающий (MessagePack с именами
+//! полей): неизвестный тип и новые поля читаются старым клиентом без ошибки, а байты
+//! едут байтами — без hex и без JSON-массивов чисел.
 
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::{self, CryptoError};
 use crate::identity::Identity;
 
-/// Версия формата конверта.
-pub const PROTOCOL_VERSION: u8 = 1;
+/// Версия формата конверта. 2 — бинарный конверт и MessagePack (с 1, JSON+hex,
+/// несовместим).
+pub const PROTOCOL_VERSION: u8 = 2;
 
 /// Заявка узла о выполненной транзитной работе — **зарезервировано под ADR-008,
 /// в 1.0 не выдаётся и не проверяется**.
@@ -28,7 +31,7 @@ pub const PROTOCOL_VERSION: u8 = 1;
 /// эту подпись A не может, не выполнив работу.
 ///
 /// **Почему здесь дайджест, а не сами квитанции.** Одна квитанция — подпись 64 Б плюс
-/// ключ; в hex-JSON это ~200 Б, то есть уже одна не влезает в бакет CONTROL 256 Б, а
+/// ключ, около сотни байт; уже двух хватает, чтобы вылезти из бакета CONTROL 256 Б, а
 /// маячок присутствия обязан быть неотличим по размеру от ack (M5). Поэтому в маячке
 /// едет лишь обязательство: хэш пачки и её размер, — а сами квитанции запрашивает
 /// тот, кому есть смысл проверять. Это же ограничивает и объём вранья: заявленное
@@ -36,7 +39,7 @@ pub const PROTOCOL_VERSION: u8 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransitClaim {
     /// BLAKE3 пачки квитанций за период.
-    #[serde(with = "hex_bytes")]
+    #[serde(with = "serde_bytes")]
     pub digest: Vec<u8>,
     /// Сколько квитанций в пачке (заявка; проверяется по предъявлению).
     pub count: u32,
@@ -99,13 +102,13 @@ pub enum Payload {
     /// зрения ОТПРАВИТЕЛЯ и переворачивается на приёме, как у ответа. `on = false` —
     /// открепить. Бакет CONTROL: по размеру неотличимо от ack.
     Pin { id: u64, target: u64, target_mine: bool, on: bool },
-    /// Медиа-сообщение чата (M2): ссылка на блоб по контент-хэшу. Байты идут отдельно
-    /// блоб-каналом (push при отправке + pull-по-хэшу при промахе), сообщение несёт лишь
+    /// Медиа-сообщение чата (M2): ссылка на блоб по контент-хэшу. Байты получатель
+    /// сам запрашивает блоб-каналом (pull по хэшу), сообщение несёт лишь
     /// ссылку → тот же надёжный путь, что и `Text` (id + `Ack`, ретраи, офлайн-очередь,
     /// дедуп). `mime` — тип (image/*, …), `name` — исходное имя файла (для не-картинок).
     Media {
         id: u64,
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         hash: Vec<u8>,
         mime: String,
         name: String,
@@ -126,7 +129,7 @@ pub enum Payload {
         /// Хэш блоба-МИНИАТЮРЫ (пусто — нет превью). Именно ссылка, а не сами байты:
         /// превью инлайн раздуло бы медиа-сообщение и сломало размерную
         /// неразличимость «текст ≡ медиа» (M5). Миниатюра мелкая, качается сразу.
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         thumb: Vec<u8>,
         /// Пересылка: hex-ключ автора исходного сообщения (пусто — своё).
         #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -166,37 +169,37 @@ pub enum Payload {
     /// `id` — надёжная доставка (retry-until-Ack): Ack шлётся при ДОСТАВКЕ (до ответа
     /// пользователя), поэтому ретрай гаснет, как только звонок долетел — чинит потерю
     /// первого пакета на холодной сессии («первый звонок не доходит»).
-    RoomInvite { id: u64, room_id: Vec<u8>, audio: bool, video: bool },
+    RoomInvite { id: u64, #[serde(with = "serde_bytes")] room_id: Vec<u8>, audio: bool, video: bool },
     /// Отклонение входящего звонка (получатель нажал «Отклонить»). Надёжно —
     /// звонящий гарантированно узнаёт отказ и перестаёт звонить.
-    RoomDecline { id: u64, room_id: Vec<u8> },
+    RoomDecline { id: u64, #[serde(with = "serde_bytes")] room_id: Vec<u8> },
     /// Групповое MLS-сообщение (Commit/Welcome/прикладное) — для пересылки
     /// участникам группы. Содержимое уже зашифровано MLS. `id` — для надёжной
     /// доставки: получатель шлёт `Ack{id}`, отправитель повторяет до Ack/TTL
     /// (per-recipient, как у DM). Дедуп повторов — на стороне MLS (generation).
-    Group { id: u64, data: Vec<u8> },
+    Group { id: u64, #[serde(with = "serde_bytes")] data: Vec<u8> },
     /// Запрос KeyPackage у контакта (чтобы добавить его в группу). `id` — для
     /// надёжной доставки (retry-until-Ack): получатель эхо-нёт `Ack{id}`. Раньше был
     /// fire-and-forget → на холодной сессии терялся (инвайт «не срабатывал»).
     GroupKeyRequest { id: u64 },
     /// Ответ с KeyPackage (MLS) для добавления в группу. `id` — надёжная доставка.
-    GroupKeyReply { id: u64, key_package: Vec<u8> },
+    GroupKeyReply { id: u64, #[serde(with = "serde_bytes")] key_package: Vec<u8> },
     /// Приглашение в группу как отдельное сообщение (решение владельца 2026-06-28):
     /// вместо тихого KeyPackage-запроса получатель видит карточку «X зовёт в Y» и сам
     /// решает вступать. При согласии он шлёт `GroupKeyReply` пригласившему. `id` —
     /// надёжная доставка; `name` — название группы для карточки.
-    GroupInvite { id: u64, gid: Vec<u8>, name: String },
+    GroupInvite { id: u64, #[serde(with = "serde_bytes")] gid: Vec<u8>, name: String },
     /// Маячок присутствия в комнате-звонке (Discord-style): периодический сигнал
     /// «я сейчас в комнате `gid`, A/V-флаги такие». `flags`: bit0 — аудио,
     /// bit1 — видео. Низкочастотный control-plane (не медиа).
-    RoomPresence { gid: Vec<u8>, flags: u8 },
+    RoomPresence { #[serde(with = "serde_bytes")] gid: Vec<u8>, flags: u8 },
     /// Запрос повторной синхронизации группы (ADR-004): отправитель отстал
     /// (пропустил Commit / удалён секрет эпохи) и просит админа заново добавить
     /// его (Remove+Add). Админ игнорирует, если проситель не в текущем ростере.
-    GroupResyncRequest { gid: Vec<u8> },
+    GroupResyncRequest { #[serde(with = "serde_bytes")] gid: Vec<u8> },
     /// Запрос на выход из группы (ADR-004): отправитель уходит и просит админа
     /// отозвать его (Remove + смена эпохи). Отправитель локально уже забыл группу.
-    GroupLeaveRequest { gid: Vec<u8> },
+    GroupLeaveRequest { #[serde(with = "serde_bytes")] gid: Vec<u8> },
     /// Анонс блоба (M2): манифест (JSON) — план докачки. Получатель качает чанки
     /// запросами `BlobRequest`. `manifest` непрозрачен для core (парсит слой blob).
     BlobManifest { manifest: String },
@@ -204,32 +207,30 @@ pub enum Payload {
     /// файла и одним пакетом перестаёт влезать в датаграмму (это и держало потолок
     /// 4 МБ), поэтому манифест едет частями. Метаданные (`mime`/`size`) дублируются
     /// в каждой части: получатель может проверить лимиты и отказаться, не дожидаясь
-    /// всех частей. `hashes` — сырые BLAKE3 чанков (кратно 32), hex на проводе.
+    /// всех частей. `hashes` — сырые BLAKE3 чанков (кратно 32).
     BlobManifestPart {
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         id: Vec<u8>,
         mime: String,
         size: u64,
         part: u32,
         total: u32,
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         hashes: Vec<u8>,
     },
     /// Запрос чанка блоба по id (BLAKE3) и индексу (получатель-драйвен pull).
     BlobRequest {
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         id: Vec<u8>,
         index: u32,
     },
     /// Ответ с чанком блоба. Шифруется как обычное сообщение (E2E), целостность
-    /// чанка отдельно проверяется по хэшу в манифесте на слое blob. `id`/`data` —
-    /// hex, а не JSON-массив чисел (иначе payload раздувался бы в ~3.5× и не влезал
-    /// в датаграмму).
+    /// чанка отдельно проверяется по хэшу в манифесте на слое blob.
     BlobChunk {
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         id: Vec<u8>,
         index: u32,
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         data: Vec<u8>,
     },
     /// Обновление профиля (M2): самоназвание + хэш аватара. Рассылается контактам при
@@ -238,7 +239,7 @@ pub enum Payload {
     /// новый и блоба ещё нет — контент-адрес даёт авто-дедуп.
     ProfileUpdate {
         name: String,
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         avatar_hash: Vec<u8>,
     },
     /// Объявление о смене АДРЕСА (ADR-007): «моя личность прежняя, слать теперь сюда».
@@ -258,15 +259,15 @@ pub enum Payload {
     TransportRotate {
         id: u64,
         epoch: u32,
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         transport_pub: Vec<u8>,
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         sig: Vec<u8>,
     },
     /// Запрос манифеста блоба по id (BLAKE3) — pull-по-хэшу (аватар / ленивые картинки).
     /// Ответ — `BlobManifest`. Делает блобы запрашиваемыми, а не только push-анонсом.
     BlobManifestRequest {
-        #[serde(with = "hex_bytes")]
+        #[serde(with = "serde_bytes")]
         id: Vec<u8>,
     },
     /// Неизвестный/будущий тип payload — forward-compat (ADR-006). Сообщения версий,
@@ -278,43 +279,32 @@ pub enum Payload {
     Unknown,
 }
 
-/// Компактная hex-сериализация байтовых полей блоб-сообщений.
-mod hex_bytes {
-    use serde::{Deserialize, Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&hex::encode(v))
+impl Payload {
+    /// Сериализация payload: MessagePack с именами полей. Та же форма — и на проводе
+    /// (до паддинга и шифрования), и в офлайн-очереди.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, ProtocolError> {
+        rmp_serde::to_vec_named(self).map_err(|e| ProtocolError::Codec(e.to_string()))
     }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
-        let s = String::deserialize(d)?;
-        hex::decode(&s).map_err(serde::de::Error::custom)
+
+    pub fn from_bytes(b: &[u8]) -> Result<Self, ProtocolError> {
+        rmp_serde::from_slice(b).map_err(|e| ProtocolError::Codec(e.to_string()))
     }
 }
 
-/// Внешний конверт, передаваемый по транспорту.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Envelope {
-    /// Версия формата.
-    pub v: u8,
-    /// Публичный ключ отправителя (ed25519, hex).
-    pub from: String,
-    /// Unix-время отправки (секунды).
-    pub time: i64,
-    /// Запечатанный payload: `nonce(24) || ciphertext`, в hex.
-    pub data: String,
-}
+/// Заголовок конверта: версия (1) и ed25519-ключ отправителя (32). Дальше —
+/// `nonce(24) || ciphertext`.
+const HEADER_LEN: usize = 1 + 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProtocolError {
     #[error("крипто: {0}")]
     Crypto(#[from] CryptoError),
-    #[error("ошибка JSON: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("неверный hex: {0}")]
-    Hex(#[from] hex::FromHexError),
+    #[error("сериализация payload: {0}")]
+    Codec(String),
     #[error("неподдерживаемая версия протокола: {0}")]
     Version(u8),
-    #[error("неверная длина публичного ключа отправителя")]
-    BadFrom,
+    #[error("конверт короче заголовка")]
+    Truncated,
     #[error("повреждённый паддинг сообщения")]
     BadPadding,
 }
@@ -341,10 +331,11 @@ pub const MAX_CAPTION: usize = 1024;
 
 const CONTROL_BUCKET: usize = 256;
 const APP_BUCKET: usize = 4096;
-/// Чанк блоба 12 КБ → hex удваивает (~24.6 КБ JSON). Бакет с запасом на JSON-оверхед;
-/// конверт (hex шифртекста ≈ ×2) остаётся заметно ниже датаграммы 65535 — на это есть
-/// тест `padded_blob_chunk_fits_datagram`.
-const CHUNK_BUCKET: usize = 25 * 1024;
+/// Чанк блоба 12 КБ (`p2p_blob::CHUNK_SIZE`) плюс запас на поля сообщения (id,
+/// индекс, имена полей, префикс длины паддинга). Полный чанк обязан влезать в бакет
+/// целиком — иначе хвостовой чанк стал бы отличим от полного; на это есть тест
+/// `padded_blob_chunk_fits_datagram`.
+const CHUNK_BUCKET: usize = 12 * 1024 + 256;
 
 fn bucket_for(payload: &Payload) -> usize {
     match payload {
@@ -373,24 +364,17 @@ fn bucket_for(payload: &Payload) -> usize {
 }
 
 /// Закодировать и зашифровать `payload` для контакта `peer_ed_pub`.
-/// Результат — готовая к отправке датаграмма (JSON-конверт).
-pub fn encode(
-    me: &Identity,
-    peer_ed_pub: &[u8; 32],
-    payload: &Payload,
-    time: i64,
-) -> Result<Vec<u8>, ProtocolError> {
-    let plaintext = serde_json::to_vec(payload)?;
+/// Результат — готовая к отправке датаграмма `[v][from][nonce || ciphertext]`.
+pub fn encode(me: &Identity, peer_ed_pub: &[u8; 32], payload: &Payload) -> Result<Vec<u8>, ProtocolError> {
+    let plaintext = payload.to_bytes()?;
     // M5: добить до размерного бакета ДО шифрования (прячем длину по размеру).
     let padded = crate::pad::pad(&plaintext, bucket_for(payload));
     let sealed = crypto::seal(me, peer_ed_pub, &padded)?;
-    let envelope = Envelope {
-        v: PROTOCOL_VERSION,
-        from: hex::encode(me.public_key_bytes()),
-        time,
-        data: hex::encode(&sealed),
-    };
-    Ok(serde_json::to_vec(&envelope)?)
+    let mut out = Vec::with_capacity(HEADER_LEN + sealed.len());
+    out.push(PROTOCOL_VERSION);
+    out.extend_from_slice(&me.public_key_bytes());
+    out.extend_from_slice(&sealed);
+    Ok(out)
 }
 
 /// Разобрать и расшифровать датаграмму. Возвращает `(ключ_отправителя, payload)`.
@@ -399,20 +383,17 @@ pub fn encode(
 /// возвращённый ключ отправителя с источником транспорта (Yggdrasil src key),
 /// чтобы конверт нельзя было приписать чужому ключу.
 pub fn decode(me: &Identity, datagram: &[u8]) -> Result<([u8; 32], Payload), ProtocolError> {
-    let envelope: Envelope = serde_json::from_slice(datagram)?;
-    if envelope.v != PROTOCOL_VERSION {
-        return Err(ProtocolError::Version(envelope.v));
+    if datagram.len() < HEADER_LEN {
+        return Err(ProtocolError::Truncated);
     }
-    let from_bytes = hex::decode(&envelope.from)?;
-    let from: [u8; 32] = from_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| ProtocolError::BadFrom)?;
-    let sealed = hex::decode(&envelope.data)?;
-    let padded = crypto::open(me, &from, &sealed)?;
+    if datagram[0] != PROTOCOL_VERSION {
+        return Err(ProtocolError::Version(datagram[0]));
+    }
+    let mut from = [0u8; 32];
+    from.copy_from_slice(&datagram[1..HEADER_LEN]);
+    let padded = crypto::open(me, &from, &datagram[HEADER_LEN..])?;
     let plaintext = crate::pad::unpad(&padded).ok_or(ProtocolError::BadPadding)?;
-    let payload: Payload = serde_json::from_slice(&plaintext)?;
-    Ok((from, payload))
+    Ok((from, Payload::from_bytes(&plaintext)?))
 }
 
 #[cfg(test)]
@@ -432,7 +413,7 @@ mod tests {
             fwd_anon: false,
         };
 
-        let datagram = encode(&alice, &bob.public_key_bytes(), &payload, 1_700_000_000).unwrap();
+        let datagram = encode(&alice, &bob.public_key_bytes(), &payload).unwrap();
         let (from, decoded) = decode(&bob, &datagram).unwrap();
 
         assert_eq!(from, alice.public_key_bytes());
@@ -455,7 +436,7 @@ mod tests {
             sig: sig.to_vec(),
         };
 
-        let datagram = encode(&alice, &bob.public_key_bytes(), &payload, 0).unwrap();
+        let datagram = encode(&alice, &bob.public_key_bytes(), &payload).unwrap();
         let (from, decoded) = decode(&bob, &datagram).unwrap();
         assert_eq!(from, alice.public_key_bytes());
         assert_eq!(decoded, payload);
@@ -479,9 +460,14 @@ mod tests {
     fn unknown_payload_type_is_ignored_not_error() {
         // Forward-compat (ADR-006): будущий тип, которого этот клиент ещё не знает
         // (напр. реакция post-1.0), декодируется в Unknown, а НЕ роняет разбор.
-        let future = r#"{"type":"reaction","target":42,"emoji":"fire"}"#;
-        let p: Payload = serde_json::from_str(future).unwrap();
-        assert_eq!(p, Payload::Unknown);
+        #[derive(Serialize)]
+        struct Reaction {
+            r#type: &'static str,
+            target: u64,
+            emoji: &'static str,
+        }
+        let future = rmp_serde::to_vec_named(&Reaction { r#type: "reaction", target: 42, emoji: "fire" }).unwrap();
+        assert_eq!(Payload::from_bytes(&future).unwrap(), Payload::Unknown);
     }
 
     #[test]
@@ -522,7 +508,7 @@ mod tests {
             Payload::ProfileUpdate { name: "Алиса".into(), avatar_hash: vec![3u8; 32] },
             Payload::BlobManifestRequest { id: vec![4u8; 32] },
         ] {
-            let d = encode(&a, &b.public_key_bytes(), &p, 0).unwrap();
+            let d = encode(&a, &b.public_key_bytes(), &p).unwrap();
             let (_, got) = decode(&b, &d).unwrap();
             assert_eq!(got, p);
         }
@@ -532,8 +518,8 @@ mod tests {
     fn padding_hides_text_length() {
         let a = Identity::generate();
         let b = Identity::generate();
-        let short = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false }, 0).unwrap();
-        let long = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "a".repeat(500), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false }, 0).unwrap();
+        let short = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false }).unwrap();
+        let long = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "a".repeat(500), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false }).unwrap();
         // M5: разные по длине тексты → одинаковый размер датаграммы (бакет скрыл длину).
         assert_eq!(short.len(), long.len(), "паддинг должен скрыть длину текста");
         // Расшифровка по-прежнему работает.
@@ -546,7 +532,7 @@ mod tests {
     fn text_media_and_call_are_indistinguishable_by_size() {
         let a = Identity::generate();
         let b = Identity::generate();
-        let enc = |p: &Payload| encode(&a, &b.public_key_bytes(), p, 0).unwrap().len();
+        let enc = |p: &Payload| encode(&a, &b.public_key_bytes(), p).unwrap().len();
 
         // Прикладной класс: текст (короткий/длинный), картинка, голосовое, файл, группа.
         let sizes = [
@@ -606,7 +592,7 @@ mod tests {
     fn presence_with_transit_claim_stays_in_control_bucket() {
         let a = Identity::generate();
         let b = Identity::generate();
-        let enc = |p: &Payload| encode(&a, &b.public_key_bytes(), p, 0).unwrap().len();
+        let enc = |p: &Payload| encode(&a, &b.public_key_bytes(), p).unwrap().len();
         let claim = TransitClaim { digest: vec![0xab; 32], count: u32::MAX, epoch: u32::MAX };
         assert_eq!(
             enc(&Payload::Ping { transit: Some(claim.clone()) }),
@@ -619,15 +605,31 @@ mod tests {
         );
     }
 
-    /// Пустое поле не должно менять байты на проводе: 1.0 обязан слать ровно то же,
-    /// что слал до резервирования.
+    /// Пустое поле не должно появляться на проводе: маячок 1.0 — это голый тип.
     #[test]
     fn empty_transit_field_is_absent_on_the_wire() {
-        let json = serde_json::to_string(&Payload::Ping { transit: None }).unwrap();
-        assert_eq!(json, r#"{"type":"ping"}"#);
+        #[derive(Serialize)]
+        struct Bare {
+            r#type: &'static str,
+        }
+        let bare = rmp_serde::to_vec_named(&Bare { r#type: "ping" }).unwrap();
+        assert_eq!(Payload::Ping { transit: None }.to_bytes().unwrap(), bare);
         // И обратно: пакет без поля читается (совместимость в обе стороны).
-        let p: Payload = serde_json::from_str(r#"{"type":"ping"}"#).unwrap();
-        assert_eq!(p, Payload::Ping { transit: None });
+        assert_eq!(Payload::from_bytes(&bare).unwrap(), Payload::Ping { transit: None });
+    }
+
+    /// R-004: байты едут байтами. Полный чанк 12 КБ на проводе — чуть больше 12 КБ,
+    /// а не вчетверо (hex в payload, потом hex всего шифртекста в JSON).
+    #[test]
+    fn blob_chunk_has_no_hex_overhead() {
+        let a = Identity::generate();
+        let b = Identity::generate();
+        let chunk = Payload::BlobChunk { id: vec![1u8; 32], index: 0, data: vec![7u8; 12 * 1024] };
+        let d = encode(&a, &b.public_key_bytes(), &chunk).unwrap();
+        assert!(d.len() < 12 * 1024 + 512, "чанк на проводе: {} Б", d.len());
+        // MLS-данные — тоже байтами, а не JSON-массивом чисел.
+        let g = Payload::Group { id: 1, data: vec![200u8; 1000] }.to_bytes().unwrap();
+        assert!(g.len() < 1100, "Group: {} Б", g.len());
     }
 
     /// Последний (короткий) чанк блоба добивается до полного — иначе точный размер
@@ -637,12 +639,11 @@ mod tests {
         let a = Identity::generate();
         let b = Identity::generate();
         let enc = |data: Vec<u8>| {
-            encode(&a, &b.public_key_bytes(), &Payload::BlobChunk { id: vec![1u8; 32], index: 0, data }, 0).unwrap()
+            encode(&a, &b.public_key_bytes(), &Payload::BlobChunk { id: vec![1u8; 32], index: 0, data }).unwrap()
         };
         let full = enc(vec![9u8; 12 * 1024]); // полный чанк
         let tail = enc(vec![9u8; 37]); // куцый хвост файла
         assert_eq!(full.len(), tail.len(), "хвостовой чанк неотличим от полного");
-        // Датаграмма транспорта — 65535; конверт с hex-оверхедом обязан влезать.
         assert!(full.len() < 65535, "чанк с паддингом не влезает в датаграмму: {}", full.len());
     }
 
@@ -651,19 +652,23 @@ mod tests {
         let alice = Identity::generate();
         let bob = Identity::generate();
         let eve = Identity::generate();
-        let d = encode(&alice, &bob.public_key_bytes(), &Payload::Hello, 0).unwrap();
+        let d = encode(&alice, &bob.public_key_bytes(), &Payload::Hello).unwrap();
         assert!(decode(&eve, &d).is_err());
     }
 
     #[test]
-    fn envelope_is_valid_json_with_expected_fields() {
+    fn envelope_layout() {
         let alice = Identity::generate();
         let bob = Identity::generate();
-        let d = encode(&alice, &bob.public_key_bytes(), &Payload::Ping { transit: None }, 123).unwrap();
-        let v: serde_json::Value = serde_json::from_slice(&d).unwrap();
-        assert_eq!(v["v"], 1);
-        assert_eq!(v["time"], 123);
-        assert_eq!(v["from"], hex::encode(alice.public_key_bytes()));
-        assert!(v["data"].as_str().unwrap().len() >= crypto::NONCE_LEN * 2);
+        let d = encode(&alice, &bob.public_key_bytes(), &Payload::Ping { transit: None }).unwrap();
+        assert_eq!(d[0], PROTOCOL_VERSION);
+        assert_eq!(&d[1..33], &alice.public_key_bytes());
+        // nonce + тег Poly1305 + бакет CONTROL, и ничего больше.
+        assert_eq!(d.len(), HEADER_LEN + crypto::NONCE_LEN + 16 + CONTROL_BUCKET);
+        // Чужая версия и обрубок не разбираются.
+        let mut old = d.clone();
+        old[0] = 1;
+        assert!(matches!(decode(&bob, &old), Err(ProtocolError::Version(1))));
+        assert!(matches!(decode(&bob, &d[..10]), Err(ProtocolError::Truncated)));
     }
 }

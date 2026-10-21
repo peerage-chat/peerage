@@ -46,8 +46,8 @@ impl OutboxStore {
     ) -> Result<i64, StoreError> {
         let conn = db::lock(&self.db);
         conn.execute(
-            "INSERT INTO outbox (peer, msg_id, payload_type, payload, created_at, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
+            "INSERT INTO outbox (peer, msg_id, payload_type, payload, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![peer.as_slice(), msg_id as i64, payload_type, payload, created_at],
         )?;
         Ok(conn.last_insert_rowid())
@@ -70,7 +70,7 @@ impl OutboxStore {
         let conn = db::lock(&self.db);
         let mut stmt = conn.prepare(
             "SELECT id, peer, msg_id, payload_type, payload, created_at FROM outbox
-             WHERE peer = ?1 AND status = 'pending' ORDER BY id LIMIT ?2",
+             WHERE peer = ?1 ORDER BY id LIMIT ?2",
         )?;
         let rows = stmt
             .query_map(rusqlite::params![peer.as_slice(), limit as i64], |row| {
@@ -91,7 +91,7 @@ impl OutboxStore {
     /// Кому вообще что-то ждёт — с них начинается досылка на старте.
     pub fn peers(&self) -> Result<Vec<[u8; 32]>, StoreError> {
         let conn = db::lock(&self.db);
-        let mut stmt = conn.prepare("SELECT DISTINCT peer FROM outbox WHERE status = 'pending'")?;
+        let mut stmt = conn.prepare("SELECT DISTINCT peer FROM outbox")?;
         let rows = stmt
             .query_map([], |row| row.get::<_, Vec<u8>>(0))?
             .filter_map(|r| r.ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok()))
@@ -116,7 +116,7 @@ impl OutboxStore {
         match peer {
             Some(p) => {
                 let mut stmt =
-                    conn.prepare(&format!("{COLS} WHERE peer = ?1 AND status = 'pending' ORDER BY created_at, id"))?;
+                    conn.prepare(&format!("{COLS} WHERE peer = ?1 ORDER BY created_at, id"))?;
                 let rows = stmt
                     .query_map(rusqlite::params![p.as_slice()], map)?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -124,7 +124,7 @@ impl OutboxStore {
             }
             None => {
                 let mut stmt =
-                    conn.prepare(&format!("{COLS} WHERE status = 'pending' ORDER BY created_at, id"))?;
+                    conn.prepare(&format!("{COLS} ORDER BY created_at, id"))?;
                 let rows = stmt.query_map([], map)?.collect::<Result<Vec<_>, _>>()?;
                 Ok(rows)
             }
@@ -157,17 +157,10 @@ impl OutboxStore {
         Ok(n)
     }
 
-    /// Выбросить протухшие записи (created_at < `cutoff`). Возвращает число удалённых.
-    pub fn prune_older_than(&self, cutoff: i64) -> Result<usize, StoreError> {
-        let n = db::lock(&self.db)
-            .execute("DELETE FROM outbox WHERE created_at < ?1", rusqlite::params![cutoff])?;
-        Ok(n)
-    }
-
     /// Число ожидающих записей (метрика/тесты).
     pub fn count(&self) -> Result<i64, StoreError> {
         let n = db::lock(&self.db)
-            .query_row("SELECT COUNT(*) FROM outbox WHERE status = 'pending'", [], |r| r.get(0))?;
+            .query_row("SELECT COUNT(*) FROM outbox", [], |r| r.get(0))?;
         Ok(n)
     }
 }
@@ -336,19 +329,6 @@ mod tests {
 
         // pending_all видит все три
         assert_eq!(s.pending_all().unwrap().len(), 3);
-    }
-
-    #[test]
-    fn prune_drops_expired_only() {
-        let s = store();
-        s.enqueue(&peer(1), 1, "text", b"old", 100).unwrap();
-        s.enqueue(&peer(1), 2, "text", b"fresh", 1000).unwrap();
-        // TTL cutoff = 500: старое (100) уходит, свежее (1000) остаётся.
-        let dropped = s.prune_older_than(500).unwrap();
-        assert_eq!(dropped, 1);
-        let left = s.pending_for(&peer(1)).unwrap();
-        assert_eq!(left.len(), 1);
-        assert_eq!(left[0].payload, b"fresh");
     }
 
     #[test]

@@ -5,6 +5,9 @@
 //! поэтому отдельного обмена ключами шифрования не нужно — публичный ключ
 //! контакта (он же его идентификатор) однозначно задаёт ключ для Box.
 
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, OnceLock};
+
 use crypto_box::aead::{Aead, AeadCore, OsRng};
 use crypto_box::{Nonce, PublicKey, SalsaBox, SecretKey};
 
@@ -25,14 +28,45 @@ pub enum CryptoError {
     TooShort,
 }
 
+/// Сколько общих Box держим готовыми. Пиров, с которыми идёт обмен, — десятки;
+/// предел нужен лишь против разрастания от потока незнакомых ключей.
+const BOX_CACHE: usize = 256;
+
+/// Готовые Box по паре (наш ключ, ключ пира). Конвертация ключа и DH X25519 —
+/// скалярные умножения; делать их на каждый ack и каждый чанк файла незачем.
+#[derive(Default)]
+struct BoxCache {
+    map: HashMap<([u8; 32], [u8; 32]), Arc<SalsaBox>>,
+    order: VecDeque<([u8; 32], [u8; 32])>,
+}
+
+fn box_cache() -> &'static Mutex<BoxCache> {
+    static CACHE: OnceLock<Mutex<BoxCache>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
 /// Построить общий Box между нашей идентичностью и контактом (по его ed25519
 /// публичному ключу). Box симметричен: одинаков для (мы→он) и (он→мы).
-fn shared_box(me: &Identity, peer_ed_pub: &[u8; 32]) -> Result<SalsaBox, CryptoError> {
+fn shared_box(me: &Identity, peer_ed_pub: &[u8; 32]) -> Result<Arc<SalsaBox>, CryptoError> {
+    let key = (me.public_key_bytes(), *peer_ed_pub);
+    if let Some(b) = box_cache().lock().unwrap_or_else(|e| e.into_inner()).map.get(&key) {
+        return Ok(b.clone());
+    }
     let my_secret = SecretKey::from_bytes(me.x25519_secret());
     let peer_curve =
         ed25519_pub_to_curve25519(peer_ed_pub).ok_or(CryptoError::KeyConversion)?;
     let peer_pub = PublicKey::from_bytes(peer_curve);
-    Ok(SalsaBox::new(&peer_pub, &my_secret))
+    let b = Arc::new(SalsaBox::new(&peer_pub, &my_secret));
+    let mut cache = box_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if cache.map.insert(key, b.clone()).is_none() {
+        cache.order.push_back(key);
+        while cache.order.len() > BOX_CACHE {
+            if let Some(old) = cache.order.pop_front() {
+                cache.map.remove(&old);
+            }
+        }
+    }
+    Ok(b)
 }
 
 /// Зашифровать `plaintext` для контакта `peer_ed_pub`.
@@ -123,5 +157,25 @@ mod tests {
         let a = seal(&alice, &bob.public_key_bytes(), b"same").unwrap();
         let b = seal(&alice, &bob.public_key_bytes(), b"same").unwrap();
         assert_ne!(a, b, "случайный nonce должен давать разный шифртекст");
+    }
+
+    /// R-016: Box кэшируется, но кэш ограничен, а вытесненная пара просто
+    /// строится заново.
+    #[test]
+    fn box_cache_is_bounded_and_transparent() {
+        let alice = Identity::generate();
+        let bob = Identity::generate();
+        let first = seal(&alice, &bob.public_key_bytes(), b"one").unwrap();
+        for _ in 0..BOX_CACHE + 10 {
+            let stranger = Identity::generate();
+            seal(&alice, &stranger.public_key_bytes(), b"x").unwrap();
+        }
+        {
+            let cache = box_cache().lock().unwrap();
+            assert!(cache.map.len() <= BOX_CACHE);
+            assert_eq!(cache.map.len(), cache.order.len());
+        }
+        // Пара alice↔bob давно вытеснена — расшифровка всё равно работает.
+        assert_eq!(open(&bob, &alice.public_key_bytes(), &first).unwrap(), b"one");
     }
 }
