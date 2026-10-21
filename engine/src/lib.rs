@@ -2332,6 +2332,25 @@ fn push_event(engine: &Engine, ev: dto::UiEvent) {
     engine.events.lock_safe().push_back(ev.to_json());
 }
 
+/// Записать входящее личное сообщение и отдать его клиенту той же строкой.
+fn push_dm_message(engine: &Engine, peer: &[u8; 32], mut msg: StoredMessage) {
+    if let Ok(row) = engine.messages.lock_safe().append(Chat::Dm(peer), &msg) {
+        msg.row = row;
+        push_event(engine, dto::UiEvent::Message { chat: hex::encode(peer), group: false, msg });
+    }
+}
+
+/// Отдать клиенту строки групп, записанные за этот виток. Флаг «скачано» уточняем
+/// по факту: у входящего вложения слой групп его не знает.
+fn push_group_messages(engine: &Engine, groups: &mut GroupManager) {
+    for (gid, mut msg) in groups.take_fresh() {
+        if !msg.downloaded && !msg.blob_id.is_empty() && engine.blob_exists(&msg.blob_id) {
+            msg.downloaded = true;
+        }
+        push_event(engine, dto::UiEvent::Message { chat: hex::encode(&gid), group: true, msg });
+    }
+}
+
 /// Поток event_pump = групповой актор: владеет [`GroupManager`] (GroupChat !Send),
 /// обрабатывает события мессенджера и групповые команды — всё в одном потоке.
 fn event_pump(
@@ -2392,14 +2411,10 @@ fn event_pump(
                 };
                 // MLS-ссылка всем; байты каждый участник запросит сам — мелкое
                 // сразу, крупное по кнопке.
-                if groups.send_media(&gid, &media) {
-                    push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
-                }
+                groups.send_media(&gid, &media);
             }
             Ok(Job::GroupMediaRef { gid, media }) => {
-                if groups.send_media(&gid, &media) {
-                    push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
-                }
+                groups.send_media(&gid, &media);
             }
             Ok(Job::GroupMediaFile { gid, path, mime, name, info }) => {
                 // Потоковый путь: ни манифест, ни отдача чанков не поднимают файл в
@@ -2434,9 +2449,7 @@ fn event_pump(
                     height: info.height,
                     thumb: thumb_hex,
                 };
-                if groups.send_media(&gid, &media) {
-                    push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
-                }
+                groups.send_media(&gid, &media);
             }
             Ok(Job::Beacon) => {
                 last_beacon = Instant::now();
@@ -2465,6 +2478,7 @@ fn event_pump(
             last_beacon = Instant::now();
             beacon_tick(&engine, &mut groups, &messenger);
         }
+        push_group_messages(&engine, &mut groups);
         blobs.tick(); // переспросить потерянные чанки докачки (M2)
         // Прогресс докачки наверх: UI рисует кружок вместо бесконечного спиннера.
         for (id, done, total) in blobs.take_progress() {
@@ -2561,16 +2575,8 @@ fn save_and_notify_blob(
     let id_hex = hex::encode(done.id);
     let _ = engine.messages.lock_safe().mark_downloaded(&id_hex);
     // То же для групп: их история живёт отдельным стором, но блоб — один и тот же.
-    for gid in groups.mark_downloaded(&id_hex) {
-        push_event(engine, dto::UiEvent::GroupMsg {
-            gid: hex::encode(&gid),
-            mine: false,
-            text: None,
-            sender: None,
-            system: None,
-            media: None,
-        });
-    }
+    // Клиент отмечает строки сам по `blob_received` — перечитывать ленту незачем.
+    groups.mark_downloaded(&id_hex);
     let _ = engine.wanted.lock_safe().remove(&id_hex); // намерение исполнено
     engine.blob_expect.lock_safe().remove(&done.id);
     push_event(engine, dto::UiEvent::BlobReceived {
@@ -2651,27 +2657,19 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             let peer_hex = hex::encode(peer);
             let dup = engine.messages.lock_safe().contains(Chat::Dm(&peer), &peer_hex, id);
             if !dup {
-                let t = now();
                 // reply_mine прислан С ТОЧКИ ЗРЕНИЯ ОТПРАВИТЕЛЯ и уже перевёрнут выше,
                 // поэтому «моё» здесь — действительно наше сообщение.
-                let _ = engine.messages.lock_safe().append(Chat::Dm(&peer), &StoredMessage {
-                    id, text: text.clone(), mine: false, time: t, status: String::new(),
-                    sender: peer_hex.clone(),
+                let msg = StoredMessage {
+                    id, text, mine: false, time: now(), status: String::new(),
+                    sender: peer_hex,
                     reply_to,
                     reply_sender: engine.reply_author(&peer, reply_to, reply_mine),
-                    fwd_from: fwd_from.clone(),
+                    fwd_from,
                     fwd_anon,
                     kind: "text".into(),
                     ..Default::default()
-                });
-                push_event(engine, dto::UiEvent::Text {
-                    peer: hex::encode(peer),
-                    id,
-                    text,
-                    time: t,
-                    reply_to,
-                    reply_mine,
-                });
+                };
+                push_dm_message(engine, &peer, msg);
             }
         }
         Event::Edit { peer, target, text } => {
@@ -2731,7 +2729,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // Крупное НЕ тянем молча: показываем карточку (имя/размер/превью), а
                 // байты качаем по кнопке — иначе чужое видео на 800 МБ приедет само.
                 let auto = have || size < AUTO_DOWNLOAD_LIMIT;
-                let _ = engine.messages.lock_safe().append(Chat::Dm(&peer), &StoredMessage {
+                let msg = StoredMessage {
                     id, mine: false, time: t, status: String::new(),
                     sender: hex::encode(peer),
                     fwd_from: fwd_from.clone(),
@@ -2751,7 +2749,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                         hex::encode(peer)
                     },
                     ..Default::default()
-                });
+                };
                 // Миниатюру тянем всегда — она мелкая, ради неё и заведена.
                 if !thumb.is_empty() && !engine.blob_exists(&thumb_hex) {
                     engine.request_blob(&peer, &thumb);
@@ -2759,30 +2757,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 if auto && !have {
                     engine.request_blob(&peer, &hash);
                 }
-                push_event(engine, dto::UiEvent::Media {
-                    peer: hex::encode(peer),
-                    id,
-                    time: t,
-                    kind: kind.to_string(),
-                    blob_id: id_hex,
-                    mime,
-                    name,
-                    size,
-                    duration_ms,
-                    width,
-                    height,
-                    thumb_id: thumb_hex,
-                    downloaded: have,
-                    auto,
-                    reply_to,
-                    reply_sender: if reply_to == 0 {
-                        String::new()
-                    } else if reply_mine {
-                        engine.me_hex()
-                    } else {
-                        hex::encode(peer)
-                    },
-                });
+                push_dm_message(engine, &peer, msg);
             }
         }
         Event::Ack { peer, id } => {
@@ -2823,53 +2798,25 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }),
         Event::Group { peer, data } => {
             let out = groups.on_group(peer, &data);
-            if let Some(gid) = &out.gid {
-                if out.text.is_some() || out.system || out.media.is_some() {
-                    // M2: докачка блоба по хэшу от отправителя, если его у нас нет.
-                    // Крупное НЕ тянем молча — как в DM, показываем карточку, а байты
-                    // качаем по кнопке: иначе чужое видео приезжает всей группе само.
-                    let media = out.media.as_ref().map(|m| {
-                        let have = engine.blob_exists(&m.hash);
-                        let auto = have || m.size < AUTO_DOWNLOAD_LIMIT;
-                        // Миниатюру тянем всегда — она мелкая, ради неё карточка и есть.
-                        if !m.thumb.is_empty() && !engine.blob_exists(&m.thumb) {
-                            if let Ok(h) = hex::decode(&m.thumb) {
-                                engine.request_blob(&peer, &h);
-                            }
-                        }
-                        if auto && !have {
-                            if let Ok(h) = hex::decode(&m.hash) {
-                                engine.request_blob(&peer, &h);
-                            }
-                        }
-                        if have {
-                            groups.mark_downloaded(&m.hash);
-                        }
-                        dto::GroupMediaEv {
-                            kind: m.kind.clone(),
-                            blob_id: m.hash.clone(),
-                            mime: m.mime.clone(),
-                            name: m.name.clone(),
-                            size: m.size,
-                            duration_ms: m.duration_ms,
-                            width: m.width,
-                            height: m.height,
-                            thumb_id: m.thumb.clone(),
-                            downloaded: have,
-                            auto,
-                        }
-                    });
-                    // Обновляем кэш истории этого gid: group_history_json читает кэш,
-                    // а не live-messages. Без этого полученное сообщение пропадает при
-                    // переоткрытии чата (отображается только live-событием).
-                    push_event(engine, dto::UiEvent::GroupMsg {
-                        gid: hex::encode(gid),
-                        mine: false,
-                        text: Some(out.text.clone().unwrap_or_default()),
-                        sender: Some(out.sender.clone().unwrap_or_default()),
-                        system: Some(out.system),
-                        media,
-                    });
+            // Саму строку клиенту отдаст push_group_messages. Здесь — только докачка:
+            // крупное НЕ тянем молча, как и в DM, — показываем карточку, а байты
+            // качаем по кнопке, иначе чужое видео приезжает всей группе само.
+            if let Some(m) = out.media.as_ref() {
+                let have = engine.blob_exists(&m.hash);
+                let auto = have || m.size < AUTO_DOWNLOAD_LIMIT;
+                // Миниатюру тянем всегда — она мелкая, ради неё карточка и есть.
+                if !m.thumb.is_empty() && !engine.blob_exists(&m.thumb) {
+                    if let Ok(h) = hex::decode(&m.thumb) {
+                        engine.request_blob(&peer, &h);
+                    }
+                }
+                if auto && !have {
+                    if let Ok(h) = hex::decode(&m.hash) {
+                        engine.request_blob(&peer, &h);
+                    }
+                }
+                if have {
+                    groups.mark_downloaded(&m.hash);
                 }
             }
             if out.retracted {
@@ -3130,12 +3077,10 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
             }
         }
         GroupCmd::SendText { gid, text, reply_to, reply_sender, fwd_from, fwd_anon } => {
+            // Своё сообщение уйдёт в UI событием `message` (take_fresh) — с id,
+            // который присвоил слой групп: на него сразу можно ответить и отозвать.
             if groups.send_text_full(&gid, &text, reply_to, &reply_sender, &fwd_from, fwd_anon) {
                 refresh_group_cache(engine, groups);
-                // Своё сообщение — событием, а не «клиент дорисует сам»: id ему
-                // присваивает этот слой, и без перечитывания истории на него нельзя
-                // было бы ни ответить, ни отозвать.
-                push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(&gid) });
             }
         }
         GroupCmd::Edit { gid, id, text } => {

@@ -155,6 +155,10 @@ pub struct GroupManager {
     /// Кто админ каждой группы (gid → ключ). Нужен, чтобы проверять права на
     /// действия, которые приходят ИЗВНЕ: закреп в шапку ставит только админ.
     admin_keys: HashMap<Vec<u8>, [u8; 32]>,
+    /// Записанные, но ещё не отданные клиенту строки `(gid, сообщение)`. Каждая
+    /// строка, которую этот слой кладёт в историю, уходит в UI событием целиком —
+    /// своё, входящее и системное одной формой, без перечитывания ленты.
+    fresh: Vec<(Vec<u8>, StoredMessage)>,
 }
 
 /// Как часто повторять принятое, но не завершённое вступление в группу.
@@ -188,6 +192,7 @@ impl GroupManager {
             messages,
             me_hex,
             admin_keys: HashMap::new(),
+            fresh: Vec::new(),
         };
         m.load_admin_keys();
         m.load_all();
@@ -358,9 +363,17 @@ impl GroupManager {
         let _ = std::fs::rename(&path, path.with_extension("msgs.bak"));
     }
 
-    /// Записать своё/входящее сообщение группы в общее хранилище.
-    fn put(&self, gid: &[u8], msg: &StoredMessage) {
-        let _ = self.messages.lock_safe().append(Chat::Group(gid), msg);
+    /// Записать своё/входящее сообщение группы в общее хранилище и отложить его
+    /// для UI (см. [`Self::take_fresh`]).
+    fn put(&mut self, gid: &[u8], msg: &StoredMessage) {
+        if let Ok(row) = self.messages.lock_safe().append(Chat::Group(gid), msg) {
+            self.fresh.push((gid.to_vec(), StoredMessage { row, ..msg.clone() }));
+        }
+    }
+
+    /// Строки, записанные с прошлого вызова, — для событий `message`.
+    pub fn take_fresh(&mut self) -> Vec<(Vec<u8>, StoredMessage)> {
+        std::mem::take(&mut self.fresh)
     }
 
     /// Запомнить имя группы рядом с её перепиской. Нужно копии данных: MLS-состояние
@@ -948,8 +961,7 @@ impl GroupManager {
                         sender: sender_hex.clone(), ..Default::default()
                     });
                     GroupOutcome {
-                        gid: Some(gid.clone()), text: Some(text),
-                        sender: Some(sender_hex), ..Default::default()
+                        gid: Some(gid.clone()), ..Default::default()
                     }
                 }
                 Some(Ok(Inbound::Edit { sender, target, text })) => {
@@ -1017,7 +1029,7 @@ impl GroupManager {
                         ..Default::default()
                     });
                     GroupOutcome {
-                        gid: Some(gid.clone()), sender: Some(sender_hex),
+                        gid: Some(gid.clone()),
                         media: Some(media),
                         ..Default::default()
                     }
@@ -1046,7 +1058,7 @@ impl GroupManager {
                         ..Default::default()
                     });
                     GroupOutcome {
-                        gid: Some(gid.clone()), sender: Some(actor_hex), system: true,
+                        gid: Some(gid.clone()),
                         ..Default::default()
                     }
                 }
@@ -1207,11 +1219,6 @@ pub struct GroupOutcome {
     pub edited: Option<(String, u64, String)>,
     /// Список закреплённых изменился — UI перечитать шапку чата.
     pub pinned: bool,
-    pub text: Option<String>,
-    /// hex отправителя (для Message) или актора (для системного события).
-    pub sender: Option<String>,
-    /// Системное событие (смена состава).
-    pub system: bool,
     pub joined: bool,
     /// Нас отозвали из группы (ADR-004) — UI должен убрать группу и уведомить.
     pub removed: bool,

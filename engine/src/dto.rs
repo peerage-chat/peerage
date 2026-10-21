@@ -125,42 +125,11 @@ pub struct CallEntry {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiEvent {
     Presence { peer: String, online: bool },
-    Text {
-        peer: String,
-        id: u64,
-        text: String,
-        time: i64,
-        /// Ответ на сообщение с этим id (0 — обычное); `reply_mine` — чьё оно у НАС.
-        #[serde(default)]
-        reply_to: u64,
-        #[serde(default)]
-        reply_mine: bool,
-    },
-    Media {
-        peer: String,
-        id: u64,
-        time: i64,
-        kind: String,
-        blob_id: String,
-        mime: String,
-        name: String,
-        size: u64,
-        duration_ms: u32,
-        width: u32,
-        height: u32,
-        thumb_id: String,
-        /// Байты уже лежат локально.
-        downloaded: bool,
-        /// Мелкое тянем сразу; крупное ждёт кнопки — клиенту это нужно, чтобы
-        /// не показывать спиннер там, где докачки не будет.
-        auto: bool,
-        /// Ответ вложением: id цитируемого сообщения (0 — обычное).
-        #[serde(default)]
-        reply_to: u64,
-        /// hex автора цитируемого сообщения (пусто — обычное).
-        #[serde(default)]
-        reply_sender: String,
-    },
+    /// Новая строка переписки — личной или групповой, своей или входящей. Едет
+    /// ровно та строка, что легла в историю (подпись, «переслано», ответ, номер
+    /// строки): одна форма для ленты и для истории, и открытый чат не расходится с
+    /// тем, что покажет перезаход.
+    Message { chat: String, group: bool, msg: p2p_core::store::StoredMessage },
     Ack { peer: String, id: u64 },
     /// Собеседник отозвал своё сообщение — строка исчезла из истории.
     Retracted { peer: String, id: u64 },
@@ -187,54 +156,6 @@ pub enum UiEvent {
     /// Докачка не началась: `too_large` (больше предела приёма) или `no_space`
     /// (на диске не хватает места). Заказ снят — кнопка «Скачать» снова доступна.
     BlobFailed { id: String, reason: String },
-    /// Групповое сообщение. Форма одна на два случая — эхо своего (`mine`) и
-    /// входящее: клиент различает их по `mine`, а не по набору полей.
-    /// Медиа-поля пропускаются, когда сообщение текстовое, — так провод не
-    /// меняется относительно прежнего варианта на литералах.
-    GroupMsg {
-        gid: String,
-        #[serde(skip_serializing_if = "std::ops::Not::not")]
-        mine: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        text: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        sender: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        system: Option<bool>,
-        /// Вложение: отдельным объектом, а не десятком плоских опций рядом с
-        /// текстовыми полями — набор полей карточки один и тот же, где бы она ни
-        /// показывалась.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        media: Option<GroupMediaEv>,
-    },
-}
-
-/// Вложение группового сообщения в событии. Повторяет поля карточки из DM: имя,
-/// размер, превью — всё известно ДО загрузки байт, иначе нечего показывать вместо
-/// автоматической докачки.
-#[derive(Debug, Clone, Serialize)]
-pub struct GroupMediaEv {
-    pub kind: String,
-    pub blob_id: String,
-    pub mime: String,
-    pub name: String,
-    pub size: u64,
-    pub duration_ms: u32,
-    pub width: u32,
-    pub height: u32,
-    pub thumb_id: String,
-    /// Байты уже лежат локально.
-    pub downloaded: bool,
-    /// Мелкое тянем сразу; крупное ждёт кнопки.
-    pub auto: bool,
-}
-
-impl UiEvent {
-    /// Эхо своего группового сообщения: клиент по нему перечитывает историю,
-    /// потому что blob_id считается в движке (по очищенным байтам).
-    pub fn group_msg_mine(gid: String) -> Self {
-        Self::GroupMsg { gid, mine: true, text: None, sender: None, system: None, media: None }
-    }
 }
 
 impl UiEvent {
@@ -265,38 +186,27 @@ mod tests {
         let ev = UiEvent::BlobProgress { id: "cc".into(), done: 3, total: 10 };
         assert_eq!(ev.to_json(), r#"{"type":"blob_progress","id":"cc","done":3,"total":10}"#);
 
-        // Эхо своего группового: только gid и mine — лишних полей на проводе нет.
-        assert_eq!(
-            UiEvent::group_msg_mine("ff".into()).to_json(),
-            r#"{"type":"group_msg","gid":"ff","mine":true}"#
-        );
-
-        // Входящее групповое с вложением: карточка приезжает целиком (имя, размер,
-        // превью, auto) — по ней клиент решает, рисовать «скачать» или спиннер.
-        let ev = UiEvent::GroupMsg {
-            gid: "ff".into(),
-            mine: false,
-            text: Some("подпись".into()),
-            sender: Some("aa".into()),
-            system: Some(false),
-            media: Some(GroupMediaEv {
-                kind: "file".into(),
-                blob_id: "bb".into(),
-                mime: "video/mp4".into(),
-                name: "clip.mp4".into(),
-                size: 900,
-                duration_ms: 12,
-                width: 1,
-                height: 2,
-                thumb_id: "cc".into(),
-                downloaded: false,
-                auto: false,
-            }),
+        // Строка переписки едет целиком — теми же полями, что и в истории.
+        let msg = p2p_core::store::StoredMessage {
+            id: 5,
+            sender: "aa".into(),
+            text: "подпись".into(),
+            time: 100,
+            kind: "file".into(),
+            blob_id: "bb".into(),
+            fwd_from: "cc".into(),
+            row: 9,
+            ..Default::default()
         };
-        assert_eq!(
-            ev.to_json(),
-            r#"{"type":"group_msg","gid":"ff","text":"подпись","sender":"aa","system":false,"media":{"kind":"file","blob_id":"bb","mime":"video/mp4","name":"clip.mp4","size":900,"duration_ms":12,"width":1,"height":2,"thumb_id":"cc","downloaded":false,"auto":false}}"#
-        );
+        let json = UiEvent::Message { chat: "ff".into(), group: true, msg }.to_json();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "message");
+        assert_eq!(v["chat"], "ff");
+        assert_eq!(v["group"], true);
+        assert_eq!(v["msg"]["text"], "подпись");
+        assert_eq!(v["msg"]["fwd_from"], "cc");
+        assert_eq!(v["msg"]["blob_id"], "bb");
+        assert_eq!(v["msg"]["row"], 9);
     }
 
     #[test]

@@ -139,53 +139,6 @@ internal data class GroupInviteDto(
 )
 
 @Serializable
-internal data class GroupMsgDto(
-    val id: Long = 0,
-    /** Курсор пагинации: номер строки в базе движка. */
-    val row: Long = 0,
-    /** hex автора исходного сообщения, если это пересылка (пусто — своё). */
-    @SerialName("fwd_from") val fwdFrom: String = "",
-    /** Переслано, но автора не называем. */
-    @SerialName("fwd_anon") val fwdAnon: Boolean = false,
-    /** Когда исправлено автором (0 — не редактировалось). */
-    @SerialName("edited_at") val editedAt: Long = 0,
-    @SerialName("reply_to") val replyTo: Long = 0,
-    @SerialName("reply_sender") val replySender: String = "",
-    val text: String = "",
-    val mine: Boolean = false,
-    val time: Long = 0,
-    val sender: String = "",
-    val system: Boolean = false,
-    val kind: String = "text",
-    @SerialName("blob_id") val blobId: String = "",
-    val mime: String = "",
-    val name: String = "",
-    val size: Long = 0,
-    @SerialName("duration_ms") val durationMs: Int = 0,
-    val width: Int = 0,
-    val height: Int = 0,
-    @SerialName("thumb_id") val thumbId: String = "",
-    val downloaded: Boolean = false,
-)
-
-/** Вложение группового сообщения в событии — отдельным объектом, как в `dto.rs`. */
-@Serializable
-internal data class GroupMediaDto(
-    val kind: String = "file",
-    @SerialName("blob_id") val blobId: String = "",
-    val mime: String = "",
-    val name: String = "",
-    val size: Long = 0,
-    @SerialName("duration_ms") val durationMs: Int = 0,
-    val width: Int = 0,
-    val height: Int = 0,
-    @SerialName("thumb_id") val thumbId: String = "",
-    val downloaded: Boolean = false,
-    /** Мелкое качается само; крупное ждёт кнопки. */
-    val auto: Boolean = false,
-)
-
-@Serializable
 internal data class RoomMemberDto(
     val peer: String = "",
     val audio: Boolean = false,
@@ -368,34 +321,6 @@ internal fun MessageDto.toModel() = Message(
     downloaded = downloaded,
 )
 
-internal fun GroupMsgDto.toModel() = Message(
-    id = id,
-    // Статуса доставки в группе нет: подтверждение приходит от каждого участника
-    // отдельно, и одной галочкой это не выражается.
-    status = "",
-    replyTo = replyTo,
-    replySender = replySender,
-    text = text,
-    mine = mine,
-    time = time,
-    sender = sender,
-    system = system,
-    kind = kind.ifEmpty { "text" }, // пустой kind — «неизвестно», не вложение
-    blobId = blobId,
-    mime = mime,
-    name = name,
-    size = size,
-    durationMs = durationMs,
-    width = width,
-    height = height,
-    thumbId = thumbId,
-    downloaded = downloaded,
-    fwdFrom = fwdFrom,
-    fwdAnon = fwdAnon,
-    editedAt = editedAt,
-    row = row,
-)
-
 // ── События ─────────────────────────────────────────────────────────────────
 
 /**
@@ -412,16 +337,14 @@ internal sealed interface EngineEvent {
     @SerialName("presence")
     data class Presence(val peer: String, val online: Boolean) : EngineEvent
 
+    /**
+     * Новая строка переписки — личной (`chat` = ключ собеседника) или групповой
+     * (`chat` = gid), своей или входящей. Ровно та строка, что легла в историю:
+     * подпись, «переслано», ответ и курсор пагинации приезжают сразу.
+     */
     @Serializable
-    @SerialName("text")
-    data class Text(
-        val peer: String,
-        val id: Long,
-        val text: String,
-        val time: Long,
-        @SerialName("reply_to") val replyTo: Long = 0,
-        @SerialName("reply_mine") val replyMine: Boolean = false,
-    ) : EngineEvent
+    @SerialName("message")
+    data class MessageEv(val chat: String, val group: Boolean = false, val msg: MessageDto) : EngineEvent
 
     /** Собеседник отозвал своё сообщение — строку надо убрать из ленты. */
     @Serializable
@@ -432,29 +355,6 @@ internal sealed interface EngineEvent {
     @Serializable
     @SerialName("group_retracted")
     data class GroupRetracted(val gid: String) : EngineEvent
-
-    @Serializable
-    @SerialName("media")
-    data class Media(
-        val peer: String,
-        val id: Long,
-        val time: Long,
-        val kind: String = "file",
-        @SerialName("blob_id") val blobId: String = "",
-        val mime: String = "",
-        val name: String = "",
-        val size: Long = 0,
-        @SerialName("duration_ms") val durationMs: Int = 0,
-        val width: Int = 0,
-        val height: Int = 0,
-        @SerialName("thumb_id") val thumbId: String = "",
-        val downloaded: Boolean = false,
-        val auto: Boolean = false,
-        /** Ответ вложением: id цитируемого сообщения (0 — обычное). */
-        @SerialName("reply_to") val replyTo: Long = 0,
-        /** hex автора цитируемого сообщения (пусто — обычное). */
-        @SerialName("reply_sender") val replySender: String = "",
-    ) : EngineEvent
 
     @Serializable
     @SerialName("ack")
@@ -498,17 +398,6 @@ internal sealed interface EngineEvent {
     @Serializable
     @SerialName("group_removed")
     data class GroupRemoved(val gid: String) : EngineEvent
-
-    @Serializable
-    @SerialName("group_msg")
-    data class GroupMsgEv(
-        val gid: String,
-        val mine: Boolean = false,
-        val text: String = "",
-        val sender: String = "",
-        val system: Boolean = false,
-        val media: GroupMediaDto? = null,
-    ) : EngineEvent
 
     @Serializable
     @SerialName("room_invite")

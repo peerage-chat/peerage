@@ -893,8 +893,11 @@ impl MessageStore {
         Ok(())
     }
 
-    pub fn append(&self, chat: Chat, msg: &StoredMessage) -> Result<(), StoreError> {
-        db::lock(&self.db).execute(
+    /// Записать сообщение. Возвращает номер строки — курсор пагинации, который
+    /// клиенту нужен и у сообщения, пришедшего событием.
+    pub fn append(&self, chat: Chat, msg: &StoredMessage) -> Result<i64, StoreError> {
+        let conn = db::lock(&self.db);
+        conn.execute(
             "INSERT OR REPLACE INTO chat_messages
                  (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
                   size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
@@ -911,7 +914,7 @@ impl MessageStore {
                 msg.fwd_anon as i64, msg.edited_at,
             ],
         )?;
-        Ok(())
+        Ok(conn.last_insert_rowid())
     }
 
     /// Пометить вложение скачанным (байты блоба доехали). Ищем по контент-адресу, а

@@ -140,8 +140,8 @@ fn long_backlog_arrives_whole_and_in_order() {
     let got_all = wait(30, || {
         while let Some(ev) = b2.poll_event() {
             let v = json(&ev);
-            if v["type"] == "text" {
-                order.push(v["text"].as_str().unwrap_or_default().to_string());
+            if v["type"] == "message" && v["msg"]["kind"] == "text" {
+                order.push(v["msg"]["text"].as_str().unwrap_or_default().to_string());
             }
         }
         order.len() >= N

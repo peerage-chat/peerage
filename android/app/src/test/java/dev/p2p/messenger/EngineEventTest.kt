@@ -20,55 +20,39 @@ class EngineEventTest {
         assertTrue(ev.online)
     }
 
-    @Test fun media_parses_all_card_fields() {
+    @Test fun message_carries_the_stored_row() {
+        // Строка истории целиком: подпись, «переслано», карточка вложения и курсор.
         val json = """
-            {"type":"media","peer":"$peer","id":7,"time":100,"kind":"video",
-             "blob_id":"bb22","mime":"video/mp4","name":"clip.mp4","size":900,
-             "duration_ms":12000,"width":1920,"height":1080,"thumb_id":"cc33",
-             "downloaded":false,"auto":false}
+            {"type":"message","chat":"$peer","group":false,
+             "msg":{"id":7,"sender":"$peer","text":"подпись","mine":false,"time":100,
+                    "status":"","kind":"video","blob_id":"bb22","mime":"video/mp4",
+                    "name":"clip.mp4","size":900,"duration_ms":12000,"width":1920,
+                    "height":1080,"thumb_id":"cc33","downloaded":false,"reply_to":0,
+                    "reply_sender":"","system":false,"fwd_from":"dd44","fwd_anon":false,
+                    "edited_at":0,"row":5}}
         """.trimIndent()
-        val ev = parseEvent(json) as EngineEvent.Media
-        assertEquals("bb22", ev.blobId)
-        assertEquals("cc33", ev.thumbId)
-        assertEquals(900L, ev.size)
-        assertEquals(12000, ev.durationMs)
-        assertEquals(1920, ev.width)
-        assertEquals(false, ev.auto)
+        val ev = parseEvent(json) as EngineEvent.MessageEv
+        assertEquals(peer, ev.chat)
+        assertEquals(false, ev.group)
+        val m = ev.msg.toModel()
+        assertEquals("подпись", m.text)
+        assertEquals("dd44", m.fwdFrom)
+        assertEquals("bb22", m.blobId)
+        assertEquals(900L, m.size)
+        assertEquals(5L, m.row)
+    }
+
+    @Test fun group_message_parses() {
+        val ev = parseEvent(
+            """{"type":"message","chat":"ff","group":true,"msg":{"id":3,"sender":"aa","text":"привет","system":true}}""",
+        ) as EngineEvent.MessageEv
+        assertTrue(ev.group)
+        assertEquals("привет", ev.msg.text)
+        assertTrue(ev.msg.system)
     }
 
     @Test fun tag_only_event_parses() {
         assertTrue(parseEvent("""{"type":"groups_changed"}""") is EngineEvent.GroupsChanged)
-    }
-
-    @Test fun group_msg_own_echo_has_only_gid_and_mine() {
-        // Своё групповое приходит короткой формой: остальные поля не сериализуются.
-        val ev = parseEvent("""{"type":"group_msg","gid":"ff","mine":true}""") as EngineEvent.GroupMsgEv
-        assertEquals("ff", ev.gid)
-        assertTrue(ev.mine)
-        assertEquals("", ev.text)
-    }
-
-    @Test fun group_media_carries_download_card_fields() {
-        // Групповое вложение приезжает вложенным объектом `media` — по нему рисуется
-        // карточка «скачать» ДО загрузки байт (крупное не тянется молча).
-        val json = """
-            {"type":"group_msg","gid":"ff","text":"подпись","sender":"aa","system":false,
-             "media":{"kind":"file","blob_id":"bb","mime":"video/mp4","name":"clip.mp4",
-                      "size":900,"duration_ms":12,"width":1,"height":2,"thumb_id":"cc",
-                      "downloaded":false,"auto":false}}
-        """.trimIndent()
-        val ev = parseEvent(json) as EngineEvent.GroupMsgEv
-        val md = ev.media!!
-        assertEquals("подпись", ev.text)
-        assertEquals("bb", md.blobId)
-        assertEquals(900L, md.size)
-        assertEquals("cc", md.thumbId)
-        assertEquals(false, md.auto)
-    }
-
-    @Test fun group_text_has_no_media_object() {
-        val ev = parseEvent("""{"type":"group_msg","gid":"ff","text":"привет","sender":"aa"}""")
-        assertEquals(null, (ev as EngineEvent.GroupMsgEv).media)
     }
 
     @Test fun unknown_event_type_is_not_a_crash() {

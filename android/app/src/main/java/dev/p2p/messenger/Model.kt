@@ -1220,7 +1220,7 @@ class AppModel private constructor() {
         }
         ops.execute {
             try {
-                val page = decodeList<GroupMsgDto>(
+                val page = decodeList<MessageDto>(
                     Native.groupHistoryPage(sessionPtr, gid, top.time, top.row),
                 ).map { it.toModel() }
                 if (page.isEmpty()) atChatStart += mark
@@ -1692,9 +1692,9 @@ class AppModel private constructor() {
         // Что меняет ПОСЛЕДНЕЕ сообщение чата или его статус — меняет и строку в
         // списке. Флаг, а не пересчёт на месте: он гасится один раз за пачку.
         when (ev) {
-            is EngineEvent.Text, is EngineEvent.Media, is EngineEvent.Ack,
+            is EngineEvent.MessageEv, is EngineEvent.Ack,
             is EngineEvent.Retracted, is EngineEvent.MessageEdited,
-            is EngineEvent.GroupMsgEv, EngineEvent.GroupsChanged,
+            EngineEvent.GroupsChanged,
             is EngineEvent.Undelivered,
             -> markSummariesDirty()
             else -> {}
@@ -1704,53 +1704,27 @@ class AppModel private constructor() {
                 online[ev.peer] = ev.online
                 if (contacts.none { it.key == ev.peer }) refreshContactsNow()
             }
-            is EngineEvent.Text -> {
-                if (contacts.none { it.key == ev.peer }) refreshContactsNow()
-                log(ev.peer).add(
-                    Message(
-                        ev.id,
-                        ev.text,
-                        mine = false,
-                        time = ev.time,
-                        status = "",
-                        replyTo = ev.replyTo,
-                        sender = ev.peer,
-                        // На проводе «чьё» едет флагом с точки зрения отправителя, и
-                        // движок его уже перевернул: true здесь значит «моё».
-                        replySender = if (ev.replyTo == 0L) {
-                            ""
-                        } else if (ev.replyMine) {
-                            me?.pubkey.orEmpty()
-                        } else {
-                            ev.peer
-                        },
-                    ),
-                )
-                if (currentChat != ev.peer) unread[ev.peer] = (unread[ev.peer] ?: 0) + 1
+            is EngineEvent.MessageEv -> {
+                val m = ev.msg.toModel()
+                if (!ev.group && contacts.none { it.key == ev.chat }) refreshContactsNow()
+                // Миниатюра — отдельный мелкий блоб: подтянем, если уже есть. Байты
+                // самого вложения лента возьмёт при показе.
+                m.thumbId.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
+                upsert(if (ev.group) groupLog(ev.chat) else log(ev.chat), m)
+                // Своё и системные строки (кто вошёл/вышел) непрочитанным не считаем:
+                // счётчик обещает сообщения, за которыми стоит человек.
+                if (!m.mine && !m.system) {
+                    if (ev.group) {
+                        if (currentGroup != ev.chat) groupUnread[ev.chat] = (groupUnread[ev.chat] ?: 0) + 1
+                    } else if (currentChat != ev.chat) {
+                        unread[ev.chat] = (unread[ev.chat] ?: 0) + 1
+                    }
+                }
             }
             // Собеседник отозвал своё сообщение: движок уже удалил его из истории,
             // здесь убираем из открытой ленты, чтобы не ждать перезахода в чат.
             is EngineEvent.Retracted -> {
                 messages[chatKey(ev.peer, group = false)]?.removeAll { it.id == ev.id && !it.mine }
-            }
-            // M2: входящее медиа (ссылка на блоб; байты подтянутся блоб-каналом).
-            is EngineEvent.Media -> {
-                if (contacts.none { it.key == ev.peer }) refreshContactsNow()
-                log(ev.peer).add(
-                    Message(
-                        id = ev.id, text = "", mine = false, time = ev.time, status = "",
-                        kind = ev.kind, blobId = ev.blobId, mime = ev.mime, name = ev.name,
-                        size = ev.size, durationMs = ev.durationMs,
-                        width = ev.width, height = ev.height,
-                        thumbId = ev.thumbId, downloaded = ev.downloaded,
-                        // Ответ вложением: ссылка «автор + id» (ADR-006) — цитату
-                        // лента рисует по своей истории.
-                        replyTo = ev.replyTo, replySender = ev.replySender,
-                    ),
-                )
-                // Миниатюра приходит отдельным мелким блобом — подтянем, если уже есть.
-                ev.thumbId.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
-                if (currentChat != ev.peer) unread[ev.peer] = (unread[ev.peer] ?: 0) + 1
             }
             is EngineEvent.Ack -> updateStatus(ev.peer, ev.id, "delivered")
             // Ретраи в памяти выдохлись, сообщение ждёт в очереди движка и уйдёт,
@@ -1841,6 +1815,14 @@ class AppModel private constructor() {
             is EngineEvent.BlobReceived -> {
                 downloads.remove(ev.id)
                 savedBlobs[ev.id] = true
+                // Пометка «скачано» — на месте во всех открытых лентах: блоб
+                // контент-адресный, один файл мог прийти в несколько чатов.
+                for (list in messages.values) {
+                    for (i in list.indices) {
+                        val m = list[i]
+                        if (m.blobId == ev.id && !m.downloaded) list[i] = m.copy(downloaded = true)
+                    }
+                }
                 if (contacts.any { it.avatarId == ev.id }) refreshContactsNow()
                 cacheBlob(ev.id)
             }
@@ -1864,52 +1846,6 @@ class AppModel private constructor() {
                     }
                 }
             }
-            is EngineEvent.GroupMsgEv -> {
-                if (ev.mine) {
-                    // Своё групповое медиа: blob_id считается от очищенных байт в
-                    // движке — перечитываем историю, чтобы показать верный хэш.
-                    if (currentGroup == ev.gid) loadGroupHistory(ev.gid)
-                } else if (currentGroup == ev.gid) {
-                    // Чат открыт — перечитываем историю целиком: id и ссылку ответа
-                    // знает движок, а событие их не несёт. Без этого свежее сообщение
-                    // нельзя было бы ни выделить, ни процитировать до перезахода.
-                    val md = ev.media
-                    if (md != null && md.downloaded) cacheBlob(md.blobId)
-                    md?.thumbId?.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
-                    loadGroupHistory(ev.gid)
-                } else {
-                    val md = ev.media
-                    // Вложение: байты берём из кэша, только если оно уже скачано —
-                    // крупное ждёт кнопки, и тянуть его «на всякий случай» нельзя.
-                    if (md != null && md.downloaded) cacheBlob(md.blobId)
-                    md?.thumbId?.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
-                    groupLog(ev.gid).add(
-                        Message(
-                            id = 0,
-                            status = "",
-                            text = ev.text,
-                            mine = false,
-                            time = System.currentTimeMillis() / 1000,
-                            sender = ev.sender,
-                            system = ev.system,
-                            kind = md?.kind ?: "text",
-                            blobId = md?.blobId.orEmpty(),
-                            mime = md?.mime.orEmpty(),
-                            name = md?.name.orEmpty(),
-                            size = md?.size ?: 0,
-                            durationMs = md?.durationMs ?: 0,
-                            width = md?.width ?: 0,
-                            height = md?.height ?: 0,
-                            thumbId = md?.thumbId.orEmpty(),
-                            downloaded = md?.downloaded ?: false,
-                        ),
-                    )
-                    // Системные строки (кто вошёл/вышел) непрочитанным не считаем:
-                    // счётчик обещает сообщения, за которыми стоит человек.
-                    if (!ev.system) groupUnread[ev.gid] = (groupUnread[ev.gid] ?: 0) + 1
-                }
-            }
-            // В группе отозвали сообщение — перечитываем ленту целиком.
             is EngineEvent.GroupRetracted -> loadGroupHistory(ev.gid)
             // Событие, которого этот клиент ещё не знает: молча пропускаем.
             EngineEvent.Unknown -> Unit
@@ -2342,7 +2278,7 @@ class AppModel private constructor() {
         // Флаг `downloaded` из истории уточняем фактом наличия блоба: своё вложение
         // и всё скачанное до появления флага иначе показывалось бы карточкой
         // «скачать». Проверка не читает байты — только наличие файла.
-        val list = decodeList<GroupMsgDto>(Native.groupHistory(sessionPtr, gid)).map { it.toModel() }
+        val list = decodeList<MessageDto>(Native.groupHistory(sessionPtr, gid)).map { it.toModel() }
             .map {
                 if (!it.downloaded && it.blobId.isNotEmpty() && Native.blobExists(sessionPtr, it.blobId)) {
                     it.copy(downloaded = true)
@@ -2359,6 +2295,16 @@ class AppModel private constructor() {
     private fun groupLog(gid: String): SnapshotStateList<Message> =
         messages.getOrPut(chatKey(gid, group = true)) { mutableListOf<Message>().toMutableStateList() }
 
+    /**
+     * Строка из события: уже есть в ленте (та же пара «автор + id» — например, лента
+     * успела перечитаться) — заменить на месте, иначе дописать в конец. Дубль
+     * недопустим: по этой паре лента держит ключи элементов.
+     */
+    private fun upsert(list: SnapshotStateList<Message>, m: Message) {
+        val i = list.indexOfFirst { it.id == m.id && it.sender == m.sender }
+        if (i >= 0) list[i] = m else list.add(m)
+    }
+
     fun inviteToGroup(gid: String, peerHex: String) = ops.execute { Native.groupInvite(sessionPtr, gid, peerHex) }
 
     private fun sendGroup(gid: String, text: String) {
@@ -2373,8 +2319,8 @@ class AppModel private constructor() {
                 reply?.id ?: 0,
                 reply?.sender.orEmpty(),
             )
-            // Ленту перечитает обработчик события от движка: команда исполняется в
-            // потоке-акторе, и сразу после возврата из JNI история ещё старая.
+            // Строку в ленту добавит событие `message` от движка: id сообщению
+            // присваивает поток-актор, и сразу после возврата из JNI его ещё нет.
         }
     }
 

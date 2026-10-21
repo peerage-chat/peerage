@@ -34,8 +34,8 @@ fn poll_texts(engine: &Engine, want: usize, timeout: Duration) -> Vec<String> {
     while Instant::now() < deadline && texts.len() < want {
         while let Some(js) = engine.poll_event() {
             let v: serde_json::Value = serde_json::from_str(&js).unwrap();
-            if v["type"] == "text" {
-                texts.push(v["text"].as_str().unwrap_or("").to_string());
+            if v["type"] == "message" && v["msg"]["kind"] == "text" {
+                texts.push(v["msg"]["text"].as_str().unwrap_or("").to_string());
             }
         }
         std::thread::sleep(Duration::from_millis(20));

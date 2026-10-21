@@ -223,7 +223,9 @@ internal fun ChatScreen(model: AppModel) {
             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
         ) {
             // Порядок элементов — от свежего к старому; i — индекс в хронологии.
-            items(msgs.size) { j ->
+            // Ключ — пара «автор + id»: состояние пузыря (просмотрщик, голосовое) и
+            // позиция прокрутки держатся за сообщение, а не за место в ленте.
+            items(msgs.size, key = { j -> msgs[msgs.size - 1 - j].let { "${it.sender}:${it.id}" } }) { j ->
                 val i = msgs.size - 1 - j
                 val m = msgs[i]
                 val prev = msgs.getOrNull(i - 1)
