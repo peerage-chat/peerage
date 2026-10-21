@@ -26,7 +26,7 @@ client yet, so there is currently no external service involved at all.
 | Rust (production code, excl. tests) | ≈17.4k lines in 12 crates (engine 6.0k, core 3.9k, androidjni 2.1k, messenger 1.5k, desktop 1.1k, blob 0.8k, …) |
 | Kotlin (Android client) | ≈18.6k lines |
 | Go (Yggdrasil wrapper, `libygg.so`) | ≈0.5k lines |
-| Rust tests | 236 passing tests: unit, property tests on parsers, and engine-level integration tests over an in-process transport double |
+| Rust tests | 238 passing tests: unit, property tests on parsers, and engine-level integration tests over an in-process transport double |
 | Android unit tests | 33 |
 | Design docs | 10 ADRs, protocol specification, threat model, internal crypto audit (2026-07-02), architecture invariants |
 
@@ -124,8 +124,8 @@ Code-level:
 - **The desktop client does not compile.** It predates the engine and still calls an
   old call API; `examples/call_signaling` has the same problem. Tests exclude it.
 - **No CI.** Tests are run by hand (`scripts/test-all.sh` in WSL).
-- **Test suite:** the full run on 2026-09-25 is green — 236 passed, 1 ignored (a test
-  that needs the public ntfy server). The same day it had been red: attachments
+- **Test suite:** the full run on 2026-10-21 is green — 238 passed, 1 ignored (a test
+  that needs the public ntfy server). On 2026-09-25 it had been red: attachments
   below 8 MiB were written with a plain `fs::write`, so a reader could see an empty or
   truncated file, and a crash mid-write left a stub that counted as "downloaded" and
   was never fetched again. Fixed by write-to-temp + rename.
@@ -151,10 +151,14 @@ Behaviour:
   admin (tolerant to partitions) is designed in [ADR-002](adr/ADR-002-group-message-ordering.md)
   but not implemented.
 - Calls: in rare cases one side's video stops mid-call (cause unknown, a redial fixes
-  it); video latency is ≈2 s on a cold start; the "Invite" button inside a call does
-  nothing yet; there is no active-speaker highlight.
-- The first message of a stranger is not replayed into the chat after their contact
-  request is accepted.
+  it); video latency is ≈2 s on a cold start. "Invite" works in group calls (rings the
+  members who are not in the room; fixed 2026-10-21); in a 1:1 call it is hidden,
+  because turning a 1:1 call into a group call is not designed yet. The speaking
+  participant is highlighted with a green frame.
+- Fixed 2026-10-21: the first message of a stranger is now kept with the contact
+  request and lands in the chat when the request is accepted (before, the sender got an
+  acknowledgement and the message was lost). Only text is kept; a first attachment is
+  still shown as a preview only.
 - One identity = one device. A second device cannot be added (N12).
 
 ## 8. What is left

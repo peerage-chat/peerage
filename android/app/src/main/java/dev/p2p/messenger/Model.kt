@@ -1971,13 +1971,19 @@ class AppModel private constructor() {
         }
     }
 
-    /** Принять входящий DM-звонок с ПРЕСЕТОМ своего mic/video (выбор join'ера до
-     *  входа, НЕ флаги звонящего). Дефолт — мик вкл, видео выкл. */
+    /** Принять входящий звонок с ПРЕСЕТОМ своего mic/video (выбор join'ера до
+     *  входа, НЕ флаги звонящего). Дефолт — мик вкл, видео выкл. Зовут либо в
+     *  личную комнату, либо в комнату группы — туда и входим. */
     fun acceptDmCall(audio: Boolean = true, video: Boolean = false) {
         val ic = incomingCall ?: return
         incomingCall = null
         val ctx = appContext ?: return
         IncomingCallReceiver.cancel(ctx)
+        if (isGroupRoom(ic.roomId)) {
+            muted = !audio
+            joinRoom(ic.roomId, audio, video)
+            return
+        }
         val name = contacts.firstOrNull { it.key == ic.peer }?.displayName ?: ""
         muted = !audio // мик-пресет → стартовое состояние мьюта
         ops.execute {
@@ -1996,7 +2002,43 @@ class AppModel private constructor() {
         val ic = incomingCall ?: return
         incomingCall = null
         appContext?.let { IncomingCallReceiver.cancel(it) }
-        ops.execute { Native.roomDeclineDm(sessionPtr, ic.peer) }
+        if (isGroupRoom(ic.roomId)) {
+            ops.execute { Native.roomDeclineGroup(sessionPtr) }
+        } else {
+            ops.execute { Native.roomDeclineDm(sessionPtr, ic.peer) }
+        }
+    }
+
+    /** Комната — групповая (её id = gid группы), а не личная. */
+    fun isGroupRoom(roomId: String): Boolean = groups.any { it.gid == roomId }
+
+    /** Кого из группы можно позвать в текущую комнату: ростер минус те, кто уже тут.
+     *  В личном звонке звать некого — там нет ростера. */
+    fun ringCandidates(): List<String> {
+        val gid = currentRoom ?: return emptyList()
+        if (dmCallPeer != null) return emptyList()
+        val here = roomMembers.map { it.peer }.toSet()
+        return (groupMemberKeys[gid] ?: emptyList()).filter { it !in here }
+    }
+
+    /** Позвать выбранных участников группы в текущую комнату. */
+    fun ringIntoRoom(peers: List<String>) {
+        val gid = currentRoom ?: return
+        if (peers.isEmpty()) return
+        val audio = !muted
+        val video = videoActive
+        ops.execute {
+            val sent = Native.roomRing(sessionPtr, gid, peers.joinToString(","), audio, video)
+            val ctx = appContext ?: return@execute
+            val text = if (sent > 0) {
+                ctx.resources.getQuantityString(R.plurals.call_ring_sent, sent, sent)
+            } else {
+                ctx.getString(R.string.call_ring_failed)
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(ctx, text, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     /** Создать аудио-сессию комнаты (Opus-битрейт/режим + fx + устройство из настроек).

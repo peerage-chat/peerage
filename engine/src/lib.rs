@@ -285,6 +285,14 @@ struct GroupCache {
     invites: String,
 }
 
+/// Текущий звонок в журнале: запись, время старта, направление и комната.
+struct ActiveCall {
+    id: i64,
+    started: i64,
+    incoming: bool,
+    room: Vec<u8>,
+}
+
 /// Состояние сессии приложения — корень контракта движок↔клиент.
 pub struct Engine {
     messenger: Arc<Messenger>,
@@ -310,8 +318,8 @@ pub struct Engine {
     outbox: Mutex<p2p_core::outbox::OutboxManager>,
     /// Журнал звонков (локальный) + id текущего активного звонка и время старта.
     calls: Mutex<p2p_core::store::CallStore>,
-    /// (id записи, время старта, входящий ли) — активных звонков не бывает больше одного.
-    active_call: Mutex<Option<(i64, i64, bool)>>,
+    /// Текущий звонок — активных звонков не бывает больше одного.
+    active_call: Mutex<Option<ActiveCall>>,
     /// Запрошенные пользователем вложения — докачиваем сами, когда пир в сети.
     wanted: Mutex<p2p_core::store::WantedStore>,
     /// Единый бюджет (M3): тир каждого известного пира. Читают ingress-лимитер
@@ -1856,18 +1864,25 @@ impl Engine {
         // «Отклонён» — исход только ВХОДЯЩЕГО: отклонить может лишь принимающая
         // сторона. Свой же исходящий, который я сам и завершил, отклонённым не был —
         // он остаётся «не дозвонился».
-        if let Some((id, _, true)) = *self.active_call.lock_safe() {
-            self.calls.lock_safe().set_outcome(id, "declined");
-            *self.active_call.lock_safe() = None;
+        self.decline_incoming();
+    }
+
+    /// Пометить текущий ВХОДЯЩИЙ звонок отклонённым и закрыть его.
+    fn decline_incoming(&self) {
+        let mut ac = self.active_call.lock_safe();
+        if let Some(c) = ac.as_ref().filter(|c| c.incoming) {
+            self.calls.lock_safe().set_outcome(c.id, "declined");
+            *ac = None;
         }
     }
 
     /// Принять DM-звонок: войти в комнату с регистрацией dm_peer. Возвращает room_id.
     pub fn room_join_dm(&self, peer: [u8; 32], audio: bool, video: bool) -> Vec<u8> {
         let room_id = p2p_core::dm_room_id(&self.me_pub, &peer);
-        match *self.active_call.lock_safe() {
+        let active = self.active_call.lock_safe().as_ref().map(|c| c.id);
+        match active {
             // Входящий, который мы приняли: запись уже заведена на RoomInvite.
-            Some((id, _, _)) => self.calls.lock_safe().set_outcome(id, "answered"),
+            Some(id) => self.calls.lock_safe().set_outcome(id, "answered"),
             None => self.begin_call(&peer, &room_id, true, "answered"),
         }
         let flags = av_flags(audio, video);
@@ -1880,7 +1895,37 @@ impl Engine {
         room_id
     }
 
+    /// Позвать участников группы в её комнату: каждому RoomInvite с room_id = gid.
+    /// Ключи вне ростера отбрасываются — звать в группу можно только её членов.
+    /// Возвращает, скольким ушло приглашение.
+    pub fn room_ring(&self, gid: &[u8], peers: &[[u8; 32]], audio: bool, video: bool) -> usize {
+        let roster = self.group_roster_set(gid);
+        peers
+            .iter()
+            .filter(|p| roster.contains(*p))
+            .filter(|p| self.messenger.send_room_invite(p, gid, audio, video).is_ok())
+            .count()
+    }
+
+    /// Пропускать ли входящий RoomInvite: наша DM-комната с этим пиром или комната
+    /// группы, в ростере которой он есть.
+    fn room_invite_allowed(&self, peer: &[u8; 32], room_id: &[u8]) -> bool {
+        room_id == p2p_core::dm_room_id(&self.me_pub, peer).as_slice()
+            || self.group_roster_set(room_id).contains(peer)
+    }
+
+    /// Отклонить приглашение в комнату группы. Звонящему ничего не шлём: он уже в
+    /// комнате и сидит там дальше, «сбросить» ему нечего. Только журнал.
+    pub fn room_decline_group(&self) {
+        self.decline_incoming();
+    }
+
     pub fn room_join(&self, gid: Vec<u8>, audio: bool, video: bool) {
+        // Вход по приглашению: запись заведена на RoomInvite как пропущенная. Комнату
+        // сверяем, чтобы не «ответить» на давно пропущенный звонок из другой.
+        if let Some(c) = self.active_call.lock_safe().as_ref().filter(|c| c.incoming && c.room == gid) {
+            self.calls.lock_safe().set_outcome(c.id, "answered");
+        }
         self.rooms.lock_safe().joined.insert(gid, av_flags(audio, video));
         let _ = self.jobs.send(Job::Beacon);
     }
@@ -1900,14 +1945,14 @@ impl Engine {
         let now = now();
         let id = self.calls.lock_safe().start(peer, gid, incoming, outcome, now);
         if id >= 0 {
-            *self.active_call.lock_safe() = Some((id, now, incoming));
+            *self.active_call.lock_safe() = Some(ActiveCall { id, started: now, incoming, room: gid.to_vec() });
         }
     }
 
     /// Закрыть активную запись: проставить длительность.
     fn end_call(&self) {
-        let Some((id, started, _)) = self.active_call.lock_safe().take() else { return };
-        self.calls.lock_safe().finish(id, now() - started);
+        let Some(c) = self.active_call.lock_safe().take() else { return };
+        self.calls.lock_safe().finish(c.id, now() - c.started);
     }
 
     /// Заметка себе («Сохранённое»). Хранится как обычное сообщение в чате с самим
@@ -2705,8 +2750,17 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             push_event(engine, dto::UiEvent::Undelivered { peer: hex::encode(peer), id });
         }
         Event::RoomInvite { peer, room_id, audio, video } => {
+            // Звать можно либо в нашу общую DM-комнату, либо в комнату группы, где
+            // звонящий состоит. Иначе любой знающий наш ключ звонил бы «в группу»,
+            // которой нет, — входящий экран без шанса что-то принять.
+            // Мы уже в этой комнате — звать некуда, а запись о звонке затёрла бы текущую.
+            if !engine.room_invite_allowed(&peer, &room_id)
+                || engine.rooms.lock_safe().joined.contains_key(&room_id)
+            {
+                return;
+            }
             // Заводим сразу как пропущенный: если пользователь ответит, исход
-            // поднимется в room_join_dm, если откажется — в room_decline_dm.
+            // поднимется в room_join(_dm), если откажется — в room_decline_*.
             engine.begin_call(&peer, &room_id, true, "missed");
             push_event(engine, dto::UiEvent::RoomInvite {
                 peer: hex::encode(peer),
@@ -2933,8 +2987,8 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             // состоялся. Без этого «позвонил и поговорил» осталось бы в журнале
             // как «не дозвонился».
             if !left {
-                if let Some((id, _, _)) = *engine.active_call.lock_safe() {
-                    engine.calls.lock_safe().set_outcome(id, "answered");
+                if let Some(c) = engine.active_call.lock_safe().as_ref() {
+                    engine.calls.lock_safe().set_outcome(c.id, "answered");
                 }
             }
             push_event(engine, dto::UiEvent::RoomPresence {

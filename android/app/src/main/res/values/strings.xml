@@ -37,6 +37,17 @@
         <item quantity="one">and %d more in the room</item>
         <item quantity="other">and %d more in the room</item>
     </plurals>
+    <string name="call_invite_group_subtitle">calls you to %1$s</string>
+
+    <!-- ── Call: inviting group members (from inside a call) ───────────── -->
+    <string name="call_ring_title">Invite to the call</string>
+    <string name="call_ring_empty">Everyone in the group is already here</string>
+    <string name="call_ring_btn">Invite</string>
+    <string name="call_ring_failed">Couldn\'t send the invitation</string>
+    <plurals name="call_ring_sent">
+        <item quantity="one">Invited %d person</item>
+        <item quantity="other">Invited %d people</item>
+    </plurals>
 
     <!-- ── Share setup (long-press Video) ──────────────────────────────── -->
     <string name="share_title">Share video</string>

@@ -12,8 +12,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -29,6 +31,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
@@ -53,20 +57,19 @@ import dev.p2p.messenger.ui.rememberPermissionRunner
 /**
  * Экран активного звонка-комнаты (Discord-style сетка). Дизайн — docs/design/call-ui.md.
  *
- * Тайл = ОДИН компонент: показывает живое видео (`SurfaceView` + приёмник) если у
- * участника видео и есть свободный декодер, иначе аватар. Своё видео НЕ
- * декодируется (тайл «Вы» пока аватар; превью с камеры — следующий шаг). `key(peer)`
- * стабилизирует surface через перерисовки → нет тёрки декодеров. UI (chrome)
- * рисуется ПОВЕРХ неподвижной сетки, тап скрывает его.
+ * Тайл = ОДИН компонент: живое видео (`TextureView` + приёмник) если у участника
+ * видео, иначе аватар; у себя — превью с камеры. `key(peer)` стабилизирует surface
+ * через перерисовки → нет тёрки декодеров. UI (chrome) рисуется ПОВЕРХ неподвижной
+ * сетки, тап скрывает его. Говорящий — зелёная рамка (`speakingPeers`).
  *
- * Active-speaker (зелёная рамка, свап декодеров с гистерезисом, пиннинг),
- * чип трафика и оверфлоу «+N» — отдельные шаги; на малом N не нужны.
+ * Свап декодеров с гистерезисом, пиннинг и оверфлоу «+N» — на малом N не нужны.
  */
 @Composable
 fun RoomCallScreen(model: AppModel, peerKey: String) {
     val remotes = model.roomMembers
     var chrome by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
+    var showRing by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf<String?>(null) }
 
     // тайлы: удалённые участники + ты (последним)
@@ -150,10 +153,11 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
             }
             // низ: панель управления (выше системной навигации)
             Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 18.dp)) {
-                ControlBar(model, peerKey)
+                ControlBar(model, onInvite = { showRing = true })
             }
         }
         if (showSettings) CallSettings(model) { showSettings = false }
+        if (showRing) RingSheet(model) { showRing = false }
         if (model.showVideoShare) ShareVideoScreen(model)
         if (model.showAudioSettings) AudioSettingsScreen(model)
     }
@@ -517,8 +521,95 @@ internal fun applyTextureTransform(view: TextureView, bufW: Int, bufH: Int, rota
     view.setTransform(m)
 }
 
+/** «Позвать в звонок»: участники группы, которых нет в комнате, с отметками. Оверлей
+ *  в стиле настроек звонка; тап по фону не закрывает (только крестик). */
 @Composable
-private fun ControlBar(model: AppModel, peerKey: String) {
+private fun RingSheet(model: AppModel, onClose: () -> Unit) {
+    // Ростер мог ещё не прийти в кэш модели — подтянуть при открытии.
+    LaunchedEffect(Unit) { model.currentRoom?.let { model.loadGroupMembers(it) } }
+    val candidates = model.ringCandidates()
+    var picked by remember { mutableStateOf(emptySet<String>()) }
+    Column(
+        Modifier.fillMaxSize().background(Tokens.Colors.overlay).clickable(enabled = false) {}
+            .statusBarsPadding().navigationBarsPadding().padding(horizontal = 18.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.call_ring_title),
+                color = Color.White,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                Modifier.clip(CircleShape).background(Tokens.Colors.glass).size(36.dp).clickable { onClose() },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Close, stringResource(R.string.call_close), tint = Color.White, modifier = Modifier.size(18.dp)) }
+        }
+        if (candidates.isEmpty()) {
+            Text(
+                stringResource(R.string.call_ring_empty),
+                color = HoloSecondary,
+                fontSize = 15.sp,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            return@Column
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            candidates.forEach { peer ->
+                val on = peer in picked
+                val name = model.peerName(peer)
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip))
+                        .clickable { picked = if (on) picked - peer else picked + peer }
+                        .background(if (on) Tokens.Colors.accentMuted else Tokens.Colors.tile)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Avatar(name, 36)
+                    Text(
+                        name,
+                        color = if (on) HoloAccent else Color.White,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Checkbox(
+                        checked = on,
+                        onCheckedChange = { picked = if (on) picked - peer else picked + peer },
+                        colors = CheckboxDefaults.colors(checkedColor = HoloAccent, uncheckedColor = HoloSecondary),
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+        }
+        Box(
+            Modifier.fillMaxWidth().padding(vertical = 14.dp).clip(RoundedCornerShape(Tokens.Radius.button))
+                .background(if (picked.isEmpty()) Tokens.Colors.tile else HoloAccent)
+                .clickable(enabled = picked.isNotEmpty()) {
+                    model.ringIntoRoom(picked.toList())
+                    onClose()
+                }
+                .padding(vertical = 14.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                stringResource(R.string.call_ring_btn),
+                color = if (picked.isEmpty()) HoloSecondary else HoloAccentDark,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ControlBar(model: AppModel, onInvite: () -> Unit) {
     Row(
         Modifier.clip(RoundedCornerShape(Tokens.Radius.pill)).background(Tokens.Colors.barScrim)
             .padding(horizontal = 12.dp, vertical = 9.dp),
@@ -527,7 +618,11 @@ private fun ControlBar(model: AppModel, peerKey: String) {
     ) {
         // Камера нужна только при ВКЛЮЧЕНИИ видео; выключение разрешения не требует.
         val runWithPerm = rememberPermissionRunner()
-        CtlButton(Icons.Filled.PersonAdd, stringResource(R.string.call_btn_invite), Tokens.Colors.btnNeutral) {}
+        // Звать можно только в групповой звонок: у личного нет ростера, а превращение
+        // его в групповой — отдельная механика.
+        if (model.dmCallPeer == null) {
+            CtlButton(Icons.Filled.PersonAdd, stringResource(R.string.call_btn_invite), Tokens.Colors.btnNeutral) { onInvite() }
+        }
         CtlButton(
             if (model.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
             stringResource(R.string.call_btn_mic),

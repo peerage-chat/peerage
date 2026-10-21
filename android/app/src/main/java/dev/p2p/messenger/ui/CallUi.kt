@@ -246,8 +246,13 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                 }
                 Spacer(Modifier.height(20.dp))
                 Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+                val groupName = model.groups.firstOrNull { it.gid == ic.roomId }?.name
                 Text(
-                    stringResource(R.string.call_invite_subtitle),
+                    if (groupName != null) {
+                        stringResource(R.string.call_invite_group_subtitle, groupName)
+                    } else {
+                        stringResource(R.string.call_invite_subtitle)
+                    },
                     color = HoloSecondary,
                     fontSize = 15.sp,
                     modifier = Modifier.padding(top = 8.dp),

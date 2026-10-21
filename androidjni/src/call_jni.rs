@@ -112,6 +112,41 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomLeave<'local>(
     });
 }
 
+/// Позвать участников группы в её комнату. `peers_csv` — hex-ключи через запятую.
+/// Возвращает, скольким ушло приглашение (ключи вне ростера не считаются).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomRing<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    peers_csv: JString<'local>,
+    audio: jboolean,
+    video: jboolean,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        let gid = gid_or!(env, gid_hex, 0);
+        let csv = jstr(&mut env, &peers_csv);
+        let peers: Vec<[u8; 32]> =
+            csv.split(',').map(str::trim).filter(|s| !s.is_empty()).filter_map(parse_key).collect();
+        e.room_ring(&gid, &peers, audio != JNI_FALSE, video != JNI_FALSE) as jint
+    })
+}
+
+/// Отклонить приглашение в комнату группы (только журнал, звонящему ничего).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_roomDeclineGroup<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        e.room_decline_group();
+    });
+}
+
 /// Текущие участники комнаты `gid`: JSON [{peer,audio,video}].
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(

@@ -29,6 +29,19 @@
         <item quantity="many">и ещё %d в комнате</item>
         <item quantity="other">и ещё %d в комнате</item>
     </plurals>
+    <string name="call_invite_group_subtitle">зовёт в %1$s</string>
+
+    <!-- ── Звонок: позвать участников группы (изнутри звонка) ──────────── -->
+    <string name="call_ring_title">Позвать в звонок</string>
+    <string name="call_ring_empty">Все участники группы уже здесь</string>
+    <string name="call_ring_btn">Позвать</string>
+    <string name="call_ring_failed">Не удалось отправить приглашение</string>
+    <plurals name="call_ring_sent">
+        <item quantity="one">Позвали %d участника</item>
+        <item quantity="few">Позвали %d участников</item>
+        <item quantity="many">Позвали %d участников</item>
+        <item quantity="other">Позвали %d участника</item>
+    </plurals>
 
     <!-- ── Экран шаринга (долгий тап «Видео») ──────────────────────────── -->
     <string name="share_title">Показать видео</string>

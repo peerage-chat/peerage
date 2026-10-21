@@ -401,6 +401,13 @@ object Native {
     /** Принять DM-звонок: войти в комнату с регистрацией dm_peer. Возвращает room_id hex. */
     external fun roomJoinDm(sessionPtr: Long, peerHex: String, audio: Boolean, video: Boolean): String
 
+    /** Позвать участников группы в её комнату; peersCsv — hex-ключи через запятую.
+     *  Возвращает, скольким ушло приглашение. */
+    external fun roomRing(sessionPtr: Long, gid: String, peersCsv: String, audio: Boolean, video: Boolean): Int
+
+    /** Отклонить приглашение в комнату группы (звонящему ничего не уходит). */
+    external fun roomDeclineGroup(sessionPtr: Long)
+
     /** Войти в комнату gid: слать маячок присутствия с A/V-флагами. */
     external fun roomJoin(sessionPtr: Long, gid: String, audio: Boolean, video: Boolean)
 
