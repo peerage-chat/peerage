@@ -53,7 +53,7 @@ fn transfer_with(content: &[u8], drop_every: u32, limits: Limits) -> Completed {
         while let Ok(ev) = b_rx.try_recv() {
             match ev {
                 Event::BlobManifest { peer, manifest } => {
-                    if let Some(done) = b.on_manifest(peer, &manifest) {
+                    if let Some(done) = b.on_manifest(peer, p2p_blob::Manifest::from_json(&manifest).unwrap()) {
                         return done;
                     }
                 }
@@ -65,8 +65,8 @@ fn transfer_with(content: &[u8], drop_every: u32, limits: Limits) -> Completed {
                         return done;
                     }
                 }
-                Event::BlobChunk { id, index, data, .. } => {
-                    if let Some(done) = b.on_chunk(&id, index, &data) {
+                Event::BlobChunk { peer, id, index, data } => {
+                    if let Some(done) = b.on_chunk(peer, &id, index, &data) {
                         return done;
                     }
                 }
@@ -134,4 +134,65 @@ fn large_blob_streams_to_disk() {
     // И читается обратно байт-в-байт (потоково, по чанкам).
     let restored = p2p_blob::disk::read_all(&path, |b| p2p_core::vault::open(b).ok()).unwrap();
     assert_eq!(restored, content, "потоково собранный блоб восстановлен точно");
+}
+
+/// Пара менеджеров в общей сети без обслуживания: тест сам решает, когда отвечать.
+fn pair(limits: Limits) -> (BlobManager, std::sync::mpsc::Receiver<Event>, BlobManager, std::sync::mpsc::Receiver<Event>, [u8; 32]) {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(50), id(60));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
+    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), Config::default());
+    let dir = std::env::temp_dir().join(format!(
+        "p2p-blobpair-{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    std::mem::forget(net);
+    let a = BlobManager::new(Arc::new(a_msgr), limits, dir.join("a"));
+    let b = BlobManager::new(Arc::new(b_msgr), limits, dir.join("b"));
+    (a, a_rx, b, b_rx, b_key)
+}
+
+/// Передать B все части манифеста, пришедшие ему за `secs`.
+fn feed_manifest(b: &mut BlobManager, b_rx: &std::sync::mpsc::Receiver<Event>, secs: u64) {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < deadline {
+        while let Ok(ev) = b_rx.try_recv() {
+            if let Event::BlobManifestPart { peer, id, mime, size, part, total, hashes } = ev {
+                b.on_manifest_part(peer, &id, &mime, size, part, total, &hashes);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// R-021: докачка запрашивает окно чанков, а не все разом.
+#[test]
+fn download_asks_one_window_at_a_time() {
+    let (mut a, a_rx, mut b, b_rx, b_key) = pair(Limits::default());
+    let content: Vec<u8> = (0..p2p_blob::CHUNK_SIZE * 150).map(|i| (i * 3) as u8).collect();
+    a.offer(b_key, &content, "application/octet-stream");
+    feed_manifest(&mut b, &b_rx, 1);
+    // A молчит — считаем, сколько B попросил.
+    std::thread::sleep(Duration::from_millis(300));
+    let mut asked = std::collections::HashSet::new();
+    while let Ok(ev) = a_rx.try_recv() {
+        if let Event::BlobRequest { index, .. } = ev {
+            asked.insert(index);
+        }
+    }
+    assert_eq!(asked.len(), 64, "в полёте ровно окно, а не все 150 чанков");
+}
+
+/// R-025: блоб больше предела не качается молча — менеджер сообщает почему.
+#[test]
+fn oversized_blob_reports_failure() {
+    let (mut a, _a_rx, mut b, b_rx, b_key) = pair(Limits::with_max_size(100_000));
+    let content = vec![1u8; 200_000];
+    let id = a.offer(b_key, &content, "video/mp4");
+    feed_manifest(&mut b, &b_rx, 1);
+    let failures = b.take_failures();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].0, id);
+    assert_eq!(failures[0].1, p2p_engine::blobs::Failure::TooLarge);
 }

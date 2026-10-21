@@ -5192,6 +5192,7 @@ name = "p2p-engine"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "libc",
  "log",
  "p2p-blob",
  "p2p-core",

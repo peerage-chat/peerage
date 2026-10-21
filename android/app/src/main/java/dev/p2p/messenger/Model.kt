@@ -1800,6 +1800,17 @@ class AppModel private constructor() {
             is EngineEvent.BlobProgress -> {
                 if (ev.total > 0) downloads[ev.id] = ev.done / ev.total.toFloat()
             }
+            // Докачка не началась — карточка снова предлагает «Скачать», а человек
+            // узнаёт причину, а не смотрит на вечный кружок.
+            is EngineEvent.BlobFailed -> {
+                downloads.remove(ev.id)
+                val msg = if (ev.reason == "no_space") R.string.download_no_space else R.string.download_too_large
+                appContext?.let { ctx ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        android.widget.Toast.makeText(ctx, ctx.getString(msg), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
             // Докачался блоб: аватар контакта — перечитать контакты; вложение чата —
             // положить байты в реактивный кэш (пузырь перерисуется).
             is EngineEvent.BlobReceived -> {

@@ -96,7 +96,6 @@ pub(crate) enum Job {
     /// Предложить блоб пиру (M2): сохранить локально + анонсировать манифест.
     BlobOffer { peer: [u8; 32], content: Vec<u8>, mime: String },
     /// Отдать блоб ФАЙЛОМ: манифест посчитан потоково, чанки читаются с диска.
-    BlobOfferFile { peer: [u8; 32], path: PathBuf, manifest: p2p_blob::Manifest },
     /// Отправить медиа-вложение в группу (M2): scrub → сохранить → MLS-ссылка всем +
     /// push блоба каждому участнику. В одном Job (нужны и группы, и BlobManager).
     GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String, info: MediaInfo },
@@ -112,6 +111,10 @@ const AUTO_DOWNLOAD_LIMIT: u64 = 2 * 1024 * 1024;
 /// На сколько поднимаем ingress-бюджет пира после явного «скачать». Продлевается
 /// каждым новым запросом, поэтому длинная докачка не обрывается на середине.
 const BLOB_BOOST_FOR: Duration = Duration::from_secs(120);
+
+/// Сколько ждём манифест на свой запрос. Дольше — ответ уже не наш: повторный
+/// запрос (докачка по кнопке, возвращение пира) заведёт ожидание заново.
+const BLOB_EXPECT_TTL: Duration = Duration::from_secs(600);
 
 /// Метаданные вложения, известные отправителю (их извлекает клиент: на Android —
 /// `MediaMetadataRetriever`). Нужны, чтобы карточка была информативной до скачивания.
@@ -311,6 +314,9 @@ pub struct Engine {
     jobs: Sender<Job>,
     room_call: Mutex<Option<RoomCall>>,
     rooms: Mutex<RoomState>,
+    /// Блобы, которые мы сами попросили: id → (у кого, когда). Манифест чего-то
+    /// другого — это файл без спроса, его не качаем (R-020).
+    blob_expect: Mutex<HashMap<p2p_blob::Hash, ([u8; 32], Instant)>>,
     bench: Mutex<Option<Arc<BenchRecv>>>,
     /// Каталог хранения блобов (контент по hex-id). M2.
     blob_dir: PathBuf,
@@ -784,18 +790,13 @@ impl Engine {
         let hash = p2p_blob::blob_id(&bytes);
         let kind = Self::media_kind(mime);
         let size = bytes.len() as u64;
-        // Миниатюру (если есть) сохраняем и пушим всегда — она мелкая, ради неё карточка.
+        // Миниатюру сохраняем; ни её, ни сам файл не толкаем: получатель запросит
+        // по хэшу из сообщения — миниатюру и мелкое сразу, крупное по кнопке.
         let thumb_hash = info.thumb.as_ref().map(|t| {
             let h = p2p_blob::blob_id(t);
             self.store_blob(h, t);
-            self.blob_offer(*key, t.clone(), "image/jpeg".to_string());
             h
         });
-        // Крупный блоб НЕ пушим: получатель сам запросит его по хэшу, когда решит
-        // скачать. Мелкое (фото/голосовое) отдаём сразу — его ждут немедленно.
-        if size < AUTO_DOWNLOAD_LIMIT {
-            self.blob_offer(*key, bytes.clone(), mime.to_string());
-        }
         // Сохраняем локально, чтобы показывать своё вложение сразу и после рестарта.
         self.store_blob(hash, &bytes);
         let id_hex = hex::encode(hash);
@@ -853,6 +854,10 @@ impl Engine {
         info: MediaInfo,
     ) -> Option<i64> {
         let manifest = p2p_blob::manifest_of_file(path, mime.to_string()).ok()?;
+        // Больше предела приёма не примет ни один получатель — не отправляем вовсе.
+        if manifest.size > p2p_blob::Limits::default().max_size {
+            return None;
+        }
         let hash = manifest.id;
         let size = manifest.size;
         let id_hex = hex::encode(hash);
@@ -860,24 +865,15 @@ impl Engine {
 
         // Своя копия — тем же потоком, чанками и зашифрованной at-rest. Без неё
         // отправитель не сможет ни показать вложение, ни дослать его после рестарта.
-        if self.blob_read(&id_hex).is_none() {
+        if !self.blob_exists(&id_hex) {
             self.store_blob_streamed(path, &manifest).ok()?;
         }
 
         let thumb_hash = info.thumb.as_ref().map(|t| {
             let h = p2p_blob::blob_id(t);
             self.store_blob(h, t);
-            self.blob_offer(*key, t.clone(), "image/jpeg".to_string());
             h
         });
-        // Крупное не пушим — получатель запросит сам; мелкое отдаём сразу.
-        if size < AUTO_DOWNLOAD_LIMIT {
-            let _ = self.jobs.send(Job::BlobOfferFile {
-                peer: *key,
-                path: path.to_path_buf(),
-                manifest: manifest.clone(),
-            });
-        }
         let meta = p2p_messenger::MediaMeta {
             fwd_from: String::new(),
             fwd_anon: false,
@@ -930,7 +926,7 @@ impl Engine {
     /// манифест по хэшу — дальше обычная докачка чанков; готовность придёт событием
     /// `blob_received`. Идемпотентно: если блоб уже есть, ничего не делаем.
     pub fn download_media(&self, peer: &[u8; 32], blob_id_hex: &str) -> bool {
-        if self.blob_read(blob_id_hex).is_some() {
+        if self.blob_exists(blob_id_hex) {
             return true; // уже скачано
         }
         let Ok(hash) = hex::decode(blob_id_hex.trim()) else { return false };
@@ -942,7 +938,8 @@ impl Engine {
         // своим же анти-флуд бюджетом бессмысленно (иначе 64 МБ ехали бы полторы
         // минуты). Поднимаем лимит адресно: только этому пиру и только пока качаем.
         self.messenger.boost_peer(peer, BLOB_BOOST_FOR);
-        self.messenger.request_blob_manifest(peer, &hash).is_ok()
+        self.request_blob(peer, &hash);
+        true
     }
 
     /// hex-id вложений, докачка которых заказана пользователем и ещё не закончена.
@@ -966,15 +963,31 @@ impl Engine {
 
     fn resume_wanted(&self, peer: &[u8; 32]) {
         for w in self.wanted.lock_safe().for_peer(peer) {
-            if self.blob_read(&w.blob_id).is_some() {
+            if self.blob_exists(&w.blob_id) {
                 let _ = self.wanted.lock_safe().remove(&w.blob_id);
                 continue;
             }
             if let Ok(hash) = hex::decode(&w.blob_id) {
                 self.messenger.boost_peer(peer, BLOB_BOOST_FOR);
-                let _ = self.messenger.request_blob_manifest(peer, &hash);
+                self.request_blob(peer, &hash);
             }
         }
+    }
+
+    /// Попросить у пира манифест блоба и запомнить, что ждём его именно от него.
+    /// Единственный путь, которым в нас попадает чужой блоб.
+    pub(crate) fn request_blob(&self, peer: &[u8; 32], hash: &[u8]) {
+        let Ok(id) = <[u8; 32]>::try_from(hash) else { return };
+        self.blob_expect.lock_safe().insert(id, (*peer, Instant::now()));
+        let _ = self.messenger.request_blob_manifest(peer, hash);
+    }
+
+    /// Ждём ли блоб `id` от `peer`.
+    fn blob_expected(&self, peer: &[u8; 32], id: &[u8]) -> bool {
+        let Ok(id) = <[u8; 32]>::try_from(id) else { return false };
+        let mut ex = self.blob_expect.lock_safe();
+        ex.retain(|_, (_, at)| at.elapsed() < BLOB_EXPECT_TTL);
+        ex.get(&id).is_some_and(|(p, _)| p == peer)
     }
 
     pub fn connect(&self, key: [u8; 32]) {
@@ -2286,9 +2299,6 @@ fn event_pump(
         match job_rx.recv_timeout(Duration::from_millis(500)) {
             Ok(Job::Ev(ev)) => handle_event(&engine, &mut groups, &mut blobs, ev),
             Ok(Job::Cmd(cmd)) => handle_cmd(&engine, &mut groups, cmd),
-            Ok(Job::BlobOfferFile { peer, path, manifest }) => {
-                blobs.offer_file(peer, manifest, path);
-            }
             Ok(Job::BlobOffer { peer, content, mime }) => {
                 // Сохраняем свой блоб локально (чтобы отправитель тоже его показывал)
                 // и анонсируем манифест — докачку ведёт получатель.
@@ -2327,15 +2337,9 @@ fn event_pump(
                     height: info.height,
                     thumb: thumb_hex,
                 };
-                // MLS-ссылка всем; байты — только мелкие. Крупное участник запросит
-                // сам по кнопке: пуш «всем сразу» означал бы, что отправитель решает
-                // за пятерых, тратить ли им трафик на видео (в DM так уже нельзя).
+                // MLS-ссылка всем; байты каждый участник запросит сам — мелкое
+                // сразу, крупное по кнопке.
                 if groups.send_media(&gid, &media) {
-                    if size < AUTO_DOWNLOAD_LIMIT {
-                        for m in &members {
-                            blobs.offer(*m, &bytes, &mime);
-                        }
-                    }
                     push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
                 }
             }
@@ -2343,11 +2347,14 @@ fn event_pump(
                 // Потоковый путь: ни манифест, ни отдача чанков не поднимают файл в
                 // память. Картинки сюда не приходят — им нужен scrub целиком.
                 let Ok(manifest) = p2p_blob::manifest_of_file(&path, mime.clone()) else { continue };
+                if manifest.size > p2p_blob::Limits::default().max_size {
+                    continue; // не примет ни один участник
+                }
                 let id_hex = hex::encode(manifest.id);
                 let size = manifest.size;
                 let members: Vec<[u8; 32]> =
                     groups.members(&gid).into_iter().filter(|m| *m != engine.me_pub).collect();
-                if engine.blob_read(&id_hex).is_none() {
+                if !engine.blob_exists(&id_hex) {
                     let _ = engine.store_blob_streamed(&path, &manifest);
                 }
                 let thumb_hex = push_group_thumb(&engine, &mut blobs, &members, info.thumb.as_deref());
@@ -2370,13 +2377,6 @@ fn event_pump(
                     thumb: thumb_hex,
                 };
                 if groups.send_media(&gid, &media) {
-                    // Мелкое отдаём сразу тем же файлом (чанки читаются с диска);
-                    // крупное ждёт запроса получателя.
-                    if size < AUTO_DOWNLOAD_LIMIT {
-                        for m in &members {
-                            blobs.offer_file(*m, manifest.clone(), path.clone());
-                        }
-                    }
                     push_event(&engine, dto::UiEvent::group_msg_mine(hex::encode(&gid)));
                 }
             }
@@ -2415,6 +2415,14 @@ fn event_pump(
                 done,
                 total,
             });
+        }
+        // Не началась (велик, нет места) — снимаем заказ, чтобы он не крутился
+        // вечно, и говорим человеку почему.
+        for (id, why) in blobs.take_failures() {
+            let id_hex = hex::encode(id);
+            let _ = engine.wanted.lock_safe().remove(&id_hex);
+            engine.blob_expect.lock_safe().remove(&id);
+            push_event(&engine, dto::UiEvent::BlobFailed { id: id_hex, reason: why.as_str().into() });
         }
     }
 }
@@ -2506,6 +2514,7 @@ fn save_and_notify_blob(
         });
     }
     let _ = engine.wanted.lock_safe().remove(&id_hex); // намерение исполнено
+    engine.blob_expect.lock_safe().remove(&done.id);
     push_event(engine, dto::UiEvent::BlobReceived {
         id: id_hex,
         mime: done.manifest.mime,
@@ -2660,7 +2669,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 let id_hex = hex::encode(&hash);
                 let thumb_hex = hex::encode(&thumb);
                 let kind = Engine::media_kind(&mime);
-                let have = engine.blob_read(&id_hex).is_some();
+                let have = engine.blob_exists(&id_hex);
                 // Крупное НЕ тянем молча: показываем карточку (имя/размер/превью), а
                 // байты качаем по кнопке — иначе чужое видео на 800 МБ приедет само.
                 let auto = have || size < AUTO_DOWNLOAD_LIMIT;
@@ -2686,11 +2695,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     ..Default::default()
                 });
                 // Миниатюру тянем всегда — она мелкая, ради неё и заведена.
-                if !thumb.is_empty() && engine.blob_read(&thumb_hex).is_none() {
-                    let _ = engine.messenger.request_blob_manifest(&peer, &thumb);
+                if !thumb.is_empty() && !engine.blob_exists(&thumb_hex) {
+                    engine.request_blob(&peer, &thumb);
                 }
                 if auto && !have {
-                    let _ = engine.messenger.request_blob_manifest(&peer, &hash);
+                    engine.request_blob(&peer, &hash);
                 }
                 push_event(engine, dto::UiEvent::Media {
                     peer: hex::encode(peer),
@@ -2762,17 +2771,17 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     // Крупное НЕ тянем молча — как в DM, показываем карточку, а байты
                     // качаем по кнопке: иначе чужое видео приезжает всей группе само.
                     let media = out.media.as_ref().map(|m| {
-                        let have = engine.blob_read(&m.hash).is_some();
+                        let have = engine.blob_exists(&m.hash);
                         let auto = have || m.size < AUTO_DOWNLOAD_LIMIT;
                         // Миниатюру тянем всегда — она мелкая, ради неё карточка и есть.
-                        if !m.thumb.is_empty() && engine.blob_read(&m.thumb).is_none() {
+                        if !m.thumb.is_empty() && !engine.blob_exists(&m.thumb) {
                             if let Ok(h) = hex::decode(&m.thumb) {
-                                let _ = engine.messenger.request_blob_manifest(&peer, &h);
+                                engine.request_blob(&peer, &h);
                             }
                         }
                         if auto && !have {
                             if let Ok(h) = hex::decode(&m.hash) {
-                                let _ = engine.messenger.request_blob_manifest(&peer, &h);
+                                engine.request_blob(&peer, &h);
                             }
                         }
                         if have {
@@ -2873,12 +2882,21 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }
         // M2 блобы: докачка получателем + отдача чанков. Событие blob_received →
         // UI (сохранён на диск, доступен через blob_read).
+        // Манифест принимаем только на свой запрос и только от того, у кого просили:
+        // иначе любой залил бы нам файл без спроса, в обход гейта и кнопки.
         Event::BlobManifest { peer, manifest } => {
-            if let Some(done) = blobs.on_manifest(peer, &manifest) {
+            let Ok(m) = p2p_blob::Manifest::from_json(&manifest) else { return };
+            if !engine.blob_expected(&peer, &m.id) {
+                return;
+            }
+            if let Some(done) = blobs.on_manifest(peer, m) {
                 save_and_notify_blob(engine, groups, peer, done);
             }
         }
         Event::BlobManifestPart { peer, id, mime, size, part, total, hashes } => {
+            if !engine.blob_expected(&peer, &id) {
+                return;
+            }
             if let Some(done) =
                 blobs.on_manifest_part(peer, &id, &mime, size, part, total, &hashes)
             {
@@ -2887,7 +2905,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         }
         Event::BlobRequest { peer, id, index } => blobs.on_request(&id, index, peer),
         Event::BlobChunk { peer, id, index, data } => {
-            if let Some(done) = blobs.on_chunk(&id, index, &data) {
+            if let Some(done) = blobs.on_chunk(peer, &id, index, &data) {
                 save_and_notify_blob(engine, groups, peer, done);
             }
         }
@@ -2901,8 +2919,8 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 let avatar_id = if avatar_hash.is_empty() { String::new() } else { hex::encode(&avatar_hash) };
                 let _ = engine.contacts.lock_safe().set_profile(&peer, &name, &avatar_id);
                 // Аватар тянем по хэшу ТОЛЬКО если новый и блоба ещё нет (контент-адрес → дедуп).
-                if !avatar_id.is_empty() && engine.blob_read(&avatar_id).is_none() {
-                    let _ = engine.messenger.request_blob_manifest(&peer, &avatar_hash);
+                if !avatar_id.is_empty() && !engine.blob_exists(&avatar_id) {
+                    engine.request_blob(&peer, &avatar_hash);
                 }
                 push_event(engine, dto::UiEvent::ContactsChanged);
             }
@@ -2938,16 +2956,36 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 push_event(engine, dto::UiEvent::ContactsChanged);
             }
         }
-        // M2 pull-по-хэшу: пир просит манифест нашего блоба (пока — аватар).
+        // Пир просит манифест нашего блоба (аватар, вложение чата или группы).
         Event::BlobManifestRequest { peer, id } => {
-            // Отдаём ЛЮБОЙ сохранённый у нас блоб по хэшу (аватар / вложение чата или
-            // группы). Безопасно: контент-адрес узнаёт лишь тот, кому мы уже прислали
-            // ссылку (профиль/сообщение); чужой хэш не угадать. Mime для аватара точный,
-            // для вложений неизвестен на этом слое → generic (клиент знает mime из ссылки).
-            let id_hex = hex::encode(&id);
-            if let Some(bytes) = engine.blob_read(&id_hex) {
-                let meta = engine.load_profile_meta();
-                let mime = if meta.avatar_id == id_hex { meta.avatar_mime } else { "application/octet-stream".into() };
+            let Ok(hash) = <[u8; 32]>::try_from(id.as_slice()) else { return };
+            // Отдаём только своим: контакту или участнику общей группы. Хэш — не
+            // секрет (он ходит в пересылках и группах, у публичного файла его считает
+            // кто угодно), и без этой проверки любой узнавал бы, есть ли у нас файл.
+            let ours = matches!(gate_of(engine, &peer), Gate::Contact)
+                || groups.group_ids().iter().any(|g| groups.members(g).contains(&peer));
+            if !ours {
+                return;
+            }
+            // Уже отдаётся — переслать манифест, не трогая диск.
+            if blobs.reoffer(peer, &hash) {
+                return;
+            }
+            let id_hex = hex::encode(hash);
+            let path = engine.blob_dir.join(&id_hex);
+            // Mime для аватара точный; у вложения его знает клиент из ссылки.
+            let meta = engine.load_profile_meta();
+            let mime = if meta.avatar_id == id_hex { meta.avatar_mime } else { "application/octet-stream".into() };
+            if p2p_blob::disk::read_header(&path).is_some() {
+                // Крупный блоб не поднимаем в память: манифест считаем потоково,
+                // чанки отдаём с диска по одному.
+                let open = |b: &[u8]| p2p_core::vault::open(b).ok();
+                if let Some(m) = p2p_blob::disk::manifest_of_stored(&path, mime, open) {
+                    if m.id == hash {
+                        blobs.offer_stored(peer, m, path);
+                    }
+                }
+            } else if let Some(bytes) = engine.blob_read(&id_hex) {
                 blobs.offer(peer, &bytes, &mime);
             }
         }
@@ -3240,6 +3278,7 @@ impl Engine {
             jobs: job_tx,
             room_call: Mutex::new(None),
             rooms: Mutex::new(RoomState::default()),
+            blob_expect: Mutex::new(HashMap::new()),
             bench: Mutex::new(None),
             blob_dir: dir.join("blobs"),
             tier_cache,

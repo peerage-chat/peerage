@@ -1,24 +1,45 @@
 //! Передача блобов по мешу (веха M2): отдача и получатель-драйвен докачка.
 //!
-//! Отдающий кладёт блоб в [`BlobManager::offer`] и шлёт манифест; получатель на
-//! манифесте создаёт [`Reassembler`], запрашивает недостающие чанки и собирает,
-//! проверяя каждый по BLAKE3. Потери лечит `tick` (переспрашивает застрявшие).
+//! Получатель сам просит манифест (`request_blob_manifest`) — блобов без спроса не
+//! бывает: какие id ждём и от кого, помнит движок. Отдающий отвечает манифестом и
+//! запоминает, КОМУ его отдал: чанки получает только он. Получатель по манифесту
+//! создаёт сборщик и тянет чанки окном, проверяя каждый по BLAKE3; потерянные
+//! переспрашивает по таймауту конкретного чанка.
 //!
 //! Транспорт-агностичная логика — тестируется через loopback без устройств
 //! (`engine/tests/blob_flow.rs`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use p2p_blob::disk::DiskAssembler;
 use p2p_blob::{Hash, Limits, Manifest, ManifestAssembler, ManifestPart, Reassembler};
 use p2p_messenger::{Messenger, PeerKey};
 
-/// Переспрашивать недостающие чанки не чаще этого (лечение потерь без флуда).
-const REREQUEST_AFTER: Duration = Duration::from_millis(150);
+/// Сколько чанков одной докачки держим запрошенными. Больше — отдающий режет
+/// всплеск и половина запросов уходит впустую; меньше — простаивает канал.
+const WINDOW: usize = 64;
+
+/// Чанк не пришёл за это время — переспрашиваем ИМЕННО его.
+const CHUNK_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Докачка без единого чанка за это время брошена: пир ушёл. Намерение «скачать»
+/// живёт у движка (`wanted`) и возобновится, когда пир вернётся.
+const STALL_AFTER: Duration = Duration::from_secs(120);
+
+/// Отдаваемый блоб, который никто не трогал столько, забываем: иначе каждое
+/// отданное вложение висело бы в памяти до перезапуска.
+const OUTGOING_IDLE: Duration = Duration::from_secs(600);
+
+/// Насколько поднимаем ingress-бюджет собеседника по блобу: этот поток мы ждём
+/// сами — как отдающий (его запросы чанков), так и получающий (его чанки).
+const BLOB_BOOST: Duration = Duration::from_secs(120);
+
+/// Запас свободного места сверх самого блоба: не забивать диск телефона под ноль.
+const DISK_RESERVE: u64 = 64 * 1024 * 1024;
 
 /// Собранный блоб для верхнего слоя.
 pub struct Completed {
@@ -36,13 +57,39 @@ pub enum CompletedData {
     OnDisk(PathBuf),
 }
 
+/// Почему докачка не началась — чтобы сказать человеку, а не молчать.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Failure {
+    /// Блоб больше предела приёма.
+    TooLarge,
+    /// На диске не хватает места под блоб.
+    NoSpace,
+}
+
+impl Failure {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Failure::TooLarge => "too_large",
+            Failure::NoSpace => "no_space",
+        }
+    }
+}
+
 /// Откуда берём чанки при отдаче.
 enum Source {
     /// Мелкое (аватар, голосовое, миниатюра) — держим в памяти, так проще.
     Memory(Vec<Vec<u8>>),
-    /// Крупное — читаем с диска по индексу. Файл на гигабайт не должен стоить
-    /// гигабайта RAM только потому, что мы его отдаём.
-    File(PathBuf),
+    /// Блоб из нашего хранилища в чанкованном формате: читаем и расшифровываем
+    /// ровно запрошенный чанк. Файл на гигабайт не стоит гигабайта RAM.
+    Stored(PathBuf),
+}
+
+struct Outgoing {
+    manifest: Manifest,
+    source: Source,
+    /// Кому отдан манифест — только они и получают чанки.
+    peers: HashSet<PeerKey>,
+    last_used: Instant,
 }
 
 /// Куда складываем приходящие чанки.
@@ -51,10 +98,37 @@ enum Sink {
     Disk(DiskAssembler),
 }
 
+impl Sink {
+    fn manifest(&self) -> &Manifest {
+        match self {
+            Sink::Ram(r) => r.manifest(),
+            Sink::Disk(d) => d.manifest(),
+        }
+    }
+
+    fn has(&self, index: usize) -> bool {
+        match self {
+            Sink::Ram(r) => r.has(index),
+            Sink::Disk(d) => d.has(index),
+        }
+    }
+
+    fn progress(&self) -> (usize, usize) {
+        match self {
+            Sink::Ram(r) => r.progress(),
+            Sink::Disk(d) => d.progress(),
+        }
+    }
+}
+
 struct Incoming {
     peer: PeerKey,
     sink: Sink,
-    last_req: Instant,
+    /// Запрошенные и ещё не пришедшие чанки: индекс → когда спросили.
+    inflight: HashMap<usize, Instant>,
+    /// Следующий ни разу не запрошенный индекс.
+    next: usize,
+    last_chunk: Instant,
     /// Последний отданный наверх процент — чтобы не сыпать событием на каждый чанк.
     last_pct: u8,
 }
@@ -64,16 +138,36 @@ pub struct BlobManager {
     limits: Limits,
     /// Куда складывать блобы, собираемые сразу на диск (крупные).
     blob_dir: PathBuf,
-    /// Блобы, которые мы отдаём: id → манифест + откуда брать чанки.
-    outgoing: HashMap<Hash, (Manifest, Source)>,
+    /// Блобы, которые мы отдаём.
+    outgoing: HashMap<Hash, Outgoing>,
     /// Блобы, которые мы качаем: id → состояние докачки.
     incoming: HashMap<Hash, Incoming>,
     /// Манифесты крупных блобов, которые ещё собираются из частей: id → сборщик.
     partial_manifests: HashMap<Hash, ManifestAssembler>,
+    /// Докачки, которые не начались, — для события в UI.
+    failures: Vec<(Hash, Failure)>,
 }
 
 fn to_id(bytes: &[u8]) -> Option<Hash> {
     <[u8; 32]>::try_from(bytes).ok()
+}
+
+/// Свободно на разделе с `dir`, байт. `None` — узнать не удалось (не мешаем).
+#[cfg(unix)]
+fn free_space(dir: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: c — валидная C-строка, st — выделенная структура нужного типа.
+    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    Some(st.f_bavail as u64 * st.f_frsize as u64)
+}
+
+#[cfg(not(unix))]
+fn free_space(_dir: &Path) -> Option<u64> {
+    None
 }
 
 impl BlobManager {
@@ -85,10 +179,12 @@ impl BlobManager {
             outgoing: HashMap::new(),
             incoming: HashMap::new(),
             partial_manifests: HashMap::new(),
+            failures: Vec::new(),
         }
     }
 
-    /// Пришла ЧАСТЬ манифеста. Возвращает `Some`, если блоб оказался пустым и уже
+    /// Пришла ЧАСТЬ манифеста. Звать только для блобов, которые мы ждём от этого
+    /// пира (решает движок). Возвращает `Some`, если блоб оказался пустым и уже
     /// собран; докачка стартует, как только собраны все части.
     #[allow(clippy::too_many_arguments)]
     pub fn on_manifest_part(
@@ -108,6 +204,7 @@ impl BlobManager {
         // Отсекаем великанов ДО накопления частей: иначе злоумышленник заставил бы
         // держать в памяти список хэшей блоба, который мы всё равно не примем.
         if size > self.limits.max_size {
+            self.failures.push((id, Failure::TooLarge));
             return None;
         }
         let p = ManifestPart {
@@ -146,6 +243,11 @@ impl BlobManager {
         let id = manifest.id;
         // Крупный блоб собираем СРАЗУ НА ДИСК: держать его целиком в RAM нельзя.
         let sink = if manifest.size >= self.limits.disk_threshold {
+            let need = manifest.size + manifest.chunks.len() as u64 * 45 + DISK_RESERVE;
+            if free_space(&self.blob_dir).is_some_and(|free| free < need) {
+                self.failures.push((id, Failure::NoSpace));
+                return None;
+            }
             let path = self.blob_dir.join(hex::encode(id));
             Sink::Disk(DiskAssembler::create(manifest, &path).ok()?)
         } else {
@@ -160,102 +262,141 @@ impl BlobManager {
             }
             Sink::Ram(re)
         };
-        let missing = match &sink {
-            Sink::Ram(r) => r.missing(),
-            Sink::Disk(d) => d.missing(),
-        };
-        self.incoming.insert(id, Incoming { peer, sink, last_req: Instant::now(), last_pct: 0 });
-        for index in missing {
-            let _ = self.messenger.send_blob_request(&peer, &id, index as u32);
-        }
+        let now = Instant::now();
+        let mut inc = Incoming { peer, sink, inflight: HashMap::new(), next: 0, last_chunk: now, last_pct: 0 };
+        self.fill_window(&id, &mut inc);
+        self.incoming.insert(id, inc);
         None
     }
 
-    /// Предложить блоб пиру: нарезать, запомнить для отдачи, отправить манифест.
-    /// Возвращает id блоба (контент-адрес).
+    /// Дозапросить чанки, пока в полёте меньше [`WINDOW`].
+    fn fill_window(&self, id: &Hash, inc: &mut Incoming) {
+        let n = inc.sink.manifest().chunks.len();
+        let now = Instant::now();
+        while inc.inflight.len() < WINDOW && inc.next < n {
+            let index = inc.next;
+            inc.next += 1;
+            if inc.sink.has(index) {
+                continue;
+            }
+            let _ = self.messenger.send_blob_request(&inc.peer, id, index as u32);
+            inc.inflight.insert(index, now);
+        }
+    }
+
+    /// Разослать манифест пиру частями (у крупного блоба список хэшей не влезает в
+    /// одну датаграмму).
+    fn send_manifest(&self, peer: &PeerKey, manifest: &Manifest) {
+        for p in manifest.split() {
+            let hashes: Vec<u8> = p.hashes.iter().flat_map(|h| h.iter().copied()).collect();
+            let _ = self.messenger.send_blob_manifest_part(
+                peer, &p.id, &p.mime, p.size, p.part, p.total, &hashes,
+            );
+        }
+    }
+
+    fn remember(&mut self, peer: PeerKey, manifest: Manifest, source: Source) {
+        let id = manifest.id;
+        let entry = self.outgoing.entry(id).or_insert_with(|| Outgoing {
+            manifest,
+            source,
+            peers: HashSet::new(),
+            last_used: Instant::now(),
+        });
+        entry.peers.insert(peer);
+        entry.last_used = Instant::now();
+        // Следом придут его запросы чанков — окном сразу; это заказанный нами же
+        // поток, резать его анти-флуд бюджетом незачем.
+        self.messenger.boost_peer(&peer, BLOB_BOOST);
+    }
+
+    /// Отдать пиру мелкий блоб из памяти: нарезать, запомнить, отправить манифест.
     pub fn offer(&mut self, peer: PeerKey, content: &[u8], mime: &str) -> Hash {
         let (manifest, chunks) = p2p_blob::build(content, mime);
         let id = manifest.id;
-        // Манифест едет ЧАСТЯМИ: у крупного блоба список хэшей не влезает в одну
-        // датаграмму (это и держало прежний потолок 4 МБ). Мелкий блоб = одна часть.
-        for p in manifest.split() {
-            let hashes: Vec<u8> = p.hashes.iter().flat_map(|h| h.iter().copied()).collect();
-            let _ = self.messenger.send_blob_manifest_part(
-                &peer, &p.id, &p.mime, p.size, p.part, p.total, &hashes,
-            );
-        }
-        self.outgoing.insert(id, (manifest, Source::Memory(chunks)));
+        self.send_manifest(&peer, &manifest);
+        self.remember(peer, manifest, Source::Memory(chunks));
         id
     }
 
-    /// Предложить пиру блоб, лежащий ФАЙЛОМ: манифест уже посчитан потоково, чанки
-    /// читаются с диска по запросу. Путь к файлу должен пережить отдачу.
-    pub fn offer_file(&mut self, peer: PeerKey, manifest: Manifest, path: PathBuf) -> Hash {
-        let id = manifest.id;
-        for p in manifest.split() {
-            let hashes: Vec<u8> = p.hashes.iter().flat_map(|h| h.iter().copied()).collect();
-            let _ = self.messenger.send_blob_manifest_part(
-                &peer, &p.id, &p.mime, p.size, p.part, p.total, &hashes,
-            );
-        }
-        self.outgoing.insert(id, (manifest, Source::File(path)));
-        id
+    /// Отдать пиру блоб из хранилища в чанкованном формате. Манифест считается
+    /// потоково (один раз — дальше берётся из `outgoing`).
+    pub fn offer_stored(&mut self, peer: PeerKey, manifest: Manifest, path: PathBuf) {
+        self.send_manifest(&peer, &manifest);
+        self.remember(peer, manifest, Source::Stored(path));
     }
 
-    /// Пришёл манифест — начать докачку. Возвращает `Some`, если блоб пустой (0
-    /// чанков) и уже «готов». Невалидный/превышающий лимиты манифест игнорируется.
-    pub fn on_manifest(&mut self, peer: PeerKey, manifest_json: &str) -> Option<Completed> {
-        let manifest = Manifest::from_json(manifest_json).ok()?;
+    /// Блоб уже отдаётся — переслать манифест ещё одному (или тому же) пиру, не
+    /// трогая диск. `false` — такого в отдаче нет.
+    pub fn reoffer(&mut self, peer: PeerKey, id: &Hash) -> bool {
+        let Some(out) = self.outgoing.get_mut(id) else { return false };
+        out.peers.insert(peer);
+        out.last_used = Instant::now();
+        let manifest = out.manifest.clone();
+        self.messenger.boost_peer(&peer, BLOB_BOOST);
+        self.send_manifest(&peer, &manifest);
+        true
+    }
+
+    /// Пришёл манифест — начать докачку. Звать только для ожидаемых блобов.
+    pub fn on_manifest(&mut self, peer: PeerKey, manifest: Manifest) -> Option<Completed> {
         self.start_download(peer, manifest)
     }
 
-    /// Пир запросил чанк нашего блоба — отдать, если он у нас есть.
-    pub fn on_request(&self, id_bytes: &[u8], index: u32, peer: PeerKey) {
+    /// Пир запросил чанк нашего блоба — отдать, если манифест отдавали именно ему.
+    pub fn on_request(&mut self, id_bytes: &[u8], index: u32, peer: PeerKey) {
         let Some(id) = to_id(id_bytes) else { return };
-        let Some((_m, src)) = self.outgoing.get(&id) else { return };
-        match src {
-            Source::Memory(chunks) => {
-                if let Some(chunk) = chunks.get(index as usize) {
-                    let _ = self.messenger.send_blob_chunk(&peer, &id, index, chunk);
-                }
+        let Some(out) = self.outgoing.get_mut(&id) else { return };
+        if !out.peers.contains(&peer) {
+            return;
+        }
+        out.last_used = Instant::now();
+        let chunk = match &out.source {
+            Source::Memory(chunks) => chunks.get(index as usize).cloned(),
+            Source::Stored(path) => {
+                p2p_blob::disk::read_chunk(path, index as usize, |b| p2p_core::vault::open(b).ok())
             }
-            Source::File(path) => {
-                // Читаем ровно один чанк с диска — так отдача крупного файла не
-                // зависит от его размера по памяти.
-                if let Ok(chunk) = p2p_blob::read_file_chunk(path, index as usize) {
-                    if !chunk.is_empty() {
-                        let _ = self.messenger.send_blob_chunk(&peer, &id, index, &chunk);
-                    }
-                }
-            }
+        };
+        if let Some(chunk) = chunk {
+            let _ = self.messenger.send_blob_chunk(&peer, &id, index, &chunk);
+            // Его запросы чанков — ожидаемый поток, не флуд.
+            self.messenger.boost_peer(&peer, BLOB_BOOST);
         }
     }
 
     /// Пришёл чанк. Проверяет его (по хэшу в манифесте) и добавляет; при полноте —
-    /// собирает и возвращает [`Completed`]. Битый чанк отбрасывается.
-    pub fn on_chunk(&mut self, id_bytes: &[u8], index: u32, data: &[u8]) -> Option<Completed> {
+    /// собирает и возвращает [`Completed`]. Битый чанк и чанк не от того пира
+    /// отбрасываются.
+    pub fn on_chunk(&mut self, peer: PeerKey, id_bytes: &[u8], index: u32, data: &[u8]) -> Option<Completed> {
         let id = to_id(id_bytes)?;
-        let inc = self.incoming.get_mut(&id)?;
-        let complete = match &mut inc.sink {
-            Sink::Ram(re) => {
-                if re.add(index as usize, data).is_err() {
-                    return None; // чужой/битый чанк — игнор
-                }
-                re.is_complete()
-            }
-            Sink::Disk(d) => {
-                // Шифруем чанк тем же at-rest ключом, что и остальные данные, и сразу
-                // пишем на диск — в памяти он не задерживается.
-                if d.add(index as usize, data, p2p_core::vault::seal).is_err() {
-                    return None;
-                }
-                d.is_complete()
-            }
-        };
-        if !complete {
+        let mut inc = self.incoming.remove(&id)?;
+        if inc.peer != peer {
+            self.incoming.insert(id, inc);
             return None;
         }
-        let inc = self.incoming.remove(&id)?;
+        let index = index as usize;
+        let accepted = match &mut inc.sink {
+            Sink::Ram(re) => re.add(index, data).is_ok(),
+            // Шифруем чанк тем же at-rest ключом, что и остальные данные, и сразу
+            // пишем на диск — в памяти он не задерживается.
+            Sink::Disk(d) => d.add(index, data, p2p_core::vault::seal).is_ok(),
+        };
+        if !accepted {
+            self.incoming.insert(id, inc);
+            return None;
+        }
+        inc.inflight.remove(&index);
+        inc.last_chunk = Instant::now();
+        self.messenger.boost_peer(&peer, BLOB_BOOST);
+        let complete = match &inc.sink {
+            Sink::Ram(re) => re.is_complete(),
+            Sink::Disk(d) => d.is_complete(),
+        };
+        if !complete {
+            self.fill_window(&id, &mut inc);
+            self.incoming.insert(id, inc);
+            return None;
+        }
         match inc.sink {
             Sink::Ram(re) => {
                 let manifest = re.manifest().clone();
@@ -269,23 +410,20 @@ impl BlobManager {
         }
     }
 
-    /// Периодический тик: переспросить застрявшие (потерянные) чанки. Зовётся
-    /// таймером/циклом. Дёшево, идемпотентно.
+    /// Периодический тик: переспросить чанки, которые не пришли за
+    /// [`CHUNK_TIMEOUT`], бросить заглохшие докачки, забыть давно не нужные отдачи.
     pub fn tick(&mut self) {
         let now = Instant::now();
-        for inc in self.incoming.values_mut() {
-            if now.duration_since(inc.last_req) < REREQUEST_AFTER {
-                continue;
-            }
-            inc.last_req = now;
-            let (id, missing) = match &inc.sink {
-                Sink::Ram(r) => (r.manifest().id, r.missing()),
-                Sink::Disk(d) => (d.manifest().id, d.missing()),
-            };
-            for index in missing {
-                let _ = self.messenger.send_blob_request(&inc.peer, &id, index as u32);
+        self.incoming.retain(|_, inc| now.duration_since(inc.last_chunk) < STALL_AFTER);
+        for (id, inc) in self.incoming.iter_mut() {
+            for (index, asked) in inc.inflight.iter_mut() {
+                if now.duration_since(*asked) >= CHUNK_TIMEOUT {
+                    *asked = now;
+                    let _ = self.messenger.send_blob_request(&inc.peer, id, *index as u32);
+                }
             }
         }
+        self.outgoing.retain(|_, out| now.duration_since(out.last_used) < OUTGOING_IDLE);
     }
 
     /// Прогресс докачек, изменившийся с прошлого опроса: (id, получено, всего).
@@ -293,14 +431,10 @@ impl BlobManager {
     pub fn take_progress(&mut self) -> Vec<(Hash, u32, u32)> {
         let mut out = Vec::new();
         for (id, inc) in self.incoming.iter_mut() {
-            let (total, missing) = match &inc.sink {
-                Sink::Ram(r) => (r.manifest().chunks.len(), r.missing().len()),
-                Sink::Disk(d) => (d.manifest().chunks.len(), d.missing().len()),
-            };
+            let (done, total) = inc.sink.progress();
             if total == 0 {
                 continue;
             }
-            let done = total - missing;
             let pct = (done * 100 / total) as u8;
             if pct != inc.last_pct {
                 inc.last_pct = pct;
@@ -310,8 +444,13 @@ impl BlobManager {
         out
     }
 
-    /// Забыть отдаваемый блоб (когда доставку можно считать завершённой).
-    pub fn drop_outgoing(&mut self, id: &Hash) {
-        self.outgoing.remove(id);
+    /// Докачки, которые не начались с прошлого опроса.
+    pub fn take_failures(&mut self) -> Vec<(Hash, Failure)> {
+        std::mem::take(&mut self.failures)
+    }
+
+    /// Сколько блобов сейчас в отдаче (диагностика и тесты).
+    pub fn outgoing_len(&self) -> usize {
+        self.outgoing.len()
     }
 }

@@ -545,6 +545,11 @@ internal sealed interface EngineEvent {
     @SerialName("blob_progress")
     data class BlobProgress(val id: String, val done: Int = 0, val total: Int = 0) : EngineEvent
 
+    /** Докачка не началась: `too_large` или `no_space`. Заказ снят движком. */
+    @Serializable
+    @SerialName("blob_failed")
+    data class BlobFailed(val id: String, val reason: String = "") : EngineEvent
+
     /** Событие, которого этот клиент ещё не знает. Тег служебный: движок его не
      *  шлёт, вариант нужен только чтобы разбор не бросал исключение. */
     @Serializable

@@ -217,6 +217,8 @@
     <string name="group_remove_member">Удалить</string>
     <string name="cd_remove_member">Удалить из группы</string>
     <string name="group_you_removed">Вас удалили из группы</string>
+    <string name="download_no_space">Не хватает места на телефоне, чтобы скачать файл</string>
+    <string name="download_too_large">Файл слишком большой — больше 2 ГБ</string>
     <string name="group_leave">Выйти из группы</string>
     <!-- Приглашения в группы карточками -->
     <string name="group_invites_header">Приглашения · %1$d</string>

@@ -99,6 +99,16 @@ impl DiskAssembler {
         self.have_count == self.have.len()
     }
 
+    /// Получен ли чанк `index`.
+    pub fn has(&self, index: usize) -> bool {
+        self.have.get(index).copied().unwrap_or(false)
+    }
+
+    /// Прогресс приёма (полученных чанков, всего).
+    pub fn progress(&self) -> (usize, usize) {
+        (self.have_count, self.have.len())
+    }
+
     /// Принять чанк: проверить BLAKE3 против манифеста, запечатать и записать в слот.
     /// `seal` — шифрование at-rest (инъекция, чтобы крейт не знал про vault).
     pub fn add(
@@ -202,6 +212,24 @@ pub fn read_all(path: &Path, open: impl Fn(&[u8]) -> Option<Vec<u8>> + Copy) -> 
         out.extend_from_slice(&read_chunk(path, i, open)?);
     }
     Some(out)
+}
+
+/// Манифест готового блоба на диске — чтобы отдать его, не поднимая в память:
+/// хэши чанков и id считаются потоково, по одному чанку.
+pub fn manifest_of_stored(
+    path: &Path,
+    mime: impl Into<String>,
+    open: impl Fn(&[u8]) -> Option<Vec<u8>> + Copy,
+) -> Option<Manifest> {
+    let (_cs, n, size) = read_header(path)?;
+    let mut total = blake3::Hasher::new();
+    let mut chunks = Vec::with_capacity(n);
+    for i in 0..n {
+        let c = read_chunk(path, i, open)?;
+        total.update(&c);
+        chunks.push(hash_of(&c));
+    }
+    Some(Manifest { mime: mime.into(), size, id: *total.finalize().as_bytes(), chunks })
 }
 
 /// Проверить контент-адрес готового файла, не загружая его целиком: считаем BLAKE3

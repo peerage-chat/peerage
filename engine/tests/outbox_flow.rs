@@ -125,7 +125,7 @@ fn retract_survives_offline() {
 fn long_backlog_arrives_whole_and_in_order() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(85), id(86));
-    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let (_a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
     let b_dir = tmpdir("b");
     let (a, b1, _) = pair(&net, (a_id, tmpdir("a")), (b_id.clone(), b_dir.clone()));
 
