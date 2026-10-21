@@ -822,14 +822,10 @@ class AppModel private constructor() {
 
     @Volatile private var started = false
 
-    // ── Офлайн-очередь сообщений ─────────────────────────────────────────────
-    // peer → [(text, unix-timestamp)]. Сохраняется в offline_queue.json (TTL 7 дней).
-    // Пишется только из ops/pollThread под queueLock; читается оттуда же.
-    private val queueLock = Any()
-    private val offlineQueueMap = HashMap<String, MutableList<Pair<String, Long>>>()
-    private var queueFile: File? = null
-
-    @Volatile private var localMsgId = -1L // отрицательные ID для «не отправлено» в логе
+    // Офлайн-очередь целиком в движке: недоставленное лежит в его зашифрованной
+    // базе и досылается им же. Здесь — только отрицательные id для того, что движок
+    // не смог даже поставить в очередь.
+    @Volatile private var localMsgId = -1L
 
     /** Инициализация ядра. Звать с фонового потока (см. MainActivity).
      *  Идемпотентно: при пересоздании Activity повторно НЕ инициализирует. */
@@ -867,9 +863,8 @@ class AppModel private constructor() {
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
         migrateSelfNameFromPrefs(dataDir) // разовый перенос имени из старых prefs в движок
-        queueFile = File(dataDir, "offline_queue.json")
-        loadOfflineQueue()
-        restoreQueuedToLog()
+        // Файл старой клиентской очереди: недоставленное в нём лежало открытым текстом.
+        File(dataDir, "offline_queue.json").delete()
         startLoops()
         registerNetworkCallback()
         return true
@@ -950,11 +945,7 @@ class AppModel private constructor() {
                     val t = Native.netTree(sessionPtr)
                     netPeers = p
                     contacts.map { it.key }.forEach { key ->
-                        val wasOnline = online[key]
-                        val nowOnline = Native.isOnline(sessionPtr, key)
-                        online[key] = nowOnline
-                        // При первом тике (wasOnline=null) или переходе в онлайн — флашим очередь.
-                        if (nowOnline && wasOnline != true) flushQueueFor(key)
+                        online[key] = Native.isOnline(sessionPtr, key)
                     }
                     // Флуд и офлайн — дёшево и нужно даже в фоне: пользователь
                     // платит за чужой поток прямо сейчас.
@@ -1136,29 +1127,6 @@ class AppModel private constructor() {
         val list = decodeList<MessageDto>(Native.history(sessionPtr, key))
             .map { it.toModel() }
             .toMutableList()
-        // Ждущее досылки, которого НЕТ в базе, — добавляем обратно в ленту.
-        //
-        // Проверка «нет в базе» обязательна: при `Undelivered` сообщение остаётся в
-        // истории движка И попадает в эту очередь, поэтому без фильтра каждое
-        // недоставленное рисовалось дважды после перезахода в чат. Сверяем по тексту
-        // и секунде отправки — id у очереди своего нет.
-        synchronized(queueLock) { offlineQueueMap[key]?.toList() ?: emptyList() }
-            .filterNot { (text, ts) -> list.any { it.mine && it.text == text && it.time == ts } }
-            .forEach { (text, ts) ->
-                // Автор обязателен даже у локальной записи: ссылка на сообщение —
-                // это пара «id + автор», и без него выделение такой строки
-                // указывало бы в пустоту.
-                list.add(
-                    Message(
-                        --localMsgId,
-                        text,
-                        mine = true,
-                        time = ts,
-                        status = "queued",
-                        sender = me?.pubkey.orEmpty(),
-                    ),
-                )
-            }
         messages[chatKey(key, group = false)] = list.toMutableStateList()
         atChatStart -= key // хвост перечитан — выше снова может что-то быть
         // Байты вложений НЕ читаем заранее: `blob()` возьмёт их при показе, то есть
@@ -1348,21 +1316,20 @@ class AppModel private constructor() {
                     ),
                 )
             } else {
-                // Пир недостижим — кладём в очередь, доставим при появлении онлайн.
-                val localId = --localMsgId
+                // Движок не смог даже поставить сообщение в очередь (сбой базы):
+                // показываем честно, текст не теряется с экрана.
                 log(key).add(
                     Message(
-                        localId,
+                        --localMsgId,
                         text,
                         mine = true,
                         time = now,
-                        status = "queued",
+                        status = "failed",
                         replyTo = reply?.id ?: 0,
                         sender = me?.pubkey.orEmpty(),
                         replySender = replyAuthor(key, reply),
                     ),
                 )
-                enqueueOffline(key, text, now)
             }
             markSummariesDirty() // своё сообщение — тоже последнее в списке чатов
         }
@@ -1649,11 +1616,8 @@ class AppModel private constructor() {
         forgetChatLocally(key)
     }
 
-    /** Убрать из памяти клиента то, что движок уже стёр: лог, закрепы, счётчик,
-     *  старую клиентскую очередь отправки. */
+    /** Убрать из памяти клиента то, что движок уже стёр: лог, закрепы, счётчик. */
     private fun forgetChatLocally(key: String) {
-        synchronized(queueLock) { offlineQueueMap.remove(key) }
-        saveOfflineQueue()
         messages[chatKey(key, group = false)]?.clear()
         pinned.remove(key) // закрепы — по голому ключу собеседника
         unread.remove(key)
@@ -1712,9 +1676,7 @@ class AppModel private constructor() {
         }
         when (ev) {
             is EngineEvent.Presence -> {
-                val wasOnline = online[ev.peer]
                 online[ev.peer] = ev.online
-                if (ev.online && wasOnline != true) flushQueueFor(ev.peer)
                 if (contacts.none { it.key == ev.peer }) refreshContactsNow()
             }
             is EngineEvent.Text -> {
@@ -1766,17 +1728,9 @@ class AppModel private constructor() {
                 if (currentChat != ev.peer) unread[ev.peer] = (unread[ev.peer] ?: 0) + 1
             }
             is EngineEvent.Ack -> updateStatus(ev.peer, ev.id, "delivered")
-            is EngineEvent.Undelivered -> {
-                // Rust ретраил 5 минут и не смог — передаём в Kotlin-очередь.
-                // Пир появится онлайн → flushQueueFor доставит автоматически.
-                val l = messages[chatKey(ev.peer, group = false)] ?: return
-                val idx = l.indexOfFirst { it.id == ev.id && it.mine }
-                if (idx >= 0) {
-                    val msg = l[idx]
-                    l[idx] = msg.copy(status = "queued")
-                    enqueueOffline(ev.peer, msg.text, msg.time)
-                }
-            }
+            // Ретраи в памяти выдохлись, сообщение ждёт в очереди движка и уйдёт,
+            // когда собеседник появится.
+            is EngineEvent.Undelivered -> updateStatus(ev.peer, ev.id, "queued")
             is EngineEvent.RoomInvite -> {
                 // Стабильная комната: если мы УЖЕ в этой комнате с этим пиром, он
                 // просто перезашёл — остаёмся в звонке, его возврат отразит presence.
@@ -1929,93 +1883,6 @@ class AppModel private constructor() {
         val l = messages[chatKey(peer, group = false)] ?: return
         val idx = l.indexOfFirst { it.id == id && it.mine }
         if (idx >= 0) l[idx] = l[idx].copy(status = status)
-    }
-
-    // ── Офлайн-очередь ────────────────────────────────────────────────────────
-
-    private fun loadOfflineQueue() {
-        val f = queueFile ?: return
-        if (!f.exists()) return
-        try {
-            val json = JSONObject(f.readText())
-            synchronized(queueLock) {
-                json.keys().forEach { peer ->
-                    val arr = json.getJSONArray(peer)
-                    // Срок хранения НЕ ограничиваем: сервера, который сохранит письмо
-                    // за нас, нет — собеседник может вернуться через месяц и обязан
-                    // его получить. Объём держит бюджет пира в движке (Tier.outbox_cap).
-                    val msgs = (0 until arr.length()).map { i ->
-                        val o = arr.getJSONObject(i)
-                        Pair(o.getString("text"), o.getLong("ts"))
-                    }
-                    if (msgs.isNotEmpty()) offlineQueueMap[peer] = msgs.toMutableList()
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("p2pqueue", "load failed: $e")
-        }
-    }
-
-    private fun saveOfflineQueue() {
-        try {
-            val json = JSONObject()
-            synchronized(queueLock) {
-                offlineQueueMap.forEach { (peer, msgs) ->
-                    if (msgs.isNotEmpty()) {
-                        val arr = JSONArray()
-                        msgs.forEach { (text, ts) -> arr.put(JSONObject().put("text", text).put("ts", ts)) }
-                        json.put(peer, arr)
-                    }
-                }
-            }
-            queueFile?.writeText(json.toString())
-        } catch (e: Exception) {
-            android.util.Log.w("p2pqueue", "save failed: $e")
-        }
-    }
-
-    private fun enqueueOffline(peer: String, text: String, ts: Long) {
-        synchronized(queueLock) {
-            offlineQueueMap.getOrPut(peer) { mutableListOf() }.add(Pair(text, ts))
-        }
-        saveOfflineQueue()
-    }
-
-    /** Восстановить очередь в лог при старте (пользователь видит «ожидание» после перезапуска). */
-    private fun restoreQueuedToLog() {
-        synchronized(queueLock) {
-            offlineQueueMap.forEach { (peer, msgs) ->
-                val l = log(peer)
-                msgs.forEach { (text, ts) ->
-                    l.add(Message(--localMsgId, text, mine = true, time = ts, status = "queued"))
-                }
-            }
-        }
-    }
-
-    /** Сброс очереди для пира, который появился онлайн.
-     *  Всё выполняется на ops-потоке, чтобы не гонять с concurrent send(). */
-    private fun flushQueueFor(peer: String) {
-        ops.execute {
-            // remove внутри ops: сериализован с send(), нет гонки «новое сообщение→flush удаляет его из лога».
-            val msgs = synchronized(queueLock) {
-                val q = offlineQueueMap.remove(peer) ?: return@execute
-                q.toList()
-            }
-            saveOfflineQueue()
-            // Убираем «ожидание»-заглушки из лога — они вернутся с настоящими ID.
-            messages[chatKey(peer, group = false)]?.removeAll { it.mine && it.status == "queued" }
-            msgs.forEach { (text, _) ->
-                val now = System.currentTimeMillis() / 1000
-                val id = Native.sendText(sessionPtr, peer, text)
-                if (id >= 0) {
-                    log(peer).add(Message(id, text, mine = true, time = now, status = "pending"))
-                } else {
-                    // Всё равно не достижим — вернём в очередь.
-                    enqueueOffline(peer, text, now)
-                }
-            }
-        }
     }
 
     // ── DM-звонки (через комнату) ─────────────────────────────────────────────
