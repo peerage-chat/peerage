@@ -381,14 +381,6 @@ pub fn parse_key(s: &str) -> Option<[u8; 32]> {
     hex::decode(s.trim()).ok()?.as_slice().try_into().ok()
 }
 
-/// Фоновый коннект к пиру (как на десктопе): держим попытки, пока процесс жив.
-pub(crate) fn spawn_connect(m: Arc<Messenger>, key: [u8; 32]) {
-    std::thread::spawn(move || loop {
-        let _ = m.connect(&key, Duration::from_secs(20));
-        std::thread::sleep(Duration::from_secs(5));
-    });
-}
-
 // ── Публичный API движка (команды/снапшоты) ─────────────────────────────────
 // Каждый метод — операция контракта. androidjni декодирует аргументы (hex→ключ)
 // и маршалит результат; домейн-логику считает здесь движок.
@@ -996,8 +988,11 @@ impl Engine {
         ex.get(&id).is_some_and(|(p, _)| p == peer)
     }
 
+    /// Достучаться до пира прямо сейчас (открыли чат с ним), не дожидаясь
+    /// расписания проб. Держать связь постоянно — забота мессенджера по набору,
+    /// который задаёт [`Self::refresh_targets`].
     pub fn connect(&self, key: [u8; 32]) {
-        spawn_connect(self.messenger.clone(), key);
+        self.messenger.poke(&key);
     }
 
     // — Контакты (TOFU) —
@@ -1060,8 +1055,8 @@ impl Engine {
         let outcome = self.contacts.lock_safe().add(key, &name, now());
         match outcome {
             Ok(p2p_core::store::AddOutcome::Added) => {
-                spawn_connect(self.messenger.clone(), *key);
-                self.refresh_budgets(); // M3: контакт → щедрый ingress-бюджет
+                self.refresh_budgets(); // M3: контакт → щедрый ingress-бюджет; и в набор связи
+                self.messenger.poke(key);
                 "added"
             }
             Ok(p2p_core::store::AddOutcome::AlreadyKnown) => "known",
@@ -1126,6 +1121,7 @@ impl Engine {
         };
         let address = node.address();
         self.messenger.swap_transport(node);
+        self.messenger.reset_probes(); // новый адрес — пусть контакты увидят нас сразу
         // Эпоху фиксируем ТОЛЬКО после успешного подъёма: иначе перезапуск после
         // сбоя искал бы нас по адресу, на котором никто не слушает.
         save_transport_epoch(&self.data_dir, epoch);
@@ -1191,6 +1187,9 @@ impl Engine {
             Some(node) => {
                 self.messenger.swap_transport(node);
                 self.offline.store(false, Ordering::Relaxed);
+                // Пока были офлайн, паузы проб выросли до минут — сеть вернулась,
+                // спрашиваем всех заново сразу.
+                self.messenger.reset_probes();
                 log::info!("онлайн: узел поднят заново (эпоха {epoch})");
                 true
             }
@@ -1289,6 +1288,24 @@ impl Engine {
         self.messenger.set_peer_tiers(&tiers);
         // Тот же бюджет — офлайн-очереди (cap/TTL хранения).
         *self.tier_cache.lock_safe() = tiers.into_iter().map(|(k, t, _)| (k, t)).collect();
+        self.refresh_targets();
+    }
+
+    /// С кем мессенджер держит связь: контакты и участники наших групп, без
+    /// заблокированных и без себя. Зовётся на любую смену контактов, блок-листа и
+    /// состава групп — выпавшему из набора больше не уходят ни пробы, ни Pong.
+    fn refresh_targets(&self) {
+        let blocked: std::collections::HashSet<[u8; 32]> =
+            self.gate.lock_safe().list_blocked().iter().filter_map(|h| parse_key(h)).collect();
+        let mut targets: std::collections::HashSet<[u8; 32]> =
+            self.contacts.lock_safe().list().iter().filter_map(|c| parse_key(&c.key)).collect();
+        for roster in self.group_cache.lock_safe().members.values() {
+            let keys = serde_json::from_str::<Vec<String>>(roster).unwrap_or_default();
+            targets.extend(keys.iter().filter_map(|h| parse_key(h)));
+        }
+        targets.remove(&self.me_pub);
+        targets.retain(|k| !blocked.contains(k));
+        self.messenger.set_targets(targets);
     }
 
     pub fn contacts_json(&self) -> String {
@@ -1356,7 +1373,7 @@ impl Engine {
             });
         }
         self.refresh_budgets();
-        spawn_connect(self.messenger.clone(), *key);
+        self.messenger.poke(key);
         let m = self.load_profile_meta();
         let hash = hex::decode(&m.avatar_id).unwrap_or_default();
         let _ = self.messenger.send_profile_update(key, &m.name, &hash);
@@ -3074,12 +3091,18 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
 
 /// Пересчитать кэш групповых read-данных (зовётся после каждой мутации).
 fn refresh_group_cache(engine: &Arc<Engine>, groups: &GroupManager) {
-    let mut cache = engine.group_cache.lock_safe();
-    cache.list = groups.list_json();
-    cache.invites = groups.invites_json();
-    for gid in groups.group_ids() {
-        cache.members.insert(gid.clone(), groups.members_json(&gid));
+    {
+        let mut cache = engine.group_cache.lock_safe();
+        cache.list = groups.list_json();
+        cache.invites = groups.invites_json();
+        // Пересобираем целиком: вышедшая группа не должна оставлять ростер в кэше
+        // (а с ним — участников в наборе связи).
+        cache.members = groups.group_ids().into_iter().map(|g| {
+            let m = groups.members_json(&g);
+            (g, m)
+        }).collect();
     }
+    engine.refresh_targets(); // состав групп мог смениться
 }
 
 /// Исполнить групповую команду (в потоке event_pump). Fire-and-forget.
@@ -3255,18 +3278,12 @@ impl Engine {
         let gate = GateStore::open(db.clone()).map_err(|e| format!("gate: {e}"))?;
         let messages = MessageStore::open(db.clone(), Some(&dir.join("messages.json")), &me_pub)
             .map_err(|e| format!("messages: {e}"))?;
-        let contact_keys: Vec<[u8; 32]> =
-            contacts.list().iter().filter_map(|c| parse_key(&c.key)).collect();
-
         let identity_for_groups = identity.clone();
         let identity_for_engine = identity.clone();
         let (messenger, rx) =
             Messenger::start_with_transport(identity, transport, cfg);
         let messenger = Arc::new(messenger);
-        // Тиры зальём ниже, после создания Engine (единая логика — refresh_budgets).
-        for k in &contact_keys {
-            spawn_connect(messenger.clone(), *k);
-        }
+        // Тиры и набор связи зальём ниже, после создания Engine (refresh_budgets).
 
         // Актор-канал: события мессенджера и групповые команды идут в один поток.
         let (job_tx, job_rx) = std::sync::mpsc::channel::<Job>();

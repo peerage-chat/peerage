@@ -378,9 +378,6 @@ impl GroupManager {
             let Ok(raw) = hex::decode(&hexid) else { continue };
             let path = self.group_path(&raw);
             if let Ok(chat) = GroupChat::load(&path, &self.identity, self.messenger.clone()) {
-                for m in chat.members() {
-                    crate::spawn_connect(self.messenger.clone(), m);
-                }
                 self.migrate_msgs_file(&raw);
                 let admin = admins.contains(&raw);
                 self.remember_title(&raw, &name);
@@ -915,7 +912,6 @@ impl GroupManager {
             })
             .unwrap_or(false);
         if added {
-            crate::spawn_connect(self.messenger.clone(), peer);
             self.save_group(&id);
             // Догоняем нового участника настоящим именем группы (иначе у него дефолт).
             // Welcome уже ушёл в add_member (раньше в очереди) → имя применится после
@@ -1100,9 +1096,6 @@ impl GroupManager {
                 self.pending_kp = None;
                 self.pending_from = None;
                 self.last_join_retry = None;
-                for m in chat.members() {
-                    crate::spawn_connect(self.messenger.clone(), m);
-                }
                 // RESYNC (ADR-004): Welcome для УЖЕ известной группы = нас заново
                 // добавили после рассинхрона. Меняем только MLS-состояние (chat),
                 // сохраняя имя и историю сообщений; событие тихое (не «joined»).

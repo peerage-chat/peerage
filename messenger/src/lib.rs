@@ -274,7 +274,22 @@ struct PeerState {
     online: bool,
     last_seen: Instant,
     last_ping: Instant,
+    /// Следующая проба офлайн-пира и текущий шаг backoff (растёт до [`PROBE_MAX`]).
+    next_probe: Instant,
+    backoff: Duration,
 }
+
+impl PeerState {
+    fn new(now: Instant) -> Self {
+        PeerState { online: false, last_seen: now, last_ping: now, next_probe: now, backoff: PROBE_MIN }
+    }
+}
+
+/// Первая и предельная пауза между пробами офлайн-пира. Пропавший контакт
+/// спрашиваем часто только поначалу: дальше — раз в несколько минут, а не пять
+/// пакетов в секунду круглые сутки.
+const PROBE_MIN: Duration = Duration::from_secs(2);
+const PROBE_MAX: Duration = Duration::from_secs(300);
 
 struct Pending {
     peer: PeerKey,
@@ -351,6 +366,10 @@ struct Shared {
     /// пользователю можно было СКАЗАТЬ, что его флудят: остановить поток на
     /// устройстве нельзя (threat-model N8), но молчать об этом — худший вариант.
     flood: Mutex<std::collections::HashMap<PeerKey, FloodEntry>>,
+    /// С кем держим связь (контакты и участники групп — задаёт движок): только им
+    /// идут пробы и keepalive, и только им отвечаем на Ping. Остальным мы не
+    /// сообщаем, онлайн ли мы.
+    targets: Mutex<std::collections::HashSet<PeerKey>>,
 }
 
 /// Учёт отброшенного по одному источнику. `pps` — оценка за последнее окно.
@@ -426,11 +445,7 @@ impl Shared {
     /// Зарегистрировать пир как отслеживаемый (для keepalive), если ещё нет.
     fn track(&self, peer: &PeerKey) {
         let now = Instant::now();
-        self.peers.lock().unwrap().entry(*peer).or_insert(PeerState {
-            online: false,
-            last_seen: now,
-            last_ping: now,
-        });
+        self.peers.lock().unwrap().entry(*peer).or_insert(PeerState::new(now));
     }
 
     /// ЕДИНЫЙ примитив надёжной отправки: выделяет id, шлёт и кладёт в `pending` —
@@ -561,14 +576,11 @@ impl Shared {
     fn mark_seen(&self, peer: &PeerKey) -> bool {
         let now = Instant::now();
         let mut peers = self.peers.lock().unwrap();
-        let st = peers.entry(*peer).or_insert(PeerState {
-            online: false,
-            last_seen: now,
-            last_ping: now,
-        });
+        let st = peers.entry(*peer).or_insert(PeerState::new(now));
         st.last_seen = now;
         if !st.online {
             st.online = true;
+            st.backoff = PROBE_MIN;
             true
         } else {
             false
@@ -634,6 +646,7 @@ impl Messenger {
             transports: Mutex::new(std::collections::HashMap::new()),
             identities: Mutex::new(std::collections::HashMap::new()),
             flood: Mutex::new(std::collections::HashMap::new()),
+            targets: Mutex::new(std::collections::HashSet::new()),
         });
         let s1 = shared.clone();
         let rx_thread = thread::spawn(move || receive_loop(s1));
@@ -676,6 +689,34 @@ impl Messenger {
         }
         if removed {
             self.shared.pump(peer);
+        }
+    }
+
+    /// С кем держим связь: пробы офлайн-пиров с backoff, keepalive онлайн-пиров,
+    /// ответ на их Ping. Кто выпал из набора (удалён, заблокирован, исключён из
+    /// группы), тот перестаёт получать от нас что-либо служебное сразу.
+    pub fn set_targets(&self, targets: std::collections::HashSet<PeerKey>) {
+        *self.shared.targets.lock().unwrap() = targets;
+    }
+
+    /// Попробовать достучаться до пира прямо сейчас (пользователь открыл чат,
+    /// сеть поднялась): сбросить backoff и послать пробу, не дожидаясь расписания.
+    pub fn poke(&self, peer: &PeerKey) {
+        if let Some(st) = self.shared.peers.lock().unwrap().get_mut(peer) {
+            st.backoff = PROBE_MIN;
+            st.next_probe = Instant::now() + PROBE_MIN;
+        }
+        let _ = self.shared.send(peer, &Payload::Ping { transit: None });
+    }
+
+    /// Сеть сменилась: всех офлайн-пиров из набора пробуем заново с короткой паузы.
+    pub fn reset_probes(&self) {
+        let now = Instant::now();
+        for st in self.shared.peers.lock().unwrap().values_mut() {
+            if !st.online {
+                st.backoff = PROBE_MIN;
+                st.next_probe = now;
+            }
         }
     }
 
@@ -806,6 +847,7 @@ impl Messenger {
     /// Установить сессию: шлём `Hello`, пока пир не станет онлайн (двунаправленный
     /// обмен поднимает шифр-сессию ironwood). После — пир под keepalive.
     pub fn connect(&self, peer: &PeerKey, timeout: Duration) -> Result<(), MessengerError> {
+        self.shared.targets.lock().unwrap().insert(*peer);
         self.shared.track(peer);
         let start = Instant::now();
         loop {
@@ -1384,7 +1426,12 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::Ping { .. } => {
                 // ADR-008: заявка о транзите (`transit`) в 1.0 не читается — её нечем
                 // проверить, а непроверенной заявке цена ноль.
-                let _ = shared.send(&peer_id, &Payload::Pong { transit: None });
+                // Отвечаем только своим: Pong кому угодно — готовый оракул «онлайн
+                // ли этот ключ» для любого, кто знает наш адрес.
+                let ours = shared.targets.lock().unwrap().contains(&peer_id);
+                if ours {
+                    let _ = shared.send(&peer_id, &Payload::Pong { transit: None });
+                }
             }
             Payload::Pong { .. } => {}
             Payload::RoomInvite { id, room_id, audio, video } => {
@@ -1473,17 +1520,38 @@ fn maintenance_loop(shared: Arc<Shared>) {
         let mut went_offline = Vec::new();
         let mut to_ping = Vec::new();
         {
+            let targets = shared.targets.lock().unwrap().clone();
             let mut peers = shared.peers.lock().unwrap();
+            for t in &targets {
+                peers.entry(*t).or_insert_with(|| PeerState::new(now));
+            }
             for (key, st) in peers.iter_mut() {
                 if st.online && now.duration_since(st.last_seen) > shared.cfg.offline_after {
                     st.online = false;
+                    st.backoff = PROBE_MIN;
+                    st.next_probe = now;
                     went_offline.push(*key);
                 }
-                if now.duration_since(st.last_ping) >= shared.cfg.ping_interval {
+                // Чужих не пингуем: пир, приславший один пакет, не повод слать ему
+                // keepalive до конца жизни процесса.
+                if !targets.contains(key) {
+                    continue;
+                }
+                if st.online {
+                    if now.duration_since(st.last_ping) >= shared.cfg.ping_interval {
+                        st.last_ping = now;
+                        to_ping.push(*key);
+                    }
+                } else if now >= st.next_probe {
+                    // Офлайн: проба с растущей паузой, а не непрерывный Hello.
                     st.last_ping = now;
+                    st.next_probe = now + st.backoff;
+                    st.backoff = (st.backoff * 2).min(PROBE_MAX);
                     to_ping.push(*key);
                 }
             }
+            // Ушедших в офлайн чужих не держим: их состояние больше никому не нужно.
+            peers.retain(|k, st| st.online || targets.contains(k));
         }
         for key in went_offline {
             shared.emit(Event::Presence { peer: key, online: false });
@@ -1640,6 +1708,50 @@ mod tests {
             }
         }
         None
+    }
+
+    /// R-010: на Ping отвечаем только своим — иначе любой знающий наш адрес
+    /// узнавал бы, онлайн ли мы, без единого сообщения.
+    #[test]
+    fn pong_only_to_targets() {
+        let net = LoopbackNet::new();
+        let (a_id, b_id) = (id(41), id(42));
+        let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+        let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
+        let (b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), Config::default());
+
+        b.poke(&a_key);
+        let seen = wait_for(&b_rx, |e| matches!(e, Event::Presence { online: true, .. }));
+        assert!(seen.is_none(), "чужому A не ответил — B не узнал, что A в сети");
+
+        a.set_targets([b_key].into_iter().collect());
+        b.poke(&a_key);
+        let seen = wait_for(&b_rx, |e| matches!(e, Event::Presence { peer, online: true } if *peer == a_key));
+        assert!(seen.is_some(), "своему A ответил");
+    }
+
+    /// R-022: офлайн-пира из набора пробуем с растущей паузой, а не непрерывно.
+    #[test]
+    fn offline_target_is_probed_with_backoff() {
+        let net = LoopbackNet::new();
+        let (a_id, x_id) = (id(43), id(44));
+        let (a_key, x_key) = (a_id.public_key_bytes(), x_id.public_key_bytes());
+        // X — только эндпоинт без мессенджера: считаем, сколько ему пришло.
+        let x = net.endpoint(x_key);
+        let got = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let g = got.clone();
+        thread::spawn(move || {
+            let mut buf = vec![0u8; 65536];
+            while x.read(&mut buf).is_ok() {
+                g.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        let (a, _rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
+        a.set_targets([x_key].into_iter().collect());
+        thread::sleep(Duration::from_millis(9500));
+        // Пробы в 0, 2, 6 с (пауза 2 → 4 → 8): три, а не ~60 (Hello каждые 150 мс).
+        let n = got.load(Ordering::Relaxed);
+        assert!((2..=4).contains(&n), "проб за 9,5 с: {n}");
     }
 
     /// Два мессенджера поверх loopback обмениваются текстом; приходит Ack (✓✓).
