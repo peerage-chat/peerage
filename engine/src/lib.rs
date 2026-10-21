@@ -1830,15 +1830,15 @@ impl Engine {
         let guard = self.room_call.lock_safe();
         if let Some(rc) = guard.as_ref() {
             let mut live = self.live_participants(&rc.gid);
-            // SEC-2 (ADR-004): для ГРУППОВОЙ комнаты в состав звонка допускаем только
-            // пиров из текущего MLS-ростера — маячок присутствия по gid сам по себе не
-            // пропуск. DM-комнаты (room_id в dm_peers) не фильтруем: там ростера нет.
-            // Fail-open, если ростер ещё не в кэше (не рвём легитимный звонок): гейт
-            // обретает зубы после отзыва (SEC-1), когда ростер реально сужается.
-            let is_dm = self.rooms.lock_safe().dm_peers.contains_key(&rc.gid);
-            if !is_dm {
-                let roster = self.group_roster_set(&rc.gid);
-                if !roster.is_empty() {
+            // `members` — адресаты нашего голоса и видео, поэтому маячок присутствия
+            // сам по себе не пропуск. В DM-комнате бывает ровно один собеседник; в
+            // групповой — только текущий MLS-ростер (SEC-2), и пустой ростер значит
+            // «никого», а не «всех».
+            let dm_peer = self.rooms.lock_safe().dm_peers.get(&rc.gid).copied();
+            match dm_peer {
+                Some(peer) => live.retain(|p| *p == peer),
+                None => {
+                    let roster = self.group_roster_set(&rc.gid);
                     live.retain(|p| roster.contains(p));
                 }
             }
@@ -1923,11 +1923,19 @@ impl Engine {
             .count()
     }
 
-    /// Пропускать ли входящий RoomInvite: наша DM-комната с этим пиром или комната
-    /// группы, в ростере которой он есть.
-    fn room_invite_allowed(&self, peer: &[u8; 32], room_id: &[u8]) -> bool {
-        room_id == p2p_core::dm_room_id(&self.me_pub, peer).as_slice()
-            || self.group_roster_set(room_id).contains(peer)
+    /// Вправе ли `peer` звать нас в комнату `room_id` и находиться в ней: это либо
+    /// наша DM-комната с ним (и он — контакт), либо комната группы, в ростере которой
+    /// он есть. Ростер ещё не прогрет — не пускаем никого: присутствие в комнате —
+    /// это адрес, куда уходят наш голос и видео.
+    ///
+    /// Сверять DM-комнату именно с `dm_room_id(мы, он)` обязательно: id комнаты
+    /// вычисляется из двух публичных ключей, и без этой сверки любой, кто знает
+    /// ключи двух собеседников, заявил бы себя участником их разговора.
+    fn room_peer_allowed(&self, peer: &[u8; 32], room_id: &[u8]) -> bool {
+        if room_id == p2p_core::dm_room_id(&self.me_pub, peer).as_slice() {
+            return self.contacts.lock_safe().contains(peer);
+        }
+        self.group_roster_set(room_id).contains(peer)
     }
 
     /// Отклонить приглашение в комнату группы. Звонящему ничего не шлём: он уже в
@@ -2766,11 +2774,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             push_event(engine, dto::UiEvent::Undelivered { peer: hex::encode(peer), id });
         }
         Event::RoomInvite { peer, room_id, audio, video } => {
-            // Звать можно либо в нашу общую DM-комнату, либо в комнату группы, где
-            // звонящий состоит. Иначе любой знающий наш ключ звонил бы «в группу»,
-            // которой нет, — входящий экран без шанса что-то принять.
+            // Звать можно либо в нашу общую DM-комнату (только контакт: незнакомец
+            // идёт через запрос в контакты, а не через звонок), либо в комнату группы,
+            // где звонящий состоит.
             // Мы уже в этой комнате — звать некуда, а запись о звонке затёрла бы текущую.
-            if !engine.room_invite_allowed(&peer, &room_id)
+            if !engine.room_peer_allowed(&peer, &room_id)
                 || engine.rooms.lock_safe().joined.contains_key(&room_id)
             {
                 return;
@@ -2993,6 +3001,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             }
         }
         Event::RoomPresence { peer, gid, flags } => {
+            // Чужой маячок в комнату, где ему не место, не записываем вовсе: из
+            // присутствия собирается список адресатов нашего голоса и видео.
+            if !engine.room_peer_allowed(&peer, &gid) {
+                return;
+            }
             let left = flags & PRESENCE_LEFT != 0;
             {
                 let mut rs = engine.rooms.lock_safe();
@@ -3008,7 +3021,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             // состоялся. Без этого «позвонил и поговорил» осталось бы в журнале
             // как «не дозвонился».
             if !left {
-                if let Some(c) = engine.active_call.lock_safe().as_ref() {
+                if let Some(c) = engine.active_call.lock_safe().as_ref().filter(|c| c.room == gid) {
                     engine.calls.lock_safe().set_outcome(c.id, "answered");
                 }
             }

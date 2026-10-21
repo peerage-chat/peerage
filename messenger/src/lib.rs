@@ -362,14 +362,14 @@ impl Shared {
         let _ = self.tx.send(ev);
     }
 
-    /// Текущий транспорт. Клонируем Arc и сразу отпускаем замок: держать его на
-    /// время блокирующего `read` нельзя — замена узла встала бы намертво.
     /// Личность за этим адресом. Неизвестный адрес — сам себе личность (эпоха 0
     /// либо незнакомец).
     fn identity_of(&self, src: &PeerKey) -> PeerKey {
         self.identities.lock().unwrap().get(src).copied().unwrap_or(*src)
     }
 
+    /// Текущий транспорт. Клонируем Arc и сразу отпускаем замок: держать его на
+    /// время блокирующего `read` нельзя — замена узла встала бы намертво.
     fn node(&self) -> Arc<dyn Transport> {
         self.node.read().unwrap().clone()
     }
@@ -1142,8 +1142,10 @@ fn receive_loop(shared: Arc<Shared>) {
         if buf[0] == CHAN_MEDIA {
             if let Some(f) = parse_media(&buf[..n]) {
                 if let Some(tx) = shared.media_tx.lock().unwrap().as_ref() {
+                    // Отправитель — ЛИЧНОСТЬ, а не адрес: по `src` движок решает,
+                    // чей это голос, и сверяет его с участниками комнаты (ADR-007).
                     let err = tx.try_send(MediaPacket {
-                        src,
+                        src: shared.identity_of(&src),
                         track: f.track,
                         seq: f.seq,
                         ts: f.ts,
