@@ -1130,6 +1130,22 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_clearOutboxFor<'local>(
     })
 }
 
+/// Очистить историю личного чата у себя (сообщения, закрепы, очередь отправки).
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_clearDmHistory<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        if let Some(k) = parse_key(&jstr(&mut env, &key_hex)) {
+            e.clear_dm_history(&k);
+        }
+    });
+}
+
 /// Что занимает место: JSON {blobs, blob_bytes, outbox_pending, outbox_bytes}.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_storageStats<'local>(

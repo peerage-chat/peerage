@@ -366,3 +366,41 @@ fn editing_replaces_text_on_both_sides_and_only_for_the_author() {
     assert_eq!(history(&b, &a_key)[0]["text"], "встречаемся в восемь");
     assert_eq!(history(&a, &b_key)[0]["text"], "встречаемся в восемь", "и у автора тоже");
 }
+
+/// «Очистить историю» стирает переписку только у себя: собеседник свою копию
+/// сохраняет, контакт остаётся, а закрепы и очередь отправки уходят вместе с
+/// историей — иначе неотправленное ушло бы позже и вернулось в пустой чат.
+#[test]
+fn clearing_history_is_local_and_takes_pins_and_queue_with_it() {
+    let (a, b, a_key, b_key) = pair("clear", 81, 82);
+
+    let id1 = a.send_text(&b_key, "первое").unwrap() as u64;
+    a.send_text(&b_key, "второе");
+    assert!(wait(10, || history(&b, &a_key).len() == 2), "оба дошли");
+    assert!(a.pin_message(p2p_engine::ChatKey::Dm(b_key), id1, &hex::encode(a_key), true));
+
+    // Собеседник, которого нет в сети: сообщение ему висит в очереди отправки.
+    let ghost = id(83).public_key_bytes();
+    a.add_contact(&ghost, "Призрак");
+    a.send_text(&ghost, "дойдёт, когда появится");
+    let pending = |e: &Engine| json_field(&e.storage_stats_json(), "outbox_pending");
+    assert!(pending(&a) >= 1, "в очереди есть неотправленное");
+
+    a.clear_dm_history(&b_key);
+    a.clear_dm_history(&ghost);
+
+    assert!(history(&a, &b_key).is_empty(), "у себя история пуста");
+    let pins: serde_json::Value = serde_json::from_str(&a.pinned_json(p2p_engine::ChatKey::Dm(b_key))).unwrap();
+    assert_eq!(pins.as_array().map(|v| v.len()), Some(0), "закреп ушёл вместе с историей");
+    assert_eq!(pending(&a), 0, "неотправленное не вернётся в чат");
+    assert!(a.contacts_json().contains(&hex::encode(b_key)), "контакт остался");
+    assert_eq!(history(&b, &a_key).len(), 2, "у собеседника переписка цела");
+
+    // Удаление контакта стирает и переписку — так обещает подтверждение в UI.
+    b.remove_contact(&a_key);
+    assert!(history(&b, &a_key).is_empty(), "удалённый контакт уходит вместе с историей");
+}
+
+fn json_field(s: &str, key: &str) -> u64 {
+    serde_json::from_str::<serde_json::Value>(s).unwrap()[key].as_u64().unwrap_or(0)
+}

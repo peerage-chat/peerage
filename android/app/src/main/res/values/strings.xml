@@ -489,6 +489,9 @@
     <string name="profile_block">Block</string>
     <string name="profile_block_confirm">Messages from %1$s will be dropped silently, before decryption.</string>
     <string name="profile_delete_confirm">The contact and the conversation history will be removed from this device.</string>
+    <string name="profile_clear_history">Clear history</string>
+    <string name="profile_clear_history_confirm">The conversation will be deleted from this device, including messages not yet sent. The other person keeps their copy.</string>
+    <string name="profile_clear_history_ok">Clear</string>
     <string name="title_verify_qr">Verify key</string>
     <string name="verify_match">Keys match — contact verified</string>
     <string name="verify_mismatch">Keys DO NOT match. Someone may be in between — do not trust this conversation until you check again.</string>

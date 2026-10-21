@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Message
@@ -61,6 +62,7 @@ internal fun ContactProfileScreen(
     var confirmDelete by remember(key) { mutableStateOf(false) }
     var confirmBlock by remember(key) { mutableStateOf(false) }
     var confirmShare by remember(key) { mutableStateOf(false) }
+    var confirmClear by remember(key) { mutableStateOf(false) }
     // Флаг чата приходит из сводки — она же кормит список на главной, так что
     // «без звука» здесь и значок на главной не разъедутся.
     val muted = model.chatSummaries[model.chatKey(key, false)]?.muted == true
@@ -260,7 +262,10 @@ internal fun ContactProfileScreen(
         // Блокировка и удаление — в СВОЕЙ карточке: их отделяет от остального не
         // заголовок, а разрыв, иначе «удалить» стоит вплотную к «переименовать».
         CardSection {
-            DangerRow(Icons.Filled.Block, stringResource(R.string.profile_block), HoloError, divider = false) {
+            DangerRow(Icons.Filled.DeleteSweep, stringResource(R.string.profile_clear_history), HoloError, divider = false) {
+                confirmClear = true
+            }
+            DangerRow(Icons.Filled.Block, stringResource(R.string.profile_block), HoloError) {
                 confirmBlock = true
             }
             DangerRow(Icons.Filled.Delete, stringResource(R.string.info_delete), HoloError) {
@@ -309,6 +314,27 @@ internal fun ContactProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmShare = false }) {
+                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
+                }
+            },
+        )
+    }
+
+    // Стирается только У СЕБЯ — это и сказано в подтверждении: человек должен знать,
+    // что у собеседника переписка останется.
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text(stringResource(R.string.profile_clear_history)) },
+            text = { Text(stringResource(R.string.profile_clear_history_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    model.clearHistory(key)
+                    confirmClear = false
+                }) { Text(stringResource(R.string.profile_clear_history_ok), color = HoloError) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) {
                     Text(stringResource(R.string.common_cancel), color = HoloSecondary)
                 }
             },

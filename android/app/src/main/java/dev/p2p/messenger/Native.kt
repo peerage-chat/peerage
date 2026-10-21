@@ -209,6 +209,9 @@ object Native {
     /** Сбросить очередь недоставленного пиру (явное действие). Возвращает удалённых. */
     external fun clearOutboxFor(sessionPtr: Long, keyHex: String): Int
 
+    /** Очистить историю личного чата у себя: сообщения, закрепы, очередь отправки. */
+    external fun clearDmHistory(sessionPtr: Long, keyHex: String)
+
     /** Что занимает место: JSON {blobs, blob_bytes, outbox_pending, outbox_bytes}. */
     external fun storageStats(sessionPtr: Long): String
 

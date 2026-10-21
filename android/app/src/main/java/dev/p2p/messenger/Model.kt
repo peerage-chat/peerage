@@ -1634,10 +1634,30 @@ class AppModel private constructor() {
         refreshContactsNow()
     }
 
+    /** Удалить контакт вместе с перепиской (движок стирает и историю). */
     fun remove(key: String) = ops.execute {
         Native.removeContact(sessionPtr, key)
         if (currentChat == key) currentChat = null
+        forgetChatLocally(key)
         refreshContactsNow()
+    }
+
+    /** Очистить историю личного чата у себя (контакт остаётся). Вместе с ней уходит
+     *  и неотправленное — иначе оно ушло бы позже и вернулось в пустой чат. */
+    fun clearHistory(key: String) = ops.execute {
+        Native.clearDmHistory(sessionPtr, key)
+        forgetChatLocally(key)
+    }
+
+    /** Убрать из памяти клиента то, что движок уже стёр: лог, закрепы, счётчик,
+     *  старую клиентскую очередь отправки. */
+    private fun forgetChatLocally(key: String) {
+        synchronized(queueLock) { offlineQueueMap.remove(key) }
+        saveOfflineQueue()
+        messages[chatKey(key, group = false)]?.clear()
+        pinned.remove(key) // закрепы — по голому ключу собеседника
+        unread.remove(key)
+        refreshChatSummariesNow()
     }
 
     // ── Гейт контактов (запросы от незнакомцев) ────────────────────────────

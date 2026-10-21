@@ -1332,8 +1332,11 @@ impl Engine {
         let _ = self.contacts.lock_safe().rename(key, name);
     }
 
+    /// Удалить контакт вместе с перепиской у себя — так обещает подтверждение в UI.
+    /// Раньше уходил только контакт, а история оставалась в базе.
     pub fn remove_contact(&self, key: &[u8; 32]) {
         let _ = self.contacts.lock_safe().remove(key);
+        self.clear_dm_history(key);
         self.refresh_budgets();
     }
 
@@ -1458,6 +1461,19 @@ impl Engine {
     /// Сбросить очередь недоставленного конкретному пиру (явное действие пользователя).
     pub fn clear_outbox_for(&self, key: &[u8; 32]) -> usize {
         self.outbox.lock_safe().clear_peer(key)
+    }
+
+    /// Очистить историю личного чата У СЕБЯ: сообщения, закрепы и то, что ещё ждёт
+    /// отправки этому собеседнику (иначе очередь дошла бы позже и «вернула» в чат
+    /// часть стёртого). Собеседник ничего не узнаёт, его копия остаётся. Контакт,
+    /// флаги чата («без звука», закреп в списке) и скачанные вложения — не трогаем:
+    /// файлы чистятся в «Хранилище», где видно, сколько они занимают.
+    pub fn clear_dm_history(&self, key: &[u8; 32]) {
+        let msgs = self.messages.lock_safe();
+        let _ = msgs.clear(Chat::Dm(key));
+        let _ = msgs.clear_pins(Chat::Dm(key));
+        drop(msgs);
+        self.outbox.lock_safe().clear_peer(key);
     }
 
     /// Что занимает место: вложения (блобы) и очередь недоставленного.
