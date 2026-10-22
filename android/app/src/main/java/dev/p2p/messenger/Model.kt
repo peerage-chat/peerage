@@ -1899,6 +1899,19 @@ class AppModel private constructor() {
                 rotation = rotation?.copy(secondsLeft = 0, newAddress = ev.address)
                 me = me?.copy(address = ev.address)
             }
+            // Новый узел не поднялся: карточку хода закрываем и говорим, что вышло.
+            // Адрес прежний; если и на него вернуться не удалось — мы офлайн, и
+            // вернёт сеть обычная кнопка «онлайн».
+            is EngineEvent.TransportRotateFailed -> {
+                rotation = null
+                offline = !ev.online
+                val msg = if (ev.online) R.string.rotate_failed else R.string.rotate_failed_offline
+                appContext?.let { ctx ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        android.widget.Toast.makeText(ctx, ctx.getString(msg), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
             is EngineEvent.BlobProgress -> {
                 if (ev.total > 0) downloads[ev.id] = ev.done / ev.total.toFloat()
             }

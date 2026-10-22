@@ -542,6 +542,8 @@
     <string name="rotate_p_pause">Пауза — осталось %1$d с</string>
     <string name="rotate_p_up">Подъём под новым адресом</string>
     <string name="rotate_p_told">Уведомление %1$d контактам</string>
+    <string name="rotate_failed">Сменить адрес не удалось — вы снова на прежнем</string>
+    <string name="rotate_failed_offline">Сменить адрес не удалось. Вы офлайн — нажмите «Вернуться в сеть»</string>
     <string name="rotate_done">Адрес сменён</string>
     <string name="rotate_if_continues">Если поток продолжится и по новому адресу — значит его знает кто-то из оповещённых.</string>
     <string name="net_epoch">Адрес меняли раз: %1$d</string>

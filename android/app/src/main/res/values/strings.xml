@@ -548,6 +548,8 @@
     <string name="rotate_p_pause">Pause — %1$d s left</string>
     <string name="rotate_p_up">Coming up under the new address</string>
     <string name="rotate_p_told">Notice to %1$d contacts</string>
+    <string name="rotate_failed">Could not change the address — you are back on the old one</string>
+    <string name="rotate_failed_offline">Could not change the address. You are offline — tap “Back online”</string>
     <string name="rotate_done">Address changed</string>
     <string name="rotate_if_continues">If the stream continues at the new address too, someone you told knows it.</string>
     <string name="net_epoch">Address changed %1$d time(s)</string>

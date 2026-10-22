@@ -316,3 +316,45 @@ fn contact_code_carries_signed_address() {
     a.shutdown();
     c.shutdown();
 }
+
+/// R-032: новый узел не поднялся — движок возвращается на прежний адрес, а не
+/// остаётся офлайн навсегда, и говорит клиенту, что смена не удалась.
+#[test]
+fn failed_rotation_falls_back_to_the_old_address() {
+    let net = LoopbackNet::new();
+    let alice = id(68);
+    let bob_id = id(69);
+    let (a_key, b_key) = (alice.public_key_bytes(), bob_id.public_key_bytes());
+    let a = Engine::start_with_transport(tmpdir("a-fail"), alice.clone(), net.endpoint(a_key)).unwrap().engine;
+    let b = Engine::start_with_transport(tmpdir("b-fail"), bob_id, net.endpoint(b_key)).unwrap().engine;
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Алиса");
+
+    // Узел новой эпохи не поднимается; прежний (ключ личности) — поднимается.
+    let net_for_factory = net.clone();
+    a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
+        let key = p2p_core::Identity::from_seed(seed).ok()?.public_key_bytes();
+        (key == a_key).then(|| net_for_factory.endpoint(key) as std::sync::Arc<dyn p2p_messenger::Transport>)
+    }));
+    a.rotate_transport(vec![b_key], 0);
+
+    let mut failed = None;
+    assert!(
+        wait(10, || {
+            while let Some(ev) = a.poll_event() {
+                let v: serde_json::Value = serde_json::from_str(&ev).unwrap();
+                if v["type"] == "transport_rotate_failed" {
+                    failed = Some(v);
+                }
+            }
+            failed.is_some()
+        }),
+        "клиент узнал, что смена не удалась"
+    );
+    assert_eq!(failed.unwrap()["online"], true);
+    assert!(!a.is_offline(), "вернулись в сеть");
+    assert_eq!(a.transport_epoch(), 0, "адрес прежний");
+
+    b.send_text(&a_key, "ты здесь?");
+    assert!(wait(20, || a.history_json(&b_key).contains("ты здесь?")), "связь на прежнем адресе жива");
+}

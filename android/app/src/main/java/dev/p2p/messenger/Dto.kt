@@ -426,6 +426,11 @@ internal sealed interface EngineEvent {
     @SerialName("transport_rotated")
     data class TransportRotated(val address: String, val epoch: Int) : EngineEvent
 
+    /** Смена адреса не удалась: адрес прежний; `online` — вернулись ли на него. */
+    @Serializable
+    @SerialName("transport_rotate_failed")
+    data class TransportRotateFailed(val online: Boolean = false) : EngineEvent
+
     @Serializable
     @SerialName("blob_received")
     data class BlobReceived(val id: String, val mime: String = "", val size: Long = 0) : EngineEvent

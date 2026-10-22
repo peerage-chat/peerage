@@ -55,6 +55,11 @@ class EngineEventTest {
         assertTrue(parseEvent("""{"type":"groups_changed"}""") is EngineEvent.GroupsChanged)
     }
 
+    @Test fun rotate_failed_parses() {
+        val ev = parseEvent("""{"type":"transport_rotate_failed","online":true}""")
+        assertTrue(ev is EngineEvent.TransportRotateFailed && ev.online)
+    }
+
     @Test fun unknown_event_type_is_not_a_crash() {
         // Движок может начать слать событие раньше, чем клиент научится его
         // показывать. Это не повод ронять поток разбора.
