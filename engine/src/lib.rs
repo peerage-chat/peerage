@@ -2077,7 +2077,7 @@ impl Engine {
             return true;
         }
         let Some(id) = self.missed_calls.lock_safe().remove(room) else { return false };
-        let mut calls = self.calls.lock_safe();
+        let calls = self.calls.lock_safe();
         if let Some(prev) = ac.take() {
             calls.finish(prev.id, prev.since.elapsed().as_secs() as i64);
         }

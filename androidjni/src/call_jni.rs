@@ -182,7 +182,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStart<'local>(
 /// Hex-ключи говорящих сейчас участников (active-speaker). JSON-массив.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomSpeakingPeers<'local>(
-    mut env: JNIEnv<'local>,
+    env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
 ) -> jstring {
@@ -195,7 +195,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSpeakingPeers<'local>(
 /// Накопленные байты трафика по участникам (JSON {hex: rx, "self": tx}).
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_roomTrafficJson<'local>(
-    mut env: JNIEnv<'local>,
+    env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
 ) -> jstring {
@@ -243,7 +243,10 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushAudio<'local>(
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
-        let n = n.max(0) as usize;
+        // `n` — слово Kotlin; длина массива — факт. Больше длины читать нельзя:
+        // JNI оставил бы висящее исключение, и оно выстрелило бы на следующем вызове.
+        let len = env.get_array_length(&data).unwrap_or(0).max(0) as usize;
+        let n = (n.max(0) as usize).min(len);
         if n == 0 { return; }
         let mut buf = vec![0i16; n];
         if env.get_short_array_region(&data, 0, &mut buf).is_err() { return; }
