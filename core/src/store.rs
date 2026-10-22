@@ -261,32 +261,27 @@ impl ContactStore {
         self.cache.contains_key(key)
     }
 
+    // Все изменения ниже — сначала в базу, потом в кэш: не записалось — кэш не
+    // трогаем, иначе память и диск разошлись бы до перезапуска (R-043).
+
     pub fn set_verified(&mut self, key: &[u8; 32], verified: bool) -> Result<bool, StoreError> {
-        match self.cache.get_mut(key) {
-            Some(c) => {
-                c.verified = verified;
-                db::lock(&self.db).execute(
-                    "UPDATE contacts SET verified=?1 WHERE key=?2",
-                    rusqlite::params![verified as i64, key.as_slice()],
-                )?;
-                Ok(true)
-            }
-            None => Ok(false),
-        }
+        let Some(c) = self.cache.get_mut(key) else { return Ok(false) };
+        db::lock(&self.db).execute(
+            "UPDATE contacts SET verified=?1 WHERE key=?2",
+            rusqlite::params![verified as i64, key.as_slice()],
+        )?;
+        c.verified = verified;
+        Ok(true)
     }
 
     pub fn rename(&mut self, key: &[u8; 32], name: &str) -> Result<bool, StoreError> {
-        match self.cache.get_mut(key) {
-            Some(c) => {
-                c.name = name.to_string();
-                db::lock(&self.db).execute(
-                    "UPDATE contacts SET name=?1 WHERE key=?2",
-                    rusqlite::params![name, key.as_slice()],
-                )?;
-                Ok(true)
-            }
-            None => Ok(false),
-        }
+        let Some(c) = self.cache.get_mut(key) else { return Ok(false) };
+        db::lock(&self.db).execute(
+            "UPDATE contacts SET name=?1 WHERE key=?2",
+            rusqlite::params![name, key.as_slice()],
+        )?;
+        c.name = name.to_string();
+        Ok(true)
     }
 
     /// Применить объявление контакта о смене адреса (ADR-007).
@@ -313,12 +308,13 @@ impl ContactStore {
         if !crate::identity::verify_transport_rotate(key, epoch, transport_pub, sig) {
             return Ok(false);
         }
-        c.transport_key = hex::encode(transport_pub);
-        c.transport_epoch = epoch;
+        let tk = hex::encode(transport_pub);
         db::lock(&self.db).execute(
             "UPDATE contacts SET transport_key=?1, transport_epoch=?2 WHERE key=?3",
-            rusqlite::params![&c.transport_key, epoch as i64, key.as_slice()],
+            rusqlite::params![&tk, epoch as i64, key.as_slice()],
         )?;
+        c.transport_key = tk;
+        c.transport_epoch = epoch;
         Ok(true)
     }
 
@@ -336,18 +332,14 @@ impl ContactStore {
     /// Обновить профиль контакта (M2): его самоназвание + hex-хэш аватара (из
     /// `ProfileUpdate`). Локальное `name` не трогаем (приоритет за пользователем).
     pub fn set_profile(&mut self, key: &[u8; 32], profile_name: &str, avatar_id: &str) -> Result<bool, StoreError> {
-        match self.cache.get_mut(key) {
-            Some(c) => {
-                c.profile_name = profile_name.to_string();
-                c.avatar_id = avatar_id.to_string();
-                db::lock(&self.db).execute(
-                    "UPDATE contacts SET profile_name=?1, avatar_id=?2 WHERE key=?3",
-                    rusqlite::params![profile_name, avatar_id, key.as_slice()],
-                )?;
-                Ok(true)
-            }
-            None => Ok(false),
-        }
+        let Some(c) = self.cache.get_mut(key) else { return Ok(false) };
+        db::lock(&self.db).execute(
+            "UPDATE contacts SET profile_name=?1, avatar_id=?2 WHERE key=?3",
+            rusqlite::params![profile_name, avatar_id, key.as_slice()],
+        )?;
+        c.profile_name = profile_name.to_string();
+        c.avatar_id = avatar_id.to_string();
+        Ok(true)
     }
 
     /// Засчитать пиру «полезное дело» (M3, репутация): он потратил на нас свой трафик,
@@ -355,21 +347,24 @@ impl ContactStore {
     /// Для не-контакта ничего не делает — заслуги копятся только после гейта (анти-Sybil).
     pub fn bump_helpful(&mut self, key: &[u8; 32]) -> Result<u32, StoreError> {
         let Some(c) = self.cache.get_mut(key) else { return Ok(0) };
-        c.helpful = c.helpful.saturating_add(1);
-        let n = c.helpful;
+        let n = c.helpful.saturating_add(1);
         db::lock(&self.db).execute(
             "UPDATE contacts SET helpful=?1 WHERE key=?2",
             rusqlite::params![n as i64, key.as_slice()],
         )?;
+        c.helpful = n;
         Ok(n)
     }
 
     pub fn remove(&mut self, key: &[u8; 32]) -> Result<bool, StoreError> {
-        if self.cache.remove(key).is_none() { return Ok(false); }
+        if !self.cache.contains_key(key) {
+            return Ok(false);
+        }
         db::lock(&self.db).execute(
             "DELETE FROM contacts WHERE key=?1",
             rusqlite::params![key.as_slice()],
         )?;
+        self.cache.remove(key);
         Ok(true)
     }
 }
@@ -2044,5 +2039,23 @@ mod tests {
         // Тот же id от ДРУГОГО автора — другое сообщение.
         let other = StoredMessage { id: 7, sender: hex::encode(key()), text: "чужое".into(), ..Default::default() };
         assert!(store.append(Chat::Dm(&peer), &other).is_ok());
+    }
+
+    /// R-043: не записалось в базу — кэш контактов не меняется (иначе память и
+    /// диск разошлись бы до перезапуска).
+    #[test]
+    fn failed_contact_write_leaves_cache_alone() {
+        let k = key();
+        let shared = db();
+        let mut store = ContactStore::open(shared.clone()).unwrap();
+        store.add(&k, "Аня", 1).unwrap();
+        crate::db::lock(&shared).execute_batch("PRAGMA query_only = ON;").unwrap();
+        assert!(store.rename(&k, "Боря").is_err());
+        assert!(store.set_verified(&k, true).is_err());
+        assert!(store.set_profile(&k, "Борис", "ab").is_err());
+        assert!(store.bump_helpful(&k).is_err());
+        assert!(store.remove(&k).is_err());
+        let c = store.get(&k).expect("контакт на месте");
+        assert_eq!((c.name.as_str(), c.verified, c.profile_name.as_str(), c.helpful), ("Аня", false, "", 0));
     }
 }
