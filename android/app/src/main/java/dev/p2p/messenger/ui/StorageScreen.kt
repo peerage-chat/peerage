@@ -228,7 +228,7 @@ private fun fmtDay(ts: Long): String =
 
 private fun kindColor(kind: String): Color = when (kind) {
     "image" -> Tokens.Colors.accent
-    "video" -> Color(0xFF7E57C2)
+    "video" -> Tokens.Colors.kindVideo
     "voice" -> Tokens.Colors.online
     else -> Tokens.Colors.iconMuted
 }

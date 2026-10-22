@@ -98,7 +98,7 @@ private fun ScannerContent(onResult: (String) -> Unit) {
             val t = (size.height - boxSizePx) / 2
             val r = l + boxSizePx
             val b = t + boxSizePx
-            val dim = Color(0x99000000)
+            val dim = Tokens.Colors.scanScrim
             drawRect(dim, topLeft = Offset.Zero, size = Size(size.width, t)) // верх
             drawRect(dim, topLeft = Offset(0f, t), size = Size(l, boxSizePx)) // лево
             drawRect(dim, topLeft = Offset(r, t), size = Size(size.width - r, boxSizePx)) // право

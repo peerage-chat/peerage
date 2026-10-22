@@ -275,7 +275,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
                 .padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SquareAvatar(name, size = Tokens.Size.avatarHead, bg = Color(0xFF0D2A0D)) {
+            SquareAvatar(name, size = Tokens.Size.avatarHead, bg = Tokens.Colors.groupAvatar) {
                 Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(10.dp))
@@ -309,7 +309,7 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         model.contacts.firstOrNull { it.key == rm.peer }?.name ?: (rm.peer.take(6) + "…")
     }
     Row(
-        Modifier.fillMaxWidth().background(Color(0xFF12331A)).padding(horizontal = 14.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().background(Tokens.Colors.roomBanner).padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
@@ -330,7 +330,7 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         Box(
             Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloOnline)
                 .clickable { onJoin() }.padding(horizontal = 18.dp, vertical = 8.dp),
-        ) { Text(stringResource(R.string.room_join), color = Color(0xFF0A1F0A), fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+        ) { Text(stringResource(R.string.room_join), color = Tokens.Colors.onOnline, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
     }
 }
 
@@ -374,7 +374,7 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
                         TextButton(onClick = { model.removeGroupMember(gid, key) }) {
                             Text(
                                 stringResource(R.string.group_remove_member),
-                                color = Color(0xFFE0563B),
+                                color = Tokens.Colors.destructive,
                                 fontSize = 14.sp,
                             )
                         }
@@ -409,7 +409,7 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
             ListRow(onClick = { model.leaveGroup(gid) }) {
                 Text(
                     stringResource(R.string.group_leave),
-                    color = Color(0xFFE0563B),
+                    color = Tokens.Colors.destructive,
                     fontSize = 16.sp,
                     modifier = Modifier.padding(top = 8.dp),
                 )

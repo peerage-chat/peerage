@@ -81,7 +81,7 @@ internal fun SearchScreen(
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(groups, key = { "g_${it.gid}" }) { g ->
                     ListRow(onClick = { onOpenGroup(g.gid) }) {
-                        SquareAvatar(g.name, size = 44.dp, bg = Color(0xFF0D2A0D)) {
+                        SquareAvatar(g.name, size = 44.dp, bg = Tokens.Colors.groupAvatar) {
                             Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
                         }
                         Spacer(Modifier.width(12.dp))

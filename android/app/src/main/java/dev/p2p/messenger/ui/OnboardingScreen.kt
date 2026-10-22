@@ -53,7 +53,7 @@ import kotlinx.coroutines.launch
 
 private val WarnBg = WarnColor.copy(alpha = 0.12f)
 private val WarnBorder = WarnColor.copy(alpha = 0.40f)
-private val WarnText = Color(0xFFE8C98A)
+private val WarnText = Tokens.Colors.onboardWarnText
 
 /** FLAG_SECURE на окно, пока композабл в композиции (блокирует скриншот/запись экрана
  *  и превью в «недавних»). Ставим на экранах с секретом — сид-фраза. */
@@ -382,7 +382,7 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
                 if (bmp != null) {
                     Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 } else {
-                    Icon(TablerIcons.User, null, tint = Color(0xFF9AA0A6), modifier = Modifier.size(40.dp))
+                    Icon(TablerIcons.User, null, tint = Tokens.Colors.iconPlaceholder, modifier = Modifier.size(40.dp))
                 }
             }
             Box(

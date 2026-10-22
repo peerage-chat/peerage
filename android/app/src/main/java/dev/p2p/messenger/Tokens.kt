@@ -78,6 +78,57 @@ object Tokens {
         val glassDanger = Color(0x33E53935) // «микрофон выключен» и подобное
         val tileBorder = Color(0xFF4A4F55) // обводка тайла участника
         val tileIdle = Color(0xFF2A2F35) // тайл участника без видео
+
+        // Группы и комнаты
+        val groupAvatar = Color(0xFF0D2A0D) // фон аватара группы/комнаты
+        val roomBanner = Color(0xFF12331A) // баннер «в комнате идёт звонок»
+        val destructive = Color(0xFFE0563B) // «удалить участника», «выйти из группы»
+
+        // Предупреждения
+        val noticeBg = Color(0xFF3A2F12) // плашка-предупреждение (очередь разрослась)
+        val noticeText = Color(0xFFF6C453) // текст и знак на ней
+        val onboardWarnText = Color(0xFFE8C98A) // текст предупреждения в онбординге
+
+        // Прочее
+        val iconBar = Color(0xFFD6D6DD) // иконки верхней панели
+        val iconPlaceholder = Color(0xFF9AA0A6) // заглушка своего аватара
+        val unreadMutedText = Color(0xFFB9B9C2) // цифра на счётчике чата без звука
+        val scanScrim = Color(0x99000000) // затемнение вокруг рамки сканера QR
+        val kindVideo = Color(0xFF7E57C2) // видео в разбивке «Хранилища»
+        val trackIdle = Color(0xFF2A2D31) // неактивная дорожка слайдера, погасшая ячейка индикатора
+
+        // Палитры: цвет выбирается детерминированно по хэшу, поэтому у одного
+        // человека он одинаков на всех экранах (и у отпечатка — на всех устройствах).
+        /** Имя отправителя в группе (Discord-style). */
+        val senderNames = listOf(
+            Color(0xFF5BC0EB),
+            Color(0xFF9BC53D),
+            Color(0xFFE5793A),
+            Color(0xFFEF6FB3),
+            Color(0xFF7C5CFC),
+            Color(0xFF20C997),
+            Color(0xFFF6C453),
+        )
+
+        /** Фон аватара-инициалов контакта. */
+        val avatarPalette = listOf(
+            Color(0xFF1E3A5A),
+            Color(0xFF2A1A3A),
+            Color(0xFF1A2A1A),
+            Color(0xFF2A2A1A),
+            Color(0xFF3A1A1A),
+            Color(0xFF1A3A3A),
+        )
+
+        /** Знаки визуального отпечатка: различимые оттенки на тёмном фоне. Порядок
+         *  — часть сверки: поменять его значит, что старые скриншоты отпечатка
+         *  перестанут совпадать. */
+        val fingerprintGlyphs = listOf(
+            Color(0xFF4FC3F7), Color(0xFF4DB6AC), Color(0xFF81C784), Color(0xFFAED581),
+            Color(0xFFFFD54F), Color(0xFFFFB74D), Color(0xFFFF8A65), Color(0xFFE57373),
+            Color(0xFFF06292), Color(0xFFBA68C8), Color(0xFF9575CD), Color(0xFF7986CB),
+            Color(0xFF90A4AE), Color(0xFFA1887F), Color(0xFFDCE775), Color(0xFFFFFFFF),
+        )
     }
 
     /**

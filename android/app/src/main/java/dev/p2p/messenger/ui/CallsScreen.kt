@@ -90,7 +90,7 @@ private fun CallRow(
     CardRow(divider = divider, inset = 70.dp) {
         if (isRoom) {
             // Комната — сущность: скруглённый квадрат. Человек — круг.
-            SquareAvatar(name, size = Tokens.Size.avatarRow, bg = Color(0xFF0D2A0D)) {
+            SquareAvatar(name, size = Tokens.Size.avatarRow, bg = Tokens.Colors.groupAvatar) {
                 Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
             }
         } else {

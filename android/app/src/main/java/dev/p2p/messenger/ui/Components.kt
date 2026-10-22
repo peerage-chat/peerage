@@ -52,7 +52,7 @@ import kotlin.math.abs
  * читается как нажимаемая (правило «контролы отличаются от контента»).
  */
 @Composable
-internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Color(0xFFD6D6DD), onClick: () -> Unit) {
+internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Colors.iconBar, onClick: () -> Unit) {
     Box(
         Modifier.padding(horizontal = Tokens.Space.xs)
             .size(38.dp)
@@ -459,15 +459,7 @@ internal fun groupSenderName(model: AppModel, hex: String): String = when {
 }
 
 /** Яркий детерминированный цвет имени отправителя (Discord-style). */
-internal val NameColors = listOf(
-    Color(0xFF5BC0EB),
-    Color(0xFF9BC53D),
-    Color(0xFFE5793A),
-    Color(0xFFEF6FB3),
-    Color(0xFF7C5CFC),
-    Color(0xFF20C997),
-    Color(0xFFF6C453),
-)
+internal val NameColors = Tokens.Colors.senderNames
 internal fun nameColor(hex: String): Color =
     if (hex.isEmpty()) HoloSecondary else NameColors[abs(hex.hashCode()) % NameColors.size]
 
@@ -586,14 +578,7 @@ internal fun dayLabel(ts: Long): String {
 
 /** Детерминированный цвет аватара по имени контакта. */
 internal fun avatarColor(name: String): Color {
-    val palette = listOf(
-        Color(0xFF1E3A5A),
-        Color(0xFF2A1A3A),
-        Color(0xFF1A2A1A),
-        Color(0xFF2A2A1A),
-        Color(0xFF3A1A1A),
-        Color(0xFF1A3A3A),
-    )
+    val palette = Tokens.Colors.avatarPalette
     return palette[abs(name.hashCode()) % palette.size]
 }
 

@@ -155,15 +155,15 @@ internal fun ContactsScreen(
                     .fillMaxWidth()
                     .padding(horizontal = ScreenPad, vertical = 6.dp)
                     .clip(RoundedCornerShape(Tokens.Radius.chip))
-                    .background(Color(0xFF3A2F12))
+                    .background(Tokens.Colors.noticeBg)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("⚠", color = Color(0xFFF6C453), fontSize = 15.sp)
+                Text("⚠", color = Tokens.Colors.noticeText, fontSize = 15.sp)
                 Spacer(Modifier.width(10.dp))
                 Text(
                     stringResource(R.string.outbox_warn, model.outboxPending),
-                    color = Color(0xFFF6C453),
+                    color = Tokens.Colors.noticeText,
                     fontSize = 13.sp,
                     modifier = Modifier.weight(1f),
                 )
@@ -286,7 +286,7 @@ private fun ChatListRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (row.group) {
-                    SquareAvatar(row.title, size = Tokens.Size.avatarRow, bg = Color(0xFF0D2A0D)) {
+                    SquareAvatar(row.title, size = Tokens.Size.avatarRow, bg = Tokens.Colors.groupAvatar) {
                         Icon(
                             Icons.Filled.Group,
                             null,
@@ -394,7 +394,7 @@ private fun ChatRowBadge(row: ChatRowUi) {
         ) {
             Text(
                 if (row.unread > 99) "99+" else "${row.unread}",
-                color = if (row.muted) Color(0xFFB9B9C2) else HoloAccentDark,
+                color = if (row.muted) Tokens.Colors.unreadMutedText else HoloAccentDark,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -551,7 +551,7 @@ private fun GroupInviteCard(model: AppModel, inv: GroupInvite) {
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SquareAvatar(inv.name.ifBlank { "#" }, size = 40.dp, bg = Color(0xFF0D2A0D)) {
+            SquareAvatar(inv.name.ifBlank { "#" }, size = 40.dp, bg = Tokens.Colors.groupAvatar) {
                 Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(12.dp))

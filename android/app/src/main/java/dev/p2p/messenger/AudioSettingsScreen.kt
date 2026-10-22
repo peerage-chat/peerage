@@ -85,7 +85,7 @@ fun AudioSettingsScreen(model: AppModel) {
                         Box(
                             Modifier.weight(1f).fillMaxHeight()
                                 .clip(RoundedCornerShape(2.dp))
-                                .background(if (i < lit) Tokens.Colors.accent else Color(0xFF2A2D31)),
+                                .background(if (i < lit) Tokens.Colors.accent else Tokens.Colors.trackIdle),
                         )
                     }
                 }
@@ -138,9 +138,9 @@ fun AudioSettingsScreen(model: AppModel) {
             colors = SliderDefaults.colors(
                 thumbColor = Tokens.Colors.accent,
                 activeTrackColor = Tokens.Colors.accent,
-                inactiveTrackColor = Color(0xFF2A2D31),
+                inactiveTrackColor = Tokens.Colors.trackIdle,
                 disabledThumbColor = Tokens.Colors.secondary,
-                disabledActiveTrackColor = Color(0xFF2A2D31),
+                disabledActiveTrackColor = Tokens.Colors.trackIdle,
             ),
         )
         Text(

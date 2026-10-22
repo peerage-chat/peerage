@@ -10,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -38,13 +37,8 @@ import kotlin.math.sin
  * инвалидируются, а не начнут молча расходиться.
  */
 
-/** Палитра знаков: различимые оттенки, читаемые на тёмном фоне. */
-private val GlyphColors = listOf(
-    Color(0xFF4FC3F7), Color(0xFF4DB6AC), Color(0xFF81C784), Color(0xFFAED581),
-    Color(0xFFFFD54F), Color(0xFFFFB74D), Color(0xFFFF8A65), Color(0xFFE57373),
-    Color(0xFFF06292), Color(0xFFBA68C8), Color(0xFF9575CD), Color(0xFF7986CB),
-    Color(0xFF90A4AE), Color(0xFFA1887F), Color(0xFFDCE775), Color(0xFFFFFFFF),
-)
+/** Палитра знаков — [Tokens.Colors.fingerprintGlyphs]. */
+private val GlyphColors = Tokens.Colors.fingerprintGlyphs
 
 /** Разобрать hex-отпечаток движка в байты. Битый вход — пустой список. */
 internal fun parseFingerprint(hex: String): List<Int> {
