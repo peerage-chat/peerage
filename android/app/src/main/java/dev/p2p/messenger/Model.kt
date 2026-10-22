@@ -22,6 +22,10 @@ import java.util.concurrent.Executors
 /** Ошибка старта движка: данные зашифрованы другим ключом (`START_VAULT_MISMATCH`). */
 internal const val START_VAULT_MISMATCH = "vault_mismatch"
 
+/** Докачанный блоб крупнее этого в память не читается: из памяти рисуются фото,
+ *  голосовое и аватары, а видео и файлы открываются выгрузкой в файл. */
+internal const val INLINE_BLOB_MAX = 16L * 1024 * 1024
+
 /** Почему данные не открылись (R-029). */
 enum class Recovery {
     /** Keystore потерял ключ — обёртку ключа хранилища развернуть нечем. */
@@ -203,7 +207,7 @@ class AppModel private constructor() {
             return hit
         }
         val fresh = synchronized(blobWanted) { blobWanted.add(blobId) }
-        if (fresh) ops.execute { cacheBlob(blobId) }
+        if (fresh) reads.execute { cacheBlob(blobId) }
         return null
     }
 
@@ -219,7 +223,7 @@ class AppModel private constructor() {
      */
     fun exportBlob(blobId: String, dir: String, name: String, onReady: (java.io.File?) -> Unit) {
         val ctx = appContext ?: return onReady(null)
-        ops.execute {
+        heavy.execute {
             val folder = File(ctx.cacheDir, dir).apply { mkdirs() }
             // Имя из сообщения — чужая строка: оставляем только её последний сегмент.
             val safe = File(name.ifBlank { blobId.take(16) }).name.ifBlank { blobId.take(16) }
@@ -898,6 +902,14 @@ class AppModel private constructor() {
     // Заводить второй значило бы получить два порядка операций над одной сессией.
     internal val ops = Executors.newSingleThreadExecutor { Thread(it, "native-ops").apply { isDaemon = true } }
 
+    // Долгое — мимо [ops], иначе пока шифруется видео на гигабайт, не открываются
+    // чаты и не уходит текст (R-051). Один поток: вложения уходят в порядке отправки.
+    internal val heavy = Executors.newSingleThreadExecutor { Thread(it, "native-heavy").apply { isDaemon = true } }
+
+    // Чтения: байты картинок для ленты и поиск. Отдельно от [heavy], чтобы прокрутка
+    // не ждала отправки файла, и от [ops], чтобы команды не ждали диска.
+    internal val reads = Executors.newSingleThreadExecutor { Thread(it, "native-reads").apply { isDaemon = true } }
+
     @Volatile private var running = false
     private var pollThread: Thread? = null
     private var tickerThread: Thread? = null
@@ -1574,7 +1586,9 @@ class AppModel private constructor() {
     }
 
     /** Отправить вложение ФАЙЛОМ (потоково). Файл должен пережить отдачу — движок
-     *  читает из него чанки по запросу получателя. */
+     *  читает из него чанки по запросу получателя. Своя зашифрованная копия
+     *  считается долго, поэтому на [heavy]: текст, отправленный следом, может
+     *  уйти раньше файла — как и подобает тому, что уже готово. */
     fun sendMediaFile(
         key: String,
         path: String,
@@ -1583,9 +1597,23 @@ class AppModel private constructor() {
         meta: MediaMeta,
         caption: String = "",
         group: Boolean = false,
-    ) = ops.execute {
+    ) {
+        // Цель ответа снимаем сразу, в момент нажатия — как у текста.
         val reply = replyTarget
         replyTarget = null
+        heavy.execute { sendMediaFileNow(key, path, mime, name, meta, caption, group, reply) }
+    }
+
+    private fun sendMediaFileNow(
+        key: String,
+        path: String,
+        mime: String,
+        name: String,
+        meta: MediaMeta,
+        caption: String,
+        group: Boolean,
+        reply: Message?,
+    ) {
         if (group) {
             Native.groupSendMediaFile(
                 sessionPtr, key, path, mime, name,
@@ -1899,7 +1927,9 @@ class AppModel private constructor() {
                     }
                 }
                 if (contacts.any { it.avatarId == ev.id }) refreshContactsNow()
-                cacheBlob(ev.id)
+                // Байты в память — только тому, что рисуется из памяти (фото,
+                // голосовое, аватар). Докачанное видео на гигабайт сюда не читаем.
+                if (ev.size <= INLINE_BLOB_MAX) reads.execute { cacheBlob(ev.id) }
             }
             EngineEvent.GroupsChanged -> {
                 refreshGroupsNow()

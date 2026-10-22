@@ -12,7 +12,7 @@ package dev.p2p.messenger
  * Искать по переписке. Пустой запрос очищает результат: показывать «всё подряд»
  * на пустой строке — не поиск.
  */
-fun AppModel.searchMessages(query: String, chat: String = "", group: Boolean = false) = ops.execute {
+fun AppModel.searchMessages(query: String, chat: String = "", group: Boolean = false) = reads.execute {
     if (query.isBlank()) {
         searchHits.clear()
         return@execute
