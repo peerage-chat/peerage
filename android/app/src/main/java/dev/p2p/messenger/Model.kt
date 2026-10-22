@@ -560,14 +560,14 @@ class AppModel private constructor() {
         val raw = appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
             ?.getString("folders", null) ?: return
         val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return
-        folders.clear()
+        val loaded = mutableListOf<Folder>()
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             fun strSet(name: String): Set<String> {
                 val a = o.optJSONArray(name) ?: return emptySet()
                 return (0 until a.length()).mapNotNull { a.optString(it).takeIf { s -> s.isNotEmpty() } }.toSet()
             }
-            folders += Folder(
+            loaded += Folder(
                 id = o.optString("id"),
                 name = o.optString("name"),
                 icon = o.optString("icon"),
@@ -576,6 +576,7 @@ class AppModel private constructor() {
                 excludeRead = o.optBoolean("exclude_read", false),
             )
         }
+        folders.replaceWith(loaded)
     }
 
     fun saveFolder(f: Folder) {
@@ -1044,8 +1045,7 @@ class AppModel private constructor() {
                     val flood = decodeList<FloodPeerDto>(Native.floodPeers(sessionPtr))
                         .map { FloodPeer(it.peer, it.dropped, it.pps, it.blocked) }
                     if (floodPeers != flood) {
-                        floodPeers.clear()
-                        floodPeers.addAll(flood)
+                        floodPeers.replaceWith(flood)
                     }
                     // Уведомление — ОДИН раз на эпизод: иначе оно само станет вторым
                     // флудом. Эпизод считается законченным, когда поток стих.
@@ -1097,8 +1097,7 @@ class AppModel private constructor() {
                         // Только при реальном изменении состава/флагов — иначе каждый тик
                         // (2с в звонке) форсит рекомпозицию всего экрана → рывок видео.
                         if (roomMembers != list) {
-                            roomMembers.clear()
-                            roomMembers.addAll(list)
+                            roomMembers.replaceWith(list)
                         }
                     }
                     // Присутствие в группах, к которым мы НЕ подключены:
@@ -1186,8 +1185,7 @@ class AppModel private constructor() {
 
     private fun refreshContactsNow() {
         val list = decodeList<ContactDto>(Native.listContacts(sessionPtr)).map { it.toModel() }
-        contacts.clear()
-        contacts.addAll(list)
+        contacts.replaceWith(list)
         list.forEach { online.putIfAbsent(it.key, Native.isOnline(sessionPtr, it.key)) }
         // Аватары контактов (M2): байты уже подтянутого блоба по хэшу. Пусто → нет (ещё
         // не докачался или контакт без аватара) — покажем букву. Читаем на этом же [ops].
@@ -1733,8 +1731,7 @@ class AppModel private constructor() {
         val list = decodeList<ContactRequestDto>(Native.contactRequests(sessionPtr))
             .map { ContactRequest(it.key, it.fingerprint, it.preview, it.time) }
             .sortedByDescending { it.time }
-        contactRequests.clear()
-        contactRequests.addAll(list)
+        contactRequests.replaceWith(list)
     }
 
     /** Одобрить запрос: незнакомец становится контактом. */
@@ -2241,8 +2238,7 @@ class AppModel private constructor() {
     private fun refreshGroupsNow() {
         val list = decodeList<GroupRowDto>(Native.groupList(sessionPtr))
             .map { Group(it.gid, it.name, it.members, it.admin, it.archived) }
-        groups.clear()
-        groups.addAll(list)
+        groups.replaceWith(list)
     }
 
     // ── Сводка чатов для главной ────────────────────────────────────────────
@@ -2308,8 +2304,7 @@ class AppModel private constructor() {
     private fun refreshGroupInvitesNow() {
         val list = decodeList<GroupInviteDto>(Native.groupInvites(sessionPtr))
             .map { GroupInvite(it.gid, it.name, it.inviter, it.waiting) }
-        groupInvites.clear()
-        groupInvites.addAll(list)
+        groupInvites.replaceWith(list)
     }
 
     /** Принять приглашение: вступление завершится по `groups_changed`. */

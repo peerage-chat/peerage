@@ -10,8 +10,7 @@ package dev.p2p.messenger
 fun AppModel.refreshCallLog() = ops.execute {
     val list = decodeList<CallEntryDto>(Native.callLog(sessionPtr, 200))
         .map { CallEntry(it.peer, it.gid, it.incoming, it.outcome, it.started, it.duration) }
-    callLog.clear()
-    callLog.addAll(list)
+    callLog.replaceWith(list)
 }
 
 fun AppModel.clearCallLog() = ops.execute {

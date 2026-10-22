@@ -20,6 +20,5 @@ fun AppModel.searchMessages(query: String, chat: String = "", group: Boolean = f
     val hits = decodeList<SearchHitDto>(
         Native.searchMessages(sessionPtr, query, chat, group, 100),
     ).map { AppModel.SearchHit(it.chat, it.group, it.id, it.sender, it.text, it.mine, it.time) }
-    searchHits.clear()
-    searchHits.addAll(hits)
+    searchHits.replaceWith(hits)
 }

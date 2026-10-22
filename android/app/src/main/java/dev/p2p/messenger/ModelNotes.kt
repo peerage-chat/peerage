@@ -12,8 +12,7 @@ package dev.p2p.messenger
 
 fun AppModel.refreshNotes() = ops.execute {
     val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
-    notes.clear()
-    notes.addAll(list)
+    notes.replaceWith(list)
     atChatStart -= "notes"
 }
 
@@ -62,7 +61,6 @@ fun AppModel.deleteSelectedNotes() {
     ops.execute {
         Native.deleteMessages(sessionPtr, key, json)
         val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
-        notes.clear()
-        notes.addAll(list)
+        notes.replaceWith(list)
     }
 }
