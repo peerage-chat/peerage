@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.p2p.messenger.ui.PhotoOr
 import dev.p2p.messenger.ui.rememberPermissionRunner
 
 /**
@@ -94,7 +95,7 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
                 when {
                     foc.video && foc.me -> SelfPreviewSurface(model, Modifier.fillMaxSize())
                     foc.video -> VideoSurface(model, foc.id, Modifier.fillMaxSize())
-                    else -> Avatar(tileName(model, foc), 104)
+                    else -> Avatar(tileName(model, foc), 104, tileAvatar(model, foc))
                 }
             }
             remotes.isEmpty() -> Box(Modifier.fillMaxSize().clickable { chrome = !chrome }) {
@@ -177,12 +178,15 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
 }
 
 /** Имя тайла: «Вы» для себя, иначе имя контакта / короткий ключ. */
+private fun tileAvatar(model: AppModel, t: Tile): ByteArray? =
+    if (t.me) model.selfAvatar else model.peerAvatar(t.id)
+
 @Composable
 private fun tileName(model: AppModel, t: Tile): String =
     if (t.me) {
         stringResource(R.string.call_you)
     } else {
-        model.contacts.firstOrNull { it.key == t.id }?.name ?: (t.id.take(6) + "…")
+        model.peerName(t.id)
     }
 
 /** Настройки звонка (кнопка ⚙️): вывод звука (динамик), качество видео. Оверлей
@@ -339,7 +343,7 @@ private fun ParticipantTile(
         when {
             t.video && t.me -> SelfPreviewSurface(model, Modifier.fillMaxSize())
             t.video -> VideoSurface(model, t.id, Modifier.fillMaxSize())
-            else -> Avatar(name, 64)
+            else -> Avatar(name, 64, tileAvatar(model, t))
         }
         // рамка: голубая у себя; зелёная — у говорящего сейчас участника (active-speaker)
         if (t.me) {
@@ -405,7 +409,7 @@ private fun TechRate(up: Boolean, kbps: Int) {
 
 @Composable
 private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
-    val name = model.contacts.firstOrNull { it.key == peerKey }?.name ?: (peerKey.take(6) + "…")
+    val name = model.peerName(peerKey)
     Box(Modifier.fillMaxSize()) {
         if (model.videoActive) {
             // Камера включена в одиночестве → своё превью на весь экран (его surface и
@@ -413,7 +417,7 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
             SelfPreviewSurface(model, Modifier.fillMaxSize())
         } else {
             // Аватар — неподвижный базовый слой, чуть выше центра, чтобы текст лёг под ним.
-            Box(Modifier.align(Alignment.Center).offset(y = (-32).dp)) { Avatar(name, 104) }
+            Box(Modifier.align(Alignment.Center).offset(y = (-32).dp)) { Avatar(name, 104, model.peerAvatar(peerKey)) }
         }
         if (chrome) {
             Column(
@@ -586,7 +590,7 @@ private fun RingSheet(model: AppModel, onClose: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Avatar(name, 36)
+                    Avatar(name, 36, model.peerAvatar(peer))
                     Text(
                         name,
                         color = if (on) HoloAccent else Color.White,
@@ -718,16 +722,18 @@ private fun TrafficChip(mbMin: Int) {
 }
 
 @Composable
-private fun Avatar(name: String, size: Int) {
+private fun Avatar(name: String, size: Int, photo: ByteArray?) {
     Box(
         Modifier.size(size.dp).clip(RoundedCornerShape(Tokens.Radius.avatar)).background(Tokens.Colors.avatar),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            name.take(1).uppercase(),
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = (size / 2.4f).sp,
-        )
+        PhotoOr(photo, size.dp) {
+            Text(
+                name.take(1).uppercase(),
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = (size / 2.4f).sp,
+            )
+        }
     }
 }

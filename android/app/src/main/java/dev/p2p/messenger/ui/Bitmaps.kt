@@ -3,10 +3,14 @@ package dev.p2p.messenger.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.produceState
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -130,4 +134,17 @@ internal fun rememberBitmap(
 internal fun rememberFullscreenBitmap(bytes: ByteArray?, cacheKey: String?): ImageBitmap? {
     val cfg = LocalConfiguration.current
     return rememberBitmap(bytes, cacheKey, cfg.screenWidthDp.dp, cfg.screenHeightDp.dp)
+}
+
+/** Фото аватара на всю площадь контейнера (форму и фон задаёт контейнер), иначе
+ *  [fallback] — обычно буква. Для экранов, что рисуют аватар своей рамкой (звонок):
+ *  без этого каждый из них рисовал только букву, и фото терялось. */
+@Composable
+internal fun PhotoOr(photo: ByteArray?, size: Dp, fallback: @Composable () -> Unit) {
+    val bmp = rememberBitmap(photo, null, size)
+    if (bmp != null) {
+        Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    } else {
+        fallback()
+    }
 }

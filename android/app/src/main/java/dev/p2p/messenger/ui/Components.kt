@@ -455,7 +455,7 @@ internal fun dayKey(ts: Long): Long {
 internal fun groupSenderName(model: AppModel, hex: String): String = when {
     hex.isEmpty() -> stringResource(R.string.group_member_fallback)
     hex == model.me?.pubkey -> stringResource(R.string.common_you)
-    else -> model.contacts.firstOrNull { it.key == hex }?.name ?: (hex.take(6) + "…")
+    else -> model.peerName(hex)
 }
 
 /** Яркий детерминированный цвет имени отправителя (Discord-style). */

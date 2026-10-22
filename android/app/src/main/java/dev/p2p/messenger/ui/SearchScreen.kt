@@ -56,7 +56,7 @@ internal fun SearchScreen(
         emptyList()
     } else {
         model.contacts.filter {
-            it.displayName.lowercase().contains(q) || it.name.lowercase().contains(q) || it.key.lowercase().contains(q)
+            it.displayName.lowercase().contains(q) || it.profileName.lowercase().contains(q) || it.key.lowercase().contains(q)
         }
     }
     val groups = if (q.isEmpty()) emptyList() else model.groups.filter { it.name.lowercase().contains(q) }

@@ -18,24 +18,24 @@ class ContactTest {
     // ── displayName: local → profile_name → hex ──────────────────────────────
 
     @Test fun displayName_prefers_local_note() {
-        val c = Contact(hex, name = "Мой Друг", fingerprint = "", verified = false, profileName = "SelfName")
+        val c = Contact(hex, localName = "Мой Друг", fingerprint = "", verified = false, profileName = "SelfName")
         assertEquals("Мой Друг", c.displayName)
     }
 
     @Test fun displayName_falls_back_to_self_name_when_local_blank() {
-        val c = Contact(hex, name = "", fingerprint = "", verified = false, profileName = "SelfName")
+        val c = Contact(hex, localName = "", fingerprint = "", verified = false, profileName = "SelfName")
         assertEquals("SelfName", c.displayName)
     }
 
     @Test fun displayName_falls_back_to_hex_when_both_blank() {
-        val c = Contact(hex, name = "", fingerprint = "", verified = false, profileName = "")
+        val c = Contact(hex, localName = "", fingerprint = "", verified = false, profileName = "")
         // короткий hex — первые 8 символов ключа
         assertEquals("ea4a6c63", c.displayName)
         assertEquals(8, c.displayName.length)
     }
 
     @Test fun displayName_local_wins_even_without_profile() {
-        val c = Contact(hex, name = "Заметка", fingerprint = "", verified = false, profileName = "")
+        val c = Contact(hex, localName = "Заметка", fingerprint = "", verified = false, profileName = "")
         assertEquals("Заметка", c.displayName)
     }
 
@@ -49,7 +49,7 @@ class ContactTest {
         """.trimIndent()
         val c = decodeList<ContactDto>(json).single().toModel()
         assertEquals(hex, c.key)
-        assertEquals("Локальное", c.name)
+        assertEquals("Локальное", c.localName)
         assertEquals("write annual again", c.fingerprint)
         assertTrue(c.verified)
         assertEquals("Алиса", c.profileName)
@@ -59,7 +59,7 @@ class ContactTest {
     @Test fun contact_json_defaults_when_profile_fields_absent() {
         // Старый контакт/движок без M2-полей — не должен падать, поля пустые.
         val c = decodeList<ContactDto>("""[{"key":"$hex","name":"Боб"}]""").single().toModel()
-        assertEquals("Боб", c.name)
+        assertEquals("Боб", c.localName)
         assertEquals("", c.profileName)
         assertEquals("", c.avatarId)
         assertFalse(c.verified)
@@ -83,7 +83,7 @@ class ContactTest {
     @Test fun auto_added_contact_shows_self_name_not_placeholder() {
         // TOFU-авто-добавление (ensure_contact) даёт пустое локальное имя; когда придёт
         // самоназвание — оно и показывается (а не hex-плейсхолдер, как было в баге).
-        val autoAdded = Contact(hex, name = "", fingerprint = "", verified = false)
+        val autoAdded = Contact(hex, localName = "", fingerprint = "", verified = false)
         assertEquals("ea4a6c63", autoAdded.displayName) // до профиля — короткий hex
         val withProfile = autoAdded.copy(profileName = "Dave")
         assertEquals("Dave", withProfile.displayName) // профиль пришёл → самоназвание

@@ -241,11 +241,12 @@ internal fun GroupChatScreen(model: AppModel) {
             val name = if (isMe) {
                 stringResource(R.string.common_you)
             } else {
-                model.contacts.firstOrNull { it.key == key }?.name ?: (key.take(6) + "…")
+                model.peerName(key)
             }
             val audio = if (isMe) true else model.roomMembers.firstOrNull { it.peer == key }?.audio ?: true
             val video = if (isMe) false else model.roomMembers.firstOrNull { it.peer == key }?.video ?: false
-            ParticipantFullscreen(name, audio, video, isMe) { focusedParticipant = null }
+            val photo = if (isMe) model.selfAvatar else model.peerAvatar(key)
+            ParticipantFullscreen(name, audio, video, isMe, photo) { focusedParticipant = null }
             BackHandler { focusedParticipant = null }
         }
     }
@@ -308,7 +309,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
 @Composable
 internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -> Unit) {
     val names = members.joinToString(", ") { rm ->
-        model.contacts.firstOrNull { it.key == rm.peer }?.name ?: (rm.peer.take(6) + "…")
+        model.peerName(rm.peer)
     }
     Row(
         Modifier.fillMaxWidth().background(Tokens.Colors.roomBanner).padding(horizontal = 14.dp, vertical = 10.dp),
@@ -402,7 +403,7 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
                 }) {
                     StatusDot(model.online[c.key] == true)
                     Spacer(Modifier.width(12.dp))
-                    Text(c.name, color = Color.White, fontSize = 16.sp)
+                    Text(c.displayName, color = Color.White, fontSize = 16.sp)
                 }
             }
         }

@@ -67,9 +67,10 @@ internal fun RoomGrid(
                         val name = if (isMe) {
                             stringResource(R.string.common_you)
                         } else {
-                            model.contacts.firstOrNull { it.key == key }?.displayName ?: (key.take(6) + "…")
+                            model.peerName(key)
                         }
-                        GridTile(name, audio, video, isMe, Modifier.weight(1f)) { onFocus(key) }
+                        val photo = if (isMe) model.selfAvatar else model.peerAvatar(key)
+                        GridTile(name, audio, video, isMe, photo, Modifier.weight(1f)) { onFocus(key) }
                     }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
@@ -84,6 +85,7 @@ internal fun GridTile(
     audio: Boolean,
     video: Boolean,
     me: Boolean,
+    photo: ByteArray?,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -104,12 +106,14 @@ internal fun GridTile(
                     .background(if (me) HoloAccent else Tokens.Colors.avatar),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    name.take(1).uppercase(),
-                    color = if (me) HoloAccentDark else Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 26.sp,
-                )
+                PhotoOr(photo, 64.dp) {
+                    Text(
+                        name.take(1).uppercase(),
+                        color = if (me) HoloAccentDark else Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 26.sp,
+                    )
+                }
             }
             Spacer(Modifier.height(10.dp))
             Text(
@@ -144,6 +148,7 @@ internal fun ParticipantFullscreen(
     audio: Boolean,
     video: Boolean,
     me: Boolean,
+    photo: ByteArray?,
     onDismiss: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize().background(Tokens.Colors.overlay).clickable { onDismiss() }) {
@@ -178,12 +183,14 @@ internal fun ParticipantFullscreen(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    name.take(1).uppercase(),
-                    color = if (me) HoloAccentDark else Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 52.sp,
-                )
+                PhotoOr(photo, 128.dp) {
+                    Text(
+                        name.take(1).uppercase(),
+                        color = if (me) HoloAccentDark else Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 52.sp,
+                    )
+                }
             }
             Spacer(Modifier.height(20.dp))
             Text(name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Medium)
@@ -221,7 +228,7 @@ internal fun ParticipantFullscreen(
 
 @Composable
 internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
-    val name = model.contacts.firstOrNull { it.key == ic.peer }?.name ?: stringResource(R.string.common_contact)
+    val name = model.peerName(ic.peer)
     // ПРЕСЕТ join'ера: в каком состоянии войдём (мик/камера). Дефолт — мик вкл, видео выкл.
     var micOn by remember { mutableStateOf(true) }
     var videoOn by remember { mutableStateOf(false) }
@@ -242,7 +249,9 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                     Modifier.size(88.dp).clip(RoundedCornerShape(Tokens.Radius.avatar)).background(HoloAccent),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(name.take(1).uppercase(), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = 40.sp)
+                    PhotoOr(model.peerAvatar(ic.peer), 88.dp) {
+                        Text(name.take(1).uppercase(), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = 40.sp)
+                    }
                 }
                 Spacer(Modifier.height(20.dp))
                 Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)

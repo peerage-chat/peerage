@@ -2327,8 +2327,17 @@ class AppModel private constructor() {
     fun isGroupAdmin(gid: String): Boolean = groups.firstOrNull { it.gid == gid }?.admin == true
 
     /** Имя для показа по hex-ключу: имя контакта (local→profile→hex) либо укороченный ключ. */
+    /** Имя собеседника для показа — единственный способ получить его по ключу:
+     *  локальное имя контакта обычно пустое ([Contact.localName]). */
     fun peerName(hex: String): String =
         contacts.firstOrNull { it.key == hex }?.displayName ?: (hex.take(8) + "…")
+
+    /** Фото собеседника (или своё — по своему ключу); null — рисуем букву. */
+    fun peerAvatar(hex: String): ByteArray? = if (hex == me?.pubkey) {
+        selfAvatar
+    } else {
+        contacts.firstOrNull { it.key == hex }?.avatarId?.let { contactAvatars[it] }
+    }
 
     fun loadGroupMembers(gid: String) = ops.execute {
         groupMemberKeys[gid] = decodeList<String>(Native.groupMembers(sessionPtr, gid))

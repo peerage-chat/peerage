@@ -286,7 +286,7 @@ internal data class BenchDto(
 
 internal fun ContactDto.toModel() = Contact(
     key = key,
-    name = name,
+    localName = name,
     fingerprint = fingerprint,
     verified = verified,
     profileName = profileName,

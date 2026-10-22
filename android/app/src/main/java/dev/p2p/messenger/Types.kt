@@ -29,8 +29,10 @@ data class VideoQuality(
 
 data class Contact(
     val key: String,
-    /** Локальная заметка — как ЭТОТ пользователь назвал контакт (может быть пустой). */
-    val name: String,
+    /** Локальная заметка — как ЭТОТ пользователь назвал контакт; обычно ПУСТАЯ.
+     *  Для показа — только [displayName]: отдельное имя у поля, чтобы его нельзя было
+     *  взять по ошибке вместо имени (так экран входящего звонка остался без имени). */
+    val localName: String,
     val fingerprint: String,
     val verified: Boolean,
     /** Самоназвание контакта (M2): как он назвал себя (ProfileUpdate). */
@@ -41,7 +43,7 @@ data class Contact(
     /** Имя для показа: локальная заметка → самоназвание → короткий hex.
      *  (docs/architecture: приоритет local → profile_name → hex.) */
     val displayName: String
-        get() = name.ifBlank { profileName.ifBlank { key.take(8) } }
+        get() = localName.ifBlank { profileName.ifBlank { key.take(8) } }
 }
 
 /** Входящий «запрос в контакты» от незнакомца (гейт вместо TOFU). Первое сообщение
