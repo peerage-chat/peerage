@@ -461,6 +461,12 @@ impl Engine {
                     }
                     let Ok(raw) = hex::decode(&id) else { continue };
                     let Ok(hash) = <[u8; 32]>::try_from(raw.as_slice()) else { continue };
+                    // Адрес обязан быть хэшем байтов: иначе подложенная копия кладёт
+                    // под чужой адрес что угодно, и мы раздаём это другим как тот блоб.
+                    if p2p_blob::blob_id(&data) != hash {
+                        log::warn!("backup: блоб {id} не совпал со своим хэшем — пропущен");
+                        continue;
+                    }
                     stats.attachment_bytes += data.len() as u64;
                     stats.attachments += 1;
                     self.store_blob(hash, &data);

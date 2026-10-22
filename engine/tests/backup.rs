@@ -274,3 +274,26 @@ fn group_history_survives_backup_as_an_archive() {
     assert_eq!(row["archived"], true, "мы в ней не состоим — только чтение");
     assert_eq!(row["members"], 0);
 }
+
+/// R-035: в копии блоб лежит под адресом-хэшем. Подложенный файл с чужими байтами
+/// под чужим адресом не принимается: иначе мы раздавали бы их другим как тот блоб.
+/// Честный блоб рядом восстанавливается как обычно.
+#[test]
+fn forged_blob_in_backup_is_rejected() {
+    let net = LoopbackNet::new();
+    let e = start(&net, id(84), tmpdir("forged"));
+    let honest = b"honest bytes".to_vec();
+    let honest_id = hex::encode(p2p_blob::blob_id(&honest));
+    let victim_id = hex::encode(p2p_blob::blob_id(b"real picture"));
+
+    let file = tmpdir("forged-file").join("copy.p2pbak");
+    let mut w = p2p_core::backup::Writer::create(std::fs::File::create(&file).unwrap(), "пароль").unwrap();
+    w.blob(&victim_id, b"forged").unwrap();
+    w.blob(&honest_id, &honest).unwrap();
+    w.finish().unwrap();
+
+    let got = e.backup_import(&file, "пароль").unwrap();
+    assert_eq!(got.attachments, 1, "принят только честный блоб");
+    assert!(!e.blob_exists(&victim_id), "подмена не легла под чужой адрес");
+    assert_eq!(e.blob_read(&honest_id).as_deref(), Some(&honest[..]));
+}
