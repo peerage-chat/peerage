@@ -7,7 +7,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::store::{Chat, MessageStore};
+use p2p_core::store::{Chat, GroupStore, MessageStore};
 use p2p_core::Identity;
 use p2p_engine::groups::GroupManager;
 use p2p_engine::MediaBody;
@@ -38,8 +38,8 @@ fn manager_with_store(
     dir: PathBuf,
 ) -> (GroupManager, Arc<Mutex<MessageStore>>) {
     let db = p2p_core::db::open(&dir).expect("база");
-    let store = Arc::new(Mutex::new(MessageStore::open(db)));
-    (GroupManager::new(id, msgr, dir, store.clone()), store)
+    let store = Arc::new(Mutex::new(MessageStore::open(db.clone())));
+    (GroupManager::new(id, msgr, dir, store.clone(), GroupStore::new(db)), store)
 }
 
 /// Разослать событие мессенджера соответствующему менеджеру группы (как event_pump).
@@ -351,10 +351,10 @@ fn sender_restart_keeps_group_working() {
     let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
     let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
-    let a_msgr = Arc::new(a_msgr);
-    let a_dir = tmpdir("restart-a");
+    let (a_msgr, b_msgr) = (Arc::new(a_msgr), Arc::new(b_msgr));
+    let (a_dir, b_dir) = (tmpdir("restart-a"), tmpdir("restart-b"));
     let mut gm_a = manager(a_id.clone(), a_msgr.clone(), a_dir.clone());
-    let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("restart-b"));
+    let mut gm_b = manager(b_id.clone(), b_msgr.clone(), b_dir.clone());
 
     let gid = gm_a.create("рестарт").expect("группа создана");
     gm_a.invite(&gid, b_key);
@@ -378,6 +378,9 @@ fn sender_restart_keeps_group_working() {
     drop(gm_a);
     let mut gm_a = manager(a_id, a_msgr, a_dir);
     assert!(gm_a.group_ids().contains(&gid), "группа поднялась с диска");
+    let list: serde_json::Value = serde_json::from_str(&gm_a.list_json()).unwrap();
+    assert_eq!(list[0]["admin"], true, "и мы в ней по-прежнему админ");
+    assert_eq!(list[0]["name"], "рестарт");
 
     assert!(gm_a.send_text(&gid, "после перезапуска"));
     assert!(
@@ -386,6 +389,21 @@ fn sender_restart_keeps_group_working() {
         }),
         "после рестарта отправителя сообщение обязано дойти"
     );
+
+    // Участник после перезапуска помнит, кто админ: от него зависит, чьи закрепы
+    // и запросы KeyPackage принимать.
+    drop(gm_b);
+    let mut gm_b = manager(b_id.clone(), b_msgr.clone(), b_dir.clone());
+    assert_eq!(gm_b.admin_key(&gid), Some(a_key), "админ известен после перезапуска");
+    let list: serde_json::Value = serde_json::from_str(&gm_b.list_json()).unwrap();
+    assert_eq!(list[0]["admin"], false);
+
+    // Вышел — после перезапуска группа не воскресает.
+    assert!(gm_b.leave(&gid));
+    drop(gm_b);
+    let gm_b = manager(b_id, b_msgr, b_dir);
+    assert!(!gm_b.group_ids().contains(&gid), "покинутая группа не вернулась");
+    assert_eq!(gm_b.admin_key(&gid), None);
 }
 
 /// Вступление не должно теряться, если пригласивший офлайн в момент «Вступить».
@@ -537,50 +555,6 @@ fn inviter_restart_still_accepts_key_package() {
         }),
         "KeyPackage узнан и после перезапуска пригласившего"
     );
-}
-
-/// История группы, накопленная в СТАРОМ формате (JSON-файл рядом с MLS-состоянием),
-/// переезжает в общее хранилище при первом запуске — и встаёт в один ряд с новыми
-/// сообщениями. Это переписка пользователя, поэтому проверяется отдельно.
-#[test]
-fn old_group_history_file_migrates_into_the_store() {
-    let net = LoopbackNet::new();
-    let a_id = id(71);
-    let a_key = a_id.public_key_bytes();
-    let (a_msgr, _a_rx) = Messenger::start_with_transport(
-        a_id.clone(),
-        net.endpoint(a_key),
-        Config::default(),
-    );
-    let a_msgr = Arc::new(a_msgr);
-    let dir = tmpdir("migrate-a");
-
-    let gid = {
-        let mut gm = manager(a_id.clone(), a_msgr.clone(), dir.clone());
-        let gid = gm.create("архив").expect("группа создана");
-        gm.send_text(&gid, "новое сообщение");
-        gid
-    };
-
-    // Кладём рядом файл ровно того вида, что писала прошлая версия.
-    let old = serde_json::json!([{
-        "id": 1_700_000_000_000u64,
-        "text": "сообщение из старой версии",
-        "mine": false,
-        "time": 1_700_000_000i64,
-        "sender": hex::encode([9u8; 32]),
-        "kind": "text",
-    }]);
-    let path = dir.join("groups").join(format!("{}.msgs.json", hex::encode(&gid)));
-    std::fs::write(&path, p2p_core::vault::seal(&serde_json::to_vec(&old).unwrap())).unwrap();
-
-    // Перезапуск: менеджер поднимает группу и по дороге переливает файл.
-    let gm2 = manager(a_id, a_msgr, dir.clone());
-    let hist: serde_json::Value = serde_json::from_str(&gm2.history_json(&gid)).unwrap();
-    let texts: Vec<&str> = hist.as_array().unwrap().iter().map(|m| m["text"].as_str().unwrap()).collect();
-    assert!(texts.contains(&"сообщение из старой версии"), "старое переехало: {texts:?}");
-    assert!(texts.contains(&"новое сообщение"), "новое на месте: {texts:?}");
-    assert!(!path.exists(), "файл убран, чтобы не переливать его снова");
 }
 
 /// Закреп в группе ставит ТОЛЬКО админ — и он доезжает до участников. Иначе любой

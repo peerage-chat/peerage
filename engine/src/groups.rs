@@ -8,12 +8,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::store::{Chat, MessageStore, StoredMessage};
+use p2p_core::store::{Chat, GroupInviteRecord, GroupStore, MessageStore, StoredMessage};
 use p2p_core::Identity;
 use p2p_group::peek_group_id;
 use p2p_groupchat::{GroupChat, MediaBody};
 use p2p_messenger::Messenger;
-use serde::{Deserialize, Serialize};
 
 use crate::LockRecover;
 
@@ -28,45 +27,6 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-/// Строка истории группы В СТАРОМ формате (JSON-файл рядом с MLS-состоянием).
-/// Нужна ровно для одного: перелить накопленное в общее хранилище сообщений и
-/// забыть про файл. Новые записи сюда не попадают.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct LegacyGMsg {
-    #[serde(default)]
-    id: u64,
-    #[serde(default)]
-    reply_to: u64,
-    #[serde(default)]
-    reply_sender: String,
-    text: String,
-    mine: bool,
-    time: i64,
-    sender: String,
-    #[serde(default)]
-    system: bool,
-    #[serde(default)]
-    kind: String,
-    #[serde(default)]
-    blob_id: String,
-    #[serde(default)]
-    mime: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    size: u64,
-    #[serde(default)]
-    duration_ms: u32,
-    #[serde(default)]
-    width: u32,
-    #[serde(default)]
-    height: u32,
-    #[serde(default)]
-    thumb_id: String,
-    #[serde(default)]
-    downloaded: bool,
-}
-
 /// Строка списка групп для клиента.
 #[derive(serde::Serialize)]
 struct GroupRow {
@@ -74,16 +34,6 @@ struct GroupRow {
     name: String,
     members: usize,
     admin: bool,
-}
-
-/// Приглашение на диске (gid — ключ карты, поэтому в теле его нет).
-#[derive(serde::Serialize, serde::Deserialize)]
-struct StoredInvite {
-    name: String,
-    inviter: String,
-    /// Приглашение уже принято, ждём Welcome от пригласившего.
-    #[serde(default)]
-    accepted: bool,
 }
 
 /// Карточка приглашения в группу для клиента.
@@ -152,6 +102,8 @@ pub struct GroupManager {
     /// таблице. Своего списка сообщений у группы больше нет — иначе каждая фича
     /// чата пишется дважды, а копия данных о группах не знает.
     messages: Arc<Mutex<MessageStore>>,
+    /// Метаданные групп и приглашений (SQLite). Всё, кроме MLS-состояния.
+    meta: GroupStore,
     /// hex своего ключа: автор наших сообщений и признак «моё» при чтении.
     me_hex: String,
     /// Кто админ каждой группы (gid → ключ). Нужен, чтобы проверять права на
@@ -174,6 +126,7 @@ impl GroupManager {
         messenger: Arc<Messenger>,
         data_dir: PathBuf,
         messages: Arc<Mutex<MessageStore>>,
+        meta: GroupStore,
     ) -> Self {
         let dir = data_dir.join("groups");
         let me_hex = hex::encode(identity.public_key_bytes());
@@ -192,24 +145,14 @@ impl GroupManager {
             messenger,
             dir,
             messages,
+            meta,
             me_hex,
             admin_keys: HashMap::new(),
             fresh: Vec::new(),
         };
-        m.load_admin_keys();
         m.load_all();
-        m.load_pending_invites();
-        m.load_sent_invites();
         m.maybe_rekey_admin_groups();
         m
-    }
-
-    /// Времена последней ротации ключа (hex gid → unix) из `rekey.json`.
-    fn rekey_times(&self) -> HashMap<String, i64> {
-        std::fs::read(self.dir.join("rekey.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
     }
 
     /// Катящийся PCS (ADR-004 п.7): при старте админ ротирует ключ тех своих групп,
@@ -217,81 +160,23 @@ impl GroupManager {
     /// resync'ом. Дёшево (раз в сутки на группу) и не завязано на таймер-поток.
     fn maybe_rekey_admin_groups(&mut self) {
         let now = now();
-        let mut times = self.rekey_times();
         let stale: Vec<Vec<u8>> = self
-            .groups
-            .iter()
-            .filter(|(id, e)| {
-                e.admin && now - times.get(&hex::encode(id)).copied().unwrap_or(0) >= REKEY_INTERVAL_SECS
-            })
-            .map(|(id, _)| id.clone())
+            .meta
+            .groups()
+            .into_iter()
+            .filter(|g| now - g.rekeyed_at >= REKEY_INTERVAL_SECS)
+            .map(|g| g.gid)
+            .filter(|gid| self.groups.get(gid).is_some_and(|e| e.admin))
             .collect();
-        if stale.is_empty() {
-            return;
-        }
         for gid in stale {
             if self.rekey(&gid) {
-                times.insert(hex::encode(&gid), now);
+                let _ = self.meta.set_rekeyed(&gid, now);
             }
-        }
-        if let Ok(j) = serde_json::to_vec(&times) {
-            let _ = p2p_core::fsutil::write_atomic(&self.dir.join("rekey.json"), j);
         }
     }
 
     fn group_path(&self, id: &[u8]) -> PathBuf {
         self.dir.join(format!("{}.group", hex::encode(id)))
-    }
-    fn msgs_path(&self, id: &[u8]) -> PathBuf {
-        self.dir.join(format!("{}.msgs.json", hex::encode(id)))
-    }
-
-    fn save_index(&self) {
-        let idx: HashMap<String, String> =
-            self.groups.iter().map(|(id, e)| (hex::encode(id), e.name.clone())).collect();
-        let _ = std::fs::create_dir_all(&self.dir);
-        if let Ok(j) = serde_json::to_vec_pretty(&idx) {
-            let _ = p2p_core::fsutil::write_atomic(&self.dir.join("index.json"), j);
-        }
-        self.save_admins();
-    }
-
-    /// Флаг «мы админ» хранится отдельным файлом (admins.json — массив hex gid),
-    /// чтобы не ломать формат index.json существующих установок (ADR-004).
-    fn save_admins(&self) {
-        let admins: Vec<String> = self
-            .groups
-            .iter()
-            .filter(|(_, e)| e.admin)
-            .map(|(id, _)| hex::encode(id))
-            .collect();
-        if let Ok(j) = serde_json::to_vec(&admins) {
-            let _ = p2p_core::fsutil::write_atomic(&self.dir.join("admins.json"), j);
-        }
-    }
-
-    fn admin_keys_path(&self) -> PathBuf {
-        self.dir.join("group_admins.json")
-    }
-
-    fn load_admin_keys(&mut self) {
-        let Ok(bytes) = std::fs::read(self.admin_keys_path()) else { return };
-        let Ok(map) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else { return };
-        for (gid_hex, key_hex) in map {
-            let (Ok(gid), Some(key)) = (hex::decode(&gid_hex), crate::parse_key(&key_hex)) else {
-                continue;
-            };
-            self.admin_keys.insert(gid, key);
-        }
-    }
-
-    fn save_admin_keys(&self) {
-        let map: HashMap<String, String> =
-            self.admin_keys.iter().map(|(g, k)| (hex::encode(g), hex::encode(k))).collect();
-        let _ = std::fs::create_dir_all(&self.dir);
-        if let Ok(j) = serde_json::to_vec(&map) {
-            let _ = p2p_core::fsutil::write_atomic(&self.admin_keys_path(), j);
-        }
     }
 
     /// Ключ админа группы (создателя). `None` — группа старая, админ неизвестен.
@@ -299,70 +184,17 @@ impl GroupManager {
         self.admin_keys.get(gid).copied()
     }
 
+    /// Запомнить админа группы. На диск попадёт с ближайшим `save_group`.
     fn remember_admin(&mut self, gid: &[u8], key: [u8; 32]) {
         self.admin_keys.insert(gid.to_vec(), key);
-        self.save_admin_keys();
     }
 
-    /// Множество gid, где мы админ (из admins.json).
-    fn load_admins(&self) -> std::collections::HashSet<Vec<u8>> {
-        std::fs::read(self.dir.join("admins.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok())
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|h| hex::decode(h).ok())
-            .collect()
-    }
-
+    /// Сохранить группу: MLS-состояние — в свой файл, остальное — в базу.
     fn save_group(&self, id: &[u8]) {
-        if let Some(e) = self.groups.get(id) {
-            let _ = e.chat.save(&self.group_path(id));
-        }
-        self.save_index();
-    }
-
-    /// Перелить историю группы из старого JSON-файла в общее хранилище и убрать
-    /// файл (переименованием — на случай, если разбор чего-то не понял). Разово:
-    /// на второй запуск файла уже нет.
-    fn migrate_msgs_file(&self, id: &[u8]) {
-        let path = self.msgs_path(id);
-        let Ok(raw) = std::fs::read(&path) else { return };
-        let Ok(bytes) = p2p_core::vault::open(&raw) else { return };
-        // Битый файл — не повод ронять приложение на старте: пропускаем.
-        let old: Vec<LegacyGMsg> = serde_json::from_slice(&bytes).unwrap_or_default();
-        let store = self.messages.lock_safe();
-        for m in &old {
-            let _ = store.import_message(Chat::Group(id), &StoredMessage {
-                id: m.id,
-                sender: m.sender.clone(),
-                text: m.text.clone(),
-                mine: m.mine,
-                time: m.time,
-                status: String::new(),
-                kind: if m.kind.is_empty() { "text".into() } else { m.kind.clone() },
-                blob_id: m.blob_id.clone(),
-                mime: m.mime.clone(),
-                name: m.name.clone(),
-                size: m.size,
-                duration_ms: m.duration_ms,
-                width: m.width,
-                height: m.height,
-                thumb_id: m.thumb_id.clone(),
-                downloaded: m.downloaded,
-                reply_to: m.reply_to,
-                reply_sender: m.reply_sender.clone(),
-                system: m.system,
-                // Пересылок в старом формате не было — переносить нечего.
-                fwd_from: String::new(),
-                fwd_anon: false,
-                edited_at: 0,
-                row: 0,
-            });
-        }
-        drop(store);
-        log::info!("group {}: история переехала в общее хранилище ({} шт.)", hex::encode(id), old.len());
-        let _ = std::fs::rename(&path, path.with_extension("msgs.bak"));
+        let Some(e) = self.groups.get(id) else { return };
+        let _ = std::fs::create_dir_all(&self.dir);
+        let _ = e.chat.save(&self.group_path(id));
+        let _ = self.meta.save_group(id, &e.name, e.admin, self.admin_keys.get(id));
     }
 
     /// Записать своё/входящее сообщение группы в общее хранилище и отложить его
@@ -386,18 +218,20 @@ impl GroupManager {
     }
 
     fn load_all(&mut self) {
-        let Ok(bytes) = std::fs::read(self.dir.join("index.json")) else { return };
-        let Ok(idx) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else { return };
-        let admins = self.load_admins();
-        for (hexid, name) in idx {
-            let Ok(raw) = hex::decode(&hexid) else { continue };
-            let path = self.group_path(&raw);
-            if let Ok(chat) = GroupChat::load(&path, &self.identity, self.messenger.clone()) {
-                self.migrate_msgs_file(&raw);
-                let admin = admins.contains(&raw);
-                self.remember_title(&raw, &name);
-                self.groups.insert(raw, Entry { chat, name, admin });
+        for g in self.meta.groups() {
+            if let Some(k) = g.admin_key {
+                self.admin_keys.insert(g.gid.clone(), k);
             }
+            let path = self.group_path(&g.gid);
+            if let Ok(chat) = GroupChat::load(&path, &self.identity, self.messenger.clone()) {
+                self.remember_title(&g.gid, &g.name);
+                self.groups.insert(g.gid, Entry { chat, name: g.name, admin: g.admin });
+            }
+        }
+        self.invites = self.meta.sent_invites().into_iter().collect();
+        for inv in self.meta.invites() {
+            self.pending_invites
+                .insert(inv.gid, PendingInvite { name: inv.name, inviter: inv.inviter, accepted: inv.accepted });
         }
     }
 
@@ -423,78 +257,21 @@ impl GroupManager {
         if let Some(e) = self.groups.get(gid) {
             let _ = self.messenger.send_group_invite(&peer, gid, &e.name);
             self.invites.insert((peer, gid.to_vec()));
-            self.save_sent_invites();
-        }
-    }
-
-    fn sent_invites_path(&self) -> PathBuf {
-        self.dir.join("sent_invites.json")
-    }
-
-    /// Кого и куда мы позвали. Живёт на диске, потому что приглашённый может нажать
-    /// «Вступить» через сутки — а к тому времени мы успеем перезапуститься, и без
-    /// этой записи его KeyPackage будет нечем сопоставить с группой (молча в никуда).
-    fn save_sent_invites(&self) {
-        let pairs: Vec<(String, String)> =
-            self.invites.iter().map(|(p, g)| (hex::encode(p), hex::encode(g))).collect();
-        let _ = std::fs::create_dir_all(&self.dir);
-        if let Ok(j) = serde_json::to_vec(&pairs) {
-            let _ = p2p_core::fsutil::write_atomic(&self.sent_invites_path(), j);
-        }
-    }
-
-    fn load_sent_invites(&mut self) {
-        let Ok(bytes) = std::fs::read(self.sent_invites_path()) else { return };
-        let Ok(pairs) = serde_json::from_slice::<Vec<(String, String)>>(&bytes) else { return };
-        for (peer_hex, gid_hex) in pairs {
-            let (Some(peer), Ok(gid)) = (crate::parse_key(&peer_hex), hex::decode(&gid_hex)) else {
-                continue;
-            };
-            self.invites.insert((peer, gid));
+            let _ = self.meta.add_sent_invite(&peer, gid);
         }
     }
 
     // ── Входящие приглашения (карточка на одобрение) ──────────────────────
 
-    fn pending_invites_path(&self) -> PathBuf {
-        self.dir.join("pending_invites.json")
-    }
-
-    fn save_pending_invites(&self) {
-        // На диск — та же карточка, что уходит клиенту, только без gid (он в ключе).
-        let map: HashMap<String, StoredInvite> = self
-            .pending_invites
-            .iter()
-            .map(|(gid, inv)| {
-                (
-                    hex::encode(gid),
-                    StoredInvite {
-                        name: inv.name.clone(),
-                        inviter: hex::encode(inv.inviter),
-                        accepted: inv.accepted,
-                    },
-                )
-            })
-            .collect();
-        let _ = std::fs::create_dir_all(&self.dir);
-        if let Ok(j) = serde_json::to_vec(&map) {
-            let _ = p2p_core::fsutil::write_atomic(&self.pending_invites_path(), j);
-        }
-    }
-
-    fn load_pending_invites(&mut self) {
-        let Ok(bytes) = std::fs::read(self.pending_invites_path()) else { return };
-        let Ok(map) = serde_json::from_slice::<HashMap<String, StoredInvite>>(&bytes) else {
-            return;
-        };
-        for (gid_hex, v) in map {
-            // Битую запись пропускаем молча: приглашение — не то, ради чего стоит
-            // ронять загрузку остальных.
-            let (Ok(gid), Some(inviter)) = (hex::decode(&gid_hex), crate::parse_key(&v.inviter)) else {
-                continue;
-            };
-            self.pending_invites
-                .insert(gid, PendingInvite { name: v.name, inviter, accepted: v.accepted });
+    /// Записать входящее приглашение как есть в памяти.
+    fn save_invite(&self, gid: &[u8]) {
+        if let Some(inv) = self.pending_invites.get(gid) {
+            let _ = self.meta.put_invite(&GroupInviteRecord {
+                gid: gid.to_vec(),
+                name: inv.name.clone(),
+                inviter: inv.inviter,
+                accepted: inv.accepted,
+            });
         }
     }
 
@@ -508,8 +285,8 @@ impl GroupManager {
         // уже согласились — согласие сохраняем, иначе «ждём ответа» откатилось бы в
         // кнопки, а движок перестал бы повторять KeyPackage.
         let accepted = self.pending_invites.get(&gid).is_some_and(|i| i.accepted);
-        self.pending_invites.insert(gid, PendingInvite { name, inviter: peer, accepted });
-        self.save_pending_invites();
+        self.pending_invites.insert(gid.clone(), PendingInvite { name, inviter: peer, accepted });
+        self.save_invite(&gid);
         true
     }
 
@@ -538,7 +315,7 @@ impl GroupManager {
         // отправку KeyPackage, как только он появится (см. `on_peer_online`).
         inv.accepted = true;
         let (inviter, name) = (inv.inviter, inv.name.clone());
-        self.save_pending_invites();
+        self.save_invite(gid);
         if self.pending.is_some() {
             // Уже идёт другое вступление — этим займёмся, когда освободимся.
             return false;
@@ -610,7 +387,7 @@ impl GroupManager {
     pub fn decline_invite(&mut self, gid: &[u8]) -> bool {
         let removed = self.pending_invites.remove(gid).is_some();
         if removed {
-            self.save_pending_invites();
+            let _ = self.meta.remove_invite(gid);
         }
         removed
     }
@@ -831,11 +608,6 @@ impl GroupManager {
         true
     }
 
-    /// Мы ли админ группы (для гейта UI «удалить участника»).
-    pub fn is_admin(&self, gid: &[u8]) -> bool {
-        self.groups.get(gid).map(|e| e.admin).unwrap_or(false)
-    }
-
     /// Все id групп (для обновления кэша истории/участников разом).
     pub fn group_ids(&self) -> Vec<Vec<u8>> {
         self.groups.keys().cloned().collect()
@@ -856,17 +628,12 @@ impl GroupManager {
     }
 
     /// Хвост истории группы (последние [`crate::HISTORY_PAGE`]), старые сверху.
-    /// Схема строки — та же `StoredMessage`, что и в личном чате.
+    /// Клиент читает историю через движок; это — для тестов группового слоя.
     pub fn history_json(&self, gid: &[u8]) -> String {
-        self.history_page_json(gid, None)
-    }
-
-    /// Страница истории группы с курсором `(время, строка)` — как в личном чате.
-    pub fn history_page_json(&self, gid: &[u8], before: Option<(i64, i64)>) -> String {
         if !self.groups.contains_key(gid) {
             return "[]".into();
         }
-        let page = self.messages.lock_safe().history(Chat::Group(gid), before, crate::HISTORY_PAGE);
+        let page = self.messages.lock_safe().history(Chat::Group(gid), None, crate::HISTORY_PAGE);
         serde_json::to_string(&page).unwrap_or_else(|_| "[]".into())
     }
 
@@ -913,7 +680,7 @@ impl GroupManager {
             return false;
         }
         let id = gid.to_vec();
-        self.save_sent_invites();
+        let _ = self.meta.remove_sent_invite(&peer, gid);
         let resync = self.resyncing.remove(&peer);
         let added = self
             .groups
@@ -1128,7 +895,7 @@ impl GroupManager {
                     self.remember_admin(&id, inviter);
                 }
                 self.pending_invites.remove(&id);
-                self.save_pending_invites();
+                let _ = self.meta.remove_invite(&id);
                 self.remember_title(&id, &name);
                 self.groups.insert(id.clone(), Entry { chat, name, admin: false });
                 self.save_group(&id);
@@ -1167,7 +934,7 @@ impl GroupManager {
         self.resync_last.insert(key, now);
         let _ = self.messenger.send_group_key_request(&peer, gid);
         self.invites.insert((peer, gid.to_vec()));
-        self.save_sent_invites();
+        let _ = self.meta.add_sent_invite(&peer, gid);
         self.resyncing.insert(peer); // on_key_reply сделает Remove+Add, не просто Add
     }
 
@@ -1195,20 +962,20 @@ impl GroupManager {
         is_admin_member && self.remove_member(gid, peer)
     }
 
-    /// Удалить группу локально (нас из неё отозвали, ADR-004): файлы + кэш + индекс.
+    /// Удалить группу локально (нас из неё отозвали, ADR-004): файл MLS, запись
+    /// в базе, переписка.
     fn delete_group(&mut self, id: &[u8]) {
         self.groups.remove(id);
         self.admin_keys.remove(id);
-        self.save_admin_keys();
+        self.invites.retain(|(_, g)| g.as_slice() != id);
+        let _ = self.meta.delete_group(id);
         let _ = std::fs::remove_file(self.group_path(id));
-        let _ = std::fs::remove_file(self.msgs_path(id));
         {
             let store = self.messages.lock_safe();
             let _ = store.clear(Chat::Group(id));
             let _ = store.forget_chat_title(Chat::Group(id));
             let _ = store.clear_pins(Chat::Group(id));
         }
-        self.save_index();
     }
 }
 

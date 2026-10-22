@@ -384,6 +384,145 @@ pub struct WantedBlob {
     pub requested: i64,
 }
 
+/// Группа на диске — всё, кроме MLS-состояния.
+#[derive(Debug, Clone)]
+pub struct GroupRecord {
+    pub gid: Vec<u8>,
+    pub name: String,
+    /// Мы — админ (создатель).
+    pub admin: bool,
+    /// Ключ админа; `None` — неизвестен.
+    pub admin_key: Option<[u8; 32]>,
+    pub rekeyed_at: i64,
+}
+
+/// Входящее приглашение в группу.
+#[derive(Debug, Clone)]
+pub struct GroupInviteRecord {
+    pub gid: Vec<u8>,
+    pub name: String,
+    pub inviter: [u8; 32],
+    pub accepted: bool,
+}
+
+/// SQLite-метаданные групп: сами группы, кого мы позвали, кто позвал нас.
+/// Слой групп держит их в памяти и пишет сюда каждое изменение.
+pub struct GroupStore {
+    db: Db,
+}
+
+impl GroupStore {
+    pub fn new(db: Db) -> Self {
+        Self { db }
+    }
+
+    pub fn groups(&self) -> Vec<GroupRecord> {
+        let conn = db::lock(&self.db);
+        let Ok(mut stmt) = conn.prepare("SELECT gid, name, admin, admin_key, rekeyed_at FROM group_meta") else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map([], |r| {
+            Ok(GroupRecord {
+                gid: r.get(0)?,
+                name: r.get(1)?,
+                admin: r.get::<_, i64>(2)? != 0,
+                admin_key: <[u8; 32]>::try_from(r.get::<_, Vec<u8>>(3)?.as_slice()).ok(),
+                rekeyed_at: r.get(4)?,
+            })
+        });
+        rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    /// Записать группу. Время ротации не трогает — у него свой [`Self::set_rekeyed`].
+    pub fn save_group(&self, gid: &[u8], name: &str, admin: bool, admin_key: Option<&[u8; 32]>) -> Result<(), StoreError> {
+        let key: &[u8] = admin_key.map(|k| k.as_slice()).unwrap_or(&[]);
+        db::lock(&self.db).execute(
+            "INSERT INTO group_meta (gid, name, admin, admin_key) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(gid) DO UPDATE SET name=excluded.name, admin=excluded.admin, admin_key=excluded.admin_key",
+            rusqlite::params![gid, name, admin as i64, key],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_rekeyed(&self, gid: &[u8], at: i64) -> Result<(), StoreError> {
+        db::lock(&self.db)
+            .execute("UPDATE group_meta SET rekeyed_at=?2 WHERE gid=?1", rusqlite::params![gid, at])?;
+        Ok(())
+    }
+
+    /// Забыть группу вместе с приглашениями в неё, которые мы разослали.
+    pub fn delete_group(&self, gid: &[u8]) -> Result<(), StoreError> {
+        let conn = db::lock(&self.db);
+        conn.execute("DELETE FROM group_meta WHERE gid=?1", rusqlite::params![gid])?;
+        conn.execute("DELETE FROM group_invites_sent WHERE gid=?1", rusqlite::params![gid])?;
+        Ok(())
+    }
+
+    pub fn sent_invites(&self) -> Vec<([u8; 32], Vec<u8>)> {
+        let conn = db::lock(&self.db);
+        let Ok(mut stmt) = conn.prepare("SELECT peer, gid FROM group_invites_sent") else { return Vec::new() };
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)));
+        rows.map(|it| {
+            it.filter_map(|r| r.ok())
+                .filter_map(|(p, g)| Some((<[u8; 32]>::try_from(p.as_slice()).ok()?, g)))
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn add_sent_invite(&self, peer: &[u8; 32], gid: &[u8]) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "INSERT OR IGNORE INTO group_invites_sent (peer, gid) VALUES (?1, ?2)",
+            rusqlite::params![peer.as_slice(), gid],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_sent_invite(&self, peer: &[u8; 32], gid: &[u8]) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "DELETE FROM group_invites_sent WHERE peer=?1 AND gid=?2",
+            rusqlite::params![peer.as_slice(), gid],
+        )?;
+        Ok(())
+    }
+
+    pub fn invites(&self) -> Vec<GroupInviteRecord> {
+        let conn = db::lock(&self.db);
+        let Ok(mut stmt) = conn.prepare("SELECT gid, name, inviter, accepted FROM group_invites") else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, String>(1)?, r.get::<_, Vec<u8>>(2)?, r.get::<_, i64>(3)?))
+        });
+        rows.map(|it| {
+            it.filter_map(|r| r.ok())
+                .filter_map(|(gid, name, inviter, accepted)| {
+                    Some(GroupInviteRecord {
+                        gid,
+                        name,
+                        inviter: <[u8; 32]>::try_from(inviter.as_slice()).ok()?,
+                        accepted: accepted != 0,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn put_invite(&self, inv: &GroupInviteRecord) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "INSERT OR REPLACE INTO group_invites (gid, name, inviter, accepted) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![inv.gid, inv.name, inv.inviter.as_slice(), inv.accepted as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_invite(&self, gid: &[u8]) -> Result<(), StoreError> {
+        db::lock(&self.db).execute("DELETE FROM group_invites WHERE gid=?1", rusqlite::params![gid])?;
+        Ok(())
+    }
+}
+
 /// SQLite-список запрошенных вложений.
 pub struct WantedStore {
     db: Db,
@@ -1848,5 +1987,34 @@ mod tests {
         assert!(g2.unblock(&k).unwrap());
         assert!(!g2.is_blocked(&k));
         assert!(!g2.unblock(&k).unwrap()); // повторный unblock — уже нет
+    }
+
+    /// Запись группы обновляется, не теряя времени ротации ключа (оно пишется
+    /// отдельно); удаление группы забирает и разосланные в неё приглашения.
+    #[test]
+    fn group_store_keeps_rekey_time_and_forgets_with_group() {
+        let (admin, peer) = (key(), key());
+        let g = GroupStore::new(db());
+        g.save_group(b"g1", "старое имя", false, Some(&admin)).unwrap();
+        g.set_rekeyed(b"g1", 77).unwrap();
+        g.save_group(b"g1", "новое имя", true, Some(&admin)).unwrap();
+        let rec = &g.groups()[0];
+        assert_eq!((rec.name.as_str(), rec.admin, rec.admin_key, rec.rekeyed_at), ("новое имя", true, Some(admin), 77));
+
+        g.add_sent_invite(&peer, b"g1").unwrap();
+        g.add_sent_invite(&peer, b"g2").unwrap();
+        g.delete_group(b"g1").unwrap();
+        assert!(g.groups().is_empty());
+        assert_eq!(g.sent_invites(), vec![(peer, b"g2".to_vec())], "приглашение в другую группу осталось");
+
+        g.put_invite(&GroupInviteRecord { gid: b"g3".to_vec(), name: "зовут".into(), inviter: peer, accepted: false })
+            .unwrap();
+        g.put_invite(&GroupInviteRecord { gid: b"g3".to_vec(), name: "зовут".into(), inviter: peer, accepted: true })
+            .unwrap();
+        let inv = g.invites();
+        assert_eq!(inv.len(), 1);
+        assert!(inv[0].accepted, "согласие перезаписывает карточку");
+        g.remove_invite(b"g3").unwrap();
+        assert!(g.invites().is_empty());
     }
 }

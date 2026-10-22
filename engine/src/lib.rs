@@ -2391,9 +2391,10 @@ fn event_pump(
     identity: Identity,
     messenger: Arc<Messenger>,
     data_dir: PathBuf,
+    group_meta: p2p_core::store::GroupStore,
 ) {
     let blob_dir = data_dir.join("blobs");
-    let mut groups = GroupManager::new(identity, messenger.clone(), data_dir, engine.messages.clone());
+    let mut groups = GroupManager::new(identity, messenger.clone(), data_dir, engine.messages.clone(), group_meta);
     let mut blobs = blobs::BlobManager::new(messenger.clone(), p2p_blob::Limits::default(), blob_dir);
     engine.resume_all_wanted(); // докачки, начатые до перезапуска
     refresh_group_cache(&engine, &groups); // прайм кэша
@@ -3363,8 +3364,9 @@ impl Engine {
 
         let pump_engine = engine.clone();
         let groups_dir = dir.clone();
+        let group_meta = p2p_core::store::GroupStore::new(db.clone());
         std::thread::spawn(move || {
-            event_pump(pump_engine, job_rx, identity_for_groups, messenger, groups_dir)
+            event_pump(pump_engine, job_rx, identity_for_groups, messenger, groups_dir, group_meta)
         });
 
         Ok(StartOk { engine, pubkey: me_pub, address })

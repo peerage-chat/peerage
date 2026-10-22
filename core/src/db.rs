@@ -200,6 +200,35 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         -- Запрошенные пользователем вложения («скачать»). Намерение персистентно:
         -- пир может быть офлайн — докачка продолжится сама, когда он появится, и
         -- переживёт перезапуск. Следить за пиром вручную пользователь не должен.
+        -- Группы, в которых мы состоим. MLS-состояние — в своём файле
+        -- (`groups/<gid>.group`), здесь всё остальное:
+        --   admin      — мы админ/секвенсор (создатель)
+        --   admin_key  — ключ админа (пусто — неизвестен): права на действия извне
+        --   rekeyed_at — последняя ротация своего ключа (катящийся PCS, ADR-004)
+        CREATE TABLE IF NOT EXISTS group_meta (
+            gid        BLOB    PRIMARY KEY,
+            name       TEXT    NOT NULL,
+            admin      INTEGER NOT NULL DEFAULT 0,
+            admin_key  BLOB    NOT NULL DEFAULT x'',
+            rekeyed_at INTEGER NOT NULL DEFAULT 0
+        );
+        -- Кого и в какую группу мы позвали: ждём от него KeyPackage с этим gid.
+        -- На диске, потому что «Вступить» могут нажать и через сутки, после нашего
+        -- перезапуска.
+        CREATE TABLE IF NOT EXISTS group_invites_sent (
+            peer BLOB NOT NULL,
+            gid  BLOB NOT NULL,
+            PRIMARY KEY (peer, gid)
+        );
+        -- Входящие приглашения, ждут решения. accepted — «Вступить» нажато, ждём
+        -- Welcome (карточка не исчезает, пока он не придёт).
+        CREATE TABLE IF NOT EXISTS group_invites (
+            gid      BLOB    PRIMARY KEY,
+            name     TEXT    NOT NULL,
+            inviter  BLOB    NOT NULL,
+            accepted INTEGER NOT NULL DEFAULT 0
+        );
+
         CREATE TABLE IF NOT EXISTS wanted_blobs (
             blob_id    TEXT PRIMARY KEY,
             peer       BLOB NOT NULL,
