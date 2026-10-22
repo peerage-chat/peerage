@@ -9,8 +9,10 @@
 //! Список участников (`members`) динамический: его обновляет presence-слой
 //! (lib.rs) по мере входа/выхода. Движок `Send` — живёт в `Arc`, зовётся из JNI.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -22,6 +24,8 @@ use p2p_core::media::{
 use p2p_core::settings::AudioSettings;
 use p2p_media::{AudioDecoder, AudioEncoder, JitterBuffer, JitterOut};
 use p2p_messenger::Messenger;
+
+use crate::LockRecover;
 
 type PeerKey = [u8; 32];
 type Ring = Arc<Mutex<VecDeque<i16>>>;
@@ -162,16 +166,22 @@ impl RoomCallEngine {
                 // VideoReassembler per-peer: собирает фрагменты в целые H264-кадры.
                 let mut vid_asm: HashMap<PeerKey, VideoReassembler> = HashMap::new();
                 while running.load(Ordering::Relaxed) {
-                    let Ok(p) = media_rx.recv_timeout(Duration::from_millis(200)) else { continue };
-                    if !members.lock().unwrap().contains(&p.src) {
+                    let p = match media_rx.recv_timeout(Duration::from_millis(200)) {
+                        Ok(p) => p,
+                        Err(RecvTimeoutError::Timeout) => continue,
+                        // Канал отобрали (новый media_channel) — приёма больше не будет,
+                        // а крутиться на мгновенно возвращающемся recv значит 100 % CPU.
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    };
+                    if !members.lock_safe().contains(&p.src) {
                         continue;
                     }
-                    *rx_bytes.lock().unwrap().entry(p.src).or_insert(0) += p.payload.len() as u64;
+                    *rx_bytes.lock_safe().entry(p.src).or_insert(0) += p.payload.len() as u64;
                     if p.track == TRACK_VIDEO {
                         if let Some(frag) = parse_video_frag(&p.payload) {
                             let asm = vid_asm.entry(p.src).or_insert_with(VideoReassembler::new);
                             if let Some(CompleteFrame { data, keyframe, .. }) = asm.push(frag) {
-                                let mut vs = vid_sources.lock().unwrap();
+                                let mut vs = vid_sources.lock_safe();
                                 let q = vs.entry(p.src).or_default();
                                 q.push_back((data, keyframe));
                                 // Анти-латентность: декодер пейсит вывод по wall-clock от
@@ -191,12 +201,17 @@ impl RoomCallEngine {
                         continue;
                     }
                     if p.track != TRACK_AUDIO { continue; }
-                    sources
-                        .lock()
-                        .unwrap()
-                        .entry(p.src)
-                        .or_insert_with(|| Source::new(audio).expect("opus decoder"))
-                        .push(p.seq, p.ts, p.payload, sample_rate);
+                    let mut srcs = sources.lock_safe();
+                    let src = match srcs.entry(p.src) {
+                        Entry::Occupied(e) => e.into_mut(),
+                        // Декодер не создался — этого собеседника не слышно, но
+                        // паника отравила бы мьютексы и убила звук всего звонка.
+                        Entry::Vacant(v) => match Source::new(audio) {
+                            Some(src) => v.insert(src),
+                            None => continue,
+                        },
+                    };
+                    src.push(p.seq, p.ts, p.payload, sample_rate);
                 }
             }));
         }
@@ -224,10 +239,10 @@ impl RoomCallEngine {
                 let mut frame = vec![0i16; frame_len];
                 while running.load(Ordering::Relaxed) {
                     let ready = {
-                        let mut q = in_ring.lock().unwrap();
+                        let mut q = in_ring.lock_safe();
                         if q.len() >= frame_len {
                             for s in frame.iter_mut() {
-                                *s = q.pop_front().unwrap();
+                                *s = q.pop_front().unwrap_or(0);
                             }
                             true
                         } else {
@@ -246,7 +261,7 @@ impl RoomCallEngine {
                     }
                     if !muted.load(Ordering::Relaxed) {
                         if let Ok(pkt) = enc.encode(&frame) {
-                            let ms = members.lock().unwrap();
+                            let ms = members.lock_safe();
                             for m in ms.iter() {
                                 let _ = msgr.send_media(m, TRACK_AUDIO, seq, ts, &pkt);
                             }
@@ -292,7 +307,7 @@ impl RoomCallEngine {
     pub fn push_video(&self, frame: &[u8], keyframe: bool) {
         let frame_id = self.vid_frame_id.fetch_add(1, Ordering::Relaxed) as u32;
         let fragments = fragment_video(frame, frame_id, keyframe);
-        let members = self.members.lock().unwrap();
+        let members = self.members.lock_safe();
         for chunk in &fragments {
             let seq = self.vid_seq.fetch_add(1, Ordering::Relaxed);
             for m in members.iter() {
@@ -304,12 +319,12 @@ impl RoomCallEngine {
 
     /// Следующий входящий H264-пакет от peer, или None если очередь пуста.
     pub fn pull_video_for(&self, peer: &PeerKey) -> Option<Vec<u8>> {
-        self.vid_sources.lock().unwrap().get_mut(peer)?.pop_front().map(|(d, _)| d)
+        self.vid_sources.lock_safe().get_mut(peer)?.pop_front().map(|(d, _)| d)
     }
 
     /// Захваченный PCM с микрофона → в очередь отправки.
     pub fn push_audio(&self, samples: &[i16]) {
-        let mut q = self.in_ring.lock().unwrap();
+        let mut q = self.in_ring.lock_safe();
         q.extend(samples.iter().copied());
         while q.len() > self.in_cap {
             q.pop_front();
@@ -319,7 +334,7 @@ impl RoomCallEngine {
     /// Смешать все источники в `out` ровным темпом потребителя. На каждый
     /// микс-кадр берём по одному кадру с каждого источника и суммируем.
     pub fn pull_audio(&self, out: &mut [i16]) -> usize {
-        let mut carry = self.mix_carry.lock().unwrap();
+        let mut carry = self.mix_carry.lock_safe();
         let mut produced = 0usize;
         let mut starved = false;
         for o in out.iter_mut() {
@@ -327,8 +342,8 @@ impl RoomCallEngine {
                 let mut mix = vec![0i32; self.frame_len];
                 let mut any = false;
                 {
-                    let mut srcs = self.sources.lock().unwrap();
-                    let mut lv = self.levels.lock().unwrap();
+                    let mut srcs = self.sources.lock_safe();
+                    let mut lv = self.levels.lock_safe();
                     // Release: плавное затухание уровня каждого кадра (держит сквозь паузы речи).
                     for v in lv.values_mut() {
                         *v *= 0.82;
@@ -375,7 +390,7 @@ impl RoomCallEngine {
     /// Hex-ключи участников, которые сейчас говорят (уровень > порога) — для
     /// active-speaker рамки. Уровень считается в [`pull_audio`] по RMS кадра.
     pub fn speaking_json(&self) -> String {
-        let lv = self.levels.lock().unwrap();
+        let lv = self.levels.lock_safe();
         let arr: Vec<String> =
             lv.iter().filter(|(_, v)| **v > 0.03).map(|(k, _)| hex::encode(k)).collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
@@ -390,7 +405,7 @@ impl RoomCallEngine {
     /// Накопленные байты трафика: {hex_участника: rx_всего, "self": tx_всего}. Клиент
     /// считает скорость (kbps) по дельте между опросами. Для тех-инфо чипа.
     pub fn traffic_json(&self) -> String {
-        let rx = self.rx_bytes.lock().unwrap();
+        let rx = self.rx_bytes.lock_safe();
         let mut m: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
         for (k, v) in rx.iter() {
             m.insert(hex::encode(k), *v);
@@ -407,7 +422,7 @@ impl RoomCallEngine {
 
     pub fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
-        for h in self.threads.lock().unwrap().drain(..) {
+        for h in self.threads.lock_safe().drain(..) {
             let _ = h.join();
         }
     }

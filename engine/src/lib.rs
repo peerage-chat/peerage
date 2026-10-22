@@ -2246,6 +2246,12 @@ impl Engine {
 
     // — Диагностика: тест пропускной способности меша —
     pub fn bench_recv_start(&self) {
+        // Медиа-канал у мессенджера один: забрать его посреди звонка значит оглушить
+        // звонок (R-033). Диагностика подождёт.
+        if self.room_call.lock_safe().is_some() {
+            log::warn!("bench: идёт звонок — замер не запускаю");
+            return;
+        }
         let rx = self.messenger.media_channel(8192);
         let st = Arc::new(BenchRecv {
             bytes: AtomicU64::new(0), pkts: AtomicU64::new(0),
