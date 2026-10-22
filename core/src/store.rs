@@ -28,6 +28,8 @@ pub enum StoreError {
     Vault(#[from] crate::vault::VaultError),
     #[error("database: {0}")]
     Db(#[from] rusqlite::Error),
+    #[error("сообщение с таким автором и id уже есть")]
+    Duplicate,
 }
 
 // ---- Профиль (идентичность) ------------------------------------------------
@@ -917,10 +919,15 @@ impl MessageStore {
 
     /// Записать сообщение. Возвращает номер строки — курсор пагинации, который
     /// клиенту нужен и у сообщения, пришедшего событием.
+    ///
+    /// Существующую строку (тот же автор и id) НЕ перезаписывает — [`StoreError::Duplicate`].
+    /// Иначе участник группы мог бы прислать «новое» сообщение с id своего старого и
+    /// тихо подменить его текст и вложение в обход правки (R-041); менять
+    /// записанное можно только явными путями — `edit_text`, статусы, пометки.
     pub fn append(&self, chat: Chat, msg: &StoredMessage) -> Result<i64, StoreError> {
         let conn = db::lock(&self.db);
-        conn.execute(
-            "INSERT OR REPLACE INTO chat_messages
+        let n = conn.execute(
+            "INSERT OR IGNORE INTO chat_messages
                  (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
                   size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
                   system, fwd_from, fwd_anon, edited_at)
@@ -936,6 +943,9 @@ impl MessageStore {
                 msg.fwd_anon as i64, msg.edited_at,
             ],
         )?;
+        if n == 0 {
+            return Err(StoreError::Duplicate);
+        }
         Ok(conn.last_insert_rowid())
     }
 
@@ -2016,5 +2026,23 @@ mod tests {
         assert!(inv[0].accepted, "согласие перезаписывает карточку");
         g.remove_invite(b"g3").unwrap();
         assert!(g.invites().is_empty());
+    }
+
+    /// R-041: повтор (автор, id) не подменяет записанное — ни текст, ни номер строки.
+    #[test]
+    fn append_does_not_overwrite_existing_message() {
+        let peer = key();
+        let store = MessageStore::open(db());
+        let author = hex::encode(peer);
+        let first = StoredMessage { id: 7, sender: author.clone(), text: "оригинал".into(), time: 10, ..Default::default() };
+        let row = store.append(Chat::Dm(&peer), &first).unwrap();
+        let forged = StoredMessage { id: 7, sender: author.clone(), text: "подмена".into(), time: 99, ..Default::default() };
+        assert!(matches!(store.append(Chat::Dm(&peer), &forged), Err(StoreError::Duplicate)));
+        let h = store.history(Chat::Dm(&peer), None, 10);
+        assert_eq!(h.len(), 1);
+        assert_eq!((h[0].text.as_str(), h[0].time, h[0].row), ("оригинал", 10, row));
+        // Тот же id от ДРУГОГО автора — другое сообщение.
+        let other = StoredMessage { id: 7, sender: hex::encode(key()), text: "чужое".into(), ..Default::default() };
+        assert!(store.append(Chat::Dm(&peer), &other).is_ok());
     }
 }
