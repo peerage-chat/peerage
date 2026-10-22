@@ -177,3 +177,44 @@ fn small_group_attachment_arrives_by_itself() {
     a.shutdown();
     b.shutdown();
 }
+
+/// R-028: подготовка крупного вложения для группы (хэш, своя зашифрованная копия)
+/// не держит актор — входящее сообщение, пришедшее следом, обрабатывается сразу,
+/// а не после того, как файл перешифрован целиком.
+#[test]
+fn preparing_group_file_does_not_block_the_actor() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(45), id(46));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a-prep"));
+    let b = start(&net, b_id, tmpdir("b-prep"));
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+    assert!(a.group_create("клуб"));
+    let gid = only_gid(&a);
+
+    let big: Vec<u8> = (0..40 * 1024 * 1024u32).map(|i| (i * 31 ^ 0x77) as u8).collect();
+    let src = tmpdir("src-prep").join("film.mp4");
+    std::fs::write(&src, &big).unwrap();
+    drop(big);
+    while a.poll_event().is_some() {}
+
+    a.group_send_media_file(gid.clone(), src, "video/mp4".into(), "film.mp4".into(), MediaInfo::default());
+    b.send_text(&a_key, "ты тут?").unwrap();
+
+    // Что придёт первым: входящий текст или эхо своего вложения?
+    let mut order = Vec::new();
+    assert!(
+        wait(60, || {
+            while let Some(js) = a.poll_event() {
+                let v = json(&js);
+                if v["type"] == "message" {
+                    order.push(if v["group"] == true { "media" } else { "text" });
+                }
+            }
+            order.len() >= 2
+        }),
+        "оба события пришли: {order:?}",
+    );
+    assert_eq!(order, vec!["text", "media"], "актор не ждал перешифровки файла");
+}

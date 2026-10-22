@@ -93,9 +93,6 @@ pub(crate) enum Job {
     Beacon,
     /// Рассылка «я вышел» членам комнаты `gid` (мгновенное исчезновение).
     Leave(Vec<u8>),
-    /// Предложить блоб пиру (M2): сохранить локально + анонсировать манифест.
-    BlobOffer { peer: [u8; 32], content: Vec<u8>, mime: String },
-    /// Отдать блоб ФАЙЛОМ: манифест посчитан потоково, чанки читаются с диска.
     /// Отправить медиа-вложение в группу (M2): scrub → сохранить → MLS-ссылка всем +
     /// push блоба каждому участнику. В одном Job (нужны и группы, и BlobManager).
     GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String, info: MediaInfo },
@@ -1677,7 +1674,7 @@ impl Engine {
     }
 
     /// Отправить в группу вложение, лежащее ФАЙЛОМ, не поднимая его в память.
-    /// Fire-and-forget: манифест и своя копия считаются на акторе.
+    /// Fire-and-forget: манифест и своя копия считаются в потоке подготовки.
     pub fn group_send_media_file(
         &self,
         gid: Vec<u8>,
@@ -1705,13 +1702,6 @@ impl Engine {
     }
 
     // — Блобы (M2) —
-    /// Предложить пиру блоб (картинку/файл/голосовое). Fire-and-forget: движок
-    /// сохранит локально и анонсирует манифест; докачку ведёт получатель. id блоба
-    /// детерминирован — `blob_id` (BLAKE3), UI может вычислить его сам для ссылки.
-    pub fn blob_offer(&self, peer: [u8; 32], content: Vec<u8>, mime: String) {
-        let _ = self.jobs.send(Job::BlobOffer { peer, content, mime });
-    }
-
     /// Контент-адрес (hex) содержимого — для ссылки на блоб из сообщения/аватарки.
     pub fn blob_id_hex(&self, content: &[u8]) -> String {
         hex::encode(p2p_blob::blob_id(content))
@@ -2409,6 +2399,20 @@ fn event_pump(
     refresh_group_cache(&engine, &groups); // прайм кэша
     push_event(&engine, dto::UiEvent::GroupsChanged);
     let mut last_beacon = Instant::now();
+    // Один поток подготовки — вложения уходят в группу в том порядке, в каком их
+    // отправили.
+    let (prep_tx, prep_rx) = std::sync::mpsc::channel::<Job>();
+    {
+        let engine = engine.clone();
+        std::thread::spawn(move || {
+            while let Ok(job) = prep_rx.recv() {
+                let Some((gid, media)) = prepare_group_media(&engine, job) else { continue };
+                if engine.jobs.send(Job::GroupMediaRef { gid, media }).is_err() {
+                    break;
+                }
+            }
+        });
+    }
     loop {
         match job_rx.recv_timeout(Duration::from_millis(500)) {
             Ok(Job::Ev(ev)) => handle_event(&engine, &mut groups, &mut blobs, ev),
@@ -2417,84 +2421,13 @@ fn event_pump(
                 blobs.cancel_downloads();
                 let _ = done.send(());
             }
-            Ok(Job::BlobOffer { peer, content, mime }) => {
-                // Сохраняем свой блоб локально (чтобы отправитель тоже его показывал)
-                // и анонсируем манифест — докачку ведёт получатель.
-                save_blob(&engine, p2p_blob::blob_id(&content), &content);
-                blobs.offer(peer, &content, &mime);
-            }
-            Ok(Job::GroupMedia { gid, content, mime, name, info }) => {
-                // Картинки чистим (scrub), считаем контент-адрес, сохраняем локально.
-                let bytes = if mime.starts_with("image/") {
-                    p2p_blob::scrub::scrub(&mime, &content)
-                } else {
-                    content
-                };
-                let hash = p2p_blob::blob_id(&bytes);
-                let id_hex = hex::encode(hash);
-                let size = bytes.len() as u64;
-                let members: Vec<[u8; 32]> =
-                    groups.members(&gid).into_iter().filter(|m| *m != engine.me_pub).collect();
-                save_blob(&engine, hash, &bytes);
-                let thumb_hex = push_group_thumb(&engine, &mut blobs, &members, info.thumb.as_deref());
-                let media = MediaBody {
-                    // id проставит слой групп при отправке (он же кладёт его в историю).
-                    id: 0,
-                    fwd_from: info.fwd_from.clone(),
-                    fwd_anon: info.fwd_anon,
-                    reply_to: info.reply_to,
-                    reply_sender: info.reply_sender.clone(),
-                    kind: Engine::media_kind(&mime).into(),
-                    hash: id_hex,
-                    mime: mime.clone(),
-                    name,
-                    caption: info.caption,
-                    size,
-                    duration_ms: info.duration_ms,
-                    width: info.width,
-                    height: info.height,
-                    thumb: thumb_hex,
-                };
-                // MLS-ссылка всем; байты каждый участник запросит сам — мелкое
-                // сразу, крупное по кнопке.
-                groups.send_media(&gid, &media);
+            // Подготовка (scrub, хэш, своя зашифрованная копия) — в своём потоке:
+            // файл на сотни мегабайт держал бы актор, а с ним приём сообщений и
+            // маячки звонка (R-028). Готовое вернётся сюда как GroupMediaRef.
+            Ok(job @ (Job::GroupMedia { .. } | Job::GroupMediaFile { .. })) => {
+                let _ = prep_tx.send(job);
             }
             Ok(Job::GroupMediaRef { gid, media }) => {
-                groups.send_media(&gid, &media);
-            }
-            Ok(Job::GroupMediaFile { gid, path, mime, name, info }) => {
-                // Потоковый путь: ни манифест, ни отдача чанков не поднимают файл в
-                // память. Картинки сюда не приходят — им нужен scrub целиком.
-                let Ok(manifest) = p2p_blob::manifest_of_file(&path, mime.clone()) else { continue };
-                if manifest.size > p2p_blob::Limits::default().max_size {
-                    continue; // не примет ни один участник
-                }
-                let id_hex = hex::encode(manifest.id);
-                let size = manifest.size;
-                let members: Vec<[u8; 32]> =
-                    groups.members(&gid).into_iter().filter(|m| *m != engine.me_pub).collect();
-                if !engine.blob_exists(&id_hex) {
-                    let _ = engine.store_blob_streamed(&path, &manifest);
-                }
-                let thumb_hex = push_group_thumb(&engine, &mut blobs, &members, info.thumb.as_deref());
-                let media = MediaBody {
-                    // id проставит слой групп при отправке (он же кладёт его в историю).
-                    id: 0,
-                    fwd_from: info.fwd_from.clone(),
-                    fwd_anon: info.fwd_anon,
-                    reply_to: info.reply_to,
-                    reply_sender: info.reply_sender.clone(),
-                    kind: Engine::media_kind(&mime).into(),
-                    hash: id_hex,
-                    mime: mime.clone(),
-                    name,
-                    caption: info.caption,
-                    size,
-                    duration_ms: info.duration_ms,
-                    width: info.width,
-                    height: info.height,
-                    thumb: thumb_hex,
-                };
                 groups.send_media(&gid, &media);
             }
             Ok(Job::Beacon) => {
@@ -2582,19 +2515,58 @@ fn write_blob_file(dir: &Path, id: p2p_blob::Hash, content: &[u8]) {
 ///
 /// Превью пушим ВСЕГДА, в отличие от самого вложения: оно мелкое, и ради него
 /// карточка и существует — без картинки предложение «скачать 800 МБ» слепое.
-fn push_group_thumb(
-    engine: &Arc<Engine>,
-    blobs: &mut blobs::BlobManager,
-    members: &[[u8; 32]],
-    thumb: Option<&[u8]>,
-) -> String {
+fn store_thumb(engine: &Arc<Engine>, thumb: Option<&[u8]>) -> String {
     let Some(t) = thumb.filter(|t| !t.is_empty()) else { return String::new() };
     let h = p2p_blob::blob_id(t);
     save_blob(engine, h, t);
-    for m in members {
-        blobs.offer(*m, t, "image/jpeg");
-    }
     hex::encode(h)
+}
+
+/// Подготовить вложение для группы: картинку очистить от метаданных, посчитать
+/// контент-адрес и сохранить свою копию (файл — потоково, не поднимая в память),
+/// миниатюру — отдельным блобом. Байты участники запросят сами — мелкое сразу,
+/// крупное по кнопке. Работает в потоке подготовки, не в акторе.
+fn prepare_group_media(engine: &Arc<Engine>, job: Job) -> Option<(Vec<u8>, MediaBody)> {
+    let (gid, hash, size, mime, name, info) = match job {
+        Job::GroupMedia { gid, content, mime, name, info } => {
+            let bytes = if mime.starts_with("image/") { p2p_blob::scrub::scrub(&mime, &content) } else { content };
+            let hash = p2p_blob::blob_id(&bytes);
+            save_blob(engine, hash, &bytes);
+            (gid, hash, bytes.len() as u64, mime, name, info)
+        }
+        Job::GroupMediaFile { gid, path, mime, name, info } => {
+            // Картинки сюда не приходят — им нужен scrub целиком.
+            let manifest = p2p_blob::manifest_of_file(&path, mime.clone()).ok()?;
+            if manifest.size > p2p_blob::Limits::default().max_size {
+                return None; // не примет ни один участник
+            }
+            if !engine.blob_exists(&hex::encode(manifest.id)) {
+                let _ = engine.store_blob_streamed(&path, &manifest);
+            }
+            (gid, manifest.id, manifest.size, mime, name, info)
+        }
+        _ => return None,
+    };
+    let thumb = store_thumb(engine, info.thumb.as_deref());
+    let media = MediaBody {
+        // id проставит слой групп при отправке (он же кладёт его в историю).
+        id: 0,
+        fwd_from: info.fwd_from,
+        fwd_anon: info.fwd_anon,
+        reply_to: info.reply_to,
+        reply_sender: info.reply_sender,
+        kind: Engine::media_kind(&mime).into(),
+        hash: hex::encode(hash),
+        mime,
+        name,
+        caption: info.caption,
+        size,
+        duration_ms: info.duration_ms,
+        width: info.width,
+        height: info.height,
+        thumb,
+    };
+    Some((gid, media))
 }
 
 /// Сохранить принятый блоб и уведомить UI (`blob_received`).

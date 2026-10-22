@@ -760,25 +760,6 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_searchMessages<'local>(
 
 // ── Блобы (M2) ──────────────────────────────────────────────────────────────
 
-/// Предложить блоб пиру (картинка/файл/голосовое). Fire-and-forget.
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_blobOffer<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-    peer_hex: JString<'local>,
-    content: JByteArray<'local>,
-    mime: JString<'local>,
-) {
-    jni_safe!((), {
-        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
-        let Some(peer) = parse_key(&jstr(&mut env, &peer_hex)) else { return };
-        let bytes = env.convert_byte_array(&content).unwrap_or_default();
-        if bytes.is_empty() { return; }
-        e.blob_offer(peer, bytes, jstr(&mut env, &mime));
-    });
-}
-
 /// Контент-адрес (hex) содержимого — id блоба для ссылки из сообщения/аватарки.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_blobIdHex<'local>(

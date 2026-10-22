@@ -130,8 +130,6 @@ object Native {
     external fun connect(sessionPtr: Long, keyHex: String)
 
     // ── Блобы (M2) ────────────────────────────────────────────────────────
-    /** Предложить блоб пиру (картинка/файл/голосовое). Fire-and-forget. */
-    external fun blobOffer(sessionPtr: Long, peerHex: String, content: ByteArray, mime: String)
 
     /** Контент-адрес (hex) содержимого — id блоба для ссылки. */
     external fun blobIdHex(sessionPtr: Long, content: ByteArray): String
