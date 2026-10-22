@@ -3294,6 +3294,14 @@ impl Engine {
         cfg: p2p_messenger::Config,
     ) -> Result<StartOk, String> {
         let me_pub = identity.public_key_bytes();
+        // Обрывки атомарной записи от убитого процесса (R-042). Сейчас, пока никто
+        // не пишет: позже временный файл мог бы оказаться чьей-то записью в процессе.
+        for d in [dir.clone(), dir.join("groups"), dir.join("blobs")] {
+            let n = p2p_core::fsutil::sweep_temp(&d);
+            if n > 0 {
+                log::info!("{}: убрано {n} временных файлов", d.display());
+            }
+        }
         let db = p2p_core::db::open(&dir).map_err(|e| format!("db: {e}"))?;
         let contacts = ContactStore::open(db.clone()).map_err(|e| format!("contacts: {e}"))?;
         let gate = GateStore::open(db.clone()).map_err(|e| format!("gate: {e}"))?;

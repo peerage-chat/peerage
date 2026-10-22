@@ -31,12 +31,42 @@ fn write_via_temp(path: &Path, data: &[u8], private: bool) -> io::Result<()> {
         // питания получили бы «новый» файл нулевой длины.
         f.sync_all()?;
         drop(f);
-        fs::rename(&tmp, path)
+        fs::rename(&tmp, path)?;
+        // Сам rename — запись в каталог: без его sync на части ФС переименование
+        // может не пережить отключение питания, и вернётся старая версия.
+        if let Some(dir) = path.parent() {
+            sync_dir(dir);
+        }
+        Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
     result
+}
+
+#[cfg(unix)]
+fn sync_dir(dir: &Path) {
+    // Ошибку глотаем: не каждая ФС даёт sync каталога, а данные уже на месте.
+    if let Ok(d) = File::open(if dir.as_os_str().is_empty() { Path::new(".") } else { dir }) {
+        let _ = d.sync_all();
+    }
+}
+
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) {}
+
+/// Удалить обрывки временных файлов в каталоге (не рекурсивно). Процесс, убитый
+/// посреди [`write_atomic`], оставляет `*.tmp`: подобрать их некому, а в каталоге
+/// блобов они ещё и засчитываются в занятое место. Звать на старте, пока никто
+/// не пишет. Возвращает, сколько удалено.
+pub fn sweep_temp(dir: &Path) -> usize {
+    let Ok(rd) = fs::read_dir(dir) else { return 0 };
+    rd.flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+        .filter(|e| fs::remove_file(e.path()).is_ok())
+        .count()
 }
 
 /// Имя временного файла рядом с целевым (тот же каталог — значит, та же ФС и
@@ -97,6 +127,18 @@ mod tests {
         assert!(write_atomic(&target_dir, b"new").is_err());
         assert_eq!(fs::read(&p).unwrap(), b"old");
         assert_eq!(fs::read_dir(&d).unwrap().count(), 2, "за сбоем не прибрали временный файл");
+    }
+
+    #[test]
+    fn sweep_removes_only_temp_leftovers() {
+        let d = dir("sweep");
+        fs::write(d.join("state.bin.123.0.tmp"), b"x").unwrap();
+        fs::write(d.join("state.bin"), b"keep").unwrap();
+        fs::write(d.join("blob.part"), b"keep").unwrap();
+        assert_eq!(sweep_temp(&d), 1);
+        let mut names: Vec<_> = fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name()).collect();
+        names.sort();
+        assert_eq!(names, ["blob.part", "state.bin"]);
     }
 
     #[cfg(unix)]
