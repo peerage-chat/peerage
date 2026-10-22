@@ -124,3 +124,40 @@ fn hung_up_call_does_not_ring_later() {
     b.add_contact(&a_key, "A");
     assert!(next_room_invite(&b, 8).is_none(), "сброшенный звонок не зазвонил");
 }
+
+/// R-049: второй входящий во время разговора — отдельная строка «пропущен», а
+/// длительность достаётся самому разговору.
+#[test]
+fn second_call_during_a_call_does_not_steal_the_record() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id, c_id) = (id(83), id(84), id(85));
+    let (a_key, b_key, c_key) = (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a-busy"));
+    let b = start(&net, b_id, tmpdir("b-busy"));
+    let c = start(&net, c_id, tmpdir("c-busy"));
+    a.add_contact(&b_key, "B");
+    c.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+    b.add_contact(&c_key, "C");
+
+    // A звонит, B отвечает.
+    a.room_invite_dm(b_key, true, false);
+    assert!(next_room_invite(&b, 8).is_some(), "звонок A дошёл");
+    let room = b.room_join_dm(a_key, true, false);
+
+    // Посреди разговора звонит C.
+    c.room_invite_dm(b_key, true, false);
+    assert!(next_room_invite(&b, 8).is_some(), "звонок C дошёл");
+    std::thread::sleep(Duration::from_millis(1200));
+    b.room_leave(room);
+
+    let calls = json(&b.calls_json(10));
+    let calls = calls.as_array().unwrap();
+    let of = |k: &[u8; 32]| calls.iter().find(|c| c["peer"] == hex::encode(k)).cloned().unwrap();
+    let with_a = of(&a_key);
+    let with_c = of(&c_key);
+    assert_eq!(with_a["outcome"], "answered");
+    assert!(with_a["duration"].as_i64().unwrap() >= 1, "длительность — у разговора: {with_a}");
+    assert_eq!(with_c["outcome"], "missed");
+    assert_eq!(with_c["duration"].as_i64(), Some(0), "у пропущенного длительности нет");
+}

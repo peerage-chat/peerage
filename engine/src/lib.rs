@@ -2019,6 +2019,12 @@ impl Engine {
         }
     }
 
+    /// Пропущенный входящий, пока идёт другой разговор: отдельная строка журнала,
+    /// активная запись не трогается.
+    fn record_missed(&self, peer: &[u8; 32], gid: &[u8]) {
+        let _ = self.calls.lock_safe().start(peer, gid, true, "missed", now());
+    }
+
     /// Закрыть активную запись: проставить длительность.
     fn end_call(&self) {
         let Some(c) = self.active_call.lock_safe().take() else { return };
@@ -2793,9 +2799,16 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             {
                 return;
             }
-            // Заводим сразу как пропущенный: если пользователь ответит, исход
-            // поднимется в room_join(_dm), если откажется — в room_decline_*.
-            engine.begin_call(&peer, &room_id, true, "missed");
+            // Идёт другой разговор: второй звонок клиент не показывает, и активную
+            // запись он не заменяет — иначе длительность разговора досталась бы
+            // пропущенному, а у самого разговора остался бы ноль (R-049).
+            if !engine.rooms.lock_safe().joined.is_empty() {
+                engine.record_missed(&peer, &room_id);
+            } else {
+                // Заводим сразу как пропущенный: если пользователь ответит, исход
+                // поднимется в room_join(_dm), если откажется — в room_decline_*.
+                engine.begin_call(&peer, &room_id, true, "missed");
+            }
             push_event(engine, dto::UiEvent::RoomInvite {
                 peer: hex::encode(peer),
                 room_id: hex::encode(&room_id),
