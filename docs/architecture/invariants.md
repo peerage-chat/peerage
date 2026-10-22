@@ -176,7 +176,7 @@ Rule: every protocol step that WAITS for the other side's action must
    would make a Welcome for the previous one undecryptable).
 
 The rule is symmetric: it also applies to the side that WAITS for someone else's answer. If
-we invited someone, "whom and where" must be on disk (`groups/sent_invites.json`) —
+we invited someone, "whom and where" must be on disk (table `group_invites_sent`) —
 otherwise after our restart an incoming answer has nothing to match and silently vanishes.
 And the other way round: a repeated invitation must not overwrite consent already given.
 

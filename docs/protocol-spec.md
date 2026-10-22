@@ -290,7 +290,7 @@ important" would mean "pinned it for myself", and the other side would never kno
 In groups it is the same — `AppMsg::Pin { target, sender, on }` inside MLS. Only the **admin**
 may pin (ADR-004), and this is checked on RECEIPT, against the admin key from local state:
 the sender's flag cannot be trusted, since a client can be patched. So a member remembers not
-only "am I the admin" but also WHO the admin is (`groups/group_admins.json`): the creator of
+only "am I the admin" but also WHO the admin is (`group_meta.admin_key`): the creator of
 the group, and for those who joined — the inviter.
 
 Pins are stored in a separate table `pinned` (chat, kind, id, author, time, by whom), not as

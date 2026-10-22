@@ -49,6 +49,9 @@ gone.
 
 ## Migrations (user data)
 
+> **Removed (2026-10-22, R-036/R-037):** compatibility with old installs is no longer
+> needed, so both migrations and the JSON importers were deleted. Kept here as history.
+
 Both one-off, each covered by a test:
 
 1. **The old `messages` table** → `chat_messages`: the author is restored from the `mine`
