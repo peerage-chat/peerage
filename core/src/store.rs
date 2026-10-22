@@ -1255,14 +1255,19 @@ impl MessageStore {
         // Последнее сообщение чата — строка с максимальным курсором `(time, rowid)`,
         // тем же, по которому листается история: иначе «последнее» в списке и
         // «последнее» в чате разъедутся на сообщениях одной секунды.
+        //
+        // Сначала список чатов (проход по индексу), потом по одному поиску на ЧАТ.
+        // Раньше подзапрос шёл на каждую СТРОКУ истории — на сотне тысяч сообщений
+        // это сотни миллисекунд на каждое входящее событие (R-039).
         let sql = format!(
             "SELECT {MSG_COLS}, m.chat, m.scope,
                     COALESCE(f.pinned_at, 0), COALESCE(f.muted, 0)
-             FROM chat_messages m
-             LEFT JOIN chat_flags f ON f.chat = m.chat AND f.scope = m.scope
-             WHERE m.rowid = (SELECT m2.rowid FROM chat_messages m2
-                              WHERE m2.chat = m.chat AND m2.scope = m.scope
-                              ORDER BY m2.time DESC, m2.rowid DESC LIMIT 1)"
+             FROM (SELECT DISTINCT chat, scope FROM chat_messages) c
+             JOIN chat_messages m ON m.rowid =
+                 (SELECT m2.rowid FROM chat_messages m2
+                  WHERE m2.chat = c.chat AND m2.scope = c.scope
+                  ORDER BY m2.time DESC, m2.rowid DESC LIMIT 1)
+             LEFT JOIN chat_flags f ON f.chat = m.chat AND f.scope = m.scope"
         );
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
@@ -1603,6 +1608,30 @@ mod tests {
         let p2 = Profile::load_or_create(&path).unwrap();
         assert_eq!(p2.identity.public_key_bytes(), key1);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn summaries_pick_last_message_per_chat() {
+        let me = key();
+        let store = MessageStore::open(db(), None, &me).unwrap();
+        let chats: Vec<[u8; 32]> = (0..30).map(|_| key()).collect();
+        let started = std::time::Instant::now();
+        for (n, c) in chats.iter().enumerate() {
+            for i in 0..2000u64 {
+                let m = StoredMessage { id: i, sender: hex::encode(c), text: format!("{n}-{i}"), time: (i / 3) as i64, ..Default::default() };
+                store.append(Chat::Dm(c), &m).unwrap();
+            }
+        }
+        eprintln!("заполнение: {:?}", started.elapsed());
+        let t = std::time::Instant::now();
+        let sums = store.summaries();
+        eprintln!("summaries на 60 тыс. строк: {:?}", t.elapsed());
+        assert_eq!(sums.len(), chats.len());
+        for s in &sums {
+            let n = chats.iter().position(|c| c.as_slice() == s.chat.as_slice()).unwrap();
+            // Последние три сообщения — в одну «секунду»; побеждает вставленное позже.
+            assert_eq!(s.last.text, format!("{n}-1999"));
+        }
     }
 
     #[test]
