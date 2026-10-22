@@ -52,7 +52,8 @@ Compose UI are thin adapters.
 
 ### S1. Messaging (reliable channel) ✅
 - **What:** sessions, events, presence/keepalive, reliable delivery (retry until ack),
-  anti-replay.
+  deduplication of repeated deliveries by message id (replay protection itself is the
+  ironwood session's job).
 - **Where:** `messenger`.
 - **Enables:** 1:1 chat, call signalling (invite/decline), presence.
 
