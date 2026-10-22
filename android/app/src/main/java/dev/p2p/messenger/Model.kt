@@ -378,7 +378,6 @@ class AppModel private constructor() {
             ?.putInt("video_fps", fps)
             ?.putBoolean("video_br_auto", videoBitrateAuto)
             ?.putInt("video_br_idx", videoBitrateIdx)
-            ?.remove("video_quality") // старый формат: ключ пресета
             ?.apply()
     }
 
@@ -616,17 +615,9 @@ class AppModel private constructor() {
         showTechInfo = prefs.getBoolean("tech_info", false)
         recentEmoji = prefs.getString("recent_emoji", "")?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
         warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
-        // Раньше хранился ключ пресета «WxH@fps», и всё вне списка пресетов (1440p,
-        // свой битрейт из звонка) после перезапуска сбрасывалось на 720p.
-        val legacy = prefs.getString("video_quality", null)?.let { key ->
-            Regex("""(\d+)x(\d+)@(\d+)""").matchEntire(key)?.destructured
-        }
-        val (w, h, fps) = legacy?.let { (w, h, f) -> Triple(w.toInt(), h.toInt(), f.toInt()) }
-            ?: Triple(
-                prefs.getInt("video_w", VideoQuality.default.width),
-                prefs.getInt("video_h", VideoQuality.default.height),
-                prefs.getInt("video_fps", VideoQuality.default.fps),
-            )
+        val w = prefs.getInt("video_w", VideoQuality.default.width)
+        val h = prefs.getInt("video_h", VideoQuality.default.height)
+        val fps = prefs.getInt("video_fps", VideoQuality.default.fps)
         cameraFront = prefs.getBoolean("video_front", true)
         videoBitrateAuto = prefs.getBoolean("video_br_auto", true)
         videoBitrateIdx = prefs.getInt("video_br_idx", 1).coerceIn(0, 2)
@@ -971,29 +962,12 @@ class AppModel private constructor() {
         loadFolders()
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
-        migrateSelfNameFromPrefs(dataDir) // разовый перенос имени из старых prefs в движок
-        // Файл старой клиентской очереди: недоставленное в нём лежало открытым текстом.
-        File(dataDir, "offline_queue.json").delete()
         // Расшифрованные копии вложений, оставшиеся от прошлого запуска (просмотр,
         // «открыть», «поделиться»): держать их дольше нужного незачем.
         appContext?.cacheDir?.let { c -> listOf("viewer", "shared").forEach { File(c, it).deleteRecursively() } }
         startLoops()
         registerNetworkCallback()
         return true
-    }
-
-    /** Разовая миграция (M2): раньше имя жило только в SharedPreferences и не
-     *  рассылалось. Если движок пустой, а в prefs имя есть — переносим в движок
-     *  (он сохранит и разошлёт), затем чистим prefs, чтобы не повторяться. */
-    private fun migrateSelfNameFromPrefs(dataDir: String) {
-        val ctx = appContext ?: return
-        val prefs = ctx.getSharedPreferences("p2p_settings", Context.MODE_PRIVATE)
-        val old = prefs.getString("profile_name", "").orEmpty().trim()
-        if (selfName.isBlank() && old.isNotBlank()) {
-            Native.setSelfName(sessionPtr, old)
-            selfName = Native.selfName(sessionPtr)
-        }
-        if (old.isNotBlank()) prefs.edit().remove("profile_name").apply()
     }
 
     // Мгновенный реконнект при восстановлении сети (до срабатывания тикера).

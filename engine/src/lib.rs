@@ -3205,7 +3205,7 @@ pub const QUARANTINE_DIR: &str = "quarantine";
 
 /// Что остаётся на месте при карантине: обёртка ключа хранилища (её разбирает
 /// клиент) и сам карантин.
-const QUARANTINE_KEEP: &[&str] = &[QUARANTINE_DIR, "vault.key.enc", "vault.meta", "vault.key"];
+const QUARANTINE_KEEP: &[&str] = &[QUARANTINE_DIR, "vault.key.enc", "vault.meta"];
 
 /// Загрузить личность из `profile.json` (или создать новую, если её нет). Если
 /// профиль есть, но не расшифровывается, — [`START_VAULT_MISMATCH`]: ничего не

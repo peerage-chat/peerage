@@ -42,7 +42,6 @@ object VaultKeyManager {
     private const val META_FILE = "vault.meta"
     private const val KEYSTORE_ALIAS = "p2p-vault"
     private const val ENC_FILE = "vault.key.enc"
-    private const val OLD_FILE = "vault.key"
     private const val GCM_IV_LEN = 12
     private const val GCM_TAG_BITS = 128
     private const val KEY_LEN = 32
@@ -92,19 +91,10 @@ object VaultKeyManager {
      */
     fun getOrCreate(filesDir: File, password: String? = null): ByteArray {
         val encFile = File(filesDir, ENC_FILE)
-        val oldFile = File(filesDir, OLD_FILE)
         val lvl = level(filesDir)
 
         return when {
             encFile.exists() -> unwrapAll(encFile.readBytes(), filesDir, lvl, password)
-            oldFile.exists() -> {
-                // Миграция: plaintext vault.key → защищённый vault.key.enc
-                val raw = oldFile.readBytes()
-                require(raw.size == KEY_LEN) { "vault.key: wrong size ${raw.size}" }
-                encFile.writeBytes(wrapAll(raw, filesDir, lvl, password))
-                oldFile.delete()
-                raw
-            }
             else -> {
                 val raw = ByteArray(KEY_LEN).also { SecureRandom().nextBytes(it) }
                 encFile.writeBytes(wrapAll(raw, filesDir, lvl, password))
@@ -135,7 +125,7 @@ object VaultKeyManager {
      * развернуть обёртку уже нечем. Следующий [getOrCreate] заведёт новый ключ.
      */
     fun reset(filesDir: File) {
-        listOf(ENC_FILE, META_FILE, OLD_FILE).forEach { File(filesDir, it).delete() }
+        listOf(ENC_FILE, META_FILE).forEach { File(filesDir, it).delete() }
         runCatching {
             KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(KEYSTORE_ALIAS)
         }

@@ -152,24 +152,16 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
         withContext(Dispatchers.IO) { model.start(dataDir) }
     }
 
-    // Гейт первого запуска (M4). Флаг в SharedPreferences; существующим пользователям
-    // (уже есть контакты) онбординг НЕ показываем — тихая миграция.
+    // Гейт первого запуска (M4). Флаг в SharedPreferences.
     val ctx = LocalContext.current
     val prefs = ctx.getSharedPreferences("p2p_settings", Context.MODE_PRIVATE)
     var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
-    LaunchedEffect(model.me, model.contacts.size) {
-        if (!onboarded && model.me != null && model.contacts.isNotEmpty()) {
-            prefs.edit().putBoolean("onboarded", true).apply()
-            onboarded = true
-        }
-    }
 
     // Камеру и микрофон здесь НЕ просим: они запрашиваются контекстно, в момент
     // использования (звонок / включение видео / сканер QR) — см. rememberPermissionRunner.
     // Здесь остаются только уведомления: они нужны приложению целиком, а не отдельному
     // экрану, и просить их можно лишь после гейта (иначе диалог накроет онбординг).
-    // Прошедшие онбординг жмут «Разрешить» в его карточке; сюда попадают те, кому
-    // онбординг не показывался (тихая миграция существующих пользователей).
+    // Онбординг просит их в своей карточке; здесь — для тех, кто там пропустил.
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(onboarded) {
         if (onboarded && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
