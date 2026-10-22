@@ -36,7 +36,8 @@ enum class VaultLevel { KEYSTORE, PASSWORD, BOTH }
  * **Смена уровня не перешифровывает данные:** vault key остаётся прежним, меняется
  * только его обёртка. Иначе каждое переключение переписывало бы всю базу и блобы.
  *
- * Миграция: старый plaintext vault.key автоматически оборачивается и удаляется.
+ * Оба файла пишутся только атомарно, а смена уровня меняет их разом
+ * ([StagedFiles]): обрезанная или наполовину сменённая обёртка — потерянный ключ.
  */
 object VaultKeyManager {
     private const val META_FILE = "vault.meta"
@@ -45,9 +46,13 @@ object VaultKeyManager {
     private const val GCM_IV_LEN = 12
     private const val GCM_TAG_BITS = 128
     private const val KEY_LEN = 32
+    private val PAIR = listOf(META_FILE, ENC_FILE)
 
     /** Текущий уровень (по умолчанию — Keystore, как было до появления выбора). */
     fun level(filesDir: File): VaultLevel {
+        // Сюда приходят первым делом на старте: прерванную смену уровня доводим
+        // здесь, до того как читать любой из двух файлов.
+        StagedFiles.finish(filesDir, PAIR)
         val meta = File(filesDir, META_FILE)
         if (!meta.exists()) return VaultLevel.KEYSTORE
         return runCatching { VaultLevel.valueOf(meta.readText().lineSequence().first().trim()) }
@@ -78,11 +83,8 @@ object VaultKeyManager {
         return meta.readText().lineSequence().drop(2).firstOrNull()?.trim()?.toIntOrNull() ?: 1
     }
 
-    private fun writeMeta(filesDir: File, lvl: VaultLevel, salt: ByteArray, profile: Int) {
-        File(filesDir, META_FILE).writeText(
-            lvl.name + "\n" + salt.joinToString("") { "%02x".format(it) } + "\n" + profile,
-        )
-    }
+    private fun metaBytes(lvl: VaultLevel, salt: ByteArray, profile: Int): ByteArray =
+        (lvl.name + "\n" + salt.joinToString("") { "%02x".format(it) } + "\n" + profile).toByteArray()
 
     /**
      * Ключ хранилища. `password` нужен на уровнях PASSWORD/BOTH; при неверном
@@ -97,7 +99,8 @@ object VaultKeyManager {
             encFile.exists() -> unwrapAll(encFile.readBytes(), filesDir, lvl, password)
             else -> {
                 val raw = ByteArray(KEY_LEN).also { SecureRandom().nextBytes(it) }
-                encFile.writeBytes(wrapAll(raw, filesDir, lvl, password))
+                val salt = if (lvl == VaultLevel.KEYSTORE) ByteArray(0) else salt(filesDir)
+                StagedFiles.writeAtomic(encFile, wrapAll(raw, lvl, password, salt, profile(filesDir)))
                 raw
             }
         }
@@ -114,8 +117,14 @@ object VaultKeyManager {
         val salt = if (target == VaultLevel.KEYSTORE) ByteArray(0) else Native.newVaultSalt()
         // Смена уровня = новая соль, значит и профиль берём текущий: файл всё равно
         // перезаписывается, и старую стоимость тащить незачем.
-        writeMeta(filesDir, target, salt, Native.currentKdfProfile())
-        File(filesDir, ENC_FILE).writeBytes(wrapAll(raw, filesDir, target, new))
+        val profile = Native.currentKdfProfile()
+        StagedFiles.replaceAll(
+            filesDir,
+            mapOf(
+                META_FILE to metaBytes(target, salt, profile),
+                ENC_FILE to wrapAll(raw, target, new, salt, profile),
+            ),
+        )
         return true
     }
 
@@ -131,11 +140,18 @@ object VaultKeyManager {
         }
     }
 
-    /** Обернуть ключ по уровню: пароль внутри, Keystore снаружи. */
-    private fun wrapAll(raw: ByteArray, filesDir: File, lvl: VaultLevel, password: String?): ByteArray {
+    /** Обернуть ключ по уровню: пароль внутри, Keystore снаружи. Соль и профиль —
+     *  явно: при смене уровня это параметры НОВОЙ обёртки, на диске их ещё нет. */
+    private fun wrapAll(
+        raw: ByteArray,
+        lvl: VaultLevel,
+        password: String?,
+        salt: ByteArray,
+        profile: Int,
+    ): ByteArray {
         var data = raw
         if (lvl != VaultLevel.KEYSTORE) {
-            val kek = Native.deriveVaultKey(password.orEmpty(), salt(filesDir), profile(filesDir))
+            val kek = Native.deriveVaultKey(password.orEmpty(), salt, profile)
             require(kek.size == KEY_LEN) { "kdf failed" }
             data = wrap(data, javax.crypto.spec.SecretKeySpec(kek, "AES"))
         }
