@@ -146,10 +146,10 @@ pub enum Event {
     RoomDecline { peer: PeerKey, room_id: Vec<u8> },
     /// Входящее групповое MLS-сообщение (переслать в групповой слой).
     Group { peer: PeerKey, data: Vec<u8> },
-    /// Контакт просит наш KeyPackage (хочет добавить в группу).
-    GroupKeyRequest { peer: PeerKey },
-    /// Контакт прислал свой KeyPackage (для добавления в группу).
-    GroupKeyReply { peer: PeerKey, key_package: Vec<u8> },
+    /// Админ группы `gid` просит наш KeyPackage (resync).
+    GroupKeyRequest { peer: PeerKey, gid: Vec<u8> },
+    /// Контакт прислал свой KeyPackage для группы `gid`.
+    GroupKeyReply { peer: PeerKey, gid: Vec<u8>, key_package: Vec<u8> },
     /// Приглашение в группу как сообщение (карточка на одобрение): `peer` — кто зовёт,
     /// `gid`/`name` — группа. Получатель решает вступать (тогда шлёт KeyPackage).
     GroupInvite { peer: PeerKey, gid: Vec<u8>, name: String },
@@ -1082,8 +1082,9 @@ impl Messenger {
     /// (retry-until-Ack): на холодной сессии первый пакет мог теряться, из-за чего
     /// инвайт «не срабатывал». Дедуп повторов на приёме — по идемпотентности
     /// (повторный запрос лишь пере-присылает KeyPackage).
-    pub fn send_group_key_request(&self, peer: &PeerKey) -> Result<(), MessengerError> {
-        self.shared.send_reliable(peer, false, |id| Payload::GroupKeyRequest { id })?;
+    pub fn send_group_key_request(&self, peer: &PeerKey, gid: &[u8]) -> Result<(), MessengerError> {
+        let gid = gid.to_vec();
+        self.shared.send_reliable(peer, false, move |id| Payload::GroupKeyRequest { id, gid })?;
         Ok(())
     }
 
@@ -1095,11 +1096,12 @@ impl Messenger {
         Ok(())
     }
 
-    /// Прислать контакту свой KeyPackage — надёжно (retry-until-Ack).
-    pub fn send_group_key_reply(&self, peer: &PeerKey, key_package: &[u8]) -> Result<(), MessengerError> {
-        let kp = key_package.to_vec();
+    /// Прислать свой KeyPackage для вступления в группу `gid` — надёжно
+    /// (retry-until-Ack).
+    pub fn send_group_key_reply(&self, peer: &PeerKey, gid: &[u8], key_package: &[u8]) -> Result<(), MessengerError> {
+        let (gid, kp) = (gid.to_vec(), key_package.to_vec());
         self.shared
-            .send_reliable(peer, false, move |id| Payload::GroupKeyReply { id, key_package: kp })?;
+            .send_reliable(peer, false, move |id| Payload::GroupKeyReply { id, gid, key_package: kp })?;
         Ok(())
     }
 
@@ -1489,12 +1491,12 @@ fn receive_loop(shared: Arc<Shared>) {
                 // ✓ доставлено — гасим повтор у отправителя (дубли отсеет MLS).
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
-            Payload::GroupKeyRequest { id } => {
-                shared.emit(Event::GroupKeyRequest { peer: peer_id });
+            Payload::GroupKeyRequest { id, gid } => {
+                shared.emit(Event::GroupKeyRequest { peer: peer_id, gid });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // гасим ретрай инвайта
             }
-            Payload::GroupKeyReply { id, key_package } => {
-                shared.emit(Event::GroupKeyReply { peer: peer_id, key_package });
+            Payload::GroupKeyReply { id, gid, key_package } => {
+                shared.emit(Event::GroupKeyReply { peer: peer_id, gid, key_package });
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::GroupInvite { id, gid, name } => {
@@ -1841,7 +1843,7 @@ mod tests {
         let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), cfg.clone());
         let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
 
-        a.send_group_key_request(&b_key).unwrap();
+        a.send_group_key_request(&b_key, &[1, 2, 3]).unwrap();
         let got = wait_for(&b_rx, |e| matches!(e, Event::GroupKeyRequest { .. }));
         assert!(got.is_some(), "GroupKeyRequest должен дойти несмотря на потери (ретрай)");
     }

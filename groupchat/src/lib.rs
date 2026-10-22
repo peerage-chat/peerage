@@ -206,7 +206,9 @@ impl GroupChat {
     /// Администратор приглашает контакт: просит его KeyPackage (контакт ответит
     /// [`p2p_messenger::Event::GroupKeyReply`], после чего вызываем [`add_member`]).
     pub fn invite(&self, peer: PeerKey) {
-        let _ = self.messenger.send_group_key_request(&peer);
+        if let Some(gid) = self.group_id() {
+            let _ = self.messenger.send_group_key_request(&peer, &gid);
+        }
     }
 
     /// Администратор добавляет участника по его KeyPackage: рассылает Commit

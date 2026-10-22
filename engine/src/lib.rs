@@ -2876,7 +2876,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }
-        Event::GroupKeyRequest { peer } => groups.on_key_request(peer),
+        Event::GroupKeyRequest { peer, gid } => groups.on_key_request(peer, &gid),
         Event::GroupInvite { peer, gid, name } => {
             // Звать в группу может только контакт: иначе незнакомец обходил бы гейт
             // карточками с любым названием, сколько позволит общая корзина чужих.
@@ -3005,8 +3005,8 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 blobs.offer(peer, &bytes, &mime);
             }
         }
-        Event::GroupKeyReply { peer, key_package } => {
-            if groups.on_key_reply(peer, &key_package) {
+        Event::GroupKeyReply { peer, gid, key_package } => {
+            if groups.on_key_reply(peer, &gid, &key_package) {
                 refresh_group_cache(engine, groups);
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }

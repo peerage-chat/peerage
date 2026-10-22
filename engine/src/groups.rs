@@ -128,7 +128,9 @@ pub struct GroupManager {
     pending_join_name: Option<String>,
     /// Входящие приглашения (gid → кто зовёт + имя), ждут accept/decline. Персистятся.
     pending_invites: HashMap<Vec<u8>, PendingInvite>,
-    invites: HashMap<[u8; 32], Vec<u8>>,
+    /// Кого и в какую группу мы позвали (пара — один человек может быть позван в
+    /// несколько групп сразу). Ждём от него KeyPackage с этим gid.
+    invites: HashSet<([u8; 32], Vec<u8>)>,
     /// Пиры, для которых текущий KeyPackage-обмен — это RE-ADD (resync, ADR-004),
     /// а не первое приглашение: на `on_key_reply` делаем Remove+Add, не просто Add.
     resyncing: HashSet<[u8; 32]>,
@@ -180,7 +182,7 @@ impl GroupManager {
             pending: None,
             pending_join_name: None,
             pending_invites: HashMap::new(),
-            invites: HashMap::new(),
+            invites: HashSet::new(),
             resyncing: HashSet::new(),
             resync_last: HashMap::new(),
             pending_kp: None,
@@ -416,11 +418,11 @@ impl GroupManager {
 
     /// Пригласить контакт в группу карточкой-сообщением (решение владельца 2026-06-28):
     /// шлём `GroupInvite` с именем группы; получатель сам решает вступать. Запоминаем
-    /// peer→gid, чтобы на его будущий KeyPackage (accept) добавить в нужную группу.
+    /// пару (peer, gid): его KeyPackage придёт с этим gid.
     pub fn invite(&mut self, gid: &[u8], peer: [u8; 32]) {
         if let Some(e) = self.groups.get(gid) {
             let _ = self.messenger.send_group_invite(&peer, gid, &e.name);
-            self.invites.insert(peer, gid.to_vec());
+            self.invites.insert((peer, gid.to_vec()));
             self.save_sent_invites();
         }
     }
@@ -433,22 +435,22 @@ impl GroupManager {
     /// «Вступить» через сутки — а к тому времени мы успеем перезапуститься, и без
     /// этой записи его KeyPackage будет нечем сопоставить с группой (молча в никуда).
     fn save_sent_invites(&self) {
-        let map: HashMap<String, String> =
+        let pairs: Vec<(String, String)> =
             self.invites.iter().map(|(p, g)| (hex::encode(p), hex::encode(g))).collect();
         let _ = std::fs::create_dir_all(&self.dir);
-        if let Ok(j) = serde_json::to_vec(&map) {
+        if let Ok(j) = serde_json::to_vec(&pairs) {
             let _ = p2p_core::fsutil::write_atomic(&self.sent_invites_path(), j);
         }
     }
 
     fn load_sent_invites(&mut self) {
         let Ok(bytes) = std::fs::read(self.sent_invites_path()) else { return };
-        let Ok(map) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else { return };
-        for (peer_hex, gid_hex) in map {
+        let Ok(pairs) = serde_json::from_slice::<Vec<(String, String)>>(&bytes) else { return };
+        for (peer_hex, gid_hex) in pairs {
             let (Some(peer), Ok(gid)) = (crate::parse_key(&peer_hex), hex::decode(&gid_hex)) else {
                 continue;
             };
-            self.invites.insert(peer, gid);
+            self.invites.insert((peer, gid));
         }
     }
 
@@ -548,7 +550,7 @@ impl GroupManager {
     fn send_key_package_to(&mut self, inviter: [u8; 32], gid: Vec<u8>, name: String) -> bool {
         match GroupChat::pending(&self.identity, self.messenger.clone()) {
             Ok((pending, kp)) => {
-                let _ = self.messenger.send_group_key_reply(&inviter, &kp);
+                let _ = self.messenger.send_group_key_reply(&inviter, &gid, &kp);
                 self.pending = Some(pending);
                 self.pending_kp = Some(kp);
                 self.pending_from = Some((inviter, vec![gid]));
@@ -578,7 +580,7 @@ impl GroupManager {
             // Ожидание уже идёт — шлём тот же KeyPackage ещё раз.
             Some(kp) if self.pending.is_some() => {
                 log::info!("group {}: повторяю KeyPackage пригласившему", hex::encode(&gid));
-                let _ = self.messenger.send_group_key_reply(&inviter, &kp);
+                let _ = self.messenger.send_group_key_reply(&inviter, &gid, &kp);
             }
             // Состояние потеряно (перезапуск приложения) — начинаем вступление заново.
             _ => {
@@ -886,32 +888,31 @@ impl GroupManager {
     /// перевыпустит нас в группу. Отвечаем только админу и только для его групп:
     /// KeyPackage + принятый Welcome — это вступление, и проситься в него вправе
     /// лишь тот, кто и так ведёт нашу группу. Новые группы идут через карточку.
-    pub fn on_key_request(&mut self, peer: [u8; 32]) {
+    pub fn on_key_request(&mut self, peer: [u8; 32], gid: &[u8]) {
         if self.pending.is_some() {
             return;
         }
-        let gids: Vec<Vec<u8>> = self
-            .admin_keys
-            .iter()
-            .filter(|(gid, admin)| **admin == peer && self.groups.contains_key(*gid))
-            .map(|(gid, _)| gid.clone())
-            .collect();
-        if gids.is_empty() {
-            log::warn!("запрос KeyPackage от {} — не админ наших групп, игнорирую", hex::encode(peer));
+        let ours = self.admin_keys.get(gid) == Some(&peer) && self.groups.contains_key(gid);
+        if !ours {
+            log::warn!("запрос KeyPackage от {} — не админ этой нашей группы, игнорирую", hex::encode(peer));
             return;
         }
         if let Ok((pending, kp)) = GroupChat::pending(&self.identity, self.messenger.clone()) {
-            let _ = self.messenger.send_group_key_reply(&peer, &kp);
+            let _ = self.messenger.send_group_key_reply(&peer, gid, &kp);
             self.pending = Some(pending);
-            self.pending_from = Some((peer, gids));
+            self.pending_from = Some((peer, vec![gid.to_vec()]));
         }
     }
 
     /// Контакт прислал KeyPackage — добавляем его в группу, куда приглашали.
     /// RESYNC (ADR-004): если это re-add отставшего, сперва убираем его устаревший
     /// leaf (Remove), затем добавляем свежим (Add) — участник входит с текущей эпохи.
-    pub fn on_key_reply(&mut self, peer: [u8; 32], key_package: &[u8]) -> bool {
-        let Some(id) = self.invites.remove(&peer) else { return false };
+    pub fn on_key_reply(&mut self, peer: [u8; 32], gid: &[u8], key_package: &[u8]) -> bool {
+        // Только туда, куда звали: KeyPackage с чужим gid — не приглашение.
+        if !self.invites.remove(&(peer, gid.to_vec())) {
+            return false;
+        }
+        let id = gid.to_vec();
         self.save_sent_invites();
         let resync = self.resyncing.remove(&peer);
         let added = self
@@ -1164,8 +1165,8 @@ impl GroupManager {
             }
         }
         self.resync_last.insert(key, now);
-        let _ = self.messenger.send_group_key_request(&peer);
-        self.invites.insert(peer, gid.to_vec());
+        let _ = self.messenger.send_group_key_request(&peer, gid);
+        self.invites.insert((peer, gid.to_vec()));
         self.save_sent_invites();
         self.resyncing.insert(peer); // on_key_reply сделает Remove+Add, не просто Add
     }

@@ -181,9 +181,18 @@ pub enum Payload {
     /// Запрос KeyPackage у контакта (чтобы добавить его в группу). `id` — для
     /// надёжной доставки (retry-until-Ack): получатель эхо-нёт `Ack{id}`. Раньше был
     /// fire-and-forget → на холодной сессии терялся (инвайт «не срабатывал»).
-    GroupKeyRequest { id: u64 },
-    /// Ответ с KeyPackage (MLS) для добавления в группу. `id` — надёжная доставка.
-    GroupKeyReply { id: u64, #[serde(with = "serde_bytes")] key_package: Vec<u8> },
+    /// `gid` — в какую группу (resync): ответ обязан его вернуть.
+    GroupKeyRequest { id: u64, #[serde(with = "serde_bytes")] gid: Vec<u8> },
+    /// Ответ с KeyPackage (MLS) для добавления в группу `gid`. Группа названа явно:
+    /// одного человека можно звать в несколько групп сразу, и KeyPackage без неё
+    /// добавил бы его не туда. `id` — надёжная доставка.
+    GroupKeyReply {
+        id: u64,
+        #[serde(with = "serde_bytes")]
+        gid: Vec<u8>,
+        #[serde(with = "serde_bytes")]
+        key_package: Vec<u8>,
+    },
     /// Приглашение в группу как отдельное сообщение (решение владельца 2026-06-28):
     /// вместо тихого KeyPackage-запроса получатель видит карточку «X зовёт в Y» и сам
     /// решает вступать. При согласии он шлёт `GroupKeyReply` пригласившему. `id` —
@@ -492,8 +501,8 @@ mod tests {
             Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: false },
             Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] },
             Payload::Group { id: 5, data: vec![1, 2, 3, 9, 9] },
-            Payload::GroupKeyRequest { id: 3 },
-            Payload::GroupKeyReply { id: 4, key_package: vec![7, 7, 7] },
+            Payload::GroupKeyRequest { id: 3, gid: vec![1, 2] },
+            Payload::GroupKeyReply { id: 4, gid: vec![1, 2], key_package: vec![7, 7, 7] },
             Payload::GroupInvite { id: 15, gid: vec![1, 2, 3], name: "Группа".into() },
             Payload::RoomPresence { gid: vec![5, 6, 7], flags: 0b11 },
             Payload::GroupResyncRequest { gid: vec![8, 9, 10] },

@@ -46,12 +46,12 @@ fn manager_with_store(
 /// Разослать событие мессенджера соответствующему менеджеру группы (как event_pump).
 fn dispatch(gm: &mut GroupManager, ev: Event) {
     match ev {
-        Event::GroupKeyRequest { peer } => gm.on_key_request(peer),
+        Event::GroupKeyRequest { peer, gid } => gm.on_key_request(peer, &gid),
         Event::GroupInvite { peer, gid, name } => {
             gm.on_invite(peer, gid, name);
         }
-        Event::GroupKeyReply { peer, key_package } => {
-            gm.on_key_reply(peer, &key_package);
+        Event::GroupKeyReply { peer, gid, key_package } => {
+            gm.on_key_reply(peer, &gid, &key_package);
         }
         Event::Group { peer, data } => {
             gm.on_group(peer, &data);
@@ -674,7 +674,7 @@ fn key_request_from_non_admin_is_ignored() {
     let (m_msgr, m_rx) = Messenger::start_with_transport(m_id, net.endpoint(m_key), cfg.clone());
     let (v_msgr, v_rx) = Messenger::start_with_transport(v_id.clone(), net.endpoint(v_key), cfg);
     let mut gm_v = manager(v_id, Arc::new(v_msgr), tmpdir("v"));
-    m_msgr.send_group_key_request(&v_key).unwrap();
+    m_msgr.send_group_key_request(&v_key, &[7u8; 16]).unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut leaked = false;
     while Instant::now() < deadline {
@@ -701,4 +701,45 @@ fn resync_key_package_cannot_join_another_group() {
     pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, _| false);
     assert!(!c.gm_b.group_ids().contains(&other), "B не вписан во вторую группу");
     assert!(c.gm_b.group_ids().contains(&c.gid), "первая группа на месте");
+}
+
+/// R-027: одного человека можно позвать в две группы сразу. Второе приглашение не
+/// затирает первое, и каждый KeyPackage добавляет ровно в ту группу, куда звали.
+#[test]
+fn one_person_invited_into_two_groups() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(33), id(34));
+    let b_key = b_id.public_key_bytes();
+    let a_key = a_id.public_key_bytes();
+    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
+    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
+    let mut gm_a = manager(a_id, Arc::new(a_msgr), tmpdir("a2g"));
+    let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("b2g"));
+
+    let first = gm_a.create("первая").unwrap();
+    let second = gm_a.create("вторая").unwrap();
+    gm_a.invite(&first, b_key);
+    gm_a.invite(&second, b_key);
+    let both = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        let j = b.invites_json();
+        j.contains(&hex::encode(&first)) && j.contains(&hex::encode(&second))
+    });
+    assert!(both, "обе карточки на месте");
+
+    // Принимаем ПЕРВОЕ приглашение (позвали в него раньше, затёрто было бы оно).
+    assert!(gm_b.accept_invite(&first));
+    gm_b.accept_invite(&second); // встанет в очередь за первым
+    let joined_first = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
+        b.group_ids().contains(&first) && a.members(&first).contains(&b_key)
+    });
+    assert!(joined_first, "B вступил именно в первую группу");
+    assert!(!gm_a.members(&second).contains(&b_key), "во вторую — пока нет");
+
+    // Очередь вступлений: маячок продолжает со второй.
+    gm_b.retry_pending_joins();
+    let joined_second = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
+        b.group_ids().contains(&second) && a.members(&second).contains(&b_key)
+    });
+    assert!(joined_second, "и во вторую тоже");
 }

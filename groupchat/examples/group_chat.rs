@@ -21,7 +21,7 @@ fn pump_admin(rx: &Receiver<Event>, a: &mut GroupChat, secs: u64) -> Vec<String>
     let mut texts = Vec::new();
     while Instant::now() < deadline {
         match rx.recv_timeout(Duration::from_millis(300)) {
-            Ok(Event::GroupKeyReply { peer, key_package }) => {
+            Ok(Event::GroupKeyReply { peer, key_package, .. }) => {
                 let _ = a.add_member(peer, &key_package);
             }
             Ok(Event::Group { data, .. }) => {
@@ -48,10 +48,10 @@ fn pump_member(
     let mut texts = Vec::new();
     while Instant::now() < deadline {
         match rx.recv_timeout(Duration::from_millis(300)) {
-            Ok(Event::GroupKeyRequest { peer }) => {
+            Ok(Event::GroupKeyRequest { peer, gid }) => {
                 if chat.is_none() {
                     if let Ok((pending, kp)) = GroupChat::pending(id, m.clone()) {
-                        let _ = m.send_group_key_reply(&peer, &kp);
+                        let _ = m.send_group_key_reply(&peer, &gid, &kp);
                         *chat = Some(pending);
                     }
                 }
