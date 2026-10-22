@@ -165,3 +165,30 @@ fn block_silences_then_unblock_restores() {
     a.shutdown();
     b.shutdown();
 }
+
+/// R-031: сверка отпечатка поднимает бюджет сразу. Сверенному вдвое больший
+/// всплеск (120 против 60): сотня пакетов подряд проходит приёмный бюджет без
+/// дропа. Раньше тир обновлялся лишь при следующей смене доверия, и часть сотни
+/// резалась как флуд. Пакеты шлём сырыми с эндпоинта A — бюджет режет до
+/// расшифровки, так что содержимое неважно, а темп не зависит от подтверждений.
+#[test]
+fn verifying_a_contact_raises_its_budget_at_once() {
+    use p2p_messenger::Transport;
+    let net = LoopbackNet::new();
+    let (a_key, b_id) = (id(91).public_key_bytes(), id(92));
+    let b_key = b_id.public_key_bytes();
+    let a_raw = net.endpoint(a_key);
+    let b = start(&net, b_id, tmpdir("b-verify"));
+    b.add_contact(&a_key, "A");
+    b.set_verified(&a_key, true);
+
+    for _ in 0..100 {
+        a_raw.write(&b_key, &[0x01; 64]).unwrap();
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    let flood: serde_json::Value = serde_json::from_str(&b.flood_json()).unwrap();
+    assert!(
+        !flood.as_array().unwrap().iter().any(|f| f["peer"] == hex::encode(a_key)),
+        "сверенный контакт не режется как флуд: {flood}"
+    );
+}

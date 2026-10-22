@@ -1354,6 +1354,8 @@ impl Engine {
 
     pub fn set_verified(&self, key: &[u8; 32], verified: bool) {
         let _ = self.contacts.lock_safe().set_verified(key, verified);
+        // Сверка — смена доверия: тир Verified щедрее и по приёму, и по очереди.
+        self.refresh_budgets();
     }
 
     pub fn rename_contact(&self, key: &[u8; 32], name: &str) {
@@ -1427,9 +1429,6 @@ impl Engine {
         ok
     }
 
-    /// Снимок офлайн-очереди для UI: `{pending, bytes, peers, warn}`. Ничего не
-    /// удаляем автоматически — по `warn` клиент показывает предупреждение, а решение
-    /// (подождать или сбросить очередь) остаётся за пользователем.
     /// Кто сейчас флудит: `[{peer, dropped, pps, blocked}]`, по убыванию темпа.
     /// Пустой массив — флуда нет.
     ///
@@ -1452,6 +1451,9 @@ impl Engine {
         serde_json::to_string(&list).unwrap_or_else(|_| "[]".into())
     }
 
+    /// Снимок офлайн-очереди для UI: `{pending, bytes, peers, warn}`. Ничего не
+    /// удаляем автоматически — по `warn` клиент показывает предупреждение, а решение
+    /// (подождать или сбросить очередь) остаётся за пользователем.
     pub fn outbox_stats_json(&self) -> String {
         let s = self.outbox.lock_safe().stats();
         let dto = dto::OutboxStats {
