@@ -6,6 +6,7 @@
 package dev.p2p.messenger.ui
 
 import android.Manifest
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -480,6 +481,8 @@ internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
     val ctx = LocalContext.current
     val sel = model.selection
     var confirmDelete by remember { mutableStateOf(false) }
+    // «Назад» в режиме выделения снимает выделение, а не уводит из чата.
+    BackHandler { model.clearSelection() }
 
     Row(
         Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
@@ -615,6 +618,11 @@ internal fun MessageInput(
     var emojiOpen by remember { mutableStateOf(false) }
     var attachOpen by remember { mutableStateOf(false) }
     var picked by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
+    // Открытую панель «назад» закрывает, а не уводит из чата.
+    BackHandler(enabled = emojiOpen || attachOpen) {
+        emojiOpen = false
+        attachOpen = false
+    }
 
     Column(Modifier.fillMaxWidth().background(HoloBg)) {
         // Цитата видна ровно там, где человек печатает ответ: иначе легко забыть,

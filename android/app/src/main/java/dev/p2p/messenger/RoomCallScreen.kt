@@ -5,6 +5,7 @@ import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.view.Surface
 import android.view.TextureView
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -159,6 +160,19 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
         if (showRing) RingSheet(model) { showRing = false }
         if (model.showVideoShare) ShareVideoScreen(model)
         if (model.showAudioSettings) AudioSettingsScreen(model)
+        // «Назад» закрывает верхний слой (в порядке отрисовки — сверху вниз). Сам
+        // звонок системная «назад» не трогает: это делает оболочка.
+        BackHandler(
+            enabled = model.showAudioSettings || model.showVideoShare || showRing || showSettings || focused != null,
+        ) {
+            when {
+                model.showAudioSettings -> model.closeAudioSettings()
+                model.showVideoShare -> model.closeVideoShare()
+                showRing -> showRing = false
+                showSettings -> showSettings = false
+                else -> focused = null
+            }
+        }
     }
 }
 

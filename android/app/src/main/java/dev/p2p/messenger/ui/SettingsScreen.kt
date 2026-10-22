@@ -2,6 +2,7 @@
 
 package dev.p2p.messenger.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -594,6 +595,7 @@ private fun SettingSwitchRow(
 @Composable
 private fun SeedPhraseSheet(model: AppModel, onClose: () -> Unit) {
     LaunchedEffect(Unit) { model.revealSeedPhrase() }
+    BackHandler(onBack = onClose)
     SecureFlag()
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),

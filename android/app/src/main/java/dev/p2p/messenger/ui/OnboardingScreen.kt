@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -72,6 +73,10 @@ internal fun SecureFlag() {
 internal fun OnboardingFlow(model: AppModel, onFinish: () -> Unit) {
     var step by rememberSaveable { mutableStateOf(0) }
     var importing by rememberSaveable { mutableStateOf(false) }
+    // «Назад» — на шаг назад; с первого шага системная кнопка выходит штатно.
+    BackHandler(enabled = importing || step > 0) {
+        if (importing) importing = false else step--
+    }
     if (importing) {
         ImportKeyStep(model = model, onBack = { importing = false })
         return
@@ -165,6 +170,7 @@ internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
         step = 0
         error = null
     }
+    BackHandler(enabled = step != 0 && !busy) { back() }
     when (step) {
         1 -> {
             SecureFlag()

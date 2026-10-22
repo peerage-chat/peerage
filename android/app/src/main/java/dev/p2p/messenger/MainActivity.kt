@@ -37,7 +37,6 @@ import dev.p2p.messenger.ui.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.reflect.KProperty
 
 class MainActivity : ComponentActivity() {
     // Синглтон на процесс: переживает пересоздание Activity (фон/возврат), иначе
@@ -225,64 +224,6 @@ internal enum class Screen {
     SettingsAbout,
 }
 
-/**
- * Текущий экран + откуда на него пришли. Делегат для `var screen by nav`: каждое
- * `screen = X` запоминает предыдущий экран как источник X, если это переход вперёд.
- *
- * Зачем: часть экранов открывается из нескольких мест («Сеть» — с главной, из
- * настроек и из «Я»; «Контакты» — из «Безопасности»). Зашитый родитель возвращал
- * на главную, откуда бы ни пришли. Полноценный стек не нужен — после «создать группу»
- * назад из группы должно вести на главную, а не в форму создания, поэтому источник
- * учитывают только экраны-разделы ([fromOrigin]), остальные держат своего родителя.
- */
-internal class NavState(initial: Screen) {
-    var current by mutableStateOf(initial)
-        private set
-    private val cameFrom = HashMap<Screen, Screen>()
-
-    operator fun getValue(thisRef: Any?, property: KProperty<*>): Screen = current
-
-    operator fun setValue(thisRef: Any?, property: KProperty<*>, value: Screen) {
-        if (value == current) return
-        when {
-            // Главная — корень: дальше начинается новая история.
-            value == Screen.Contacts -> cameFrom.clear()
-            // Возврат к тому, откуда пришли, — не новый вход: источник не трогаем.
-            cameFrom[current] == value -> {}
-            else -> cameFrom[value] = current
-        }
-        current = value
-    }
-
-    /** Куда ведёт «назад» с экрана [s] — одно правило и для системной кнопки, и для
-     *  стрелки в шапке. */
-    fun parentOf(s: Screen): Screen = when (s) {
-        Screen.Scanner -> Screen.Add
-        Screen.CreateGroup -> Screen.NewChat
-        Screen.SettingsSecurity, Screen.SettingsPrivacy, Screen.SettingsMedia,
-        Screen.SettingsNotifications, Screen.SettingsAbout,
-        -> Screen.Settings
-        Screen.AddMember -> Screen.GroupChat
-        Screen.Info -> Screen.Chat
-        Screen.Flood, Screen.Outbox -> Screen.Network
-        Screen.RotateAddress -> Screen.Flood
-        Screen.Backup -> Screen.Storage
-        Screen.FolderEdit -> Screen.Folders
-        Screen.VaultLevel -> cameFrom[s] ?: Screen.SettingsSecurity
-        Screen.EditProfile -> cameFrom[s] ?: Screen.Settings
-        in fromOrigin -> cameFrom[s] ?: Screen.Contacts
-        else -> Screen.Contacts
-    }
-
-    private companion object {
-        /** Разделы, открываемые из разных мест: «назад» ведёт туда, откуда пришли. */
-        val fromOrigin = setOf(
-            Screen.Settings, Screen.Network, Screen.Storage, Screen.ContactList,
-            Screen.Calls, Screen.Saved, Screen.Folders, Screen.Groups, Screen.Me,
-        )
-    }
-}
-
 /** Класс ширины окна (ADR-005). Свой enum вместо material3 WindowWidthSizeClass, чтобы
  *  experimental-API жил только в MainActivity, а UI зависел от стабильного типа. */
 internal enum class WidthClass { Compact, Medium, Expanded }
@@ -319,9 +260,7 @@ private fun CompactShell(model: AppModel) {
     val ctx = LocalContext.current
     // ADR-004: нас отозвали из открытой группы (currentGroup → null) — уходим на список.
     LaunchedEffect(model.currentGroup) {
-        if (model.currentGroup == null && (screen == Screen.GroupChat || screen == Screen.AddMember)) {
-            screen = Screen.Groups
-        }
+        if (model.currentGroup == null) nav.leave(setOf(Screen.GroupChat, Screen.AddMember))
     }
     var scanResult by remember { mutableStateOf<String?>(null) }
     // Папки: единственный источник правды — страница пейджера. Таб и заголовок только
@@ -339,24 +278,18 @@ private fun CompactShell(model: AppModel) {
         if (i >= 0) scope.launch { folderPager.animateScrollToPage(i) }
     }
 
-    // Системная «назад» — навигация по приложению, а не выход. Во время звонка/
-    // входящего гасим (не выходим), открытое меню закрываем, иначе возврат к родителю.
-    // На главном (Contacts) без оверлеев — обработчик выключен, back выходит штатно.
-    BackHandler(
-        enabled = model.dmCallPeer != null || model.incomingCall != null || screen != Screen.Contacts,
-    ) {
-        when {
-            model.incomingCall != null -> {}
-            model.dmCallPeer != null -> {}
-            screen == Screen.Scanner && verifyingPeer != null -> {
-                verifyingPeer = null
-                screen = Screen.Info
-            }
-            else -> screen = nav.parentOf(screen)
-        }
+    // «Назад» — одна функция и для системной кнопки, и для стрелки в шапке.
+    val goBack: () -> Unit = {
+        if (screen == Screen.Scanner) verifyingPeer = null
+        nav.back()
     }
-    // Стрелка в шапке ведёт туда же, куда системная «назад».
-    val goBack: () -> Unit = { screen = nav.parentOf(screen) }
+    // Системная «назад» — навигация по приложению, а не выход. Во время звонка/
+    // входящего гасим (не выходим); слои внутри экранов (выделение, панели, настройки
+    // звонка) перехватывают её своими обработчиками раньше этого. На главной без
+    // оверлеев обработчик выключен — back выходит штатно.
+    BackHandler(enabled = model.dmCallPeer != null || model.incomingCall != null || nav.depth > 1) {
+        if (model.incomingCall == null && model.dmCallPeer == null) goBack()
+    }
 
     val navigate: (Screen) -> Unit = { dest ->
         if (dest == Screen.Groups) model.refreshGroups()
@@ -407,23 +340,23 @@ private fun CompactShell(model: AppModel) {
                         }
                         Screen.Chat -> ChatTopBar(
                             model,
-                            onBack = { screen = Screen.Contacts },
+                            onBack = goBack,
                             onProfile = { screen = Screen.Info },
                         )
-                        Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = { screen = Screen.Contacts })
+                        Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = goBack)
                         Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = goBack)
-                        Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = { screen = Screen.Chat })
+                        Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = goBack)
                         Screen.Groups -> TopBar(stringResource(R.string.title_groups), onBack = goBack) {
                             BarIcon(Icons.Filled.Add, stringResource(R.string.cd_new_group)) { screen = Screen.CreateGroup }
                         }
                         Screen.GroupChat -> GroupChatTopBar(
                             model,
-                            onBack = { screen = Screen.Contacts },
+                            onBack = goBack,
                             onInfo = { screen = Screen.AddMember },
                         )
-                        Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = { screen = Screen.NewChat })
-                        Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = { screen = Screen.Contacts })
-                        Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = { screen = Screen.GroupChat })
+                        Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = goBack)
+                        Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = goBack)
+                        Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = goBack)
                         Screen.Settings -> TopBar(stringResource(R.string.menu_settings), onBack = goBack)
                         Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = goBack)
                         Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = goBack)
@@ -432,10 +365,7 @@ private fun CompactShell(model: AppModel) {
                         Screen.SettingsAbout -> TopBar(stringResource(R.string.settings_cat_about), onBack = goBack)
                         Screen.Scanner -> TopBar(
                             stringResource(if (verifyingPeer != null) R.string.title_verify_qr else R.string.title_scan_qr),
-                            onBack = {
-                                screen = if (verifyingPeer != null) Screen.Info else Screen.Add
-                                verifyingPeer = null
-                            },
+                            onBack = goBack,
                         )
                         Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
                             BarIcon(Icons.Filled.PersonAdd, stringResource(R.string.cd_add_contact)) { screen = Screen.Add }
@@ -454,7 +384,7 @@ private fun CompactShell(model: AppModel) {
                         Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = goBack)
                         Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = goBack)
                         Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = goBack)
-                        Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = { screen = Screen.Contacts })
+                        Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = goBack)
                     }
                     // ── Папки табами: только на главном экране ──────────────────────
                     if (screen == Screen.Contacts) {
@@ -488,7 +418,8 @@ private fun CompactShell(model: AppModel) {
                                 model,
                                 scannedKey = scanResult,
                                 onScan = { screen = Screen.Scanner },
-                            ) { screen = Screen.Contacts }
+                                onDone = goBack,
+                            )
                             Screen.Scanner -> QrScannerScreen { key ->
                                 val target = verifyingPeer
                                 if (target == null) {
@@ -532,9 +463,11 @@ private fun CompactShell(model: AppModel) {
                                 model,
                                 onNewGroup = { screen = Screen.CreateGroup },
                                 onAddContact = { screen = Screen.Add },
+                                // Выбор собеседника завершает «Новый чат»: назад из
+                                // чата — на главную, а не обратно в выбор.
                                 onOpenDm = {
                                     model.openChat(it)
-                                    screen = Screen.Chat
+                                    nav.replace(Screen.Chat)
                                 },
                             )
                             Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
@@ -585,7 +518,7 @@ private fun CompactShell(model: AppModel) {
                                 // Ход операции живёт на том же экране: уводить человека
                                 // в другое место в момент, когда он на минуту офлайн,
                                 // — ровно тогда, когда он хочет видеть, что происходит.
-                                RotationProgress(model) { screen = Screen.Network }
+                                RotationProgress(model) { nav.replace(Screen.Network) }
                             } else {
                                 RotateAddressScreen(model) {}
                             }

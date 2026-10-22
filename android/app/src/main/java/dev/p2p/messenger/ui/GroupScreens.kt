@@ -6,6 +6,7 @@
 package dev.p2p.messenger.ui
 
 import android.Manifest
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -245,6 +246,7 @@ internal fun GroupChatScreen(model: AppModel) {
             val audio = if (isMe) true else model.roomMembers.firstOrNull { it.peer == key }?.audio ?: true
             val video = if (isMe) false else model.roomMembers.firstOrNull { it.peer == key }?.video ?: false
             ParticipantFullscreen(name, audio, video, isMe) { focusedParticipant = null }
+            BackHandler { focusedParticipant = null }
         }
     }
 }
