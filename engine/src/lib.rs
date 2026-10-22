@@ -25,7 +25,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use p2p_core::budget::Tier;
 use p2p_core::settings::AudioSettings;
 use p2p_core::store::{Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage};
-use p2p_core::Identity;
+use p2p_core::{vault, Identity};
 /// Реэкспорт: медиа-вложение группового сообщения — часть контракта движка
 /// (клиенты и тесты собирают его, чтобы отправить вложение в группу).
 pub use p2p_groupchat::MediaBody;
@@ -939,7 +939,7 @@ impl Engine {
         let mut asm = p2p_blob::disk::DiskAssembler::create(manifest.clone(), &dst)?;
         for i in 0..manifest.chunks.len() {
             let chunk = p2p_blob::read_file_chunk(src, i).map_err(|_| p2p_blob::BlobError::Io)?;
-            asm.add(i, &chunk, p2p_core::vault::seal)?;
+            asm.add(i, &chunk, |i, b| vault::seal(&vault::chunk_purpose(&manifest.id, i), b))?;
         }
         asm.finish()?;
         Ok(())
@@ -1749,19 +1749,24 @@ impl Engine {
     pub fn blob_export(&self, id_hex: &str, dst: &Path) -> bool {
         use std::io::Write;
         let Ok(raw) = hex::decode(id_hex.trim()) else { return false };
-        let src = self.blob_dir.join(hex::encode(raw));
+        let src = self.blob_dir.join(hex::encode(&raw));
         let part = dst.with_extension("part");
         let ok = (|| -> Option<()> {
             let mut out = std::io::BufWriter::new(std::fs::File::create(&part).ok()?);
             match p2p_blob::disk::read_header(&src) {
                 Some((_cs, n, _size)) => {
                     for i in 0..n {
-                        let c = p2p_blob::disk::read_chunk(&src, i, |b| p2p_core::vault::open(b).ok())?;
+                        let c = p2p_blob::disk::read_chunk(&src, i, |i, b| {
+                            vault::open(&vault::chunk_purpose(&raw, i), b).ok()
+                        })?;
                         out.write_all(&c).ok()?;
                     }
                 }
                 // Мелкий блоб лежит одним запечатанным буфером — он и так невелик.
-                None => out.write_all(&p2p_core::vault::open(&std::fs::read(&src).ok()?).ok()?).ok()?,
+                None => {
+                    let bytes = vault::open(&vault::blob_purpose(&raw), &std::fs::read(&src).ok()?).ok()?;
+                    out.write_all(&bytes).ok()?
+                }
             }
             out.flush().ok()?;
             drop(out);
@@ -2544,15 +2549,15 @@ fn event_pump(
 /// (её колбэк живёт вне `Engine`), и самому движку.
 fn read_blob_at(dir: &Path, id_hex: &str) -> Option<Vec<u8>> {
     // Санитизация: только валидный hex → чистое имя файла (без traversal).
-    let clean = hex::encode(hex::decode(id_hex.trim()).ok()?);
-    let path = dir.join(clean);
+    let id = hex::decode(id_hex.trim()).ok()?;
+    let path = dir.join(hex::encode(&id));
     // Крупные блобы лежат в чанкованном формате (собраны потоково на диск), мелкие —
     // одним запечатанным буфером. Различаем по магии в заголовке.
     if p2p_blob::disk::read_header(&path).is_some() {
-        return p2p_blob::disk::read_all(&path, |b| p2p_core::vault::open(b).ok());
+        return p2p_blob::disk::read_all(&path, |i, b| vault::open(&vault::chunk_purpose(&id, i), b).ok());
     }
     let raw = std::fs::read(path).ok()?;
-    p2p_core::vault::open(&raw).ok()
+    vault::open(&vault::blob_purpose(&id), &raw).ok()
 }
 
 /// Сохранить блоб на диск по hex-id (принятый или свой отправленный).
@@ -2569,7 +2574,7 @@ fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
 /// переименовываются (`p2p_blob::disk`).
 fn write_blob_file(dir: &Path, id: p2p_blob::Hash, content: &[u8]) {
     let _ = std::fs::create_dir_all(dir);
-    let _ = p2p_core::fsutil::write_atomic(&dir.join(hex::encode(id)), &p2p_core::vault::seal(content));
+    let _ = p2p_core::fsutil::write_atomic(&dir.join(hex::encode(id)), &vault::seal(&vault::blob_purpose(&id), content));
 }
 
 /// Подготовить вложение для группы (см. [`Engine::store_media`]) и собрать
@@ -3040,7 +3045,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             if p2p_blob::disk::read_header(&path).is_some() {
                 // Крупный блоб не поднимаем в память: манифест считаем потоково,
                 // чанки отдаём с диска по одному.
-                let open = |b: &[u8]| p2p_core::vault::open(b).ok();
+                let open = |i: usize, b: &[u8]| vault::open(&vault::chunk_purpose(&hash, i), b).ok();
                 if let Some(m) = p2p_blob::disk::manifest_of_stored(&path, mime, open) {
                     if m.id == hash {
                         blobs.offer_stored(peer, m, path);

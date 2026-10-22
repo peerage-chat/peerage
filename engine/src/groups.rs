@@ -223,10 +223,16 @@ impl GroupManager {
                 self.admin_keys.insert(g.gid.clone(), k);
             }
             let path = self.group_path(&g.gid);
-            if let Ok(chat) = GroupChat::load(&path, &self.identity, self.messenger.clone()) {
-                self.remember_title(&g.gid, &g.name);
-                self.groups.insert(g.gid, Entry { chat, name: g.name, admin: g.admin });
+            let Ok(chat) = GroupChat::load(&path, &self.identity, self.messenger.clone()) else { continue };
+            // Файл обязан быть состоянием ИМЕННО этой группы: подложенное под её имя
+            // состояние другой группы расшифровалось бы (id в AAD не входит) и
+            // подменило бы собой эту (R-038).
+            if chat.group_id().as_deref() != Some(g.gid.as_slice()) {
+                log::warn!("group {}: файл состояния от другой группы — пропущен", hex::encode(&g.gid));
+                continue;
             }
+            self.remember_title(&g.gid, &g.name);
+            self.groups.insert(g.gid, Entry { chat, name: g.name, admin: g.admin });
         }
         self.invites = self.meta.sent_invites().into_iter().collect();
         for inv in self.meta.invites() {

@@ -55,7 +55,7 @@ impl Profile {
     }
 
     pub fn load(path: &Path) -> Result<Profile, StoreError> {
-        let data = crate::vault::open(&std::fs::read(path)?)?;
+        let data = crate::vault::open(&profile_purpose(), &std::fs::read(path)?)?;
         let pf: ProfileFile = serde_json::from_slice(&data)?;
         let seed = hex::decode(&pf.seed)?;
         let identity = Identity::from_seed(&seed).map_err(|_| StoreError::BadLength)?;
@@ -70,9 +70,14 @@ impl Profile {
         }
         let pf = ProfileFile { version: 1, seed: hex::encode(self.identity.seed()) };
         let json = serde_json::to_vec_pretty(&pf)?;
-        crate::fsutil::write_atomic_private(path, &crate::vault::seal(&json))?;
+        crate::fsutil::write_atomic_private(path, &crate::vault::seal(&profile_purpose(), &json))?;
         Ok(())
     }
+}
+
+/// AAD файла профиля (см. [`crate::vault::purpose`]).
+fn profile_purpose() -> Vec<u8> {
+    crate::vault::purpose("profile", &[], 0)
 }
 
 // ---- Контакты (TOFU) -------------------------------------------------------

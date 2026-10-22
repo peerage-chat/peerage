@@ -132,7 +132,8 @@ fn large_blob_streams_to_disk() {
         "содержимое не должно лежать открытым текстом"
     );
     // И читается обратно байт-в-байт (потоково, по чанкам).
-    let restored = p2p_blob::disk::read_all(&path, |b| p2p_core::vault::open(b).ok()).unwrap();
+    let open = |i: usize, b: &[u8]| p2p_core::vault::open(&p2p_core::vault::chunk_purpose(&done.id, i), b).ok();
+    let restored = p2p_blob::disk::read_all(&path, open).unwrap();
     assert_eq!(restored, content, "потоково собранный блоб восстановлен точно");
 }
 

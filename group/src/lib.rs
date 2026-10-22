@@ -113,14 +113,14 @@ impl Member {
         }
         // Атомарно: убитый посреди записи процесс не должен оставить обрезанное
         // MLS-состояние — такую группу уже не загрузить.
-        p2p_core::fsutil::write_atomic(path, &p2p_core::vault::seal(&out)).map_err(mls)?;
+        p2p_core::fsutil::write_atomic(path, &p2p_core::vault::seal(&state_purpose(), &out)).map_err(mls)?;
         Ok(())
     }
 
     /// Загрузить состояние группы с диска.
     pub fn load(path: &Path, identity: &Identity) -> Result<Self, GroupError> {
         let raw = std::fs::read(path).map_err(mls)?;
-        let data = p2p_core::vault::open(&raw).map_err(mls)?;
+        let data = p2p_core::vault::open(&state_purpose(), &raw).map_err(mls)?;
         if data.len() < 4 {
             return Err(GroupError::Mls("повреждённый файл группы".into()));
         }
@@ -335,6 +335,12 @@ pub fn peek_group_id(message: &[u8]) -> Option<Vec<u8>> {
     let msg = MlsMessageIn::tls_deserialize_exact(message).ok()?;
     let protocol = msg.try_into_protocol_message().ok()?;
     Some(protocol.group_id().as_slice().to_vec())
+}
+
+/// AAD файла MLS-состояния (см. `p2p_core::vault::purpose`). Id группы в него не
+/// входит — он лежит внутри файла, и слой групп сверяет его с ожидаемым при загрузке.
+fn state_purpose() -> Vec<u8> {
+    p2p_core::vault::purpose("mls-group", &[], 0)
 }
 
 #[cfg(test)]

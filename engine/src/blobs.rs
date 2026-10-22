@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 
 use p2p_blob::disk::DiskAssembler;
+use p2p_core::vault;
 use p2p_blob::{Hash, Limits, Manifest, ManifestAssembler, ManifestPart, Reassembler};
 use p2p_messenger::{Messenger, PeerKey};
 
@@ -354,7 +355,9 @@ impl BlobManager {
         let chunk = match &out.source {
             Source::Memory(chunks) => chunks.get(index as usize).cloned(),
             Source::Stored(path) => {
-                p2p_blob::disk::read_chunk(path, index as usize, |b| p2p_core::vault::open(b).ok())
+                p2p_blob::disk::read_chunk(path, index as usize, |i, b| {
+                    vault::open(&vault::chunk_purpose(&id, i), b).ok()
+                })
             }
         };
         if let Some(chunk) = chunk {
@@ -379,7 +382,7 @@ impl BlobManager {
             Sink::Ram(re) => re.add(index, data).is_ok(),
             // Шифруем чанк тем же at-rest ключом, что и остальные данные, и сразу
             // пишем на диск — в памяти он не задерживается.
-            Sink::Disk(d) => d.add(index, data, p2p_core::vault::seal).is_ok(),
+            Sink::Disk(d) => d.add(index, data, |i, b| vault::seal(&vault::chunk_purpose(&id, i), b)).is_ok(),
         };
         if !accepted {
             self.incoming.insert(id, inc);

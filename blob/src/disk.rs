@@ -15,8 +15,8 @@
 //! "P2PB" | ver:u8 | chunk_size:u32 | n_chunks:u32 | size:u64 | слоты…
 //! слот = len:u32 | запечатанные байты чанка | добивка до slot_size
 //! ```
-//! Первый байт «P» отличает его от формата [`vault::seal`] (там 0 или 1), поэтому
-//! старые блобы (файл = один запечатанный буфер) читаются по-прежнему.
+//! Первый байт «P» отличает его от формата [`vault::seal`] (там 0 или 1): мелкие
+//! блобы лежат одним запечатанным буфером, и читатель различает их по нему.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -110,12 +110,13 @@ impl DiskAssembler {
     }
 
     /// Принять чанк: проверить BLAKE3 против манифеста, запечатать и записать в слот.
-    /// `seal` — шифрование at-rest (инъекция, чтобы крейт не знал про vault).
+    /// `seal(номер, байты)` — шифрование at-rest (инъекция, чтобы крейт не знал про
+    /// vault). Номер чанка нужен ему для привязки шифртекста к месту в файле.
     pub fn add(
         &mut self,
         index: usize,
         data: &[u8],
-        seal: impl Fn(&[u8]) -> Vec<u8>,
+        seal: impl Fn(usize, &[u8]) -> Vec<u8>,
     ) -> Result<(), BlobError> {
         if index >= self.have.len() {
             return Err(BlobError::BadIndex);
@@ -131,7 +132,7 @@ impl DiskAssembler {
         if self.have[index] {
             return Ok(()); // дубль — уже записан
         }
-        let sealed = seal(data);
+        let sealed = seal(index, data);
         if sealed.len() > CHUNK_SIZE + SEAL_OVERHEAD {
             return Err(BlobError::Io); // шифрование дало больше, чем рассчитан слот
         }
@@ -179,11 +180,12 @@ pub fn read_header(path: &Path) -> Option<(usize, usize, u64)> {
     Some((chunk_size, n, size))
 }
 
-/// Прочитать ОДИН чанк готового блоба, не читая файл целиком.
+/// Прочитать ОДИН чанк готового блоба, не читая файл целиком. `open(номер, байты)`
+/// — расшифровка at-rest.
 pub fn read_chunk(
     path: &Path,
     index: usize,
-    open: impl Fn(&[u8]) -> Option<Vec<u8>>,
+    open: impl Fn(usize, &[u8]) -> Option<Vec<u8>>,
 ) -> Option<Vec<u8>> {
     let (chunk_size, n, _size) = read_header(path)?;
     if index >= n {
@@ -199,13 +201,13 @@ pub fn read_chunk(
     }
     let mut sealed = vec![0u8; len];
     f.read_exact(&mut sealed).ok()?;
-    open(&sealed)
+    open(index, &sealed)
 }
 
 /// Прочитать блоб целиком (для мелких — картинка, аватар). Для крупных файлов
 /// вызывающий должен читать по чанкам через [`read_chunk`], иначе смысл потоковой
 /// сборки теряется.
-pub fn read_all(path: &Path, open: impl Fn(&[u8]) -> Option<Vec<u8>> + Copy) -> Option<Vec<u8>> {
+pub fn read_all(path: &Path, open: impl Fn(usize, &[u8]) -> Option<Vec<u8>> + Copy) -> Option<Vec<u8>> {
     let (_chunk_size, n, size) = read_header(path)?;
     let mut out = Vec::with_capacity(size as usize);
     for i in 0..n {
@@ -219,7 +221,7 @@ pub fn read_all(path: &Path, open: impl Fn(&[u8]) -> Option<Vec<u8>> + Copy) -> 
 pub fn manifest_of_stored(
     path: &Path,
     mime: impl Into<String>,
-    open: impl Fn(&[u8]) -> Option<Vec<u8>> + Copy,
+    open: impl Fn(usize, &[u8]) -> Option<Vec<u8>> + Copy,
 ) -> Option<Manifest> {
     let (_cs, n, size) = read_header(path)?;
     let mut total = blake3::Hasher::new();
@@ -234,7 +236,7 @@ pub fn manifest_of_stored(
 
 /// Проверить контент-адрес готового файла, не загружая его целиком: считаем BLAKE3
 /// потоково по чанкам.
-pub fn verify_id(path: &Path, expect: Hash, open: impl Fn(&[u8]) -> Option<Vec<u8>> + Copy) -> bool {
+pub fn verify_id(path: &Path, expect: Hash, open: impl Fn(usize, &[u8]) -> Option<Vec<u8>> + Copy) -> bool {
     let Some((_cs, n, _size)) = read_header(path) else { return false };
     let mut hasher = blake3::Hasher::new();
     for i in 0..n {
@@ -265,12 +267,12 @@ mod tests {
 
     /// Имитация vault: маркер + «шифртекст» той же длины (реальный vault добавляет
     /// 41 байт, здесь достаточно проверить, что оверхед учитывается).
-    fn seal(p: &[u8]) -> Vec<u8> {
+    fn seal(_i: usize, p: &[u8]) -> Vec<u8> {
         let mut v = vec![1u8];
         v.extend_from_slice(p);
         v
     }
-    fn open(d: &[u8]) -> Option<Vec<u8>> {
+    fn open(_i: usize, d: &[u8]) -> Option<Vec<u8>> {
         d.split_first().map(|(_, rest)| rest.to_vec())
     }
 
