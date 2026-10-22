@@ -17,9 +17,6 @@ object Native {
      *  Возвращает JSON {pubkey, address, fingerprint, session_ptr} или {error}. */
     external fun start(dataDir: String, vaultKey: ByteArray): String
 
-    /** Освобождение ресурсов сессии. */
-    external fun destroySession(sessionPtr: Long)
-
     /** Следующее событие как JSON-строка, либо "" если очередь пуста. */
     external fun pollEvent(sessionPtr: Long): String
 

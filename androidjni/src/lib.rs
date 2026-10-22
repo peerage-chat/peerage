@@ -5,7 +5,9 @@
 //! (JString/byte[] → ключи/строки), зовёт метод [`p2p_engine::Engine`] и кодирует
 //! результат обратно. Домейн-логики здесь нет — она в движке, который
 //! юнит-тестируется без устройства. Указатель сессии (`session_ptr`) — это
-//! `Box<Arc<Engine>>`, переданный в Kotlin как jlong.
+//! `Box<Arc<Engine>>`, переданный в Kotlin как jlong. Сессия живёт до конца
+//! процесса и не освобождается: её указатель держат фоновые потоки Kotlin
+//! (`pollThread`, `ops`), и освобождение при живых потоках было бы use-after-free.
 //!
 //! Модель событий — поллинг: Kotlin периодически зовёт `pollEvent()`.
 
@@ -98,20 +100,6 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
             Err(e) => ret(&env, &serde_json::json!({"error": e}).to_string()),
         }
     })
-}
-
-/// Освободить сессию (выгружает Arc<Engine>).
-#[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_destroySession<'local>(
-    _env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-) {
-    jni_safe!((), {
-        if session_ptr != 0 {
-            let _boxed = unsafe { Box::from_raw(session_ptr as *mut Arc<Engine>) };
-        }
-    });
 }
 
 /// Следующее событие как JSON-строка, либо "" если очередь пуста.
