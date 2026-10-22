@@ -93,11 +93,9 @@ pub(crate) enum Job {
     Beacon,
     /// Рассылка «я вышел» членам комнаты `gid` (мгновенное исчезновение).
     Leave(Vec<u8>),
-    /// Отправить медиа-вложение в группу (M2): scrub → сохранить → MLS-ссылка всем +
-    /// push блоба каждому участнику. В одном Job (нужны и группы, и BlobManager).
-    GroupMedia { gid: Vec<u8>, content: Vec<u8>, mime: String, name: String, info: MediaInfo },
-    /// То же ФАЙЛОМ: манифест считается потоково, чанки читаются с диска.
-    GroupMediaFile { gid: Vec<u8>, path: PathBuf, mime: String, name: String, info: MediaInfo },
+    /// Отправить вложение в группу: подготовка (см. [`Engine::store_media`]) идёт в
+    /// своём потоке, готовое возвращается сюда как `GroupMediaRef`.
+    GroupMedia { gid: Vec<u8>, source: MediaSource, mime: String, name: String, info: MediaInfo },
     /// Ссылка на блоб, который уже у нас (пересылка): байты не трогаем.
     GroupMediaRef { gid: Vec<u8>, media: MediaBody },
     /// Бросить идущие докачки (очистка вложений); ответ — когда брошены.
@@ -116,6 +114,14 @@ const BLOB_BOOST_FOR: Duration = Duration::from_secs(120);
 /// Сколько ждём манифест на свой запрос. Дольше — ответ уже не наш: повторный
 /// запрос (докачка по кнопке, возвращение пира) заведёт ожидание заново.
 const BLOB_EXPECT_TTL: Duration = Duration::from_secs(600);
+
+/// Откуда взять байты своего вложения.
+pub(crate) enum MediaSource {
+    /// Уже в памяти (картинка, голосовое).
+    Bytes(Vec<u8>),
+    /// Файлом на диске: в память не поднимается.
+    File(PathBuf),
+}
 
 /// Метаданные вложения, известные отправителю (их извлекает клиент: на Android —
 /// `MediaMetadataRetriever`). Нужны, чтобы карточка была информативной до скачивания.
@@ -798,24 +804,73 @@ impl Engine {
         name: &str,
         info: MediaInfo,
     ) -> Option<i64> {
-        // Картинки чистим от метаданных (EXIF/GPS) перед отправкой, как аватар.
-        let bytes = if mime.starts_with("image/") {
-            p2p_blob::scrub::scrub(mime, &content)
-        } else {
-            content
-        };
-        let hash = p2p_blob::blob_id(&bytes);
-        let size = bytes.len() as u64;
-        // Миниатюру сохраняем; ни её, ни сам файл не толкаем: получатель запросит
-        // по хэшу из сообщения — миниатюру и мелкое сразу, крупное по кнопке.
-        let thumb_hash = info.thumb.as_ref().map(|t| {
-            let h = p2p_blob::blob_id(t);
-            self.store_blob(h, t);
-            h
-        });
-        // Сохраняем локально, чтобы показывать своё вложение сразу и после рестарта.
-        self.store_blob(hash, &bytes);
-        self.send_media_ref(key, hash, size, mime, name, thumb_hash, &info)
+        self.send_media_from(key, MediaSource::Bytes(content), mime, name, info)
+    }
+
+    /// Отправить вложение, лежащее ФАЙЛОМ, не поднимая его в память.
+    pub fn send_media_file(
+        &self,
+        key: &[u8; 32],
+        path: &std::path::Path,
+        mime: &str,
+        name: &str,
+        info: MediaInfo,
+    ) -> Option<i64> {
+        self.send_media_from(key, MediaSource::File(path.to_path_buf()), mime, name, info)
+    }
+
+    fn send_media_from(
+        &self,
+        key: &[u8; 32],
+        source: MediaSource,
+        mime: &str,
+        name: &str,
+        info: MediaInfo,
+    ) -> Option<i64> {
+        let (hash, size) = self.store_media(source, mime)?;
+        // Ни миниатюру, ни сам файл не толкаем: получатель запросит по хэшу из
+        // сообщения — миниатюру и мелкое сразу, крупное по кнопке.
+        let thumb = self.store_thumb(info.thumb.as_deref());
+        self.send_media_ref(key, hash, size, mime, name, thumb, &info)
+    }
+
+    /// Положить своё вложение в хранилище блобов (чтобы показывать его сразу и
+    /// после рестарта) и вернуть его контент-адрес и размер. Общая подготовка
+    /// личного и группового вложения.
+    ///
+    /// Байты в памяти: картинку сперва чистим от метаданных (EXIF/GPS), как аватар.
+    /// Файл: манифест считается потоково, копия пишется тем же потоком чанками —
+    /// в память он не поднимается. Картинки сюда файлом не приходят: scrub-у нужен
+    /// весь файл, а весят они немного. `None` — файл не читается или больше предела
+    /// приёма (его не примет ни один получатель).
+    fn store_media(&self, source: MediaSource, mime: &str) -> Option<(p2p_blob::Hash, u64)> {
+        match source {
+            MediaSource::Bytes(content) => {
+                let bytes = if mime.starts_with("image/") { p2p_blob::scrub::scrub(mime, &content) } else { content };
+                let hash = p2p_blob::blob_id(&bytes);
+                self.store_blob(hash, &bytes);
+                Some((hash, bytes.len() as u64))
+            }
+            MediaSource::File(path) => {
+                let manifest = p2p_blob::manifest_of_file(&path, mime.to_string()).ok()?;
+                if manifest.size > p2p_blob::Limits::default().max_size {
+                    return None;
+                }
+                if !self.blob_exists(&hex::encode(manifest.id)) {
+                    self.store_blob_streamed(&path, &manifest).ok()?;
+                }
+                Some((manifest.id, manifest.size))
+            }
+        }
+    }
+
+    /// Сохранить миниатюру вложения отдельным блобом. Её получатель запрашивает
+    /// сразу, без кнопки: без картинки предложение «скачать 800 МБ» слепое.
+    fn store_thumb(&self, thumb: Option<&[u8]>) -> Option<p2p_blob::Hash> {
+        let t = thumb.filter(|t| !t.is_empty())?;
+        let h = p2p_blob::blob_id(t);
+        self.store_blob(h, t);
+        Some(h)
     }
 
     /// Отправить медиа-сообщение со ссылкой на блоб, который УЖЕ лежит у нас, и
@@ -865,43 +920,6 @@ impl Engine {
             ..Default::default()
         });
         Some(id as i64)
-    }
-
-    /// Отправить вложение, лежащее ФАЙЛОМ, не поднимая его в память.
-    ///
-    /// Манифест считается потоково, чанки отдаются чтением с диска по запросу, а своя
-    /// копия кладётся в хранилище блобов тем же потоком. Картинки при этом идут через
-    /// обычный путь в памяти: их надо scrub-ить (EXIF/GPS), а это требует всего файла,
-    /// и весят они немного.
-    pub fn send_media_file(
-        &self,
-        key: &[u8; 32],
-        path: &std::path::Path,
-        mime: &str,
-        name: &str,
-        info: MediaInfo,
-    ) -> Option<i64> {
-        let manifest = p2p_blob::manifest_of_file(path, mime.to_string()).ok()?;
-        // Больше предела приёма не примет ни один получатель — не отправляем вовсе.
-        if manifest.size > p2p_blob::Limits::default().max_size {
-            return None;
-        }
-        let hash = manifest.id;
-        let size = manifest.size;
-        let id_hex = hex::encode(hash);
-
-        // Своя копия — тем же потоком, чанками и зашифрованной at-rest. Без неё
-        // отправитель не сможет ни показать вложение, ни дослать его после рестарта.
-        if !self.blob_exists(&id_hex) {
-            self.store_blob_streamed(path, &manifest).ok()?;
-        }
-
-        let thumb_hash = info.thumb.as_ref().map(|t| {
-            let h = p2p_blob::blob_id(t);
-            self.store_blob(h, t);
-            h
-        });
-        self.send_media_ref(key, hash, size, mime, name, thumb_hash, &info)
     }
 
     /// Записать свою копию блоба на диск потоково, в том же чанкованном формате, что
@@ -1670,7 +1688,7 @@ impl Engine {
         name: String,
         info: MediaInfo,
     ) {
-        let _ = self.jobs.send(Job::GroupMedia { gid, content, mime, name, info });
+        let _ = self.jobs.send(Job::GroupMedia { gid, source: MediaSource::Bytes(content), mime, name, info });
     }
 
     /// Отправить в группу вложение, лежащее ФАЙЛОМ, не поднимая его в память.
@@ -1683,7 +1701,7 @@ impl Engine {
         name: String,
         info: MediaInfo,
     ) {
-        let _ = self.jobs.send(Job::GroupMediaFile { gid, path, mime, name, info });
+        let _ = self.jobs.send(Job::GroupMedia { gid, source: MediaSource::File(path), mime, name, info });
     }
 
     /// Отозвать участника из группы (ADR-004, только админ). Fire-and-forget.
@@ -2425,7 +2443,7 @@ fn event_pump(
             // Подготовка (scrub, хэш, своя зашифрованная копия) — в своём потоке:
             // файл на сотни мегабайт держал бы актор, а с ним приём сообщений и
             // маячки звонка (R-028). Готовое вернётся сюда как GroupMediaRef.
-            Ok(job @ (Job::GroupMedia { .. } | Job::GroupMediaFile { .. })) => {
+            Ok(job @ Job::GroupMedia { .. }) => {
                 let _ = prep_tx.send(job);
             }
             Ok(Job::GroupMediaRef { gid, media }) => {
@@ -2511,44 +2529,13 @@ fn write_blob_file(dir: &Path, id: p2p_blob::Hash, content: &[u8]) {
     let _ = p2p_core::fsutil::write_atomic(&dir.join(hex::encode(id)), &p2p_core::vault::seal(content));
 }
 
-/// Сохранить миниатюру группового вложения и раздать её всем участникам, вернув
-/// её hex-id (пусто, если миниатюры нет).
-///
-/// Превью пушим ВСЕГДА, в отличие от самого вложения: оно мелкое, и ради него
-/// карточка и существует — без картинки предложение «скачать 800 МБ» слепое.
-fn store_thumb(engine: &Arc<Engine>, thumb: Option<&[u8]>) -> String {
-    let Some(t) = thumb.filter(|t| !t.is_empty()) else { return String::new() };
-    let h = p2p_blob::blob_id(t);
-    save_blob(engine, h, t);
-    hex::encode(h)
-}
-
-/// Подготовить вложение для группы: картинку очистить от метаданных, посчитать
-/// контент-адрес и сохранить свою копию (файл — потоково, не поднимая в память),
-/// миниатюру — отдельным блобом. Байты участники запросят сами — мелкое сразу,
-/// крупное по кнопке. Работает в потоке подготовки, не в акторе.
+/// Подготовить вложение для группы (см. [`Engine::store_media`]) и собрать
+/// MLS-ссылку на него. Байты участники запросят сами — мелкое сразу, крупное по
+/// кнопке. Работает в потоке подготовки, не в акторе.
 fn prepare_group_media(engine: &Arc<Engine>, job: Job) -> Option<(Vec<u8>, MediaBody)> {
-    let (gid, hash, size, mime, name, info) = match job {
-        Job::GroupMedia { gid, content, mime, name, info } => {
-            let bytes = if mime.starts_with("image/") { p2p_blob::scrub::scrub(&mime, &content) } else { content };
-            let hash = p2p_blob::blob_id(&bytes);
-            save_blob(engine, hash, &bytes);
-            (gid, hash, bytes.len() as u64, mime, name, info)
-        }
-        Job::GroupMediaFile { gid, path, mime, name, info } => {
-            // Картинки сюда не приходят — им нужен scrub целиком.
-            let manifest = p2p_blob::manifest_of_file(&path, mime.clone()).ok()?;
-            if manifest.size > p2p_blob::Limits::default().max_size {
-                return None; // не примет ни один участник
-            }
-            if !engine.blob_exists(&hex::encode(manifest.id)) {
-                let _ = engine.store_blob_streamed(&path, &manifest);
-            }
-            (gid, manifest.id, manifest.size, mime, name, info)
-        }
-        _ => return None,
-    };
-    let thumb = store_thumb(engine, info.thumb.as_deref());
+    let Job::GroupMedia { gid, source, mime, name, info } = job else { return None };
+    let (hash, size) = engine.store_media(source, &mime)?;
+    let thumb = engine.store_thumb(info.thumb.as_deref()).map(hex::encode).unwrap_or_default();
     let media = MediaBody {
         // id проставит слой групп при отправке (он же кладёт его в историю).
         id: 0,
