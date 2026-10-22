@@ -32,6 +32,7 @@ fn cfg() -> p2p_messenger::Config {
         retry_interval: Duration::from_millis(200),
         ping_interval: Duration::from_millis(300),
         offline_after: Duration::from_secs(1),
+        ..Default::default()
     }
 }
 

@@ -104,3 +104,23 @@ fn group_member_is_rung_into_the_group_room_and_stranger_is_not() {
 
     std::mem::forget(net);
 }
+
+/// R-007: позвонил и положил трубку, пока собеседник был офлайн, — появившись,
+/// он звонка не получает. Приглашение снято при выходе из комнаты.
+#[test]
+fn hung_up_call_does_not_ring_later() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(81), id(82));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a-hang"));
+    a.add_contact(&b_key, "B");
+
+    // B офлайн: его в сети ещё нет.
+    let room = a.room_invite_dm(b_key, true, false);
+    std::thread::sleep(Duration::from_millis(300));
+    a.room_leave(room);
+
+    let b = start(&net, b_id, tmpdir("b-hang"));
+    b.add_contact(&a_key, "A");
+    assert!(next_room_invite(&b, 8).is_none(), "сброшенный звонок не зазвонил");
+}

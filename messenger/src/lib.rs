@@ -243,6 +243,9 @@ pub struct Config {
     pub retry_interval: Duration,
     /// После этого времени бросаем попытки доставить сообщение.
     pub message_ttl: Duration,
+    /// Сколько живёт приглашение в звонок (и отказ от него): время дозвона. Звонок,
+    /// доставленный позже, звонил бы человеку, который давно положил трубку.
+    pub ring_ttl: Duration,
 }
 
 impl Default for Config {
@@ -252,6 +255,7 @@ impl Default for Config {
             offline_after: Duration::from_secs(45),
             retry_interval: Duration::from_secs(3),
             message_ttl: Duration::from_secs(300),
+            ring_ttl: Duration::from_secs(45),
         }
     }
 }
@@ -296,6 +300,8 @@ struct Pending {
     payload: Payload,
     created: Instant,
     last_sent: Instant,
+    /// Сколько пытаемся доставить: обычно `message_ttl`, у звонка — `ring_ttl`.
+    ttl: Duration,
     /// Уведомлять ли UI о доставке/недоставке (`Ack`/`Undelivered`). true для DM,
     /// false для групповых (статус по участникам в UI не показывается).
     notify: bool,
@@ -463,13 +469,24 @@ impl Shared {
         notify: bool,
         mk: impl FnOnce(u64) -> Payload,
     ) -> Result<u64, MessengerError> {
+        self.send_reliable_for(peer, notify, self.cfg.message_ttl, mk)
+    }
+
+    /// То же со своим сроком доставки: у приглашения в звонок он — время дозвона.
+    fn send_reliable_for(
+        &self,
+        peer: &PeerKey,
+        notify: bool,
+        ttl: Duration,
+        mk: impl FnOnce(u64) -> Payload,
+    ) -> Result<u64, MessengerError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let payload = mk(id);
         self.track(peer);
         let now = Instant::now();
         self.pending.lock().unwrap().insert(
             id,
-            Pending { peer: *peer, payload: payload.clone(), created: now, last_sent: now, notify, durable: false },
+            Pending { peer: *peer, payload: payload.clone(), created: now, last_sent: now, ttl, notify, durable: false },
         );
         if let Err(e) = self.send(peer, &payload) {
             log::warn!("send id={id}: транспорт не принял ({e}), дожмёт ретрай");
@@ -540,7 +557,15 @@ impl Shared {
                 let notify = e.payload_type == SPOOL_NOTIFY;
                 pending.insert(
                     e.msg_id,
-                    Pending { peer: *peer, payload: payload.clone(), created: now, last_sent: now, notify, durable: true },
+                    Pending {
+                        peer: *peer,
+                        payload: payload.clone(),
+                        created: now,
+                        last_sent: now,
+                        ttl: self.cfg.message_ttl,
+                        notify,
+                        durable: true,
+                    },
                 );
                 to_send.push(payload);
             }
@@ -1000,27 +1025,44 @@ impl Messenger {
         Ok(())
     }
 
-    /// Пригласить пира в голосовую комнату (DM-звонок).
+    /// Пригласить пира в голосовую комнату. Надёжно (retry-until-Ack — чинит
+    /// потерю первого пакета на холодной сессии), но только пока идёт дозвон
+    /// ([`Config::ring_ttl`]): позже звонок уже никто не ждёт. Возвращает id —
+    /// положил трубку раньше, сними приглашение через [`Self::cancel`].
     pub fn send_room_invite(
         &self,
         peer: &PeerKey,
         room_id: &[u8],
         audio: bool,
         video: bool,
-    ) -> Result<(), MessengerError> {
-        // Надёжно (retry-until-Ack): чинит потерю первого пакета на холодной сессии.
+    ) -> Result<u64, MessengerError> {
         let room_id = room_id.to_vec();
-        self.shared
-            .send_reliable(peer, false, move |id| Payload::RoomInvite { id, room_id, audio, video })?;
-        Ok(())
+        self.shared.send_reliable_for(peer, false, self.shared.cfg.ring_ttl, move |id| Payload::RoomInvite {
+            id,
+            room_id,
+            audio,
+            video,
+        })
     }
 
-    /// Отклонить входящий звонок — надёжно (звонящий гарантированно узнаёт отказ).
+    /// Отклонить входящий звонок (или отменить свой дозвон) — надёжно, с тем же
+    /// сроком, что и приглашение: отказ, пришедший позже, отвечает на звонок,
+    /// которого уже нет.
     pub fn send_room_decline(&self, peer: &PeerKey, room_id: &[u8]) -> Result<(), MessengerError> {
         let room_id = room_id.to_vec();
         self.shared
-            .send_reliable(peer, false, move |id| Payload::RoomDecline { id, room_id })?;
+            .send_reliable_for(peer, false, self.shared.cfg.ring_ttl, move |id| Payload::RoomDecline { id, room_id })?;
         Ok(())
+    }
+
+    /// Перестать доставлять неподтверждённое сообщение `id` (не из офлайн-очереди).
+    /// Для звонка: положили трубку — приглашение, ещё не дошедшее до собеседника,
+    /// не должно зазвонить у него потом.
+    pub fn cancel(&self, id: u64) {
+        let mut pending = self.shared.pending.lock().unwrap();
+        if pending.get(&id).is_some_and(|p| !p.durable) {
+            pending.remove(&id);
+        }
     }
 
     /// Переслать групповое MLS-сообщение конкретному участнику — НАДЁЖНО:
@@ -1567,7 +1609,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
         {
             let mut pending = shared.pending.lock().unwrap();
             pending.retain(|id, p| {
-                if now.duration_since(p.created) > shared.cfg.message_ttl {
+                if now.duration_since(p.created) > p.ttl {
                     expired.push((*id, p.peer, p.notify));
                     return false;
                 }
@@ -1819,5 +1861,59 @@ mod tests {
         a.send_room_invite(&b_key, &[9u8; 16], true, false).unwrap();
         let got = wait_for(&b_rx, |e| matches!(e, Event::RoomInvite { audio: true, .. }));
         assert!(got.is_some(), "RoomInvite должен дойти несмотря на потери (ретрай)");
+    }
+
+    /// R-007: приглашение живёт только время дозвона. Собеседник, появившийся
+    /// позже, звонка не получает.
+    #[test]
+    fn room_invite_expires_after_ring_time() {
+        let net = LoopbackNet::new();
+        let (a_id, b_id) = (id(45), id(46));
+        let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+        let cfg = Config {
+            retry_interval: Duration::from_millis(50),
+            ring_ttl: Duration::from_millis(600),
+            ..Config::default()
+        };
+        let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), cfg.clone());
+        // B пока офлайн: его эндпоинта в сети нет.
+        a.send_room_invite(&b_key, &[1u8; 16], true, false).unwrap();
+        a.send_text(&b_key, "контроль").unwrap(); // обычное сообщение живёт дольше
+        thread::sleep(Duration::from_millis(1600));
+        let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
+        let mut ring = false;
+        let mut text = false;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && !text {
+            if let Ok(ev) = b_rx.recv_timeout(Duration::from_millis(50)) {
+                ring |= matches!(ev, Event::RoomInvite { .. });
+                text |= matches!(ev, Event::Text { .. });
+            }
+        }
+        assert!(text, "обычное сообщение дошло");
+        assert!(!ring, "просроченный звонок не зазвонил");
+    }
+
+    /// R-007: положили трубку до того, как собеседник появился, — снятое
+    /// приглашение не доставляется, а неснятое доходит.
+    #[test]
+    fn cancelled_room_invite_is_not_delivered() {
+        let net = LoopbackNet::new();
+        let (a_id, b_id) = (id(47), id(48));
+        let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+        let cfg = Config { retry_interval: Duration::from_millis(50), ..Config::default() };
+        let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), cfg.clone());
+        let dropped = a.send_room_invite(&b_key, &[1u8; 16], true, false).unwrap();
+        a.send_room_invite(&b_key, &[2u8; 16], true, false).unwrap();
+        a.cancel(dropped);
+        let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
+        let mut rooms = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if let Ok(Event::RoomInvite { room_id, .. }) = b_rx.recv_timeout(Duration::from_millis(50)) {
+                rooms.push(room_id);
+            }
+        }
+        assert_eq!(rooms, vec![vec![2u8; 16]], "дошло только неснятое");
     }
 }

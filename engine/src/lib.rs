@@ -316,6 +316,9 @@ pub struct Engine {
     jobs: Sender<Job>,
     room_call: Mutex<Option<RoomCall>>,
     rooms: Mutex<RoomState>,
+    /// id наших недоставленных приглашений в звонок по комнате: уходя из комнаты,
+    /// снимаем их (R-007). Доставленные снимает сам Ack — здесь они просто лишние.
+    rings: Mutex<HashMap<Vec<u8>, Vec<u64>>>,
     /// Блобы, которые мы сами попросили: id → (у кого, когда). Манифест чего-то
     /// другого — это файл без спроса, его не качаем (R-020).
     blob_expect: Mutex<HashMap<p2p_blob::Hash, ([u8; 32], Instant)>>,
@@ -1898,7 +1901,9 @@ impl Engine {
         // собеседник появится в комнате. Иначе оборванная попытка не попала бы в
         // журнал вовсе — а именно её чаще всего и ищут.
         self.begin_call(&peer, &room_id, false, "unanswered");
-        let _ = self.messenger.send_room_invite(&peer, &room_id, audio, video);
+        if let Ok(id) = self.messenger.send_room_invite(&peer, &room_id, audio, video) {
+            self.rings.lock_safe().entry(room_id.clone()).or_default().push(id);
+        }
         let flags = av_flags(audio, video);
         {
             let mut rs = self.rooms.lock_safe();
@@ -1954,7 +1959,8 @@ impl Engine {
         peers
             .iter()
             .filter(|p| roster.contains(*p))
-            .filter(|p| self.messenger.send_room_invite(p, gid, audio, video).is_ok())
+            .filter_map(|p| self.messenger.send_room_invite(p, gid, audio, video).ok())
+            .map(|id| self.rings.lock_safe().entry(gid.to_vec()).or_default().push(id))
             .count()
     }
 
@@ -1991,6 +1997,11 @@ impl Engine {
 
     pub fn room_leave(&self, gid: Vec<u8>) {
         self.end_call();
+        // Ушли — недоставленные приглашения в эту комнату снимаем: иначе они
+        // зазвонили бы у собеседника, появившегося позже (R-007).
+        for id in self.rings.lock_safe().remove(&gid).unwrap_or_default() {
+            self.messenger.cancel(id);
+        }
         {
             let mut rs = self.rooms.lock_safe();
             rs.joined.remove(&gid);
@@ -3313,6 +3324,7 @@ impl Engine {
             jobs: job_tx,
             room_call: Mutex::new(None),
             rooms: Mutex::new(RoomState::default()),
+            rings: Mutex::new(HashMap::new()),
             blob_expect: Mutex::new(HashMap::new()),
             bench: Mutex::new(None),
             blob_dir: dir.join("blobs"),

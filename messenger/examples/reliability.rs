@@ -81,6 +81,7 @@ fn main() {
         offline_after: Duration::from_secs(3),
         retry_interval: Duration::from_secs(1),
         message_ttl: Duration::from_secs(5),
+        ..Config::default()
     };
     let (a, rx_a) = Messenger::start_with_config(id_a, node_a, cfg.clone());
     let (b, rx_b) = Messenger::start_with_config(id_b, node_b, cfg);
