@@ -161,3 +161,36 @@ fn second_call_during_a_call_does_not_steal_the_record() {
     assert_eq!(with_c["outcome"], "missed");
     assert_eq!(with_c["duration"].as_i64(), Some(0), "у пропущенного длительности нет");
 }
+
+/// R-034: дозваниваемся до C, тут звонит A — и мы отвечаем ему. Отвеченным
+/// становится звонок A (одной строкой, а не «пропущен» + «отвечен»), а наш
+/// дозвон до C остаётся «не дозвонился».
+#[test]
+fn answering_a_call_during_own_ring_marks_the_right_call() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id, c_id) = (id(86), id(87), id(88));
+    let (a_key, b_key, c_key) = (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a-ring2"));
+    let b = start(&net, b_id, tmpdir("b-ring2"));
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+    b.add_contact(&c_key, "C");
+
+    // B дозванивается до C (тот офлайн и не ответит).
+    b.room_invite_dm(c_key, true, false);
+    // Звонит A — B отвечает ему, не сбросив свой дозвон.
+    a.room_invite_dm(b_key, true, false);
+    assert!(next_room_invite(&b, 8).is_some(), "звонок A дошёл");
+    let room = b.room_join_dm(a_key, true, false);
+    std::thread::sleep(Duration::from_millis(1200));
+    b.room_leave(room);
+
+    let calls = json(&b.calls_json(10));
+    let calls = calls.as_array().unwrap();
+    let with_a: Vec<_> = calls.iter().filter(|c| c["peer"] == hex::encode(a_key)).collect();
+    let with_c = calls.iter().find(|c| c["peer"] == hex::encode(c_key)).unwrap();
+    assert_eq!(with_a.len(), 1, "звонок A — одна строка: {calls:?}");
+    assert_eq!(with_a[0]["outcome"], "answered");
+    assert!(with_a[0]["duration"].as_i64().unwrap() >= 1, "длительность — у разговора с A");
+    assert_eq!(with_c["outcome"], "unanswered", "C не отвечал");
+}

@@ -336,6 +336,9 @@ pub struct Engine {
     calls: Mutex<p2p_core::store::CallStore>,
     /// Текущий звонок — активных звонков не бывает больше одного.
     active_call: Mutex<Option<ActiveCall>>,
+    /// Звонки, пришедшие посреди другого разговора (комната → строка журнала
+    /// «пропущен»): ответят на такой — строка станет отвеченной, а не задвоится.
+    missed_calls: Mutex<HashMap<Vec<u8>, i64>>,
     /// Запрошенные пользователем вложения — докачиваем сами, когда пир в сети.
     wanted: Mutex<p2p_core::store::WantedStore>,
     /// Единый бюджет (M3): тир каждого известного пира. Читают ingress-лимитер
@@ -1968,11 +1971,10 @@ impl Engine {
     /// Принять DM-звонок: войти в комнату с регистрацией dm_peer. Возвращает room_id.
     pub fn room_join_dm(&self, peer: [u8; 32], audio: bool, video: bool) -> Vec<u8> {
         let room_id = p2p_core::dm_room_id(&self.me_pub, &peer);
-        let active = self.active_call.lock_safe().as_ref().map(|c| c.id);
-        match active {
-            // Входящий, который мы приняли: запись уже заведена на RoomInvite.
-            Some(id) => self.calls.lock_safe().set_outcome(id, "answered"),
-            None => self.begin_call(&peer, &room_id, true, "answered"),
+        // Входящий, который мы приняли: запись уже заведена на RoomInvite. Комнату
+        // сверяем — активным может быть и другой звонок (R-034).
+        if !self.answer_call(&room_id) {
+            self.begin_call(&peer, &room_id, true, "answered");
         }
         let flags = av_flags(audio, video);
         {
@@ -2019,17 +2021,15 @@ impl Engine {
     }
 
     pub fn room_join(&self, gid: Vec<u8>, audio: bool, video: bool) {
-        // Вход по приглашению: запись заведена на RoomInvite как пропущенная. Комнату
-        // сверяем, чтобы не «ответить» на давно пропущенный звонок из другой.
-        if let Some(c) = self.active_call.lock_safe().as_ref().filter(|c| c.incoming && c.room == gid) {
-            self.calls.lock_safe().set_outcome(c.id, "answered");
-        }
+        // Вход по приглашению: запись заведена на RoomInvite как пропущенная.
+        self.answer_call(&gid);
         self.rooms.lock_safe().joined.insert(gid, av_flags(audio, video));
         let _ = self.jobs.send(Job::Beacon);
     }
 
     pub fn room_leave(&self, gid: Vec<u8>) {
         self.end_call();
+        self.missed_calls.lock_safe().remove(&gid);
         // Ушли — недоставленные приглашения в эту комнату снимаем: иначе они
         // зазвонили бы у собеседника, появившегося позже (R-007).
         for id in self.rings.lock_safe().remove(&gid).unwrap_or_default() {
@@ -2055,7 +2055,32 @@ impl Engine {
     /// Пропущенный входящий, пока идёт другой разговор: отдельная строка журнала,
     /// активная запись не трогается.
     fn record_missed(&self, peer: &[u8; 32], gid: &[u8]) {
-        let _ = self.calls.lock_safe().start(peer, gid, true, "missed", now());
+        let id = self.calls.lock_safe().start(peer, gid, true, "missed", now());
+        if id >= 0 {
+            self.missed_calls.lock_safe().insert(gid.to_vec(), id);
+        }
+    }
+
+    /// Мы вошли в комнату `room` по входящему звонку: его строка журнала становится
+    /// отвеченной и активной. Строка — либо активный входящий именно этой комнаты,
+    /// либо звонок, пропущенный посреди другого разговора (тот разговор тогда
+    /// закрывается: звонков параллельно не бывает). `false` — звонка в эту комнату
+    /// не было.
+    fn answer_call(&self, room: &[u8]) -> bool {
+        let mut ac = self.active_call.lock_safe();
+        if let Some(c) = ac.as_ref().filter(|c| c.incoming && c.room == room) {
+            self.calls.lock_safe().set_outcome(c.id, "answered");
+            return true;
+        }
+        let Some(id) = self.missed_calls.lock_safe().remove(room) else { return false };
+        let now = now();
+        let mut calls = self.calls.lock_safe();
+        if let Some(prev) = ac.take() {
+            calls.finish(prev.id, now - prev.started);
+        }
+        calls.set_outcome(id, "answered");
+        *ac = Some(ActiveCall { id, started: now, incoming: true, room: room.to_vec() });
+        true
     }
 
     /// Закрыть активную запись: проставить длительность.
@@ -3315,6 +3340,7 @@ impl Engine {
             wanted: Mutex::new(p2p_core::store::WantedStore::new(db.clone())),
             calls: Mutex::new(p2p_core::store::CallStore::new(db.clone())),
             active_call: Mutex::new(None),
+            missed_calls: Mutex::new(HashMap::new()),
             messages: Arc::new(Mutex::new(messages)),
             outbox: Mutex::new(outbox),
             me_pub,
