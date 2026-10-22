@@ -20,10 +20,23 @@ fun AppModel.refreshStorage() = ops.execute {
 }
 
 /** Удалить сохранённые вложения. История и ссылки остаются — байты можно
- *  скачать у собеседника заново (блобы контент-адресные). */
+ *  скачать у собеседника заново (блобы контент-адресные). Аватары и миниатюры
+ *  движок оставляет. */
 fun AppModel.clearAttachments() = ops.execute {
     Native.clearBlobs(sessionPtr)
     mediaBlobs.clear()
+    savedBlobs.clear()
+    downloads.clear()
+    // Пометки «скачано» в открытых лентах — по факту: движок снял их в истории,
+    // а уже показанные строки иначе считали бы себя скачанными до перезахода.
+    for (list in messages.values) {
+        for (i in list.indices) {
+            val m = list[i]
+            if (m.downloaded && m.blobId.isNotEmpty() && !Native.blobExists(sessionPtr, m.blobId)) {
+                list[i] = m.copy(downloaded = false)
+            }
+        }
+    }
     // Учёт объёма и порядок обращений — часть того же кэша: без сброса они
     // остались бы считать давно удалённые байты.
     synchronized(blobOrder) {
@@ -31,7 +44,6 @@ fun AppModel.clearAttachments() = ops.execute {
         blobBytes = 0
     }
     dev.p2p.messenger.ui.Bitmaps.clear()
-    contactAvatars.clear()
     refreshStorage()
 }
 

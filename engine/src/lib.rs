@@ -103,6 +103,8 @@ pub(crate) enum Job {
     GroupMediaFile { gid: Vec<u8>, path: PathBuf, mime: String, name: String, info: MediaInfo },
     /// Ссылка на блоб, который уже у нас (пересылка): байты не трогаем.
     GroupMediaRef { gid: Vec<u8>, media: MediaBody },
+    /// Бросить идущие докачки (очистка вложений); ответ — когда брошены.
+    CancelDownloads(Sender<()>),
 }
 
 /// До этого размера вложение скачивается автоматически (фото, голосовое — их ждут
@@ -1538,16 +1540,39 @@ impl Engine {
     /// Удалить ВСЕ сохранённые вложения (явное действие пользователя). Не трогает
     /// историю сообщений: ссылки остаются, и байты можно скачать у собеседника
     /// заново — блобы контент-адресные. Возвращает освобождённые байты.
+    /// Удалить сохранённые вложения (R-030). Остаются аватары (свой — его у нас
+    /// запрашивают контакты; их — иначе пропали бы до следующей смены) и миниатюры
+    /// (без них карточки пусты). Идущие докачки отменяются явно, пометки «скачано»
+    /// снимаются — карточки снова предлагают «Скачать». Возвращает освобождённые байты.
     pub fn clear_blobs(&self) -> u64 {
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        if self.jobs.send(Job::CancelDownloads(done_tx)).is_ok() {
+            let _ = done_rx.recv_timeout(Duration::from_secs(5));
+        }
+        let wanted = self.wanted.lock_safe().all();
+        for w in wanted {
+            let _ = self.wanted.lock_safe().remove(&w.blob_id);
+        }
+        self.blob_expect.lock_safe().clear();
+
+        let mut keep: std::collections::HashSet<String> = self.messages.lock_safe().thumb_ids().into_iter().collect();
+        keep.extend(self.self_avatar_id());
+        keep.extend(self.contacts.lock_safe().list().iter().map(|c| c.avatar_id.clone()).filter(|a| !a.is_empty()));
+
         let mut freed = 0u64;
         if let Ok(rd) = std::fs::read_dir(&self.blob_dir) {
             for e in rd.flatten() {
                 let Ok(meta) = e.metadata() else { continue };
-                if meta.is_file() && std::fs::remove_file(e.path()).is_ok() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if !meta.is_file() || keep.contains(&name) {
+                    continue;
+                }
+                if std::fs::remove_file(e.path()).is_ok() {
                     freed += meta.len();
                 }
             }
         }
+        let _ = self.messages.lock_safe().reset_downloaded(&keep);
         freed
     }
 
@@ -2388,6 +2413,10 @@ fn event_pump(
         match job_rx.recv_timeout(Duration::from_millis(500)) {
             Ok(Job::Ev(ev)) => handle_event(&engine, &mut groups, &mut blobs, ev),
             Ok(Job::Cmd(cmd)) => handle_cmd(&engine, &mut groups, cmd),
+            Ok(Job::CancelDownloads(done)) => {
+                blobs.cancel_downloads();
+                let _ = done.send(());
+            }
             Ok(Job::BlobOffer { peer, content, mime }) => {
                 // Сохраняем свой блоб локально (чтобы отправитель тоже его показывал)
                 // и анонсируем манифест — докачку ведёт получатель.

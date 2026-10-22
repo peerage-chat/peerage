@@ -450,6 +450,13 @@ impl BlobManager {
     }
 
     /// Сколько блобов сейчас в отдаче (диагностика и тесты).
+    /// Бросить все идущие докачки (очистка вложений): их недособранные файлы
+    /// сейчас удалят, и дописывать в них нечего.
+    pub fn cancel_downloads(&mut self) {
+        self.incoming.clear();
+        self.partial_manifests.clear();
+    }
+
     pub fn outgoing_len(&self) -> usize {
         self.outgoing.len()
     }

@@ -144,3 +144,54 @@ fn large_file_downloads_by_button() {
     assert!(!out.with_extension("part").exists(), "временный .part убран");
     assert!(!b.blob_export("00", &tmpdir("out2").join("x")), "нет блоба — false");
 }
+
+/// R-030: «Очистить вложения» убирает сами файлы, но не свой аватар и не
+/// миниатюры; пометка «скачано» снимается, идущая докачка бросается.
+#[test]
+fn clearing_attachments_keeps_avatar_and_thumbs() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(98), id(99));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let dir_a = tmpdir("a4");
+    let a = start(&net, a_id, dir_a.clone());
+    let b = start(&net, b_id, tmpdir("b4"));
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+
+    let avatar = a.set_self_avatar(vec![5u8; 300], "image/png");
+    // Мелкое вложение с миниатюрой — приезжает само.
+    let thumb = vec![6u8; 200];
+    let thumb_id = hex::encode(p2p_blob::blob_id(&thumb));
+    let small: Vec<u8> = (0..20_000u32).map(|i| (i % 13) as u8).collect();
+    let small_id = hex::encode(p2p_blob::blob_id(&small));
+    let info = MediaInfo { thumb: Some(thumb), ..Default::default() };
+    b.send_media_with(&a_key, small, "application/pdf", "doc.pdf", info).unwrap();
+    assert!(wait(10, || a.blob_exists(&small_id) && a.blob_exists(&thumb_id)), "вложение и миниатюра у A");
+
+    // Крупное — качается по кнопке; очистка застаёт его на середине.
+    let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+    let src = tmpdir("src4").join("v.mp4");
+    std::fs::write(&src, &big).unwrap();
+    let big_id = hex::encode(p2p_blob::blob_id(&big));
+    b.send_media_file(&a_key, &src, "video/mp4", "v.mp4", MediaInfo::default()).unwrap();
+    assert!(wait(10, || a.history_json(&b_key).contains(&big_id)), "карточка крупного пришла");
+    assert!(a.download_media(&b_key, &big_id));
+    std::thread::sleep(Duration::from_millis(200));
+
+    a.clear_blobs();
+    assert!(a.blob_exists(&avatar), "свой аватар на месте");
+    assert!(a.blob_exists(&thumb_id), "миниатюра на месте");
+    assert!(!a.blob_exists(&small_id), "вложение удалено");
+    let hist: serde_json::Value = serde_json::from_str(&a.history_json(&b_key)).unwrap();
+    let row = hist.as_array().unwrap().iter().find(|m| m["blob_id"] == small_id.as_str()).unwrap();
+    assert_eq!(row["downloaded"], false, "карточка снова предлагает «Скачать»");
+
+    // Брошенная докачка не дописывается и не оставляет недособранных файлов.
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(!a.blob_exists(&big_id), "докачка брошена");
+    let parts = std::fs::read_dir(dir_a.join("blobs"))
+        .unwrap()
+        .filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "part"))
+        .count();
+    assert_eq!(parts, 0, "недособранных файлов не осталось");
+}

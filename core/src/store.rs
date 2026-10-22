@@ -928,6 +928,33 @@ impl MessageStore {
         Ok(n)
     }
 
+    /// Хэши миниатюр всех вложений в истории: их байты нужны карточкам и после
+    /// очистки вложений.
+    pub fn thumb_ids(&self) -> Vec<String> {
+        let conn = db::lock(&self.db);
+        let Ok(mut stmt) = conn.prepare("SELECT DISTINCT thumb_id FROM chat_messages WHERE thumb_id != ''") else {
+            return Vec::new();
+        };
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .map(|it| it.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Снять пометку «скачано» со всех вложений, кроме `keep` (их байты остались).
+    /// После очистки вложений карточки должны снова предлагать «Скачать».
+    pub fn reset_downloaded(&self, keep: &std::collections::HashSet<String>) -> Result<(), StoreError> {
+        let conn = db::lock(&self.db);
+        let ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT DISTINCT blob_id FROM chat_messages WHERE downloaded=1 AND blob_id != ''")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        for id in ids.iter().filter(|id| !keep.contains(*id)) {
+            conn.execute("UPDATE chat_messages SET downloaded=0 WHERE blob_id=?1", rusqlite::params![id])?;
+        }
+        Ok(())
+    }
+
     /// Статус доставки — только у СВОИХ сообщений (у чужих его не бывает).
     pub fn set_status(&self, chat: Chat, id: u64, status: &str) -> Result<bool, StoreError> {
         let n = db::lock(&self.db).execute(
