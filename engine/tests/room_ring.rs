@@ -157,7 +157,7 @@ fn second_call_during_a_call_does_not_steal_the_record() {
     let with_a = of(&a_key);
     let with_c = of(&c_key);
     assert_eq!(with_a["outcome"], "answered");
-    assert!(with_a["duration"].as_i64().unwrap() >= 1, "длительность — у разговора: {with_a}");
+    assert!(with_a["duration"].as_i64().unwrap() >= 1, "длительность — у разговора: {calls:?}");
     assert_eq!(with_c["outcome"], "missed");
     assert_eq!(with_c["duration"].as_i64(), Some(0), "у пропущенного длительности нет");
 }

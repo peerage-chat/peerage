@@ -298,7 +298,9 @@ struct GroupCache {
 /// Текущий звонок в журнале: запись, время старта, направление и комната.
 struct ActiveCall {
     id: i64,
-    started: i64,
+    /// Длительность меряем монотонно: настенные часы двигает синхронизация времени,
+    /// и разговор, во время которого их подвели назад, получал бы ноль.
+    since: Instant,
     incoming: bool,
     room: Vec<u8>,
 }
@@ -2047,10 +2049,10 @@ impl Engine {
 
     /// Начать запись о звонке (одна активная за раз — звонков параллельно не бывает).
     fn begin_call(&self, peer: &[u8; 32], gid: &[u8], incoming: bool, outcome: &str) {
-        let now = now();
-        let id = self.calls.lock_safe().start(peer, gid, incoming, outcome, now);
+        let id = self.calls.lock_safe().start(peer, gid, incoming, outcome, now());
         if id >= 0 {
-            *self.active_call.lock_safe() = Some(ActiveCall { id, started: now, incoming, room: gid.to_vec() });
+            *self.active_call.lock_safe() =
+                Some(ActiveCall { id, since: Instant::now(), incoming, room: gid.to_vec() });
         }
     }
 
@@ -2075,20 +2077,19 @@ impl Engine {
             return true;
         }
         let Some(id) = self.missed_calls.lock_safe().remove(room) else { return false };
-        let now = now();
         let mut calls = self.calls.lock_safe();
         if let Some(prev) = ac.take() {
-            calls.finish(prev.id, now - prev.started);
+            calls.finish(prev.id, prev.since.elapsed().as_secs() as i64);
         }
         calls.set_outcome(id, "answered");
-        *ac = Some(ActiveCall { id, started: now, incoming: true, room: room.to_vec() });
+        *ac = Some(ActiveCall { id, since: Instant::now(), incoming: true, room: room.to_vec() });
         true
     }
 
     /// Закрыть активную запись: проставить длительность.
     fn end_call(&self) {
         let Some(c) = self.active_call.lock_safe().take() else { return };
-        self.calls.lock_safe().finish(c.id, now() - c.started);
+        self.calls.lock_safe().finish(c.id, c.since.elapsed().as_secs() as i64);
     }
 
     /// Заметка себе («Сохранённое»). Хранится как обычное сообщение в чате с самим
