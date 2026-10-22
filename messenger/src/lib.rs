@@ -1241,6 +1241,12 @@ fn receive_loop(shared: Arc<Shared>) {
     let mut media_rl = RateLimiter::new(1200.0, 600.0);
     let mut pkt_count: u64 = 0;
     let mut dropped: u64 = 0;
+    // Медиа, которое некуда деть (очередь звонка полна или звонка уже нет, а
+    // собеседник ещё шлёт). Счётчики — по той же причине, что и у `dropped`:
+    // строка лога на каждый пакет сама становится штормом в сотни строк в секунду.
+    let mut media_full: u64 = 0;
+    let mut media_orphan: u64 = 0;
+    let mut media_bad: u64 = 0;
     loop {
         // Снимок берём КАЖДУЮ итерацию: при смене адреса узел заменяется, и цикл
         // обязан продолжить работу на новом — иначе после ротации приём молча
@@ -1324,13 +1330,22 @@ fn receive_loop(shared: Arc<Shared>) {
                         payload: f.payload.to_vec(),
                     });
                     if err.is_err() {
-                        log::error!("p2p-media: channel full, dropped packet track={}", f.track);
+                        media_full = media_full.wrapping_add(1);
+                        if media_full % 512 == 1 {
+                            log::warn!("p2p-media: очередь полна, дроп (track={}, всего {media_full})", f.track);
+                        }
                     }
                 } else {
-                    log::warn!("p2p-media: received packet but media_tx is None (track={})", f.track);
+                    media_orphan = media_orphan.wrapping_add(1);
+                    if media_orphan % 512 == 1 {
+                        log::info!("p2p-media: пакет вне звонка, дроп (track={}, всего {media_orphan})", f.track);
+                    }
                 }
             } else {
-                log::warn!("p2p-media: parse_media failed for n={}", n);
+                media_bad = media_bad.wrapping_add(1);
+                if media_bad % 512 == 1 {
+                    log::warn!("p2p-media: битый медиа-пакет (n={n}, всего {media_bad})");
+                }
             }
             continue;
         }
