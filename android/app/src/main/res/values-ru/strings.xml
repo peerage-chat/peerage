@@ -726,4 +726,15 @@
     <string name="settings_cat_notifications_desc">Что показывать помимо сообщений</string>
     <string name="settings_cat_about">О приложении</string>
     <string name="settings_cat_about_desc">Версия, транспорт, лицензия</string>
+    <string name="recovery_title">Данные не открываются</string>
+    <string name="recovery_sub">Ключ к переписке на этом телефоне недоступен</string>
+    <string name="recovery_reason_key_lost">Система сбросила ключ шифрования. Так бывает после смены блокировки экрана или обновления прошивки.</string>
+    <string name="recovery_reason_mismatch">Данные зашифрованы другим ключом: пропал файл ключа или данные перенесены с другого устройства.</string>
+    <string name="recovery_body">Прочитать переписку отсюда нельзя. Удалять её не будем, только отложим. Личность можно вернуть по 24 словам.</string>
+    <string name="recovery_restore">Восстановить по 24 словам</string>
+    <string name="recovery_start_over">Начать заново</string>
+    <string name="recovery_new_title">Начать заново?</string>
+    <string name="recovery_new_sub">Будет создана новая личность</string>
+    <string name="recovery_new_body">Контакты увидят вас как нового человека, им придётся добавить вас заново. Старые данные отложим, а не удалим.</string>
+    <string name="recovery_failed">Не удалось отложить данные. Попробуйте ещё раз</string>
 </resources>

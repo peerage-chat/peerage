@@ -30,6 +30,16 @@ object Native {
      *  true = успех (Kotlin затем перезапускает процесс). Не трогает живую сессию. */
     external fun importSeedPhrase(dataDir: String, phrase: String): Boolean
 
+    /** Фраза корректна (24 слова с верной контрольной суммой). Без сессии. */
+    external fun seedPhraseValid(phrase: String): Boolean
+
+    /** Отложить нечитаемые данные в `quarantine/` (R-029). Без сессии. */
+    external fun quarantineData(dataDir: String): Boolean
+
+    /** Личность из фразы в чистый каталог, под ключом хранилища `vaultKey`. Без сессии:
+     *  после карантина движок не поднят. */
+    external fun restoreSeedPhrase(dataDir: String, vaultKey: ByteArray, phrase: String): Boolean
+
     /** Своё самоназвание (M2). "" если не задано. */
     external fun selfName(sessionPtr: Long): String
 

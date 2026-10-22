@@ -732,4 +732,15 @@
     <string name="settings_cat_notifications_desc">What to show besides messages</string>
     <string name="settings_cat_about">About</string>
     <string name="settings_cat_about_desc">Version, transport, license</string>
+    <string name="recovery_title">Data won\'t open</string>
+    <string name="recovery_sub">The key to this phone\'s chats is unavailable</string>
+    <string name="recovery_reason_key_lost">Android reset the encryption key. This happens after changing the screen lock or a system update.</string>
+    <string name="recovery_reason_mismatch">The data is encrypted with a different key: the key file is gone, or the data came from another device.</string>
+    <string name="recovery_body">The chats stored here can\'t be read. We won\'t delete them, just set them aside. Your identity can be restored from your 24 words.</string>
+    <string name="recovery_restore">Restore from 24 words</string>
+    <string name="recovery_start_over">Start over</string>
+    <string name="recovery_new_title">Start over?</string>
+    <string name="recovery_new_sub">A new identity will be created</string>
+    <string name="recovery_new_body">Contacts will see you as a new person and will have to add you again. The old data will be set aside, not deleted.</string>
+    <string name="recovery_failed">Couldn\'t set the data aside. Try again</string>
 </resources>

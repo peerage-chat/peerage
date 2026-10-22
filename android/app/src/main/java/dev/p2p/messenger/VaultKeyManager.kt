@@ -129,6 +129,18 @@ object VaultKeyManager {
         return true
     }
 
+    /**
+     * Забыть ключ хранилища целиком: обёртку, параметры уровня и ключ Keystore.
+     * Только для восстановления (R-029), когда Keystore свой ключ потерял и
+     * развернуть обёртку уже нечем. Следующий [getOrCreate] заведёт новый ключ.
+     */
+    fun reset(filesDir: File) {
+        listOf(ENC_FILE, META_FILE, OLD_FILE).forEach { File(filesDir, it).delete() }
+        runCatching {
+            KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(KEYSTORE_ALIAS)
+        }
+    }
+
     /** Обернуть ключ по уровню: пароль внутри, Keystore снаружи. */
     private fun wrapAll(raw: ByteArray, filesDir: File, lvl: VaultLevel, password: String?): ByteArray {
         var data = raw

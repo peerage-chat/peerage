@@ -3139,14 +3139,55 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
 }
 
 /// Удалить зашифрованные пользовательские данные при потере vault-ключа.
-fn wipe_user_data(dir: &Path) {
-    for name in &["profile.json", "contacts.json", "messages.json", "messenger.db",
-                  "messenger.db-shm", "messenger.db-wal"] {
-        let _ = std::fs::remove_file(dir.join(name));
+/// Ошибка старта: данные на диске зашифрованы другим ключом хранилища (ключ
+/// потерян или подменён). Клиент показывает экран восстановления: решать, что
+/// делать с данными, должен человек, а не движок.
+pub const START_VAULT_MISMATCH: &str = "vault_mismatch";
+
+/// Каталог, куда откладываются нечитаемые данные (внутри каталога данных).
+pub const QUARANTINE_DIR: &str = "quarantine";
+
+/// Что остаётся на месте при карантине: обёртка ключа хранилища (её разбирает
+/// клиент) и сам карантин.
+const QUARANTINE_KEEP: &[&str] = &[QUARANTINE_DIR, "vault.key.enc", "vault.meta", "vault.key"];
+
+/// Загрузить личность из `profile.json` (или создать новую, если её нет). Если
+/// профиль есть, но не расшифровывается, — [`START_VAULT_MISMATCH`]: ничего не
+/// стирается и новая личность не создаётся.
+pub fn load_identity(dir: &Path) -> Result<Identity, String> {
+    match Profile::load_or_create(&dir.join("profile.json")) {
+        Ok(p) => Ok(p.identity),
+        Err(p2p_core::store::StoreError::Vault(p2p_core::vault::VaultError::Decrypt)) => {
+            log::warn!("профиль не расшифровывается этим ключом хранилища — нужен выбор пользователя");
+            Err(START_VAULT_MISMATCH.into())
+        }
+        Err(e) => Err(e.to_string()),
     }
-    if let Ok(entries) = std::fs::read_dir(dir.join("groups")) {
-        for e in entries.flatten() { let _ = std::fs::remove_file(e.path()); }
+}
+
+/// Отложить данные, которые нельзя прочитать: всё содержимое каталога, кроме
+/// [`QUARANTINE_KEEP`], переезжает в `quarantine/<время>/`. Не удаление — если
+/// старый ключ найдётся, данные можно вернуть руками. Возвращает путь карантина.
+pub fn quarantine_user_data(dir: &Path) -> std::io::Result<PathBuf> {
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let root = dir.join(QUARANTINE_DIR);
+    let mut dst = root.join(secs.to_string());
+    let mut n = 1;
+    while dst.exists() {
+        dst = root.join(format!("{secs}-{n}"));
+        n += 1;
     }
+    std::fs::create_dir_all(&dst)?;
+    for e in std::fs::read_dir(dir)? {
+        let e = e?;
+        let name = e.file_name();
+        if QUARANTINE_KEEP.iter().any(|k| name == *k) {
+            continue;
+        }
+        // rename в пределах одного каталога данных — без копирования.
+        std::fs::rename(e.path(), dst.join(&name))?;
+    }
+    Ok(dst)
 }
 
 impl Engine {
@@ -3160,18 +3201,9 @@ impl Engine {
             p2p_core::vault::init_with_key(key);
         }
 
-        let identity = match Profile::load_or_create(&dir.join("profile.json")) {
-            Ok(p) => p.identity,
-            Err(p2p_core::store::StoreError::Vault(p2p_core::vault::VaultError::Decrypt)) => {
-                // Vault key lost (factory reset / переустановка поверх старых данных).
-                log::warn!("vault key mismatch: wiping user data and regenerating identity");
-                wipe_user_data(&dir);
-                Profile::load_or_create(&dir.join("profile.json"))
-                    .map_err(|e| e.to_string())?
-                    .identity
-            }
-            Err(e) => return Err(e.to_string()),
-        };
+        // Не подошёл ключ — не стираем и не заводим новую личность молча: это
+        // решает человек на экране восстановления (R-029).
+        let identity = load_identity(&dir)?;
         // ADR-007: узел поднимается на ТРАНСПОРТНОМ ключе текущей эпохи. Эпоха 0 —
         // это сам ключ личности, поэтому у тех, кто адрес не менял, ничего не
         // меняется.

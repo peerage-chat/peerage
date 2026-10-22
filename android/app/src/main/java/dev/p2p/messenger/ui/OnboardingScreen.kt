@@ -121,21 +121,114 @@ private fun ImportKeyStep(model: AppModel, onBack: () -> Unit) {
             if (error) Text(stringResource(R.string.onb_bad_phrase), color = HoloError, fontSize = 11.sp)
         },
     ) {
-        Box(
-            Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
-                .border(1.dp, if (error) HoloError else HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
-        ) {
-            if (phrase.isEmpty()) Text(stringResource(R.string.onb_phrase_placeholder), color = HoloSecondary, fontSize = 15.sp)
-            BasicTextField(
-                value = phrase,
-                onValueChange = {
-                    phrase = it
-                    error = false
+        PhraseInput(phrase, error) {
+            phrase = it
+            error = false
+        }
+    }
+}
+
+/** Поле ввода 24 слов: импорт при первом запуске и экран восстановления. */
+@Composable
+private fun ColumnScope.PhraseInput(phrase: String, error: Boolean, onChange: (String) -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
+            .border(1.dp, if (error) HoloError else HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
+    ) {
+        if (phrase.isEmpty()) Text(stringResource(R.string.onb_phrase_placeholder), color = HoloSecondary, fontSize = 15.sp)
+        BasicTextField(
+            value = phrase,
+            onValueChange = onChange,
+            textStyle = TextStyle(color = Color.White, fontSize = 15.sp, lineHeight = 24.sp),
+            cursorBrush = SolidColor(HoloAccent),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * Данные на устройстве не открываются (R-029): ключ хранилища потерян или не тот.
+ * Без человека ничего не стирается — он выбирает: вернуть личность по 24 словам или
+ * начать заново. Старые данные в обоих случаях откладываются, а не удаляются.
+ */
+@Composable
+internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
+    val ctx = LocalContext.current
+    var step by rememberSaveable { mutableStateOf(0) } // 0 — выбор, 1 — фраза, 2 — «начать заново?»
+    var phrase by rememberSaveable { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<Int?>(null) }
+    val caption: @Composable RowScope.() -> Unit = {
+        error?.let { Text(stringResource(it), color = HoloError, fontSize = 11.sp) }
+    }
+    val back = {
+        step = 0
+        error = null
+    }
+    when (step) {
+        1 -> {
+            SecureFlag()
+            OnbScaffold(
+                title = stringResource(R.string.onb_restore_title),
+                desc = stringResource(R.string.onb_restore_sub),
+                primary = stringResource(if (busy) R.string.onb_checking else R.string.onb_restore),
+                onPrimary = {
+                    if (!busy && phrase.isNotBlank()) {
+                        busy = true
+                        error = null
+                        model.recoverFromPhrase(dataDir, phrase) { r ->
+                            busy = false
+                            when (r) {
+                                RecoverResult.OK -> relaunchApp(ctx)
+                                RecoverResult.BAD_PHRASE -> error = R.string.onb_bad_phrase
+                                RecoverResult.FAILED -> error = R.string.recovery_failed
+                            }
+                        }
+                    }
                 },
-                textStyle = TextStyle(color = Color.White, fontSize = 15.sp, lineHeight = 24.sp),
-                cursorBrush = SolidColor(HoloAccent),
-                modifier = Modifier.fillMaxSize(),
-            )
+                secondary = stringResource(R.string.common_back),
+                onSecondary = back,
+                caption = caption,
+            ) {
+                PhraseInput(phrase, error == R.string.onb_bad_phrase) {
+                    phrase = it
+                    error = null
+                }
+            }
+        }
+        2 -> OnbScaffold(
+            title = stringResource(R.string.recovery_new_title),
+            desc = stringResource(R.string.recovery_new_sub),
+            primary = stringResource(R.string.recovery_start_over),
+            onPrimary = {
+                if (!busy) {
+                    busy = true
+                    model.recoverStartOver(dataDir) { ok ->
+                        busy = false
+                        if (ok) relaunchApp(ctx) else error = R.string.recovery_failed
+                    }
+                }
+            },
+            secondary = stringResource(R.string.common_back),
+            onSecondary = back,
+            caption = caption,
+        ) {
+            Text(stringResource(R.string.recovery_new_body), color = HoloSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
+        }
+        else -> OnbScaffold(
+            title = stringResource(R.string.recovery_title),
+            desc = stringResource(R.string.recovery_sub),
+            primary = stringResource(R.string.recovery_restore),
+            onPrimary = { step = 1 },
+            secondary = stringResource(R.string.recovery_start_over),
+            onSecondary = { step = 2 },
+        ) {
+            Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(32.dp))
+            Spacer(Modifier.height(16.dp))
+            val reason = if (why == Recovery.KEY_LOST) R.string.recovery_reason_key_lost else R.string.recovery_reason_mismatch
+            Text(stringResource(reason), color = Color.White, fontSize = 14.sp, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.recovery_body), color = HoloSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
         }
     }
 }

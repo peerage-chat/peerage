@@ -130,6 +130,11 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
     // на выделенных потоках (см. AppModel — UI ничего нативного не вызывает напрямую).
     // Уровень at-rest с паролем: движок не стартует, пока ключ не отперт. Показывать
     // пустой мессенджер вместо запроса — врать про состояние данных.
+    // Данные не открылись (R-029): ничего не стёрто, выбор за человеком.
+    model.recovery?.let {
+        RecoveryScreen(model, dataDir, it)
+        return
+    }
     val needsPassword = remember { VaultKeyManager.needsPassword(java.io.File(dataDir)) }
     var vaultOpen by remember { mutableStateOf(!needsPassword) }
     if (!vaultOpen) {

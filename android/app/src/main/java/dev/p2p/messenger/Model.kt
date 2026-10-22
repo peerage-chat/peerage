@@ -19,6 +19,20 @@ import java.io.File
 import java.util.concurrent.Executors
 
 /** Пресет качества видео-звонка. */
+/** Ошибка старта движка: данные зашифрованы другим ключом (`START_VAULT_MISMATCH`). */
+internal const val START_VAULT_MISMATCH = "vault_mismatch"
+
+/** Почему данные не открылись (R-029). */
+enum class Recovery {
+    /** Keystore потерял ключ — обёртку ключа хранилища развернуть нечем. */
+    KEY_LOST,
+
+    /** Ключ есть, но данные зашифрованы другим (файл ключа пропал, данные чужие). */
+    DATA_UNREADABLE,
+}
+
+enum class RecoverResult { OK, BAD_PHRASE, FAILED }
+
 class AppModel private constructor() {
     companion object {
         /**
@@ -72,6 +86,53 @@ class AppModel private constructor() {
 
     fun clearRevealedPhrase() {
         revealedPhrase = null
+    }
+
+    /** Почему данные не открылись (R-029); null — открылись. */
+    var recovery by mutableStateOf<Recovery?>(null)
+        private set
+
+    /** Ключ хранилища, которым движок не смог прочитать данные. Он уже задан
+     *  процессу и годится для новых данных после карантина. Нет его — значит
+     *  Keystore ключ потерял, и заводится новый. */
+    private var recoveryKey: ByteArray? = null
+
+    /** «Начать заново» (R-029): отложить нечитаемое; вызывающий перезапускает процесс. */
+    fun recoverStartOver(dataDir: String, onDone: (Boolean) -> Unit) = ops.execute {
+        val ok = Native.quarantineData(dataDir)
+        if (ok) {
+            if (recoveryKey == null) VaultKeyManager.reset(File(dataDir))
+            // Новая личность — заново и онбординг с резервной копией фразы. commit():
+            // процесс сейчас перезапустится, и apply() не успел бы записать.
+            appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+                ?.edit()?.putBoolean("onboarded", false)?.putBoolean("key_backup_done", false)?.commit()
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).post { onDone(ok) }
+    }
+
+    /** «Восстановить по 24 словам» (R-029). Фраза проверяется ДО карантина: с
+     *  опечаткой данные остаются на месте. Успех — вызывающий перезапускает процесс. */
+    fun recoverFromPhrase(dataDir: String, phrase: String, onDone: (RecoverResult) -> Unit) = ops.execute {
+        val dir = File(dataDir)
+        val result = when {
+            !Native.seedPhraseValid(phrase) -> RecoverResult.BAD_PHRASE
+            !Native.quarantineData(dataDir) -> RecoverResult.FAILED
+            else -> {
+                val key = recoveryKey ?: run {
+                    VaultKeyManager.reset(dir)
+                    runCatching { VaultKeyManager.getOrCreate(dir) }.getOrNull()
+                }
+                if (key != null && Native.restoreSeedPhrase(dataDir, key, phrase)) {
+                    // Фраза у человека есть — он её только что ввёл.
+                    appContext?.getSharedPreferences("p2p_settings", android.content.Context.MODE_PRIVATE)
+                        ?.edit()?.putBoolean("onboarded", true)?.putBoolean("key_backup_done", true)?.commit()
+                    RecoverResult.OK
+                } else {
+                    RecoverResult.FAILED
+                }
+            }
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).post { onDone(result) }
     }
 
     /** Импорт личности из фразы (M4): валидирует+пишет profile.json на [ops], результат
@@ -859,13 +920,27 @@ class AppModel private constructor() {
     fun start(dataDir: String, password: String? = null): Boolean {
         if (started) return true
         val vaultKey = runCatching { VaultKeyManager.getOrCreate(File(dataDir), password) }
-            .getOrElse { return false }
+            .getOrElse {
+                // С паролем сбой значит «неверный пароль» — это покажет экран ввода.
+                // Без пароля ключ не развернулся: Keystore потерял свой ключ (сменили
+                // блокировку экрана, обновили прошивку). Тупик «не запускается» —
+                // хуже любого выбора, поэтому показываем экран восстановления.
+                if (password == null) recovery = Recovery.KEY_LOST
+                return false
+            }
         started = true
         loadSettings()
         loadAudioPrefs()
         val started = decodeOrNull<StartResultDto>(Native.start(dataDir, vaultKey))
         if (started == null || started.error != null || started.sessionPtr == 0L) {
-            error = started?.error ?: "engine start failed"
+            this.started = false
+            // Данные зашифрованы другим ключом: движок их не стёр, решает человек.
+            if (started?.error == START_VAULT_MISMATCH) {
+                recoveryKey = vaultKey
+                recovery = Recovery.DATA_UNREADABLE
+            } else {
+                error = started?.error ?: "engine start failed"
+            }
             return false
         }
         sessionPtr = started.sessionPtr

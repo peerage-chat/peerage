@@ -179,6 +179,72 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_importSeedPhrase<'local>(
     })
 }
 
+/// Сид-фраза корректна (24 слова BIP39 с верной контрольной суммой). Без сессии:
+/// экран восстановления проверяет фразу ДО того, как что-либо трогать на диске.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_seedPhraseValid<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    phrase: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let phrase = jstr(&mut env, &phrase);
+        if p2p_core::Identity::from_phrase(&phrase).is_ok() { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
+/// Отложить нечитаемые данные в `quarantine/` (R-029): ключ хранилища не подошёл,
+/// и человек выбрал «восстановить» или «начать заново». Без сессии — движок в
+/// этом состоянии не поднят. true — данные отложены.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_quarantineData<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    data_dir: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let dir = PathBuf::from(jstr(&mut env, &data_dir));
+        match p2p_engine::quarantine_user_data(&dir) {
+            Ok(dst) => {
+                log::warn!("данные отложены в {}", dst.display());
+                JNI_TRUE
+            }
+            Err(e) => {
+                log::error!("карантин данных не удался: {e}");
+                JNI_FALSE
+            }
+        }
+    })
+}
+
+/// Восстановить личность из сид-фразы в чистом каталоге (после карантина): профиль
+/// запечатывается ключом хранилища `vault_key`. Нужен отдельно от
+/// [`importSeedPhrase`]: движок здесь не поднят, и ключ хранилища ещё не задан.
+#[no_mangle]
+pub extern "system" fn Java_dev_p2p_messenger_Native_restoreSeedPhrase<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    data_dir: JString<'local>,
+    vault_key: JByteArray<'local>,
+    phrase: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let dir = jstr(&mut env, &data_dir);
+        let phrase = jstr(&mut env, &phrase);
+        let Ok(raw) = env.convert_byte_array(&vault_key) else { return JNI_FALSE };
+        let Ok(key) = <[u8; 32]>::try_from(raw.as_slice()) else { return JNI_FALSE };
+        // Ключ задаётся на процесс один раз. Если он уже задан ДРУГИМ, профиль лёг
+        // бы под чужой ключ и не открылся бы на следующем старте — отказываемся.
+        p2p_core::vault::init_with_key(key);
+        if p2p_core::vault::key_bytes() != Some(key) {
+            return JNI_FALSE;
+        }
+        let Ok(identity) = p2p_core::Identity::from_phrase(&phrase) else { return JNI_FALSE };
+        let path = std::path::Path::new(&dir).join("profile.json");
+        if (p2p_core::store::Profile { identity }).save(&path).is_ok() { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
 /// Своё самоназвание (M2). "" если не задано.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_selfName<'local>(
