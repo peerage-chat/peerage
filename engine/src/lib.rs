@@ -2097,22 +2097,26 @@ impl Engine {
     /// Отдельное хранилище заводить незачем, история уже умеет всё нужное.
     pub fn save_note(&self, text: &str) -> Option<i64> {
         let t = now();
-        let id = t as u64;
         let me = self.me_pub;
-        self.messages
-            .lock_safe()
-            .append(Chat::Dm(&me), &StoredMessage {
-                id,
-                sender: self.me_hex(),
-                text: text.to_string(),
-                mine: true,
-                time: t,
-                status: String::new(),
-                kind: "text".into(),
-                ..Default::default()
-            })
-            .ok()?;
-        Some(t)
+        let mut note = StoredMessage {
+            // id — миллисекунды: в секундах вторая заметка за ту же секунду
+            // получала id первой (R-040). Совпало и так — берём следующий.
+            id: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
+            sender: self.me_hex(),
+            text: text.to_string(),
+            mine: true,
+            time: t,
+            kind: "text".into(),
+            ..Default::default()
+        };
+        let store = self.messages.lock_safe();
+        loop {
+            match store.append(Chat::Dm(&me), &note) {
+                Ok(_) => return Some(t),
+                Err(p2p_core::store::StoreError::Duplicate) => note.id += 1,
+                Err(_) => return None,
+            }
+        }
     }
 
     /// Заметки себе, старые первыми (как в чате).

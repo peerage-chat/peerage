@@ -447,3 +447,16 @@ fn forwarded_attachment_is_a_reference_the_recipient_pulls() {
     assert!(wait(60, || c.blob_exists(&blob)), "Вера скачала у Боба");
     assert_eq!(c.blob_read(&blob).unwrap(), content, "байт-в-байт");
 }
+
+/// R-040: две заметки подряд (в одну секунду) — две заметки, а не одна.
+#[test]
+fn two_notes_in_one_second_are_both_kept() {
+    let net = LoopbackNet::new();
+    let a = start(&net, id(63), tmpdir("notes"));
+    a.save_note("первая");
+    a.save_note("вторая");
+    a.save_note("третья");
+    let notes: serde_json::Value = serde_json::from_str(&a.notes_json()).unwrap();
+    let texts: Vec<&str> = notes.as_array().unwrap().iter().filter_map(|n| n["text"].as_str()).collect();
+    assert_eq!(texts, ["первая", "вторая", "третья"]);
+}
