@@ -4,10 +4,8 @@
 //! до вызова [`open`]). При отсутствии ключа база остаётся незашифрованной
 //! (только в dev/test окружении).
 //!
-//! Схема:
-//!   contacts   — TOFU-контакты
-//!   messages   — история сообщений
-//!   outbox     — офлайн-очередь исходящих (см. `outbox`)
+//! Схема описана ОДИН раз — в `migrate()`, без ALTER: совместимость со старыми
+//! базами не поддерживается, новая колонка добавляется прямо в `CREATE TABLE`.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -65,7 +63,12 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             verified     INTEGER NOT NULL DEFAULT 0,
             profile_name TEXT NOT NULL DEFAULT '',
             avatar_id    TEXT NOT NULL DEFAULT '',
-            helpful      INTEGER NOT NULL DEFAULT 0
+            -- Репутация (M3): отданные нам блобы, влияет на бюджет (p2p_core::budget).
+            helpful      INTEGER NOT NULL DEFAULT 0,
+            -- ADR-007: адрес контакта отделён от личности. Пусто = эпоха 0, адрес
+            -- совпадает с ключом личности.
+            transport_key   TEXT    NOT NULL DEFAULT '',
+            transport_epoch INTEGER NOT NULL DEFAULT 0
         );
 
         -- Вся переписка одной таблицей: личные чаты, «Сохранённое» и группы. Раньше
@@ -112,7 +115,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS outbox (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             peer         BLOB    NOT NULL,
-            msg_id       INTEGER NOT NULL DEFAULT 0,
+            msg_id       INTEGER NOT NULL,
             payload_type TEXT    NOT NULL,
             payload      BLOB    NOT NULL,
             created_at   INTEGER NOT NULL
@@ -124,7 +127,12 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             key         BLOB PRIMARY KEY,
             fingerprint TEXT    NOT NULL,
             preview     TEXT    NOT NULL DEFAULT '',
-            time        INTEGER NOT NULL
+            time        INTEGER NOT NULL,
+            -- Первое сообщение незнакомца целиком: при одобрении оно ложится в чат
+            -- (отправитель уже получил Ack и не перешлёт его).
+            first_id    INTEGER NOT NULL DEFAULT 0,
+            first_text  TEXT    NOT NULL DEFAULT '',
+            first_time  INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS blocklist (
             key     BLOB    PRIMARY KEY,
@@ -219,67 +227,6 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
              INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
          END;",
     );
-    // Разовое построение индекса для баз, живших до его появления. Считать строки
-    // в самом индексе бесполезно: у FTS с внешним контентом COUNT(*) читает
-    // ОСНОВНУЮ таблицу и всегда «не пуст», из-за чего переиндексация не запускалась
-    // и поиск по старой переписке молча не находил ничего. Отметку ставим в
-    // user_version, чтобы не перестраивать словарь на каждом запуске.
-    let schema_ver: i64 =
-        conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap_or(0);
-    if schema_ver < 1 {
-        let _ = conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')", []);
-        let _ = conn.execute_batch("PRAGMA user_version = 1;");
-    }
-    // Пересылка: автор исходного сообщения. Идемпотентно — на свежей базе колонка
-    // уже есть из CREATE TABLE, повторный ALTER просто игнорируется.
-    let _ = conn.execute("ALTER TABLE chat_messages ADD COLUMN fwd_from TEXT NOT NULL DEFAULT ''", []);
-    let _ =
-        conn.execute("ALTER TABLE chat_messages ADD COLUMN fwd_anon INTEGER NOT NULL DEFAULT 0", []);
-    // Правка сообщения: когда изменено (0 — не редактировалось). Идемпотентно.
-    let _ = conn
-        .execute("ALTER TABLE chat_messages ADD COLUMN edited_at INTEGER NOT NULL DEFAULT 0", []);
-    // Миграция для установок с outbox без msg_id (идемпотентно: дубль-колонка → игнор).
-    let _ = conn.execute("ALTER TABLE outbox ADD COLUMN msg_id INTEGER NOT NULL DEFAULT 0", []);
-    // Ответ на сообщение (ADR-006, «фича-по-ссылке»): ссылка = (автор, id). Здесь
-    // автор кодируется флагом reply_mine, потому что в DM собеседник всего один.
-    // Идемпотентно: повторный ALTER на существующей колонке игнорируется.
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN reply_to INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN reply_mine INTEGER NOT NULL DEFAULT 0", []);
-    // Репутация (M3): счётчик «полезных дел» пира — отданных нам блобов. Влияет на
-    // бюджет ресурсов (см. p2p_core::budget). Идемпотентно.
-    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN helpful INTEGER NOT NULL DEFAULT 0", []);
-    // Профиль контакта (M2): самоназвание + хэш аватара (идемпотентно).
-    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN profile_name TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN avatar_id TEXT NOT NULL DEFAULT ''", []);
-    // ADR-007: адрес контакта отделён от его личности. Пусто = эпоха 0, то есть
-    // адрес совпадает с ключом личности (как было до разделения) — существующие
-    // записи мигрировать не нужно.
-    let _ = conn.execute(
-        "ALTER TABLE contacts ADD COLUMN transport_key TEXT NOT NULL DEFAULT ''",
-        [],
-    );
-    let _ = conn.execute(
-        "ALTER TABLE contacts ADD COLUMN transport_epoch INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
-    // Медиа-сообщения (M2): тип + ссылка на блоб вложения (идемпотентно).
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'", []);
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN blob_id TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN mime TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN name TEXT NOT NULL DEFAULT ''", []);
-    // Карточка вложения: размер/длительность/кадр/превью + признак «скачано».
-    // Крупные вложения не тянутся автоматически — сначала карточка, байты по кнопке.
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN size INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN width INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN height INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN thumb_id TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE messages ADD COLUMN downloaded INTEGER NOT NULL DEFAULT 0", []);
-    // Первое сообщение незнакомца целиком: при одобрении запроса оно ложится в чат.
-    // Отправитель уже получил Ack и не перешлёт его, так что без этого оно терялось.
-    let _ = conn.execute("ALTER TABLE contact_requests ADD COLUMN first_id INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE contact_requests ADD COLUMN first_text TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE contact_requests ADD COLUMN first_time INTEGER NOT NULL DEFAULT 0", []);
     Ok(())
 }
 

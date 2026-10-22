@@ -5,7 +5,6 @@
 //! * [`MessageStore`] — история сообщений в SQLite, без кэша (прямые запросы).
 //!
 //! Оба стора принимают [`crate::db::Db`] — общее `Arc<Mutex<Connection>>`.
-//! Миграция из JSON-файлов выполняется один раз в `open()` при наличии legacy-файла.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -135,18 +134,9 @@ pub struct ContactStore {
 }
 
 impl ContactStore {
-    /// Открыть хранилище. Если `legacy` указывает на существующий contacts.json,
-    /// импортирует оттуда данные и переименовывает файл в .bak.
-    pub fn open(db: Db, legacy: Option<&Path>) -> Result<Self, StoreError> {
-        let mut store = ContactStore { db: db.clone(), cache: HashMap::new() };
+    pub fn open(db: Db) -> Result<Self, StoreError> {
+        let mut store = ContactStore { db, cache: HashMap::new() };
         store.load_cache()?;
-
-        if let Some(path) = legacy {
-            if path.exists() {
-                store.import_json(path)?;
-                let _ = std::fs::rename(path, path.with_extension("json.bak"));
-            }
-        }
         Ok(store)
     }
 
@@ -186,33 +176,6 @@ impl ContactStore {
                     transport_epoch: tepoch.max(0) as u32,
                 });
             }
-        }
-        Ok(())
-    }
-
-    fn import_json(&mut self, path: &Path) -> Result<(), StoreError> {
-        #[derive(Deserialize)]
-        struct LegacyFile { contacts: Vec<Contact> }
-
-        let raw = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(_) => return Ok(()),
-        };
-        let data = crate::vault::open(&raw).unwrap_or(raw);
-        let lf: LegacyFile = match serde_json::from_slice(&data) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        let conn = db::lock(&self.db);
-        for c in lf.contacts {
-            let key = match decode_key(&c.key) { Ok(k) => k, Err(_) => continue };
-            if self.cache.contains_key(&key) { continue; }
-            conn.execute(
-                "INSERT OR IGNORE INTO contacts (key, name, fingerprint, added, verified)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![key.as_slice(), &c.name, &c.fingerprint, c.added, c.verified as i64],
-            )?;
-            self.cache.insert(key, c);
         }
         Ok(())
     }
@@ -809,88 +772,8 @@ pub struct MessageStore {
 }
 
 impl MessageStore {
-    /// Открыть хранилище. `me` нужен, чтобы у старых строк (где автор кодировался
-    /// флагом `mine`) появился явный автор. Если `legacy` указывает на существующий
-    /// messages.json, импортирует оттуда данные и переименовывает файл в .bak.
-    pub fn open(db: Db, legacy: Option<&Path>, me: &[u8; 32]) -> Result<Self, StoreError> {
-        let store = MessageStore { db };
-        store.migrate_legacy_table(me)?;
-        if let Some(path) = legacy {
-            if path.exists() {
-                store.import_json(path, me)?;
-                let _ = std::fs::rename(path, path.with_extension("json.bak"));
-            }
-        }
-        Ok(store)
-    }
-
-    /// Перелить историю из таблицы `messages` (личные чаты, автор = флаг `mine`) в
-    /// общую `chat_messages` и убрать старую. Разово: после переноса таблицы нет.
-    fn migrate_legacy_table(&self, me: &[u8; 32]) -> Result<(), StoreError> {
-        let conn = db::lock(&self.db);
-        let exists = conn
-            .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'",
-                [],
-                |_| Ok(()),
-            )
-            .is_ok();
-        if !exists {
-            return Ok(());
-        }
-        let me_hex = hex::encode(me);
-        conn.execute(
-            "INSERT OR IGNORE INTO chat_messages
-                 (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
-                  size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender, system)
-             SELECT peer, 0, id,
-                    CASE mine WHEN 1 THEN ?1 ELSE lower(hex(peer)) END,
-                    mine, text, time, status, kind, blob_id, mime, name,
-                    size, duration_ms, width, height, thumb_id, downloaded, reply_to,
-                    CASE WHEN reply_to = 0 THEN ''
-                         WHEN reply_mine = 1 THEN ?1
-                         ELSE lower(hex(peer)) END,
-                    0
-             FROM messages",
-            rusqlite::params![me_hex],
-        )?;
-        conn.execute("DROP TABLE messages", [])?;
-        Ok(())
-    }
-
-    fn import_json(&self, path: &Path, me: &[u8; 32]) -> Result<(), StoreError> {
-        #[derive(Deserialize)]
-        struct LegacyFile {
-            log: std::collections::BTreeMap<String, Vec<StoredMessage>>,
-        }
-
-        let raw = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(_) => return Ok(()),
-        };
-        let data = crate::vault::open(&raw).unwrap_or(raw);
-        let lf: LegacyFile = match serde_json::from_slice(&data) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        let me_hex = hex::encode(me);
-        let conn = db::lock(&self.db);
-        for (peer_hex, msgs) in &lf.log {
-            let peer = match decode_key(peer_hex) { Ok(k) => k, Err(_) => continue };
-            for m in msgs {
-                let sender = if m.mine { &me_hex } else { peer_hex };
-                conn.execute(
-                    "INSERT OR IGNORE INTO chat_messages
-                         (chat, scope, id, sender, mine, text, time, status)
-                     VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    rusqlite::params![
-                        peer.as_slice(), m.id as i64, sender, m.mine as i64,
-                        &m.text, m.time, &m.status,
-                    ],
-                )?;
-            }
-        }
-        Ok(())
+    pub fn open(db: Db) -> MessageStore {
+        MessageStore { db }
     }
 
     /// Записать сообщение. Возвращает номер строки — курсор пагинации, который
@@ -1612,8 +1495,7 @@ mod tests {
 
     #[test]
     fn summaries_pick_last_message_per_chat() {
-        let me = key();
-        let store = MessageStore::open(db(), None, &me).unwrap();
+        let store = MessageStore::open(db());
         let chats: Vec<[u8; 32]> = (0..30).map(|_| key()).collect();
         let started = std::time::Instant::now();
         for (n, c) in chats.iter().enumerate() {
@@ -1638,7 +1520,7 @@ mod tests {
     fn contacts_add_persist() {
         let k1 = key();
         let k2 = key();
-        let mut store = ContactStore::open(db(), None).unwrap();
+        let mut store = ContactStore::open(db()).unwrap();
         assert_eq!(store.add(&k1, "Alice", 100).unwrap(), AddOutcome::Added);
         assert_eq!(store.add(&k2, "Bob", 200).unwrap(), AddOutcome::Added);
         assert_eq!(store.add(&k1, "Alice2", 300).unwrap(), AddOutcome::AlreadyKnown);
@@ -1653,10 +1535,10 @@ mod tests {
         let shared = db();
         let k = key();
         {
-            let mut s = ContactStore::open(shared.clone(), None).unwrap();
+            let mut s = ContactStore::open(shared.clone()).unwrap();
             s.add(&k, "Reload", 0).unwrap();
         }
-        let s2 = ContactStore::open(shared, None).unwrap();
+        let s2 = ContactStore::open(shared).unwrap();
         assert!(s2.contains(&k));
         assert_eq!(s2.get(&k).unwrap().name, "Reload");
     }
@@ -1664,7 +1546,7 @@ mod tests {
     #[test]
     fn contacts_rename_and_remove() {
         let k = key();
-        let mut store = ContactStore::open(db(), None).unwrap();
+        let mut store = ContactStore::open(db()).unwrap();
         store.add(&k, "Old", 0).unwrap();
         assert!(store.rename(&k, "New").unwrap());
         assert_eq!(store.get(&k).unwrap().name, "New");
@@ -1676,13 +1558,13 @@ mod tests {
     fn contacts_verified_flag() {
         let k = key();
         let shared = db();
-        let mut store = ContactStore::open(shared.clone(), None).unwrap();
+        let mut store = ContactStore::open(shared.clone()).unwrap();
         store.add(&k, "Eve", 0).unwrap();
         assert!(!store.get(&k).unwrap().verified);
         assert!(store.set_verified(&k, true).unwrap());
         assert!(store.get(&k).unwrap().verified);
 
-        let s2 = ContactStore::open(shared, None).unwrap();
+        let s2 = ContactStore::open(shared).unwrap();
         assert!(s2.get(&k).unwrap().verified);
     }
 
@@ -1690,7 +1572,7 @@ mod tests {
     fn contacts_profile_persists() {
         let k = key();
         let shared = db();
-        let mut store = ContactStore::open(shared.clone(), None).unwrap();
+        let mut store = ContactStore::open(shared.clone()).unwrap();
         store.add(&k, "MyNote", 0).unwrap();
         assert!(store.set_profile(&k, "TheirName", "ab12").unwrap());
         let c = store.get(&k).unwrap();
@@ -1698,7 +1580,7 @@ mod tests {
         assert_eq!(c.profile_name, "TheirName");
         assert_eq!(c.avatar_id, "ab12");
         // Персист через переоткрытие.
-        let s2 = ContactStore::open(shared, None).unwrap();
+        let s2 = ContactStore::open(shared).unwrap();
         assert_eq!(s2.get(&k).unwrap().profile_name, "TheirName");
         assert_eq!(s2.get(&k).unwrap().avatar_id, "ab12");
     }
@@ -1709,7 +1591,7 @@ mod tests {
         let alice = Identity::from_seed(&[31u8; 32]).unwrap();
         let k = alice.public_key_bytes();
         let shared = db();
-        let mut store = ContactStore::open(shared.clone(), None).unwrap();
+        let mut store = ContactStore::open(shared.clone()).unwrap();
         store.add(&k, "Алиса", 0).unwrap();
 
         // Эпоха 0: адрес совпадает с личностью — старые записи так и живут.
@@ -1737,7 +1619,7 @@ mod tests {
         assert_eq!(store.transport_of(&k), Some(tk1), "захват адреса не прошёл");
 
         // Персист через переоткрытие: адрес и эпоха переживают перезапуск.
-        let s2 = ContactStore::open(shared, None).unwrap();
+        let s2 = ContactStore::open(shared).unwrap();
         assert_eq!(s2.transport_of(&k), Some(tk1));
         assert_eq!(s2.get(&k).unwrap().transport_epoch, 1);
     }
@@ -1750,7 +1632,7 @@ mod tests {
         let k = stranger.public_key_bytes();
         let tk = stranger.transport_public(1);
         let sig = stranger.sign_transport_rotate(1, &tk);
-        let mut store = ContactStore::open(db(), None).unwrap();
+        let mut store = ContactStore::open(db()).unwrap();
         assert!(!store.apply_transport_rotate(&k, 1, &tk, &sig).unwrap());
         assert_eq!(store.transport_of(&k), None);
     }
@@ -1760,7 +1642,7 @@ mod tests {
     fn messages_append_status_history() {
         let peer = key();
         let me = key();
-        let store = MessageStore::open(db(), None, &me).unwrap();
+        let store = MessageStore::open(db());
         let (me_hex, peer_hex) = (hex::encode(me), hex::encode(peer));
         store.append(Chat::Dm(&peer), &StoredMessage { id: 1, sender: me_hex.clone(), text: "hi".into(), mine: true,  time: 10, status: "sent".into(), ..Default::default() }).unwrap();
         store.append(Chat::Dm(&peer), &StoredMessage { id: 5, sender: peer_hex, text: "yo".into(), mine: false, time: 11, status: "".into(), ..Default::default() }).unwrap();
@@ -1778,7 +1660,7 @@ mod tests {
     fn messages_clear() {
         let peer = key();
         let me = key();
-        let store = MessageStore::open(db(), None, &me).unwrap();
+        let store = MessageStore::open(db());
         store.append(Chat::Dm(&peer), &StoredMessage { id: 1, sender: hex::encode(me), text: "x".into(), mine: true, time: 0, status: "".into(), ..Default::default() }).unwrap();
         store.clear(Chat::Dm(&peer)).unwrap();
         assert!(store.history(Chat::Dm(&peer), None, 50).is_empty());
@@ -1790,7 +1672,7 @@ mod tests {
     fn group_and_dm_histories_are_separate() {
         let id32 = key();
         let me = key();
-        let store = MessageStore::open(db(), None, &me).unwrap();
+        let store = MessageStore::open(db());
         let me_hex = hex::encode(me);
         store.append(Chat::Dm(&id32), &StoredMessage { id: 1, sender: me_hex.clone(), text: "личное".into(), mine: true, time: 1, ..Default::default() }).unwrap();
         store.append(Chat::Group(&id32), &StoredMessage { id: 1, sender: me_hex.clone(), text: "групповое".into(), mine: true, time: 1, ..Default::default() }).unwrap();
@@ -1809,7 +1691,7 @@ mod tests {
     fn same_id_from_different_senders_coexists() {
         let gid = vec![7u8; 16];
         let (me, other) = (key(), key());
-        let store = MessageStore::open(db(), None, &me).unwrap();
+        let store = MessageStore::open(db());
         store.append(Chat::Group(&gid), &StoredMessage { id: 42, sender: hex::encode(me), text: "моё".into(), mine: true, time: 1, ..Default::default() }).unwrap();
         store.append(Chat::Group(&gid), &StoredMessage { id: 42, sender: hex::encode(other), text: "чужое".into(), mine: false, time: 2, ..Default::default() }).unwrap();
         assert_eq!(store.history(Chat::Group(&gid), None, 50).len(), 2);
@@ -1828,7 +1710,7 @@ mod tests {
     fn history_pages_from_the_tail_upwards() {
         let peer = key();
         let me = key();
-        let store = MessageStore::open(db(), None, &me).unwrap();
+        let store = MessageStore::open(db());
         let me_hex = hex::encode(me);
         for i in 1..=10u64 {
             store.append(Chat::Dm(&peer), &StoredMessage {
@@ -1848,62 +1730,13 @@ mod tests {
         assert!(prev.iter().all(|m| !tail.iter().any(|t| t.id == m.id)), "и без повторов");
     }
 
-    /// Переезд со старой таблицы: у сообщений появляется явный автор, а ответы
-    /// («моё/не моё») превращаются в ссылку на конкретного человека. Это данные
-    /// пользователя, поэтому проверяется отдельно от остального.
-    #[test]
-    fn legacy_messages_table_migrates_with_authors() {
-        let (me, peer) = (key(), key());
-        let shared = db();
-        {
-            // Схема ровно та, что была до объединения хранилищ.
-            let conn = crate::db::lock(&shared);
-            conn.execute_batch(
-                "CREATE TABLE messages (
-                    peer BLOB NOT NULL, id INTEGER NOT NULL, mine INTEGER NOT NULL,
-                    text TEXT NOT NULL, time INTEGER NOT NULL, status TEXT NOT NULL DEFAULT '',
-                    kind TEXT NOT NULL DEFAULT 'text', blob_id TEXT NOT NULL DEFAULT '',
-                    mime TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
-                    size INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
-                    width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0,
-                    thumb_id TEXT NOT NULL DEFAULT '', downloaded INTEGER NOT NULL DEFAULT 0,
-                    reply_to INTEGER NOT NULL DEFAULT 0, reply_mine INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (peer, id, mine))",
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO messages (peer, id, mine, text, time, status) VALUES (?1, 1, 1, 'моё', 10, 'sent')",
-                rusqlite::params![peer.as_slice()],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO messages (peer, id, mine, text, time, reply_to, reply_mine)
-                 VALUES (?1, 2, 0, 'ответ на моё', 11, 1, 1)",
-                rusqlite::params![peer.as_slice()],
-            )
-            .unwrap();
-        }
-
-        let store = MessageStore::open(shared.clone(), None, &me).unwrap();
-        let h = store.history(Chat::Dm(&peer), None, 50);
-        assert_eq!(h.len(), 2, "вся переписка переехала");
-        assert_eq!(h[0].sender, hex::encode(me), "своё сообщение — от меня");
-        assert_eq!(h[1].sender, hex::encode(peer), "чужое — от собеседника");
-        assert_eq!(h[1].reply_to, 1);
-        assert_eq!(h[1].reply_sender, hex::encode(me), "«ответ на моё» стал ссылкой на меня");
-
-        // Старой таблицы больше нет — второй прогон не задваивает историю.
-        let store2 = MessageStore::open(shared, None, &me).unwrap();
-        assert_eq!(store2.history(Chat::Dm(&peer), None, 50).len(), 2);
-    }
-
     /// Поиск находит сообщение в нужном чате, умеет искать по началу слова и не
     /// путает чаты между собой. Пустой запрос — пустой результат (иначе «поиск»
     /// вываливал бы всю переписку).
     #[test]
     fn search_finds_messages_by_prefix_and_respects_the_chat() {
         let (me, peer, other) = (key(), key(), key());
-        let store = MessageStore::open(db(), None, &me).unwrap();
+        let store = MessageStore::open(db());
         let me_hex = hex::encode(me);
         let put = |chat: Chat, id: u64, text: &str, time: i64| {
             store
@@ -1942,7 +1775,7 @@ mod tests {
     fn helpful_counter_persists_and_ignores_unknown() {
         let k = key();
         let shared = db();
-        let mut s = ContactStore::open(shared.clone(), None).unwrap();
+        let mut s = ContactStore::open(shared.clone()).unwrap();
         s.add(&k, "Helper", 0).unwrap();
         assert_eq!(s.get(&k).unwrap().helpful, 0);
         assert_eq!(s.bump_helpful(&k).unwrap(), 1);
@@ -1950,7 +1783,7 @@ mod tests {
         // Не-контакт заслуг не копит (анти-Sybil: бонус только после гейта).
         assert_eq!(s.bump_helpful(&key()).unwrap(), 0);
 
-        let s2 = ContactStore::open(shared, None).unwrap();
+        let s2 = ContactStore::open(shared).unwrap();
         assert_eq!(s2.get(&k).unwrap().helpful, 2, "репутация пережила переоткрытие");
     }
 

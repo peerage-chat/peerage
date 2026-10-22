@@ -3275,11 +3275,9 @@ impl Engine {
     ) -> Result<StartOk, String> {
         let me_pub = identity.public_key_bytes();
         let db = p2p_core::db::open(&dir).map_err(|e| format!("db: {e}"))?;
-        let contacts = ContactStore::open(db.clone(), Some(&dir.join("contacts.json")))
-            .map_err(|e| format!("contacts: {e}"))?;
+        let contacts = ContactStore::open(db.clone()).map_err(|e| format!("contacts: {e}"))?;
         let gate = GateStore::open(db.clone()).map_err(|e| format!("gate: {e}"))?;
-        let messages = MessageStore::open(db.clone(), Some(&dir.join("messages.json")), &me_pub)
-            .map_err(|e| format!("messages: {e}"))?;
+        let messages = MessageStore::open(db.clone());
         let identity_for_groups = identity.clone();
         let identity_for_engine = identity.clone();
         let (messenger, rx) =

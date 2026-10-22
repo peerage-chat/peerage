@@ -37,9 +37,8 @@ fn manager_with_store(
     msgr: Arc<Messenger>,
     dir: PathBuf,
 ) -> (GroupManager, Arc<Mutex<MessageStore>>) {
-    let me = id.public_key_bytes();
     let db = p2p_core::db::open(&dir).expect("база");
-    let store = Arc::new(Mutex::new(MessageStore::open(db, None, &me).expect("хранилище")));
+    let store = Arc::new(Mutex::new(MessageStore::open(db)));
     (GroupManager::new(id, msgr, dir, store.clone()), store)
 }
 
