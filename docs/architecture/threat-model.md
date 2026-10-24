@@ -94,11 +94,14 @@ understand them before trusting the system with sensitive conversations.
   sees the topic name, size and time of messages (not the content).
 - **N5. No protection from a malicious member inside a group.** A3 reads all group content
   within their epochs — a property of any group, not a defect.
-- **N6. Group call media is bound to the roster, but fails open.** SEC-2 is implemented
-  (`Engine::sync_room_members`): only peers from the current MLS roster are admitted to a
-  GROUP call, and a removed member drops out immediately on Remove. Residual limitation:
-  if the roster is not cached yet, the gate lets everyone in (fail-open, so as not to
-  break a legitimate call), and DM rooms are not filtered at all (there is no roster).
+- **N6. Call media is bound to membership by the gate, not by cryptography.** SEC-2 is
+  implemented (`Engine::sync_room_members`, `room_peer_allowed`): a GROUP call admits only
+  peers from the current MLS roster (an empty or not yet cached roster admits nobody —
+  fail-closed since the 2026-10 review), a removed member drops out on Remove, and a DM
+  room admits only its one contact (the room id is checked against `dm_room_id`). The
+  recipient list of our voice is built only by this filter, from the first frame on.
+  Residual limitation: media itself is not encrypted to the members (SEC-4), so the
+  guarantee holds only as far as the transport does.
 - **N7. Padding (G6) hides SIZE, but not timing, volume or channel.** What A1 still sees
   despite the buckets:
   * **timing and rate** — a conversation is recognisable by its packet rhythm; constant

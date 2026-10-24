@@ -11,7 +11,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -37,6 +37,10 @@ const MAX_PLC: u32 = 4;
 /// под разрешение/fps через [`RoomCallEngine::set_video_cap`]. Декодер пейсит вывод
 /// по wall-clock, поэтому бэклог в очереди = постоянная задержка.
 const VID_CAP_DEFAULT: usize = 9;
+
+/// Предел входящей видео-очереди участника в байтах — поверх предела в кадрах:
+/// кадр бывает до 8 МБ (`MAX_VIDEO_FRAGS`), и 60 таких — полгигабайта.
+const VID_QUEUE_BYTES: usize = 32 << 20;
 
 /// Состояние приёма одного участника: джиттер + декодер + счётчик PLC + расчет джиттера.
 struct Source {
@@ -115,7 +119,8 @@ pub struct RoomCallEngine {
     messenger: Arc<Messenger>,
     members: Arc<Mutex<Vec<PeerKey>>>,
     vid_seq: AtomicU16,
-    vid_frame_id: AtomicU16,
+    /// Номер кадра на проводе — u32: 16 бит оборачивались за 36 минут при 30 fps.
+    vid_frame_id: AtomicU32,
     /// Кап видео-очереди в кадрах (зависит от fps, см. [`set_video_fps`]).
     vid_cap: Arc<AtomicUsize>,
     /// Уровень речи на участника (0..1, сглажен): attack мгновенный, decay плавный.
@@ -196,6 +201,9 @@ impl RoomCallEngine {
                                     }
                                     while q.len() > cap { q.pop_front(); }
                                 }
+                                while q.len() > 1 && q.iter().map(|(d, _)| d.len()).sum::<usize>() > VID_QUEUE_BYTES {
+                                    q.pop_front();
+                                }
                             }
                         }
                         continue;
@@ -261,6 +269,9 @@ impl RoomCallEngine {
                     }
                     if !muted.load(Ordering::Relaxed) {
                         if let Ok(pkt) = enc.encode(&frame) {
+                            if !running.load(Ordering::Relaxed) {
+                                break;
+                            }
                             let ms = members.lock_safe();
                             for m in ms.iter() {
                                 let _ = msgr.send_media(m, TRACK_AUDIO, seq, ts, &pkt);
@@ -286,7 +297,7 @@ impl RoomCallEngine {
             messenger,
             members,
             vid_seq: AtomicU16::new(0),
-            vid_frame_id: AtomicU16::new(0),
+            vid_frame_id: AtomicU32::new(0),
             vid_cap,
             levels: Mutex::new(HashMap::new()),
             target_bitrate,
@@ -305,7 +316,7 @@ impl RoomCallEngine {
 
     /// Закодированный H264 access-unit → фрагментация + мультикаст всем участникам.
     pub fn push_video(&self, frame: &[u8], keyframe: bool) {
-        let frame_id = self.vid_frame_id.fetch_add(1, Ordering::Relaxed) as u32;
+        let frame_id = self.vid_frame_id.fetch_add(1, Ordering::Relaxed);
         let fragments = fragment_video(frame, frame_id, keyframe);
         let members = self.members.lock_safe();
         for chunk in &fragments {
@@ -420,8 +431,18 @@ impl RoomCallEngine {
         self.muted.store(m, Ordering::Relaxed);
     }
 
-    pub fn stop(&self) {
+    /// Немедленно прекратить отправку и приём, не дожидаясь потоков: адресатов
+    /// больше нет, а поток отправки выходит на следующем кадре. Это и есть
+    /// «положить трубку» — оно не стоит ни в какой очереди за входящим трафиком
+    /// (класс Signal RingRTC CVE-2026-113380). Дождаться потоков — [`stop`].
+    pub fn halt(&self) {
         self.running.store(false, Ordering::Relaxed);
+        self.members.lock_safe().clear();
+        self.in_ring.lock_safe().clear();
+    }
+
+    pub fn stop(&self) {
+        self.halt();
         for h in self.threads.lock_safe().drain(..) {
             let _ = h.join();
         }

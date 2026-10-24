@@ -197,6 +197,21 @@ is a group that can no longer be loaded, for the profile a lost identity.
 The reader sees either the old version or the new one in full. The same applies to blobs
 (small ones through `write_atomic`, large ones are assembled in a `.part` file and renamed).
 
+## 12. Hanging up is never queued behind the peer — ✅
+
+A call peer controls how much traffic reaches us. If our own "hang up" waits in a queue
+that the peer's traffic also feeds, the peer can keep our microphone live after we hang up
+(Signal RingRTC CVE-2026-113380: a flooded call event queue).
+
+> **Leaving a call stops sending at once and on its own path.** In the engine
+> `RoomCallEngine::halt` (no recipients, running flag down) runs before
+> `room_audio_stop` returns; the threads are joined in the background. In the client the
+> teardown runs on its own thread, not on `ops`. Because the call START lives on `ops`,
+> start and teardown share a lock and a call generation: a start queued before the
+> hang-up sees the new generation and does nothing.
+
+Guard test: `engine/tests/gate_rooms.rs::hangup_stops_our_audio_at_once_under_peer_flood`.
+
 ---
 Related: [tokens.md](../design/tokens.md), [ADR-003](../adr/ADR-003-engine-api.md) (engine
 ↔ client boundary), [ADR-007](../adr/ADR-007-identity-transport-key-split.md) (identity vs

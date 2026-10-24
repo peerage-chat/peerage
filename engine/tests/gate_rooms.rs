@@ -144,3 +144,85 @@ fn contact_still_rings() {
 
     std::mem::forget(net);
 }
+
+/// Класс Signal RingRTC CVE-2026-113380: участник звонка заваливает нас трафиком,
+/// а мы кладём трубку. Отправка нашего голоса обязана погаснуть сразу — выход не
+/// стоит ни в какой очереди за входящим. «Микрофон» A продолжает подавать звук и
+/// после выхода (захват на устройстве останавливается своим путём и может
+/// запоздать) — до собеседника не должно дойти ничего.
+#[test]
+fn hangup_stops_our_audio_at_once_under_peer_flood() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let net = LoopbackNet::new();
+    let (a_id, m_id) = (id(78), id(79));
+    let (a_key, m_key) = (a_id.public_key_bytes(), m_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a-flood"));
+    let m = Arc::new(attacker(&net, m_id));
+    let heard = m.media_channel(8192);
+    a.add_contact(&m_key, "M");
+
+    let room = a.room_invite_dm(m_key, true, false);
+    m.send_room_presence(&a_key, &room, 0b01).unwrap();
+    assert!(wait(15, || in_room(&a, &room, &m_key)), "M в комнате A");
+    let params = json(&a.room_audio_start(room.clone(), 0, false));
+    let frame = params["frame_len"].as_u64().unwrap() as usize;
+
+    // Флуд от M: медиа и маячки, без пауз.
+    let stop_flood = Arc::new(AtomicBool::new(false));
+    let flood = {
+        let (m, stop, room) = (m.clone(), stop_flood.clone(), room.clone());
+        std::thread::spawn(move || {
+            let junk = vec![0u8; 1000];
+            let mut seq = 0u16;
+            while !stop.load(Ordering::Relaxed) {
+                let _ = m.send_media(&a_key, p2p_core::media::TRACK_VIDEO, seq, 0, &junk);
+                if seq % 64 == 0 {
+                    let _ = m.send_room_presence(&a_key, &room, 0b01);
+                }
+                seq = seq.wrapping_add(1);
+            }
+        })
+    };
+    // «Микрофон» A: подаёт звук всё время теста, в том числе после выхода.
+    let mic_on = Arc::new(AtomicBool::new(true));
+    let mic = {
+        let (a, on) = (a.clone(), mic_on.clone());
+        std::thread::spawn(move || {
+            let tone: Vec<i16> = (0..frame).map(|i| if i % 2 == 0 { 8000 } else { -8000 }).collect();
+            while on.load(Ordering::Relaxed) {
+                a.room_push_audio(&tone);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        })
+    };
+    let is_audio = |p: &p2p_messenger::MediaPacket| p.src == a_key && p.track == p2p_core::media::TRACK_AUDIO;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut got = false;
+    while !got && Instant::now() < deadline {
+        got = heard.recv_timeout(Duration::from_millis(100)).is_ok_and(|p| is_audio(&p));
+    }
+    assert!(got, "до выхода голос A доходит до M");
+
+    let t = Instant::now();
+    a.room_audio_stop();
+    a.room_leave(room.clone());
+    let took = t.elapsed();
+    assert!(took < Duration::from_millis(250), "выход под флудом занял {took:?}");
+
+    // То, что уже было в пути, дочитываем; дальше — ни одного кадра голоса.
+    std::thread::sleep(Duration::from_millis(100));
+    while heard.try_recv().is_ok() {}
+    let window = Instant::now() + Duration::from_millis(700);
+    let mut leaked = 0;
+    while Instant::now() < window {
+        if heard.recv_timeout(Duration::from_millis(50)).is_ok_and(|p| is_audio(&p)) {
+            leaked += 1;
+        }
+    }
+    mic_on.store(false, Ordering::Relaxed);
+    stop_flood.store(true, Ordering::Relaxed);
+    let _ = (mic.join(), flood.join());
+    assert_eq!(leaked, 0, "после выхода голос A не уходит собеседнику");
+
+    std::mem::forget(net);
+}

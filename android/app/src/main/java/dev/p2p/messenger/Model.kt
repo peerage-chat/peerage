@@ -869,6 +869,25 @@ class AppModel private constructor() {
 
     @Volatile private var roomAudio: CallAudio? = null
 
+    /**
+     * «Положить трубку» не стоит в очереди. Выход разбирает звонок своим потоком,
+     * а не через [ops]: в [ops] попадает и работа, вызванная событиями из сети, и
+     * собеседник не должен суметь задержать остановку нашего микрофона (класс Signal
+     * RingRTC CVE-2026-113380). Но старт медиа живёт в [ops], и выход мог бы его
+     * обогнать — тогда микрофон включился бы ПОСЛЕ выхода. Поэтому у звонка есть
+     * поколение ([callGen], растёт на каждом выходе), а старт и разбор идут под одним
+     * замком ([callLock]): разбор либо застанет запущенное и остановит его, либо
+     * отложенный старт увидит новое поколение и не начнётся.
+     */
+    private val callGen = java.util.concurrent.atomic.AtomicInteger()
+    private val callLock = Any()
+
+    /** Выполнить старт звонка в [ops], если звонок за это время не завершили. */
+    private fun startCall(block: () -> Unit) {
+        val gen = callGen.get()
+        ops.execute { synchronized(callLock) { if (callGen.get() == gen) block() } }
+    }
+
     @Volatile private var videoSender: VideoSender? = null
 
     /** Приёмники видео per-peer: тайл сетки даёт surface → приёмник на этого пира.
@@ -1954,9 +1973,9 @@ class AppModel private constructor() {
         if (currentRoom != null) return
         val ctx = appContext ?: return
         val name = contacts.firstOrNull { it.key == peer }?.displayName ?: ""
-        ops.execute {
+        startCall {
             val roomId = Native.roomInviteDm(sessionPtr, peer, audio, video)
-            if (roomId.isEmpty()) return@execute
+            if (roomId.isEmpty()) return@startCall
             currentRoom = roomId
             dmCallPeer = peer
             roomMembers.clear()
@@ -1980,9 +1999,9 @@ class AppModel private constructor() {
         }
         val name = contacts.firstOrNull { it.key == ic.peer }?.displayName ?: ""
         muted = !audio // мик-пресет → стартовое состояние мьюта
-        ops.execute {
+        startCall {
             val roomId = Native.roomJoinDm(sessionPtr, ic.peer, audio, video)
-            if (roomId.isEmpty()) return@execute
+            if (roomId.isEmpty()) return@startCall
             currentRoom = roomId
             dmCallPeer = ic.peer
             roomMembers.clear()
@@ -2187,7 +2206,7 @@ class AppModel private constructor() {
         roomMembers.clear()
         val ctx = appContext ?: return
         val name = groups.firstOrNull { it.gid == gid }?.name ?: ""
-        ops.execute {
+        startCall {
             Native.roomJoin(sessionPtr, gid, audio, video)
             CallService.start(ctx, name)
             startRoomMedia(ctx, gid, video)
@@ -2207,26 +2226,28 @@ class AppModel private constructor() {
         roomMembers.clear()
         muted = false
         micLevel = 0f // вывод (audioOut) теперь персистится как настройка — не сбрасываем
-        val a = roomAudio
-        roomAudio = null
-        val vs = videoSender
-        videoSender = null
+        callGen.incrementAndGet() // отложенный старт этого звонка уже не начнётся
         val vrs = videoReceivers.values.toList()
         videoReceivers.clear()
         val ctx = appContext
-        ops.execute {
-            // RoomDecline шлём ТОЛЬКО чтобы отменить ДОЗВОН (пир ещё не вошёл) → у
-            // него гаснет экран входящего+уведомление. Выход из АКТИВНОЙ комнаты —
-            // только presence LEFT (roomLeave): пир ОСТАЁТСЯ в комнате (комнатная
-            // модель), мы не «кладём ему трубку».
-            if (peer != null && !peerPresent) Native.roomDeclineDm(sessionPtr, peer)
-            Native.roomLeave(sessionPtr, gid)
-            Native.roomAudioStop(sessionPtr)
-            if (ctx != null) CallService.stop(ctx)
-        }
+        // Мимо ops — см. [callGen]. Сначала гасим отправку и захват, потом остальное.
         Thread {
-            runCatching { a?.stop() }
-            runCatching { vs?.stop() }
+            synchronized(callLock) {
+                Native.roomAudioStop(sessionPtr)
+                val a = roomAudio
+                roomAudio = null
+                val vs = videoSender
+                videoSender = null
+                runCatching { a?.stop() }
+                runCatching { vs?.stop() }
+                // RoomDecline шлём ТОЛЬКО чтобы отменить ДОЗВОН (пир ещё не вошёл) → у
+                // него гаснет экран входящего+уведомление. Выход из АКТИВНОЙ комнаты —
+                // только presence LEFT (roomLeave): пир ОСТАЁТСЯ в комнате (комнатная
+                // модель), мы не «кладём ему трубку».
+                if (peer != null && !peerPresent) Native.roomDeclineDm(sessionPtr, peer)
+                Native.roomLeave(sessionPtr, gid)
+                if (ctx != null) CallService.stop(ctx)
+            }
             vrs.forEach { runCatching { it.stop() } }
         }.apply { isDaemon = true }.start()
     }

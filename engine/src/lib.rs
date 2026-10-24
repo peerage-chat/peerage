@@ -2189,18 +2189,25 @@ impl Engine {
                 p2p_core::settings::OpusMode::Voip
             };
         }
-        let members = Arc::new(Mutex::new(self.live_participants(&gid)));
+        // Адресаты — пусто до сверки: список собирает только sync_room_members, по
+        // тем же правилам, что и дальше по ходу звонка (DM-собеседник / ростер).
+        let members = Arc::new(Mutex::new(Vec::new()));
         let engine = RoomCallEngine::start(self.messenger.clone(), audio, members.clone());
         let old = self.room_call.lock_safe().replace(RoomCall { gid, engine, members });
         if let Some(old) = old {
+            old.engine.halt();
             std::thread::spawn(move || old.engine.stop());
         }
+        self.sync_room_members();
         call_params(&audio)
     }
 
+    /// Остановить звук комнаты. Отправка гаснет до возврата (`halt`), потоки
+    /// дожидаются в фоне.
     pub fn room_audio_stop(&self) {
         let rc = self.room_call.lock_safe().take();
         if let Some(rc) = rc {
+            rc.engine.halt();
             std::thread::spawn(move || rc.engine.stop());
         }
     }
