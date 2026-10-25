@@ -1,9 +1,10 @@
 # ADR-012: 1:1 session v2 — an interactive hybrid post-quantum handshake with rekeying
 
-**Status:** Proposed (2026-10-25) — waiting for the owner's decision on the open questions
-at the end. Nothing is implemented yet.
+**Status:** Accepted (2026-10-25). Implementation in progress (beta plan, step 3).
 **Date:** 2026-10-25
-**Decided by:** project owner (pending)
+**Decided by:** project owner — approach A, rekey every 2 minutes, a separate static key
+signed by the identity (which turns the pattern from IK into XX, see below); the ML-KEM
+crate was left to the implementer (`libcrux-ml-kem`).
 **Related:** [ADR-011](ADR-011-post-quantum.md) (post-quantum transition, item 1),
 [ADR-007](ADR-007-identity-transport-key-split.md) (identity vs address),
 [threat model](../architecture/threat-model.md), [security audit](../architecture/security-audit-2026-07-02.md)
@@ -44,7 +45,7 @@ pair of people never changes.** That gives us three problems at once:
 
 | | Option | FS | PQ | New state at rest | Our own crypto code | Verdict |
 |---|---|---|---|---|---|---|
-| **A** | **Interactive Noise IK + hybrid KEM (HFS), WireGuard-style rekeying** | per session (minutes) | yes (KEM in handshake) | none | handshake ≈ one Noise pattern | **recommended** |
+| **A** | **Interactive Noise handshake + hybrid KEM (HFS), WireGuard-style rekeying** | per session (minutes) | yes (KEM in handshake) | none | handshake ≈ one Noise pattern | **chosen** |
 | B | `vodozemac` (Matrix Olm: 3DH + Double Ratchet) | per message | **no** — Olm has no PQ; would need our own wrapper around it | ratchet state per pair, every message | wrapper + glue | contradicts the PQ goal |
 | C | Our own Double Ratchet + PQXDH-style start | per message | yes | ratchet state per pair, every message | the most: ratchet, skipped keys, PQXDH | largest risk, solves a problem we don't have |
 | D | 1:1 as a two-member MLS group | per epoch | **no** until openmls ships a PQ ciphersuite | MLS state per pair | little | revisit when openmls has X-Wing |
@@ -63,32 +64,42 @@ practical difference is small, and the failure modes of A are far simpler.
 
 ## Decision (proposed)
 
-### Handshake: `Noise_IKhfs_25519+MLKEM768_ChaChaPoly_BLAKE2s`
+### Handshake: `Noise_XXhfs_25519+MLKEM768_ChaChaPoly_BLAKE2s` + `mac1`
 
-- **IK:** the initiator already knows the responder's static key — it is derived from the
-  peer's identity, which is how a contact is added at all.
-- **Static keys:** X25519, converted from the Ed25519 identity — the same key the Box uses
-  today, so the number of protocols sharing the key does not grow (SEC-5 stays as it is;
-  a signed, domain-separated static key is an open question below).
-- **Hybrid (HFS tokens):** the first message carries an ephemeral ML-KEM-768 encapsulation
-  key; the second carries the KEM ciphertext; the shared secret is mixed into the chaining
-  key together with the X25519 results. Breaking the session needs breaking **both**
-  X25519 and ML-KEM. Authentication stays classical — ADR-011: a signature is forged at
-  the moment of an attack, encryption is broken retroactively; KEM first.
+- **Static keys are separate from the identity (closes SEC-5 for 1:1).** Each side has a
+  static X25519 key derived from its seed with its own domain label
+  (`dev.p2p.session-static.v1`) and **signed by the Ed25519 identity**. The signature
+  travels in the handshake payload next to the identity key; the receiver checks it and
+  that the identity is the one it expects. Precedent: libp2p's Noise handshake signs its
+  static key with the peer's identity key the same way.
+- **XX, not IK.** IK requires the initiator to know the responder's static key in advance,
+  and a separate static key cannot be derived from the identity — that is its point. In XX
+  the statics are exchanged inside the handshake.
+- **Hybrid (HFS tokens):** message 1 carries an ephemeral ML-KEM-768 encapsulation key,
+  message 2 the KEM ciphertext; the KEM secret is mixed into the chaining key together
+  with the X25519 results. Breaking a session needs breaking **both** X25519 and ML-KEM.
+  Authentication stays classical — ADR-011: a signature is forged at the moment of an
+  attack, encryption is broken retroactively; KEM first.
 
 ```
-  -> e, es, s, ss, e1          (e1 = ephemeral ML-KEM-768 encapsulation key)
-  <- e, ee, se, ekem1          (ekem1 = ML-KEM ciphertext to e1; its secret is mixed in)
+  -> e, e1                        + mac1   (e1 = ephemeral ML-KEM-768 encapsulation key)
+  <- e, ee, ekem1, s, es          payload: responder identity + signature over its static
+  -> s, se                        payload: initiator identity + signature, then data
 ```
 
-- **No application data in the first message** (its payload would have weaker
-  guarantees). Data flows only after the handshake completes: one extra round trip on a
-  cold session, nothing on a warm one.
-- **The initiator's identity is encrypted** inside message 1 (`s` token). Transport
-  messages carry only a random session index — **the identity no longer travels in clear.**
-- Sizes: message 1 ≈ 32 + 48 + 1 184 + 16 ≈ 1.3 KB, message 2 ≈ 32 + 1 088 + 16 ≈ 1.2 KB.
-  Both are padded to the APP bucket (4 KiB) — the M5 size-indistinguishability test must
-  cover them.
+- **Probe resistance (`mac1`, as in WireGuard).** In XX the responder reveals its identity
+  in message 2 — so anyone who learned a new address could ask "whose is it?", which would
+  undo address rotation (ADR-007). Message 1 therefore carries
+  `mac1 = MAC(HASH("mac1" || responder_identity_pub), message1)`: only someone who already
+  knows our identity can produce it, and without it we stay silent.
+- **Round trips:** the initiator's first data rides in message 3 — one round trip before
+  the first message on a cold session, as with IK without 0-RTT data. Nothing on a warm
+  session.
+- **Both identities are encrypted** inside the handshake. Transport messages carry only a
+  random session index — **the identity no longer travels in clear.**
+- Sizes: message 1 ≈ 32 + 1 184 + 16 ≈ 1.2 KB, message 2 ≈ 32 + 1 104 + 48 + 112 ≈ 1.3 KB,
+  message 3 ≈ 48 + 112 + data. All padded to the APP bucket (4 KiB) — the M5
+  size-indistinguishability test must cover them.
 
 ### Session lifetime (WireGuard model)
 
@@ -129,9 +140,9 @@ practical difference is small, and the failure modes of A are far simpler.
 
 ## Verification plan (part of the work, not after it)
 
-1. **Classical core against official vectors:** the Noise state machine (MixKey/MixHash/
-   Split) is checked against the published Noise test vectors for `Noise_IK_25519_ChaChaPoly_BLAKE2s`
-   before the HFS tokens are added.
+1. **Classical core against a reference:** the Noise state machine (MixKey/MixHash/
+   Split) runs `Noise_XX_25519_ChaChaPoly_BLAKE2s` against `snow` with fixed keys and
+   must produce byte-identical messages before the HFS tokens are added.
 2. **Primitives from verified/audited crates:** ML-KEM from `libcrux-ml-kem` (formally
    verified with hax/F*, pre-1.0) or RustCrypto `ml-kem` (open question); X25519 and
    ChaCha20-Poly1305 from the crates we already use.
@@ -150,17 +161,13 @@ The wire format breaks (envelope v1 is removed — no backward compatibility bef
 see the compatibility policy). **Stored data does not change** (the outbox holds payloads,
 not ciphertext), so no `pm clear` is needed; both devices must simply run the new build.
 
-## Open questions for the owner
+## Decisions taken (2026-10-25)
 
-1. **Approach:** A (recommended) vs B/C (per-message FS with persisted ratchet state).
-2. **Rekey interval:** 2 min (WireGuard; more handshakes, ~2.5 KB each per active pair)
-   or 5–10 min (fewer handshakes, a wider window if a device is compromised mid-session).
-3. **ML-KEM crate:** `libcrux-ml-kem` (formally verified, pre-1.0, maintainers ask to be
-   contacted for production) vs RustCrypto `ml-kem` (pure Rust, widely used, not
-   independently audited). The hybrid keeps X25519 as the safety net either way.
-4. **Noise implementation:** our own minimal implementation of this one pattern (≈300
-   lines, checked against official vectors) vs `snow` — which, as far as I could find, has
-   no ML-KEM support (only an old Kyber draft behind its HFS feature).
-5. **Static key:** keep the converted identity key (as today) or a domain-separated
-   static key signed by the identity (closes SEC-5 fully, costs a signature and 64 bytes
-   in message 1).
+1. **Approach A.**
+2. **Rekey every 2 minutes** (WireGuard's value).
+3. **ML-KEM: `libcrux-ml-kem`** — formally verified (hax/F*); it is pre-1.0, and the
+   hybrid keeps X25519 as the safety net if the young implementation turns out wrong.
+4. **Noise: our own minimal implementation of exactly this pattern.** `snow` has no
+   ML-KEM; it is used in tests only, as a reference for the classical XX part (same
+   inputs → byte-identical messages).
+5. **A separate static key signed by the identity** → pattern XX + `mac1` (above).
