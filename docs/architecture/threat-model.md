@@ -246,14 +246,18 @@ understand them before trusting the system with sensitive conversations.
   * **the KDF parameters are recorded in every file** (profile number). Otherwise raising
     the cost in a future version would make old backups unreadable with a "wrong
     password" message — and a person would delete their data thinking they mistyped.
-- **N11. A quantum adversary is outside the v1.0 model.** All asymmetric crypto is
-  classical (Ed25519, X25519 — in our packets, in MLS and in the Yggdrasil transport). The
-  symmetric part (XChaCha20-Poly1305, AES-256 in the database) holds. The practical threat
-  is not "broken tomorrow" but **"harvest now, decrypt later"**: traffic intercepted today
-  is kept until a cryptographically relevant quantum computer exists. Order of work and
-  what depends on upstream (`openmls`, Yggdrasil) — [ADR-011](../adr/ADR-011-post-quantum.md);
-  1.0 closes it with a hybrid KEM for personal messages, signatures come with identity 2.0
-  ([ADR-010](../adr/ADR-010-identity-v2-multidevice.md)).
+- **N11. Post-quantum: confidentiality yes, authentication no.** The practical threat is
+  **"harvest now, decrypt later"**: traffic intercepted today is kept until a
+  cryptographically relevant quantum computer exists. Every packet between two peers —
+  DM, call media, and all MLS group traffic — travels inside a 1:1 session keyed by
+  X25519 **and** ML-KEM-768 (G7), so a recording of the mesh stays closed. Inside that,
+  MLS itself is classical (X25519 HPKE) — deliberately, see
+  [ADR-013](../adr/ADR-013-mls-ciphersuite.md): there is no PQ defence in depth for groups if
+  the session layer were broken. Signatures (Ed25519) and the Yggdrasil transport are
+  classical: a quantum attacker could impersonate in the future and see who talks to whom,
+  not read the past. Signatures come with identity 2.0
+  ([ADR-010](../adr/ADR-010-identity-v2-multidevice.md)); order of work —
+  [ADR-011](../adr/ADR-011-post-quantum.md).
 - **N12. One identity — one device.** A key cannot be copied to a second phone (two devices
   under one MLS leaf break the group for all members), and a data backup brings back the
   history but not the membership. The solution is recorded in
@@ -279,9 +283,11 @@ In order of return on risk (details in the [audit document](security-audit-2026-
    old key drops out of the tree). A relay (post-1.0, not planned) would cut the stream
    without going offline, but we do not bring an upstream into a serverless design.
 7. **N11, post-quantum** ([ADR-011](../adr/ADR-011-post-quantum.md)): a hybrid KEM
-   (X25519 + ML-KEM-768) for personal messages and the 256-bit MLS suite — in 1.0;
-   signatures (ML-DSA) together with identity 2.0, otherwise the format breaks twice. MLS
-   and the transport stay classical until upstream moves, and we say so plainly.
+   (X25519 + ML-KEM-768) in the 1:1 sessions — ✅ done (ADR-012), covers groups too since
+   all MLS traffic rides those sessions; MLS keeps its 128-bit suite
+   ([ADR-013](../adr/ADR-013-mls-ciphersuite.md), with the conditions to revisit).
+   Signatures (ML-DSA) together with identity 2.0, otherwise the format breaks twice. The
+   transport stays classical until upstream moves, and we say so plainly.
 8. **N12, multi-device** ([ADR-010](../adr/ADR-010-identity-v2-multidevice.md)): the root
    signs the list of devices, each device is its own leaf in MLS. After 1.0.
 9. **N9, transit incentives** (post-1.0, [ADR-008](../adr/ADR-008-proof-of-transit.md)):

@@ -1,6 +1,9 @@
 # ADR-011: The post-quantum transition — what, in which order, and what we wait for upstream
 
-**Status:** Accepted (decision recorded 2026-08-03). 1.0 includes a hybrid KEM for personal
+**Status:** Accepted (decision recorded 2026-08-03). Item 1 implemented by
+[ADR-012](ADR-012-dm-session-v2.md) (2026-10-25); item 2 revised by
+[ADR-013](ADR-013-mls-ciphersuite.md) (2026-10-26) — MLS stays 128-bit, groups get PQ from the
+1:1 sessions. 1.0 includes a hybrid KEM for personal
 messages and raising the symmetric strength of MLS; replacing signatures comes together with
 [ADR-010](ADR-010-identity-v2-multidevice.md) (a shared identity format).
 **Date:** 2026-08-03
@@ -37,6 +40,8 @@ wipe out what already works. No upstream is needed, the envelope is versioned, a
 **2. Symmetric strength of MLS — in 1.0, cheap.**
 Move from `MLS_128_*` to the 256-bit suite. It relates to quantum only indirectly (Grover),
 but it is a one-day change and settles the question "why 128 bits".
+*Revised by [ADR-013](ADR-013-mls-ciphersuite.md):* it is not a one-day change — the only
+256-bit suite that keeps Ed25519 is the draft X-Wing one, 7–10× larger group messages.
 
 **3. Signatures (Ed25519 → ML-DSA) — together with ADR-010, after 1.0.**
 Not because it is expensive in itself, but because of sizes: an ML-DSA-44 signature is 2420

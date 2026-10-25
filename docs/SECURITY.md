@@ -19,9 +19,11 @@ All audits so far are internal. There has been no external audit.
 - **Forward secrecy and post-compromise security.** In groups this comes from MLS. For
   1:1 messages it comes from our own session layer (ADR-012): fresh ephemeral keys every
   2 minutes, kept in memory only.
-- **Post-quantum confidentiality of 1:1 messages.** The 1:1 key exchange is hybrid
-  (X25519 + ML-KEM-768): recorded traffic stays secret unless both are broken.
-  Authentication is classical (ADR-011).
+- **Post-quantum confidentiality on the wire.** The 1:1 key exchange is hybrid
+  (X25519 + ML-KEM-768): recorded traffic stays secret unless both are broken. All group
+  (MLS) traffic and call media ride these sessions too; MLS itself stays on its classical
+  128-bit suite ([ADR-013](adr/ADR-013-mls-ciphersuite.md)). Authentication is classical
+  (ADR-011).
 - **Protection from a man in the middle at first contact.** Users can compare a visual
   fingerprint out of band (in person or by QR) and mark the contact verified.
 - **At rest.** A seized or stolen device does not give away the identity key or the
@@ -42,7 +44,8 @@ reveals activity), a compromised operating system, physical access to an unlocke
   ChaCha20-Poly1305 with a counter nonce and a replay window. The static key is separate
   from the identity and signed by it; the identity travels only encrypted. Rekey every
   2 minutes.
-- **Groups:** MLS (RFC 9420, openmls 0.8) — TreeKEM, FS/PCS, signatures bound to ed25519.
+- **Groups:** MLS (RFC 9420, openmls 0.8), `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`
+  ([ADR-013](adr/ADR-013-mls-ciphersuite.md)) — TreeKEM, FS/PCS, signatures bound to ed25519.
 - **Transport:** the ironwood `iwe` session layer (ratchet, FS, anti-replay) over the mesh.
 - **Wire padding:** every payload is padded to one of three size buckets (256 B / 4 KiB /
   25 KiB), so message classes are indistinguishable by size (threat model G6/N7).
