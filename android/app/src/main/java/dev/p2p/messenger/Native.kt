@@ -144,8 +144,16 @@ object Native {
      *  `личность:эпоха:адрес:подпись` (ADR-007). Возвращает "added"|"known"|"error". */
     external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
 
-    /** Текст в группу ответом на сообщение автора `replySender` (hex). */
-    external fun groupSendTextReply(sessionPtr: Long, gidHex: String, text: String, replyTo: Long, replySender: String)
+    /** Текст в группу ответом на сообщение автора `replySender` (hex; `replyTo = 0` —
+     *  не ответ). `mentionsJson` — `[{"at","len","key"}]`, смещения в байтах UTF-8. */
+    external fun groupSendTextReply(
+        sessionPtr: Long,
+        gidHex: String,
+        text: String,
+        replyTo: Long,
+        replySender: String,
+        mentionsJson: String,
+    )
 
     /** Удалить групповые сообщения у себя. `refsJson` = `[{"id":…,"sender":"hex"}]`. */
     external fun groupDeleteMessages(sessionPtr: Long, gidHex: String, refsJson: String)
@@ -251,13 +259,15 @@ object Native {
         limit: Int,
     ): String
 
-    /** Исправить СВОЁ сообщение (текст или подпись вложения). 1 — получилось. */
+    /** Исправить СВОЁ сообщение (текст или подпись вложения). 1 — получилось.
+     *  `mentionsJson` — упоминания новой версии текста (только группа, иначе `[]`). */
     external fun editMessage(
         sessionPtr: Long,
         chatHex: String,
         isGroup: Boolean,
         msgId: Long,
         text: String,
+        mentionsJson: String,
     ): Int
 
     /** Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми. */

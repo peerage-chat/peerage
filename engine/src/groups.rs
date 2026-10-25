@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use p2p_core::mention::Mention;
 use p2p_core::store::{Chat, GroupInviteRecord, GroupStore, MessageStore, StoredMessage};
 use p2p_core::Identity;
 use p2p_group::peek_group_id;
@@ -412,11 +413,12 @@ impl GroupManager {
         reply_to: u64,
         reply_sender: &str,
     ) -> bool {
-        self.send_text_full(gid, text, reply_to, reply_sender, "", false)
+        self.send_text_full(gid, text, reply_to, reply_sender, "", false, Vec::new())
     }
 
     /// Общий путь: обычный текст, ответ и пересылка (`fwd_from` — hex автора
-    /// исходного сообщения, пусто — своё).
+    /// исходного сообщения, пусто — своё) с упоминаниями.
+    #[allow(clippy::too_many_arguments)]
     pub fn send_text_full(
         &mut self,
         gid: &[u8],
@@ -425,12 +427,16 @@ impl GroupManager {
         reply_sender: &str,
         fwd_from: &str,
         fwd_anon: bool,
+        mentions: Vec<Mention>,
     ) -> bool {
         let Some(e) = self.groups.get_mut(gid) else { return false };
         // id посеян временем в миллисекундах: он должен быть уникален только в
         // пределах отправителя (ссылка — пара «автор + id»).
         let id = now_ms();
-        if e.chat.send_text_full(text, id, reply_to, reply_sender, fwd_from, fwd_anon).is_err() {
+        // У себя храним ровно то, что ушло в сеть — чистка та же, что в слое групп.
+        let mentions = p2p_core::mention::clean(text, mentions);
+        let sent = e.chat.send_text_full(text, id, reply_to, reply_sender, fwd_from, fwd_anon, &mentions);
+        if sent.is_err() {
             return false;
         }
         self.put(gid, &StoredMessage {
@@ -442,6 +448,7 @@ impl GroupManager {
             kind: "text".into(),
             fwd_from: fwd_from.to_string(),
             fwd_anon,
+            mentions,
             text: text.to_string(), mine: true, time: now(),
             sender: self.me_hex.clone(), ..Default::default()
         });
@@ -484,19 +491,26 @@ impl GroupManager {
 
     /// Исправить СВОЁ сообщение в группе. Возвращает `(автор, текст)` при успехе.
     /// Чужое править нельзя: подменять чужие слова — это не редактирование.
-    pub fn edit(&mut self, gid: &[u8], id: u64, text: &str) -> Option<(String, String)> {
+    pub fn edit(
+        &mut self,
+        gid: &[u8],
+        id: u64,
+        text: &str,
+        mentions: &[Mention],
+    ) -> Option<(String, String, Vec<Mention>)> {
         let me = self.me_hex.clone();
         if !self.messages.lock_safe().contains(Chat::Group(gid), &me, id) {
             return None;
         }
         let e = self.groups.get_mut(gid)?;
-        if e.chat.send_edit(id, text).is_err() {
+        let mentions = p2p_core::mention::clean(text, mentions.to_vec());
+        if e.chat.send_edit(id, text, &mentions).is_err() {
             return None;
         }
-        let _ = self.messages.lock_safe().edit_text(Chat::Group(gid), &me, id, text, now());
+        let _ = self.messages.lock_safe().edit_text(Chat::Group(gid), &me, id, text, &mentions, now());
         // Рассылка двигает MLS-ратчет — состояние обязано лечь на диск.
         self.save_group(gid);
-        Some((me, text.to_string()))
+        Some((me, text.to_string(), mentions))
     }
 
     /// Закрепить/открепить сообщение в группе. Право — только у админа (ADR-004):
@@ -721,7 +735,7 @@ impl GroupManager {
             let inbound = self.groups.get_mut(&gid).map(|e| e.chat.handle(data));
             let outcome = match inbound {
                 Some(Ok(Inbound::Message {
-                    sender, text, id, reply_to, reply_sender, fwd_from, fwd_anon,
+                    sender, text, id, reply_to, reply_sender, fwd_from, fwd_anon, mentions,
                 })) => {
                     let sender_hex = hex::encode(sender);
                     self.put(&gid, &StoredMessage {
@@ -730,6 +744,7 @@ impl GroupManager {
                         reply_sender,
                         fwd_from,
                         fwd_anon,
+                        mentions,
                         kind: "text".into(),
                         text: text.clone(), mine: false, time: now(),
                         sender: sender_hex.clone(), ..Default::default()
@@ -738,16 +753,16 @@ impl GroupManager {
                         gid: Some(gid.clone()), ..Default::default()
                     }
                 }
-                Some(Ok(Inbound::Edit { sender, target, text })) => {
+                Some(Ok(Inbound::Edit { sender, target, text, mentions })) => {
                     let who = hex::encode(sender);
                     let changed = self
                         .messages
                         .lock_safe()
-                        .edit_text(Chat::Group(&gid), &who, target, &text, now())
+                        .edit_text(Chat::Group(&gid), &who, target, &text, &mentions, now())
                         .unwrap_or(false);
                     GroupOutcome {
                         gid: Some(gid.clone()),
-                        edited: changed.then(|| (who, target, text)),
+                        edited: changed.then(|| (who, target, text, mentions)),
                         ..Default::default()
                     }
                 }
@@ -989,8 +1004,8 @@ impl GroupManager {
 #[derive(Default)]
 pub struct GroupOutcome {
     pub gid: Option<Vec<u8>>,
-    /// Сообщение исправлено автором: `(автор, id, новый текст)`.
-    pub edited: Option<(String, u64, String)>,
+    /// Сообщение исправлено автором: `(автор, id, новый текст, упоминания)`.
+    pub edited: Option<(String, u64, String, Vec<Mention>)>,
     /// Список закреплённых изменился — UI перечитать шапку чата.
     pub pinned: bool,
     pub joined: bool,

@@ -76,8 +76,26 @@ internal fun GroupChatScreen(model: AppModel) {
     val isAdmin = model.groups.firstOrNull { it.gid == gid }?.admin == true
     LaunchedEffect(gid) { model.refreshPins(gid, group = true) }
     var input by remember(gid) { mutableStateOf("") }
+    // Кого человек выбрал из подсказки «@»: ключ → вставленное имя. При отправке
+    // каждое «@имя», ещё живое в тексте, становится ссылкой на этого человека.
+    var picked by remember(gid) { mutableStateOf(mapOf<String, String>()) }
     // Правка начинается с текущего текста: человек исправляет, а не набирает заново.
-    LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
+    // Упоминания своего сообщения поднимаются вместе с ним — иначе правка опечатки
+    // молча снимала бы их.
+    LaunchedEffect(model.editTarget) {
+        model.editTarget?.let {
+            input = it.text
+            picked = Mentions.picked(it.text, it.mentions)
+        }
+    }
+    val members = model.groupMemberKeys[gid].orEmpty()
+    val mentionCandidates = { q: String ->
+        members.filter { it != model.me?.pubkey }
+            .map { it to model.peerName(it) }
+            // Имя ищем с начала любого слова: «@пет» находит «Иван Петров».
+            .filter { (_, name) -> q.isEmpty() || name.split(' ').any { w -> w.startsWith(q, ignoreCase = true) } }
+            .sortedBy { it.second.lowercase() }
+    }
     var focusedParticipant by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
@@ -222,16 +240,20 @@ internal fun GroupChatScreen(model: AppModel) {
                     onVoiceStart = startVoice,
                     onVoiceStop = stopVoice,
                     model = model,
+                    mentionCandidates = mentionCandidates,
+                    onMentionPicked = { key, name -> picked = picked + (key to name) },
                     onSend = {
                         val editing = model.editTarget
+                        val mentions = Mentions.collect(input, picked)
                         if (editing != null) {
-                            if (input.isNotBlank()) model.applyEdit(gid, true, editing.id, input)
+                            if (input.isNotBlank()) model.applyEdit(gid, true, editing.id, input, mentions)
                             model.editTarget = null
                             input = ""
                         } else if (input.isNotBlank()) {
-                            model.send(gid, input, group = true)
+                            model.send(gid, input, group = true, mentions = mentions)
                             input = ""
                         }
+                        picked = emptyMap()
                     },
                 )
             }

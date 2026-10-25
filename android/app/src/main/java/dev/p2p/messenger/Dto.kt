@@ -82,6 +82,7 @@ internal data class MessageDto(
     val height: Int = 0,
     @SerialName("thumb_id") val thumbId: String = "",
     val downloaded: Boolean = false,
+    val mentions: List<Mention> = emptyList(),
 )
 
 /**
@@ -319,6 +320,7 @@ internal fun MessageDto.toModel() = Message(
     height = height,
     thumbId = thumbId,
     downloaded = downloaded,
+    mentions = mentions,
 )
 
 // ── События ─────────────────────────────────────────────────────────────────
@@ -393,6 +395,7 @@ internal sealed interface EngineEvent {
         val id: Long,
         val sender: String,
         val text: String,
+        val mentions: List<Mention> = emptyList(),
     ) : EngineEvent
 
     @Serializable

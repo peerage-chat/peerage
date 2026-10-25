@@ -63,6 +63,10 @@ object Tokens {
         val folderSelected = Color(0xFF1C3A47)
         val unreadMuted = Color(0xFF3A3A42) // счётчик чата без звука
 
+        // Упоминание на исходящем пузыре: чистый акцент на bubbleOut почти сливается.
+        val mentionOnOut = Color(0xFFB5E6F7)
+        val mentionSelfBg = accentBadge // упомянули МЕНЯ — подложка под участком
+
         // ── Скримы/оверлеи ────────────────────────────────────────────────────
         val overlay = Color(0xF2000000) // полноэкранный оверлей (входящее/настройки)
         val chipScrim = Color(0xB8141518) // chrome-чипы (имя/трафик/камера/⚙)

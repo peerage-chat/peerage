@@ -11,6 +11,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use p2p_core::mention::{self, Mention};
 use p2p_core::Identity;
 use p2p_group::{GroupError, Incoming, Member};
 use p2p_messenger::Messenger;
@@ -46,6 +47,10 @@ enum AppMsg {
         /// «Переслано, автора не называем» — ключ автора не отправляется.
         #[serde(default)]
         fwd_anon: bool,
+        /// Упоминания: ссылки на людей поверх участков `text` (p2p_core::mention).
+        /// Пустой список не сериализуется — тело обычного сообщения не меняется.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mentions: Vec<Mention>,
     },
     #[serde(rename = "media")]
     Media(MediaBody),
@@ -55,8 +60,14 @@ enum AppMsg {
     #[serde(rename = "retract")]
     Retract { target: u64 },
     /// Правка своего сообщения: автор берётся из MLS, поэтому в теле только цель.
+    /// Упоминания едут заново: их участки привязаны к старому тексту.
     #[serde(rename = "edit")]
-    Edit { target: u64, text: String },
+    Edit {
+        target: u64,
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mentions: Vec<Mention>,
+    },
     /// Закрепить/открепить сообщение группы. Ссылка — пара «автор + id» (ADR-006).
     /// Право проверяет верхний слой: закрепляет админ, иначе любой участник мог бы
     /// повесить своё сообщение в шапку всем остальным.
@@ -123,11 +134,13 @@ pub enum Inbound {
         fwd_from: String,
         /// «Переслано, автора не называем».
         fwd_anon: bool,
+        /// Упоминания (уже проверенные [`mention::clean`]).
+        mentions: Vec<Mention>,
     },
     /// Отправитель просит удалить СВОЁ сообщение `target` у всех.
     Retract { sender: PeerKey, target: u64 },
     /// Отправитель исправил своё сообщение `target`.
-    Edit { sender: PeerKey, target: u64, text: String },
+    Edit { sender: PeerKey, target: u64, text: String, mentions: Vec<Mention> },
     /// Закрепить/открепить сообщение (`actor` — кто это сделал).
     Pin { actor: PeerKey, target: u64, sender: String, on: bool },
     /// Медиа-сообщение (M2): отправитель + ссылка на блоб с метаданными карточки.
@@ -261,11 +274,13 @@ impl GroupChat {
         reply_to: u64,
         reply_sender: &str,
     ) -> Result<(), GroupChatError> {
-        self.send_text_full(text, id, reply_to, reply_sender, "", false)
+        self.send_text_full(text, id, reply_to, reply_sender, "", false, &[])
     }
 
     /// Общий путь: обычный текст, ответ и пересылка. `fwd_from` — hex автора
-    /// исходного сообщения (пусто — своё).
+    /// исходного сообщения (пусто — своё). Упоминания чистятся здесь же: за то, что
+    /// уходит в сеть, отвечает этот слой.
+    #[allow(clippy::too_many_arguments)]
     pub fn send_text_full(
         &mut self,
         text: &str,
@@ -274,6 +289,7 @@ impl GroupChat {
         reply_sender: &str,
         fwd_from: &str,
         fwd_anon: bool,
+        mentions: &[Mention],
     ) -> Result<(), GroupChatError> {
         self.send_app(&AppMsg::Text {
             text: text.to_string(),
@@ -282,6 +298,7 @@ impl GroupChat {
             reply_sender: reply_sender.to_string(),
             fwd_from: fwd_from.to_string(),
             fwd_anon,
+            mentions: mention::clean(text, mentions.to_vec()),
         })
     }
 
@@ -299,8 +316,14 @@ impl GroupChat {
     }
 
     /// Исправить своё сообщение у всех участников.
-    pub fn send_edit(&mut self, target: u64, text: &str) -> Result<(), GroupChatError> {
-        self.send_app(&AppMsg::Edit { target, text: text.to_string() })
+    pub fn send_edit(
+        &mut self,
+        target: u64,
+        text: &str,
+        mentions: &[Mention],
+    ) -> Result<(), GroupChatError> {
+        let mentions = mention::clean(text, mentions.to_vec());
+        self.send_app(&AppMsg::Edit { target, text: text.to_string(), mentions })
     }
 
     /// Закрепить/открепить сообщение у всех участников.
@@ -337,13 +360,21 @@ impl GroupChat {
                 let sender = to_key(sender);
                 // M2: тело — JSON-envelope (текст/медиа); старое сырое-UTF-8 → текст.
                 Ok(match serde_json::from_slice::<AppMsg>(&body) {
-                    Ok(AppMsg::Text { text, id, reply_to, reply_sender, fwd_from, fwd_anon }) => {
+                    Ok(AppMsg::Text {
+                        text, id, reply_to, reply_sender, fwd_from, fwd_anon, mentions,
+                    }) => {
+                        // Чистим и на приёме: отправитель мог быть пропатчен.
+                        let mentions = mention::clean(&text, mentions);
                         Inbound::Message {
                             sender, text, id, reply_to, reply_sender, fwd_from, fwd_anon,
+                            mentions,
                         }
                     }
                     Ok(AppMsg::Retract { target }) => Inbound::Retract { sender, target },
-                    Ok(AppMsg::Edit { target, text }) => Inbound::Edit { sender, target, text },
+                    Ok(AppMsg::Edit { target, text, mentions }) => {
+                        let mentions = mention::clean(&text, mentions);
+                        Inbound::Edit { sender, target, text, mentions }
+                    }
                     Ok(AppMsg::Pin { target, sender: who, on }) => {
                         Inbound::Pin { actor: sender, target, sender: who, on }
                     }
@@ -362,6 +393,7 @@ impl GroupChat {
                         reply_sender: String::new(),
                         fwd_from: String::new(),
                         fwd_anon: false,
+                        mentions: Vec::new(),
                     },
                 })
             }

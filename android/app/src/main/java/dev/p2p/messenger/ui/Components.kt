@@ -511,6 +511,17 @@ internal fun BubbleText(
     color: Color = Color.White,
     fontSize: TextUnit = 15.sp,
     meta: @Composable () -> Unit,
+) = BubbleText(AnnotatedString(text), modifier, color, fontSize, meta)
+
+/** То же для размеченного текста (упоминания): мерка и показ идут по ОДНОЙ строке —
+ *  имя в «@» бывает длиннее или короче набранного отправителем. */
+@Composable
+internal fun BubbleText(
+    text: AnnotatedString,
+    modifier: Modifier = Modifier,
+    color: Color = Color.White,
+    fontSize: TextUnit = 15.sp,
+    meta: @Composable () -> Unit,
 ) {
     val measurer = rememberTextMeasurer()
     val style = TextStyle(color = color, fontSize = fontSize)
@@ -536,7 +547,7 @@ internal fun BubbleText(
         // когда рядом было полно места, а место под неё всё равно резервировалось
         // сбоку.
         val m = measurer.measure(
-            AnnotatedString(text),
+            text,
             style,
             constraints = Constraints(maxWidth = constraints.maxWidth),
         )

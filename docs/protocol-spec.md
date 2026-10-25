@@ -309,8 +309,27 @@ reliable (`id`). The bucket is APP, like `Text`: in the CONTROL bucket an edit w
 up to a multiple of 256 bytes and gave away the length of the new text (fixed 2026-09-25,
 covered by `text_media_and_call_are_indistinguishable_by_size`).
 
-In groups: `AppMsg::Edit { target, text }` inside MLS; the author is taken from MLS, not
-from the body.
+In groups: `AppMsg::Edit { target, text, mentions }` inside MLS; the author is taken from
+MLS, not from the body. Mentions travel again with the new text — their spans point into it.
+
+### Mentions (groups)
+
+`AppMsg::Text` and `AppMsg::Edit` carry `mentions: [{at, len, key}]` — a span of `text` in
+**UTF-8 bytes** plus the hex identity key of the person mentioned (`core/src/mention.rs`).
+An empty list is not serialised, so ordinary messages keep their bytes.
+
+A mention is a **reference to a person, not a string**: the receiver draws the span as "@" +
+the name IT knows for that key (contact name, profile, own name), never the sender's text.
+So "@Anna" cannot be forged by typing it, and no nicknames are needed. Typing "@Anna"
+without picking her from the suggestion stays plain text.
+
+`mention::clean` runs on send and again on receipt (the sender may be patched): spans that
+are empty, out of the text, split a UTF-8 character or overlap an earlier span are dropped,
+as are keys that are not 64 hex characters, and everything beyond 32 per message. The
+member list is not checked: history must not change meaning when someone leaves.
+Captions of attachments and forwarded text carry no mentions (a forward goes to a different
+chat whose members are other people). The client marks a group with an "@" badge while an
+unread message there mentions me; there are no system notifications yet.
 
 ### Forwarding
 

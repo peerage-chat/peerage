@@ -315,6 +315,53 @@ fn group_reply_and_retract() {
     assert!(!ctx.gm_a.history_json(&ctx.gid).contains("во сколько"), "и у автора тоже");
 }
 
+/// Упоминание — ссылка «участок + ключ»: доходит до участника, хранится у обоих,
+/// заменяется при правке; кривой участок (посреди буквы) отбрасывается ещё у
+/// отправителя, а не рисуется у получателя.
+#[test]
+fn group_mentions_travel_and_follow_edits() {
+    use p2p_core::mention::Mention;
+    let mut ctx = setup_and_join(0);
+    let b_hex = hex::encode(ctx.b_key);
+    let text = "@Боб, глянь";
+    let span = Mention { at: 0, len: "@Боб".len() as u32, key: b_hex.clone() };
+    // Второй участок режет «Б» пополам — его быть не должно ни у кого.
+    let broken = Mention { at: 2, len: 1, key: b_hex.clone() };
+    assert!(ctx.gm_a.send_text_full(&ctx.gid, text, 0, "", "", false, vec![span.clone(), broken]));
+    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
+        b.history_json(&ctx.gid).contains("глянь")
+    });
+    assert!(got, "сообщение с упоминанием дошло");
+
+    let find = |gm: &GroupManager, needle: &str| -> serde_json::Value {
+        let h: serde_json::Value = serde_json::from_str(&gm.history_json(&ctx.gid)).unwrap();
+        h.as_array().unwrap().iter().find(|m| m["text"].as_str().unwrap_or("").contains(needle)).unwrap().clone()
+    };
+    let at_b = find(&ctx.gm_b, "глянь");
+    let want = serde_json::json!([{ "at": 0, "len": span.len, "key": b_hex }]);
+    assert_eq!(at_b["mentions"], want, "у получателя ровно один честный участок");
+    assert_eq!(find(&ctx.gm_a, "глянь")["mentions"], want, "у автора то же, что ушло в сеть");
+
+    // Правка сдвигает текст — упоминание едет заново, со своим участком.
+    let id = at_b["id"].as_u64().unwrap();
+    let new_text = "Ну что, @Боб?";
+    let moved = Mention { at: "Ну что, ".len() as u32, len: "@Боб".len() as u32, key: b_hex.clone() };
+    assert!(ctx.gm_a.edit(&ctx.gid, id, new_text, &[moved.clone()]).is_some());
+    let edited = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
+        b.history_json(&ctx.gid).contains("Ну что")
+    });
+    assert!(edited, "правка дошла");
+    assert_eq!(find(&ctx.gm_b, "Ну что")["mentions"][0]["at"], moved.at);
+
+    // Правка без упоминаний снимает их, а не оставляет висеть на чужом участке.
+    assert!(ctx.gm_a.edit(&ctx.gid, id, "отбой", &[]).is_some());
+    let cleared = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
+        b.history_json(&ctx.gid).contains("отбой")
+    });
+    assert!(cleared);
+    assert!(find(&ctx.gm_b, "отбой").get("mentions").is_none(), "упоминаний больше нет");
+}
+
 /// Отозвать ЧУЖОЕ сообщение нельзя: автор берётся из MLS, а не из тела пакета,
 /// иначе любой участник вычищал бы чужую переписку.
 #[test]

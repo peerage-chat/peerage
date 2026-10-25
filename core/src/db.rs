@@ -104,6 +104,9 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             fwd_from     TEXT    NOT NULL DEFAULT '',
             fwd_anon     INTEGER NOT NULL DEFAULT 0,
             edited_at    INTEGER NOT NULL DEFAULT 0,
+            -- Упоминания (JSON `[{at,len,key}]`, пусто — нет): ссылки на людей
+            -- поверх участков текста, см. p2p_core::mention.
+            mentions     TEXT    NOT NULL DEFAULT '',
             PRIMARY KEY (chat, scope, sender, id)
         );
         -- Порядок в чате и курсор пагинации. Курсор двойной, (time, rowid), но в

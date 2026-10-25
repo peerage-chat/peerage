@@ -1326,10 +1326,20 @@ class AppModel private constructor() {
 
     /** То же для группового сообщения. */
 
-    /** Отправить правку своего сообщения. */
-    fun applyEdit(chat: String, group: Boolean, id: Long, text: String) = ops.execute {
-        if (text.isNotBlank()) Native.editMessage(sessionPtr, chat, group, id, text)
-    }
+    /** Отправить правку своего сообщения (в группе — вместе с упоминаниями). */
+    fun applyEdit(chat: String, group: Boolean, id: Long, text: String, mentions: List<Mention> = emptyList()) =
+        ops.execute {
+            if (text.isNotBlank()) Native.editMessage(sessionPtr, chat, group, id, text, mentionsJson(mentions))
+        }
+
+    private fun mentionsJson(m: List<Mention>): String = Mentions.toJson(m)
+
+    /** Имя для «@» в ленте: своё — моё имя, чужое — как этот человек записан у меня. */
+    fun mentionName(key: String): String =
+        if (key == me?.pubkey) selfName.ifBlank { appContext?.getString(R.string.common_you).orEmpty() } else peerName(key)
+
+    /** Группы, где меня упомянули в непрочитанном. Как и счётчик, живёт в памяти. */
+    val groupMentioned = mutableStateMapOf<String, Boolean>()
 
     internal fun wireDmRefs(refs: Collection<MsgRef>): String =
         dmRefsJson(refs, me?.pubkey.orEmpty())
@@ -1385,9 +1395,9 @@ class AppModel private constructor() {
      * Отправить текст в чат. Различие каналов — одна ветка внутри, а не два
      * публичных метода: снаружи «отправить» означает одно и то же.
      */
-    fun send(key: String, text: String, group: Boolean = false) {
+    fun send(key: String, text: String, group: Boolean = false, mentions: List<Mention> = emptyList()) {
         if (group) {
-            sendGroup(key, text)
+            sendGroup(key, text, mentions)
             return
         }
         if (text.isBlank()) return
@@ -1808,7 +1818,10 @@ class AppModel private constructor() {
                 // счётчик обещает сообщения, за которыми стоит человек.
                 if (!m.mine && !m.system) {
                     if (ev.group) {
-                        if (currentGroup != ev.chat) groupUnread[ev.chat] = (groupUnread[ev.chat] ?: 0) + 1
+                        if (currentGroup != ev.chat) {
+                            groupUnread[ev.chat] = (groupUnread[ev.chat] ?: 0) + 1
+                            if (m.mentions.any { it.key == me?.pubkey }) groupMentioned[ev.chat] = true
+                        }
                     } else if (currentChat != ev.chat) {
                         unread[ev.chat] = (unread[ev.chat] ?: 0) + 1
                     }
@@ -1873,7 +1886,8 @@ class AppModel private constructor() {
                 }
                 messages[chatKey(ev.chat, group = true)]?.let { list ->
                     val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
-                    if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp)
+                    // Упоминания заменяются вместе с текстом: их участки привязаны к нему.
+                    if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp, mentions = ev.mentions)
                 }
                 if (ev.chat == me?.pubkey) {
                     val i = notes.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
@@ -2387,6 +2401,7 @@ class AppModel private constructor() {
         currentGroup = gid
         currentGroupRoster = null // тикер подтянет свежий агрегат
         groupUnread[gid] = 0
+        groupMentioned.remove(gid)
         loadGroupMembers(gid)
         ops.execute { loadGroupHistory(gid) }
     }
@@ -2424,7 +2439,7 @@ class AppModel private constructor() {
 
     fun inviteToGroup(gid: String, peerHex: String) = ops.execute { Native.groupInvite(sessionPtr, gid, peerHex) }
 
-    private fun sendGroup(gid: String, text: String) {
+    private fun sendGroup(gid: String, text: String, mentions: List<Mention>) {
         if (text.isBlank()) return
         val reply = replyTarget
         replyTarget = null
@@ -2435,6 +2450,7 @@ class AppModel private constructor() {
                 text,
                 reply?.id ?: 0,
                 reply?.sender.orEmpty(),
+                mentionsJson(mentions),
             )
             // Строку в ленту добавит событие `message` от движка: id сообщению
             // присваивает поток-актор, и сразу после возврата из JNI его ещё нет.

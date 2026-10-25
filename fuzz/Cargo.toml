@@ -53,3 +53,10 @@ path = "fuzz_targets/scrub.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "mention"
+path = "fuzz_targets/mention.rs"
+test = false
+doc = false
+bench = false

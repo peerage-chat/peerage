@@ -101,7 +101,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
     });
 }
 
-/// Текст в группу ОТВЕТОМ на сообщение `replyTo` автора `replySender` (hex).
+/// Текст в группу ОТВЕТОМ на сообщение `replyTo` автора `replySender` (hex;
+/// `replyTo = 0` — не ответ). `mentionsJson` — `[{"at","len","key"}]`, байты UTF-8.
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendTextReply<'local>(
     mut env: JNIEnv<'local>,
@@ -111,13 +112,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendTextReply<'local>(
     text: JString<'local>,
     reply_to: jlong,
     reply_sender: JString<'local>,
+    mentions_json: JString<'local>,
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
         let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
         let text = jstr(&mut env, &text);
         let sender = jstr(&mut env, &reply_sender);
-        e.group_send_text_reply(gid, text, reply_to.max(0) as u64, sender);
+        let mentions = crate::parse_mentions(&jstr(&mut env, &mentions_json));
+        e.group_send_text_reply(gid, text, reply_to.max(0) as u64, sender, mentions);
     });
 }
 

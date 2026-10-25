@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use p2p_core::budget::Tier;
+pub use p2p_core::mention::Mention;
 use p2p_core::settings::AudioSettings;
 use p2p_core::store::{Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage};
 use p2p_core::{vault, Identity};
@@ -66,11 +67,13 @@ pub(crate) enum GroupCmd {
         fwd_from: String,
         /// «Переслано, автора не называем».
         fwd_anon: bool,
+        /// Упоминания поверх участков `text` (p2p_core::mention).
+        mentions: Vec<Mention>,
     },
     /// Отозвать свои сообщения у участников («удалить у всех»).
     Retract { gid: Vec<u8>, ids: Vec<u64> },
     /// Исправить своё сообщение в группе.
-    Edit { gid: Vec<u8>, id: u64, text: String },
+    Edit { gid: Vec<u8>, id: u64, text: String, mentions: Vec<Mention> },
     /// Закрепить/открепить сообщение в группе (только админ).
     Pin { gid: Vec<u8>, id: u64, sender: String, on: bool },
     /// Удалить сообщения только у себя: пары `(id, автор-hex)`.
@@ -488,6 +491,12 @@ impl Engine {
     /// надеемся на клиент. История правок не хранится, но пометка «изменено»
     /// остаётся навсегда: молча подменённый текст хуже отсутствия правки.
     pub fn edit_message(&self, chat: ChatKey, id: u64, text: &str) -> bool {
+        self.edit_message_with(chat, id, text, &[])
+    }
+
+    /// То же с упоминаниями. Они бывают только в группе: в личном чате упоминать
+    /// некого, и там список молча отбрасывается.
+    pub fn edit_message_with(&self, chat: ChatKey, id: u64, text: &str, mentions: &[Mention]) -> bool {
         let me = self.me_hex();
         match &chat {
             ChatKey::Dm(peer) => {
@@ -499,18 +508,24 @@ impl Engine {
                 if self.messenger.send_edit(peer, id, text).is_err() {
                     return false;
                 }
-                let _ = self.messages.lock_safe().edit_text(chat.as_chat(), &me, id, text, now());
+                let _ = self.messages.lock_safe().edit_text(chat.as_chat(), &me, id, text, &[], now());
                 push_event(self, dto::UiEvent::MessageEdited {
                     chat: hex::encode(chat.id_bytes()),
                     id,
                     sender: me,
                     text: text.to_string(),
+                    mentions: Vec::new(),
                 });
                 true
             }
             ChatKey::Group(gid) => self
                 .jobs
-                .send(Job::Cmd(GroupCmd::Edit { gid: gid.clone(), id, text: text.to_string() }))
+                .send(Job::Cmd(GroupCmd::Edit {
+                    gid: gid.clone(),
+                    id,
+                    text: text.to_string(),
+                    mentions: mentions.to_vec(),
+                }))
                 .is_ok(),
         }
     }
@@ -677,6 +692,9 @@ impl Engine {
                         reply_sender: String::new(),
                         fwd_from: origin.to_string(),
                         fwd_anon: anon,
+                        // Пересылка несёт текст, а не ссылки: упомянутый в исходном
+                        // чате не обязан состоять в этом.
+                        mentions: Vec::new(),
                     }))
                     .is_ok()
             }
@@ -1665,13 +1683,20 @@ impl Engine {
             reply_sender: String::new(),
             fwd_from: String::new(),
             fwd_anon: false,
+            mentions: Vec::new(),
         }));
     }
 
-    /// Отправить медиа-вложение в группу (M2). Fire-and-forget: движок чистит
-    /// картинку, сохраняет блоб, шлёт MLS-ссылку всем и пушит байты каждому.
-    /// Текст ответом на сообщение `reply_to` автора `reply_sender` (hex).
-    pub fn group_send_text_reply(&self, gid: Vec<u8>, text: String, reply_to: u64, reply_sender: String) {
+    /// Текст ответом на сообщение `reply_to` автора `reply_sender` (hex; `0` — не
+    /// ответ), с упоминаниями поверх участков текста.
+    pub fn group_send_text_reply(
+        &self,
+        gid: Vec<u8>,
+        text: String,
+        reply_to: u64,
+        reply_sender: String,
+        mentions: Vec<Mention>,
+    ) {
         let _ = self.jobs.send(Job::Cmd(GroupCmd::SendText {
             gid,
             text,
@@ -1679,6 +1704,7 @@ impl Engine {
             reply_sender,
             fwd_from: String::new(),
             fwd_anon: false,
+            mentions,
         }));
     }
 
@@ -2739,7 +2765,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             let changed = engine
                 .messages
                 .lock_safe()
-                .edit_text(Chat::Dm(&peer), &author, target, &text, now())
+                .edit_text(Chat::Dm(&peer), &author, target, &text, &[], now())
                 .unwrap_or(false);
             if changed {
                 push_event(engine, dto::UiEvent::MessageEdited {
@@ -2747,6 +2773,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     id: target,
                     sender: author,
                     text,
+                    mentions: Vec::new(),
                 });
             }
         }
@@ -2894,13 +2921,14 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                     push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(gid) });
                 }
             }
-            if let Some((sender, id, text)) = out.edited.clone() {
+            if let Some((sender, id, text, mentions)) = out.edited.clone() {
                 if let Some(gid) = &out.gid {
                     push_event(engine, dto::UiEvent::MessageEdited {
                         chat: hex::encode(gid),
                         id,
                         sender,
                         text,
+                        mentions,
                     });
                 }
             }
@@ -3144,20 +3172,24 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                 push_event(engine, dto::UiEvent::GroupInvitesChanged);
             }
         }
-        GroupCmd::SendText { gid, text, reply_to, reply_sender, fwd_from, fwd_anon } => {
+        GroupCmd::SendText { gid, text, reply_to, reply_sender, fwd_from, fwd_anon, mentions } => {
             // Своё сообщение уйдёт в UI событием `message` (take_fresh) — с id,
             // который присвоил слой групп: на него сразу можно ответить и отозвать.
-            if groups.send_text_full(&gid, &text, reply_to, &reply_sender, &fwd_from, fwd_anon) {
+            let sent = groups.send_text_full(
+                &gid, &text, reply_to, &reply_sender, &fwd_from, fwd_anon, mentions,
+            );
+            if sent {
                 refresh_group_cache(engine, groups);
             }
         }
-        GroupCmd::Edit { gid, id, text } => {
-            if let Some((sender, text)) = groups.edit(&gid, id, &text) {
+        GroupCmd::Edit { gid, id, text, mentions } => {
+            if let Some((sender, text, mentions)) = groups.edit(&gid, id, &text, &mentions) {
                 push_event(engine, dto::UiEvent::MessageEdited {
                     chat: hex::encode(&gid),
                     id,
                     sender,
                     text,
+                    mentions,
                 });
             }
         }

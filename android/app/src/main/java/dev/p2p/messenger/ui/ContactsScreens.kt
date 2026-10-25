@@ -62,6 +62,8 @@ private data class ChatRowUi(
     val online: Boolean = false,
     val verified: Boolean = false,
     val unread: Int = 0,
+    /** В непрочитанном меня упомянули (только группы). */
+    val mentioned: Boolean = false,
     val muted: Boolean = false,
     val pinnedAt: Long = 0,
     val summary: ChatSummary? = null,
@@ -120,6 +122,7 @@ internal fun ContactsScreen(
                     ChatRowUi(
                         id = g.gid, group = true, title = g.name,
                         unread = model.groupUnread[g.gid] ?: 0,
+                        mentioned = model.groupMentioned[g.gid] == true,
                         muted = s?.muted ?: false, pinnedAt = s?.pinnedAt ?: 0, summary = s,
                         inRoom = model.groupPresence[g.gid]?.size ?: 0, members = g.members,
                     ),
@@ -385,20 +388,21 @@ private fun ChatListRow(
 private fun ChatRowBadge(row: ChatRowUi) {
     val s = row.summary
     when {
-        row.unread > 0 -> Box(
-            Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
-                .background(if (row.muted) Tokens.Colors.unreadMuted else HoloAccent)
-                .defaultMinSize(minWidth = 19.dp)
-                .padding(horizontal = 6.dp, vertical = 1.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                if (row.unread > 99) "99+" else "${row.unread}",
-                color = if (row.muted) Tokens.Colors.unreadMutedText else HoloAccentDark,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+        // Упоминание меня — отдельный значок «@» перед счётчиком, и всегда акцентный,
+        // даже в чате без звука: ради этого человека и звали.
+        row.unread > 0 && row.mentioned -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloAccent)
+                    .defaultMinSize(minWidth = 19.dp)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("@", color = HoloAccentDark, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.width(Tokens.Space.xs))
+            UnreadCount(row)
         }
+        row.unread > 0 -> UnreadCount(row)
         // Те же значки, что в пузыре чата: часы → одна галочка → две. Один и тот же
         // факт не должен выглядеть в списке иначе, чем внутри переписки.
         s != null && s.lastMine && !s.lastSystem -> when (s.lastStatus) {
@@ -427,6 +431,25 @@ private fun ChatRowBadge(row: ChatRowUi) {
             null,
             tint = HoloOnline,
             modifier = Modifier.size(14.dp),
+        )
+    }
+}
+
+/** Счётчик непрочитанного: приглушённый в чате без звука. */
+@Composable
+private fun UnreadCount(row: ChatRowUi) {
+    Box(
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
+            .background(if (row.muted) Tokens.Colors.unreadMuted else HoloAccent)
+            .defaultMinSize(minWidth = 19.dp)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (row.unread > 99) "99+" else "${row.unread}",
+            color = if (row.muted) Tokens.Colors.unreadMutedText else HoloAccentDark,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

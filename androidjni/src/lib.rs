@@ -604,6 +604,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_forwardMessages<'local>(
 }
 
 /// Исправить своё сообщение (текст или подпись вложения). Возвращает 1/0.
+/// `mentionsJson` — `[{"at","len","key"}]` в байтах UTF-8 (только группа).
 #[no_mangle]
 pub extern "system" fn Java_dev_p2p_messenger_Native_editMessage<'local>(
     mut env: JNIEnv<'local>,
@@ -613,6 +614,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_editMessage<'local>(
     is_group: jboolean,
     msg_id: jlong,
     text: JString<'local>,
+    mentions_json: JString<'local>,
 ) -> jint {
     jni_safe!(0, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
@@ -621,8 +623,15 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_editMessage<'local>(
             return 0;
         };
         let text = jstr(&mut env, &text);
-        i32::from(e.edit_message(chat, msg_id as u64, &text))
+        let mentions = parse_mentions(&jstr(&mut env, &mentions_json));
+        i32::from(e.edit_message_with(chat, msg_id as u64, &text, &mentions))
     })
+}
+
+/// Упоминания от клиента. Кривой JSON — не повод терять сообщение: уходит без
+/// упоминаний (участки всё равно проверяет `p2p_core::mention::clean`).
+pub(crate) fn parse_mentions(json: &str) -> Vec<p2p_engine::Mention> {
+    serde_json::from_str(json).unwrap_or_default()
 }
 
 /// Закрепить/открепить сообщение в чате (личном или групповом). Возвращает 1/0.

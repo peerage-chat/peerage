@@ -99,7 +99,18 @@ data class Message(
     val editedAt: Long = 0,
     /** Курсор пагинации: номер строки в базе движка (0 — запись создана локально). */
     val row: Long = 0,
+    /** Упоминания поверх участков [text] (только группы), см. [Mention]. */
+    val mentions: List<Mention> = emptyList(),
 )
+
+/**
+ * Упоминание: участок текста `[at, at+len)` и ключ того, кого упомянули. Смещения в
+ * БАЙТАХ UTF-8 — как их хранит и проверяет движок; в индексы Kotlin-строки (UTF-16)
+ * их переводит [Mentions]. Рисуется участок как «@» + имя, которое ЭТО устройство
+ * знает для ключа, а не как текст отправителя: подделать «@Аня» нельзя.
+ */
+@kotlinx.serialization.Serializable
+data class Mention(val at: Int, val len: Int, val key: String)
 
 /** Чат как адресат пересылки: личный (ключ собеседника) или группа (gid). */
 data class ChatTarget(val id: String, val group: Boolean, val title: String = "")

@@ -66,6 +66,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -588,6 +589,50 @@ internal fun DateChip(label: String) {
     }
 }
 
+/** Список «кого упомянуть» над полем ввода. Не больше пяти строк: дальше человек
+ *  уточняет имя, а не листает. */
+@Composable
+private fun MentionSuggestions(candidates: List<Pair<String, String>>, onPick: (String, String) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s).padding(top = Tokens.Space.s)) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloSurface),
+        ) {
+            candidates.take(5).forEach { (key, name) ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onPick(key, name) }
+                        .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SquareAvatar(name, size = Tokens.Size.avatarSeries)
+                    Spacer(Modifier.width(Tokens.Space.m))
+                    Text(
+                        name,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Текст пузыря: упоминания рисуются именами, которые знает это устройство. */
+private fun bubbleText(model: AppModel, m: Message): AnnotatedString =
+    if (m.mentions.isEmpty()) {
+        AnnotatedString(m.text)
+    } else {
+        Mentions.render(
+            m.text,
+            m.mentions,
+            model.me?.pubkey,
+            model::mentionName,
+            accent = if (m.mine) Tokens.Colors.mentionOnOut else HoloAccent,
+            meBg = Tokens.Colors.mentionSelfBg,
+        )
+    }
+
 @Composable
 internal fun MessageInput(
     value: String,
@@ -602,6 +647,11 @@ internal fun MessageInput(
     model: AppModel? = null,
     /** Полоска «отвечаем на …» над полем: экран решает, чья цель ответа. */
     replyStrip: (@Composable () -> Unit)? = null,
+    /** Кого можно упомянуть по набранному после «@»: пары (ключ, имя). Пусто — в
+     *  этом чате упоминаний нет (личный чат). */
+    mentionCandidates: (String) -> List<Pair<String, String>> = { emptyList() },
+    /** Человека выбрали из подсказки: его ключ и вставленная метка (без «@»). */
+    onMentionPicked: (String, String) -> Unit = { _, _ -> },
     onSend: () -> Unit,
 ) {
     // Поле держим как TextFieldValue: панели эмодзи нужна ПОЗИЦИЯ КУРСОРА, иначе
@@ -628,6 +678,19 @@ internal fun MessageInput(
         // Цитата видна ровно там, где человек печатает ответ: иначе легко забыть,
         // что сообщение уйдёт ответом, и получить «ответ» не на то.
         replyStrip?.invoke()
+        // Подсказка «кого упомянуть» — над полем, пока у курсора набирается «@…».
+        // Выбор вставляет имя целиком и запоминает ключ: упоминание — ссылка на
+        // человека, а не совпадение букв.
+        val query = if (field.selection.collapsed) Mentions.query(field.text, field.selection.start) else null
+        val candidates = query?.let { mentionCandidates(it.second) }.orEmpty()
+        if (query != null && candidates.isNotEmpty()) {
+            MentionSuggestions(candidates) { key, name ->
+                val ins = "@$name "
+                val text = field.text.take(query.first) + ins + field.text.substring(field.selection.start)
+                setField(TextFieldValue(text, TextRange(query.first + ins.length)))
+                onMentionPicked(key, name)
+            }
+        }
         // Панель ВЫЕЗЖАЕТ из строки ввода: движение объясняет, откуда она взялась.
         // Появление «из ниоткуда» читается как подмена экрана.
         //
@@ -1051,7 +1114,7 @@ internal fun MessageBubble(
                             "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready) { model.toggleSelect(m) }
                             // Текст обтекает мету: она едет в конец последней строки
                             // и переносится сама, если та её не вмещает.
-                            else -> BubbleText(m.text) { meta() }
+                            else -> BubbleText(bubbleText(model, m)) { meta() }
                         }
                     }
                     // Подпись к вложению — в том же пузыре, под содержимым. Она пришла

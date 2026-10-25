@@ -142,8 +142,16 @@ pub enum UiEvent {
     GroupInvitesChanged,
     /// Список закреплённых в чате изменился (hex ключа собеседника или gid).
     PinsChanged { chat: String },
-    /// Сообщение исправлено автором: текст в ленте надо заменить на месте.
-    MessageEdited { chat: String, id: u64, sender: String, text: String },
+    /// Сообщение исправлено автором: текст в ленте надо заменить на месте (вместе с
+    /// упоминаниями — их участки привязаны к тексту).
+    MessageEdited {
+        chat: String,
+        id: u64,
+        sender: String,
+        text: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        mentions: Vec<p2p_core::mention::Mention>,
+    },
     GroupRemoved { gid: String },
     RoomInvite { peer: String, room_id: String, audio: bool, video: bool },
     RoomDecline { peer: String, room_id: String },

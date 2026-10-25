@@ -101,8 +101,9 @@ Compose UI are thin adapters.
   References are the pair "author + id" (ADR-006); unknown payload types are ignored, so
   extensions are additive.
 - **Done:** replies, edits, retraction ("delete for everyone"), forwarding (optionally
-  without the author), pins, captions.
-- **Not yet:** reactions, read receipts, typing indicator, mentions.
+  without the author), pins, captions, mentions in groups (a span + identity key, the name
+  is drawn by the receiver; `core/mention.rs`).
+- **Not yet:** reactions, read receipts, typing indicator.
 - **Where:** `core/protocol.rs`, `groupchat` (`AppMsg`), `core/store.rs`.
 
 ### P1. Platform shell ✅
@@ -124,7 +125,8 @@ Compose UI are thin adapters.
 | Avatars | S5 + S4 (hash check) | ✅ |
 | Images / video / files / voice messages | S5 + S7 | ✅ |
 | Replies / edits / forwarding / pins | S7 | ✅ |
-| Reactions / read receipts / typing / mentions | S7 | ⏳ |
+| Mentions in groups | S7 | ✅ |
+| Reactions / read receipts / typing | S7 | ⏳ |
 | Search | F3 (FTS5) | ✅ |
 | Data backup | F3 | ✅ |
 | Settings (media/camera/energy/storage/at rest) | P1 + F3 | ✅ |

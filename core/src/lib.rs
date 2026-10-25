@@ -10,6 +10,7 @@ pub mod db;
 pub mod fsutil;
 pub mod identity;
 pub mod media;
+pub mod mention;
 pub mod noise;
 pub mod outbox;
 pub mod pad;
