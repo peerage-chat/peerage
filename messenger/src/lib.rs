@@ -1548,7 +1548,12 @@ fn receive_loop(shared: Arc<Shared>) {
         // Любой трафик от пира = он онлайн.
         shared.peer_alive(&peer_id);
 
-        if let Some(id) = payload.reliable_id() {
+        // Отсев повторов надёжных сообщений. Групповые (MLS) — мимо: у MLS свой
+        // отсев по поколению, а ошибка нашего (лишний «повтор») стоила бы группе
+        // рассинхрона. Повтор — это ТОТ ЖЕ id от того же пира: id выделяются заново
+        // на каждое сообщение и переиспользуются только переотправкой его самого.
+        let dedup = payload.reliable_id().filter(|_| !matches!(payload, Payload::Group { .. }));
+        if let Some(id) = dedup {
             if !shared.first_delivery(&peer_id, id, now) {
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
                 continue;
@@ -2082,6 +2087,41 @@ mod tests {
         }
         assert!(text, "обычное сообщение дошло");
         assert!(!ring, "просроченный звонок не зазвонил");
+    }
+
+    /// Повтор надёжного сообщения (тот же id от того же пира) доходит до движка
+    /// один раз — иначе второй `RoomInvite` стал бы вторым звонком в истории. Но
+    /// только повтор: другой id или другой отправитель — новое сообщение, а
+    /// групповые (MLS) отсевает сам MLS.
+    #[test]
+    fn duplicate_reliable_payload_is_delivered_once() {
+        let net = LoopbackNet::new();
+        let (a_id, b_id, c_id) = (id(51), id(52), id(53));
+        let (a_key, b_key, c_key) = (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+        let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
+        let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), Config::default());
+        let (c, _c_rx) = Messenger::start_with_transport(c_id, net.endpoint(c_key), Config::default());
+        let invite = |id: u64| Payload::RoomInvite { id, room_id: vec![7u8; 16], audio: true, video: false };
+        a.shared.send(&b_key, &invite(77)).unwrap();
+        a.shared.send(&b_key, &invite(77)).unwrap(); // повтор
+        a.shared.send(&b_key, &invite(78)).unwrap(); // новое
+        c.shared.send(&b_key, &invite(77)).unwrap(); // тот же id, другой отправитель
+        a.shared.send(&b_key, &Payload::Group { id: 90, data: vec![1] }).unwrap();
+        a.shared.send(&b_key, &Payload::Group { id: 90, data: vec![1] }).unwrap();
+        let (mut invites, mut groups) = (Vec::new(), 0);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            match b_rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(Event::RoomInvite { peer, .. }) => invites.push(peer),
+                Ok(Event::Group { .. }) => groups += 1,
+                _ => {}
+            }
+        }
+        invites.sort();
+        let mut want = vec![a_key, a_key, c_key];
+        want.sort();
+        assert_eq!(invites, want, "повтор отсеян, новое и чужое — нет");
+        assert_eq!(groups, 2, "групповые не отсеиваем — это дело MLS");
     }
 
     /// R-007: положили трубку до того, как собеседник появился, — снятое

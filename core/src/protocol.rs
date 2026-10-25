@@ -504,6 +504,16 @@ mod tests {
         }
     }
 
+    /// Всё, у чего есть id надёжной доставки, отдаёт его; Ack — нет (его id чужой).
+    #[test]
+    fn reliable_id_covers_reliable_payloads() {
+        assert_eq!(Payload::Ack { id: 5 }.reliable_id(), None);
+        assert_eq!(Payload::Ping { transit: None }.reliable_id(), None);
+        assert_eq!(Payload::RoomInvite { id: 5, room_id: vec![], audio: true, video: false }.reliable_id(), Some(5));
+        assert_eq!(Payload::Retract { id: 6, target: 1 }.reliable_id(), Some(6));
+        assert_eq!(Payload::GroupKeyRequest { id: 7, gid: vec![] }.reliable_id(), Some(7));
+    }
+
     #[test]
     fn padding_hides_text_length() {
         let short = Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false };
