@@ -288,6 +288,10 @@
     <string name="settings_encryption_label">Encryption</string>
     <string name="settings_encryption_value">E2E, always on</string>
     <string name="settings_license_label">License</string>
+    <string name="settings_log_save">Save log</string>
+    <string name="settings_log_hint">For a bug report: a text file you send yourself. No messages or keys; peer keys are shortened, network addresses removed.</string>
+    <string name="settings_log_saved">Log saved</string>
+    <string name="settings_log_failed">Could not save the log</string>
     <string name="settings_about_future">Power, media and storage settings are coming closer to release.</string>
 
     <!-- ── CallUi extras ───────────────────────────────────────────────── -->

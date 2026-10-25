@@ -43,6 +43,7 @@ class ConnService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        LogExport.install(applicationContext) // сервис живёт и без открытого экрана
         startForegroundCompat()
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "p2p:mesh").apply {

@@ -282,6 +282,10 @@
     <string name="settings_encryption_label">Шифрование</string>
     <string name="settings_encryption_value">E2E, всегда включено</string>
     <string name="settings_license_label">Лицензия</string>
+    <string name="settings_log_save">Сохранить лог</string>
+    <string name="settings_log_hint">Для сообщения об ошибке: текстовый файл, который вы пересылаете сами. Без сообщений и ключей; ключи собеседников укорочены, сетевые адреса убраны.</string>
+    <string name="settings_log_saved">Лог сохранён</string>
+    <string name="settings_log_failed">Не удалось сохранить лог</string>
     <string name="settings_about_future">Энергия, медиа и хранилище — настройки появятся ближе к релизу.</string>
 
     <!-- ── Доп. строки звонка ──────────────────────────────────────────── -->

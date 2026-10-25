@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CameraFront
 import androidx.compose.material.icons.filled.CameraRear
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Info
@@ -504,6 +505,24 @@ internal fun SettingsNotificationsScreen(model: AppModel) {
 /** О приложении: версия, транспорт, шифрование, лицензия. */
 @Composable
 internal fun SettingsAboutScreen() {
+    val ctx = LocalContext.current
+    // Сохранить лог: человек выбирает, куда положить файл, и сам его пересылает.
+    val saveLog = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        Thread {
+            val ok = runCatching {
+                val text = dev.p2p.messenger.LogExport.collect(ctx)
+                ctx.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } ?: error("no stream")
+            }.isSuccess
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(
+                    ctx,
+                    ctx.getString(if (ok) R.string.settings_log_saved else R.string.settings_log_failed),
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }.apply { isDaemon = true }.start()
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
     ) {
@@ -523,6 +542,15 @@ internal fun SettingsAboutScreen() {
                 stringResource(R.string.settings_encryption_value),
             )
             SettingInfoRow(stringResource(R.string.settings_license_label), "GPL-3.0")
+        }
+        Spacer(Modifier.height(Tokens.Space.m))
+        CardSection {
+            SettingRow(
+                Icons.Filled.Description,
+                stringResource(R.string.settings_log_save),
+                stringResource(R.string.settings_log_hint),
+                divider = false,
+            ) { saveLog.launch(dev.p2p.messenger.LogExport.fileName()) }
         }
         Text(
             stringResource(R.string.settings_about_future),

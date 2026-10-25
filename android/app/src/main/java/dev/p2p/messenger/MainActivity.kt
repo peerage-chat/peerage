@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        LogExport.install(applicationContext)
         model.appContext = applicationContext
         AppLock.load(applicationContext)
         // Разрешения НЕ просим здесь: во время онбординга системный диалог не нужен.
