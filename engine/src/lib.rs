@@ -2645,17 +2645,19 @@ fn save_and_notify_blob(
     peer: [u8; 32],
     done: blobs::Completed,
 ) {
+    // M3, репутация: пир потратил на нас свой трафик, отдав блоб целиком → растим
+    // его бюджет. Не-контакту счётчик не двигается (анти-Sybil, см. budget.rs).
+    // ДО сохранения: блоб становится виден читателям сразу после записи, и кто
+    // увидел блоб, должен видеть и засчитанную заслугу (иначе гонка в media-тесте).
+    let bumped = engine.contacts.lock_safe().bump_helpful(&peer).unwrap_or(0);
+    if bumped > 0 {
+        engine.refresh_budgets();
+    }
     match &done.data {
         // Мелкий блоб собран в памяти — сохраняем как раньше (один запечатанный файл).
         blobs::CompletedData::InMemory(content) => save_blob(engine, done.id, content),
         // Крупный уже лежит на диске в чанкованном виде — писать нечего.
         blobs::CompletedData::OnDisk(_) => {}
-    }
-    // M3, репутация: пир потратил на нас свой трафик, отдав блоб целиком → растим
-    // его бюджет. Не-контакту счётчик не двигается (анти-Sybil, см. budget.rs).
-    let bumped = engine.contacts.lock_safe().bump_helpful(&peer).unwrap_or(0);
-    if bumped > 0 {
-        engine.refresh_budgets();
     }
     // Отмечаем вложение скачанным во ВСЕХ чатах: блоб контент-адресный, один и тот
     // же файл в разных чатах скачан разом. Иначе карточка так и предлагала бы «скачать».
