@@ -174,6 +174,11 @@ struct Session {
     created: Instant,
     next: u64,
     window: ReplayWindow,
+    /// Медиа-канал (SEC-4): свои ключи, счётчик и окно повторов.
+    media_send: Zeroizing<[u8; 32]>,
+    media_recv: Zeroizing<[u8; 32]>,
+    media_next: u64,
+    media_window: ReplayWindow,
     /// Собеседник точно держит эту сессию: мы от него по ней что-то приняли (или
     /// мы отвечали, и его msg3 это доказал). Неподтверждённой шлём, только если
     /// подтверждённой нет: потерянный msg3 иначе молча съел бы всё отправленное.
@@ -325,6 +330,44 @@ impl Sessions {
             }
         }
         out
+    }
+
+    /// Зашифровать медиа-кадр для `peer` (SEC-4): ключом медиа текущей сессии,
+    /// тем же форматом, что пакет данных. Без живой сессии — `None`: медиа не
+    /// ждёт (опоздавший кадр бесполезен), рукопожатие начинает мессенджер.
+    pub fn seal_media(&mut self, peer: &PeerKey, plaintext: &[u8], now: Instant) -> Option<Vec<u8>> {
+        let idx = self.sending_session(peer, now)?;
+        let Some(Slot::Live(s)) = self.slots.get_mut(&idx) else { return None };
+        if s.media_next >= REJECT_AFTER_MESSAGES {
+            return None;
+        }
+        let n = s.media_next;
+        s.media_next += 1;
+        let mut out = Vec::with_capacity(DATA_OVERHEAD + plaintext.len());
+        out.extend_from_slice(&s.remote.to_le_bytes());
+        out.extend_from_slice(&n.to_le_bytes());
+        let ct = aead_seal(&s.media_send, n, &out, plaintext);
+        out.extend_from_slice(&ct);
+        Some(out)
+    }
+
+    /// Расшифровать медиа-пакет: (кто прислал — личность из рукопожатия, кадр).
+    /// Подделка, повтор и пакет без живой сессии — `None`.
+    pub fn open_media(&mut self, pkt: &[u8], now: Instant) -> Option<(PeerKey, Vec<u8>)> {
+        let idx = index_at(pkt, 0)?;
+        let Some(Slot::Live(s)) = self.slots.get_mut(&idx) else { return None };
+        if pkt.len() < DATA_OVERHEAD || now.duration_since(s.created) >= REJECT_AFTER {
+            return None;
+        }
+        let mut c = [0u8; 8];
+        c.copy_from_slice(&pkt[4..12]);
+        let counter = u64::from_le_bytes(c);
+        if !s.media_window.check(counter) {
+            return None;
+        }
+        let plaintext = aead_open(&s.media_recv, counter, &pkt[..12], &pkt[12..]).ok()?;
+        s.media_window.update(counter);
+        Some((s.peer, plaintext))
     }
 
     /// Таймеры рукопожатий (зовётся периодически, раз в полсекунды): повторить
@@ -499,6 +542,10 @@ impl Sessions {
             created: now,
             next: 0,
             window: ReplayWindow::new(),
+            media_send: keys.media_send,
+            media_recv: keys.media_recv,
+            media_next: 0,
+            media_window: ReplayWindow::new(),
             confirmed: false,
             msg3: Some((m3, now)),
         };
@@ -529,6 +576,10 @@ impl Sessions {
             created: now,
             next: 0,
             window: ReplayWindow::new(),
+            media_send: keys.media_send,
+            media_recv: keys.media_recv,
+            media_next: 0,
+            media_window: ReplayWindow::new(),
             confirmed: true,
             msg3: None,
         };
@@ -728,6 +779,32 @@ mod tests {
         assert!(matches!(&r[..], [Received::Data { peer, plaintext }] if *peer == b.id && unpadded(plaintext) == "и тебе"));
         let r = deliver(&mut a, &mut b, "ещё", t);
         assert!(matches!(&r[..], [Received::Data { .. }]), "{r:?}");
+    }
+
+    /// Медиа (SEC-4): кадр доходит, отправитель — личность из рукопожатия;
+    /// повтор, подделка и пакет чата на месте медиа не проходят; без сессии
+    /// медиа не шифруется вовсе.
+    #[test]
+    fn media_is_sealed_with_its_own_keys() {
+        let (mut a, mut b) = (node(), node());
+        let t = Instant::now();
+        assert!(a.s.seal_media(&b.id, b"frame", t).is_none(), "без сессии медиа не ждёт");
+        handshake(&mut a, &mut b, "x", t);
+        let m = a.s.seal_media(&b.id, b"frame", t).unwrap();
+        assert_eq!(m.len(), DATA_OVERHEAD + 5);
+        assert_eq!(b.s.open_media(&m, t), Some((a.id, b"frame".to_vec())));
+        assert_eq!(b.s.open_media(&m, t), None, "повтор");
+        let mut bad = a.s.seal_media(&b.id, b"frame", t).unwrap();
+        bad[DATA_OVERHEAD] ^= 1;
+        assert_eq!(b.s.open_media(&bad, t), None, "подделка");
+        // Пакет чата по ключу медиа не открывается — и наоборот.
+        let chat = a.s.send(&b.id, &text("чат"), true, t, &mut OsRng).remove(0);
+        assert_eq!(b.s.open_media(&chat, t), None);
+        let media = a.s.seal_media(&b.id, &text("кадр"), t).unwrap();
+        assert_eq!(b.s.receive(&media, t, &mut OsRng), Received::Rejected);
+        // В обратную сторону — свой ключ.
+        let back = b.s.seal_media(&a.id, b"answer", t).unwrap();
+        assert_eq!(a.s.open_media(&back, t), Some((b.id, b"answer".to_vec())));
     }
 
     #[test]

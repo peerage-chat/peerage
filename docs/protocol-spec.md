@@ -96,6 +96,13 @@ data  receiver_idx(4) | counter(8) | ChaCha20-Poly1305(padded payload), AD = the
   (`Payload::reliable_id`); a repeat is acked again but not passed up.
 - **Probes** (`Ping` to an offline contact) are not queued either: the handshake itself is
   the probe.
+- **Media (`CHAN_MEDIA`, SEC-4)** uses the same packet layout — `receiver_idx(4) |
+  counter(8) | ChaCha20-Poly1305` — with the session's *media* keys
+  (`HKDF(ck, "dev.p2p.media-keys.v1")`, one per direction, independent of the chat keys),
+  its own counter and its own replay window. The plaintext is the media frame
+  (`track | seq | ts | payload`, `core/src/media.rs`), so track and sequence numbers are
+  no longer visible on the wire. Without a session the frame is dropped (late media is
+  useless) and a handshake starts. 28 bytes of overhead per frame.
 - **Retransmission is timer-driven** (`Sessions::tick`, every 500 ms), not left to the
   application — beacons, blob manifests and profile updates are sent once. Until its new
   session is confirmed, the initiator resends msg3 every second together with what it

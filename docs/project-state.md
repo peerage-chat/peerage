@@ -100,7 +100,7 @@ indistinguishable by datagram size.
 | SEC-2 — group call media not bound to the MLS roster | **fixed** (fail-open while the roster is not cached, see N6) |
 | SEC-5 — one key reused across protocols | **fixed** for new keys (domain-separated KDF); the identity/transport split itself is designed in ADR-007 |
 | SEC-3 — forward secrecy of 1:1 messages relies only on the transport ratchet (Yggdrasil/ironwood); the application layer is a static NaCl box | **fixed** — 1:1 sessions with a hybrid post-quantum handshake ([ADR-012](adr/ADR-012-dm-session-v2.md)) |
-| SEC-4 — call media confidentiality relies only on the transport | **open** |
+| SEC-4 — call media confidentiality relies only on the transport | **fixed** — media key per pair from the 1:1 session (ADR-012) |
 | SEC-L1…L4 — replay ring bound, unauthenticated envelope time, desktop plaintext fallback, wipe footgun | open, low |
 
 **Explicit non-goals of v1.0:** hiding who talks to whom (presence beacons and

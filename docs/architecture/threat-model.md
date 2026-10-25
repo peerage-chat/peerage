@@ -42,14 +42,11 @@ All source authenticity rests on **one root assumption**:
 > datagram is the sender's real public key, and that the content is encrypted between
 > the two end nodes.**
 
-Resting on it:
-- anti-spoofing on the reliable channel (`from == src`, `messenger/src/lib.rs`);
-- **all** confidentiality and authenticity of the media channel (`CHAN_MEDIA` has no
-  application-layer encryption — finding SEC-4).
-
-If this assumption breaks (a regression in Ironwood, a switch to a transport without
-end-to-end encryption), calls lose confidentiality silently. That is an invariant, not a
-detail: any replacement of the transport must keep the property or add an application layer.
+Since ADR-012 and SEC-4 (2026-10-25/26) **neither content channel rests on it**: chat
+and call media are both encrypted and authenticated by our own 1:1 sessions. What still
+rests on it is metadata only — the binding of an address to a key (anti-spoofing of the
+*address*, `messenger/src/lib.rs::is_bound`) and the transport's view of who talks to
+whom. A broken transport reveals metadata, not content.
 
 ## 4. Guarantees we give
 
@@ -114,8 +111,9 @@ understand them before trusting the system with sensitive conversations.
   fail-closed since the 2026-10 review), a removed member drops out on Remove, and a DM
   room admits only its one contact (the room id is checked against `dm_room_id`). The
   recipient list of our voice is built only by this filter, from the first frame on.
-  Residual limitation: media itself is not encrypted to the members (SEC-4), so the
-  guarantee holds only as far as the transport does.
+  Media itself is encrypted per pair with the 1:1 session's media key (SEC-4), so a
+  frame is readable only by the member it was sent to and attributable to its sender;
+  the roster decides *who gets a copy*.
 - **N7. Padding (G6) hides SIZE, but not timing, volume or channel.** What A1 still sees
   despite the buckets:
   * **timing and rate** — a conversation is recognisable by its packet rhythm; constant
@@ -272,7 +270,8 @@ In order of return on risk (details in the [audit document](security-audit-2026-
    ([ADR-012](../adr/ADR-012-dm-session-v2.md)). Done 2026-10-25.
 4. **SEC-5** — domain separation of keys (a separate MLS signing key). The derivation
    primitive and the policy for new keys are done.
-5. **SEC-4** — encryption parity for media (a key from the MLS/Box exporter); metadata in the UI.
+5. ✅ **SEC-4** — call media is encrypted per pair with a media key exported from the 1:1
+   session (ADR-012), in DM and group calls alike. Done 2026-10-26.
 6. **N8, flooding** — after the 2026-08-01 experiments (ADR-007) the order is:
    (a) cheap hardening of the receive path + an honest flood UX: "go offline" and "change
    address" buttons; (b) separation of identity and transport keys — both containment of

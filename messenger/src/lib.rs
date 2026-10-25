@@ -1118,8 +1118,10 @@ impl Messenger {
         })
     }
 
-    /// Отправить медиа-датаграмму (реалтайм-канал): без Ack/повторов/шифрования
-    /// приложения — конфиденциальность даёт E2E-шифрование транспорта Yggdrasil.
+    /// Отправить медиа-датаграмму (реалтайм-канал, без Ack и повторов). Кадр
+    /// шифруется ключом медиа сессии 1:1 с этим собеседником (SEC-4) — и в
+    /// личном, и в групповом звонке: звонок — это полная сетка пар. Нет сессии —
+    /// кадр отбрасывается (опоздавшее медиа бесполезно) и начинается рукопожатие.
     pub fn send_media(
         &self,
         peer: &PeerKey,
@@ -1132,11 +1134,19 @@ impl Messenger {
             return Err(MessengerError::MediaTooLarge);
         }
         let total = MEDIA_HEADER_LEN + payload.len();
-        let mut buf = vec![0u8; total];
-        write_media_header(&mut buf, track, seq, ts);
-        buf[MEDIA_HEADER_LEN..total].copy_from_slice(payload);
-        if let Err(e) = self.shared.node().write(&self.shared.transport_of(peer), &buf) {
-            log::warn!("p2p-media: node.write failed for track={} len={}: {:?}", track, total, e);
+        let mut frame = vec![0u8; total];
+        write_media_header(&mut frame, track, seq, ts);
+        frame[MEDIA_HEADER_LEN..total].copy_from_slice(payload);
+        let sealed = self.shared.sessions.lock().unwrap().seal_media(peer, &frame, Instant::now());
+        let Some(sealed) = sealed else {
+            self.shared.probe(peer);
+            return Ok(());
+        };
+        let mut dg = Vec::with_capacity(1 + sealed.len());
+        dg.push(CHAN_MEDIA);
+        dg.extend_from_slice(&sealed);
+        if let Err(e) = self.shared.node().write(&self.shared.transport_of(peer), &dg) {
+            log::warn!("p2p-media: node.write failed for track={} len={}: {:?}", track, dg.len(), e);
             return Err(MessengerError::Transport(e));
         }
         Ok(())
@@ -1433,14 +1443,26 @@ fn receive_loop(shared: Arc<Shared>) {
             chat_rl.evict_idle(now);
             media_rl.evict_idle(now);
         }
-        // Демукс по байту канала: медиа — лёгкий путь без крипто/Ack.
+        // Демукс по байту канала: медиа — лёгкий путь без Ack, но с шифрованием
+        // сессии (SEC-4).
         if buf[0] == CHAN_MEDIA {
-            if let Some(f) = parse_media(&buf[..n]) {
-                if let Some(tx) = shared.media_tx.lock().unwrap().as_ref() {
-                    // Отправитель — ЛИЧНОСТЬ, а не адрес: по `src` движок решает,
-                    // чей это голос, и сверяет его с участниками комнаты (ADR-007).
+            // Звонка нет — и расшифровывать незачем.
+            let Some(tx) = shared.media_tx.lock().unwrap().clone() else {
+                media_orphan = media_orphan.wrapping_add(1);
+                if media_orphan % 512 == 1 {
+                    log::info!("p2p-media: пакет вне звонка, дроп (всего {media_orphan})");
+                }
+                continue;
+            };
+            let opened = shared.sessions.lock().unwrap().open_media(&buf[1..n], now);
+            let frame = opened.as_ref().and_then(|(peer, pt)| parse_media(pt).map(|f| (*peer, f)));
+            if let Some((peer, f)) = frame {
+                {
+                    // Отправитель — ЛИЧНОСТЬ, доказанная рукопожатием сессии, а не
+                    // адрес: по ней движок решает, чей это голос, и сверяет её с
+                    // участниками комнаты.
                     let err = tx.try_send(MediaPacket {
-                        src: shared.identity_of(&src),
+                        src: peer,
                         track: f.track,
                         seq: f.seq,
                         ts: f.ts,
@@ -1452,16 +1474,11 @@ fn receive_loop(shared: Arc<Shared>) {
                             log::warn!("p2p-media: очередь полна, дроп (track={}, всего {media_full})", f.track);
                         }
                     }
-                } else {
-                    media_orphan = media_orphan.wrapping_add(1);
-                    if media_orphan % 512 == 1 {
-                        log::info!("p2p-media: пакет вне звонка, дроп (track={}, всего {media_orphan})", f.track);
-                    }
                 }
             } else {
                 media_bad = media_bad.wrapping_add(1);
                 if media_bad % 512 == 1 {
-                    log::warn!("p2p-media: битый медиа-пакет (n={n}, всего {media_bad})");
+                    log::warn!("p2p-media: не расшифровать или битый медиа-пакет (n={n}, всего {media_bad})");
                 }
             }
             continue;

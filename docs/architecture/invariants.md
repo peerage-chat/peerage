@@ -33,7 +33,9 @@ Two channels, by the first byte of the datagram (`core/src/media.rs`):
   `messenger/src/lib.rs`). For: chat messages, keys (MLS Welcome/KeyPackage), control
   (RoomInvite, Ack, presence control).
 - **CHAN_MEDIA** — fast: light datagrams **without acks**, loss is acceptable. For:
-  real-time audio/video only.
+  real-time audio/video only. Encrypted too (SEC-4): `Sessions::seal_media` /
+  `open_media`, the media key of the 1:1 session with that recipient. No session — the
+  frame is dropped, not queued; the sender of a frame is the session's identity.
 
 **Forbidden:** sending keys, chat or files over `CHAN_MEDIA`; pushing media through the
 reliable ack transport on `CHAN_CHAT` (acks on video = an avalanche of confirmations and

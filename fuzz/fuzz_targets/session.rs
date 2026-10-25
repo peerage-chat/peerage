@@ -1,4 +1,5 @@
-//! Пакеты сессий 1:1 (ADR-012) на каждом шаге рукопожатия и в живой сессии.
+//! Пакеты сессий 1:1 (ADR-012) на каждом шаге рукопожатия, в живой сессии и
+//! медиа-канал сессии (SEC-4).
 //!
 //! Случайные байты почти никогда не попадают в наш индекс, поэтому цель заранее
 //! проводит настоящее рукопожатие и запоминает состояние обеих сторон на каждом
@@ -81,7 +82,11 @@ fn fixture() -> &'static Fixture {
             let _ = b.receive(p, t, &mut rng);
         }
         let data = a.send(&pb, &text(), true, t, &mut rng).remove(0);
-        stages.push(Stage { a, b, template: data, to_b: true });
+        stages.push(Stage { a: a.clone(), b: b.clone(), template: data, to_b: true });
+        let mut frame = vec![0u8; p2p_core::media::MEDIA_HEADER_LEN + 5];
+        p2p_core::media::write_media_header(&mut frame, p2p_core::media::TRACK_AUDIO, 1, 0);
+        let media = a.seal_media(&pb, &frame, t).unwrap();
+        stages.push(Stage { a, b, template: media, to_b: true });
         Fixture { pa, pb, t, stages }
     })
 }
@@ -89,7 +94,7 @@ fn fixture() -> &'static Fixture {
 fuzz_target!(|data: &[u8]| {
     let Some((&sel, rest)) = data.split_first() else { return };
     let f = fixture();
-    let st = &f.stages[usize::from(sel % 4)];
+    let st = &f.stages[usize::from(sel % 5)];
     let (mut a, mut b) = (st.a.clone(), st.b.clone());
     let mut rng = Det(u64::from(sel));
 
@@ -108,6 +113,10 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let (rx, tx) = if st.to_b { (&mut b, &mut a) } else { (&mut a, &mut b) };
+    // Любой пакет пробуем и как медиа: путь разбора у медиа свой.
+    if let Some((_, frame)) = rx.open_media(&pkt, f.t) {
+        let _ = p2p_core::media::parse_media(&frame);
+    }
     let back = match rx.receive(&pkt, f.t, &mut rng) {
         Received::Reply(m) => vec![m],
         Received::Established { out, .. } => out,

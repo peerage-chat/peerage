@@ -27,6 +27,8 @@ const TAGLEN: usize = 16;
 pub const KEM_PK_LEN: usize = 1184;
 /// Размер шифртекста ML-KEM-768.
 pub const KEM_CT_LEN: usize = 1088;
+/// Метка вывода ключей медиа-канала из цепного ключа рукопожатия.
+const MEDIA_LABEL: &[u8] = b"dev.p2p.media-keys.v1";
 
 #[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq)]
 pub enum NoiseError {
@@ -204,7 +206,11 @@ pub struct Split {
     pub send: Zeroizing<[u8; 32]>,
     /// Ключ для того, что шлют НАМ.
     pub recv: Zeroizing<[u8; 32]>,
-    /// Хэш рукопожатия — привязка к этой сессии (экспорт ключей, напр. медиа).
+    /// Ключи медиа-канала (SEC-4) — свои для каждой стороны, независимые от
+    /// ключей чата: у медиа свой счётчик, и общий ключ значил бы общий nonce.
+    pub media_send: Zeroizing<[u8; 32]>,
+    pub media_recv: Zeroizing<[u8; 32]>,
+    /// Хэш рукопожатия — привязка к этой сессии.
     pub hash: [u8; HASHLEN],
     /// Статический ключ собеседника (X25519), подтверждённый рукопожатием.
     pub remote_static: [u8; 32],
@@ -384,8 +390,13 @@ impl HandshakeState {
         }
         let remote_static = *self.rs.ok_or(NoiseError::OutOfTurn)?.as_bytes();
         let (k1, k2) = hkdf2(&self.sym.ck, &[]);
+        // Ключи медиа — из того же цепного ключа, но с собственной меткой: Split
+        // по спецификации — это HKDF(ck, пусто), другая метка даёт независимые
+        // выходы (так же экспортируют ключи поверх Noise, напр. в Lightning).
+        let (m1, m2) = hkdf2(&self.sym.ck, MEDIA_LABEL);
         let (send, recv) = if self.initiator { (k1, k2) } else { (k2, k1) };
-        Ok(Split { send, recv, hash: self.sym.h, remote_static })
+        let (media_send, media_recv) = if self.initiator { (m1, m2) } else { (m2, m1) };
+        Ok(Split { send, recv, media_send, media_recv, hash: self.sym.h, remote_static })
     }
 }
 
@@ -495,6 +506,11 @@ mod tests {
         assert_eq!(*ki.send, *kr.recv);
         assert_eq!(*ki.recv, *kr.send);
         assert_ne!(*ki.send, *ki.recv);
+        assert_eq!(*ki.media_send, *kr.media_recv);
+        assert_eq!(*ki.media_recv, *kr.media_send);
+        for m in [&*ki.media_send, &*ki.media_recv] {
+            assert!(m != &*ki.send && m != &*ki.recv, "ключ медиа совпал с ключом чата");
+        }
         assert_eq!(ki.hash, kr.hash);
     }
 
