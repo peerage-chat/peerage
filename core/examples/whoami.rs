@@ -10,10 +10,6 @@ fn main() {
 
     println!("== Новая идентичность узла ==\n");
     println!("ed25519 публичный ключ : {}", hex::encode(id.public_key_bytes()));
-    match id.curve25519_public() {
-        Ok(c) => println!("curve25519 публичный    : {}", hex::encode(c)),
-        Err(e) => println!("curve25519 публичный    : <ошибка: {e}>"),
-    }
     println!("Yggdrasil адрес         : {}", id.yggdrasil_address());
     println!("\nFingerprint (8 слов BIP39):");
     println!("  {}", id.fingerprint());

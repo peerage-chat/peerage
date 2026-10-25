@@ -55,7 +55,8 @@ detail: any replacement of the transport must keep the property or add an applic
 
 - **G1.** DM and group *text* messages are end-to-end encrypted; an intermediary (A1, A5)
   cannot read the content.
-- **G2.** Forgery or corruption of a message is detected (AEAD tag of NaCl Box / MLS).
+- **G2.** Forgery or corruption of a message is detected (AEAD tag of the 1:1 session /
+  MLS), and a replayed 1:1 packet is rejected (the session's replay window).
 - **G3.** The sender is authentic: a message cannot be attributed to someone else's key
   (G3 relies on the root assumption).
 - **G4.** At rest: without the key from the Keystore/keyring (A4), the database and group
@@ -68,19 +69,28 @@ detail: any replacement of the transport must keep the property or add an applic
   ack/ping/presence beacon (256 B bucket); the short last chunk of a blob is padded to a
   full one, so the exact file size does not leak through the remainder. Implementation:
   `core/src/pad.rs` + `bucket_for` in `core/src/protocol.rs`; test
-  `text_media_and_call_are_indistinguishable_by_size`. **Limits of G6 — see N7.**
+  `text_media_and_call_are_indistinguishable_by_size`. Session handshake packets have the
+  same sizes (msg1/msg2 = an APP packet, msg3 = a CONTROL packet, random padding).
+  **Limits of G6 — see N7.**
+- **G7 (ADR-012).** 1:1 messages have forward secrecy per session: session keys come from
+  fresh ephemeral X25519 **and** ML-KEM-768 keys, live in memory only and are replaced
+  every 2 minutes. Recording traffic today and later stealing the device, or later
+  breaking X25519 with a quantum computer, does not reveal past sessions. Neither identity
+  travels in the clear; a stranger who learns our new address cannot make us answer
+  without already knowing our identity (`mac1`).
 
 ## 5. What we do NOT promise (explicit non-goals of v1.0)
 
 These are deliberate limitations of the current version, not bugs. Users should
 understand them before trusting the system with sensitive conversations.
 
-- **N1. Forward secrecy for 1:1 DMs relies only on the transport ratchet.** The DM
-  application layer is a static NaCl Box, which gives no FS by itself. FS/PCS comes from
-  the ironwood `iwe` ratchet at the transport layer. That works against an on-path
-  observer (A1), but: (a) all DM forward secrecy is a property of one external dependency,
-  with no margin in the application; (b) on every ironwood upgrade the property must be
-  re-verified — a silent regression would erase FS. (Finding SEC-3.)
+- **N1. 1:1 forward secrecy is per session, not per message, and authentication is not
+  post-quantum.** (SEC-3 itself is resolved by ADR-012, see G7.) Whoever compromises a
+  device *during* a session reads that session's traffic — a window of up to 3 minutes —
+  but not earlier sessions. Signatures and the handshake's static keys are classical: a
+  future quantum attacker could impersonate, not decrypt the past (ADR-011). A handshake
+  is recognisable by its structure (no AEAD counter, X25519 keys are not uniform random) —
+  G6 hides its size, not its existence.
 - **~~N2. No member revocation and no post-compromise recovery in groups.~~**
   **RESOLVED** (SEC-1, [ADR-004](../adr/ADR-004-mls-membership-revocation.md), implemented
   2026-07-02, tested on devices 2026-07-03): the admin sequencer performs Remove
@@ -90,6 +100,10 @@ understand them before trusting the system with sensitive conversations.
 - **N3. Metadata is not hidden.** Presence beacons and keepalives (every ~15 s) reveal the
   social graph and activity patterns to A1. Yggdrasil routes by public keys: source and
   destination are visible on the path. There is no anonymisation (onion/mixnet).
+  Anyone who knows our identity can learn whether we are online: we answer their 1:1
+  handshake (ADR-012), as we must for a contact request to arrive at all — the same as a
+  stranger's message getting an Ack before. Knowing only our address is not enough
+  (`mac1`).
 - **N4. A relay's operator sees relay metadata.** If `ntfy.sh` is used (A5), its operator
   sees the topic name, size and time of messages (not the content).
 - **N5. No protection from a malicious member inside a group.** A3 reads all group content
@@ -254,8 +268,8 @@ In order of return on risk (details in the [audit document](security-audit-2026-
 1. ✅ **SEC-1** — MLS Remove + periodic self-Update → revocation and PCS
    ([ADR-004](../adr/ADR-004-mls-membership-revocation.md)). Done 2026-07-02/03.
 2. ✅ **SEC-2** — call membership from the MLS roster. Done (fail-open, see N6).
-3. **SEC-3** — pin/re-verify ironwood `iwe`; consider MLS for 1:1 (FS/PCS in the
-   application itself, without a single-point dependency on the transport).
+3. ✅ **SEC-3** — 1:1 sessions with a hybrid post-quantum handshake and rekeying
+   ([ADR-012](../adr/ADR-012-dm-session-v2.md)). Done 2026-10-25.
 4. **SEC-5** — domain separation of keys (a separate MLS signing key). The derivation
    primitive and the policy for new keys are done.
 5. **SEC-4** — encryption parity for media (a key from the MLS/Box exporter); metadata in the UI.

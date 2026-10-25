@@ -212,6 +212,33 @@ that the peer's traffic also feeds, the peer can keep our microphone live after 
 
 Guard test: `engine/tests/gate_rooms.rs::hangup_stops_our_audio_at_once_under_peer_flood`.
 
+## 13. 1:1 traffic goes only through sessions; session keys never touch disk — ✅
+
+[ADR-012](../adr/ADR-012-dm-session-v2.md). Everything on `CHAN_CHAT` is a packet of a
+`core::session` session: `Shared::send` → `Sessions::send`, the receive loop →
+`Sessions::receive`. There is no second, "simpler" path for one kind of payload.
+
+> **Do not persist session state.** Keys, indices and replay windows live in memory; a
+> restart is a new handshake. Saving them would bring back exactly what ADR-012 chose
+> to avoid (state that a process kill corrupts) and would turn a stolen device into a
+> key to recent sessions.
+>
+> **A one-shot payload needs no special care, a waiting peer does.** Handshake
+> retransmission is driven by `Sessions::tick` from the maintenance loop, so a beacon or
+> manifest sent once still goes out after a lost handshake packet. Anything that must
+> arrive is still sent reliably (§10): the session layer recovers handshakes, not lost
+> data packets.
+>
+> **Reliable data is never held by the session layer** (`send_pending`, `hold = false`):
+> its only owner is `pending`/outbox, which knows about cancellation and TTL. A new
+> session triggers `resend_pending`, which goes through `pump` — paced, in id order.
+>
+> **The identity of a packet is `Received::Data::peer`**, proven by the handshake —
+> never the transport source address (that is only checked for binding, §7).
+
+Guard tests: `core/src/session.rs` (unit), `engine/tests/chat_flow.rs::receiver_restart_mid_session_recovers`,
+fuzz target `session`.
+
 ---
 Related: [tokens.md](../design/tokens.md), [ADR-003](../adr/ADR-003-engine-api.md) (engine
 ↔ client boundary), [ADR-007](../adr/ADR-007-identity-transport-key-split.md) (identity vs

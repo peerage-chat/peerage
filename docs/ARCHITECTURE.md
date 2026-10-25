@@ -107,14 +107,16 @@ must work before decryption (threat model, N7). Details: [invariants.md §2](arc
 
 - **Identity** (`core/src/identity.rs`): the root is an **ed25519** key (Yggdrasil v0.4+
   requires it). The Yggdrasil IPv6 address is derived from it (checked bit-for-bit
-  against yggdrasil-go), and it converts to **Curve25519** for NaCl Box. Sub-keys for
-  new purposes are derived with domain separation (`derive_subkey`, BLAKE3).
+  against yggdrasil-go). Every other key is a sub-key derived with domain separation
+  (`derive_subkey`, BLAKE3).
 - **Verification:** a visual fingerprint — a 6×2 grid of shapes and colours, 96 bits —
   compared in person or by scanning a QR code. We draw the glyphs ourselves so the grid
   looks identical on every device.
-- **1:1 messages** (`core/src/crypto.rs`): NaCl **Box** (Curve25519 + XSalsa20-Poly1305,
-  crate `crypto_box`, binary-compatible with libsodium). Forward secrecy for 1:1 comes
-  from the transport ratchet (ironwood), not from this layer — known finding SEC-3.
+- **1:1 messages** (`core/src/noise.rs`, `core/src/session.rs`): sessions from a hybrid
+  **Noise XXhfs** handshake (X25519 + ML-KEM-768, ChaCha20-Poly1305, BLAKE2s) —
+  [ADR-012](adr/ADR-012-dm-session-v2.md). Keys live in memory only and are replaced every
+  2 minutes; a restart is just a new handshake. The static key is separate from the
+  identity and signed by it.
 - **Groups** (`group`/`groupchat`): **MLS (RFC 9420, openmls)** — TreeKEM, forward secrecy
   and post-compromise security. Serverless: messages spread over the mesh and the group
   admin sequences Commits. Members can be removed (revocation), and a daily self-update

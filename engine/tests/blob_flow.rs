@@ -22,14 +22,20 @@ fn transfer(content: &[u8], drop_every: u32) -> Completed {
 
 fn transfer_with(content: &[u8], drop_every: u32, limits: Limits) -> Completed {
     let net = LoopbackNet::new();
-    if drop_every > 0 {
-        net.set_drop_every(drop_every);
-    }
     let (a_id, b_id) = (id(30), id(40));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
     let cfg = Config::default();
     let (a_msgr, a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
+    // Потери включаются, когда манифест уже дошёл: тест — про докачку ЧАНКОВ
+    // сквозь потери. Манифест здесь уходит один раз и без страховки (в движке его
+    // страхуют надёжное `Media` и запрос манифеста по хэшу), и его потеря
+    // проверяла бы не докачку, а везение.
+    let lossy = |net: &LoopbackNet| {
+        if drop_every > 0 {
+            net.set_drop_every(drop_every);
+        }
+    };
     // Каталоги для блобов, собираемых сразу на диск (крупные); мелкие идут через RAM.
     let dir = std::env::temp_dir().join(format!(
         "p2p-blobflow-{}",
@@ -53,12 +59,14 @@ fn transfer_with(content: &[u8], drop_every: u32, limits: Limits) -> Completed {
         while let Ok(ev) = b_rx.try_recv() {
             match ev {
                 Event::BlobManifest { peer, manifest } => {
+                    lossy(&net);
                     if let Some(done) = b.on_manifest(peer, p2p_blob::Manifest::from_json(&manifest).unwrap()) {
                         return done;
                     }
                 }
                 // Манифест теперь едет частями (снят потолок 4 МБ).
                 Event::BlobManifestPart { peer, id, mime, size, part, total, hashes } => {
+                    lossy(&net);
                     if let Some(done) =
                         b.on_manifest_part(peer, &id, &mime, size, part, total, &hashes)
                     {

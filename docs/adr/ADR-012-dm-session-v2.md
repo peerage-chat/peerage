@@ -1,6 +1,9 @@
 # ADR-012: 1:1 session v2 — an interactive hybrid post-quantum handshake with rekeying
 
-**Status:** Accepted (2026-10-25). Implementation in progress (beta plan, step 3).
+**Status:** Accepted (2026-10-25). Implemented 2026-10-25: `core/src/noise.rs`,
+`core/src/session.rs`, wired into `messenger` (wire format in
+[protocol-spec §2.1](../protocol-spec.md)). Open from the verification plan: the ProVerif
+model (item 5).
 **Date:** 2026-10-25
 **Decided by:** project owner — approach A, rekey every 2 minutes, a separate static key
 signed by the identity (which turns the pattern from IK into XX, see below); the ML-KEM
@@ -62,7 +65,7 @@ window of minutes), not earlier sessions. B/C/E give per-message FS at the price
 persisted ratchet state; with in-memory session keys and a short rekey interval the
 practical difference is small, and the failure modes of A are far simpler.
 
-## Decision (proposed)
+## Decision
 
 ### Handshake: `Noise_XXhfs_25519+MLKEM768_ChaChaPoly_BLAKE2s` + `mac1`
 

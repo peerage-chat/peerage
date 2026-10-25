@@ -20,7 +20,8 @@ Compose UI are thin adapters.
 ## Subsystems (bottom up)
 
 ### F1. Identity and crypto ✅
-- **What:** ed25519 → Curve25519, the 24-word recovery phrase, NaCl Box, the at-rest
+- **What:** ed25519 identity, the 24-word recovery phrase, 1:1 sessions (hybrid Noise,
+  ADR-012), the at-rest
   vault, the visual fingerprint. Plus **an address separate from the identity** (ADR-007):
   the transport key is derived per epoch with domain separation, epoch 0 is the identity
   itself, and an address change is announced with the identity's signature.

@@ -6,15 +6,16 @@
 pub mod kdf;
 pub mod backup;
 pub mod budget;
-pub mod crypto;
 pub mod db;
 pub mod fsutil;
 pub mod identity;
 pub mod media;
+pub mod noise;
 pub mod outbox;
 pub mod pad;
 pub mod protocol;
 pub mod ratelimit;
+pub mod session;
 pub mod settings;
 pub mod store;
 pub mod vault;

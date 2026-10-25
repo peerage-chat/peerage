@@ -21,7 +21,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use p2p_core::media::{
     parse_media, write_media_header, CHAN_CHAT, CHAN_MEDIA, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN,
 };
-use p2p_core::protocol::{decode, encode, Payload, ProtocolError};
+use p2p_core::protocol::{Payload, ProtocolError};
+use p2p_core::session::{Received, Sessions};
+use rand_core::OsRng;
 use p2p_core::budget::Tier;
 use p2p_core::ratelimit::{RateLimiter, TieredRateLimiter};
 use p2p_core::Identity;
@@ -308,6 +310,9 @@ struct Pending {
     /// Лежит в персистентной очереди: на Ack снимаем и оттуда и подтягиваем
     /// следующее в окно.
     durable: bool,
+    /// Должно уйти заново по новой сессии с собеседником (прежняя отправка ушла
+    /// туда, где её не прочтут). Уходит через `pump` — темпом и по порядку.
+    owed: bool,
 }
 
 /// Сколько сообщений одному пиру держим в полёте. Остальные ждут в очереди и
@@ -325,6 +330,9 @@ const SPOOL_QUIET: &str = "payload-quiet";
 
 struct Shared {
     identity: Identity,
+    /// Сессии 1:1 (ADR-012): всё, что идёт по чат-каналу, шифруется ими. Ключи
+    /// только в памяти — перезапуск означает новое рукопожатие, а не потерю связи.
+    sessions: Mutex<Sessions>,
     /// Транспорт под замком: узел ЗАМЕНЯЕМ на ходу при смене адреса (ADR-007).
     /// Читатели берут снимок (`node()`), поэтому замена не рвёт ни одну операцию:
     /// приёмный цикл проснётся ошибкой на погашенном узле и переключится на новый.
@@ -372,6 +380,10 @@ struct Shared {
     /// пользователю можно было СКАЗАТЬ, что его флудят: остановить поток на
     /// устройстве нельзя (threat-model N8), но молчать об этом — худший вариант.
     flood: Mutex<std::collections::HashMap<PeerKey, FloodEntry>>,
+    /// Недавно принятые надёжные сообщения (пир, id) — отсев повторов. Повтор
+    /// подтверждаем снова (его Ack мог потеряться), но наверх не отдаём: второй
+    /// `RoomInvite` — это второй звонок в истории.
+    delivered: Mutex<HashMap<(PeerKey, u64), Instant>>,
     /// С кем держим связь (контакты и участники групп — задаёт движок): только им
     /// идут пробы и keepalive, и только им отвечаем на Ping. Остальным мы не
     /// сообщаем, онлайн ли мы.
@@ -387,6 +399,9 @@ struct FloodEntry {
     pps: f64,
     last_seen: Instant,
 }
+
+/// Сколько недавно принятых надёжных сообщений помним для отсева повторов.
+const DELIVERED_CAP: usize = 8192;
 
 /// Сколько источников держим в учёте. Больше не нужно: экран показывает верхних,
 /// а неограниченная карта — это вектор роста памяти от Sybil-флуда.
@@ -434,17 +449,54 @@ impl Shared {
         self.transports.lock().unwrap().get(peer).copied().unwrap_or(*peer)
     }
 
+    /// Разовая отправка: без сессии payload подождёт рукопожатия и уйдёт за ним.
     fn send(&self, peer: &PeerKey, payload: &Payload) -> Result<(), MessengerError> {
-        // ВАЖНО: шифруем ключу ЛИЧНОСТИ, а отправляем на текущий АДРЕС. Это разные
-        // ключи с ADR-007, и путать их нельзя: зашифруешь адресу — получатель не
-        // расшифрует (у него другой Box-ключ), пошлёшь личности — пакет уйдёт на
-        // покинутый адрес.
-        let body = encode(&self.identity, peer, payload)?;
-        // Префикс канала чата (демукс с медиа на приёме).
-        let mut dg = Vec::with_capacity(1 + body.len());
-        dg.push(CHAN_CHAT);
-        dg.extend_from_slice(&body);
-        self.node().write(&self.transport_of(peer), &dg)?;
+        self.send_with(peer, payload, true)
+    }
+
+    /// Проба присутствия: без сессии само рукопожатие и есть проба (ответ на него
+    /// — признак жизни), держать Ping до его конца незачем.
+    fn probe(&self, peer: &PeerKey) {
+        let _ = self.send_with(peer, &Payload::Ping { transit: None }, false);
+    }
+
+    /// Отправка того, что лежит в `pending`: без сессии — только начать
+    /// рукопожатие. Payload дошлёт ретрай (или `resend_pending` сразу по
+    /// готовности сессии), и снятое к тому времени уже не уйдёт.
+    fn send_pending(&self, peer: &PeerKey, payload: &Payload) -> Result<(), MessengerError> {
+        self.send_with(peer, payload, false)
+    }
+
+    fn send_with(&self, peer: &PeerKey, payload: &Payload, hold: bool) -> Result<(), MessengerError> {
+        // ВАЖНО: сессия заведена на ЛИЧНОСТЬ, а пакеты идут на текущий АДРЕС. Это
+        // разные ключи с ADR-007: сессия переживает смену адреса, а слать по
+        // ключу личности — значит слать на покинутый адрес.
+        let plaintext = payload.to_padded()?;
+        let out = self.sessions.lock().unwrap().send(peer, &plaintext, hold, Instant::now(), &mut OsRng);
+        self.write_chat(&self.transport_of(peer), out)
+    }
+
+    /// Сессия с `peer` только что поднялась: всё, что ждёт его Ack, уходит заново,
+    /// не дожидаясь очередного ретрая. Через `pump` — темпом [`SEND_RATE`] и по
+    /// порядку: залп всего окна сверх ingress-бюджета получателя срезал бы хвост,
+    /// и новые сообщения обогнали бы его (R-011).
+    fn resend_pending(&self, peer: &PeerKey) {
+        for p in self.pending.lock().unwrap().values_mut().filter(|p| p.peer == *peer) {
+            p.owed = true;
+        }
+        self.pump(peer);
+    }
+
+    /// Отправить пакеты сессии на адрес `to` с префиксом чат-канала (демукс с
+    /// медиа на приёме).
+    fn write_chat(&self, to: &PeerKey, packets: Vec<Vec<u8>>) -> Result<(), MessengerError> {
+        let node = self.node();
+        for p in packets {
+            let mut dg = Vec::with_capacity(1 + p.len());
+            dg.push(CHAN_CHAT);
+            dg.extend_from_slice(&p);
+            node.write(to, &dg)?;
+        }
         Ok(())
     }
 
@@ -486,9 +538,18 @@ impl Shared {
         let now = Instant::now();
         self.pending.lock().unwrap().insert(
             id,
-            Pending { peer: *peer, payload: payload.clone(), created: now, last_sent: now, ttl, notify, durable: false },
+            Pending {
+                peer: *peer,
+                payload: payload.clone(),
+                created: now,
+                last_sent: now,
+                ttl,
+                notify,
+                durable: false,
+                owed: false,
+            },
         );
-        if let Err(e) = self.send(peer, &payload) {
+        if let Err(e) = self.send_pending(peer, &payload) {
             log::warn!("send id={id}: транспорт не принял ({e}), дожмёт ретрай");
         }
         Ok(id)
@@ -524,10 +585,11 @@ impl Shared {
     /// это ровно то, что должно быть в полёте; чего из неё нет в `pending`, то и
     /// отправляем, не быстрее [`SEND_RATE`]. Зовётся на постановку, Ack, появление
     /// пира и старт; упёрлись в темп — пира дотянет maintenance.
+    ///
+    /// Сперва — должное заново (`owed`, после смены сессии), и пока оно не ушло
+    /// всё, новое из очереди не трогаем: иначе новое обогнало бы старое.
     fn pump(&self, peer: &PeerKey) {
-        let Some(outbox) = self.outbox.get() else { return };
         let _order = self.send_order.lock().unwrap();
-        let Ok(head) = outbox.head_for(peer, SEND_WINDOW) else { return };
         let now = Instant::now();
         let budget = {
             let mut pace = self.pace.lock().unwrap();
@@ -537,43 +599,65 @@ impl Shared {
             }
             SEND_RATE.saturating_sub(slot.1)
         };
+        // Кандидаты на отправку — по id, то есть в порядке постановки: должное
+        // заново (уже в `pending`) и не отправленное из головы очереди (в том числе
+        // выпавшее из `pending` по сроку). Отдельными проходами новое обгоняло бы
+        // старое (R-011).
+        let outbox = self.outbox.get();
+        let head = outbox.and_then(|o| o.head_for(peer, SEND_WINDOW).ok()).unwrap_or_default();
         let mut to_send = Vec::new();
         let mut broken = Vec::new();
-        let mut deferred = false;
-        {
+        let deferred = {
             let mut pending = self.pending.lock().unwrap();
-            for e in head {
-                if pending.contains_key(&e.msg_id) {
-                    continue;
+            // (id, None) — должное из `pending`; (id, Some(i)) — head[i].
+            let mut cands: Vec<(u64, Option<usize>)> =
+                pending.iter().filter(|(_, p)| p.peer == *peer && p.owed).map(|(id, _)| (*id, None)).collect();
+            cands.extend(
+                head.iter().enumerate().filter(|(_, e)| !pending.contains_key(&e.msg_id)).map(|(i, e)| (e.msg_id, Some(i))),
+            );
+            cands.sort_unstable_by_key(|c| c.0);
+            let deferred = cands.len() > budget;
+            for (id, src) in cands.into_iter().take(budget) {
+                match src {
+                    None => {
+                        if let Some(p) = pending.get_mut(&id) {
+                            p.owed = false;
+                            p.last_sent = now;
+                            to_send.push(p.payload.clone());
+                        }
+                    }
+                    Some(i) => {
+                        let e = &head[i];
+                        let Ok(payload) = Payload::from_bytes(&e.payload) else {
+                            broken.push(e.id);
+                            continue;
+                        };
+                        let notify = e.payload_type == SPOOL_NOTIFY;
+                        pending.insert(
+                            e.msg_id,
+                            Pending {
+                                peer: *peer,
+                                payload: payload.clone(),
+                                created: now,
+                                last_sent: now,
+                                ttl: self.cfg.message_ttl,
+                                notify,
+                                durable: true,
+                                owed: false,
+                            },
+                        );
+                        to_send.push(payload);
+                    }
                 }
-                if to_send.len() >= budget {
-                    deferred = true;
-                    break;
-                }
-                let Ok(payload) = Payload::from_bytes(&e.payload) else {
-                    broken.push(e.id);
-                    continue;
-                };
-                let notify = e.payload_type == SPOOL_NOTIFY;
-                pending.insert(
-                    e.msg_id,
-                    Pending {
-                        peer: *peer,
-                        payload: payload.clone(),
-                        created: now,
-                        last_sent: now,
-                        ttl: self.cfg.message_ttl,
-                        notify,
-                        durable: true,
-                    },
-                );
-                to_send.push(payload);
             }
-        }
+            deferred
+        };
         // Нечитаемая запись (формат сменился) застряла бы в голове навсегда и
         // заперла окно — выбрасываем.
-        for id in broken {
-            let _ = outbox.remove(id);
+        if let Some(outbox) = outbox {
+            for id in broken {
+                let _ = outbox.remove(id);
+            }
         }
         if let Some(slot) = self.pace.lock().unwrap().get_mut(peer) {
             slot.1 += to_send.len();
@@ -582,7 +666,7 @@ impl Shared {
             self.backlog.lock().unwrap().insert(*peer);
         }
         for payload in to_send {
-            if let Err(e) = self.send(peer, &payload) {
+            if let Err(e) = self.send_pending(peer, &payload) {
                 log::warn!("досылка пиру {:02x?}: транспорт не принял ({e})", &peer[..4]);
             }
         }
@@ -595,6 +679,37 @@ impl Shared {
             .get(peer)
             .map(|s| s.online)
             .unwrap_or(false)
+    }
+
+    /// Первая ли это доставка надёжного сообщения `id` от `peer`. Помним дольше
+    /// срока ретраев отправителя; карта ограничена, чтобы флуд её не раздул.
+    fn first_delivery(&self, peer: &PeerKey, id: u64, now: Instant) -> bool {
+        let keep = self.cfg.message_ttl * 2;
+        let mut d = self.delivered.lock().unwrap();
+        if d.len() >= DELIVERED_CAP {
+            d.retain(|_, t| now.duration_since(*t) < keep);
+            if d.len() >= DELIVERED_CAP {
+                // Всё свежее: забываем самое старое. Худшее последствие — повтор
+                // наверх, который движок для текста и так отсеет.
+                if let Some(old) = d.iter().min_by_key(|(_, t)| **t).map(|(k, _)| *k) {
+                    d.remove(&old);
+                }
+            }
+        }
+        d.insert((*peer, id), now).is_none()
+    }
+
+    /// Пакет от `peer` пришёл с адреса `src`, который за этой личностью числится.
+    fn is_bound(&self, peer: &PeerKey, src: &PeerKey) -> bool {
+        peer == src || self.transport_of(peer) == *src
+    }
+
+    /// От пира пришёл подлинный трафик: он онлайн. Вернулся — досылаем накопленное.
+    fn peer_alive(&self, peer: &PeerKey) {
+        if self.mark_seen(peer) {
+            self.emit(Event::Presence { peer: *peer, online: true });
+            self.pump(peer);
+        }
     }
 
     /// Отметить приход трафика от пира; вернуть true, если пир ПЕРЕШЁЛ в онлайн.
@@ -645,6 +760,7 @@ impl Messenger {
     ) -> (Messenger, Receiver<Event>) {
         let (tx, rx) = mpsc::channel();
         let shared = Arc::new(Shared {
+            sessions: Mutex::new(Sessions::new(&identity)),
             identity,
             node: std::sync::RwLock::new(node),
             cfg,
@@ -671,6 +787,7 @@ impl Messenger {
             transports: Mutex::new(std::collections::HashMap::new()),
             identities: Mutex::new(std::collections::HashMap::new()),
             flood: Mutex::new(std::collections::HashMap::new()),
+            delivered: Mutex::new(HashMap::new()),
             targets: Mutex::new(std::collections::HashSet::new()),
         });
         let s1 = shared.clone();
@@ -731,7 +848,7 @@ impl Messenger {
             st.backoff = PROBE_MIN;
             st.next_probe = Instant::now() + PROBE_MIN;
         }
-        let _ = self.shared.send(peer, &Payload::Ping { transit: None });
+        self.shared.probe(peer);
     }
 
     /// Сеть сменилась: всех офлайн-пиров из набора пробуем заново с короткой паузы.
@@ -1223,9 +1340,9 @@ fn note_flood(shared: &Arc<Shared>, src: &PeerKey, now: Instant) {
 
 fn receive_loop(shared: Arc<Shared>) {
     let mut buf = vec![0u8; 65535];
-    // Своего анти-replay здесь нет (R-019): повторить датаграмму может только тот,
-    // кто внутри ygg-сессии, а от этого защищает сама сессия (ironwood). Повторную
-    // ДОСТАВКУ (ретрай после потерянного Ack) отсекает движок — дедупом по id сообщения.
+    // Повтор датаграммы отсекает окно повторов сессии (ADR-012). Повторную
+    // ДОСТАВКУ (ретрай после потерянного Ack — это новый пакет) отсекает движок —
+    // дедупом по id сообщения.
 
     // Приёмный rate-limit (M1, анти-abuse): per-source token-bucket, навязывается
     // ПРИНИМАЮЩИМ (модификация отправителя не обходит). Применяется по src-ключу
@@ -1352,23 +1469,66 @@ fn receive_loop(shared: Arc<Shared>) {
         if buf[0] != CHAN_CHAT {
             continue;
         }
-        let (from, payload) = match decode(&shared.identity, &buf[1..n]) {
-            Ok(v) => v,
-            Err(_) => continue, // не наш конверт / не расшифровать
+        let received = {
+            // Новая сессия не должна появиться посреди пачки ретраев или досылки
+            // (они идут под `send_order`): иначе голова пачки уходит по старой
+            // сессии, которой у собеседника уже нет, хвост — по новой, и после
+            // переотправки голова приходит позже хвоста (R-011).
+            let _order = shared.send_order.lock().unwrap();
+            shared.sessions.lock().unwrap().receive(&buf[1..n], now, &mut OsRng)
+        };
+        let (from, payload) = match received {
+            Received::Data { peer, plaintext } => match Payload::from_padded(&plaintext) {
+                Ok(p) => (peer, p),
+                Err(_) => continue,
+            },
+            Received::Keepalive { peer } => {
+                if shared.is_bound(&peer, &src) {
+                    shared.peer_alive(&peer);
+                }
+                continue;
+            }
+            // Ответ на рукопожатие — туда, откуда пришёл msg1: кто там, узнаем
+            // только из msg3.
+            Received::Reply(m2) => {
+                let _ = shared.write_chat(&src, vec![m2]);
+                continue;
+            }
+            // Рукопожатие закончено: msg3, подтверждение и всё, что ждало
+            // сессии, — по адресу, с которого собеседник только что ответил.
+            Received::Established { peer, out } => {
+                let _ = shared.write_chat(&src, out);
+                shared.resend_pending(&peer);
+                if shared.is_bound(&peer, &src) {
+                    shared.peer_alive(&peer);
+                }
+                continue;
+            }
+            // Шлют по сессии, которой у нас нет (мы перезапустились). Если это
+            // свой и сессии с ним правда нет — начинаем её сами, не дожидаясь,
+            // пока он заметит молчание. Чужим не отвечаем ничем.
+            Received::UnknownIndex => {
+                let peer = shared.identity_of(&src);
+                let ours = shared.targets.lock().unwrap().contains(&peer);
+                if ours && !shared.sessions.lock().unwrap().has_session(&peer, now) {
+                    shared.probe(&peer);
+                }
+                continue;
+            }
+            Received::Rejected => continue,
         };
         // Анти-спуфинг с учётом разделения личности и адреса (ADR-007).
         //
-        // Раньше правило было простым: `from == src`. С разделением ключей адрес
-        // (src) больше не обязан совпадать с личностью (from), поэтому проверяем
-        // ПРИВЯЗКУ. Принять пакет можно в трёх случаях:
-        //   * from == src — эпоха 0 или незнакомец (в точности прежнее правило);
+        // `from` — личность, доказанная рукопожатием сессии. Адрес (src) с ней
+        // не обязан совпадать, поэтому проверяем ПРИВЯЗКУ. Принять пакет можно
+        // в трёх случаях:
+        //   * from == src — эпоха 0 или незнакомец;
         //   * src — известный нам адрес этой личности (связка подтверждена ранее
         //     принятым подписанным объявлением);
         //   * это само объявление о смене адреса, и его подпись связывает
         //     from → src (самоподтверждающийся случай, иначе новый адрес
         //     невозможно узнать: он приходит уже С нового адреса).
-        // Без такой проверки любой узел мог бы прислать конверт с чужим `from`.
-        let bound = from == src || shared.transport_of(&from) == src;
+        let bound = shared.is_bound(&from, &src);
         let self_authenticating = matches!(
             &payload,
             Payload::TransportRotate { epoch, transport_pub, sig, .. }
@@ -1386,9 +1546,13 @@ fn receive_loop(shared: Arc<Shared>) {
         let peer_id = from;
 
         // Любой трафик от пира = он онлайн.
-        if shared.mark_seen(&peer_id) {
-            shared.emit(Event::Presence { peer: peer_id, online: true });
-            shared.pump(&peer_id); // вернулся — досылаем накопленное
+        shared.peer_alive(&peer_id);
+
+        if let Some(id) = payload.reliable_id() {
+            if !shared.first_delivery(&peer_id, id, now) {
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
+                continue;
+            }
         }
 
         match payload {
@@ -1555,6 +1719,14 @@ fn maintenance_loop(shared: Arc<Shared>) {
         }
         let now = Instant::now();
 
+        // Таймеры рукопожатий сессий: повтор msg3 и новое рукопожатие для тех, кому
+        // ждут данные. Первый пакет на холодной сессии иначе держался бы на том,
+        // что его кто-нибудь пошлёт ещё раз.
+        let handshakes = shared.sessions.lock().unwrap().tick(now, &mut OsRng);
+        for (peer, dg) in handshakes {
+            let _ = shared.write_chat(&shared.transport_of(&peer), vec![dg]);
+        }
+
         // Presence-таймауты + расписание keepalive-ping.
         let mut went_offline = Vec::new();
         let mut to_ping = Vec::new();
@@ -1596,7 +1768,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
             shared.emit(Event::Presence { peer: key, online: false });
         }
         for key in to_ping {
-            let _ = shared.send(&key, &Payload::Ping { transit: None });
+            shared.probe(&key);
         }
 
         // Повтор недоставленных сообщений; отсев по TTL. Выбор и отправка — под
@@ -1611,7 +1783,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
                     expired.push((*id, p.peer, p.notify));
                     return false;
                 }
-                if now.duration_since(p.last_sent) >= shared.cfg.retry_interval {
+                if !p.owed && now.duration_since(p.last_sent) >= shared.cfg.retry_interval {
                     p.last_sent = now;
                     to_retry.push((*id, p.peer, p.payload.clone()));
                 }
@@ -1627,7 +1799,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
         // офлайне сообщения ретраятся по порядку, а не в случайном (HashMap) порядке.
         to_retry.sort_by_key(|(id, _, _)| *id);
         for (_, peer, payload) in to_retry {
-            let _ = shared.send(&peer, &payload);
+            let _ = shared.send_pending(&peer, &payload);
         }
         drop(order);
 
@@ -1653,7 +1825,7 @@ pub mod loopback {
     #[derive(Clone, Default)]
     pub struct LoopbackNet {
         inboxes: Arc<Mutex<HashMap<PeerKey, Inbox>>>,
-        /// Ронять каждую N-ю датаграмму (0 = без потерь) — для тестов ретрая.
+        /// Ронять в среднем каждую N-ю датаграмму (0 = без потерь) — для тестов ретрая.
         drop_every: Arc<AtomicU32>,
         counter: Arc<AtomicU32>,
     }
@@ -1663,7 +1835,10 @@ pub mod loopback {
             Self::default()
         }
 
-        /// Ронять каждую `n`-ю доставку (эмуляция потерь; 0 — выключить).
+        /// Ронять в среднем каждую `n`-ю доставку (эмуляция потерь; 0 — выключить).
+        /// Потери псевдослучайные, но воспроизводимые (по номеру датаграммы), а не
+        /// строго периодические: строгое «каждый N-й» с рукопожатием из трёх пакетов
+        /// даёт вырожденные узоры — при N = 2 msg2 вечно падает на чётный номер.
         pub fn set_drop_every(&self, n: u32) {
             self.drop_every.store(n, Ordering::Relaxed);
         }
@@ -1686,8 +1861,12 @@ pub mod loopback {
         fn write(&self, dst_pub: &PeerKey, data: &[u8]) -> Result<usize, YggError> {
             let drop_every = self.net.drop_every.load(Ordering::Relaxed);
             if drop_every > 0 {
-                let n = self.net.counter.fetch_add(1, Ordering::Relaxed) + 1;
-                if n % drop_every == 0 {
+                let n = self.net.counter.fetch_add(1, Ordering::Relaxed) as u64 + 1;
+                // splitmix64 от номера: равномерно и детерминированно.
+                let mut z = n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                if (z ^ (z >> 31)) % u64::from(drop_every) == 0 {
                     return Ok(data.len()); // «потеряли» пакет
                 }
             }
@@ -1738,7 +1917,15 @@ mod tests {
 
     /// Дождаться конкретного события до таймаута (фон-потоки доставляют асинхронно).
     fn wait_for(rx: &Receiver<Event>, pred: impl Fn(&Event) -> bool) -> Option<Event> {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        wait_long(rx, Duration::from_secs(2), pred)
+    }
+
+    /// Под потерями холодная сессия — это рукопожатие из трёх пакетов, и каждый
+    /// может потеряться: при 50 % потерь на это уходят секунды, а не один ретрай.
+    const LOSSY: Duration = Duration::from_secs(10);
+
+    fn wait_long(rx: &Receiver<Event>, within: Duration, pred: impl Fn(&Event) -> bool) -> Option<Event> {
+        let deadline = Instant::now() + within;
         while Instant::now() < deadline {
             if let Ok(ev) = rx.recv_timeout(Duration::from_millis(50)) {
                 if pred(&ev) {
@@ -1749,24 +1936,29 @@ mod tests {
         None
     }
 
-    /// R-010: на Ping отвечаем только своим — иначе любой знающий наш адрес
-    /// узнавал бы, онлайн ли мы, без единого сообщения.
+    /// R-010 в мире сессий (ADR-012): адрес сам по себе не отвечает. Кто знает
+    /// лишь адрес A, но не его личность, не получает ничего — msg1 без верного
+    /// `mac1` встречает молчание, и нельзя узнать ни что A онлайн, ни чей это адрес.
+    /// Кто знает личность, узнаёт, что A в сети, из самого рукопожатия (как раньше —
+    /// из Ack на любое сообщение); без этого не дошёл бы и запрос в контакты.
     #[test]
-    fn pong_only_to_targets() {
+    fn address_alone_gets_no_answer() {
         let net = LoopbackNet::new();
         let (a_id, b_id) = (id(41), id(42));
         let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
-        let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
+        let (_a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
         let (b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), Config::default());
 
-        b.poke(&a_key);
+        // B думает, что по адресу A живёт кто-то другой (X): mac1 под X.
+        let x_key = id(49).public_key_bytes();
+        b.set_peer_transports(&[(x_key, a_key)]);
+        b.poke(&x_key);
         let seen = wait_for(&b_rx, |e| matches!(e, Event::Presence { online: true, .. }));
-        assert!(seen.is_none(), "чужому A не ответил — B не узнал, что A в сети");
+        assert!(seen.is_none(), "по одному адресу A не ответил");
 
-        a.set_targets([b_key].into_iter().collect());
         b.poke(&a_key);
         let seen = wait_for(&b_rx, |e| matches!(e, Event::Presence { peer, online: true } if *peer == a_key));
-        assert!(seen.is_some(), "своему A ответил");
+        assert!(seen.is_some(), "знающему личность — рукопожатие");
     }
 
     /// R-022: офлайн-пира из набора пробуем с растущей паузой, а не непрерывно.
@@ -1823,7 +2015,7 @@ mod tests {
         let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
 
         a.send_text(&b_key, "сквозь потери").unwrap();
-        let got = wait_for(&b_rx, |e| matches!(e, Event::Text { text, .. } if text == "сквозь потери"));
+        let got = wait_long(&b_rx, LOSSY, |e| matches!(e, Event::Text { text, .. } if text == "сквозь потери"));
         assert!(got.is_some(), "ретрай должен дожать сообщение несмотря на потери");
     }
 
@@ -1840,7 +2032,7 @@ mod tests {
         let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
 
         a.send_group_key_request(&b_key, &[1, 2, 3]).unwrap();
-        let got = wait_for(&b_rx, |e| matches!(e, Event::GroupKeyRequest { .. }));
+        let got = wait_long(&b_rx, LOSSY, |e| matches!(e, Event::GroupKeyRequest { .. }));
         assert!(got.is_some(), "GroupKeyRequest должен дойти несмотря на потери (ретрай)");
     }
 
@@ -1857,7 +2049,7 @@ mod tests {
         let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
 
         a.send_room_invite(&b_key, &[9u8; 16], true, false).unwrap();
-        let got = wait_for(&b_rx, |e| matches!(e, Event::RoomInvite { audio: true, .. }));
+        let got = wait_long(&b_rx, LOSSY, |e| matches!(e, Event::RoomInvite { audio: true, .. }));
         assert!(got.is_some(), "RoomInvite должен дойти несмотря на потери (ретрай)");
     }
 

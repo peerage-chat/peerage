@@ -45,17 +45,69 @@ unix time (cosmetic); correctness timing uses monotonic clocks inside the engine
 ## 2. Wire protocol overview
 
 Every datagram starts with a channel byte (`CHAN_CHAT = 0x01`, reliable;
-`CHAN_MEDIA = 0x02`, real-time). On `CHAN_CHAT` the body is a binary envelope
-`[v:1][from:32][nonce:24][ciphertext]` (version 2), where the ciphertext is a NaCl Box of
-the padded `Payload` serialised as MessagePack with field names (`core/src/protocol.rs`).
-No send time travels in the clear, and bytes travel as bytes — no hex and no JSON arrays
-of numbers, so a 12 KiB blob chunk costs about 12.3 KiB on the wire. The same MessagePack
-form is what the offline queue stores. Shared Box keys are cached per peer (bounded), so
-the X25519 exchange is not redone for every packet.
+`CHAN_MEDIA = 0x02`, real-time). On `CHAN_CHAT` the body is a packet of a **1:1 session**
+([ADR-012](adr/ADR-012-dm-session-v2.md), `core/src/session.rs`); its plaintext is the
+`Payload` serialised as MessagePack with field names and padded to its size bucket
+(`Payload::to_padded`, `core/src/protocol.rs`). No send time and no identity travel in the
+clear, and bytes travel as bytes — no hex and no JSON arrays of numbers, so a 12 KiB blob
+chunk costs about 12.3 KiB on the wire. The offline queue stores the unpadded MessagePack
+form and encrypts at the moment of sending.
+
+### 2.1 Sessions (ADR-012)
+
+A session is created by a `Noise_XXhfs_25519+MLKEM768_ChaChaPoly_BLAKE2s` handshake
+(prologue `dev.p2p.dm-session.v2`) and lives in memory only. Indices are little-endian.
+
+```text
+msg1  sender_idx(4) | e(32) | e1(1184) | mac1(16)                   | random padding → 4124 B
+msg2  receiver_idx(4) | sender_idx(4) | e(32) | ekem1(1104) | s(48) | auth(112) | padding → 4124 B
+msg3  receiver_idx(4) | s(48) | auth(112)                           | padding → 284 B
+data  receiver_idx(4) | counter(8) | ChaCha20-Poly1305(padded payload), AD = the 12-byte header
+```
+
+- **No type byte.** The receiver recognises a packet by its own index in the first four
+  bytes (pending msg2, pending msg3 or a live session); an unknown index of the APP size is
+  tried as msg1. msg1/msg2 have the size of an APP data packet, msg3 the size of a
+  CONTROL one, so a handshake is not told apart from traffic by size.
+- **`mac1`** = first 16 bytes of `BLAKE3-keyed(derive_key("dev.p2p.session-mac1.v1",
+  responder_identity), msg1 without mac1)`. Without it the responder stays silent: only
+  someone who already knows our identity can make us reveal it (address rotation, ADR-007).
+- **`auth`** = identity public key (32) ‖ Ed25519 signature by that identity over
+  `"dev.p2p.session-static.v1" ‖ static_pub` (64), encrypted inside the handshake. The
+  static X25519 key is `derive_subkey("dev.p2p.session-static.v1")`. The initiator
+  requires the responder's identity to be the peer it called; the responder learns the
+  initiator's identity from msg3.
+- **Data:** the counter is the AEAD nonce; a 2048-packet sliding window rejects replays
+  and anything older. An empty padded plaintext is a keepalive: the responder sends one
+  right after msg3 so the initiator knows the session is confirmed.
+- **Lifetime:** a send on a session older than 120 s starts a new handshake; a session is
+  dropped 180 s after creation. The sender uses the newest *confirmed* session (one it has
+  received on); the initiator's new session becomes confirmed with the first packet back.
+  If a peer stays silent for 15 s while we send (5 s on an unconfirmed session), a new
+  handshake starts — that is how a peer restart is noticed. Both sides may initiate at
+  once; both sessions complete and both are accepted.
+- **Without a session** a one-shot payload (ack, beacon, blob manifest, profile) waits in
+  a small queue (64 packets, 10 s) and goes out right after the handshake. A **reliable**
+  payload is *not* held: it only triggers the handshake, and as soon as the session is up
+  the messenger resends its whole in-flight window to that peer — paced (20/s) and in id
+  order, the same path as the outbox. Holding it in the session queue too would deliver
+  what the messenger had already withdrawn (a hung-up call, an expired ring).
+- **Duplicates:** the receiver remembers delivered (peer, id) pairs of reliable payloads
+  (`Payload::reliable_id`); a repeat is acked again but not passed up.
+- **Probes** (`Ping` to an offline contact) are not queued either: the handshake itself is
+  the probe.
+- **Retransmission is timer-driven** (`Sessions::tick`, every 500 ms), not left to the
+  application — beacons, blob manifests and profile updates are sent once. Until its new
+  session is confirmed, the initiator resends msg3 every second together with what it
+  already sent on that session; a session still unconfirmed after 5 s is dropped and its
+  data goes back to the queue; a queue with no session and no handshake in flight starts
+  a new handshake (so a lost msg1/msg2 is retried every 5 s while data waits).
+- **Unknown index** from one of our contacts while we have no session with them (we
+  restarted) → we start a handshake ourselves. Strangers get no answer.
 
 | Group | Payloads |
 |---|---|
-| Session | `Hello`, `Ping`, `Pong`, `Ack` |
+| Presence and delivery | `Hello`, `Ping`, `Pong`, `Ack` |
 | 1:1 messages | `Text`, `Media`, `Edit`, `Retract`, `Pin` |
 | Groups (MLS) | `Group` (MLS message), `GroupInvite`, `GroupKeyRequest`, `GroupKeyReply`, `GroupResyncRequest`, `GroupLeaveRequest` |
 | Rooms (calls) | `RoomInvite`, `RoomDecline`, `RoomPresence` |

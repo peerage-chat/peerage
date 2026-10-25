@@ -12,6 +12,7 @@ name = "p2p_messenger"
 log = "0.4"
 p2p-core = { path = "../core" }
 p2p-ygg = { path = "../transport" }
+rand_core.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 

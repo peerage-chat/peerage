@@ -2,18 +2,18 @@
 //!
 //! Одна пара ключей ed25519 — корень идентичности:
 //!   * публичный ключ ed25519 → детерминированный адрес Yggdrasil IPv6;
-//!   * тот же ключ конвертируется в Curve25519 для шифрования сообщений (NaCl Box);
+//!   * ключи для остального — доменно-разделённые под-ключи seed-а
+//!     ([`Identity::derive_subkey`]), связанные с личностью подписью, где нужно
+//!     (статический ключ сессий 1:1, ADR-012);
 //!   * SHA-256(публичный ключ) → 8 слов BIP39 (человекочитаемый fingerprint).
 //!
 //! Yggdrasil (v0.4+) использует именно ed25519, поэтому ed25519 — первичен.
-//! Curve25519 выводится из него по стандартной формуле birational map
-//! (как `crypto_sign_ed25519_pk_to_curve25519` в libsodium).
 
 use std::net::Ipv6Addr;
 
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand_core::OsRng;
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha256};
 
 /// Размер seed-а ed25519 (он же приватный материал, который храним на диске).
 pub const SEED_LEN: usize = 32;
@@ -24,8 +24,6 @@ pub const FINGERPRINT_WORDS: usize = 8;
 pub enum IdentityError {
     #[error("неверная длина seed: ожидалось {SEED_LEN}, получено {0}")]
     BadSeedLen(usize),
-    #[error("не удалось сконвертировать ключ ed25519 в curve25519")]
-    KeyConversion,
     #[error("неверная сид-фраза BIP39")]
     BadPhrase,
 }
@@ -94,32 +92,14 @@ impl Identity {
         addr_for_key(&self.public_key_bytes())
     }
 
-    /// Публичный ключ Curve25519 (для шифрования NaCl Box).
-    pub fn curve25519_public(&self) -> Result<[u8; 32], IdentityError> {
-        ed25519_pub_to_curve25519(&self.public_key_bytes()).ok_or(IdentityError::KeyConversion)
-    }
-
-    /// Секретный ключ Curve25519 (X25519) для NaCl Box.
-    ///
-    /// Эквивалент `crypto_sign_ed25519_sk_to_curve25519`: первые 32 байта
-    /// SHA-512(seed). Клэмпинг X25519 применяет при умножении (идемпотентно),
-    /// поэтому возвращаем «сырое» значение — как libsodium.
-    pub fn x25519_secret(&self) -> [u8; 32] {
-        let hash = Sha512::digest(self.signing.to_bytes());
-        let mut sk = [0u8; 32];
-        sk.copy_from_slice(&hash[..32]);
-        sk
-    }
-
     /// Доменно-разделённый под-ключ (32 байта) из seed по контекстной метке
     /// (SEC-5). BLAKE3 в режиме KDF: `context` — уникальная незасекреченная строка-
     /// домен (напр. `"dev.p2p.blob-at-rest.v1"`), одна метка → один детерминированный
     /// ключ, независимый от seed и от ключей других доменов.
     ///
-    /// ПОЛИТИКА: **любой новый симметричный ключ** (шифрование блобов at-rest, ключи
-    /// медиа/группового звонка и т.п.) выводить ЧЕРЕЗ этот метод, а не переиспользуя
-    /// seed/идентичность/Box-ключ. Существующие ключи (ed25519-идентичность =
-    /// транспорт+MLS-credential; X25519 Box из seed — стандарт libsodium) не трогаем.
+    /// ПОЛИТИКА: **любой новый ключ** (шифрование блобов at-rest, ключи медиа,
+    /// статический ключ сессий и т.п.) выводить ЧЕРЕЗ этот метод, а не переиспользуя
+    /// seed или ключ личности (ed25519 = транспорт эпохи 0 + MLS-credential).
     pub fn derive_subkey(&self, context: &str) -> [u8; 32] {
         blake3::derive_key(context, &self.signing.to_bytes())
     }
@@ -164,6 +144,24 @@ impl Identity {
         self.signing.sign(&rotate_msg(epoch, transport_pub)).to_bytes()
     }
 
+    // ── Статический ключ сессий 1:1 (ADR-012) ───────────────────────────────
+    //
+    // Отдельный X25519-ключ рукопожатия, а не Box-ключ, переделанный из ed25519
+    // личности (SEC-5): один ключ — одна роль. Связь с личностью даёт подпись,
+    // которая едет внутри рукопожатия (как в libp2p noise).
+
+    /// Секрет статического ключа сессий 1:1. Детерминирован из seed — после
+    /// восстановления из мнемоники он тот же, хранить отдельно нечего.
+    pub fn session_static_secret(&self) -> [u8; 32] {
+        self.derive_subkey("dev.p2p.session-static.v1")
+    }
+
+    /// Подписать свой статический ключ сессий ключом ЛИЧНОСТИ.
+    pub fn sign_session_static(&self, static_pub: &[u8; 32]) -> [u8; 64] {
+        use ed25519_dalek::Signer;
+        self.signing.sign(&session_static_msg(static_pub)).to_bytes()
+    }
+
     /// Fingerprint — 8 слов BIP39 из SHA-256(публичный ключ).
     pub fn fingerprint_words(&self) -> [&'static str; FINGERPRINT_WORDS] {
         fingerprint_words(&self.public_key_bytes())
@@ -204,6 +202,22 @@ pub fn verify_transport_rotate(
     use ed25519_dalek::Verifier;
     let Ok(vk) = VerifyingKey::from_bytes(identity_pub) else { return false };
     vk.verify(&rotate_msg(epoch, transport_pub), &ed25519_dalek::Signature::from_bytes(sig))
+        .is_ok()
+}
+
+/// Домен подписи статического ключа сессий (ADR-012).
+const SESSION_STATIC_DOMAIN: &[u8] = b"dev.p2p.session-static.v1";
+
+fn session_static_msg(static_pub: &[u8; 32]) -> Vec<u8> {
+    [SESSION_STATIC_DOMAIN, static_pub.as_slice()].concat()
+}
+
+/// Проверить, что статический ключ сессий `static_pub` принадлежит `identity_pub`.
+/// Строгая проверка (`verify_strict`): ключ малого порядка и неканоничная подпись
+/// не проходят — проверяется подпись, пришедшая от кого угодно.
+pub fn verify_session_static(identity_pub: &[u8; 32], static_pub: &[u8; 32], sig: &[u8; 64]) -> bool {
+    let Ok(vk) = VerifyingKey::from_bytes(identity_pub) else { return false };
+    vk.verify_strict(&session_static_msg(static_pub), &ed25519_dalek::Signature::from_bytes(sig))
         .is_ok()
 }
 
@@ -252,15 +266,6 @@ pub fn addr_for_key(public_key: &[u8; 32]) -> Ipv6Addr {
     addr[2..2 + take].copy_from_slice(&temp[..take]);
 
     Ipv6Addr::from(addr)
-}
-
-/// Конвертация публичного ключа ed25519 → Curve25519 (Montgomery u-coordinate).
-/// Эквивалент `crypto_sign_ed25519_pk_to_curve25519`.
-pub fn ed25519_pub_to_curve25519(ed_pub: &[u8; 32]) -> Option<[u8; 32]> {
-    use curve25519_dalek::edwards::CompressedEdwardsY;
-    let compressed = CompressedEdwardsY(*ed_pub);
-    let point = compressed.decompress()?;
-    Some(point.to_montgomery().to_bytes())
 }
 
 /// 8 слов BIP39 из первых 88 бит SHA-256(публичный ключ).
@@ -347,13 +352,6 @@ mod tests {
     }
 
     #[test]
-    fn curve25519_conversion_works() {
-        let id = Identity::generate();
-        let c = id.curve25519_public().expect("конвертация должна пройти");
-        assert_ne!(c, [0u8; 32]);
-    }
-
-    #[test]
     fn derive_subkey_is_domain_separated_and_deterministic() {
         let id = Identity::from_seed(&[5u8; 32]).unwrap();
         let a1 = id.derive_subkey("dev.p2p.blob-at-rest.v1");
@@ -363,9 +361,8 @@ mod tests {
         assert_eq!(a1, a2);
         // Разные домены → разные ключи.
         assert_ne!(a1, b);
-        // Не равен ни seed, ни X25519-секрету (не переиспользование).
+        // Не равен seed-у (не переиспользование).
         assert_ne!(a1, id.seed());
-        assert_ne!(a1, id.x25519_secret());
         // Разные идентичности → разные под-ключи для того же домена.
         let other = Identity::from_seed(&[6u8; 32]).unwrap();
         assert_ne!(a1, other.derive_subkey("dev.p2p.blob-at-rest.v1"));

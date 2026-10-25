@@ -93,6 +93,34 @@ fn sender_restart_no_false_dedup() {
     assert_eq!(texts, vec!["second"], "второе сообщение после рестарта показано");
 }
 
+/// Сессии 1:1 живут только в памяти (ADR-012): ПОЛУЧАТЕЛЬ перезапустился, а у
+/// отправителя ещё живая сессия, которой на том конце больше нет. Первое
+/// сообщение уходит в пустоту, но связь обязана восстановиться сама — получатель
+/// видит пакет с незнакомым индексом и начинает новое рукопожатие, ретрай
+/// отправителя доставляет. Без этого чат молчал бы до смены ключей (2 мин).
+#[test]
+fn receiver_restart_mid_session_recovers() {
+    let net = LoopbackNet::new();
+    let b_dir = tmpdir("b");
+    let (a_id, b_id) = (id(9), id(10));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a"));
+    a.add_contact(&b_key, "B");
+    let b1 = start(&net, b_id.clone(), b_dir.clone());
+    b1.add_contact(&a_key, "A");
+    a.send_text(&b_key, "до");
+    assert_eq!(poll_texts(&b1, 1, Duration::from_secs(6)), vec!["до"]);
+
+    b1.shutdown();
+    drop(b1);
+    let b2 = start(&net, b_id, b_dir);
+    a.send_text(&b_key, "после");
+    let texts = poll_texts(&b2, 1, Duration::from_secs(10));
+    a.shutdown();
+    b2.shutdown();
+    assert_eq!(texts, vec!["после"], "после перезапуска получателя связь восстановилась");
+}
+
 /// Честный статус: пока сообщение ждёт доставки, оно НЕ помечается как ошибка.
 /// Раньше по истечении in-memory ретраев в БД писалось "failed", и после
 /// перезапуска ждущее в очереди сообщение показывалось красным «!».

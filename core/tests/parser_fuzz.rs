@@ -3,7 +3,8 @@
 //! тысячи случайных байтовых последовательностей. Гоняется на хосте (`cargo test`).
 
 use p2p_core::media::{parse_media, parse_video_frag, VideoReassembler};
-use p2p_core::protocol::decode;
+use p2p_core::protocol::Payload;
+use p2p_core::session::Sessions;
 use p2p_core::Identity;
 use proptest::prelude::*;
 
@@ -34,10 +35,12 @@ proptest! {
         }
     }
 
-    /// Расшифровка/разбор датаграммы не паникует на мусоре (возвращает Err).
+    /// Пакет сессии и расшифрованный текст не роняют разбор на мусоре.
     #[test]
-    fn decode_never_panics(data in proptest::collection::vec(any::<u8>(), 0..2048)) {
+    fn session_and_payload_never_panic(data in proptest::collection::vec(any::<u8>(), 0..5000)) {
         let me = Identity::from_seed(&[1u8; 32]).unwrap();
-        prop_assert!(decode(&me, &data).is_err() || decode(&me, &data).is_ok());
+        let mut s = Sessions::new(&me);
+        let _ = s.receive(&data, std::time::Instant::now(), &mut rand_core::OsRng);
+        let _ = Payload::from_padded(&data);
     }
 }

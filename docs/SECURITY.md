@@ -17,7 +17,11 @@ All audits so far are internal. There has been no external audit.
   participants. The transport (Yggdrasil/ironwood) is not trusted; it only routes
   datagrams addressed by ed25519 key.
 - **Forward secrecy and post-compromise security.** In groups this comes from MLS. For
-  1:1 messages it currently comes only from the transport ratchet — see SEC-3 below.
+  1:1 messages it comes from our own session layer (ADR-012): fresh ephemeral keys every
+  2 minutes, kept in memory only.
+- **Post-quantum confidentiality of 1:1 messages.** The 1:1 key exchange is hybrid
+  (X25519 + ML-KEM-768): recorded traffic stays secret unless both are broken.
+  Authentication is classical (ADR-011).
 - **Protection from a man in the middle at first contact.** Users can compare a visual
   fingerprint out of band (in person or by QR) and mark the contact verified.
 - **At rest.** A seized or stolen device does not give away the identity key or the
@@ -30,10 +34,14 @@ reveals activity), a compromised operating system, physical access to an unlocke
 
 ## Cryptographic building blocks
 
-- **Identity:** ed25519. Yggdrasil address = `AddrForKey(pub)`. For NaCl Box the key is
-  converted to Curve25519 (x25519 secret = `SHA512(seed)[:32]`). New sub-keys are derived
-  with domain separation (`Identity::derive_subkey`, BLAKE3).
-- **1:1:** NaCl Box (XSalsa20-Poly1305) with a random 24-byte nonce per message.
+- **Identity:** ed25519. Yggdrasil address = `AddrForKey(pub)`. Every other key is a
+  domain-separated sub-key of the seed (`Identity::derive_subkey`, BLAKE3).
+- **1:1:** sessions from a `Noise_XXhfs_25519+MLKEM768_ChaChaPoly_BLAKE2s` handshake
+  ([ADR-012](adr/ADR-012-dm-session-v2.md)): own Noise state machine checked byte for byte
+  against `snow` for classic XX, ML-KEM from `libcrux-ml-kem` (formally verified),
+  ChaCha20-Poly1305 with a counter nonce and a replay window. The static key is separate
+  from the identity and signed by it; the identity travels only encrypted. Rekey every
+  2 minutes.
 - **Groups:** MLS (RFC 9420, openmls 0.8) — TreeKEM, FS/PCS, signatures bound to ed25519.
 - **Transport:** the ironwood `iwe` session layer (ratchet, FS, anti-replay) over the mesh.
 - **Wire padding:** every payload is padded to one of three size buckets (256 B / 4 KiB /
@@ -66,9 +74,9 @@ reveals activity), a compromised operating system, physical access to an unlocke
 |----|----------|---------|--------|
 | SEC-1 | High | No MLS Remove/Update: nobody could be revoked, and PCS never recovered. | **Fixed** ([ADR-004](adr/ADR-004-mls-membership-revocation.md)): Remove, daily self-update, resync of lagging members. Tested on devices. |
 | SEC-2 | Medium | Group call media was not bound to the MLS roster. | **Fixed** — only roster members are admitted. Fails open while the roster is not cached (N6). |
-| SEC-3 | Medium | FS for 1:1 relies only on the transport ratchet; the application layer is a static Box. | **Open.** The hybrid post-quantum exchange for 1:1 ([ADR-011](adr/ADR-011-post-quantum.md)) changes the same layer, so the two are best designed together. |
+| SEC-3 | Medium | FS for 1:1 relies only on the transport ratchet; the application layer is a static Box. | **Fixed** ([ADR-012](adr/ADR-012-dm-session-v2.md), 2026-10-25): 1:1 sessions with ephemeral hybrid (X25519 + ML-KEM-768) keys, in memory only, replaced every 2 minutes. FS is per session (minutes), not per message. |
 | SEC-4 | Medium | Call media confidentiality relies only on the transport. | **Open** — plan: a media key from the MLS/Box exporter secret. |
-| SEC-5 | Medium | One key reused across protocols. | **Mitigated** — domain-separated derivation for all new keys ([invariants §6](architecture/invariants.md)); the identity/transport split is designed in [ADR-007](adr/ADR-007-identity-transport-key-split.md). |
+| SEC-5 | Medium | One key reused across protocols. | **Mitigated** — domain-separated derivation for all new keys ([invariants §6](architecture/invariants.md)); the identity/transport split ([ADR-007](adr/ADR-007-identity-transport-key-split.md)); the identity-converted Box key is gone — 1:1 uses a separate signed static key (ADR-012). The identity still signs both the transport (epoch 0) and MLS credentials. |
 | SEC-L1…L4 | Low | Bounded replay ring; unauthenticated envelope time; plaintext fallback on the desktop when the vault is unavailable; a wipe footgun on vault mismatch. | Open, low. |
 
 ## Surface added after the audits (not yet re-audited)

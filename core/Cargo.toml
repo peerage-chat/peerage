@@ -11,8 +11,6 @@ crate-type = ["lib"]
 
 [dependencies]
 ed25519-dalek = { workspace = true, features = ["rand_core"] }
-curve25519-dalek.workspace = true
-crypto_box.workspace = true
 sha2.workspace = true
 rand_core.workspace = true
 thiserror.workspace = true
@@ -26,6 +24,13 @@ rmp-serde = "1.3"
 serde_bytes = "0.11"
 blake3.workspace = true
 chacha20poly1305 = "0.10"
+# Сессия 1:1 v2 (ADR-012): Noise XXhfs — X25519 + ML-KEM-768, BLAKE2s, HMAC.
+x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
+blake2 = "0.10"
+hmac = "0.12"
+# Формально проверенная реализация ML-KEM (hax/F*); случайность передаётся явно.
+libcrux-ml-kem = "0.0.8" # та же версия, что тянет openmls (hpke-rs-libcrux)
+zeroize = "1"
 # Argon2id для уровня at-rest «пароль» (KDF от того, что пользователь ЗНАЕТ).
 argon2 = "0.5"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
@@ -40,4 +45,6 @@ sqlcipher = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
 
 [dev-dependencies]
 hex = "0.4"
+# Эталон классической части Noise XX в тестах ADR-012 (байт-в-байт).
+snow = "0.10"
 proptest.workspace = true

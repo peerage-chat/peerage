@@ -1,25 +1,17 @@
 //! Протокол сообщений.
 //!
-//! Два слоя:
-//!   * [`Payload`] — внутреннее сообщение (тип + данные). Сериализуется в
-//!     MessagePack и ШИФРУЕТСЯ (NaCl Box), поэтому тип сообщения не виден снаружи.
-//!   * Конверт — бинарный заголовок `[v:1][from:32]` и за ним запечатанный payload
-//!     `nonce(24) || ciphertext`. Передаётся как датаграмма через транспорт.
+//! [`Payload`] — внутреннее сообщение (тип + данные). Сериализуется в MessagePack,
+//! добивается до размерного бакета ([`Payload::to_padded`]) и целиком шифруется
+//! сессией 1:1 ([`crate::session`], ADR-012), поэтому ни тип сообщения, ни
+//! отправитель снаружи не видны: на проводе только индекс сессии и счётчик.
 //!
 //! Отклонение от ТЗ: `type` сообщения убран в зашифрованную часть (приватность
-//! метаданных), времени отправки в конверте нет (его некому читать, а открытым
-//! текстом оно лишь метаданные). Формат самоописывающий (MessagePack с именами
-//! полей): неизвестный тип и новые поля читаются старым клиентом без ошибки, а байты
-//! едут байтами — без hex и без JSON-массивов чисел.
+//! метаданных), времени отправки нет (его некому читать, а открытым текстом оно
+//! лишь метаданные). Формат самоописывающий (MessagePack с именами полей):
+//! неизвестный тип и новые поля читаются старым клиентом без ошибки, а байты едут
+//! байтами — без hex и без JSON-массивов чисел.
 
 use serde::{Deserialize, Serialize};
-
-use crate::crypto::{self, CryptoError};
-use crate::identity::Identity;
-
-/// Версия формата конверта. 2 — бинарный конверт и MessagePack (с 1, JSON+hex,
-/// несовместим).
-pub const PROTOCOL_VERSION: u8 = 2;
 
 /// Заявка узла о выполненной транзитной работе — **зарезервировано под ADR-008,
 /// в 1.0 не выдаётся и не проверяется**.
@@ -298,22 +290,44 @@ impl Payload {
     pub fn from_bytes(b: &[u8]) -> Result<Self, ProtocolError> {
         rmp_serde::from_slice(b).map_err(|e| ProtocolError::Codec(e.to_string()))
     }
-}
 
-/// Заголовок конверта: версия (1) и ed25519-ключ отправителя (32). Дальше —
-/// `nonce(24) || ciphertext`.
-const HEADER_LEN: usize = 1 + 32;
+    /// id надёжной доставки (retry-until-Ack), если он у payload есть. Получатель
+    /// по нему отсеивает повторы: ретрай после потерянного Ack и переотправка при
+    /// смене сессии приносят то же сообщение ещё раз.
+    pub fn reliable_id(&self) -> Option<u64> {
+        match self {
+            Payload::Text { id, .. }
+            | Payload::Retract { id, .. }
+            | Payload::Edit { id, .. }
+            | Payload::Pin { id, .. }
+            | Payload::Media { id, .. }
+            | Payload::RoomInvite { id, .. }
+            | Payload::RoomDecline { id, .. }
+            | Payload::Group { id, .. }
+            | Payload::GroupKeyRequest { id, .. }
+            | Payload::GroupKeyReply { id, .. }
+            | Payload::GroupInvite { id, .. }
+            | Payload::TransportRotate { id, .. } => Some(*id),
+            _ => None,
+        }
+    }
+
+    /// Открытый текст пакета сессии: payload, добитый до бакета своего класса.
+    /// M5: добивка ДО шифрования прячет длину по размеру пакета.
+    pub fn to_padded(&self) -> Result<Vec<u8>, ProtocolError> {
+        Ok(crate::pad::pad(&self.to_bytes()?, bucket_for(self)))
+    }
+
+    /// Обратно из расшифрованного текста пакета сессии.
+    pub fn from_padded(padded: &[u8]) -> Result<Self, ProtocolError> {
+        Self::from_bytes(&crate::pad::unpad(padded).ok_or(ProtocolError::BadPadding)?)
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProtocolError {
-    #[error("крипто: {0}")]
-    Crypto(#[from] CryptoError),
     #[error("сериализация payload: {0}")]
     Codec(String),
-    #[error("неподдерживаемая версия протокола: {0}")]
-    Version(u8),
-    #[error("конверт короче заголовка")]
-    Truncated,
     #[error("повреждённый паддинг сообщения")]
     BadPadding,
 }
@@ -338,8 +352,8 @@ pub enum ProtocolError {
 /// бакет и станет отличимым от текстового по размеру.
 pub const MAX_CAPTION: usize = 1024;
 
-const CONTROL_BUCKET: usize = 256;
-const APP_BUCKET: usize = 4096;
+pub const CONTROL_BUCKET: usize = 256;
+pub const APP_BUCKET: usize = 4096;
 /// Чанк блоба 12 КБ (`p2p_blob::CHUNK_SIZE`) плюс запас на поля сообщения (id,
 /// индекс, имена полей, префикс длины паддинга). Полный чанк обязан влезать в бакет
 /// целиком — иначе хвостовой чанк стал бы отличим от полного; на это есть тест
@@ -372,47 +386,24 @@ fn bucket_for(payload: &Payload) -> usize {
     }
 }
 
-/// Закодировать и зашифровать `payload` для контакта `peer_ed_pub`.
-/// Результат — готовая к отправке датаграмма `[v][from][nonce || ciphertext]`.
-pub fn encode(me: &Identity, peer_ed_pub: &[u8; 32], payload: &Payload) -> Result<Vec<u8>, ProtocolError> {
-    let plaintext = payload.to_bytes()?;
-    // M5: добить до размерного бакета ДО шифрования (прячем длину по размеру).
-    let padded = crate::pad::pad(&plaintext, bucket_for(payload));
-    let sealed = crypto::seal(me, peer_ed_pub, &padded)?;
-    let mut out = Vec::with_capacity(HEADER_LEN + sealed.len());
-    out.push(PROTOCOL_VERSION);
-    out.extend_from_slice(&me.public_key_bytes());
-    out.extend_from_slice(&sealed);
-    Ok(out)
-}
-
-/// Разобрать и расшифровать датаграмму. Возвращает `(ключ_отправителя, payload)`.
-///
-/// Расшифровка идёт по ключу `from` из конверта. Вызывающий слой ДОЛЖЕН сверить
-/// возвращённый ключ отправителя с источником транспорта (Yggdrasil src key),
-/// чтобы конверт нельзя было приписать чужому ключу.
-pub fn decode(me: &Identity, datagram: &[u8]) -> Result<([u8; 32], Payload), ProtocolError> {
-    if datagram.len() < HEADER_LEN {
-        return Err(ProtocolError::Truncated);
-    }
-    if datagram[0] != PROTOCOL_VERSION {
-        return Err(ProtocolError::Version(datagram[0]));
-    }
-    let mut from = [0u8; 32];
-    from.copy_from_slice(&datagram[1..HEADER_LEN]);
-    let padded = crypto::open(me, &from, &datagram[HEADER_LEN..])?;
-    let plaintext = crate::pad::unpad(&padded).ok_or(ProtocolError::BadPadding)?;
-    Ok((from, Payload::from_bytes(&plaintext)?))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::identity::Identity;
+
+    // Размер на проводе = открытый текст + постоянный заголовок и тег сессии
+    // (`session::DATA_OVERHEAD`), поэтому равенство длин `to_padded` — это и есть
+    // равенство размеров датаграмм.
+    fn wire(p: &Payload) -> usize {
+        p.to_padded().unwrap().len() + crate::session::DATA_OVERHEAD
+    }
+
+    fn roundtrip(p: &Payload) -> Payload {
+        Payload::from_padded(&p.to_padded().unwrap()).unwrap()
+    }
 
     #[test]
-    fn encode_decode_roundtrip() {
-        let alice = Identity::generate();
-        let bob = Identity::generate();
+    fn padded_roundtrip() {
         let payload = Payload::Text {
             id: 42,
             text: "привет, как дела?".to_string(),
@@ -421,15 +412,11 @@ mod tests {
             fwd_from: String::new(),
             fwd_anon: false,
         };
-
-        let datagram = encode(&alice, &bob.public_key_bytes(), &payload).unwrap();
-        let (from, decoded) = decode(&bob, &datagram).unwrap();
-
-        assert_eq!(from, alice.public_key_bytes());
-        assert_eq!(decoded, payload);
+        assert_eq!(roundtrip(&payload), payload);
+        assert!(matches!(Payload::from_padded(&[0, 0, 0, 9, 1]), Err(ProtocolError::BadPadding)));
     }
 
-    /// Объявление о смене адреса переживает шифрование целиком и проверяется у
+    /// Объявление о смене адреса переживает упаковку целиком и проверяется у
     /// получателя ключом ЛИЧНОСТИ отправителя — то есть подписью, а не тем, откуда
     /// пакет пришёл. Иначе смена адреса не отличалась бы от захвата контакта.
     #[test]
@@ -444,10 +431,7 @@ mod tests {
             transport_pub: tk.to_vec(),
             sig: sig.to_vec(),
         };
-
-        let datagram = encode(&alice, &bob.public_key_bytes(), &payload).unwrap();
-        let (from, decoded) = decode(&bob, &datagram).unwrap();
-        assert_eq!(from, alice.public_key_bytes());
+        let decoded = roundtrip(&payload);
         assert_eq!(decoded, payload);
 
         let Payload::TransportRotate { epoch, transport_pub, sig, .. } = decoded else {
@@ -455,6 +439,7 @@ mod tests {
         };
         let tp = <[u8; 32]>::try_from(transport_pub.as_slice()).unwrap();
         let sg = <[u8; 64]>::try_from(sig.as_slice()).unwrap();
+        let from = alice.public_key_bytes();
         assert!(crate::identity::verify_transport_rotate(&from, epoch, &tp, &sg));
         // Тот же пакет, приписанный другой личности, не проходит.
         assert!(!crate::identity::verify_transport_rotate(
@@ -481,8 +466,6 @@ mod tests {
 
     #[test]
     fn all_payload_types_roundtrip() {
-        let a = Identity::generate();
-        let b = Identity::generate();
         for p in [
             Payload::Hello,
             Payload::Ping { transit: None },
@@ -517,31 +500,24 @@ mod tests {
             Payload::ProfileUpdate { name: "Алиса".into(), avatar_hash: vec![3u8; 32] },
             Payload::BlobManifestRequest { id: vec![4u8; 32] },
         ] {
-            let d = encode(&a, &b.public_key_bytes(), &p).unwrap();
-            let (_, got) = decode(&b, &d).unwrap();
-            assert_eq!(got, p);
+            assert_eq!(roundtrip(&p), p);
         }
     }
 
     #[test]
     fn padding_hides_text_length() {
-        let a = Identity::generate();
-        let b = Identity::generate();
-        let short = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false }).unwrap();
-        let long = encode(&a, &b.public_key_bytes(), &Payload::Text { id: 1, text: "a".repeat(500), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false }).unwrap();
+        let short = Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false };
+        let long = Payload::Text { id: 1, text: "a".repeat(500), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false };
         // M5: разные по длине тексты → одинаковый размер датаграммы (бакет скрыл длину).
-        assert_eq!(short.len(), long.len(), "паддинг должен скрыть длину текста");
-        // Расшифровка по-прежнему работает.
-        let (_, p) = decode(&b, &short).unwrap();
-        assert!(matches!(p, Payload::Text { text, .. } if text == "да"));
+        assert_eq!(wire(&short), wire(&long), "паддинг должен скрыть длину текста");
+        assert!(matches!(roundtrip(&short), Payload::Text { text, .. } if text == "да"));
     }
 
-    /// DoD M5: размеры НА ПРОВОДЕ не различают текст / медиа / звонок.
+    /// DoD M5: размеры НА ПРОВОДЕ не различают текст / медиа / звонок, а пакеты
+    /// рукопожатия сессии совпадают по размеру с прикладными и управляющими.
     #[test]
     fn text_media_and_call_are_indistinguishable_by_size() {
-        let a = Identity::generate();
-        let b = Identity::generate();
-        let enc = |p: &Payload| encode(&a, &b.public_key_bytes(), p).unwrap().len();
+        let enc = wire;
 
         // Прикладной класс: текст (короткий/длинный), картинка, голосовое, файл, группа.
         let sizes = [
@@ -573,10 +549,12 @@ mod tests {
             enc(&Payload::TransportRotate {
                 id: 14, epoch: 7, transport_pub: vec![3u8; 32], sig: vec![4u8; 64],
             }),
+            // msg1 и msg2 рукопожатия (ADR-012).
+            crate::session::APP_PACKET,
         ];
         assert!(
             sizes.iter().all(|s| *s == sizes[0]),
-            "текст/правка/картинка/голосовое/файл/группа/смена-адреса должны быть одного размера, получено {sizes:?}"
+            "текст/правка/картинка/голосовое/файл/группа/смена-адреса/рукопожатие должны быть одного размера, получено {sizes:?}"
         );
 
         // Control-класс: начало звонка неотличимо от ack/ping/маячка присутствия.
@@ -586,6 +564,8 @@ mod tests {
             enc(&Payload::Ack { id: 13 }),
             enc(&Payload::Ping { transit: None }),
             enc(&Payload::RoomPresence { gid: vec![9u8; 16], flags: 0b11 }),
+            // msg3 рукопожатия и пустой пакет подтверждения сессии.
+            crate::session::CONTROL_PACKET,
         ];
         assert!(
             ctl.iter().all(|s| *s == ctl[0]),
@@ -599,19 +579,13 @@ mod tests {
     /// наблюдатель начнёт видеть, кто в сети, а свойство M5 сломается задним числом.
     #[test]
     fn presence_with_transit_claim_stays_in_control_bucket() {
-        let a = Identity::generate();
-        let b = Identity::generate();
-        let enc = |p: &Payload| encode(&a, &b.public_key_bytes(), p).unwrap().len();
         let claim = TransitClaim { digest: vec![0xab; 32], count: u32::MAX, epoch: u32::MAX };
         assert_eq!(
-            enc(&Payload::Ping { transit: Some(claim.clone()) }),
-            enc(&Payload::Ack { id: 1 }),
+            wire(&Payload::Ping { transit: Some(claim.clone()) }),
+            wire(&Payload::Ack { id: 1 }),
             "маячок с квитанциями обязан остаться неотличим от ack по размеру"
         );
-        assert_eq!(
-            enc(&Payload::Pong { transit: Some(claim) }),
-            enc(&Payload::Ack { id: 1 }),
-        );
+        assert_eq!(wire(&Payload::Pong { transit: Some(claim) }), wire(&Payload::Ack { id: 1 }));
     }
 
     /// Пустое поле не должно появляться на проводе: маячок 1.0 — это голый тип.
@@ -631,53 +605,21 @@ mod tests {
     /// а не вчетверо (hex в payload, потом hex всего шифртекста в JSON).
     #[test]
     fn blob_chunk_has_no_hex_overhead() {
-        let a = Identity::generate();
-        let b = Identity::generate();
         let chunk = Payload::BlobChunk { id: vec![1u8; 32], index: 0, data: vec![7u8; 12 * 1024] };
-        let d = encode(&a, &b.public_key_bytes(), &chunk).unwrap();
-        assert!(d.len() < 12 * 1024 + 512, "чанк на проводе: {} Б", d.len());
+        assert!(wire(&chunk) < 12 * 1024 + 512, "чанк на проводе: {} Б", wire(&chunk));
         // MLS-данные — тоже байтами, а не JSON-массивом чисел.
         let g = Payload::Group { id: 1, data: vec![200u8; 1000] }.to_bytes().unwrap();
         assert!(g.len() < 1100, "Group: {} Б", g.len());
     }
 
     /// Последний (короткий) чанк блоба добивается до полного — иначе точный размер
-    /// файла утекал бы остатком. И при этом конверт обязан влезать в датаграмму.
+    /// файла утекал бы остатком. И при этом пакет обязан влезать в датаграмму.
     #[test]
     fn padded_blob_chunk_fits_datagram() {
-        let a = Identity::generate();
-        let b = Identity::generate();
-        let enc = |data: Vec<u8>| {
-            encode(&a, &b.public_key_bytes(), &Payload::BlobChunk { id: vec![1u8; 32], index: 0, data }).unwrap()
-        };
+        let enc = |data: Vec<u8>| wire(&Payload::BlobChunk { id: vec![1u8; 32], index: 0, data });
         let full = enc(vec![9u8; 12 * 1024]); // полный чанк
         let tail = enc(vec![9u8; 37]); // куцый хвост файла
-        assert_eq!(full.len(), tail.len(), "хвостовой чанк неотличим от полного");
-        assert!(full.len() < 65535, "чанк с паддингом не влезает в датаграмму: {}", full.len());
-    }
-
-    #[test]
-    fn wrong_recipient_fails_to_decode() {
-        let alice = Identity::generate();
-        let bob = Identity::generate();
-        let eve = Identity::generate();
-        let d = encode(&alice, &bob.public_key_bytes(), &Payload::Hello).unwrap();
-        assert!(decode(&eve, &d).is_err());
-    }
-
-    #[test]
-    fn envelope_layout() {
-        let alice = Identity::generate();
-        let bob = Identity::generate();
-        let d = encode(&alice, &bob.public_key_bytes(), &Payload::Ping { transit: None }).unwrap();
-        assert_eq!(d[0], PROTOCOL_VERSION);
-        assert_eq!(&d[1..33], &alice.public_key_bytes());
-        // nonce + тег Poly1305 + бакет CONTROL, и ничего больше.
-        assert_eq!(d.len(), HEADER_LEN + crypto::NONCE_LEN + 16 + CONTROL_BUCKET);
-        // Чужая версия и обрубок не разбираются.
-        let mut old = d.clone();
-        old[0] = 1;
-        assert!(matches!(decode(&bob, &old), Err(ProtocolError::Version(1))));
-        assert!(matches!(decode(&bob, &d[..10]), Err(ProtocolError::Truncated)));
+        assert_eq!(full, tail, "хвостовой чанк неотличим от полного");
+        assert!(full < 65535, "чанк с паддингом не влезает в датаграмму: {full}");
     }
 }

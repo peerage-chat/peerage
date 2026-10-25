@@ -41,8 +41,6 @@ authors = ["p2p messenger"]
 
 [workspace.dependencies]
 ed25519-dalek = "2"
-curve25519-dalek = "4"
-crypto_box = { version = "0.9", features = ["std", "salsa20"] }
 sha2 = "0.10"
 rand_core = { version = "0.6", features = ["getrandom"] }
 thiserror = "2"
