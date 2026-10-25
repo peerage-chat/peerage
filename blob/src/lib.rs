@@ -240,7 +240,11 @@ pub struct ManifestAssembler {
 impl ManifestAssembler {
     /// Начать сборку по первой пришедшей части.
     pub fn new(first: &ManifestPart) -> Result<Self, BlobError> {
-        if first.total == 0 || first.part >= first.total {
+        // Число частей однозначно задано размером: любое другое — чужая выдумка.
+        // Без этой сверки одна часть с total = u32::MAX заставляла выделить ~100 ГБ
+        // под список частей, а сбой выделения памяти — не паника, а abort всего
+        // процесса (его не ловит catch_unwind на JNI). Найдено фаззером.
+        if first.total != Self::parts_for(first.size) || first.part >= first.total {
             return Err(BlobError::BadManifest);
         }
         let mut a = ManifestAssembler {
@@ -255,9 +259,17 @@ impl ManifestAssembler {
         Ok(a)
     }
 
+    /// Сколько частей у манифеста блоба размера `size` (см. [`Manifest::split`]).
+    fn parts_for(size: u64) -> u32 {
+        Manifest::expected_chunks(size).div_ceil(HASHES_PER_PART).max(1) as u32
+    }
+
     /// Принять часть. Части от другого блоба или с иным разбиением отвергаются.
     pub fn add(&mut self, p: &ManifestPart) -> Result<(), BlobError> {
         if p.id != self.id || p.size != self.size || p.total != self.total {
+            return Err(BlobError::BadManifest);
+        }
+        if p.hashes.len() > HASHES_PER_PART {
             return Err(BlobError::BadManifest);
         }
         let idx = p.part as usize;
@@ -572,6 +584,26 @@ mod tests {
 
     /// Манифест крупного блоба режется на части и собирается обратно байт-в-байт.
     /// Именно это снимало прежний потолок 4 МБ (список хэшей не влезал в датаграмму).
+    /// Найдено фаззером (fuzz/blob_manifest): часть с выдуманным числом частей не
+    /// принимается — раньше total = u32::MAX означал попытку выделить ~100 ГБ.
+    #[test]
+    fn manifest_part_total_must_match_size() {
+        let part = |size: u64, total: u32| ManifestPart {
+            id: [1; 32],
+            mime: String::new(),
+            size,
+            part: 0,
+            total,
+            hashes: Vec::new(),
+        };
+        assert!(ManifestAssembler::new(&part(10, u32::MAX)).is_err());
+        assert!(ManifestAssembler::new(&part(10, 2)).is_err());
+        assert!(ManifestAssembler::new(&part(10, 1)).is_ok());
+        assert!(ManifestAssembler::new(&part(0, 1)).is_ok(), "пустой блоб — одна часть");
+        let big = (CHUNK_SIZE * (HASHES_PER_PART + 1)) as u64;
+        assert!(ManifestAssembler::new(&part(big, 2)).is_ok());
+    }
+
     #[test]
     fn manifest_splits_and_reassembles() {
         // Столько чанков, что хэши заведомо не влезли бы в один пакет.

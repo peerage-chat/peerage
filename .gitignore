@@ -35,3 +35,8 @@ Thumbs.db
 *.seed
 identity.key
 /scripts/local.env
+
+# Фаззинг: корпус и находки — локальные
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage

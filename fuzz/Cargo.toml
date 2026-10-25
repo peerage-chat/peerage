@@ -1,0 +1,47 @@
+# Фаззинг разборщиков недоверенных байт (план беты, шаг 2). Отдельный workspace:
+# нужен nightly и cargo-fuzz, основной набор от него не зависит.
+# Запуск — scripts/fuzz.sh (WSL).
+[package]
+name = "p2p-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+p2p-core = { path = "../core" }
+p2p-blob = { path = "../blob" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "wire"
+path = "fuzz_targets/wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "media"
+path = "fuzz_targets/media.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "blob_manifest"
+path = "fuzz_targets/blob_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scrub"
+path = "fuzz_targets/scrub.rs"
+test = false
+doc = false
+bench = false
