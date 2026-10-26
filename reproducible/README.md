@@ -13,7 +13,8 @@
 | Go 1.26.4, rustup 1.28.2, Rust 1.96.0, NDK r28c, cmdline-tools | версия + sha256 архива в `Dockerfile` |
 | SDK platform 34, build-tools 34.0.0 | `sdkmanager` (сверяет sha1 по манифесту Google) |
 | Gradle 8.9 | `distributionSha256Sum` в `gradle-wrapper.properties` |
-| Зависимости Rust / Go / Maven | `Cargo.lock`, `go.sum`, версии в `build.gradle.kts` |
+| Зависимости Rust / Go / Maven | `Cargo.lock`, `go.sum` (с хэшами); Maven — пока только версии в `build.gradle.kts` |
+| platform-tools | **не закреплено**: sdkmanager отдаёт только последнюю; в APK не попадает |
 
 Сборка идёт из `git clone` коммита — незакоммиченные правки и локальные `.so` в неё не
 попадают. Время сборки = время коммита (`SOURCE_DATE_EPOCH`), путь — всегда

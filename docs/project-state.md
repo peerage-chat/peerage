@@ -140,7 +140,7 @@ Code-level:
   bucket as text, and the size-indistinguishability test covers them.
 - **Fuzzing is partial:** property tests (`proptest`) cover the wire, media and blob
   parsers; there is no `cargo-fuzz` and no Kani harnesses yet.
-- **No reproducible build, no F-Droid package.**
+- **Reproducible build: yes** (`scripts/repro-build.sh --check`, 2026-10-26); **no F-Droid package yet.**
 - **Some documentation is in Russian.** The README, architecture, protocol
   specification, security documents, invariants and all ADRs are in English; the design
   documents, plans, bug notes, roadmap and the July audit report are still in Russian.

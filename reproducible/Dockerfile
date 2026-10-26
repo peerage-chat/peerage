@@ -60,7 +60,9 @@ RUN $DL -o /tmp/clt.zip https://dl.google.com/android/repository/commandlinetool
  && echo "${CLT_SHA256}  /tmp/clt.zip" | sha256sum -c - \
  && mkdir -p $ANDROID_HOME/cmdline-tools && unzip -q /tmp/clt.zip -d $ANDROID_HOME/cmdline-tools \
  && mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest && rm /tmp/clt.zip \
- && $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-34" "build-tools;34.0.0" \
+ # platform-tools Gradle иначе докачивает сам ВО ВРЕМЯ сборки. Версию sdkmanager
+ # закрепить не даёт (только последняя), но в APK из него ничего не попадает.
+ && $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools" \
  && rm -rf /root/.android
 
 # Постоянный путь сборки: пути попадают в отладочную информацию, и разные каталоги
