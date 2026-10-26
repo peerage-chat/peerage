@@ -33,7 +33,13 @@ declare -A CLANG=(
 ABIS=("$@")
 [ ${#ABIS[@]} -eq 0 ] && ABIS=(arm64-v8a) # по умолчанию — только arm64 (реальные устройства)
 
-go mod tidy >/dev/null 2>&1
+# В воспроизводимой сборке (REPRO=1) зависимости только из go.sum: tidy мог бы
+# молча подтянуть другую версию.
+if [ -n "${REPRO:-}" ]; then
+    export GOFLAGS="-mod=readonly"
+else
+    go mod tidy >/dev/null 2>&1
+fi
 for abi in "${ABIS[@]}"; do
     cc="$TOOLCHAIN/${CLANG[$abi]}"
     [ -x "$cc" ] || { echo "нет компилятора $cc — проверьте NDK" >&2; exit 1; }
@@ -41,7 +47,9 @@ for abi in "${ABIS[@]}"; do
     mkdir -p "$out"
     echo "→ $abi (GOARCH=${GOARCH[$abi]})"
     CC="$cc" GOOS=android GOARCH="${GOARCH[$abi]}" \
-        go build -buildmode=c-shared -o "$out/libygg.so" ./libygg
+        # -trimpath и пустой buildid: в бинарнике нет путей машины и случайного id,
+        # одинаковые исходники дают одинаковые байты (шаг 7 плана беты).
+        go build -buildmode=c-shared -trimpath -buildvcs=false -ldflags=-buildid=             -o "$out/libygg.so" ./libygg
     ls -la "$out/libygg.so"
 done
 echo "готово: ygg/libygg/android/"

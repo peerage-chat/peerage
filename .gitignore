@@ -40,3 +40,4 @@ identity.key
 /fuzz/corpus
 /fuzz/artifacts
 /fuzz/coverage
+/repro-out/
