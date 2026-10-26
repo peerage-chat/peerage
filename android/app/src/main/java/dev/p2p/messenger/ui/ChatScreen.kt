@@ -944,9 +944,12 @@ internal fun MessageRow(
                 animate,
                 senderName = if (pos == BlockPos.Solo || pos == BlockPos.First) who else null,
                 senderColor = nameColor(m.sender),
+                group = true,
             )
         }
-        else -> MessageBubble(m, model, pos, animate)
+        // Своё сообщение в группе — тоже групповое: его вложение открывается из ленты
+        // группы, а не личного чата.
+        else -> MessageBubble(m, model, pos, animate, group = group)
     }
 }
 
@@ -960,7 +963,12 @@ internal fun MessageBubble(
      *  блока: в личном чате собеседник один и подписывать его нечем. */
     senderName: String? = null,
     senderColor: Color = Color.White,
+    /** Пузырь в группе. Явно, а не по `currentChat`: в группе тот пуст, и всё, что
+     *  ищет «свой чат», — просмотрщик, докачка, цитата — молча искало в никуда. */
+    group: Boolean = false,
 ) {
+    // Чат пузыря: gid группы или ключ собеседника.
+    val chatId = if (group) model.currentGroup else model.currentChat
     // Байты в память берём только у фото и голосового: видео рисуется миниатюрой,
     // файл — именем и размером из сообщения. Иначе прокрутка чата с видео тянула
     // бы в кучу файлы целиком ради одного кадра.
@@ -1042,11 +1050,7 @@ internal fun MessageBubble(
                         if (m.replyTo != 0L) {
                             // Ключ строки — пара «автор + id»: id посеян временем
                             // отправителя и у обеих сторон может совпасть.
-                            val group = senderName != null || model.currentGroup != null
-                            val src = model.chat(
-                                if (group) model.currentGroup else model.currentChat,
-                                group,
-                            ).firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
+                            val src = model.chat(chatId, group).firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
                             QuoteBlock(
                                 model,
                                 src,
@@ -1087,7 +1091,12 @@ internal fun MessageBubble(
                             m.durationMs,
                             m.thumbId,
                             m.blobId,
-                        ) { model.currentChat?.let { model.downloadMedia(it, m.blobId) } }
+                        ) {
+                            // Просим у автора: в личном чате это собеседник, в группе —
+                            // тот, кто прислал (вложение лежит у него).
+                            val from = if (group) m.sender else model.currentChat
+                            from?.let { model.downloadMedia(it, m.blobId) }
+                        }
                         else -> when (m.kind) {
                             // В режиме выделения тап по вложению переключает выбор,
                             // а не открывает файл: иначе выбор был бы ловушкой.
@@ -1137,14 +1146,23 @@ internal fun MessageBubble(
     if (viewer) {
         // Листаем по вложениям ЭТОГО чата, а не показываем одно: список берётся из
         // уже загруженной ленты (полная история медиа — задача #45).
-        val chat = model.currentChat.orEmpty()
+        val chat = chatId.orEmpty()
         val me = stringResource(R.string.chat_reply_you)
         val peer = model.contacts.firstOrNull { it.key == chat }?.displayName
             ?: stringResource(R.string.chat_default_title)
-        val items = remember(chat, model.chat(chat).size) {
-            model.chat(chat)
-                .filter { (it.kind == "image" || it.kind == "video") && it.blobId.isNotEmpty() }
-                .map { ViewerItem(it.id, it.sender, if (it.mine) me else peer, it.time, it.mime, it.name, it.blobId) }
+        val feed = model.chat(chat, group)
+        // Имена авторов считаем здесь: в группе их много, а в ViewerItem едет строка.
+        val names = feed.map { it.sender }.distinct().associateWith { groupSenderName(model, it) }
+        val items = remember(chat, group, feed.size) {
+            feed.filter { (it.kind == "image" || it.kind == "video") && it.blobId.isNotEmpty() }
+                .map {
+                    val author = when {
+                        it.mine -> me
+                        group -> names[it.sender].orEmpty()
+                        else -> peer
+                    }
+                    ViewerItem(it.id, it.sender, author, it.time, it.mime, it.name, it.blobId)
+                }
         }
         val start = items.indexOfFirst { it.id == m.id && it.sender == m.sender }
         MediaViewer(
@@ -1157,11 +1175,11 @@ internal fun MessageBubble(
                 // Пересылка идёт через выделение — тот же путь, что из панели
                 // чата, чтобы «переслать» везде означало ровно одно.
                 model.toggleSelect(m)
-                model.beginForward(chat)
+                model.beginForward(chat, group)
             },
             onDelete = {
                 model.toggleSelect(m)
-                model.deleteSelected(chat)
+                model.deleteSelected(chat, group)
             },
             onShowInChat = { target ->
                 viewer = false

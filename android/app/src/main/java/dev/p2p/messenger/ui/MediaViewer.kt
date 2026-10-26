@@ -478,11 +478,14 @@ private fun VideoSurface(model: AppModel, item: ViewerItem, muted: Boolean, chro
         model.exportBlob(item.blobId, "viewer", "${item.blobId.take(16)}-${item.name}") { file = it }
     }
     DisposableEffect(file) {
+        // Захватить файл ЭТОГО эффекта: при смене null→файл onDispose старого эффекта
+        // читал бы уже новый и удалял его до того, как плеер успеет открыть.
+        val own = file
         onDispose {
             Player.view?.stopPlayback()
             Player.view = null
             Player.media = null
-            file?.delete()
+            own?.delete()
         }
     }
     LaunchedEffect(muted) {
