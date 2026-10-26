@@ -11,7 +11,7 @@
 //!   * переподключение: keepalive продолжает слать ping офлайн-пирам, и при их
 //!     возвращении сессия восстанавливается, а недоставленные сообщения уходят.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -1793,10 +1793,15 @@ fn maintenance_loop(shared: Arc<Shared>) {
             shared.probe(&key);
         }
 
-        // Повтор недоставленных сообщений; отсев по TTL. Выбор и отправка — под
-        // `send_order`, чтобы досылка не вклинилась в середину пачки.
-        let order = shared.send_order.lock().unwrap();
-        let mut to_retry: Vec<(u64, PeerKey, Payload)> = Vec::new();
+        // Повтор недоставленных сообщений; отсев по TTL.
+        //
+        // Повтор — для пира ЦЕЛИКОМ: подошёл срок хоть у одного сообщения — заново
+        // уходят все неподтверждённые этому пиру, через `pump`, строго по id. Раньше
+        // у каждого сообщения был свой таймер, сдвинутый на момент отправки; после
+        // обрыва связи сообщения доходили в порядке «чей таймер сработал первым»
+        // (живой прогон 2026-10-26: 2, 5, 1, 3, 4). Тот же `pump` подтягивает из
+        // очереди и выпавшее из памяти по сроку, так что новое не обгоняет и его.
+        let mut due: HashSet<PeerKey> = HashSet::new();
         let mut expired = Vec::new();
         {
             let mut pending = shared.pending.lock().unwrap();
@@ -1806,28 +1811,22 @@ fn maintenance_loop(shared: Arc<Shared>) {
                     return false;
                 }
                 if !p.owed && now.duration_since(p.last_sent) >= shared.cfg.retry_interval {
-                    p.last_sent = now;
-                    to_retry.push((*id, p.peer, p.payload.clone()));
+                    due.insert(p.peer);
                 }
                 true
             });
+            for p in pending.values_mut().filter(|p| due.contains(&p.peer)) {
+                p.owed = true;
+            }
         }
         for (id, peer, notify) in expired {
             if notify {
                 shared.emit(Event::Undelivered { peer, id });
             }
         }
-        // По id (монотонный) → отправка в порядке постановки: при накоплении в
-        // офлайне сообщения ретраятся по порядку, а не в случайном (HashMap) порядке.
-        to_retry.sort_by_key(|(id, _, _)| *id);
-        for (_, peer, payload) in to_retry {
-            let _ = shared.send_pending(&peer, &payload);
-        }
-        drop(order);
-
-        // Очередь, упёршаяся в темп досылки, — дотягиваем.
-        let backlog: Vec<PeerKey> = shared.backlog.lock().unwrap().drain().collect();
-        for peer in backlog {
+        // Очередь, упёршаяся в темп досылки, — дотягиваем вместе с повторами.
+        due.extend(shared.backlog.lock().unwrap().drain());
+        for peer in due {
             shared.pump(&peer);
         }
     }
@@ -1850,6 +1849,9 @@ pub mod loopback {
         /// Ронять в среднем каждую N-ю датаграмму (0 = без потерь) — для тестов ретрая.
         drop_every: Arc<AtomicU32>,
         counter: Arc<AtomicU32>,
+        /// Обрыв связи: всё пропадает, но узлы и их сессии живы — как телефон,
+        /// у которого выключили интернет.
+        cut: Arc<AtomicBool>,
     }
 
     impl LoopbackNet {
@@ -1863,6 +1865,11 @@ pub mod loopback {
         /// даёт вырожденные узоры — при N = 2 msg2 вечно падает на чётный номер.
         pub fn set_drop_every(&self, n: u32) {
             self.drop_every.store(n, Ordering::Relaxed);
+        }
+
+        /// Оборвать (`true`) или вернуть связь для всех узлов сети.
+        pub fn set_cut(&self, cut: bool) {
+            self.cut.store(cut, Ordering::Relaxed);
         }
 
         /// Эндпоинт-транспорт для узла с ключом `key`.
@@ -1881,6 +1888,9 @@ pub mod loopback {
 
     impl Transport for LoopbackTransport {
         fn write(&self, dst_pub: &PeerKey, data: &[u8]) -> Result<usize, YggError> {
+            if self.net.cut.load(Ordering::Relaxed) {
+                return Ok(data.len());
+            }
             let drop_every = self.net.drop_every.load(Ordering::Relaxed);
             if drop_every > 0 {
                 let n = self.net.counter.fetch_add(1, Ordering::Relaxed) as u64 + 1;
@@ -2139,6 +2149,43 @@ mod tests {
         want.sort();
         assert_eq!(invites, want, "повтор отсеян, новое и чужое — нет");
         assert_eq!(groups, 2, "групповые не отсеиваем — это дело MLS");
+    }
+
+    /// Живой прогон 2026-10-26: у получателя пропал интернет, отправитель набрал пять
+    /// сообщений с паузами, связь вернулась — пришло 2, 5, 1, 3, 4. Сессия при этом
+    /// жива, и повторы шли по таймеру каждого сообщения, сдвинутому на момент его
+    /// отправки. Теперь повтор — пачкой по пиру, строго по id.
+    #[test]
+    fn messages_queued_during_outage_arrive_in_order() {
+        let net = LoopbackNet::new();
+        let (a_id, b_id) = (id(61), id(62));
+        let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+        // Интервал повтора длиннее тика обслуживания (500 мс), как в жизни (3 с):
+        // иначе каждый тик повторяет всё разом и баг не виден.
+        let cfg = Config { retry_interval: Duration::from_millis(2000), ..Config::default() };
+        let (a, _a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), cfg.clone());
+        let (_b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), cfg);
+        a.send_text(&b_key, "до обрыва").unwrap();
+        assert!(wait_for(&b_rx, |e| matches!(e, Event::Text { .. })).is_some(), "сессия поднялась");
+
+        net.set_cut(true);
+        for i in 1..=5 {
+            a.send_text(&b_key, &i.to_string()).unwrap();
+            // Паузы короче интервала повтора и длиннее тика: таймеры сообщений
+            // расходятся по фазе, как у человека, набирающего текст.
+            std::thread::sleep(Duration::from_millis(600));
+        }
+        std::thread::sleep(Duration::from_millis(700));
+        net.set_cut(false);
+
+        let mut got = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while got.len() < 5 && Instant::now() < deadline {
+            if let Ok(Event::Text { text, .. }) = b_rx.recv_timeout(Duration::from_millis(50)) {
+                got.push(text);
+            }
+        }
+        assert_eq!(got, ["1", "2", "3", "4", "5"], "после обрыва — в порядке отправки");
     }
 
     /// R-007: положили трубку до того, как собеседник появился, — снятое
