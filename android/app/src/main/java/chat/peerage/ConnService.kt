@@ -117,7 +117,7 @@ class ConnService : Service() {
 
         b.setContentTitle(getString(R.string.app_name))
             .setContentText(getString(R.string.notif_conn_text))
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(R.drawable.ic_glyph)
             .setOngoing(true)
             .setContentIntent(openPi)
 

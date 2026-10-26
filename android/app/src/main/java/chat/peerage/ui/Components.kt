@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -131,7 +132,7 @@ internal fun PeerIndicator(peers: Int, onTap: () -> Unit = {}, onLongPress: () -
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Icon(
-            TablerIcons.Affiliate,
+            painterResource(R.drawable.ic_glyph),
             stringResource(R.string.menu_network),
             tint = if (peers > 0) HoloOnline else HoloSecondary,
             modifier = Modifier.size(18.dp),

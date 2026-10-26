@@ -42,18 +42,6 @@ private fun tabler(name: String, vararg paths: String): ImageVector =
         }
     }.build()
 
-val TablerIcons.Affiliate: ImageVector by lazy {
-    tabler(
-        "affiliate",
-        "M5.931 6.936l1.275 4.249m5.607 5.609l4.251 1.275",
-        "M11.683 12.317l5.759 -5.759",
-        "M4 5.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0",
-        "M17 5.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0",
-        "M17 18.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0",
-        "M4 15.5a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0",
-    )
-}
-
 val TablerIcons.Menu2: ImageVector by lazy {
     tabler("menu-2", "M4 6l16 0", "M4 12l16 0", "M4 18l16 0")
 }
