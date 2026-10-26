@@ -1,12 +1,12 @@
 [package]
-name = "p2p-call"
+name = "peerage-call"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [lib]
-name = "p2p_call"
+name = "peerage_call"
 
 [dependencies]
 cpal = "0.15"
@@ -14,9 +14,9 @@ xcap = { version = "0", optional = true }
 nokhwa = { version = "0.10", optional = true, features = ["input-native"] }
 image = { version = "0.25", default-features = false, optional = true }
 thiserror.workspace = true
-p2p-core = { path = "../core" }
-p2p-messenger = { path = "../messenger" }
-p2p-media = { path = "../media" }
+peerage-core = { path = "../core" }
+peerage-messenger = { path = "../messenger" }
+peerage-media = { path = "../media" }
 
 [features]
 # Захват экрана/камеры тянет тяжёлые системные библиотеки (pipewire/gbm/drm) —
@@ -24,7 +24,7 @@ p2p-media = { path = "../media" }
 capture = ["dep:xcap", "dep:nokhwa", "dep:image"]
 
 [dev-dependencies]
-p2p-ygg = { path = "../transport" }
+peerage-ygg = { path = "../transport" }
 
 [[example]]
 name = "screen_probe"

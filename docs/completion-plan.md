@@ -76,8 +76,8 @@ reply), длинный тап, детали статуса доставки, м�
 аватарки — закрывает медиа-часть P1 И P2 разом. + metadata-scrub (EXIF). См. scope M2.
 
 **Прогресс 2026-07-02 (data plane готов, весь под тестами без устройств):**
-- ✅ Крейт `p2p-blob`: контент-адресный примитив (build/Reassembler/Manifest/Limits),
-  по-чанковая + итоговая BLAKE3-проверка, анти-DoS. `cargo test -p p2p-blob` (хост).
+- ✅ Крейт `peerage-blob`: контент-адресный примитив (build/Reassembler/Manifest/Limits),
+  по-чанковая + итоговая BLAKE3-проверка, анти-DoS. `cargo test -p peerage-blob` (хост).
 - ✅ `blob::scrub`: снятие EXIF/GPS с JPEG/PNG без ре-энкода (PET-ось).
 - ✅ Pull-протокол: `Payload/Event` Blob{Manifest,Request,Chunk} + `engine::blobs::
   BlobManager` (offer/докачка/отдача/tick). Loopback-тест `blob_flow` (вкл. потери).

@@ -2,7 +2,7 @@
 # нужен nightly и cargo-fuzz, основной набор от него не зависит.
 # Запуск — scripts/fuzz.sh (WSL).
 [package]
-name = "p2p-fuzz"
+name = "peerage-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -12,8 +12,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
-p2p-core = { path = "../core" }
-p2p-blob = { path = "../blob" }
+peerage-core = { path = "../core" }
+peerage-blob = { path = "../blob" }
 rand_core = "0.6"
 
 [workspace]

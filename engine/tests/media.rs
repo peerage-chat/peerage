@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::Engine;
-use p2p_messenger::loopback::LoopbackNet;
+use peerage_core::Identity;
+use peerage_engine::Engine;
+use peerage_messenger::loopback::LoopbackNet;
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -16,7 +16,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-media-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("peerage-media-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -95,7 +95,7 @@ fn image_message_delivers_and_blob_pulls() {
 /// получатель собирает тот же контент-адрес. Плюс подпись едет ВНУТРИ сообщения.
 #[test]
 fn file_attachment_with_caption_delivers() {
-    p2p_core::vault::init_with_key([9u8; 32]);
+    peerage_core::vault::init_with_key([9u8; 32]);
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(21), id(22));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
@@ -110,11 +110,11 @@ fn file_attachment_with_caption_delivers() {
     let path = dir.join("clip.bin");
     std::fs::write(&path, &content).unwrap();
 
-    let info = p2p_engine::MediaInfo { caption: "подпись к файлу".into(), ..Default::default() };
+    let info = peerage_engine::MediaInfo { caption: "подпись к файлу".into(), ..Default::default() };
     a.send_media_file(&b_key, &path, "application/octet-stream", "clip.bin", info)
         .expect("send_media_file");
 
-    let want_id = hex::encode(p2p_blob::blob_id(&content));
+    let want_id = hex::encode(peerage_blob::blob_id(&content));
     // Отправитель сохранил свою копию потоково и читает её обратно байт-в-байт.
     assert_eq!(a.blob_read(&want_id).as_deref(), Some(&content[..]), "своя копия цела");
 

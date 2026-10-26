@@ -1,4 +1,4 @@
-//! p2p-blob — унифицированный контент-адресный примитив (веха M2).
+//! peerage-blob — унифицированный контент-адресный примитив (веха M2).
 //!
 //! Один примитив под аватарки, картинки, файлы, голосовые, стикеры: контент
 //! режется на чанки, адресуется по BLAKE3-хэшу, докачивается кусками и проверяется
@@ -467,7 +467,7 @@ mod tests {
     #[test]
     fn file_manifest_matches_in_memory() {
         let content: Vec<u8> = (0..CHUNK_SIZE * 2 + 777).map(|i| (i * 31 ^ 0x5a) as u8).collect();
-        let dir = std::env::temp_dir().join(format!("p2p-blobfile-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("test-blobfile-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("data.bin");
         std::fs::write(&path, &content).unwrap();

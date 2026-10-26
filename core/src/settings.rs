@@ -122,7 +122,7 @@ mod tests {
 
     fn tmp() -> std::path::PathBuf {
         let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let d = std::env::temp_dir().join(format!("p2p-settings-{n}"));
+        let d = std::env::temp_dir().join(format!("test-settings-{n}"));
         std::fs::create_dir_all(&d).unwrap();
         d
     }

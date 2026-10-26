@@ -1,6 +1,6 @@
 //! Резервная копия ДАННЫХ: что кладём в архив и что достаём обратно.
 //!
-//! Формат контейнера — [`p2p_core::backup`]; здесь только состав и правила слияния.
+//! Формат контейнера — [`peerage_core::backup`]; здесь только состав и правила слияния.
 //!
 //! **Пользователь выбирает состав.** Причина не в гибкости ради гибкости: части
 //! отличаются на порядки по объёму и по чувствительности. Переписка — мегабайты,
@@ -18,7 +18,7 @@
 //!   ломают группу целиком. Честная граница: копия возвращает то, что ЧИТАТЬ, а не
 //!   то, ЧЕМ расшифровывать. После восстановления в группы приглашают заново.
 //! * **Транспортных ключей контактов** (адресов): протухают, см.
-//!   [`p2p_core::store::ContactStore::import_contact`].
+//!   [`peerage_core::store::ContactStore::import_contact`].
 //!
 //! **Восстановление — слияние, а не замена.** То, что пришло после снятия копии,
 //! новее; затирать его архивом нельзя. Ключи записей одинаковы на обоих концах,
@@ -26,8 +26,8 @@
 
 use std::path::Path;
 
-use p2p_core::backup::{BackupError, Frame, Reader, Writer};
-use p2p_core::store::{CallRecord, Chat, Contact, StoredMessage};
+use peerage_core::backup::{BackupError, Frame, Reader, Writer};
+use peerage_core::store::{CallRecord, Chat, Contact, StoredMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::{dto, push_event, Engine, LockRecover};
@@ -463,7 +463,7 @@ impl Engine {
                     let Ok(hash) = <[u8; 32]>::try_from(raw.as_slice()) else { continue };
                     // Адрес обязан быть хэшем байтов: иначе подложенная копия кладёт
                     // под чужой адрес что угодно, и мы раздаём это другим как тот блоб.
-                    if p2p_blob::blob_id(&data) != hash {
+                    if peerage_blob::blob_id(&data) != hash {
                         log::warn!("backup: блоб {id} не совпал со своим хэшем — пропущен");
                         continue;
                     }

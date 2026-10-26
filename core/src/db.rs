@@ -63,7 +63,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             verified     INTEGER NOT NULL DEFAULT 0,
             profile_name TEXT NOT NULL DEFAULT '',
             avatar_id    TEXT NOT NULL DEFAULT '',
-            -- Репутация (M3): отданные нам блобы, влияет на бюджет (p2p_core::budget).
+            -- Репутация (M3): отданные нам блобы, влияет на бюджет (peerage_core::budget).
             helpful      INTEGER NOT NULL DEFAULT 0,
             -- ADR-007: адрес контакта отделён от личности. Пусто = эпоха 0, адрес
             -- совпадает с ключом личности.
@@ -105,7 +105,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             fwd_anon     INTEGER NOT NULL DEFAULT 0,
             edited_at    INTEGER NOT NULL DEFAULT 0,
             -- Упоминания (JSON `[{at,len,key}]`, пусто — нет): ссылки на людей
-            -- поверх участков текста, см. p2p_core::mention.
+            -- поверх участков текста, см. peerage_core::mention.
             mentions     TEXT    NOT NULL DEFAULT '',
             PRIMARY KEY (chat, scope, sender, id)
         );

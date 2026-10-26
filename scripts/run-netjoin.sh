@@ -9,4 +9,4 @@ cd "$ROOT"
 export LD_LIBRARY_PATH="$ROOT/ygg/libygg:${LD_LIBRARY_PATH:-}"
 
 bash scripts/build-ygg.sh >/dev/null
-cargo run -q -p p2p-ygg --example netjoin -- peers/public-peers.txt
+cargo run -q -p peerage-ygg --example netjoin -- peers/public-peers.txt

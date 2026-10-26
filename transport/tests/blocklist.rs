@@ -5,14 +5,14 @@
 //! проверяем, что после `block` пакеты вообще не поднимаются в Rust, а после
 //! `unblock` доставка возвращается.
 //!
-//! Прогон из WSL (нужна libygg): `cargo test -p p2p-ygg`.
+//! Прогон из WSL (нужна libygg): `cargo test -p peerage-ygg`.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_ygg::Node;
+use peerage_ygg::Node;
 
 /// Поток-читатель: считает пакеты, дошедшие до приложения.
 fn spawn_reader(node: Arc<Node>, stop: Arc<AtomicBool>) -> Arc<AtomicU64> {

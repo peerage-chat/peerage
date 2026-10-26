@@ -16,10 +16,10 @@ members = [
 ]
 # transport линкует Go-библиотеку libygg.so и собирается только под Linux (WSL).
 # Дефолтная сборка (cargo build/test без -p) ограничена кросс-платформенными
-# крейтами, чтобы не ломать Windows. transport собираем явно: cargo build -p p2p-ygg.
+# крейтами, чтобы не ломать Windows. transport собираем явно: cargo build -p peerage-ygg.
 default-members = ["core"]
 
-# Профиль release для всего воркспейса (в т.ч. android cdylib libp2p_android.so).
+# Профиль release для всего воркспейса (в т.ч. android cdylib libpeerage_android.so).
 # Цель — меньше размер .so без риска для отзывчивости и корректности:
 #   strip           — срезать таблицу символов (.symtab/.strtab ~2.7 МБ), код не трогает;
 #   lto = "thin"    — межкрейтовый инлайн: меньше и обычно быстрее, приемлемый линк;
@@ -37,7 +37,7 @@ edition = "2021"
 # GPL-3.0: используем Slint под GPL-вариантом его три-лицензии, поэтому всё
 # приложение копилефтное — исходники остаются открытыми и проверяемыми.
 license = "GPL-3.0-only"
-authors = ["p2p messenger"]
+authors = ["Peerage contributors"]
 
 [workspace.dependencies]
 ed25519-dalek = "2"

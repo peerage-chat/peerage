@@ -13,13 +13,13 @@ use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, Stream, StreamConfig};
 
-use p2p_core::media::{fragment_video, parse_video_frag, VideoReassembler, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO};
-use p2p_core::settings::{AudioSettings, VideoSettings};
-use p2p_media::{
+use peerage_core::media::{fragment_video, parse_video_frag, VideoReassembler, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO};
+use peerage_core::settings::{AudioSettings, VideoSettings};
+use peerage_media::{
     AudioDecoder, AudioEncoder, DecodedFrame, JitterBuffer, JitterOut, VideoDecoder, VideoEncoder,
     VideoSource,
 };
-use p2p_messenger::Messenger;
+use peerage_messenger::Messenger;
 
 use crate::CallError;
 

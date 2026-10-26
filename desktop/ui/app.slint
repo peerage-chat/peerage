@@ -1,4 +1,4 @@
-// P2P Messenger — Holo-интерфейс на Slint (нативная отрисовка, без WebView).
+// Peerage — Holo-интерфейс на Slint (нативная отрисовка, без WebView).
 import { ListView } from "std-widgets.slint";
 
 export struct ContactItem {
@@ -101,7 +101,7 @@ component TopBar inherits Rectangle {
 }
 
 export component AppWindow inherits Window {
-    title: "P2P Messenger";
+    title: "Peerage";
     preferred-width: 440px;
     preferred-height: 820px;
     background: #1a1a1a;
@@ -181,7 +181,7 @@ export component AppWindow inherits Window {
 
     // ===== Главный экран =====
     if root.screen == 0: VerticalLayout {
-        TopBar { title: "P2P Messenger";
+        TopBar { title: "Peerage";
             Text {
                 text: root.net-status;
                 color: root.net-online ? #8bc34a : #888888;

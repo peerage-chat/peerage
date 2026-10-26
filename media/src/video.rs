@@ -9,7 +9,7 @@ use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate};
 use openh264::formats::{RgbSliceU8, YUVBuffer, YUVSource};
 use openh264::OpenH264API;
 
-pub use p2p_core::settings::VideoSettings;
+pub use peerage_core::settings::VideoSettings;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VideoError {

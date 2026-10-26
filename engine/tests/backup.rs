@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::backup::Parts;
-use p2p_engine::Engine;
-use p2p_messenger::loopback::LoopbackNet;
+use peerage_core::Identity;
+use peerage_engine::backup::Parts;
+use peerage_engine::Engine;
+use peerage_messenger::loopback::LoopbackNet;
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -21,7 +21,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-backup-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-backup-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -65,7 +65,7 @@ fn export_import_restores_conversation_on_a_clean_device() {
     let a = start(&net, a_id, tmpdir("src"));
     fill(&a, &peer);
 
-    let file = tmpdir("file").join("copy.p2pbak");
+    let file = tmpdir("file").join("copy.peerage");
     let out = a.backup_export(&file, all(), "пароль-копии").unwrap();
     assert_eq!(out.contacts, 1);
     assert_eq!(out.messages, 3, "два текста + медиа");
@@ -109,7 +109,7 @@ fn restore_does_not_grant_verification() {
     fill(&a, &peer);
     a.set_verified(&peer, true); // у источника контакт сверен вживую
 
-    let file = tmpdir("ver").join("copy.p2pbak");
+    let file = tmpdir("ver").join("copy.peerage");
     a.backup_export(&file, all(), "пк").unwrap();
 
     let b = start(&net, id(99), tmpdir("ver-dst"));
@@ -127,7 +127,7 @@ fn only_selected_parts_are_included() {
     fill(&a, &peer);
 
     // Только контакты: ни переписки, ни заметок, ни файлов.
-    let file = tmpdir("sel").join("contacts-only.p2pbak");
+    let file = tmpdir("sel").join("contacts-only.peerage");
     let out = a
         .backup_export(&file, Parts { contacts: true, ..Default::default() }, "пк")
         .unwrap();
@@ -150,7 +150,7 @@ fn notes_are_separate_from_conversations() {
     let a = start(&net, id(87), tmpdir("notes-src"));
     fill(&a, &peer);
 
-    let file = tmpdir("notes").join("msgs.p2pbak");
+    let file = tmpdir("notes").join("msgs.peerage");
     let out = a
         .backup_export(&file, Parts { messages: true, ..Default::default() }, "пк")
         .unwrap();
@@ -165,7 +165,7 @@ fn import_merges_and_is_idempotent() {
     let peer = id(90).public_key_bytes();
     let a = start(&net, id(89), tmpdir("merge-src"));
     fill(&a, &peer);
-    let file = tmpdir("merge").join("copy.p2pbak");
+    let file = tmpdir("merge").join("copy.peerage");
     a.backup_export(&file, all(), "пк").unwrap();
 
     let b = start(&net, id(91), tmpdir("merge-dst"));
@@ -194,7 +194,7 @@ fn wrong_password_does_not_restore_anything() {
     let peer = id(93).public_key_bytes();
     let a = start(&net, id(92), tmpdir("pw-src"));
     fill(&a, &peer);
-    let file = tmpdir("pw").join("copy.p2pbak");
+    let file = tmpdir("pw").join("copy.peerage");
     a.backup_export(&file, all(), "правильный").unwrap();
 
     let b = start(&net, id(94), tmpdir("pw-dst"));
@@ -218,7 +218,7 @@ fn restored_group_is_read_only() {
     a.group_send_text(gid.clone(), "сообщение в группе".into());
     assert!(wait(5, || a.group_history_json(&gid).contains("сообщение в группе")));
 
-    let file = tmpdir("grp").join("copy.p2pbak");
+    let file = tmpdir("grp").join("copy.peerage");
     a.backup_export(&file, all(), "пк").unwrap();
 
     let b = start(&net, id(96), tmpdir("grp-dst"));
@@ -253,7 +253,7 @@ fn group_history_survives_backup_as_an_archive() {
         "сообщение записано в историю"
     );
 
-    let file = tmpdir("gfile").join("groups.p2pbak");
+    let file = tmpdir("gfile").join("groups.peerage");
     let out = a.backup_export(&file, all(), "пароль").unwrap();
     assert_eq!(out.group_messages, 1, "групповое сообщение попало в копию");
 
@@ -283,11 +283,11 @@ fn forged_blob_in_backup_is_rejected() {
     let net = LoopbackNet::new();
     let e = start(&net, id(84), tmpdir("forged"));
     let honest = b"honest bytes".to_vec();
-    let honest_id = hex::encode(p2p_blob::blob_id(&honest));
-    let victim_id = hex::encode(p2p_blob::blob_id(b"real picture"));
+    let honest_id = hex::encode(peerage_blob::blob_id(&honest));
+    let victim_id = hex::encode(peerage_blob::blob_id(b"real picture"));
 
-    let file = tmpdir("forged-file").join("copy.p2pbak");
-    let mut w = p2p_core::backup::Writer::create(std::fs::File::create(&file).unwrap(), "пароль").unwrap();
+    let file = tmpdir("forged-file").join("copy.peerage");
+    let mut w = peerage_core::backup::Writer::create(std::fs::File::create(&file).unwrap(), "пароль").unwrap();
     w.blob(&victim_id, b"forged").unwrap();
     w.blob(&honest_id, &honest).unwrap();
     w.finish().unwrap();

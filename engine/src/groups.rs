@@ -8,12 +8,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::mention::Mention;
-use p2p_core::store::{Chat, GroupInviteRecord, GroupStore, MessageStore, StoredMessage};
-use p2p_core::Identity;
-use p2p_group::peek_group_id;
-use p2p_groupchat::{GroupChat, MediaBody};
-use p2p_messenger::Messenger;
+use peerage_core::mention::Mention;
+use peerage_core::store::{Chat, GroupInviteRecord, GroupStore, MessageStore, StoredMessage};
+use peerage_core::Identity;
+use peerage_group::peek_group_id;
+use peerage_groupchat::{GroupChat, MediaBody};
+use peerage_messenger::Messenger;
 
 use crate::LockRecover;
 
@@ -434,7 +434,7 @@ impl GroupManager {
         // пределах отправителя (ссылка — пара «автор + id»).
         let id = now_ms();
         // У себя храним ровно то, что ушло в сеть — чистка та же, что в слое групп.
-        let mentions = p2p_core::mention::clean(text, mentions);
+        let mentions = peerage_core::mention::clean(text, mentions);
         let sent = e.chat.send_text_full(text, id, reply_to, reply_sender, fwd_from, fwd_anon, &mentions);
         if sent.is_err() {
             return false;
@@ -503,7 +503,7 @@ impl GroupManager {
             return None;
         }
         let e = self.groups.get_mut(gid)?;
-        let mentions = p2p_core::mention::clean(text, mentions.to_vec());
+        let mentions = peerage_core::mention::clean(text, mentions.to_vec());
         if e.chat.send_edit(id, text, &mentions).is_err() {
             return None;
         }
@@ -728,7 +728,7 @@ impl GroupManager {
     /// Входящее групповое сообщение. Возвращает Some((gid_hex, text)) для
     /// прикладного сообщения (чтобы UI показал), либо None (Commit/Welcome).
     pub fn on_group(&mut self, peer: [u8; 32], data: &[u8]) -> GroupOutcome {
-        use p2p_groupchat::Inbound;
+        use peerage_groupchat::Inbound;
         // Известная группа? (Commit или прикладное сообщение)
         let known = peek_group_id(data).filter(|g| self.groups.contains_key(g));
         if let Some(gid) = known {

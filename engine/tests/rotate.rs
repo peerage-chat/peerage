@@ -11,10 +11,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::Engine;
-use p2p_messenger::loopback::LoopbackNet;
-use p2p_messenger::{Config, Messenger};
+use peerage_core::Identity;
+use peerage_engine::Engine;
+use peerage_messenger::loopback::LoopbackNet;
+use peerage_messenger::{Config, Messenger};
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -22,7 +22,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-rotate-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-rotate-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -112,8 +112,8 @@ fn own_rotation_keeps_the_contact_reachable() {
     // Ротация поднимает узел на новом ключе; на loopback это новая точка сети.
     let net_for_factory = net.clone();
     a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
-        let key = p2p_core::Identity::from_seed(seed).ok()?.public_key_bytes();
-        Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn p2p_messenger::Transport>)
+        let key = peerage_core::Identity::from_seed(seed).ok()?.public_key_bytes();
+        Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
     }));
 
     assert_eq!(a.transport_epoch(), 0, "до ротации живём на ключе личности");
@@ -245,8 +245,8 @@ fn group_survives_member_rotation() {
     // A меняет адрес и сообщает об этом B.
     let net_for_factory = net.clone();
     a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
-        let key = p2p_core::Identity::from_seed(seed).ok()?.public_key_bytes();
-        Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn p2p_messenger::Transport>)
+        let key = peerage_core::Identity::from_seed(seed).ok()?.public_key_bytes();
+        Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
     }));
     a.rotate_transport(vec![b_key], 0);
     let tk1 = alice.transport_public(1);
@@ -292,8 +292,8 @@ fn contact_code_carries_signed_address() {
 
     let net_for_factory = net.clone();
     a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
-        let key = p2p_core::Identity::from_seed(seed).ok()?.public_key_bytes();
-        Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn p2p_messenger::Transport>)
+        let key = peerage_core::Identity::from_seed(seed).ok()?.public_key_bytes();
+        Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
     }));
     a.rotate_transport(vec![], 0); // никого не оповещаем — знакомимся заново по коду
     assert!(wait(20, || a.transport_epoch() == 1));
@@ -333,8 +333,8 @@ fn failed_rotation_falls_back_to_the_old_address() {
     // Узел новой эпохи не поднимается; прежний (ключ личности) — поднимается.
     let net_for_factory = net.clone();
     a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
-        let key = p2p_core::Identity::from_seed(seed).ok()?.public_key_bytes();
-        (key == a_key).then(|| net_for_factory.endpoint(key) as std::sync::Arc<dyn p2p_messenger::Transport>)
+        let key = peerage_core::Identity::from_seed(seed).ok()?.public_key_bytes();
+        (key == a_key).then(|| net_for_factory.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
     }));
     a.rotate_transport(vec![b_key], 0);
 

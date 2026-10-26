@@ -9,7 +9,7 @@ cd "$ROOT"
 export LD_LIBRARY_PATH="$ROOT/ygg/libygg:${LD_LIBRARY_PATH:-}"
 
 bash scripts/build-ygg.sh >/dev/null
-cargo build -q -p p2p-messenger --examples
+cargo build -q -p peerage-messenger --examples
 CHAT="$CARGO_TARGET_DIR/debug/examples/chat"
 PC="$CARGO_TARGET_DIR/debug/examples/persisted_chat"
 

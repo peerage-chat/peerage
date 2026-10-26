@@ -7,11 +7,11 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::store::{Chat, GroupStore, MessageStore};
-use p2p_core::Identity;
-use p2p_engine::groups::GroupManager;
-use p2p_engine::MediaBody;
-use p2p_messenger::{loopback::LoopbackNet, Config, Event, Messenger};
+use peerage_core::store::{Chat, GroupStore, MessageStore};
+use peerage_core::Identity;
+use peerage_engine::groups::GroupManager;
+use peerage_engine::MediaBody;
+use peerage_messenger::{loopback::LoopbackNet, Config, Event, Messenger};
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -19,7 +19,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-it-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-it-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -37,7 +37,7 @@ fn manager_with_store(
     msgr: Arc<Messenger>,
     dir: PathBuf,
 ) -> (GroupManager, Arc<Mutex<MessageStore>>) {
-    let db = p2p_core::db::open(&dir).expect("база");
+    let db = peerage_core::db::open(&dir).expect("база");
     let store = Arc::new(Mutex::new(MessageStore::open(db.clone())));
     (GroupManager::new(id, msgr, dir, store.clone(), GroupStore::new(db)), store)
 }
@@ -320,7 +320,7 @@ fn group_reply_and_retract() {
 /// отправителя, а не рисуется у получателя.
 #[test]
 fn group_mentions_travel_and_follow_edits() {
-    use p2p_core::mention::Mention;
+    use peerage_core::mention::Mention;
     let mut ctx = setup_and_join(0);
     let b_hex = hex::encode(ctx.b_key);
     let text = "@Боб, глянь";

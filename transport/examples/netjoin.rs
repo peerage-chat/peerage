@@ -1,12 +1,12 @@
 //! Проба входа в глобальную сеть Yggdrasil: узел подключается к публичным пирам
 //! из файла и отслеживает, попал ли он в mesh.
 //!
-//! Запуск (WSL): cargo run -p p2p-ygg --example netjoin -- peers/public-peers.txt
-//! С логами Yggdrasil: YGG_DEBUG=1 cargo run -p p2p-ygg --example netjoin -- ...
+//! Запуск (WSL): cargo run -p peerage-ygg --example netjoin -- peers/public-peers.txt
+//! С логами Yggdrasil: YGG_DEBUG=1 cargo run -p peerage-ygg --example netjoin -- ...
 
 use std::time::{Duration, Instant};
 
-use p2p_ygg::Node;
+use peerage_ygg::Node;
 
 fn main() {
     let path = std::env::args()

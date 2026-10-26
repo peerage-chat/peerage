@@ -3,7 +3,7 @@
 //! датаграммы узлу B на максимальной скорости, B считает принятые байты/пакеты.
 //!
 //! Запуск (WSL/Linux, после scripts/build-ygg.sh):
-//!   cargo run -p p2p-ygg --release --example throughput
+//!   cargo run -p peerage-ygg --release --example throughput
 //!
 //! ВАЖНО: это «потолок» транспорта на БЫСТРОМ канале (localhost) — шифрование
 //! iwe + FFI + накладные на датаграмму. Реальный интернет-путь телефон↔телефон
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_ygg::Node;
+use peerage_ygg::Node;
 
 const DATA: u8 = 0xAA; // маркер полезных датаграмм (B считает только их)
 

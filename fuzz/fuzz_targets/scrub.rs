@@ -3,7 +3,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use p2p_blob::scrub::scrub;
+use peerage_blob::scrub::scrub;
 
 fuzz_target!(|data: &[u8]| {
     let _ = scrub("image/*", data);

@@ -16,11 +16,11 @@ ktlint {
 }
 
 android {
-    namespace = "dev.p2p.messenger"
+    namespace = "chat.peerage"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "dev.p2p.messenger"
+        applicationId = "chat.peerage"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
@@ -49,14 +49,14 @@ android {
     // android.jar в юнит-тестах — заглушка; настоящий берётся из testImplementation ниже.
     testOptions { unitTests.isReturnDefaultValues = true }
 
-    // Нативные .so (libygg.so + libp2p_android.so) стейджатся скриптом
+    // Нативные .so (libygg.so + libpeerage_android.so) стейджатся скриптом
     // scripts/build-android-libs.sh в этот каталог по ABI.
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
 
     packaging {
         // Нативка лежит в APK несжатой+выровненной (AGP zipalign) и грузится ПРЯМО из
         // APK — без распаковки-дубликата на диск. Проверено: и Go c-shared libygg.so,
-        // и Rust libp2p_android.so корректно мапятся (nativeloader: base.apk!/lib/…: ok).
+        // и Rust libpeerage_android.so корректно мапятся (nativeloader: base.apk!/lib/…: ok).
         jniLibs.useLegacyPackaging = false
     }
 

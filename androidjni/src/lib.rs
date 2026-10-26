@@ -1,8 +1,8 @@
-//! JNI-кодек Android ↔ движок (`p2p-engine`). Грузится из Kotlin:
-//! `System.loadLibrary("p2p_android")`.
+//! JNI-кодек Android ↔ движок (`peerage-engine`). Грузится из Kotlin:
+//! `System.loadLibrary("peerage_android")`.
 //!
 //! Этот крейт — ТОНКИЙ слой маршалинга (ADR-003): декодирует JNI-аргументы
-//! (JString/byte[] → ключи/строки), зовёт метод [`p2p_engine::Engine`] и кодирует
+//! (JString/byte[] → ключи/строки), зовёт метод [`peerage_engine::Engine`] и кодирует
 //! результат обратно. Домейн-логики здесь нет — она в движке, который
 //! юнит-тестируется без устройства. Указатель сессии (`session_ptr`) — это
 //! `Box<Arc<Engine>>`, переданный в Kotlin как jlong. Сессия живёт до конца
@@ -22,7 +22,7 @@ use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
-use p2p_engine::{parse_key, Engine};
+use peerage_engine::{parse_key, Engine};
 
 // Ловим Rust-паники на JNI-границе: паника сквозь FFI = UB (на Android — SIGABRT
 // без стека). catch_unwind превращает её в ошибку с логом и безопасным дефолтом.
@@ -65,7 +65,7 @@ pub(crate) unsafe fn engine<'a>(session_ptr: jlong) -> Option<&'a Arc<Engine>> {
 /// Инициализация. dataDir — приватный каталог приложения (filesDir).
 /// Возвращает JSON `{session_ptr, pubkey, address, fingerprint}` или `{"error": "..."}`.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
+pub extern "system" fn Java_chat_peerage_Native_start<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     data_dir: JString<'local>,
@@ -73,7 +73,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
 ) -> jstring {
     jni_safe!(ret(&env, r#"{"error":"panic in start"}"#), {
         let _ = android_logger::init_once(
-            android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("p2p"),
+            android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("core"),
         );
 
         let dir = PathBuf::from(jstr(&mut env, &data_dir));
@@ -93,7 +93,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
                     "session_ptr": session_ptr,
                     "pubkey": hex::encode(ok.pubkey),
                     "address": ok.address,
-                    "fingerprint": p2p_core::identity::fingerprint_words(&ok.pubkey).join(" "),
+                    "fingerprint": peerage_core::identity::fingerprint_words(&ok.pubkey).join(" "),
                 });
                 ret(&env, &json.to_string())
             }
@@ -104,7 +104,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_start<'local>(
 
 /// Следующее событие как JSON-строка, либо "" если очередь пуста.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_pollEvent<'local>(
+pub extern "system" fn Java_chat_peerage_Native_pollEvent<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -116,7 +116,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_pollEvent<'local>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_stop<'local>(
+pub extern "system" fn Java_chat_peerage_Native_stop<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -129,7 +129,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_stop<'local>(
 /// Секретная сид-фраза (24 слова BIP39) для резервной копии ключа (M4). СЕКРЕТ —
 /// показывать только на FLAG_SECURE-экране. "" если сессии нет.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_seedPhrase<'local>(
+pub extern "system" fn Java_chat_peerage_Native_seedPhrase<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -145,7 +145,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_seedPhrase<'local>(
 /// vault-ключом, уже установленным при старте движка). Возвращает true при успехе.
 /// Kotlin после успеха перезапускает процесс — новый profile.json грузится начисто.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_importSeedPhrase<'local>(
+pub extern "system" fn Java_chat_peerage_Native_importSeedPhrase<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     data_dir: JString<'local>,
@@ -154,10 +154,10 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_importSeedPhrase<'local>(
     jni_safe!(JNI_FALSE, {
         let dir = jstr(&mut env, &data_dir);
         let phrase = jstr(&mut env, &phrase);
-        match p2p_core::Identity::from_phrase(&phrase) {
+        match peerage_core::Identity::from_phrase(&phrase) {
             Ok(identity) => {
                 let path = std::path::Path::new(&dir).join("profile.json");
-                match (p2p_core::store::Profile { identity }).save(&path) {
+                match (peerage_core::store::Profile { identity }).save(&path) {
                     Ok(()) => JNI_TRUE,
                     Err(_) => JNI_FALSE,
                 }
@@ -170,14 +170,14 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_importSeedPhrase<'local>(
 /// Сид-фраза корректна (24 слова BIP39 с верной контрольной суммой). Без сессии:
 /// экран восстановления проверяет фразу ДО того, как что-либо трогать на диске.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_seedPhraseValid<'local>(
+pub extern "system" fn Java_chat_peerage_Native_seedPhraseValid<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     phrase: JString<'local>,
 ) -> jboolean {
     jni_safe!(JNI_FALSE, {
         let phrase = jstr(&mut env, &phrase);
-        if p2p_core::Identity::from_phrase(&phrase).is_ok() { JNI_TRUE } else { JNI_FALSE }
+        if peerage_core::Identity::from_phrase(&phrase).is_ok() { JNI_TRUE } else { JNI_FALSE }
     })
 }
 
@@ -185,14 +185,14 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_seedPhraseValid<'local>(
 /// и человек выбрал «восстановить» или «начать заново». Без сессии — движок в
 /// этом состоянии не поднят. true — данные отложены.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_quarantineData<'local>(
+pub extern "system" fn Java_chat_peerage_Native_quarantineData<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     data_dir: JString<'local>,
 ) -> jboolean {
     jni_safe!(JNI_FALSE, {
         let dir = PathBuf::from(jstr(&mut env, &data_dir));
-        match p2p_engine::quarantine_user_data(&dir) {
+        match peerage_engine::quarantine_user_data(&dir) {
             Ok(dst) => {
                 log::warn!("данные отложены в {}", dst.display());
                 JNI_TRUE
@@ -209,7 +209,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_quarantineData<'local>(
 /// запечатывается ключом хранилища `vault_key`. Нужен отдельно от
 /// [`importSeedPhrase`]: движок здесь не поднят, и ключ хранилища ещё не задан.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_restoreSeedPhrase<'local>(
+pub extern "system" fn Java_chat_peerage_Native_restoreSeedPhrase<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     data_dir: JString<'local>,
@@ -223,19 +223,19 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_restoreSeedPhrase<'local>(
         let Ok(key) = <[u8; 32]>::try_from(raw.as_slice()) else { return JNI_FALSE };
         // Ключ задаётся на процесс один раз. Если он уже задан ДРУГИМ, профиль лёг
         // бы под чужой ключ и не открылся бы на следующем старте — отказываемся.
-        p2p_core::vault::init_with_key(key);
-        if p2p_core::vault::key_bytes() != Some(key) {
+        peerage_core::vault::init_with_key(key);
+        if peerage_core::vault::key_bytes() != Some(key) {
             return JNI_FALSE;
         }
-        let Ok(identity) = p2p_core::Identity::from_phrase(&phrase) else { return JNI_FALSE };
+        let Ok(identity) = peerage_core::Identity::from_phrase(&phrase) else { return JNI_FALSE };
         let path = std::path::Path::new(&dir).join("profile.json");
-        if (p2p_core::store::Profile { identity }).save(&path).is_ok() { JNI_TRUE } else { JNI_FALSE }
+        if (peerage_core::store::Profile { identity }).save(&path).is_ok() { JNI_TRUE } else { JNI_FALSE }
     })
 }
 
 /// Своё самоназвание (M2). "" если не задано.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_selfName<'local>(
+pub extern "system" fn Java_chat_peerage_Native_selfName<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -248,7 +248,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_selfName<'local>(
 
 /// Установить своё имя (M2): сохранить и разослать контактам (ProfileUpdate).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_setSelfName<'local>(
+pub extern "system" fn Java_chat_peerage_Native_setSelfName<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -262,7 +262,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_setSelfName<'local>(
 
 /// Установить свой аватар (M2): scrub + сохранить блобом. Возвращает hex-id ("" при ошибке).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_setSelfAvatar<'local>(
+pub extern "system" fn Java_chat_peerage_Native_setSelfAvatar<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -279,7 +279,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_setSelfAvatar<'local>(
 
 /// Байты своего аватара (M2), либо null если не задан.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_selfAvatar<'local>(
+pub extern "system" fn Java_chat_peerage_Native_selfAvatar<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -297,7 +297,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_selfAvatar<'local>(
 
 /// Отправить текст. Возвращает id (≥0) либо -1 при ошибке.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_sendText<'local>(
+pub extern "system" fn Java_chat_peerage_Native_sendText<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -315,7 +315,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendText<'local>(
 /// Отправить текст ОТВЕТОМ на сообщение `replyTo` (`replyMine` — чьё оно у нас).
 /// `replyTo = 0` — обычное сообщение. Возвращает id (≥0) либо -1.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_sendTextReply<'local>(
+pub extern "system" fn Java_chat_peerage_Native_sendTextReply<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -335,7 +335,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendTextReply<'local>(
 /// Удалить сообщения ТОЛЬКО У СЕБЯ. `refsJson` — `[{"id":123,"mine":true}, …]`.
 /// Возвращает число удалённых.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_deleteMessages<'local>(
+pub extern "system" fn Java_chat_peerage_Native_deleteMessages<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -364,7 +364,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_deleteMessages<'local>(
 /// Отозвать СВОИ сообщения у собеседника («удалить у всех»). `idsJson` — `[123, …]`.
 /// Возвращает число отправленных просьб.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_retractMessages<'local>(
+pub extern "system" fn Java_chat_peerage_Native_retractMessages<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -382,7 +382,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_retractMessages<'local>(
 /// Отправить медиа-вложение (M2): scrub картинок + блоб + медиа-сообщение.
 /// Возвращает id (≥0) либо -1 при ошибке.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_sendMedia<'local>(
+pub extern "system" fn Java_chat_peerage_Native_sendMedia<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -407,7 +407,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMedia<'local>(
 /// декодировать медиа не умеет.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
-pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
+pub extern "system" fn Java_chat_peerage_Native_sendMediaWithMeta<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -432,7 +432,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
         let name = jstr(&mut env, &name);
         let caption = jstr(&mut env, &caption);
         let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
-        let info = p2p_engine::MediaInfo {
+        let info = peerage_engine::MediaInfo {
             fwd_from: String::new(),
             fwd_anon: false,
             duration_ms: duration_ms.max(0) as u32,
@@ -451,7 +451,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaWithMeta<'local>(
 /// диска. Для крупного это единственный путь — читать гигабайт в память нельзя.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
-pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaFile<'local>(
+pub extern "system" fn Java_chat_peerage_Native_sendMediaFile<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -475,7 +475,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaFile<'local>(
         let name = jstr(&mut env, &name);
         let caption = jstr(&mut env, &caption);
         let thumb_bytes = env.convert_byte_array(&thumb).unwrap_or_default();
-        let info = p2p_engine::MediaInfo {
+        let info = peerage_engine::MediaInfo {
             fwd_from: String::new(),
             fwd_anon: false,
             duration_ms: duration_ms.max(0) as u32,
@@ -493,7 +493,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_sendMediaFile<'local>(
 /// Скачать вложение по кнопке (крупное не тянется автоматически). Готовность придёт
 /// событием `blob_received`.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_downloadMedia<'local>(
+pub extern "system" fn Java_chat_peerage_Native_downloadMedia<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -510,7 +510,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_downloadMedia<'local>(
 
 /// Заказанные пользователем докачки (hex-id) — переживают перезапуск.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_wantedBlobs<'local>(
+pub extern "system" fn Java_chat_peerage_Native_wantedBlobs<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -523,7 +523,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_wantedBlobs<'local>(
 
 /// Инициировать/держать соединение с пиром (фоновый коннект).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_connect<'local>(
+pub extern "system" fn Java_chat_peerage_Native_connect<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -537,7 +537,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_connect<'local>(
 
 /// История переписки с пиром как JSON-массив.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_history<'local>(
+pub extern "system" fn Java_chat_peerage_Native_history<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -553,7 +553,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_history<'local>(
 /// Страница истории ВЫШЕ уже показанной: курсор — `time`/`row` самого верхнего
 /// сообщения. Открытие чата отдаёт только хвост, остальное клиент просит сам.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_historyPage<'local>(
+pub extern "system" fn Java_chat_peerage_Native_historyPage<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -571,7 +571,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_historyPage<'local>(
 /// Переслать сообщения в другой чат. `src_group`/`dst_group` — «это группа?»,
 /// идентификатор в hex (ключ пира или gid). Возвращает, сколько ушло.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_forwardMessages<'local>(
+pub extern "system" fn Java_chat_peerage_Native_forwardMessages<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -584,8 +584,8 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_forwardMessages<'local>(
 ) -> jint {
     jni_safe!(0, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
-        let src = p2p_engine::ChatKey::parse(&jstr(&mut env, &src_hex), src_group != 0);
-        let dst = p2p_engine::ChatKey::parse(&jstr(&mut env, &dst_hex), dst_group != 0);
+        let src = peerage_engine::ChatKey::parse(&jstr(&mut env, &src_hex), src_group != 0);
+        let dst = peerage_engine::ChatKey::parse(&jstr(&mut env, &dst_hex), dst_group != 0);
         let (Some(src), Some(dst)) = (src, dst) else { return 0 };
         let raw: serde_json::Value =
             serde_json::from_str(&jstr(&mut env, &refs_json)).unwrap_or(serde_json::Value::Null);
@@ -606,7 +606,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_forwardMessages<'local>(
 /// Исправить своё сообщение (текст или подпись вложения). Возвращает 1/0.
 /// `mentionsJson` — `[{"at","len","key"}]` в байтах UTF-8 (только группа).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_editMessage<'local>(
+pub extern "system" fn Java_chat_peerage_Native_editMessage<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -618,7 +618,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_editMessage<'local>(
 ) -> jint {
     jni_safe!(0, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
-        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
         else {
             return 0;
         };
@@ -629,14 +629,14 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_editMessage<'local>(
 }
 
 /// Упоминания от клиента. Кривой JSON — не повод терять сообщение: уходит без
-/// упоминаний (участки всё равно проверяет `p2p_core::mention::clean`).
-pub(crate) fn parse_mentions(json: &str) -> Vec<p2p_engine::Mention> {
+/// упоминаний (участки всё равно проверяет `peerage_core::mention::clean`).
+pub(crate) fn parse_mentions(json: &str) -> Vec<peerage_engine::Mention> {
     serde_json::from_str(json).unwrap_or_default()
 }
 
 /// Закрепить/открепить сообщение в чате (личном или групповом). Возвращает 1/0.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_pinMessage<'local>(
+pub extern "system" fn Java_chat_peerage_Native_pinMessage<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -648,7 +648,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_pinMessage<'local>(
 ) -> jint {
     jni_safe!(0, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
-        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
         else {
             return 0;
         };
@@ -659,7 +659,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_pinMessage<'local>(
 
 /// Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_pinned<'local>(
+pub extern "system" fn Java_chat_peerage_Native_pinned<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -668,7 +668,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_pinned<'local>(
 ) -> jstring {
     jni_safe!(ret(&env, "[]"), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
-        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
         else {
             return ret(&env, "[]");
         };
@@ -679,7 +679,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_pinned<'local>(
 /// Сводка по всем чатам для главной: JSON `[{chat, group, pinned_at, muted, last}]`.
 /// Один вызов на перерисовку списка вместо запроса на чат.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_chatSummaries<'local>(
+pub extern "system" fn Java_chat_peerage_Native_chatSummaries<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -692,7 +692,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_chatSummaries<'local>(
 
 /// Закрепить чат в списке или снять закреп (пометка локальная, не уходит собеседнику).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_setChatPinned<'local>(
+pub extern "system" fn Java_chat_peerage_Native_setChatPinned<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -702,7 +702,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_setChatPinned<'local>(
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
-        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
         else {
             return;
         };
@@ -712,7 +712,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_setChatPinned<'local>(
 
 /// Выключить/включить звук чата (тоже локально).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_setChatMuted<'local>(
+pub extern "system" fn Java_chat_peerage_Native_setChatMuted<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -722,7 +722,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_setChatMuted<'local>(
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
-        let Some(chat) = p2p_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
         else {
             return;
         };
@@ -733,7 +733,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_setChatMuted<'local>(
 /// Поиск по переписке. `chat_hex` пустой — искать во ВСЕХ чатах.
 /// Возвращает JSON `[{chat, group, ...сообщение}]`, свежие первыми.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_searchMessages<'local>(
+pub extern "system" fn Java_chat_peerage_Native_searchMessages<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -749,7 +749,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_searchMessages<'local>(
         let chat = if chat_str.trim().is_empty() {
             None
         } else {
-            p2p_engine::ChatKey::parse(&chat_str, is_group != 0)
+            peerage_engine::ChatKey::parse(&chat_str, is_group != 0)
         };
         ret(&env, &e.search_json(&q, chat, limit.max(0) as usize))
     })
@@ -759,7 +759,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_searchMessages<'local>(
 
 /// Контент-адрес (hex) содержимого — id блоба для ссылки из сообщения/аватарки.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_blobIdHex<'local>(
+pub extern "system" fn Java_chat_peerage_Native_blobIdHex<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -774,7 +774,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_blobIdHex<'local>(
 
 /// Прочитать сохранённый блоб по hex-id. Пустой массив, если блоба нет.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_blobRead<'local>(
+pub extern "system" fn Java_chat_peerage_Native_blobRead<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -794,7 +794,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_blobRead<'local>(
 /// Есть ли блоб локально. Нужен, чтобы понять «скачано ли вложение», не читая его
 /// байты: у крупного файла такая проверка стоила бы гигабайта памяти.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_blobExists<'local>(
+pub extern "system" fn Java_chat_peerage_Native_blobExists<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -810,7 +810,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_blobExists<'local>(
 /// Расшифровать блоб в файл по пути `path` потоково — для проигрывания и открытия
 /// крупных вложений без чтения их в память. `true` — файл записан целиком.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_blobExport<'local>(
+pub extern "system" fn Java_chat_peerage_Native_blobExport<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -829,7 +829,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_blobExport<'local>(
 
 /// Добавить контакт. Возвращает "added" | "known" | "error".
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_addContact<'local>(
+pub extern "system" fn Java_chat_peerage_Native_addContact<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -850,7 +850,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_addContact<'local>(
 /// Долгая операция (~0.5–1 с на телефоне) — звать с фонового потока. Пустой массив
 /// при ошибке (пустой пароль/неверная соль).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_deriveVaultKey<'local>(
+pub extern "system" fn Java_chat_peerage_Native_deriveVaultKey<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     password: JString<'local>,
@@ -861,7 +861,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_deriveVaultKey<'local>(
     jni_safe!(empty_bytes(&env), {
         let pass = jstr(&mut env, &password);
         let salt_bytes = env.convert_byte_array(&salt).unwrap_or_default();
-        match p2p_core::kdf::derive_key_with(profile.max(0) as u8, &pass, &salt_bytes) {
+        match peerage_core::kdf::derive_key_with(profile.max(0) as u8, &pass, &salt_bytes) {
             Ok(key) => env.byte_array_from_slice(&key).unwrap_or(empty),
             Err(e) => {
                 log::warn!("derive_vault_key: {e}");
@@ -874,29 +874,29 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_deriveVaultKey<'local>(
 /// Номер профиля стоимости KDF для НОВЫХ файлов. Живёт в ядре, а не в Kotlin:
 /// иначе при повышении стоимости пришлось бы помнить про две константы.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_currentKdfProfile<'local>(
+pub extern "system" fn Java_chat_peerage_Native_currentKdfProfile<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jint {
-    jni_safe!(0, { p2p_core::kdf::CURRENT_PROFILE as jint })
+    jni_safe!(0, { peerage_core::kdf::CURRENT_PROFILE as jint })
 }
 
 /// Свежая случайная соль для KDF (16 байт).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_newVaultSalt<'local>(
+pub extern "system" fn Java_chat_peerage_Native_newVaultSalt<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> JByteArray<'local> {
     let empty = empty_bytes(&env);
     jni_safe!(empty_bytes(&env), {
-        env.byte_array_from_slice(&p2p_core::kdf::new_salt()).unwrap_or(empty)
+        env.byte_array_from_slice(&peerage_core::kdf::new_salt()).unwrap_or(empty)
     })
 }
 
 /// Что и сколько войдёт в резервную копию: JSON `{contacts, messages, notes, calls,
 /// attachments, attachment_bytes, skipped_big}`. Считает по базе — с фонового потока.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_backupEstimate<'local>(
+pub extern "system" fn Java_chat_peerage_Native_backupEstimate<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -911,7 +911,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_backupEstimate<'local>(
 /// `partsJson` — что положить: `{"contacts":true,"messages":true,...}`.
 /// Возвращает JSON статистики или `{"error":"..."}`. Долгая операция (KDF + вложения).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_backupExport<'local>(
+pub extern "system" fn Java_chat_peerage_Native_backupExport<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -932,7 +932,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_backupExport<'local>(
 
 /// Восстановить из копии `path`. Возвращает JSON ДОБАВЛЕННОГО или `{"error":"..."}`.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_backupImport<'local>(
+pub extern "system" fn Java_chat_peerage_Native_backupImport<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -951,7 +951,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_backupImport<'local>(
 
 /// Кто сейчас флудит: JSON `[{peer, dropped, pps, blocked}]`, по убыванию темпа.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_floodPeers<'local>(
+pub extern "system" fn Java_chat_peerage_Native_floodPeers<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -964,7 +964,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_floodPeers<'local>(
 
 /// Текущая эпоха адреса (0 — адрес совпадает с ключом личности).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_transportEpoch<'local>(
+pub extern "system" fn Java_chat_peerage_Native_transportEpoch<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -979,7 +979,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_transportEpoch<'local>(
 /// подписанного объявления перечисленным контактам (hex через запятую).
 /// Fire-and-forget: операция долгая (пауза!), результат придёт событием.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_rotateTransport<'local>(
+pub extern "system" fn Java_chat_peerage_Native_rotateTransport<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -997,7 +997,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_rotateTransport<'local>(
 
 /// Уйти в офлайн (разорвать соединения) — перестать платить за чужой поток.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_goOffline<'local>(
+pub extern "system" fn Java_chat_peerage_Native_goOffline<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1009,7 +1009,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_goOffline<'local>(
 
 /// Вернуться в сеть на текущем адресе.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_goOnline<'local>(
+pub extern "system" fn Java_chat_peerage_Native_goOnline<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1022,7 +1022,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_goOnline<'local>(
 
 /// Мы намеренно вне сети (офлайн по кнопке или пауза смены адреса).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_isOffline<'local>(
+pub extern "system" fn Java_chat_peerage_Native_isOffline<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1036,7 +1036,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_isOffline<'local>(
 /// Строка для своего QR/«скопировать ключ»: личность, а после смены адреса — ещё и
 /// подписанная привязка к текущему адресу.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_myContactCode<'local>(
+pub extern "system" fn Java_chat_peerage_Native_myContactCode<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1050,7 +1050,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_myContactCode<'local>(
 /// Снимок офлайн-очереди: JSON {pending, bytes, peers, warn}. По `warn` клиент
 /// показывает предупреждение о разросшейся очереди (ничего не удаляется само).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_outboxStats<'local>(
+pub extern "system" fn Java_chat_peerage_Native_outboxStats<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1063,7 +1063,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_outboxStats<'local>(
 
 /// Заметки себе («Сохранённое») — JSON-история чата с самим собой.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_notes<'local>(
+pub extern "system" fn Java_chat_peerage_Native_notes<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1076,7 +1076,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_notes<'local>(
 
 /// Сохранить заметку себе. Возвращает id (или -1).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_saveNote<'local>(
+pub extern "system" fn Java_chat_peerage_Native_saveNote<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1091,7 +1091,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_saveNote<'local>(
 
 /// Удалить заметку по id.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_deleteNote<'local>(
+pub extern "system" fn Java_chat_peerage_Native_deleteNote<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1106,7 +1106,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_deleteNote<'local>(
 
 /// Журнал звонков (JSON-массив, свежие первыми).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_callLog<'local>(
+pub extern "system" fn Java_chat_peerage_Native_callLog<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1120,7 +1120,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_callLog<'local>(
 
 /// Очистить журнал звонков (явное действие пользователя).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_clearCallLog<'local>(
+pub extern "system" fn Java_chat_peerage_Native_clearCallLog<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1135,7 +1135,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_clearCallLog<'local>(
 /// Визуальный отпечаток ключа (hex, 12 байт) — сверка глазами по сетке знаков.
 /// Пустой `key_hex` — свой отпечаток.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_visualFingerprint<'local>(
+pub extern "system" fn Java_chat_peerage_Native_visualFingerprint<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1154,7 +1154,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_visualFingerprint<'local>(
 
 /// Очередь по получателям (JSON-массив) для экрана очереди отправки.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_outboxByPeer<'local>(
+pub extern "system" fn Java_chat_peerage_Native_outboxByPeer<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1167,7 +1167,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_outboxByPeer<'local>(
 
 /// Сбросить очередь ВСЕМ (двойное подтверждение — на стороне UI).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_clearOutboxAll<'local>(
+pub extern "system" fn Java_chat_peerage_Native_clearOutboxAll<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1180,7 +1180,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_clearOutboxAll<'local>(
 
 /// Сбросить очередь недоставленного пиру (явное действие пользователя).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_clearOutboxFor<'local>(
+pub extern "system" fn Java_chat_peerage_Native_clearOutboxFor<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1194,7 +1194,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_clearOutboxFor<'local>(
 
 /// Очистить историю личного чата у себя (сообщения, закрепы, очередь отправки).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_clearDmHistory<'local>(
+pub extern "system" fn Java_chat_peerage_Native_clearDmHistory<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1210,7 +1210,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_clearDmHistory<'local>(
 
 /// Что занимает место: JSON {blobs, blob_bytes, outbox_pending, outbox_bytes}.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_storageStats<'local>(
+pub extern "system" fn Java_chat_peerage_Native_storageStats<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1223,7 +1223,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_storageStats<'local>(
 
 /// Удалить все сохранённые вложения (явное действие). Возвращает освобождённые байты.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_clearBlobs<'local>(
+pub extern "system" fn Java_chat_peerage_Native_clearBlobs<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1235,7 +1235,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_clearBlobs<'local>(
 
 /// Список контактов как JSON-массив.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_listContacts<'local>(
+pub extern "system" fn Java_chat_peerage_Native_listContacts<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1248,7 +1248,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_listContacts<'local>(
 
 /// Пометить контакт проверенным/непроверенным.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_setVerified<'local>(
+pub extern "system" fn Java_chat_peerage_Native_setVerified<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1265,7 +1265,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_setVerified<'local>(
 
 /// Переименовать контакт.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_renameContact<'local>(
+pub extern "system" fn Java_chat_peerage_Native_renameContact<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1282,7 +1282,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_renameContact<'local>(
 
 /// Удалить контакт.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_removeContact<'local>(
+pub extern "system" fn Java_chat_peerage_Native_removeContact<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1298,7 +1298,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_removeContact<'local>(
 
 /// Входящие запросы в контакты как JSON-массив [{key, fingerprint, preview, time}].
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_contactRequests<'local>(
+pub extern "system" fn Java_chat_peerage_Native_contactRequests<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1311,7 +1311,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_contactRequests<'local>(
 
 /// Одобрить запрос: незнакомец → контакт. Возвращает true при успехе.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_acceptContactRequest<'local>(
+pub extern "system" fn Java_chat_peerage_Native_acceptContactRequest<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1326,7 +1326,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_acceptContactRequest<'local
 
 /// Отклонить запрос (тихо). Возвращает true, если запрос был.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_declineContactRequest<'local>(
+pub extern "system" fn Java_chat_peerage_Native_declineContactRequest<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1341,7 +1341,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_declineContactRequest<'loca
 
 /// Заблокировать пира: будущие сообщения тихо дропаются, запрос снят, из контактов убран.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_blockContact<'local>(
+pub extern "system" fn Java_chat_peerage_Native_blockContact<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1356,7 +1356,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_blockContact<'local>(
 
 /// Разблокировать пира. Возвращает true, если был в блок-листе.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_unblockContact<'local>(
+pub extern "system" fn Java_chat_peerage_Native_unblockContact<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1370,7 +1370,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_unblockContact<'local>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_isOnline<'local>(
+pub extern "system" fn Java_chat_peerage_Native_isOnline<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1386,7 +1386,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_isOnline<'local>(
 // ── Сеть ────────────────────────────────────────────────────────────────────
 
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_netPeers<'local>(
+pub extern "system" fn Java_chat_peerage_Native_netPeers<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1397,7 +1397,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_netPeers<'local>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_netTree<'local>(
+pub extern "system" fn Java_chat_peerage_Native_netTree<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1409,7 +1409,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_netTree<'local>(
 
 /// Снапшот стата сети: JSON NetStats (агрегаты считает движок).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_netStats<'local>(
+pub extern "system" fn Java_chat_peerage_Native_netStats<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1422,7 +1422,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_netStats<'local>(
 
 /// Принудительно переподключить публичных Yggdrasil-пиров (обход backoff).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_reconnectPeers<'local>(
+pub extern "system" fn Java_chat_peerage_Native_reconnectPeers<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,

@@ -4,7 +4,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use p2p_core::protocol::Payload;
+use peerage_core::protocol::Payload;
 
 fuzz_target!(|data: &[u8]| {
     let _ = Payload::from_padded(data);

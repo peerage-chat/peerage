@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Доказательства Kani (план беты, шаг 6). Запуск из WSL:
-#   scripts/kani.sh              — все доказательства p2p-core
+#   scripts/kani.sh              — все доказательства peerage-core
 #   scripts/kani.sh unpad        — только те, чьё имя содержит подстроку
 #
 # Фаззер проверяет выборку входов, Kani — ВСЕ входы ограниченного размера
@@ -15,6 +15,6 @@ cd "$ROOT"
 # Свой каталог сборки: Kani собирает своим тулчейном и флагами.
 TD="${CARGO_TARGET_DIR:-$ROOT/target}-kani"
 if [ $# -gt 0 ]; then
-    exec cargo kani -p p2p-core --target-dir "$TD" --harness "$1"
+    exec cargo kani -p peerage-core --target-dir "$TD" --harness "$1"
 fi
-exec cargo kani -p p2p-core --target-dir "$TD"
+exec cargo kani -p peerage-core --target-dir "$TD"

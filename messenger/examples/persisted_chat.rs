@@ -6,10 +6,10 @@
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::store::{ContactStore, MessageStore, StoredMessage};
-use p2p_core::Identity;
-use p2p_messenger::{Event, Messenger};
-use p2p_ygg::Node;
+use peerage_core::store::{ContactStore, MessageStore, StoredMessage};
+use peerage_core::Identity;
+use peerage_messenger::{Event, Messenger};
+use peerage_ygg::Node;
 
 fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)

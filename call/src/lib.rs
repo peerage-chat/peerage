@@ -1,4 +1,4 @@
-//! p2p-call — движок звонка: аудио и/или видео поверх лёгкого медиа-пути.
+//! peerage-call — движок звонка: аудио и/или видео поверх лёгкого медиа-пути.
 //!
 //! Один потребитель медиа-канала демультиплексирует по track: аудио →
 //! джиттер → Opus → динамики; видео/экран → реассемблер → H.264 → кадры RGB
@@ -22,14 +22,14 @@ pub use group_call::GroupCall;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, Stream, StreamConfig};
 
-use p2p_core::media::{fragment_video, parse_video_frag, VideoReassembler, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO};
-use p2p_core::settings::{AudioSettings, VideoSettings};
-use p2p_media::{AudioDecoder, AudioEncoder, DecodedFrame, JitterBuffer, JitterOut, VideoDecoder, VideoEncoder, VideoSource};
-use p2p_messenger::Messenger;
+use peerage_core::media::{fragment_video, parse_video_frag, VideoReassembler, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO};
+use peerage_core::settings::{AudioSettings, VideoSettings};
+use peerage_media::{AudioDecoder, AudioEncoder, DecodedFrame, JitterBuffer, JitterOut, VideoDecoder, VideoEncoder, VideoSource};
+use peerage_messenger::Messenger;
 
 pub type PeerKey = [u8; 32];
 
-pub use p2p_media::VideoSource as Source;
+pub use peerage_media::VideoSource as Source;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CallError {
@@ -40,9 +40,9 @@ pub enum CallError {
     #[error("cpal: {0}")]
     BuildStream(String),
     #[error("кодек: {0}")]
-    Codec(#[from] p2p_media::CodecError),
+    Codec(#[from] peerage_media::CodecError),
     #[error("видео: {0}")]
-    Video(#[from] p2p_media::VideoError),
+    Video(#[from] peerage_media::VideoError),
 }
 
 type Ring = Arc<Mutex<VecDeque<i16>>>;

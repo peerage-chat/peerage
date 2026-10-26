@@ -22,16 +22,16 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::budget::Tier;
-pub use p2p_core::mention::Mention;
-use p2p_core::settings::AudioSettings;
-use p2p_core::store::{Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage};
-use p2p_core::{vault, Identity};
+use peerage_core::budget::Tier;
+pub use peerage_core::mention::Mention;
+use peerage_core::settings::AudioSettings;
+use peerage_core::store::{Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage};
+use peerage_core::{vault, Identity};
 /// Реэкспорт: медиа-вложение группового сообщения — часть контракта движка
 /// (клиенты и тесты собирают его, чтобы отправить вложение в группу).
-pub use p2p_groupchat::MediaBody;
-use p2p_messenger::{Event, Messenger};
-use p2p_ygg::Node;
+pub use peerage_groupchat::MediaBody;
+use peerage_messenger::{Event, Messenger};
+use peerage_ygg::Node;
 
 use groups::GroupManager;
 use net::{GroupPresence, NetStats, PeerStat};
@@ -67,7 +67,7 @@ pub(crate) enum GroupCmd {
         fwd_from: String,
         /// «Переслано, автора не называем».
         fwd_anon: bool,
-        /// Упоминания поверх участков `text` (p2p_core::mention).
+        /// Упоминания поверх участков `text` (peerage_core::mention).
         mentions: Vec<Mention>,
     },
     /// Отозвать свои сообщения у участников («удалить у всех»).
@@ -331,21 +331,21 @@ pub struct Engine {
     rings: Mutex<HashMap<Vec<u8>, Vec<u64>>>,
     /// Блобы, которые мы сами попросили: id → (у кого, когда). Манифест чего-то
     /// другого — это файл без спроса, его не качаем (R-020).
-    blob_expect: Mutex<HashMap<p2p_blob::Hash, ([u8; 32], Instant)>>,
+    blob_expect: Mutex<HashMap<peerage_blob::Hash, ([u8; 32], Instant)>>,
     bench: Mutex<Option<Arc<BenchRecv>>>,
     /// Каталог хранения блобов (контент по hex-id). M2.
     blob_dir: PathBuf,
     /// Персистентная офлайн-очередь исходящих (M3): досылка после офлайна/рестарта.
-    outbox: Mutex<p2p_core::outbox::OutboxManager>,
+    outbox: Mutex<peerage_core::outbox::OutboxManager>,
     /// Журнал звонков (локальный) + id текущего активного звонка и время старта.
-    calls: Mutex<p2p_core::store::CallStore>,
+    calls: Mutex<peerage_core::store::CallStore>,
     /// Текущий звонок — активных звонков не бывает больше одного.
     active_call: Mutex<Option<ActiveCall>>,
     /// Звонки, пришедшие посреди другого разговора (комната → строка журнала
     /// «пропущен»): ответят на такой — строка станет отвеченной, а не задвоится.
     missed_calls: Mutex<HashMap<Vec<u8>, i64>>,
     /// Запрошенные пользователем вложения — докачиваем сами, когда пир в сети.
-    wanted: Mutex<p2p_core::store::WantedStore>,
+    wanted: Mutex<peerage_core::store::WantedStore>,
     /// Единый бюджет (M3): тир каждого известного пира. Читают ingress-лимитер
     /// (через messenger) и офлайн-очередь (через замыкание) — одна точка истины.
     tier_cache: Arc<Mutex<HashMap<[u8; 32], Tier>>>,
@@ -367,7 +367,7 @@ pub struct Engine {
 
 /// Создатель транспорта из seed узла: `None` — не удалось поднять.
 pub type TransportFactory =
-    Arc<dyn Fn(&[u8; 32]) -> Option<Arc<dyn p2p_messenger::Transport>> + Send + Sync>;
+    Arc<dyn Fn(&[u8; 32]) -> Option<Arc<dyn peerage_messenger::Transport>> + Send + Sync>;
 
 /// Свой профиль на диске (M2): самоназвание + аватар (id блоба + mime). Не секрет —
 /// уходит контактам; хранится plaintext в profile_meta.json.
@@ -438,11 +438,11 @@ impl Engine {
     /// Визуальный отпечаток ключа для сверки глазами: 12 байт в hex.
     /// Пусто, если ключ не разобрать. Свой — [`visual_fingerprint_self`].
     pub fn visual_fingerprint(&self, key: &[u8; 32]) -> String {
-        hex::encode(p2p_core::identity::visual_fingerprint(key))
+        hex::encode(peerage_core::identity::visual_fingerprint(key))
     }
 
     pub fn visual_fingerprint_self(&self) -> String {
-        hex::encode(p2p_core::identity::visual_fingerprint(&self.me_pub))
+        hex::encode(peerage_core::identity::visual_fingerprint(&self.me_pub))
     }
 
     /// Секретная сид-фраза (24 слова BIP39) — по запросу пользователя (онбординг M4
@@ -885,17 +885,17 @@ impl Engine {
     /// в память он не поднимается. Картинки сюда файлом не приходят: scrub-у нужен
     /// весь файл, а весят они немного. `None` — файл не читается или больше предела
     /// приёма (его не примет ни один получатель).
-    fn store_media(&self, source: MediaSource, mime: &str) -> Option<(p2p_blob::Hash, u64)> {
+    fn store_media(&self, source: MediaSource, mime: &str) -> Option<(peerage_blob::Hash, u64)> {
         match source {
             MediaSource::Bytes(content) => {
-                let bytes = if mime.starts_with("image/") { p2p_blob::scrub::scrub(mime, &content) } else { content };
-                let hash = p2p_blob::blob_id(&bytes);
+                let bytes = if mime.starts_with("image/") { peerage_blob::scrub::scrub(mime, &content) } else { content };
+                let hash = peerage_blob::blob_id(&bytes);
                 self.store_blob(hash, &bytes);
                 Some((hash, bytes.len() as u64))
             }
             MediaSource::File(path) => {
-                let manifest = p2p_blob::manifest_of_file(&path, mime.to_string()).ok()?;
-                if manifest.size > p2p_blob::Limits::default().max_size {
+                let manifest = peerage_blob::manifest_of_file(&path, mime.to_string()).ok()?;
+                if manifest.size > peerage_blob::Limits::default().max_size {
                     return None;
                 }
                 if !self.blob_exists(&hex::encode(manifest.id)) {
@@ -908,9 +908,9 @@ impl Engine {
 
     /// Сохранить миниатюру вложения отдельным блобом. Её получатель запрашивает
     /// сразу, без кнопки: без картинки предложение «скачать 800 МБ» слепое.
-    fn store_thumb(&self, thumb: Option<&[u8]>) -> Option<p2p_blob::Hash> {
+    fn store_thumb(&self, thumb: Option<&[u8]>) -> Option<peerage_blob::Hash> {
         let t = thumb.filter(|t| !t.is_empty())?;
-        let h = p2p_blob::blob_id(t);
+        let h = peerage_blob::blob_id(t);
         self.store_blob(h, t);
         Some(h)
     }
@@ -922,14 +922,14 @@ impl Engine {
     fn send_media_ref(
         &self,
         key: &[u8; 32],
-        hash: p2p_blob::Hash,
+        hash: peerage_blob::Hash,
         size: u64,
         mime: &str,
         name: &str,
-        thumb: Option<p2p_blob::Hash>,
+        thumb: Option<peerage_blob::Hash>,
         info: &MediaInfo,
     ) -> Option<i64> {
-        let meta = p2p_messenger::MediaMeta {
+        let meta = peerage_messenger::MediaMeta {
             fwd_from: info.fwd_from.clone(),
             fwd_anon: info.fwd_anon,
             size,
@@ -969,13 +969,13 @@ impl Engine {
     fn store_blob_streamed(
         &self,
         src: &std::path::Path,
-        manifest: &p2p_blob::Manifest,
-    ) -> Result<(), p2p_blob::BlobError> {
+        manifest: &peerage_blob::Manifest,
+    ) -> Result<(), peerage_blob::BlobError> {
         let _ = std::fs::create_dir_all(&self.blob_dir);
         let dst = self.blob_dir.join(hex::encode(manifest.id));
-        let mut asm = p2p_blob::disk::DiskAssembler::create(manifest.clone(), &dst)?;
+        let mut asm = peerage_blob::disk::DiskAssembler::create(manifest.clone(), &dst)?;
         for i in 0..manifest.chunks.len() {
-            let chunk = p2p_blob::read_file_chunk(src, i).map_err(|_| p2p_blob::BlobError::Io)?;
+            let chunk = peerage_blob::read_file_chunk(src, i).map_err(|_| peerage_blob::BlobError::Io)?;
             asm.add(i, &chunk, |i, b| vault::seal(&vault::chunk_purpose(&manifest.id, i), b))?;
         }
         asm.finish()?;
@@ -1135,12 +1135,12 @@ impl Engine {
         // снимаем результат в переменную (гард освобождается на `;`), затем match.
         let outcome = self.contacts.lock_safe().add(key, name, now());
         match outcome {
-            Ok(p2p_core::store::AddOutcome::Added) => {
+            Ok(peerage_core::store::AddOutcome::Added) => {
                 self.refresh_budgets(); // M3: контакт → щедрый ingress-бюджет; и в набор связи
                 self.messenger.poke(key);
                 "added"
             }
-            Ok(p2p_core::store::AddOutcome::AlreadyKnown) => "known",
+            Ok(peerage_core::store::AddOutcome::AlreadyKnown) => "known",
             Err(_) => "error",
         }
     }
@@ -1226,7 +1226,7 @@ impl Engine {
 
     /// Поднять узел на транспортном ключе указанной эпохи. Одна точка на две
     /// операции — смену адреса и возврат из офлайна.
-    fn spawn_node(&self, epoch: u32) -> Option<Arc<dyn p2p_messenger::Transport>> {
+    fn spawn_node(&self, epoch: u32) -> Option<Arc<dyn peerage_messenger::Transport>> {
         let seed = self.identity.transport_seed(epoch);
         let factory = self.transport_factory.lock_safe().clone();
         match factory {
@@ -1309,7 +1309,7 @@ impl Engine {
         *self.rotate_pending.lock_safe() = peers.iter().copied().collect();
         let hexes: Vec<String> = peers.iter().map(hex::encode).collect();
         if let Ok(v) = serde_json::to_vec(&hexes) {
-            let _ = p2p_core::fsutil::write_atomic(&self.data_dir.join("rotate_pending.json"), v);
+            let _ = peerage_core::fsutil::write_atomic(&self.data_dir.join("rotate_pending.json"), v);
         }
     }
 
@@ -1799,7 +1799,7 @@ impl Engine {
     // — Блобы (M2) —
     /// Контент-адрес (hex) содержимого — для ссылки на блоб из сообщения/аватарки.
     pub fn blob_id_hex(&self, content: &[u8]) -> String {
-        hex::encode(p2p_blob::blob_id(content))
+        hex::encode(peerage_blob::blob_id(content))
     }
 
     /// Прочитать сохранённый блоб по hex-id (принятый или свой отправленный).
@@ -1818,10 +1818,10 @@ impl Engine {
         let part = dst.with_extension("part");
         let ok = (|| -> Option<()> {
             let mut out = std::io::BufWriter::new(std::fs::File::create(&part).ok()?);
-            match p2p_blob::disk::read_header(&src) {
+            match peerage_blob::disk::read_header(&src) {
                 Some((_cs, n, _size)) => {
                     for i in 0..n {
-                        let c = p2p_blob::disk::read_chunk(&src, i, |i, b| {
+                        let c = peerage_blob::disk::read_chunk(&src, i, |i, b| {
                             vault::open(&vault::chunk_purpose(&raw, i), b).ok()
                         })?;
                         out.write_all(&c).ok()?;
@@ -1853,7 +1853,7 @@ impl Engine {
 
     // — Свой профиль (M2): имя + аватар (контент-адресный блоб). Хранится в
     // profile_meta.json; рассылается контактам при смене и на коннекте.
-    fn store_blob(&self, id: p2p_blob::Hash, content: &[u8]) {
+    fn store_blob(&self, id: peerage_blob::Hash, content: &[u8]) {
         write_blob_file(&self.blob_dir, id, content);
     }
 
@@ -1870,7 +1870,7 @@ impl Engine {
 
     fn save_profile_meta(&self, m: &ProfileMeta) {
         if let Ok(v) = serde_json::to_vec(m) {
-            let _ = p2p_core::fsutil::write_atomic(&self.profile_meta_path(), v);
+            let _ = peerage_core::fsutil::write_atomic(&self.profile_meta_path(), v);
         }
     }
 
@@ -1890,8 +1890,8 @@ impl Engine {
     /// Установить свой аватар: scrub (PET) → контент-адресный блоб → запись id+mime.
     /// Разослать контактам. Возвращает hex-id.
     pub fn set_self_avatar(&self, content: Vec<u8>, mime: &str) -> String {
-        let scrubbed = p2p_blob::scrub::scrub(mime, &content);
-        let id = p2p_blob::blob_id(&scrubbed);
+        let scrubbed = peerage_blob::scrub::scrub(mime, &content);
+        let id = peerage_blob::blob_id(&scrubbed);
         self.store_blob(id, &scrubbed);
         let id_hex = hex::encode(id);
         let mut m = self.load_profile_meta();
@@ -2016,7 +2016,7 @@ impl Engine {
     /// DM-звонок: создать комнату, послать RoomInvite, начать слать маячок.
     /// Возвращает room_id.
     pub fn room_invite_dm(&self, peer: [u8; 32], audio: bool, video: bool) -> Vec<u8> {
-        let room_id = p2p_core::dm_room_id(&self.me_pub, &peer);
+        let room_id = peerage_core::dm_room_id(&self.me_pub, &peer);
         // Пишем сразу как «не дозвонился»: исход поднимется до answered, когда
         // собеседник появится в комнате. Иначе оборванная попытка не попала бы в
         // журнал вовсе — а именно её чаще всего и ищут.
@@ -2035,7 +2035,7 @@ impl Engine {
     }
 
     pub fn room_decline_dm(&self, peer: [u8; 32]) {
-        let room_id = p2p_core::dm_room_id(&self.me_pub, &peer);
+        let room_id = peerage_core::dm_room_id(&self.me_pub, &peer);
         let _ = self.messenger.send_room_decline(&peer, &room_id);
         // «Отклонён» — исход только ВХОДЯЩЕГО: отклонить может лишь принимающая
         // сторона. Свой же исходящий, который я сам и завершил, отклонённым не был —
@@ -2054,7 +2054,7 @@ impl Engine {
 
     /// Принять DM-звонок: войти в комнату с регистрацией dm_peer. Возвращает room_id.
     pub fn room_join_dm(&self, peer: [u8; 32], audio: bool, video: bool) -> Vec<u8> {
-        let room_id = p2p_core::dm_room_id(&self.me_pub, &peer);
+        let room_id = peerage_core::dm_room_id(&self.me_pub, &peer);
         // Входящий, который мы приняли: запись уже заведена на RoomInvite. Комнату
         // сверяем — активным может быть и другой звонок (R-034).
         if !self.answer_call(&room_id) {
@@ -2092,7 +2092,7 @@ impl Engine {
     /// вычисляется из двух публичных ключей, и без этой сверки любой, кто знает
     /// ключи двух собеседников, заявил бы себя участником их разговора.
     fn room_peer_allowed(&self, peer: &[u8; 32], room_id: &[u8]) -> bool {
-        if room_id == p2p_core::dm_room_id(&self.me_pub, peer).as_slice() {
+        if room_id == peerage_core::dm_room_id(&self.me_pub, peer).as_slice() {
             return self.contacts.lock_safe().contains(peer);
         }
         self.group_roster_set(room_id).contains(peer)
@@ -2193,7 +2193,7 @@ impl Engine {
         loop {
             match store.append(Chat::Dm(&me), &note) {
                 Ok(_) => return Some(t),
-                Err(p2p_core::store::StoreError::Duplicate) => note.id += 1,
+                Err(peerage_core::store::StoreError::Duplicate) => note.id += 1,
                 Err(_) => return None,
             }
         }
@@ -2254,9 +2254,9 @@ impl Engine {
         if bitrate > 0 {
             audio.bitrate = bitrate;
             audio.mode = if music {
-                p2p_core::settings::OpusMode::Audio
+                peerage_core::settings::OpusMode::Audio
             } else {
-                p2p_core::settings::OpusMode::Voip
+                peerage_core::settings::OpusMode::Voip
             };
         }
         // Адресаты — пусто до сверки: список собирает только sync_room_members, по
@@ -2457,7 +2457,7 @@ fn load_transport_epoch(dir: &Path) -> u32 {
 
 fn save_transport_epoch(dir: &Path, epoch: u32) {
     if let Ok(v) = serde_json::to_vec(&TransportMeta { epoch }) {
-        let _ = p2p_core::fsutil::write_atomic(&transport_meta_path(dir), v);
+        let _ = peerage_core::fsutil::write_atomic(&transport_meta_path(dir), v);
     }
 }
 
@@ -2534,11 +2534,11 @@ fn event_pump(
     identity: Identity,
     messenger: Arc<Messenger>,
     data_dir: PathBuf,
-    group_meta: p2p_core::store::GroupStore,
+    group_meta: peerage_core::store::GroupStore,
 ) {
     let blob_dir = data_dir.join("blobs");
     let mut groups = GroupManager::new(identity, messenger.clone(), data_dir, engine.messages.clone(), group_meta);
-    let mut blobs = blobs::BlobManager::new(messenger.clone(), p2p_blob::Limits::default(), blob_dir);
+    let mut blobs = blobs::BlobManager::new(messenger.clone(), peerage_blob::Limits::default(), blob_dir);
     engine.resume_all_wanted(); // докачки, начатые до перезапуска
     refresh_group_cache(&engine, &groups); // прайм кэша
     push_event(&engine, dto::UiEvent::GroupsChanged);
@@ -2630,8 +2630,8 @@ fn read_blob_at(dir: &Path, id_hex: &str) -> Option<Vec<u8>> {
     let path = dir.join(hex::encode(&id));
     // Крупные блобы лежат в чанкованном формате (собраны потоково на диск), мелкие —
     // одним запечатанным буфером. Различаем по магии в заголовке.
-    if p2p_blob::disk::read_header(&path).is_some() {
-        return p2p_blob::disk::read_all(&path, |i, b| vault::open(&vault::chunk_purpose(&id, i), b).ok());
+    if peerage_blob::disk::read_header(&path).is_some() {
+        return peerage_blob::disk::read_all(&path, |i, b| vault::open(&vault::chunk_purpose(&id, i), b).ok());
     }
     let raw = std::fs::read(path).ok()?;
     vault::open(&vault::blob_purpose(&id), &raw).ok()
@@ -2639,7 +2639,7 @@ fn read_blob_at(dir: &Path, id_hex: &str) -> Option<Vec<u8>> {
 
 /// Сохранить блоб на диск по hex-id (принятый или свой отправленный).
 /// Шифрует at-rest (`vault::seal`) — как сообщения/группы.
-fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
+fn save_blob(engine: &Arc<Engine>, id: peerage_blob::Hash, content: &[u8]) {
     write_blob_file(&engine.blob_dir, id, content);
 }
 
@@ -2648,10 +2648,10 @@ fn save_blob(engine: &Arc<Engine>, id: p2p_blob::Hash, content: &[u8]) {
 /// (UI опрашивает `blob_read`/`blob_exists`) ловил пустое или обрезанное вложение,
 /// а падение посреди записи оставляло огрызок, который считается «скачанным» и
 /// больше никогда не перекачивается. Крупные блобы так же собираются в `.part` и
-/// переименовываются (`p2p_blob::disk`).
-fn write_blob_file(dir: &Path, id: p2p_blob::Hash, content: &[u8]) {
+/// переименовываются (`peerage_blob::disk`).
+fn write_blob_file(dir: &Path, id: peerage_blob::Hash, content: &[u8]) {
     let _ = std::fs::create_dir_all(dir);
-    let _ = p2p_core::fsutil::write_atomic(&dir.join(hex::encode(id)), &vault::seal(&vault::blob_purpose(&id), content));
+    let _ = peerage_core::fsutil::write_atomic(&dir.join(hex::encode(id)), &vault::seal(&vault::blob_purpose(&id), content));
 }
 
 /// Подготовить вложение для группы (см. [`Engine::store_media`]) и собрать
@@ -3030,7 +3030,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         // Манифест принимаем только на свой запрос и только от того, у кого просили:
         // иначе любой залил бы нам файл без спроса, в обход гейта и кнопки.
         Event::BlobManifest { peer, manifest } => {
-            let Ok(m) = p2p_blob::Manifest::from_json(&manifest) else { return };
+            let Ok(m) = peerage_blob::Manifest::from_json(&manifest) else { return };
             if !engine.blob_expected(&peer, &m.id) {
                 return;
             }
@@ -3126,11 +3126,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             // Mime для аватара точный; у вложения его знает клиент из ссылки.
             let meta = engine.load_profile_meta();
             let mime = if meta.avatar_id == id_hex { meta.avatar_mime } else { "application/octet-stream".into() };
-            if p2p_blob::disk::read_header(&path).is_some() {
+            if peerage_blob::disk::read_header(&path).is_some() {
                 // Крупный блоб не поднимаем в память: манифест считаем потоково,
                 // чанки отдаём с диска по одному.
                 let open = |i: usize, b: &[u8]| vault::open(&vault::chunk_purpose(&hash, i), b).ok();
-                if let Some(m) = p2p_blob::disk::manifest_of_stored(&path, mime, open) {
+                if let Some(m) = peerage_blob::disk::manifest_of_stored(&path, mime, open) {
                     if m.id == hash {
                         blobs.offer_stored(peer, m, path);
                     }
@@ -3306,7 +3306,7 @@ const QUARANTINE_KEEP: &[&str] = &[QUARANTINE_DIR, "vault.key.enc", "vault.meta"
 pub fn load_identity(dir: &Path) -> Result<Identity, String> {
     match Profile::load_or_create(&dir.join("profile.json")) {
         Ok(p) => Ok(p.identity),
-        Err(p2p_core::store::StoreError::Vault(p2p_core::vault::VaultError::Decrypt)) => {
+        Err(peerage_core::store::StoreError::Vault(peerage_core::vault::VaultError::Decrypt)) => {
             log::warn!("профиль не расшифровывается этим ключом хранилища — нужен выбор пользователя");
             Err(START_VAULT_MISMATCH.into())
         }
@@ -3347,7 +3347,7 @@ impl Engine {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
         if let Some(key) = vault_key {
-            p2p_core::vault::init_with_key(key);
+            peerage_core::vault::init_with_key(key);
         }
 
         // Не подошёл ключ — не стираем и не заводим новую личность молча: это
@@ -3362,7 +3362,7 @@ impl Engine {
         for uri in public_peer_uris() {
             let _ = node.add_peer(uri);
         }
-        Self::start_inner(dir, identity, Arc::new(node), address, p2p_messenger::Config::default())
+        Self::start_inner(dir, identity, Arc::new(node), address, peerage_messenger::Config::default())
     }
 
     /// Поднять движок поверх ПРОИЗВОЛЬНОГО транспорта (loopback в интеграционных
@@ -3371,18 +3371,18 @@ impl Engine {
     pub fn start_with_transport(
         dir: PathBuf,
         identity: Identity,
-        transport: Arc<dyn p2p_messenger::Transport>,
+        transport: Arc<dyn peerage_messenger::Transport>,
     ) -> Result<StartOk, String> {
-        Self::start_with_transport_cfg(dir, identity, transport, p2p_messenger::Config::default())
+        Self::start_with_transport_cfg(dir, identity, transport, peerage_messenger::Config::default())
     }
 
-    /// То же, но с явным [`p2p_messenger::Config`] — нужен тестам, которые проверяют
+    /// То же, но с явным [`peerage_messenger::Config`] — нужен тестам, которые проверяют
     /// поведение по таймаутам (штатный `message_ttl` = 5 минут, столько не подождать).
     pub fn start_with_transport_cfg(
         dir: PathBuf,
         identity: Identity,
-        transport: Arc<dyn p2p_messenger::Transport>,
-        cfg: p2p_messenger::Config,
+        transport: Arc<dyn peerage_messenger::Transport>,
+        cfg: peerage_messenger::Config,
     ) -> Result<StartOk, String> {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let address = transport.address();
@@ -3393,20 +3393,20 @@ impl Engine {
     fn start_inner(
         dir: PathBuf,
         identity: Identity,
-        transport: Arc<dyn p2p_messenger::Transport>,
+        transport: Arc<dyn peerage_messenger::Transport>,
         address: String,
-        cfg: p2p_messenger::Config,
+        cfg: peerage_messenger::Config,
     ) -> Result<StartOk, String> {
         let me_pub = identity.public_key_bytes();
         // Обрывки атомарной записи от убитого процесса (R-042). Сейчас, пока никто
         // не пишет: позже временный файл мог бы оказаться чьей-то записью в процессе.
         for d in [dir.clone(), dir.join("groups"), dir.join("blobs")] {
-            let n = p2p_core::fsutil::sweep_temp(&d);
+            let n = peerage_core::fsutil::sweep_temp(&d);
             if n > 0 {
                 log::info!("{}: убрано {n} временных файлов", d.display());
             }
         }
-        let db = p2p_core::db::open(&dir).map_err(|e| format!("db: {e}"))?;
+        let db = peerage_core::db::open(&dir).map_err(|e| format!("db: {e}"))?;
         let contacts = ContactStore::open(db.clone()).map_err(|e| format!("contacts: {e}"))?;
         let gate = GateStore::open(db.clone()).map_err(|e| format!("gate: {e}"))?;
         let messages = MessageStore::open(db.clone());
@@ -3439,8 +3439,8 @@ impl Engine {
         // статистика и ручной сброс.
         let outbox = {
             let tc = tier_cache.clone();
-            p2p_core::outbox::OutboxManager::new(
-                p2p_core::outbox::OutboxStore::new(db.clone()),
+            peerage_core::outbox::OutboxManager::new(
+                peerage_core::outbox::OutboxStore::new(db.clone()),
                 // Cap/TTL очереди — из того же бюджета, что и ingress (единая точка).
                 Box::new(move |peer| {
                     tc.lock()
@@ -3456,8 +3456,8 @@ impl Engine {
             messenger: messenger.clone(),
             contacts: Mutex::new(contacts),
             gate: Mutex::new(gate),
-            wanted: Mutex::new(p2p_core::store::WantedStore::new(db.clone())),
-            calls: Mutex::new(p2p_core::store::CallStore::new(db.clone())),
+            wanted: Mutex::new(peerage_core::store::WantedStore::new(db.clone())),
+            calls: Mutex::new(peerage_core::store::CallStore::new(db.clone())),
             active_call: Mutex::new(None),
             missed_calls: Mutex::new(HashMap::new()),
             messages: Arc::new(Mutex::new(messages)),
@@ -3492,11 +3492,11 @@ impl Engine {
         // потом отдать её мессенджеру — он и дошлёт оставшееся.
         let dropped = engine.outbox.lock_safe().prune_expired(now());
         log::info!("outbox: выброшено просроченных {dropped}, ждёт {}", engine.outbox.lock_safe().pending_count());
-        engine.messenger.set_outbox(p2p_core::outbox::OutboxStore::new(db.clone()));
+        engine.messenger.set_outbox(peerage_core::outbox::OutboxStore::new(db.clone()));
 
         let pump_engine = engine.clone();
         let groups_dir = dir.clone();
-        let group_meta = p2p_core::store::GroupStore::new(db.clone());
+        let group_meta = peerage_core::store::GroupStore::new(db.clone());
         std::thread::spawn(move || {
             event_pump(pump_engine, job_rx, identity_for_groups, messenger, groups_dir, group_meta)
         });

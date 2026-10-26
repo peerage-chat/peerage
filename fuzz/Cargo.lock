@@ -745,7 +745,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
-name = "p2p-blob"
+name = "peerage-blob"
 version = "0.1.0"
 dependencies = [
  "blake3",
@@ -756,7 +756,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "p2p-core"
+name = "peerage-core"
 version = "0.1.0"
 dependencies = [
  "argon2",
@@ -782,12 +782,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "p2p-fuzz"
+name = "peerage-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "p2p-blob",
- "p2p-core",
+ "peerage-blob",
+ "peerage-core",
  "rand_core 0.6.4",
 ]
 

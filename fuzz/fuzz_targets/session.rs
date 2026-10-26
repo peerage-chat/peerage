@@ -13,8 +13,8 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use libfuzzer_sys::fuzz_target;
-use p2p_core::session::{Received, Sessions};
-use p2p_core::Identity;
+use peerage_core::session::{Received, Sessions};
+use peerage_core::Identity;
 use rand_core::{CryptoRng, RngCore};
 
 /// Детерминированная «случайность» (splitmix64): находку можно воспроизвести.
@@ -44,7 +44,7 @@ impl RngCore for Det {
 impl CryptoRng for Det {}
 
 fn text() -> Vec<u8> {
-    p2p_core::pad::pad(b"fuzz", p2p_core::protocol::APP_BUCKET)
+    peerage_core::pad::pad(b"fuzz", peerage_core::protocol::APP_BUCKET)
 }
 
 /// Шаг рукопожатия: состояния сторон перед приёмом `template`, кто его принимает.
@@ -83,8 +83,8 @@ fn fixture() -> &'static Fixture {
         }
         let data = a.send(&pb, &text(), true, t, &mut rng).remove(0);
         stages.push(Stage { a: a.clone(), b: b.clone(), template: data, to_b: true });
-        let mut frame = vec![0u8; p2p_core::media::MEDIA_HEADER_LEN + 5];
-        p2p_core::media::write_media_header(&mut frame, p2p_core::media::TRACK_AUDIO, 1, 0);
+        let mut frame = vec![0u8; peerage_core::media::MEDIA_HEADER_LEN + 5];
+        peerage_core::media::write_media_header(&mut frame, peerage_core::media::TRACK_AUDIO, 1, 0);
         let media = a.seal_media(&pb, &frame, t).unwrap();
         stages.push(Stage { a, b, template: media, to_b: true });
         Fixture { pa, pb, t, stages }
@@ -115,7 +115,7 @@ fuzz_target!(|data: &[u8]| {
     let (rx, tx) = if st.to_b { (&mut b, &mut a) } else { (&mut a, &mut b) };
     // Любой пакет пробуем и как медиа: путь разбора у медиа свой.
     if let Some((_, frame)) = rx.open_media(&pkt, f.t) {
-        let _ = p2p_core::media::parse_media(&frame);
+        let _ = peerage_core::media::parse_media(&frame);
     }
     let back = match rx.receive(&pkt, f.t, &mut rng) {
         Received::Reply(m) => vec![m],

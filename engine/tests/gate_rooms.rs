@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::Engine;
-use p2p_messenger::loopback::LoopbackNet;
-use p2p_messenger::{Config, Messenger};
+use peerage_core::Identity;
+use peerage_engine::Engine;
+use peerage_messenger::loopback::LoopbackNet;
+use peerage_messenger::{Config, Messenger};
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -20,7 +20,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-gaterooms-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-gaterooms-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -90,7 +90,7 @@ fn forged_presence_in_dm_room_is_dropped() {
     b.add_contact(&a_key, "A");
 
     let room = a.room_join_dm(b_key, true, false);
-    assert_eq!(room, p2p_core::dm_room_id(&a_key, &b_key).to_vec());
+    assert_eq!(room, peerage_core::dm_room_id(&a_key, &b_key).to_vec());
     for _ in 0..3 {
         m.send_room_presence(&a_key, &room, 0).unwrap();
     }
@@ -114,7 +114,7 @@ fn stranger_cannot_ring_or_invite_to_group() {
     let a = start(&net, a_id, tmpdir("a2"));
     let m = attacker(&net, m_id);
 
-    let room = p2p_core::dm_room_id(&a_key, &m_key);
+    let room = peerage_core::dm_room_id(&a_key, &m_key);
     m.send_room_invite(&a_key, &room, true, false).unwrap();
     m.send_group_invite(&a_key, &[7u8; 32], "Бесплатные призы").unwrap();
     m.send_text(&a_key, "привет").unwrap();
@@ -175,7 +175,7 @@ fn hangup_stops_our_audio_at_once_under_peer_flood() {
             let junk = vec![0u8; 1000];
             let mut seq = 0u16;
             while !stop.load(Ordering::Relaxed) {
-                let _ = m.send_media(&a_key, p2p_core::media::TRACK_VIDEO, seq, 0, &junk);
+                let _ = m.send_media(&a_key, peerage_core::media::TRACK_VIDEO, seq, 0, &junk);
                 if seq % 64 == 0 {
                     let _ = m.send_room_presence(&a_key, &room, 0b01);
                 }
@@ -195,7 +195,7 @@ fn hangup_stops_our_audio_at_once_under_peer_flood() {
             }
         })
     };
-    let is_audio = |p: &p2p_messenger::MediaPacket| p.src == a_key && p.track == p2p_core::media::TRACK_AUDIO;
+    let is_audio = |p: &peerage_messenger::MediaPacket| p.src == a_key && p.track == peerage_core::media::TRACK_AUDIO;
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut got = false;
     while !got && Instant::now() < deadline {

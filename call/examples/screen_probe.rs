@@ -1,8 +1,8 @@
 //! Проба захвата экрана: берёт один кадр и печатает размер.
-//! Запуск (WSL): cargo run -p p2p-call --example screen_probe
+//! Запуск (WSL): cargo run -p peerage-call --example screen_probe
 
-use p2p_call::capture::ScreenSource;
-use p2p_media::VideoSource;
+use peerage_call::capture::ScreenSource;
+use peerage_media::VideoSource;
 
 fn main() {
     let mut src = match ScreenSource::primary(640, 360) {

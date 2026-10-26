@@ -1,4 +1,4 @@
-# interlace — documentation
+# Peerage — documentation
 
 A serverless end-to-end encrypted messenger over the **Yggdrasil** mesh. One Rust core; the
 Android client is a thin layer on top. GPL-3.0-only.
@@ -30,7 +30,7 @@ scripts/test-all.sh                           # the whole suite
 bash scripts/live-two-node.sh                 # two headless nodes on the public mesh
 
 # Android:
-bash scripts/rebuild-p2p-android.sh x86_64    # Rust-only rebuild of the .so (emulator)
+bash scripts/rebuild-peerage-android.sh x86_64    # Rust-only rebuild of the .so (emulator)
 bash scripts/build-android-libs.sh x86_64     # full: libygg + Rust (when the ygg.go FFI changed)
 ./gradlew :app:assembleDebug                  # APK (from android/)
 ./gradlew ktlintFormat                        # before committing Kotlin

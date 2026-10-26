@@ -738,7 +738,7 @@ impl GateStore {
     }
 
     /// Все заблокированные ключи (hex) — для единого бюджета: заблокированный
-    /// режется на ingress ещё до расшифровки (см. `p2p_core::budget::Tier`).
+    /// режется на ingress ещё до расшифровки (см. `peerage_core::budget::Tier`).
     pub fn list_blocked(&self) -> Vec<String> {
         self.blocked.iter().map(hex::encode).collect()
     }
@@ -1651,7 +1651,7 @@ mod tests {
 
     #[test]
     fn profile_load_or_create_then_reload_is_stable() {
-        let dir = std::env::temp_dir().join(format!("p2p-prof-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("test-prof-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("profile.json");
         let p1 = Profile::load_or_create(&path).unwrap();

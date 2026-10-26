@@ -22,7 +22,7 @@ use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use rand_core::{OsRng, RngCore};
 
 const NONCE_LEN: usize = 24;
-const SERVICE: &str = "dev.p2p.messenger";
+const SERVICE: &str = "chat.peerage";
 const ENTRY: &str = "vault-key";
 
 static KEY: OnceLock<[u8; 32]> = OnceLock::new();

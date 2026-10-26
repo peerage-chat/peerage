@@ -31,7 +31,7 @@
 //! который не доставляется и безо всякой ротации.
 //!
 //! Запуск (WSL, нужна libygg):
-//!   LD_LIBRARY_PATH=ygg/libygg cargo run -p p2p-ygg --example flood_rotation
+//!   LD_LIBRARY_PATH=ygg/libygg cargo run -p peerage-ygg --example flood_rotation
 //!   [--secs N] [--pps N] [--size N] [--direct]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -39,7 +39,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_ygg::Node;
+use peerage_ygg::Node;
 
 /// Байты по каждому линку узла: (ключ пира, принято, отправлено).
 fn links(n: &Node) -> Vec<(String, u64, u64)> {

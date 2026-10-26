@@ -5,7 +5,7 @@
 //! профиль второй стороны). Управление — одноразовыми аргументами.
 //!
 //! Запуск из WSL:
-//!   LD_LIBRARY_PATH=ygg/libygg cargo run -p p2p-engine --example mesh_node -- \
+//!   LD_LIBRARY_PATH=ygg/libygg cargo run -p peerage-engine --example mesh_node -- \
 //!       /tmp/nodeb --name Bob --avatar --add <PEER_HEX>
 //!
 //! Выводит строки с префиксами: `PUB <hex>`, `ADDR <addr>`, `AVATAR <id>`,
@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use p2p_engine::Engine;
+use peerage_engine::Engine;
 
 /// Мини-JPEG с EXIF и заданными байтами энтропии — проходит scrub, даёт стабильный
 /// контент-адрес. Разные байты → разный аватар.

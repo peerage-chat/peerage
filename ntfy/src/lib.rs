@@ -1,4 +1,4 @@
-//! p2p-ntfy — минимальный клиент [ntfy](https://ntfy.sh): публикация и подписка.
+//! peerage-ntfy — минимальный клиент [ntfy](https://ntfy.sh): публикация и подписка.
 //!
 //! Зачем: (1) push-пробуждение приложения в фоне; (2) delivery service для групп
 //! (топик = группа, ntfy даёт FIFO-порядок и хранение для офлайн-участников).
@@ -85,7 +85,7 @@ mod tests {
     #[ignore = "сетевой тест: требует доступ к ntfy.sh"]
     fn publish_subscribe_roundtrip() {
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let topic = format!("p2p-selftest-{nanos}");
+        let topic = format!("test-selftest-{nanos}");
         let server = "https://ntfy.sh";
         let payload = b"\x00\x01\x02 binary group bytes \xfe\xff".to_vec();
 

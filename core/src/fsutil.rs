@@ -99,7 +99,7 @@ mod tests {
     use super::*;
 
     fn dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("p2p-fsutil-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("test-fsutil-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d

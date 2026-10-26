@@ -19,14 +19,14 @@
 //! Стенд меряет время до первого доставленного пакета при полностью молчащем
 //! приложении получателя. Если версия верна — доставка начнётся через ~минуту.
 //!
-//! Запуск (WSL): LD_LIBRARY_PATH=ygg/libygg cargo run -p p2p-ygg --example silent_victim
+//! Запуск (WSL): LD_LIBRARY_PATH=ygg/libygg cargo run -p peerage-ygg --example silent_victim
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_ygg::Node;
+use peerage_ygg::Node;
 
 fn main() {
     let limit = std::env::args()

@@ -3,7 +3,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use p2p_core::media::{parse_media, parse_video_frag, VideoReassembler};
+use peerage_core::media::{parse_media, parse_video_frag, VideoReassembler};
 
 fuzz_target!(|data: &[u8]| {
     let _ = parse_media(data);

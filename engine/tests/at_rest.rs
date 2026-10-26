@@ -8,12 +8,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use p2p_core::store::{GroupStore, MessageStore};
-use p2p_core::Identity;
-use p2p_engine::groups::GroupManager;
-use p2p_engine::Engine;
-use p2p_messenger::loopback::LoopbackNet;
-use p2p_messenger::{Config, Messenger};
+use peerage_core::store::{GroupStore, MessageStore};
+use peerage_core::Identity;
+use peerage_engine::groups::GroupManager;
+use peerage_engine::Engine;
+use peerage_messenger::loopback::LoopbackNet;
+use peerage_messenger::{Config, Messenger};
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -21,13 +21,13 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-atrest-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-atrest-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
 
 fn with_key() {
-    p2p_core::vault::init_with_key([42u8; 32]);
+    peerage_core::vault::init_with_key([42u8; 32]);
 }
 
 /// Файл блоба, переложенный в хранилище под чужим контент-адресом, не читается —
@@ -45,16 +45,16 @@ fn blob_file_under_another_address_is_not_readable() {
     a.add_contact(&b_key, "B");
     let content = b"%PDF pretend document".to_vec();
     a.send_media(&b_key, content.clone(), "application/pdf", "doc.pdf").unwrap();
-    let real = hex::encode(p2p_blob::blob_id(&content));
+    let real = hex::encode(peerage_blob::blob_id(&content));
     assert_eq!(a.blob_read(&real).as_deref(), Some(&content[..]), "свой блоб читается");
 
-    let other = hex::encode(p2p_blob::blob_id(b"something else"));
+    let other = hex::encode(peerage_blob::blob_id(b"something else"));
     std::fs::copy(dir.join("blobs").join(&real), dir.join("blobs").join(&other)).unwrap();
     assert!(a.blob_read(&other).is_none(), "под чужим адресом — не читается");
 }
 
 fn manager(ident: Identity, msgr: Arc<Messenger>, dir: PathBuf) -> GroupManager {
-    let db = p2p_core::db::open(&dir).expect("база");
+    let db = peerage_core::db::open(&dir).expect("база");
     let store = Arc::new(Mutex::new(MessageStore::open(db.clone())));
     GroupManager::new(ident, msgr, dir, store, GroupStore::new(db))
 }

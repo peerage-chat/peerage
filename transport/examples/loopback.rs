@@ -2,7 +2,7 @@
 //! пирятся по localhost, узел A шлёт сообщение узлу B по его публичному ключу.
 //!
 //! Запуск (в WSL/Linux, после scripts/build-ygg.sh):
-//!   cargo run -p p2p-ygg --example loopback
+//!   cargo run -p peerage-ygg --example loopback
 //!
 //! Завершается с кодом 0 при успешной доставке, 1 — при таймауте.
 
@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_ygg::Node;
+use peerage_ygg::Node;
 
 fn hexs(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()

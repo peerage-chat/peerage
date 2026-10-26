@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::{Engine, MediaInfo};
-use p2p_messenger::loopback::LoopbackNet;
+use peerage_core::Identity;
+use peerage_engine::{Engine, MediaInfo};
+use peerage_messenger::loopback::LoopbackNet;
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -19,7 +19,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-gmedia-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-gmedia-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }

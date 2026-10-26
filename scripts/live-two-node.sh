@@ -22,7 +22,7 @@ NODE="$T/debug/examples/mesh_node"
 
 if [ ! -x "$NODE" ]; then
     echo "Собираю mesh_node…"
-    cargo build -p p2p-engine --example mesh_node || exit 1
+    cargo build -p peerage-engine --example mesh_node || exit 1
 fi
 
 rm -rf "$WORK"

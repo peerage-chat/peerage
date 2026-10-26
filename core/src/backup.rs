@@ -14,7 +14,7 @@
 //! **Формат** (потоковый, кадрами — чтобы не держать гигабайты вложений в памяти):
 //!
 //! ```text
-//! "P2PBAK" | version u8 | kdf_profile u8 | salt[16]
+//! "PEERBK" | version u8 | kdf_profile u8 | salt[16]
 //! кадр*:   len u32 LE | nonce[24] | ciphertext(XChaCha20-Poly1305)
 //! ```
 //!
@@ -38,7 +38,7 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use rand_core::{OsRng, RngCore};
 
-const MAGIC: &[u8; 6] = b"P2PBAK";
+const MAGIC: &[u8; 6] = b"PEERBK";
 /// Версия формата. Растёт при несовместимых изменениях; читатель отказывается от
 /// незнакомых версий, а не «пытается разобрать» — молча испорченная копия хуже
 /// честного отказа.

@@ -35,16 +35,16 @@
 
     <application
         android:allowBackup="false"
-        android:label="p2p messenger"
+        android:label="Peerage"
         android:supportsRtl="true"
-        android:theme="@style/Theme.P2P">
+        android:theme="@style/Theme.App">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.P2P">
+            android:theme="@style/Theme.App">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -83,9 +83,9 @@
             android:name=".FloodNotifier"
             android:exported="false">
             <intent-filter>
-                <action android:name="dev.p2p.messenger.GO_OFFLINE" />
-                <action android:name="dev.p2p.messenger.GO_ONLINE" />
-                <action android:name="dev.p2p.messenger.ROTATE_ADDRESS" />
+                <action android:name="chat.peerage.GO_OFFLINE" />
+                <action android:name="chat.peerage.GO_ONLINE" />
+                <action android:name="chat.peerage.ROTATE_ADDRESS" />
             </intent-filter>
         </receiver>
 
@@ -94,8 +94,8 @@
             android:name=".IncomingCallReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="dev.p2p.messenger.ACCEPT_CALL" />
-                <action android:name="dev.p2p.messenger.DECLINE_CALL" />
+                <action android:name="chat.peerage.ACCEPT_CALL" />
+                <action android:name="chat.peerage.DECLINE_CALL" />
             </intent-filter>
         </receiver>
     </application>

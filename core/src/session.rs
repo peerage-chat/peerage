@@ -65,7 +65,7 @@ const MAX_LIVE_PER_PEER: usize = 4;
 /// Потолок счётчика сообщений сессии (как в WireGuard): дальше — только новая.
 const REJECT_AFTER_MESSAGES: u64 = u64::MAX - (1 << 13);
 
-const PROLOGUE: &[u8] = b"dev.p2p.dm-session.v2";
+const PROLOGUE: &[u8] = b"peerage:dm-session:v2";
 const TAG: usize = 16;
 const AUTH_LEN: usize = 32 + 64;
 const MAC_LEN: usize = 16;
@@ -84,7 +84,7 @@ const _: () = assert!(MSG1_LEN <= APP_PACKET && MSG2_LEN <= APP_PACKET && MSG3_L
 /// только тот, кто эту личность уже знает. Без верного `mac1` мы молчим, и новый
 /// адрес нельзя «спросить, чей он» (иначе смена адреса из ADR-007 обесценилась бы).
 fn mac1_key(identity: &PeerKey) -> [u8; 32] {
-    blake3::derive_key("dev.p2p.session-mac1.v1", identity)
+    blake3::derive_key("peerage:session-mac1:v1", identity)
 }
 
 fn mac1(key: &[u8; 32], msg: &[u8]) -> [u8; MAC_LEN] {

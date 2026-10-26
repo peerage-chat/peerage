@@ -1,11 +1,11 @@
 //! JNI-кодек звонков/комнат (Discord-style присутствие + DM-звонки).
-//! Тонкий слой: декодирует аргументы и зовёт методы [`p2p_engine::Engine`].
+//! Тонкий слой: декодирует аргументы и зовёт методы [`peerage_engine::Engine`].
 
 use jni::objects::{JByteArray, JClass, JShortArray, JString};
 use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE};
 use jni::JNIEnv;
 
-use p2p_engine::parse_key;
+use peerage_engine::parse_key;
 
 use crate::{empty_bytes, engine, jni_safe, jstr, ret};
 
@@ -19,7 +19,7 @@ macro_rules! gid_or {
 /// Позвонить пиру: создать DM-комнату, отправить RoomInvite, слать маячок.
 /// Возвращает room_id hex.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomInviteDm<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomInviteDm<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -37,7 +37,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomInviteDm<'local>(
 
 /// Отклонить входящий DM-звонок.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomDeclineDm<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomDeclineDm<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -51,7 +51,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomDeclineDm<'local>(
 
 /// Принять DM-звонок: войти в комнату, зарегистрировать dm_peer. Возвращает room_id hex.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoinDm<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomJoinDm<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -69,7 +69,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoinDm<'local>(
 
 /// Живые участники комнаты по маячкам: JSON [{peer,audio,video}].
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomPresencePeers<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomPresencePeers<'local>(
     mut env: JNIEnv<'local>, _class: JClass<'local>,
     session_ptr: jlong, gid_hex: JString<'local>,
 ) -> jstring {
@@ -82,7 +82,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPresencePeers<'local>(
 
 /// Войти в комнату `gid` (начать слать маячок присутствия).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoin<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomJoin<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -99,7 +99,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomJoin<'local>(
 
 /// Выйти из комнаты `gid`.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomLeave<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomLeave<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -115,7 +115,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomLeave<'local>(
 /// Позвать участников группы в её комнату. `peers_csv` — hex-ключи через запятую.
 /// Возвращает, скольким ушло приглашение (ключи вне ростера не считаются).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomRing<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomRing<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -136,7 +136,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomRing<'local>(
 
 /// Отклонить приглашение в комнату группы (только журнал, звонящему ничего).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomDeclineGroup<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomDeclineGroup<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -149,7 +149,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomDeclineGroup<'local>(
 
 /// Текущие участники комнаты `gid`: JSON [{peer,audio,video}].
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomParticipants<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -164,7 +164,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomParticipants<'local>(
 
 /// Запустить мультипати аудио комнаты `gid`. JSON {sample_rate,channels,frame_len}.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStart<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomAudioStart<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -181,7 +181,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStart<'local>(
 
 /// Hex-ключи говорящих сейчас участников (active-speaker). JSON-массив.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomSpeakingPeers<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomSpeakingPeers<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -194,7 +194,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSpeakingPeers<'local>(
 
 /// Накопленные байты трафика по участникам (JSON {hex: rx, "self": tx}).
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomTrafficJson<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomTrafficJson<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -207,7 +207,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomTrafficJson<'local>(
 
 /// Сменить Opus-битрейт текущей аудио-сессии на лету.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetAudioBitrate<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomSetAudioBitrate<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -222,7 +222,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetAudioBitrate<'local>
 
 /// Остановить мультипати аудио комнаты.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStop<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomAudioStop<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -234,7 +234,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomAudioStop<'local>(
 
 /// Захваченный PCM с микрофона → мультикаст-движку комнаты.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushAudio<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomPushAudio<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -256,7 +256,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushAudio<'local>(
 
 /// Заполнить массив смешанным PCM комнаты. Возвращает число реальных сэмплов.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullAudio<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomPullAudio<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -274,7 +274,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullAudio<'local>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetMuted<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomSetMuted<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -287,7 +287,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetMuted<'local>(
 
 /// Закодированный H264 access-unit → фрагментация + мультикаст всем участникам.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushVideo<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomPushVideo<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -304,7 +304,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomPushVideo<'local>(
 
 /// Задать кап входящей видео-очереди (кадров) — политику бюджета считает Kotlin.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetVideoCap<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomSetVideoCap<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -317,7 +317,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_roomSetVideoCap<'local>(
 
 /// Следующий входящий H264-пакет от peer. Пустой массив если очередь пуста.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_roomPullVideoPacket<'local>(
+pub extern "system" fn Java_chat_peerage_Native_roomPullVideoPacket<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,

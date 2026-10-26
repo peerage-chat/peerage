@@ -4,11 +4,11 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use p2p_engine::{load_identity, quarantine_user_data, QUARANTINE_DIR, START_VAULT_MISMATCH};
+use peerage_engine::{load_identity, quarantine_user_data, QUARANTINE_DIR, START_VAULT_MISMATCH};
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-recovery-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-recovery-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }

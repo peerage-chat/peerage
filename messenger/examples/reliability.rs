@@ -5,18 +5,18 @@
 //!   4. обнаружение офлайна при остановке узла;
 //!   5. сдача недоставленного сообщения по TTL (Undelivered).
 //!
-//! Запуск (WSL): cargo run -p p2p-messenger --example reliability
+//! Запуск (WSL): cargo run -p peerage-messenger --example reliability
 
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::store::{ContactStore, Profile};
-use p2p_messenger::{Config, Event, Messenger};
-use p2p_ygg::Node;
+use peerage_core::store::{ContactStore, Profile};
+use peerage_messenger::{Config, Event, Messenger};
+use peerage_ygg::Node;
 
 fn tmp_dir() -> std::path::PathBuf {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-reliability-{nanos}"));
+    let d = std::env::temp_dir().join(format!("test-reliability-{nanos}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }

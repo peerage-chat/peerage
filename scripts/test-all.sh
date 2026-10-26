@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Полный прогон Rust-набора. Запускать из WSL:
 #   scripts/test-all.sh            — весь набор
-#   scripts/test-all.sh -p p2p-core --lib   — часть (аргументы уходят в cargo test)
+#   scripts/test-all.sh -p peerage-core --lib   — часть (аргументы уходят в cargo test)
 #
 # Три вещи, которые каждый раз приходится вспоминать заново, — поэтому они здесь:
 #
@@ -10,7 +10,7 @@
 #     срабатывать раньше, чем приходит ожидаемое, и падения выглядят как «плавающие».
 #  2. LD_LIBRARY_PATH до ygg/libygg. Транспорт линкуется с libygg.so; без пути
 #     тесты не стартуют вовсе, с сообщением про отсутствующую библиотеку.
-#  3. --exclude p2p-desktop и --lib --tests. Desktop-крейт и examples/call_signaling
+#  3. --exclude peerage-desktop и --lib --tests. Desktop-крейт и examples/call_signaling
 #     не компилируются (унаследованное старое API звонков); без исключения упрёшься в
 #     чужую ошибку компиляции, так и не запустив ни одного теста.
 set -euo pipefail
@@ -29,4 +29,6 @@ if [ $# -gt 0 ]; then
     exec cargo test "$@" -- --test-threads=1
 fi
 
-exec cargo test --workspace --exclude p2p-desktop --lib --tests -- --test-threads=1
+# --no-fail-fast: одно плавающее падение не должно обрывать весь набор — без него
+# cargo останавливался на первом упавшем бинаре, и остальные тесты молча не шли.
+exec cargo test --workspace --exclude peerage-desktop --lib --tests --no-fail-fast -- --test-threads=1

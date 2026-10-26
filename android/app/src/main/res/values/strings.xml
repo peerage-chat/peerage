@@ -10,7 +10,7 @@
   Placeholders: %1$s text, %1$d number. Do not concatenate strings in code.
 -->
 <resources>
-    <string name="app_name">p2p messenger</string>
+    <string name="app_name">Peerage</string>
 
     <!-- ── Call: in-room grid ──────────────────────────────────────────── -->
     <string name="call_you">You</string>
@@ -315,7 +315,7 @@
     <string name="notif_incoming_channel">Incoming calls</string>
     <string name="notif_incoming_channel_desc">Incoming call notification</string>
     <string name="notif_conn_channel">Connection</string>
-    <string name="notif_conn_channel_desc">p2p online — mesh node active</string>
+    <string name="notif_conn_channel_desc">Online — mesh node active</string>
     <string name="notif_conn_text">Online — keeping mesh connection</string>
     <string name="notif_disconnect">Disconnect</string>
     <string name="notif_call_channel">Calls</string>
@@ -648,7 +648,7 @@
     <string name="backup_working_restore">Restoring</string>
     <string name="backup_working_hint">Keep this screen open. Checking the password takes about a second — deliberately: it costs the same to anyone trying to guess it.</string>
     <string name="backup_pick_file">Choose a backup file</string>
-    <string name="backup_pick_hint">Tap to find a .p2pbak file</string>
+    <string name="backup_pick_hint">Tap to find a .peerage file</string>
     <string name="backup_merge_title">Data will be merged</string>
     <string name="backup_merge_text">Nothing is deleted: whatever arrived after the backup stays. Restoring the same file twice adds nothing.</string>
     <string name="backup_restore_go">Restore</string>

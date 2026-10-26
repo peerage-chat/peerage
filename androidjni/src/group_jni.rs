@@ -5,13 +5,13 @@ use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
-use p2p_engine::parse_key;
+use peerage_engine::parse_key;
 
 use crate::{engine, jni_safe, jstr, ret};
 
 /// Создать группу. Fire-and-forget: результат — через событие `groups_changed`.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupCreate<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupCreate<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -25,7 +25,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupCreate<'local>(
 
 /// Пригласить контакт в группу. Fire-and-forget.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupInvite<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -44,7 +44,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvite<'local>(
 
 /// Входящие приглашения в группы: JSON [{gid, name, inviter}]. Снапшот движка.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvites<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupInvites<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -57,7 +57,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupInvites<'local>(
 
 /// Принять приглашение в группу (карточка). Fire-and-forget.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_acceptGroupInvite<'local>(
+pub extern "system" fn Java_chat_peerage_Native_acceptGroupInvite<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -72,7 +72,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_acceptGroupInvite<'local>(
 
 /// Отклонить приглашение в группу. Fire-and-forget.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_declineGroupInvite<'local>(
+pub extern "system" fn Java_chat_peerage_Native_declineGroupInvite<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -87,7 +87,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_declineGroupInvite<'local>(
 
 /// Отправить текст в группу. Fire-and-forget.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupSendText<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -104,7 +104,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendText<'local>(
 /// Текст в группу ОТВЕТОМ на сообщение `replyTo` автора `replySender` (hex;
 /// `replyTo = 0` — не ответ). `mentionsJson` — `[{"at","len","key"}]`, байты UTF-8.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendTextReply<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupSendTextReply<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -126,7 +126,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendTextReply<'local>(
 
 /// Удалить групповые сообщения У СЕБЯ. `refsJson` — `[{"id":…,"sender":"hex"}, …]`.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupDeleteMessages<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupDeleteMessages<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -154,7 +154,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupDeleteMessages<'local>
 
 /// Отозвать СВОИ групповые сообщения у участников. `idsJson` — `[123, …]`.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupRetractMessages<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupRetractMessages<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -169,7 +169,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupRetractMessages<'local
     });
 }
 
-/// Собрать [`p2p_engine::MediaInfo`] из аргументов JNI (длительность/кадр/превью/
+/// Собрать [`peerage_engine::MediaInfo`] из аргументов JNI (длительность/кадр/превью/
 /// подпись). Метаданные извлекает клиент — движок медиа не декодирует.
 fn media_info<'local>(
     env: &mut JNIEnv<'local>,
@@ -180,9 +180,9 @@ fn media_info<'local>(
     caption: &JString<'local>,
     reply_to: jlong,
     reply_sender: &JString<'local>,
-) -> p2p_engine::MediaInfo {
+) -> peerage_engine::MediaInfo {
     let thumb_bytes = env.convert_byte_array(thumb).unwrap_or_default();
-    p2p_engine::MediaInfo {
+    peerage_engine::MediaInfo {
         fwd_from: String::new(),
         fwd_anon: false,
         duration_ms: duration_ms.max(0) as u32,
@@ -199,7 +199,7 @@ fn media_info<'local>(
 /// пушит участникам сразу, крупное они запрашивают сами. Fire-and-forget.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMedia<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupSendMedia<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -230,7 +230,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMedia<'local>(
 /// Отправить в группу вложение ФАЙЛОМ (потоково). Fire-and-forget.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMediaFile<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupSendMediaFile<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -259,7 +259,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupSendMediaFile<'local>(
 
 /// Отозвать участника группы (ADR-004, только админ). Fire-and-forget.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupRemoveMember<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupRemoveMember<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -278,7 +278,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupRemoveMember<'local>(
 
 /// Ротация ключа группы (PCS, ADR-004). Fire-and-forget.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupRekey<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupRekey<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -293,7 +293,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupRekey<'local>(
 
 /// Выйти из группы (ADR-004). Fire-and-forget.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupLeave<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupLeave<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -308,7 +308,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupLeave<'local>(
 
 /// Список групп: JSON [{gid, name, members}]. Снапшот движка.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupList<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -321,7 +321,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupList<'local>(
 
 /// История группы: JSON [{text, mine, time, sender, system}]. Снапшот движка.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistory<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupHistory<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -336,7 +336,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistory<'local>(
 
 /// Страница истории группы ВЫШЕ показанной; курсор — `time`/`row` верхнего сообщения.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistoryPage<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupHistoryPage<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -353,7 +353,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupHistoryPage<'local>(
 
 /// Ключи участников группы (hex): JSON-массив. Снапшот движка.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupMembers<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -368,7 +368,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_groupMembers<'local>(
 
 /// Снапшот присутствия группы: JSON {total, online}. Агрегат считает движок.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_groupPresence<'local>(
+pub extern "system" fn Java_chat_peerage_Native_groupPresence<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,

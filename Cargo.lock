@@ -5079,180 +5079,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "p2p-android"
-version = "0.1.0"
-dependencies = [
- "android_logger",
- "hex",
- "jni 0.21.1",
- "log",
- "p2p-core",
- "p2p-engine",
- "serde_json",
-]
-
-[[package]]
-name = "p2p-blob"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "hex",
- "proptest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "p2p-call"
-version = "0.1.0"
-dependencies = [
- "cpal",
- "image",
- "nokhwa",
- "p2p-core",
- "p2p-media",
- "p2p-messenger",
- "p2p-ygg",
- "thiserror 2.0.18",
- "xcap",
-]
-
-[[package]]
-name = "p2p-core"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "bip39",
- "blake2",
- "blake3",
- "chacha20poly1305",
- "ed25519-dalek",
- "hex",
- "hmac",
- "keyring",
- "libcrux-ml-kem",
- "proptest",
- "rand_core 0.6.4",
- "rmp-serde",
- "rusqlite",
- "serde",
- "serde_bytes",
- "serde_json",
- "sha2",
- "snow",
- "thiserror 2.0.18",
- "x25519-dalek",
- "zeroize",
-]
-
-[[package]]
-name = "p2p-desktop"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "hex",
- "p2p-call",
- "p2p-core",
- "p2p-group",
- "p2p-groupchat",
- "p2p-media",
- "p2p-messenger",
- "p2p-ygg",
- "serde_json",
- "slint",
- "slint-build",
-]
-
-[[package]]
-name = "p2p-engine"
-version = "0.1.0"
-dependencies = [
- "hex",
- "libc",
- "log",
- "p2p-blob",
- "p2p-core",
- "p2p-group",
- "p2p-groupchat",
- "p2p-media",
- "p2p-messenger",
- "p2p-ygg",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "p2p-group"
-version = "0.1.0"
-dependencies = [
- "openmls",
- "openmls_basic_credential",
- "openmls_memory_storage",
- "openmls_rust_crypto",
- "openmls_traits",
- "p2p-core",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "p2p-groupchat"
-version = "0.1.0"
-dependencies = [
- "p2p-core",
- "p2p-group",
- "p2p-messenger",
- "p2p-ygg",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "p2p-media"
-version = "0.1.0"
-dependencies = [
- "openh264",
- "opus",
- "p2p-core",
- "p2p-messenger",
- "p2p-ygg",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "p2p-messenger"
-version = "0.1.0"
-dependencies = [
- "hex",
- "log",
- "p2p-core",
- "p2p-ygg",
- "rand_core 0.6.4",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "p2p-ntfy"
-version = "0.1.0"
-dependencies = [
- "base64",
- "serde_json",
- "thiserror 2.0.18",
- "ureq",
-]
-
-[[package]]
-name = "p2p-ygg"
-version = "0.1.0"
-dependencies = [
- "hex",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "p384"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5358,6 +5184,180 @@ name = "peeking_take_while"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
+
+[[package]]
+name = "peerage-android"
+version = "0.1.0"
+dependencies = [
+ "android_logger",
+ "hex",
+ "jni 0.21.1",
+ "log",
+ "peerage-core",
+ "peerage-engine",
+ "serde_json",
+]
+
+[[package]]
+name = "peerage-blob"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "hex",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "peerage-call"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "image",
+ "nokhwa",
+ "peerage-core",
+ "peerage-media",
+ "peerage-messenger",
+ "peerage-ygg",
+ "thiserror 2.0.18",
+ "xcap",
+]
+
+[[package]]
+name = "peerage-core"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "bip39",
+ "blake2",
+ "blake3",
+ "chacha20poly1305",
+ "ed25519-dalek",
+ "hex",
+ "hmac",
+ "keyring",
+ "libcrux-ml-kem",
+ "proptest",
+ "rand_core 0.6.4",
+ "rmp-serde",
+ "rusqlite",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+ "snow",
+ "thiserror 2.0.18",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
+name = "peerage-desktop"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "hex",
+ "peerage-call",
+ "peerage-core",
+ "peerage-group",
+ "peerage-groupchat",
+ "peerage-media",
+ "peerage-messenger",
+ "peerage-ygg",
+ "serde_json",
+ "slint",
+ "slint-build",
+]
+
+[[package]]
+name = "peerage-engine"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "libc",
+ "log",
+ "peerage-blob",
+ "peerage-core",
+ "peerage-group",
+ "peerage-groupchat",
+ "peerage-media",
+ "peerage-messenger",
+ "peerage-ygg",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "peerage-group"
+version = "0.1.0"
+dependencies = [
+ "openmls",
+ "openmls_basic_credential",
+ "openmls_memory_storage",
+ "openmls_rust_crypto",
+ "openmls_traits",
+ "peerage-core",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "peerage-groupchat"
+version = "0.1.0"
+dependencies = [
+ "peerage-core",
+ "peerage-group",
+ "peerage-messenger",
+ "peerage-ygg",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "peerage-media"
+version = "0.1.0"
+dependencies = [
+ "openh264",
+ "opus",
+ "peerage-core",
+ "peerage-messenger",
+ "peerage-ygg",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "peerage-messenger"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "log",
+ "peerage-core",
+ "peerage-ygg",
+ "rand_core 0.6.4",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "peerage-ntfy"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "serde_json",
+ "thiserror 2.0.18",
+ "ureq",
+]
+
+[[package]]
+name = "peerage-ygg"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "pem-rfc7468"

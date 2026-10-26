@@ -2,18 +2,18 @@
 //! синусоида → Opus энкод → лёгкий медиа-путь Yggdrasil → джиттер-буфер →
 //! Opus декод → сверка длины и энергии (RMS). Полное качество (128 кбит/с).
 //!
-//! Запуск (WSL): cargo run -p p2p-media --example audio_loopback
+//! Запуск (WSL): cargo run -p peerage-media --example audio_loopback
 
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_core::media::TRACK_AUDIO;
-use p2p_core::Identity;
-use p2p_media::{AudioDecoder, AudioEncoder, AudioSettings, JitterBuffer, JitterOut};
-use p2p_messenger::{MediaPacket, Messenger};
-use p2p_ygg::Node;
+use peerage_core::media::TRACK_AUDIO;
+use peerage_core::Identity;
+use peerage_media::{AudioDecoder, AudioEncoder, AudioSettings, JitterBuffer, JitterOut};
+use peerage_messenger::{MediaPacket, Messenger};
+use peerage_ygg::Node;
 
 const FRAMES: u16 = 150; // 150 × 20мс = 3с
 

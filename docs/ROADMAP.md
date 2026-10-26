@@ -1,7 +1,7 @@
 # Дорожная карта
 
 Что строим и скоуп — [v1.0-scope.md](v1.0-scope.md) (исходное ТЗ —
-[archive/p2p-messenger-spec.md](archive/p2p-messenger-spec.md)). Этот файл — **порядок
+[archive/peerage-messenger-spec.md](archive/peerage-messenger-spec.md)). Этот файл — **порядок
 и зависимости** работ. Сквозная картина системы — в [ARCHITECTURE.md](ARCHITECTURE.md).
 Концептуальный индекс (подсистемы → фичи, хребет для кода/плана/UI) —
 в [SUBSYSTEMS.md](SUBSYSTEMS.md).
@@ -36,7 +36,7 @@
 
 ### Фаза A — 1:1 аудио-звонок  ✓ ГОТОВО
 - [x] Сигнализация `CallInvite/CallAccept/CallEnd`.
-- [x] Движок `p2p-call` (cpal: мик→Opus→сеть; приём→джиттер→Opus→динамики; mute).
+- [x] Движок `peerage-call` (cpal: мик→Opus→сеть; приём→джиттер→Opus→динамики; mute).
 - [x] UI: 📞 в чате, экран звонка (таймер/mute/завершить), входящие accept/decline.
 
 ### Фаза B — 1:1 видео  ✓ ГОТОВО
@@ -55,11 +55,11 @@
   PARTIAL_WAKE_LOCK + WifiLock(FULL_HIGH_PERF). Проверено на железе: сервис
   foreground, оба лока удерживаются.
 - [ ] **Mode B (self-hosted push):** лёгкий коннект к своему ntfy (опционально).
-  Клиент `p2p-ntfy` уже написан. Реализуется при необходимости.
+  Клиент `peerage-ntfy` уже написан. Реализуется при необходимости.
 
 ### Фаза E — Группы (MLS)  ✓ ГОТОВО
-- [x] **E1 — крипто-слой** `p2p-group` (openmls): create/add/join/encrypt/process.
-- [x] **E2 — распространение + упорядочивание (SERVERLESS).** `p2p-groupchat`,
+- [x] **E1 — крипто-слой** `peerage-group` (openmls): create/add/join/encrypt/process.
+- [x] **E2 — распространение + упорядочивание (SERVERLESS).** `peerage-groupchat`,
   admin-sequencer.
 - [x] Персистентность состояния группы (save/load).
 - [x] Сетевой онбординг: обмен KeyPackage по сети.

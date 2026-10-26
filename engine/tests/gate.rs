@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::Engine;
-use p2p_messenger::loopback::LoopbackNet;
+use peerage_core::Identity;
+use peerage_engine::Engine;
+use peerage_messenger::loopback::LoopbackNet;
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -17,7 +17,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-gate-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-gate-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -173,7 +173,7 @@ fn block_silences_then_unblock_restores() {
 /// расшифровки, так что содержимое неважно, а темп не зависит от подтверждений.
 #[test]
 fn verifying_a_contact_raises_its_budget_at_once() {
-    use p2p_messenger::Transport;
+    use peerage_messenger::Transport;
     let net = LoopbackNet::new();
     let (a_key, b_id) = (id(91).public_key_bytes(), id(92));
     let b_key = b_id.public_key_bytes();

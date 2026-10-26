@@ -1,4 +1,4 @@
-# interlace — project state
+# Peerage — project state
 
 **As of:** 2026-09-25 · **Purpose:** an honest baseline for the NLnet (Restack) proposal —
 what exists, how each part was verified, and what is broken or missing. Written to be
@@ -6,7 +6,7 @@ read by a reviewer who will open the code afterwards.
 
 ---
 
-## 1. What interlace is
+## 1. What Peerage is
 
 A serverless end-to-end encrypted messenger. There is no server of ours anywhere in the
 data path: peers talk directly over the [Yggdrasil](https://yggdrasil-network.github.io/)

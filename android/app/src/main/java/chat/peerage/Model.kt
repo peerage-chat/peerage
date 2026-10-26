@@ -1,0 +1,2487 @@
+package chat.peerage
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.toMutableStateList
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.Executors
+
+/** Пресет качества видео-звонка. */
+/** Ошибка старта движка: данные зашифрованы другим ключом (`START_VAULT_MISMATCH`). */
+internal const val START_VAULT_MISMATCH = "vault_mismatch"
+
+/** Докачанный блоб крупнее этого в память не читается: из памяти рисуются фото,
+ *  голосовое и аватары, а видео и файлы открываются выгрузкой в файл. */
+internal const val INLINE_BLOB_MAX = 16L * 1024 * 1024
+
+/** Почему данные не открылись (R-029). */
+enum class Recovery {
+    /** Keystore потерял ключ — обёртку ключа хранилища развернуть нечем. */
+    KEY_LOST,
+
+    /** Ключ есть, но данные зашифрованы другим (файл ключа пропал, данные чужие). */
+    DATA_UNREADABLE,
+}
+
+enum class RecoverResult { OK, BAD_PHRASE, FAILED }
+
+class AppModel private constructor() {
+    companion object {
+        /**
+         * Пауза офлайн при смене адреса, секунды. Зашита, а не настраивается:
+         * величина не про вкус, а про то, за сколько старый ключ выпадает из дерева
+         * маршрутизации. Замерено — хватает ~30 с; 60 взято с запасом.
+         */
+        const val ROTATE_GAP_SECS = 60
+
+        /**
+         * С какого темпа считаем происходящее флудом, достойным уведомления.
+         * Ниже — это шум одиночных отказов (пир не в контактах, пара пакетов),
+         * дёргать им пользователя незачем.
+         */
+        const val FLOOD_NOTIFY_PPS = 20.0
+
+        /** Единственный экземпляр на процесс. Нативный узел/потоки тоже одни на
+         *  процесс, поэтому модель должна переживать пересоздание Activity (иначе
+         *  утекают второй узел и дублирующие poll/ticker-циклы → потеря событий). */
+        val instance: AppModel by lazy { AppModel() }
+
+        /** Докачка заказана, но чанки ещё не пошли (пир офлайн / идёт манифест). */
+        const val DOWNLOAD_INIT = -1f
+
+        /** Сколько недавних эмодзи помним (ряд на 8 + запас на вытеснение). */
+        const val RECENT_EMOJI_MAX = 24
+    }
+
+    var me by mutableStateOf<Me?>(null)
+    var error by mutableStateOf<String?>(null)
+    var sessionPtr: Long = 0L
+
+    /** Секретная сид-фраза (24 слова) — раскрывается по запросу (онбординг M4
+     *  «Показать фразу»), СЕКРЕТ. null = скрыта. Читается через [ops], не с UI-потока. */
+    var revealedPhrase by mutableStateOf<String?>(null)
+        private set
+
+    fun revealSeedPhrase() = ops.execute { revealedPhrase = Native.seedPhrase(sessionPtr) }
+
+    /** Записал ли пользователь резервную копию ключа (M4). Локальный факт, не
+     *  секрет: без него человек не узнает, что личность держится на одной фразе. */
+    var keyBackupDone by mutableStateOf(false)
+        private set
+
+    /** Отметить, что фраза записана (нажал «Записал»). */
+    fun markKeyBackupDone() {
+        keyBackupDone = true
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("key_backup_done", true)?.apply()
+    }
+
+    fun clearRevealedPhrase() {
+        revealedPhrase = null
+    }
+
+    /** Почему данные не открылись (R-029); null — открылись. */
+    var recovery by mutableStateOf<Recovery?>(null)
+        private set
+
+    /** Ключ хранилища, которым движок не смог прочитать данные. Он уже задан
+     *  процессу и годится для новых данных после карантина. Нет его — значит
+     *  Keystore ключ потерял, и заводится новый. */
+    private var recoveryKey: ByteArray? = null
+
+    /** «Начать заново» (R-029): отложить нечитаемое; вызывающий перезапускает процесс. */
+    fun recoverStartOver(dataDir: String, onDone: (Boolean) -> Unit) = ops.execute {
+        val ok = Native.quarantineData(dataDir)
+        if (ok) {
+            if (recoveryKey == null) VaultKeyManager.reset(File(dataDir))
+            // Новая личность — заново и онбординг с резервной копией фразы. commit():
+            // процесс сейчас перезапустится, и apply() не успел бы записать.
+            appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+                ?.edit()?.putBoolean("onboarded", false)?.putBoolean("key_backup_done", false)?.commit()
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).post { onDone(ok) }
+    }
+
+    /** «Восстановить по 24 словам» (R-029). Фраза проверяется ДО карантина: с
+     *  опечаткой данные остаются на месте. Успех — вызывающий перезапускает процесс. */
+    fun recoverFromPhrase(dataDir: String, phrase: String, onDone: (RecoverResult) -> Unit) = ops.execute {
+        val dir = File(dataDir)
+        val result = when {
+            !Native.seedPhraseValid(phrase) -> RecoverResult.BAD_PHRASE
+            !Native.quarantineData(dataDir) -> RecoverResult.FAILED
+            else -> {
+                val key = recoveryKey ?: run {
+                    VaultKeyManager.reset(dir)
+                    runCatching { VaultKeyManager.getOrCreate(dir) }.getOrNull()
+                }
+                if (key != null && Native.restoreSeedPhrase(dataDir, key, phrase)) {
+                    // Фраза у человека есть — он её только что ввёл.
+                    appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+                        ?.edit()?.putBoolean("onboarded", true)?.putBoolean("key_backup_done", true)?.commit()
+                    RecoverResult.OK
+                } else {
+                    RecoverResult.FAILED
+                }
+            }
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).post { onDone(result) }
+    }
+
+    /** Импорт личности из фразы (M4): валидирует+пишет profile.json на [ops], результат
+     *  на главном потоке. true → успех (вызывающий перезапускает процесс). */
+    fun importIdentity(dataDir: String, phrase: String, onResult: (Boolean) -> Unit) = ops.execute {
+        val ok = Native.importSeedPhrase(dataDir, phrase)
+        android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(ok) }
+    }
+
+    /** Свой аватар (M2), байты изображения; null = не задан. Читается через [ops]. */
+    var selfAvatar by mutableStateOf<ByteArray?>(null)
+        private set
+
+    /** Своё самоназвание (M2). Живёт в движке (рассылается контактам), не в prefs. */
+    var selfName by mutableStateOf("")
+        private set
+
+    fun loadSelfAvatar() = ops.execute { selfAvatar = Native.selfAvatar(sessionPtr) }
+
+    fun setSelfAvatar(content: ByteArray, mime: String) = ops.execute {
+        Native.setSelfAvatar(sessionPtr, content, mime)
+        selfAvatar = Native.selfAvatar(sessionPtr)
+    }
+
+    /** Задать своё имя (M2): движок сохранит и разошлёт контактам. */
+    fun updateSelfName(name: String) = ops.execute {
+        Native.setSelfName(sessionPtr, name.trim())
+        selfName = Native.selfName(sessionPtr)
+    }
+
+    /** Байты аватаров контактов по hex-хэшу (M2). Заполняется при обновлении контактов;
+     *  UI читает [Contact.avatarId] → сюда. */
+    val contactAvatars = mutableStateMapOf<String, ByteArray>()
+
+    /** Байты вложений чата по hex-хэшу блоба (M2). Реактивный кэш: при докачке
+     *  (blob_received) картинка появляется в пузыре без ручного рефреша.
+     *
+     *  Читать напрямую НЕ надо — только через [blob]: карта ограничена по объёму и
+     *  вытесняет давнее, а [blob] умеет заказать выселенное обратно. */
+    val mediaBlobs = mutableStateMapOf<String, ByteArray>()
+
+    /** Потолок кэша вложений в памяти. Раньше его не было вовсе: чат на два десятка
+     *  фотографий держал в куче все их байты разом и никогда не отпускал. */
+    private val blobCacheLimit = 24L * 1024 * 1024
+
+    /** Порядок обращений для вытеснения (в конце — самые свежие). */
+    internal val blobOrder = LinkedHashSet<String>()
+    internal var blobBytes = 0L
+
+    /** Блобы, чтение которых уже заказано — чтобы промах не плодил очередь заказов
+     *  на каждую рекомпозицию. */
+    private val blobWanted = mutableSetOf<String>()
+
+    /**
+     * Байты вложения для показа.
+     *
+     * При промахе заказывает чтение с диска и возвращает null: вызывающий рисует
+     * заглушку, а байты приедут в реактивную карту и он перерисуется сам.
+     */
+    fun blob(blobId: String): ByteArray? {
+        if (blobId.isEmpty()) return null
+        val hit = mediaBlobs[blobId]
+        if (hit != null) {
+            synchronized(blobOrder) {
+                blobOrder.remove(blobId)
+                blobOrder.add(blobId)
+            }
+            return hit
+        }
+        val fresh = synchronized(blobWanted) { blobWanted.add(blobId) }
+        if (fresh) reads.execute { cacheBlob(blobId) }
+        return null
+    }
+
+    /** Вложения, докачанные за эту сессию: видео и файлы в память не читаются,
+     *  и «скачано» для пузыря берётся отсюда (и из `downloaded` истории). */
+    val savedBlobs = mutableStateMapOf<String, Boolean>()
+
+    /**
+     * Расшифровать вложение в файл `cacheDir/<dir>/` потоково и отдать путь на
+     * главный поток (`null` — не вышло). Так открывают и проигрывают видео и
+     * файлы: целиком в память они не поднимаются. Файл — открытым текстом, поэтому
+     * вызывающий удаляет его, когда он больше не нужен; забытое чистится на старте.
+     */
+    fun exportBlob(blobId: String, dir: String, name: String, onReady: (java.io.File?) -> Unit) {
+        val ctx = appContext ?: return onReady(null)
+        heavy.execute {
+            val folder = File(ctx.cacheDir, dir).apply { mkdirs() }
+            // Имя из сообщения — чужая строка: оставляем только её последний сегмент.
+            val safe = File(name.ifBlank { blobId.take(16) }).name.ifBlank { blobId.take(16) }
+            val f = File(folder, safe)
+            val ok = Native.blobExport(sessionPtr, blobId, f.absolutePath)
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onReady(if (ok) f else null) }
+        }
+    }
+
+    /** Подтянуть байты блоба в кэш, если он уже есть локально (на [ops]). */
+    private fun cacheBlob(blobId: String) {
+        if (blobId.isNotEmpty() && !mediaBlobs.containsKey(blobId)) {
+            Native.blobRead(sessionPtr, blobId).takeIf { it.isNotEmpty() }?.let { putBlob(blobId, it) }
+        }
+        synchronized(blobWanted) { blobWanted.remove(blobId) }
+    }
+
+    /** Положить блоб в кэш, вытеснив самые давние, если вышли за потолок. */
+    private fun putBlob(blobId: String, data: ByteArray) {
+        val evict = synchronized(blobOrder) {
+            if (blobOrder.add(blobId)) blobBytes += data.size
+            val doomed = mutableListOf<String>()
+            val it = blobOrder.iterator()
+            // Свежий блоб не трогаем даже когда он один переполняет кэш: его сейчас
+            // и показывают, а выселить его — значит тут же заказать снова.
+            while (blobBytes > blobCacheLimit && it.hasNext()) {
+                val old = it.next()
+                if (old == blobId) continue
+                it.remove()
+                blobBytes -= (mediaBlobs[old]?.size ?: 0).toLong()
+                doomed += old
+            }
+            doomed
+        }
+        mediaBlobs[blobId] = data
+        evict.forEach { mediaBlobs.remove(it) }
+    }
+
+    val contacts = mutableStateListOf<Contact>()
+
+    /** Входящие запросы в контакты от незнакомцев (гейт). */
+    val contactRequests = mutableStateListOf<ContactRequest>()
+    val online = mutableStateMapOf<String, Boolean>()
+    val unread = mutableStateMapOf<String, Int>()
+
+    /**
+     * Ленты всех чатов: ключ — [chatKey], то есть вид чата входит в ключ. Раньше
+     * карт было две (личные и групповые), и всё, что работает с историей, шло по
+     * два раза — по одному на каждую.
+     *
+     * Читать удобнее через [chat]: он не заставляет вызывающего собирать ключ.
+     */
+    val messages = mutableStateMapOf<String, SnapshotStateList<Message>>()
+
+    /** Лента чата: `chat(hex)` — личный, `chat(gid, group = true)` — групповой. */
+    fun chat(id: String?, group: Boolean = false): List<Message> =
+        id?.let { messages[chatKey(it, group)] }.orEmpty()
+
+    var currentChat by mutableStateOf<String?>(null)
+    var netPeers by mutableStateOf(0)
+
+    /** Снапшот стата сети (экран «Сеть»). Обновляется тикером на переднем плане. */
+    var netStats by mutableStateOf<NetStats?>(null)
+
+    /** Режим «узел сети» (ретрансляция чужого трафика). Пока только UI-флаг —
+     *  привязка к движку (вкл/выкл relay) — TODO, когда появится нативный вызов. */
+    var relayEnabled by mutableStateOf(true)
+
+    /** Результат последней попытки добавить контакт ("" | added | known | error). */
+    var addStatus by mutableStateOf("")
+
+    // Диагностика: тест пропускной способности меша.
+    var benchRecv by mutableStateOf(false) // режим приёмника включён
+    var benchRecvMbps by mutableStateOf(0.0) // живая скорость приёма
+    var benchResult by mutableStateOf("") // результат отправки (для blast)
+
+    // Группы (MLS).
+    val groups = mutableStateListOf<Group>()
+
+    /** Входящие приглашения в группы (карточки на одобрение). */
+    val groupInvites = mutableStateListOf<GroupInvite>()
+
+    /** Непрочитанные в группах: gid → счётчик. Живёт только в памяти, как и [unread]
+     *  у личных чатов — это «что пришло, пока я смотрел в другое место», а не факт
+     *  переписки, который стоило бы хранить. */
+    val groupUnread = mutableStateMapOf<String, Int>()
+    var currentGroup by mutableStateOf<String?>(null)
+
+    /** Присутствие открытой группы «N уч · M в сети» — агрегат отдаёт движок
+     *  (groupPresence). Обновляется тикером, пока групповой чат открыт. */
+    var currentGroupRoster by mutableStateOf<GroupRoster?>(null)
+
+    // Комната-звонок (Discord-style присутствие). gid комнаты, где мы сейчас.
+    var currentRoom by mutableStateOf<String?>(null)
+    val roomMembers = mutableStateListOf<RoomMember>()
+
+    /** Hex-ключи говорящих сейчас участников (active-speaker рамка). Опрашивается
+     *  отдельным потоком ~4 раза/с, пока мы в звонке. */
+    var speakingPeers by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** Скорость трафика (kbps) по участникам для тех-инфо: hex участника → входящий от
+     *  него; "self" → свой исходящий. Считается по дельте байт между опросами поллера. */
+    var peerKbps by mutableStateOf<Map<String, Int>>(emptyMap())
+        private set
+
+    /** Угол поворота входящего видео на участника (град, угол сенсора отправителя).
+     *  UI доворачивает тайл. Энкодер шлёт сырой кадр с сенсора → нужен доворот. */
+    val roomMemberRotation = mutableStateMapOf<String, Int>()
+
+    /** Живые участники каждой группы по маячкам — обновляется тикером.
+     *  Заполняется даже когда мы сами не в комнате (peer слал нам RoomPresence). */
+    val groupPresence = mutableStateMapOf<String, List<RoomMember>>()
+
+    // Видео по умолчанию для звонков — загружается из SharedPreferences при start().
+    // Меняется в «Настройки → Медиа и звонки» и при «Применить» на экране «Показать
+    // видео» в звонке; оба пути пишут одно и то же.
+    var videoQuality by mutableStateOf(VideoQuality.default)
+        private set
+
+    /** Битрейт видео: «авто» (рекомендация под разрешение/fps) или вариант 0/1/2 из
+     *  [bitrateOptions] — относительный, переживает смену разрешения. */
+    var videoBitrateAuto by mutableStateOf(true)
+        private set
+    var videoBitrateIdx by mutableStateOf(1)
+        private set
+
+    /** Три варианта битрейта (бит/с) под разрешение/fps: ниже · рекоменд. · выше. */
+    fun bitrateOptions(w: Int, h: Int, fps: Int): List<Int> {
+        val a = autoBitrate(w, h, fps)
+        return listOf(a * 6 / 10, a, a * 3 / 2).map { (it / 1_000_000).coerceAtLeast(1) * 1_000_000 }
+    }
+
+    /** Изменить видео по умолчанию (что не передано — остаётся) и сохранить. */
+    fun setVideoDefaults(
+        front: Boolean = cameraFront,
+        w: Int = videoQuality.width,
+        h: Int = videoQuality.height,
+        fps: Int = videoQuality.fps,
+        bitrateAuto: Boolean = videoBitrateAuto,
+        bitrateIdx: Int = videoBitrateIdx,
+    ) {
+        cameraFront = front
+        videoBitrateAuto = bitrateAuto
+        videoBitrateIdx = bitrateIdx.coerceIn(0, 2)
+        val bps = bitrateOptions(w, h, fps)[if (bitrateAuto) 1 else videoBitrateIdx]
+        videoQuality = VideoQuality("${h}p", w, h, fps, bps)
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)?.edit()
+            ?.putBoolean("video_front", front)
+            ?.putInt("video_w", w)
+            ?.putInt("video_h", h)
+            ?.putInt("video_fps", fps)
+            ?.putBoolean("video_br_auto", videoBitrateAuto)
+            ?.putInt("video_br_idx", videoBitrateIdx)
+            ?.apply()
+    }
+
+    /** Тех-инфо оверлей в звонке (пинг/разрешение/fps/битрейт на тайлах). Тумблер в ⚙️. */
+    var showTechInfo by mutableStateOf(false)
+        private set
+
+    fun toggleTechInfo() {
+        showTechInfo = !showTechInfo
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("tech_info", showTechInfo)?.apply()
+    }
+
+    /** Предупреждать о разросшейся очереди недоставленного (вкл по умолчанию).
+     *  Сообщения при этом НЕ удаляются — это только уведомление. Тумблер в ⚙️. */
+    var warnOutboxGrowth by mutableStateOf(true)
+        private set
+
+    fun toggleOutboxWarning() {
+        warnOutboxGrowth = !warnOutboxGrowth
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("warn_outbox", warnOutboxGrowth)?.apply()
+    }
+
+    /** Сколько сообщений ждёт доставки и надо ли предупредить (из движка). */
+    var outboxPending by mutableStateOf(0)
+        internal set
+    var outboxWarn by mutableStateOf(false)
+        private set
+
+    private fun refreshOutboxStats() {
+        val s = decodeOrNull<OutboxStatsDto>(Native.outboxStats(sessionPtr)) ?: return
+        outboxPending = s.pending
+        outboxWarn = s.warn
+    }
+
+    // ── Хранилище (простой экран; нормальный дизайн — позже) ──────────────────
+    var storageBlobs by mutableStateOf(0L)
+        internal set
+    var storageBlobBytes by mutableStateOf(0L)
+        internal set
+    var storageOutboxPending by mutableStateOf(0L)
+        internal set
+
+    /** Что занимает место, по типам вложения: kind → байты. */
+    var storageByKind by mutableStateOf<List<Pair<String, Long>>>(emptyList())
+        internal set
+
+    /** По чатам: (ключ пира, файлов, байт), самый тяжёлый первым. */
+    var storageChats by mutableStateOf<List<Triple<String, Long, Long>>>(emptyList())
+        internal set
+
+    // ── Резервная копия ДАННЫХ (M4) ───────────────────────────────────────────
+    // Не путать с копией КЛЮЧА ([revealSeedPhrase]): ключ возвращает личность, копия
+    // данных — переписку.
+
+    /** Когда сделана последняя копия данных (unix-секунды); 0 — не делалась.
+     *  Локальный факт, как и [keyBackupDone]: сам файл мы после сохранения не видим
+     *  (он у пользователя), а сказать «копии нет» после её создания — врать. */
+    var dataBackupAt by mutableStateOf(0L)
+        internal set
+
+    private fun markDataBackupDone() {
+        val now = System.currentTimeMillis() / 1000
+        dataBackupAt = now
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putLong("data_backup_at", now)?.apply()
+    }
+
+    /** Что и сколько войдёт в копию. Считается по базе, поэтому через [ops]. */
+    internal var backupEstimate by mutableStateOf(BackupStatsDto())
+        private set
+
+    fun refreshBackupEstimate() = ops.execute {
+        backupEstimate = decodeOrNull<BackupStatsDto>(Native.backupEstimate(sessionPtr))
+            ?: BackupStatsDto()
+    }
+
+    /**
+     * Создать копию в файл `path`. **Блокирующая** (Argon2id ~секунда плюс вложения) —
+     * звать с фонового потока; UI на это время показывает прогресс.
+     */
+    internal fun exportBackupBlocking(path: String, parts: BackupPartsDto, password: String): BackupStatsDto {
+        // Только через WireJson: см. его док — иначе поля с дефолтными значениями
+        // молча не доедут до движка.
+        val json = WireJson.encodeToString(BackupPartsDto.serializer(), parts)
+        val out = Native.backupExport(sessionPtr, path, json, password)
+        val stats = decodeOrNull<BackupStatsDto>(out)
+            ?: BackupStatsDto(error = "не удалось создать копию")
+        if (stats.error.isEmpty()) markDataBackupDone()
+        return stats
+    }
+
+    /** Восстановить из копии. Возвращает ДОБАВЛЕННОЕ (не «что было в файле»). */
+    internal fun importBackupBlocking(path: String, password: String): BackupStatsDto {
+        val out = Native.backupImport(sessionPtr, path, password)
+        val stats = decodeOrNull<BackupStatsDto>(out)
+            ?: BackupStatsDto(error = "не удалось прочитать копию")
+        if (stats.error.isEmpty()) {
+            // Контакты и чаты поменялись — перечитываем то, что уже на экране.
+            refreshContacts()
+            refreshStorage()
+        }
+        return stats
+    }
+
+    /** Очередь по получателям: (ключ, сколько ждёт, байт, время самой старой записи). */
+    var outboxByPeer by mutableStateOf<List<OutboxPeer>>(emptyList())
+        internal set
+
+    /**
+     * Закреплённые сообщения по чатам (ключ собеседника или gid), свежие первыми.
+     * Шапка чата показывает верхнее; закреп общий для всех участников, поэтому
+     * список приходит из движка, а не собирается на клиенте.
+     */
+    val pinned = mutableStateMapOf<String, List<Message>>()
+
+    /** Перечитать закреплённые для чата. */
+    fun refreshPins(chat: String, group: Boolean) = ops.execute {
+        pinned[chat] = decodeList<MessageDto>(Native.pinned(sessionPtr, chat, group))
+            .map { it.toModel() }
+    }
+
+    /** Закрепить/открепить выделенное сообщение. */
+    fun setPinned(chat: String, group: Boolean, msg: Message, on: Boolean) = ops.execute {
+        Native.pinMessage(sessionPtr, chat, group, msg.id, msg.sender, on)
+        refreshPins(chat, group)
+    }
+
+    /** Находка поиска по переписке: где нашлось + само сообщение. */
+    data class SearchHit(
+        val chat: String,
+        val group: Boolean,
+        val id: Long,
+        val sender: String,
+        val text: String,
+        val mine: Boolean,
+        val time: Long,
+    )
+
+    /** Результаты поиска по сообщениям (свежие первыми). */
+    val searchHits = mutableStateListOf<SearchHit>()
+
+    /** Заметки себе («Сохранённое»), старые первыми. */
+    val notes = mutableStateListOf<Message>()
+
+    /** Журнал звонков (свежие первыми). */
+    val callLog = mutableStateListOf<CallEntry>()
+
+    /** Визуальные отпечатки ключей (hex) — кэш, чтобы не дёргать JNI на рекомпозицию. */
+    private val fpCache = mutableMapOf<String, String>()
+
+    /** Отпечаток для сверки глазами. Пустой ключ — свой. Считает движок (одна
+     *  реализация на все клиенты), UI только рисует. */
+    fun visualFingerprint(key: String = ""): String = fpCache.getOrPut(key) {
+        if (sessionPtr == 0L) "" else runCatching { Native.visualFingerprint(sessionPtr, key) }.getOrDefault("")
+    }
+
+    // ── Пользовательские папки ──────────────────────────────────────────────
+    val folders = mutableStateListOf<Folder>()
+
+    private fun saveFolders() {
+        val arr = JSONArray()
+        folders.forEach { f ->
+            arr.put(
+                JSONObject()
+                    .put("id", f.id)
+                    .put("name", f.name)
+                    .put("icon", f.icon)
+                    .put("types", JSONArray(f.types.toList()))
+                    .put("chats", JSONArray(f.chats.toList()))
+                    .put("exclude_read", f.excludeRead),
+            )
+        }
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putString("folders", arr.toString())?.apply()
+    }
+
+    private fun loadFolders() {
+        val raw = appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.getString("folders", null) ?: return
+        val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return
+        val loaded = mutableListOf<Folder>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            fun strSet(name: String): Set<String> {
+                val a = o.optJSONArray(name) ?: return emptySet()
+                return (0 until a.length()).mapNotNull { a.optString(it).takeIf { s -> s.isNotEmpty() } }.toSet()
+            }
+            loaded += Folder(
+                id = o.optString("id"),
+                name = o.optString("name"),
+                icon = o.optString("icon"),
+                types = strSet("types"),
+                chats = strSet("chats"),
+                excludeRead = o.optBoolean("exclude_read", false),
+            )
+        }
+        folders.replaceWith(loaded)
+    }
+
+    fun saveFolder(f: Folder) {
+        val i = folders.indexOfFirst { it.id == f.id }
+        if (i >= 0) folders[i] = f else folders += f
+        saveFolders()
+    }
+
+    fun deleteFolder(id: String) {
+        folders.removeAll { it.id == id }
+        saveFolders()
+    }
+
+    fun folderById(id: String): Folder? = folders.firstOrNull { it.id == id }
+
+    /** Попадает ли личный чат в папку. */
+    fun folderHasDm(f: Folder, key: String): Boolean =
+        ("dm" in f.types || key in f.chats) && !(f.excludeRead && (unread[key] ?: 0) == 0)
+
+    /** Попадает ли группа/комната в папку. */
+    fun folderHasGroup(f: Folder, gid: String): Boolean = "room" in f.types || gid in f.chats
+
+    /** Недавно использованные эмодзи (первым — самый свежий). Панель показывает их
+     *  сверху: в ходу у человека десяток символов, ради них не должно быть выбора
+     *  категории. Живут в prefs, а не в движке — это предпочтение клиента. */
+    var recentEmoji by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    fun useEmoji(e: String) {
+        recentEmoji = (listOf(e) + recentEmoji.filter { it != e }).take(RECENT_EMOJI_MAX)
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)?.edit()
+            ?.putString("recent_emoji", recentEmoji.joinToString(" "))?.apply()
+    }
+
+    private fun loadSettings() {
+        val prefs = appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) ?: return
+        showTechInfo = prefs.getBoolean("tech_info", false)
+        recentEmoji = prefs.getString("recent_emoji", "")?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
+        warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
+        val w = prefs.getInt("video_w", VideoQuality.default.width)
+        val h = prefs.getInt("video_h", VideoQuality.default.height)
+        val fps = prefs.getInt("video_fps", VideoQuality.default.fps)
+        cameraFront = prefs.getBoolean("video_front", true)
+        videoBitrateAuto = prefs.getBoolean("video_br_auto", true)
+        videoBitrateIdx = prefs.getInt("video_br_idx", 1).coerceIn(0, 2)
+        val bps = bitrateOptions(w, h, fps)[if (videoBitrateAuto) 1 else videoBitrateIdx]
+        videoQuality = VideoQuality("${h}p", w, h, fps, bps)
+    }
+
+    // ── Экран шаринга видео (долгий тап «Видео» в звонке). ──────────────────────
+    var showVideoShare by mutableStateOf(false)
+        private set
+    var shareScreenMode by mutableStateOf(false) // false = камера, true = экран
+        private set
+    var shareFront by mutableStateOf(true)
+        private set
+    var shareResW by mutableStateOf(1280)
+        private set
+    var shareResH by mutableStateOf(720)
+        private set
+    var shareFps by mutableStateOf(30)
+        private set
+    var shareBitrateAuto by mutableStateOf(true)
+        private set
+
+    /** Индекс ручного битрейта (0 ниже · 1 рекомендация · 2 выше) — ОТНОСИТЕЛЬНЫЙ:
+     *  переживает смену разрешения/fps (для 4К берётся свой вариант того же уровня). */
+    var shareBitrateIdx by mutableStateOf(1)
+        private set
+
+    /** Рекомендуемый битрейт (бит/с) ≈ w·h·fps·0.08 (H264, ~0.08 bpp/кадр). */
+    fun autoBitrate(w: Int, h: Int, fps: Int): Int =
+        (w.toLong() * h * fps * 0.08).toInt().coerceIn(1_000_000, 40_000_000)
+
+    /** Три варианта битрейта (бит/с) под текущее разрешение/fps: ниже · рекоменд. · выше. */
+    fun shareBitrateOptions(): List<Int> = bitrateOptions(shareResW, shareResH, shareFps)
+
+    /** Применяемый битрейт: рекомендация (idx 1) при «Авто», иначе выбранный вариант. */
+    fun shareBitrateBps(): Int = shareBitrateOptions()[if (shareBitrateAuto) 1 else shareBitrateIdx]
+
+    fun openVideoShare() {
+        shareScreenMode = false
+        shareFront = cameraFront
+        shareResW = videoQuality.width
+        shareResH = videoQuality.height
+        shareFps = videoQuality.fps
+        shareBitrateAuto = videoBitrateAuto
+        shareBitrateIdx = videoBitrateIdx
+        showVideoShare = true
+    }
+
+    fun closeVideoShare() {
+        showVideoShare = false
+    }
+
+    fun pickSource(screen: Boolean) {
+        shareScreenMode = screen
+    }
+
+    fun pickFacing(front: Boolean) {
+        shareFront = front
+    }
+
+    fun pickRes(w: Int, h: Int) {
+        shareResW = w
+        shareResH = h // битрейт следует сам: авто=рекоменд, ручной=тот же idx под новое разрешение
+    }
+
+    fun pickFps(f: Int) {
+        shareFps = f
+    }
+
+    fun pickBitrateAuto() {
+        shareBitrateAuto = true
+    }
+
+    fun pickBitrateIdx(i: Int) {
+        shareBitrateIdx = i.coerceIn(0, 2)
+        shareBitrateAuto = false
+    }
+
+    /** Применить выбор и начать показ видео с этими параметрами. */
+    fun applyVideoShare() {
+        showVideoShare = false
+        if (shareScreenMode) return // шаринг экрана (MediaProjection) — отдельная фича, пока no-op
+        // Выбор в звонке становится и новым значением по умолчанию — как в настройках.
+        setVideoDefaults(shareFront, shareResW, shareResH, shareFps, shareBitrateAuto, shareBitrateIdx)
+        if (videoActive) {
+            // видео уже идёт → пересобрать отправитель с новыми параметрами
+            stopVideoSender()
+            maybeStartVideoSender()
+        } else {
+            toggleVideo()
+        }
+    }
+
+    // ── Настройки звука (долгий тап «Микрофон» в звонке). ───────────────────────
+    var showAudioSettings by mutableStateOf(false)
+        private set
+
+    /** Вывод звонка: "builtin" (встроенный/разговорный), "speaker" (громкая), "bluetooth". */
+    var audioOut by mutableStateOf("builtin")
+        private set
+
+    /** Вход (микрофон): "builtin", "headset" (проводная гарнитура), "bluetooth". */
+    var audioIn by mutableStateOf("builtin")
+        private set
+
+    /** Аппаратная обработка микрофона (AEC/NS/AGC). */
+    var audioFx by mutableStateOf(AudioFx())
+        private set
+
+    /** Качество: авто (адаптивно) либо ручной Opus-битрейт 16–48 кбит. */
+    var audioQualityAuto by mutableStateOf(true)
+        private set
+    var audioBitrate by mutableStateOf(24_000)
+        private set
+
+    /** Живой уровень микрофона 0..1 — индикатор на экране настроек. */
+    var micLevel by mutableStateOf(0f)
+        private set
+
+    /** Для CallSettings: «громкая связь» = вывод на динамик. */
+    val speakerOn get() = audioOut == "speaker"
+
+    fun toggleSpeaker() = pickAudioOut(if (audioOut == "speaker") "builtin" else "speaker")
+
+    fun openAudioSettings() {
+        showAudioSettings = true
+    }
+
+    fun closeAudioSettings() {
+        showAudioSettings = false
+        micLevel = 0f
+    }
+
+    fun pickAudioOut(dev: String) {
+        audioOut = dev
+        applyOutputDevice()
+        saveAudioPrefs()
+    }
+
+    fun pickAudioIn(dev: String) {
+        audioIn = dev
+        saveAudioPrefs() // вход применяется при следующем старте аудио-сессии (preferredDevice)
+    }
+
+    fun setAudioFx(ns: Boolean = audioFx.ns, aec: Boolean = audioFx.aec, agc: Boolean = audioFx.agc) {
+        audioFx = AudioFx(ns, aec, agc)
+        saveAudioPrefs() // эффекты привязаны к audioSessionId → применяются на следующем старте
+    }
+
+    fun setAudioQuality(auto: Boolean, bitrate: Int = audioBitrate) {
+        audioQualityAuto = auto
+        audioBitrate = bitrate.coerceIn(16_000, 48_000)
+        saveAudioPrefs() // TODO: Opus bitrate/mode на сессию — нужен JNI-сеттер (+ adaptive)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyOutputDevice() {
+        val am = appContext?.getSystemService(android.content.Context.AUDIO_SERVICE)
+            as? android.media.AudioManager ?: return
+        when (audioOut) {
+            "speaker" -> {
+                runCatching { am.stopBluetoothSco() }
+                am.isBluetoothScoOn = false
+                am.isSpeakerphoneOn = true
+            }
+            "bluetooth" -> {
+                am.isSpeakerphoneOn = false
+                runCatching { am.startBluetoothSco() }
+                am.isBluetoothScoOn = true
+            }
+            else -> { // встроенный (разговорный)
+                runCatching { am.stopBluetoothSco() }
+                am.isBluetoothScoOn = false
+                am.isSpeakerphoneOn = false
+            }
+        }
+    }
+
+    /** Доступные выходы: встроенный/динамик всегда; bluetooth — если подключён. */
+    fun availableAudioOuts(): Set<String> {
+        val am = appContext?.getSystemService(android.content.Context.AUDIO_SERVICE)
+            as? android.media.AudioManager ?: return setOf("builtin", "speaker")
+        val s = linkedSetOf("builtin", "speaker")
+        if (hasBluetoothAudio(am)) s += "bluetooth"
+        return s
+    }
+
+    /** Доступные входы: встроенный всегда; проводная гарнитура/bluetooth — если есть. */
+    fun availableAudioIns(): Set<String> {
+        val am = appContext?.getSystemService(android.content.Context.AUDIO_SERVICE)
+            as? android.media.AudioManager ?: return setOf("builtin")
+        val s = linkedSetOf("builtin")
+        val devs = am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+        if (devs.any { it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET }) s += "headset"
+        if (hasBluetoothAudio(am)) s += "bluetooth"
+        return s
+    }
+
+    private fun hasBluetoothAudio(am: android.media.AudioManager): Boolean =
+        am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+        }
+
+    /** AudioDeviceInfo выбранного входа (для CallAudio.preferredDevice); null = дефолт. */
+    private fun selectedInputDevice(): android.media.AudioDeviceInfo? {
+        if (audioIn == "builtin") return null
+        val am = appContext?.getSystemService(android.content.Context.AUDIO_SERVICE)
+            as? android.media.AudioManager ?: return null
+        val type = when (audioIn) {
+            "headset" -> android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET
+            "bluetooth" -> android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            else -> return null
+        }
+        return am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type == type }
+    }
+
+    private fun saveAudioPrefs() {
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)?.edit()
+            ?.putString("audio_out", audioOut)
+            ?.putString("audio_in", audioIn)
+            ?.putBoolean("fx_ns", audioFx.ns)
+            ?.putBoolean("fx_aec", audioFx.aec)
+            ?.putBoolean("fx_agc", audioFx.agc)
+            ?.putBoolean("aq_auto", audioQualityAuto)
+            ?.putInt("aq_bitrate", audioBitrate)
+            ?.apply()
+    }
+
+    private fun loadAudioPrefs() {
+        val p = appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) ?: return
+        audioOut = p.getString("audio_out", "builtin") ?: "builtin"
+        audioIn = p.getString("audio_in", "builtin") ?: "builtin"
+        audioFx = AudioFx(p.getBoolean("fx_ns", true), p.getBoolean("fx_aec", true), p.getBoolean("fx_agc", true))
+        audioQualityAuto = p.getBoolean("aq_auto", true)
+        audioBitrate = p.getInt("aq_bitrate", 24_000)
+    }
+
+    var appContext: android.content.Context? = null
+
+    /** Приложение на переднем плане? Ставит MainActivity (onStart/onStop). В фоне
+     *  poll/ticker троттлятся — меньше пробуждений CPU при удержанном wakelock. */
+    @Volatile var foreground = true
+    var incomingCall by mutableStateOf<IncomingRoomCall?>(null)
+    var dmCallPeer by mutableStateOf<String?>(null)
+    var videoActive by mutableStateOf(false)
+
+    @Volatile private var roomAudio: CallAudio? = null
+
+    /**
+     * «Положить трубку» не стоит в очереди. Выход разбирает звонок своим потоком,
+     * а не через [ops]: в [ops] попадает и работа, вызванная событиями из сети, и
+     * собеседник не должен суметь задержать остановку нашего микрофона (класс Signal
+     * RingRTC CVE-2026-113380). Но старт медиа живёт в [ops], и выход мог бы его
+     * обогнать — тогда микрофон включился бы ПОСЛЕ выхода. Поэтому у звонка есть
+     * поколение ([callGen], растёт на каждом выходе), а старт и разбор идут под одним
+     * замком ([callLock]): разбор либо застанет запущенное и остановит его, либо
+     * отложенный старт увидит новое поколение и не начнётся.
+     */
+    private val callGen = java.util.concurrent.atomic.AtomicInteger()
+    private val callLock = Any()
+
+    /** Выполнить старт звонка в [ops], если звонок за это время не завершили. */
+    private fun startCall(block: () -> Unit) {
+        val gen = callGen.get()
+        ops.execute { synchronized(callLock) { if (callGen.get() == gen) block() } }
+    }
+
+    @Volatile private var videoSender: VideoSender? = null
+
+    /** Приёмники видео per-peer: тайл сетки даёт surface → приёмник на этого пира.
+     *  Стабильны: создаются при появлении surface тайла, гасятся при уходе (участник
+     *  вышел / тайл скрыт). key(peer) в Compose не даёт пересоздавать surface на
+     *  перерисовке → нет тёрки декодеров. */
+    private val videoReceivers = java.util.concurrent.ConcurrentHashMap<String, VideoReceiver>()
+
+    /** Surface тайла «Вы» для локального превью с камеры (без энкодера). */
+    @Volatile private var selfPreviewSurface: android.view.Surface? = null
+
+    /** Микрофон заглушён (управляется из UI звонка). */
+    var muted by mutableStateOf(false)
+
+    /** Текущий объектив: фронтальная камера (true) или тыловая. Влияет на зеркало
+     *  превью «Вы» (селфи-зеркало только у фронталки). */
+    var cameraFront by mutableStateOf(true)
+        private set
+
+    // Фоновое взаимодействие с ядром (никогда не на главном потоке).
+    // `internal`, а не `private`: поведение модели разнесено по зонам-файлам
+    // (заметки, поиск, хранилище), и всем им нужен один и тот же поток-актор.
+    // Заводить второй значило бы получить два порядка операций над одной сессией.
+    internal val ops = Executors.newSingleThreadExecutor { Thread(it, "native-ops").apply { isDaemon = true } }
+
+    // Долгое — мимо [ops], иначе пока шифруется видео на гигабайт, не открываются
+    // чаты и не уходит текст (R-051). Один поток: вложения уходят в порядке отправки.
+    internal val heavy = Executors.newSingleThreadExecutor { Thread(it, "native-heavy").apply { isDaemon = true } }
+
+    // Чтения: байты картинок для ленты и поиск. Отдельно от [heavy], чтобы прокрутка
+    // не ждала отправки файла, и от [ops], чтобы команды не ждали диска.
+    internal val reads = Executors.newSingleThreadExecutor { Thread(it, "native-reads").apply { isDaemon = true } }
+
+    @Volatile private var running = false
+    private var pollThread: Thread? = null
+    private var tickerThread: Thread? = null
+    private var netCallback: ConnectivityManager.NetworkCallback? = null
+
+    @Volatile private var started = false
+
+    // Офлайн-очередь целиком в движке: недоставленное лежит в его зашифрованной
+    // базе и досылается им же. Здесь — только отрицательные id для того, что движок
+    // не смог даже поставить в очередь.
+    @Volatile private var localMsgId = -1L
+
+    /** Инициализация ядра. Звать с фонового потока (см. MainActivity).
+     *  Идемпотентно: при пересоздании Activity повторно НЕ инициализирует. */
+    /**
+     * Инициализация ядра. `password` нужен на уровнях at-rest PASSWORD/BOTH.
+     * Возвращает false, если пароль не подошёл, — вызывающий показывает ошибку, а
+     * не стартует с мусорным ключом (иначе база выглядела бы повреждённой).
+     */
+    fun start(dataDir: String, password: String? = null): Boolean {
+        if (started) return true
+        val vaultKey = runCatching { VaultKeyManager.getOrCreate(File(dataDir), password) }
+            .getOrElse {
+                // С паролем сбой значит «неверный пароль» — это покажет экран ввода.
+                // Без пароля ключ не развернулся: Keystore потерял свой ключ (сменили
+                // блокировку экрана, обновили прошивку). Тупик «не запускается» —
+                // хуже любого выбора, поэтому показываем экран восстановления.
+                if (password == null) recovery = Recovery.KEY_LOST
+                return false
+            }
+        started = true
+        loadSettings()
+        loadAudioPrefs()
+        val started = decodeOrNull<StartResultDto>(Native.start(dataDir, vaultKey))
+        if (started == null || started.error != null || started.sessionPtr == 0L) {
+            this.started = false
+            // Данные зашифрованы другим ключом: движок их не стёр, решает человек.
+            if (started?.error == START_VAULT_MISMATCH) {
+                recoveryKey = vaultKey
+                recovery = Recovery.DATA_UNREADABLE
+            } else {
+                error = started?.error ?: "engine start failed"
+            }
+            return false
+        }
+        sessionPtr = started.sessionPtr
+        me = Me(started.pubkey, started.address, started.fingerprint)
+        transportEpoch = Native.transportEpoch(sessionPtr)
+        val prefs = appContext
+            ?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        keyBackupDone = prefs?.getBoolean("key_backup_done", false) ?: false
+        dataBackupAt = prefs?.getLong("data_backup_at", 0L) ?: 0L
+        refreshContactsNow()
+        refreshRequestsNow()
+        refreshGroupsNow()
+        refreshGroupInvitesNow()
+        refreshChatSummariesNow() // список чатов с превью — сразу, до первого события
+        loadWanted() // докачки, заказанные до перезапуска
+        loadFolders()
+        selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
+        selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
+        // Расшифрованные копии вложений, оставшиеся от прошлого запуска (просмотр,
+        // «открыть», «поделиться»): держать их дольше нужного незачем.
+        appContext?.cacheDir?.let { c -> listOf("viewer", "shared").forEach { File(c, it).deleteRecursively() } }
+        startLoops()
+        registerNetworkCallback()
+        return true
+    }
+
+    // Мгновенный реконнект при восстановлении сети (до срабатывания тикера).
+    private fun registerNetworkCallback() {
+        val ctx = appContext ?: return
+        val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val ptr = sessionPtr
+                if (ptr != 0L) {
+                    android.util.Log.i("net", "Network available — forcing peer reconnect")
+                    runCatching { Native.reconnectPeers(ptr) }
+                }
+            }
+        }
+        netCallback = cb
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                cm.registerDefaultNetworkCallback(cb)
+            } else {
+                val req = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                cm.registerNetworkCallback(req, cb)
+            }
+        }
+    }
+
+    private fun startLoops() {
+        if (running) return
+        running = true
+        pollThread = Thread {
+            while (running) {
+                var e = Native.pollEvent(sessionPtr)
+                while (e.isNotEmpty()) {
+                    runCatching { applyEvent(e) }
+                    e = Native.pollEvent(sessionPtr)
+                }
+                // Сводка чатов пересчитывается РАЗ на пачку событий, а не на каждое:
+                // при разгребании офлайн-очереди событий приходят сотни, а список
+                // чатов всё равно перерисуется один раз.
+                if (summariesDirty) {
+                    summariesDirty = false
+                    runCatching { refreshChatSummariesNow() }
+                }
+                // В фоне реже опрашиваем (входящие задержатся максимум на интервал —
+                // приемлемо), на переднем плане — отзывчиво.
+                Thread.sleep(if (foreground) 80 else 400)
+            }
+        }.apply {
+            isDaemon = true
+            name = "native-poll"
+            start()
+        }
+        tickerThread = Thread {
+            var tick = 0L
+            var zeroPeerTicks = 0 // счётчик тиков без пиров
+            while (running) {
+                runCatching {
+                    val p = Native.netPeers(sessionPtr)
+                    val t = Native.netTree(sessionPtr)
+                    netPeers = p
+                    contacts.map { it.key }.forEach { key ->
+                        online[key] = Native.isOnline(sessionPtr, key)
+                    }
+                    // Флуд и офлайн — дёшево и нужно даже в фоне: пользователь
+                    // платит за чужой поток прямо сейчас.
+                    val wasOffline = offline
+                    offline = Native.isOffline(sessionPtr)
+                    appContext?.let { ctx ->
+                        if (offline && !wasOffline) FloodNotifier.showOffline(ctx)
+                        if (!offline && wasOffline) FloodNotifier.cancelOffline(ctx)
+                    }
+                    val flood = decodeList<FloodPeerDto>(Native.floodPeers(sessionPtr))
+                        .map { FloodPeer(it.peer, it.dropped, it.pps, it.blocked) }
+                    if (floodPeers != flood) {
+                        floodPeers.replaceWith(flood)
+                    }
+                    // Уведомление — ОДИН раз на эпизод: иначе оно само станет вторым
+                    // флудом. Эпизод считается законченным, когда поток стих.
+                    val top = flood.maxByOrNull { it.pps }
+                    if (top != null && top.pps >= FLOOD_NOTIFY_PPS) {
+                        if (!floodNotified) {
+                            floodNotified = true
+                            appContext?.let { ctx ->
+                                val who = contacts.firstOrNull { it.key == top.peer }?.displayName
+                                    ?: (top.peer.take(8) + "…")
+                                FloodNotifier.showFlood(ctx, who, top.pps.toInt())
+                            }
+                        }
+                    } else if (flood.isEmpty()) {
+                        floodNotified = false
+                    }
+                    if (benchRecv) {
+                        benchRecvMbps = decodeOrNull<BenchDto>(Native.benchRecvStats(sessionPtr))?.mbps ?: 0.0
+                    }
+                    // Очередь недоставленного: раз в ~10 тиков хватает (ничего не
+                    // теряется, это только повод показать предупреждение).
+                    if (tick % 10 == 0L) refreshOutboxStats()
+                    // Снапшот стата сети — только на переднем плане (экран «Сеть»).
+                    if (foreground) {
+                        decodeOrNull<NetStatsDto>(Native.netStats(sessionPtr))?.let { n ->
+                            netStats = NetStats(
+                                n.peerCount,
+                                n.tree,
+                                n.pingMs,
+                                n.rxRate,
+                                n.txRate,
+                                n.peers.map {
+                                    NetPeer(it.key, it.inbound, it.up, it.latencyMs, it.rxRate, it.txRate, it.uptimeS)
+                                },
+                            )
+                        }
+                    }
+                    // Присутствие открытой группы «N уч · M в сети» — агрегат
+                    // (ростер ∩ онлайн) считает движок, клиент лишь рендерит.
+                    currentGroup?.let { gid ->
+                        decodeOrNull<GroupRosterDto>(Native.groupPresence(sessionPtr, gid))?.let {
+                            currentGroupRoster = GroupRoster(it.total, it.online)
+                        }
+                    }
+                    // Присутствие в комнате: кто сейчас внутри (по свежим маячкам).
+                    currentRoom?.let { gid ->
+                        val list = decodeList<RoomMemberDto>(Native.roomParticipants(sessionPtr, gid))
+                            .map { RoomMember(it.peer, it.audio, it.video) }
+                        // Только при реальном изменении состава/флагов — иначе каждый тик
+                        // (2с в звонке) форсит рекомпозицию всего экрана → рывок видео.
+                        if (roomMembers != list) {
+                            roomMembers.replaceWith(list)
+                        }
+                    }
+                    // Присутствие в группах, к которым мы НЕ подключены:
+                    // показывает кто уже в комнате до того как мы вошли.
+                    groups.forEach { g ->
+                        if (g.gid == currentRoom) return@forEach
+                        val list = decodeList<RoomMemberDto>(Native.roomPresencePeers(sessionPtr, g.gid))
+                            .map { RoomMember(it.peer, it.audio, it.video) }
+                        if (groupPresence[g.gid] != list) groupPresence[g.gid] = list
+                    }
+                    // Диагностика + авто-реконнект меша.
+                    // peers=0 два тика подряд (~6с) → Yggdrasil потерял все пиры.
+                    // Принудительно re-add чтобы обойти внутренний backoff.
+                    if (p == 0) {
+                        zeroPeerTicks++
+                        if (zeroPeerTicks >= 2) {
+                            android.util.Log.w("net", "peers=0 for $zeroPeerTicks ticks — forcing peer reconnect")
+                            Native.reconnectPeers(sessionPtr)
+                            zeroPeerTicks = 0
+                        }
+                    } else {
+                        zeroPeerTicks = 0
+                    }
+                    android.util.Log.i("net", "tick=$tick peers=$p tree=$t incoming=${incomingCall != null} room=${currentRoom != null}")
+                }
+                tick++
+                // В звонке (currentRoom) держим присутствие свежим (2с) даже в фоне;
+                // иначе на переднем плане 3с, в фоне 15с — реже будим CPU.
+                Thread.sleep(
+                    when {
+                        benchRecv -> 1000
+                        currentRoom != null -> 2000
+                        foreground -> 3000
+                        else -> 15000
+                    },
+                )
+            }
+        }.apply {
+            isDaemon = true
+            name = "native-ticker"
+            start()
+        }
+        // Active-speaker + трафик: пока в звонке — опрос ~4 раза/с (быстрее тикера).
+        Thread {
+            var prevBytes = emptyMap<String, Long>()
+            var prevT = 0L
+            while (running) {
+                if (currentRoom != null && sessionPtr != 0L) {
+                    runCatching {
+                        val set = decodeList<String>(Native.roomSpeakingPeers(sessionPtr)).toSet()
+                        if (speakingPeers != set) speakingPeers = set
+                        // Трафик: скорость = дельта байт × 8 / dt.
+                        val tj = decodeOrNull<Map<String, Long>>(Native.roomTrafficJson(sessionPtr)).orEmpty()
+                        val now = System.currentTimeMillis()
+                        val dt = ((now - prevT).coerceAtLeast(1)) / 1000.0
+                        val cur = mutableMapOf<String, Long>()
+                        val kbps = mutableMapOf<String, Int>()
+                        tj.forEach { (k, b) ->
+                            cur[k] = b
+                            val pb = prevBytes[k] ?: b
+                            kbps[k] = (((b - pb).coerceAtLeast(0)) * 8 / 1000 / dt).toInt()
+                        }
+                        prevBytes = cur
+                        prevT = now
+                        if (peerKbps != kbps) peerKbps = kbps
+                    }
+                    Thread.sleep(250)
+                } else {
+                    if (speakingPeers.isNotEmpty()) speakingPeers = emptySet()
+                    if (peerKbps.isNotEmpty()) peerKbps = emptyMap()
+                    prevBytes = emptyMap()
+                    Thread.sleep(500)
+                }
+            }
+        }.apply {
+            isDaemon = true
+            name = "active-speaker"
+            start()
+        }
+    }
+
+    // ── Контакты / чат ────────────────────────────────────────────────────────
+
+    fun refreshContacts() = ops.execute { refreshContactsNow() }
+
+    private fun refreshContactsNow() {
+        val list = decodeList<ContactDto>(Native.listContacts(sessionPtr)).map { it.toModel() }
+        contacts.replaceWith(list)
+        list.forEach { online.putIfAbsent(it.key, Native.isOnline(sessionPtr, it.key)) }
+        // Аватары контактов (M2): байты уже подтянутого блоба по хэшу. Пусто → нет (ещё
+        // не докачался или контакт без аватара) — покажем букву. Читаем на этом же [ops].
+        list.forEach { c ->
+            if (c.avatarId.isNotEmpty() && !contactAvatars.containsKey(c.avatarId)) {
+                Native.blobRead(sessionPtr, c.avatarId).takeIf { it.isNotEmpty() }
+                    ?.let { contactAvatars[c.avatarId] = it }
+            }
+        }
+    }
+
+    fun openChat(key: String) {
+        // Выделение, ответ и правка теперь общие на все чаты, а принадлежат они
+        // ОТКРЫТОМУ: без сброса выбранное в одном чате оказалось бы «выбранным» и
+        // в следующем, а действие ушло бы не туда.
+        leaveChat()
+        currentChat = key
+        unread[key] = 0
+        ops.execute { loadHistory(key) }
+    }
+
+    private fun loadHistory(key: String) {
+        val list = decodeList<MessageDto>(Native.history(sessionPtr, key))
+            .map { it.toModel() }
+            .toMutableList()
+        messages[chatKey(key, group = false)] = list.toMutableStateList()
+        atChatStart -= key // хвост перечитан — выше снова может что-то быть
+        // Байты вложений НЕ читаем заранее: `blob()` возьмёт их при показе, то есть
+        // только для видимых пузырей. Раньше вход в чат тянул с диска всю страницу,
+        // включая вложения, до которых человек не долистает.
+    }
+
+    private fun log(key: String): SnapshotStateList<Message> =
+        messages.getOrPut(chatKey(key, group = false)) { mutableListOf<Message>().toMutableStateList() }
+
+    /** Чаты, где мы уже дошли до начала переписки (просить выше нечего). */
+    internal val atChatStart = mutableSetOf<String>()
+
+    /** Чаты/группы с идущей догрузкой — чтобы прокрутка не запускала её пачкой. */
+    internal val loadingOlder = mutableSetOf<String>()
+
+    /**
+     * Догрузить страницу истории ВЫШЕ показанной. Открытие чата отдаёт только хвост
+     * (движок не поднимает переписку целиком), остальное приезжает по мере прокрутки.
+     *
+     * [done] получает, сколько сообщений добавлено — вызывающему это нужно, чтобы
+     * удержать позицию списка: вставка сверху иначе выглядит как прыжок.
+     */
+    /**
+     * Догрузить страницу истории выше текущей. Вид чата — параметр: страницы
+     * приходят из разных вызовов движка, но условия («уже в начале», «загрузка
+     * идёт») и место вставки общие.
+     */
+    fun loadOlder(key: String, done: (Int) -> Unit, group: Boolean = false) {
+        if (group) {
+            loadOlderGroup(key, done)
+            return
+        }
+        val list = messages[chatKey(key, group = false)]
+        // Курсор берём с первой строки, ПРИШЕДШЕЙ ИЗ БАЗЫ: у локальных (ожидающих
+        // досылки) записей номера строки нет, ссылаться на них не на что.
+        val top = list?.firstOrNull { it.row != 0L }
+        if (list == null || top == null || key in atChatStart || !loadingOlder.add(key)) {
+            done(0)
+            return
+        }
+        ops.execute {
+            try {
+                val page = decodeList<MessageDto>(
+                    Native.historyPage(sessionPtr, key, top.time, top.row),
+                ).map { it.toModel() }
+                if (page.isEmpty()) atChatStart += key
+                if (page.isNotEmpty()) {
+                    list.addAll(0, page)
+                }
+                done(page.size)
+            } finally {
+                loadingOlder -= key
+            }
+        }
+    }
+
+    /** То же для группы: путь общий, отличается только источник страницы. */
+    private fun loadOlderGroup(gid: String, done: (Int) -> Unit) {
+        val list = messages[chatKey(gid, group = true)]
+        val top = list?.firstOrNull { it.row != 0L }
+        val mark = "g:$gid"
+        if (list == null || top == null || mark in atChatStart || !loadingOlder.add(mark)) {
+            done(0)
+            return
+        }
+        ops.execute {
+            try {
+                val page = decodeList<MessageDto>(
+                    Native.groupHistoryPage(sessionPtr, gid, top.time, top.row),
+                ).map { it.toModel() }
+                if (page.isEmpty()) atChatStart += mark
+                if (page.isNotEmpty()) {
+                    list.addAll(0, page)
+                }
+                done(page.size)
+            } finally {
+                loadingOlder -= mark
+            }
+        }
+    }
+
+    /**
+     * Что переслать: источник и ссылки на сообщения. Непусто — открыт выбор адресата.
+     * Выделение при этом уже снято: пока человек ищет чат, лента живёт своей жизнью.
+     */
+    var forwarding by mutableStateOf<Pair<ChatTarget, List<Pair<Long, String>>>?>(null)
+
+    /**
+     * Сообщение, которое сейчас правят (null — обычный ввод). Поле ввода при этом
+     * показывает старый текст: правка — это исправление, а не отправка заново.
+     */
+    var editTarget by mutableStateOf<Message?>(null)
+
+    /** То же для группового сообщения. */
+
+    /** Отправить правку своего сообщения (в группе — вместе с упоминаниями). */
+    fun applyEdit(chat: String, group: Boolean, id: Long, text: String, mentions: List<Mention> = emptyList()) =
+        ops.execute {
+            if (text.isNotBlank()) Native.editMessage(sessionPtr, chat, group, id, text, mentionsJson(mentions))
+        }
+
+    private fun mentionsJson(m: List<Mention>): String = Mentions.toJson(m)
+
+    /** Имя для «@» в ленте: своё — моё имя, чужое — как этот человек записан у меня. */
+    fun mentionName(key: String): String =
+        if (key == me?.pubkey) selfName.ifBlank { appContext?.getString(R.string.common_you).orEmpty() } else peerName(key)
+
+    /** Группы, где меня упомянули в непрочитанном. Как и счётчик, живёт в памяти. */
+    val groupMentioned = mutableStateMapOf<String, Boolean>()
+
+    internal fun wireDmRefs(refs: Collection<MsgRef>): String =
+        dmRefsJson(refs, me?.pubkey.orEmpty())
+
+    private fun wireGroupRefs(refs: Collection<MsgRef>): String = groupRefsJson(refs)
+
+    /** Своё ли это сообщение: сравнение автора с собственным ключом. */
+    fun isMine(ref: MsgRef): Boolean = ref.sender == me?.pubkey
+
+    /** Начать пересылку выделенного в личном чате или «Сохранённом». */
+    fun beginForward(chatKey: String, group: Boolean = false) {
+        val refs = selection.map { it.id to it.sender }
+        if (refs.isEmpty()) return
+        forwarding = ChatTarget(chatKey, group) to refs
+        clearSelection()
+    }
+
+    /**
+     * Скрывать ли автора при пересылке. Решение принимается на КАЖДУЮ пересылку и
+     * сбрасывается вместе с ней: «скрыл один раз» не должно молча распространяться
+     * на все следующие.
+     */
+    var forwardHideAuthor by mutableStateOf(false)
+
+    /** Отправить отложенное в выбранный чат. */
+    fun forwardTo(dst: ChatTarget) {
+        val (src, refs) = forwarding ?: return
+        val hide = forwardHideAuthor
+        forwarding = null
+        forwardHideAuthor = false
+        ops.execute {
+            val json = wireGroupRefs(refs.map { MsgRef(it.first, it.second) })
+            Native.forwardMessages(sessionPtr, src.id, src.group, json, dst.id, dst.group, hide)
+            // Целевой чат может быть открыт прямо сейчас — перечитываем его хвост.
+            if (dst.group && currentGroup == dst.id) {
+                loadGroupHistory(dst.id)
+            } else if (!dst.group && currentChat == dst.id) {
+                loadHistory(dst.id)
+            } else if (!dst.group && dst.id == me?.pubkey) {
+                refreshNotes()
+            }
+        }
+    }
+
+    /** hex автора цитируемого сообщения: «моё» — это я, иначе собеседник. */
+    private fun replyAuthor(peerKey: String, reply: Message?): String = when {
+        reply == null -> ""
+        reply.mine -> me?.pubkey.orEmpty()
+        else -> peerKey
+    }
+
+    /**
+     * Отправить текст в чат. Различие каналов — одна ветка внутри, а не два
+     * публичных метода: снаружи «отправить» означает одно и то же.
+     */
+    fun send(key: String, text: String, group: Boolean = false, mentions: List<Mention> = emptyList()) {
+        if (group) {
+            sendGroup(key, text, mentions)
+            return
+        }
+        if (text.isBlank()) return
+        // Цель ответа снимаем СРАЗУ: пользователь уже нажал «отправить», и оставленная
+        // цитата в поле ввода означала бы, что следующее сообщение тоже уйдёт ответом.
+        val reply = replyTarget
+        replyTarget = null
+        ops.execute {
+            val now = System.currentTimeMillis() / 1000
+            val id = Native.sendTextReply(
+                sessionPtr,
+                key,
+                text,
+                reply?.id ?: 0,
+                reply?.mine ?: false,
+            )
+            if (id >= 0) {
+                // "pending" — Rust подтверждение ещё не пришло; сменится на "delivered" по ACK.
+                log(key).add(
+                    Message(
+                        id,
+                        text,
+                        mine = true,
+                        time = now,
+                        status = "pending",
+                        replyTo = reply?.id ?: 0,
+                        sender = me?.pubkey.orEmpty(),
+                        replySender = replyAuthor(key, reply),
+                    ),
+                )
+            } else {
+                // Движок не смог даже поставить сообщение в очередь (сбой базы):
+                // показываем честно, текст не теряется с экрана.
+                log(key).add(
+                    Message(
+                        --localMsgId,
+                        text,
+                        mine = true,
+                        time = now,
+                        status = "failed",
+                        replyTo = reply?.id ?: 0,
+                        sender = me?.pubkey.orEmpty(),
+                        replySender = replyAuthor(key, reply),
+                    ),
+                )
+            }
+            markSummariesDirty() // своё сообщение — тоже последнее в списке чатов
+        }
+    }
+
+    // ── Действия с сообщением (ADR-006) ───────────────────────────────────────
+
+    /**
+     * Что выделено в открытом чате. Одно на все виды чатов: открыт всегда ровно
+     * один, и держать отдельный набор для группы значило бы синхронизировать два
+     * состояния там, где хватает одного.
+     */
+    var selection by mutableStateOf<Set<MsgRef>>(emptySet())
+        internal set
+
+    /** На какое сообщение отвечаем (null — обычная отправка). */
+    var replyTarget by mutableStateOf<Message?>(null)
+        private set
+
+    fun toggleSelect(m: Message) {
+        // Сообщения без id (старый клиент) выбрать нельзя: с ними нечего делать —
+        // ни отозвать, ни ответить, а «удалить у себя» без ссылки не адресуется.
+        if (m.id == 0L) return
+        val ref = MsgRef(m.id, m.sender)
+        selection = if (ref in selection) selection - ref else selection + ref
+    }
+
+    /** Забыть всё, что относится к прежде открытому чату. */
+    fun leaveChat() {
+        selection = emptySet()
+        replyTarget = null
+        editTarget = null
+    }
+
+    fun clearSelection() {
+        selection = emptySet()
+    }
+
+    fun startReply(m: Message) {
+        replyTarget = m
+        selection = emptySet()
+    }
+
+    fun cancelReply() {
+        replyTarget = null
+    }
+
+    /** Текст выделенного для буфера обмена: несколько сообщений — с новой строки. */
+    /** Текст выделенного (для копирования) — из ленты любого чата. */
+    fun selectedTextOf(id: String, group: Boolean = false): String {
+        val sel = selection
+        return chat(id, group)
+            .filter { MsgRef(it.id, it.sender) in sel }
+            .joinToString("\n") { if (it.text.isNotEmpty()) it.text else it.name }
+    }
+
+    fun selectedText(key: String): String = selectedTextOf(key)
+
+    /** Удалить выделенное только у себя. */
+    fun deleteSelected(key: String, group: Boolean = false) {
+        val refs = selection.toList()
+        if (refs.isEmpty()) return
+        selection = emptySet()
+        ops.execute {
+            if (group) {
+                Native.groupDeleteMessages(sessionPtr, key, wireGroupRefs(refs))
+                // Ленту группы перечитает событие от движка.
+            } else {
+                Native.deleteMessages(sessionPtr, key, wireDmRefs(refs))
+                reloadHistory(key)
+            }
+        }
+    }
+
+    /** Отозвать выделенные СВОИ сообщения у собеседника. Чужие не трогаем. */
+    fun retractSelected(key: String, group: Boolean = false) {
+        val ids = selection.filter { isMine(it) }.map { it.id }
+        if (ids.isEmpty()) return
+        selection = emptySet()
+        val json = ids.joinToString(prefix = "[", postfix = "]")
+        ops.execute {
+            if (group) {
+                Native.groupRetractMessages(sessionPtr, key, json)
+            } else {
+                Native.retractMessages(sessionPtr, key, json)
+                reloadHistory(key)
+            }
+        }
+    }
+
+    /** Перечитать историю чата после удаления/отзыва.
+     *
+     *  Именно [loadHistory], а не «очистить и долить»: он ЗАМЕНЯЕТ список целиком и
+     *  возвращает в ленту неотправленное из офлайн-очереди (его в БД нет). Ручная
+     *  чистка на месте оставляла в ленте старые копии — сообщения задваивались. */
+    private fun reloadHistory(key: String) = loadHistory(key)
+
+    /** Отправить вложение (M2): движок чистит картинку (scrub), шлёт блоб + медиа-
+     *  сообщение. Хэш блоба считается от ОЧИЩЕННЫХ байт в движке, поэтому своё
+     *  сообщение подтягиваем перечитыванием истории из стора (там верный blob_id). */
+    fun sendMedia(key: String, content: ByteArray, mime: String, name: String) = ops.execute {
+        if (Native.sendMedia(sessionPtr, key, content, mime, name) >= 0 && currentChat == key) {
+            loadHistory(key)
+        }
+        markSummariesDirty()
+    }
+
+    /** Отправить вложение с метаданными для карточки (длительность/кадр/превью).
+     *  Их извлекает клиент — движок медиа не декодирует. */
+    /**
+     * Отправить вложение. Различие каналов — одна ветка внутри: снаружи это одно
+     * действие, и полоска «отвечаем на …» снимается одинаково для обоих.
+     */
+    fun sendMediaWithMeta(
+        key: String,
+        content: ByteArray,
+        mime: String,
+        name: String,
+        meta: MediaMeta,
+        caption: String = "",
+        group: Boolean = false,
+    ) = ops.execute {
+        // Цель ответа снимаем в тот же момент, что и у текста: иначе полоска
+        // «отвечаем на …» висела бы после отправки вложения, а ссылка терялась.
+        val reply = replyTarget
+        replyTarget = null
+        if (group) {
+            Native.groupSendMedia(
+                sessionPtr, key, content, mime, name,
+                meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+                reply?.id ?: 0, reply?.sender.orEmpty(),
+            )
+        } else {
+            val id = Native.sendMediaWithMeta(
+                sessionPtr, key, content, mime, name,
+                meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+                reply?.id ?: 0, replyAuthor(key, reply),
+            )
+            if (id >= 0 && currentChat == key) loadHistory(key)
+        }
+        markSummariesDirty()
+    }
+
+    /** Отправить вложение ФАЙЛОМ (потоково). Файл должен пережить отдачу — движок
+     *  читает из него чанки по запросу получателя. Своя зашифрованная копия
+     *  считается долго, поэтому на [heavy]: текст, отправленный следом, может
+     *  уйти раньше файла — как и подобает тому, что уже готово. */
+    fun sendMediaFile(
+        key: String,
+        path: String,
+        mime: String,
+        name: String,
+        meta: MediaMeta,
+        caption: String = "",
+        group: Boolean = false,
+    ) {
+        // Цель ответа снимаем сразу, в момент нажатия — как у текста.
+        val reply = replyTarget
+        replyTarget = null
+        heavy.execute { sendMediaFileNow(key, path, mime, name, meta, caption, group, reply) }
+    }
+
+    private fun sendMediaFileNow(
+        key: String,
+        path: String,
+        mime: String,
+        name: String,
+        meta: MediaMeta,
+        caption: String,
+        group: Boolean,
+        reply: Message?,
+    ) {
+        if (group) {
+            Native.groupSendMediaFile(
+                sessionPtr, key, path, mime, name,
+                meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+                reply?.id ?: 0, reply?.sender.orEmpty(),
+            )
+        } else {
+            val id = Native.sendMediaFile(
+                sessionPtr, key, path, mime, name,
+                meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
+                reply?.id ?: 0, replyAuthor(key, reply),
+            )
+            if (id >= 0 && currentChat == key) loadHistory(key)
+        }
+        markSummariesDirty()
+    }
+
+    // ── Флуд и смена адреса (ADR-007) ────────────────────────────────────────
+
+    /** Кто сейчас заваливает нас трафиком (по убыванию темпа). Пусто — флуда нет. */
+    val floodPeers = mutableStateListOf<FloodPeer>()
+
+    /** Уведомление о текущем эпизоде флуда уже показано. */
+    private var floodNotified = false
+
+    /** Мы намеренно вне сети: кнопка «офлайн» или пауза смены адреса. */
+    var offline by mutableStateOf(false)
+        private set
+
+    /** Эпоха адреса: 0 — адрес ни разу не менялся. */
+    var transportEpoch by mutableStateOf(0)
+        private set
+
+    /** Ход смены адреса: null — не идёт. */
+    var rotation by mutableStateOf<RotationState?>(null)
+        private set
+
+    /** Уйти в офлайн: разорвать соединения. Чужой поток перестаёт тратить трафик —
+     *  ценой того, что и свои сообщения не приходят. */
+    fun goOffline() = ops.execute {
+        Native.goOffline(sessionPtr)
+        offline = true
+    }
+
+    /** Вернуться в сеть на текущем адресе. */
+    fun goOnline() = ops.execute {
+        if (Native.goOnline(sessionPtr)) offline = false
+    }
+
+    /**
+     * Сменить адрес: пауза офлайн [ROTATE_GAP_SECS] секунд, затем подъём на новом
+     * ключе и рассылка подписанного объявления выбранным контактам.
+     *
+     * Пауза обязательна: без неё новый узел наследует маршрутную позицию старого
+     * ключа и поток флудера продолжает приходить (проверено на публичном меше).
+     * Поэтому её не прячем, а показываем обратным отсчётом.
+     */
+    fun rotateAddress(recipients: List<String>) {
+        rotation = RotationState(secondsLeft = ROTATE_GAP_SECS, told = recipients.size)
+        offline = true
+        ops.execute { Native.rotateTransport(sessionPtr, recipients.joinToString(","), ROTATE_GAP_SECS) }
+        // Отсчёт — отдельным потоком: сам движок в это время спит в паузе.
+        Thread {
+            for (left in ROTATE_GAP_SECS - 1 downTo 0) {
+                Thread.sleep(1000)
+                rotation = rotation?.copy(secondsLeft = left)
+            }
+        }.start()
+    }
+
+    /** Убрать итоговую карточку смены адреса. */
+    fun dismissRotation() {
+        rotation = null
+    }
+
+    /** Заказанные пользователем докачки: blobId → доля 0..1, [DOWNLOAD_INIT] — ждём
+     *  первых чанков (пир может быть офлайн). Движок хранит намерение на диске и сам
+     *  продолжает, когда пир появится, — следить за этим пользователь не должен. */
+    val downloads = mutableStateMapOf<String, Float>()
+
+    /** Подтянуть заказы, пережившие перезапуск (иначе карточка снова звала бы «Скачать»). */
+    private fun loadWanted() {
+        decodeList<String>(Native.wantedBlobs(sessionPtr)).forEach { id ->
+            if (id.isNotEmpty() && !downloads.containsKey(id)) downloads[id] = DOWNLOAD_INIT
+        }
+    }
+
+    /** Скачать вложение по кнопке (крупное не тянется автоматически).
+     *  Готовность придёт событием `blob_received` — история перечитается. */
+    fun downloadMedia(peer: String, blobId: String) {
+        downloads[blobId] = DOWNLOAD_INIT
+        ops.execute { Native.downloadMedia(sessionPtr, peer, blobId) }
+    }
+
+    /** Код для своего QR (ADR-007): личность + подписанный текущий адрес, если он
+     *  менялся. Читается с движка, а не собирается в UI: формат — контракт движка. */
+    fun myContactCode(): String = Native.myContactCode(sessionPtr)
+
+    fun addContact(key: String, name: String) = ops.execute {
+        val r = Native.addContact(sessionPtr, key, name)
+        if (r == "added") refreshContactsNow()
+        addStatus = r
+    }
+
+    fun toggleVerified(key: String) = ops.execute {
+        val c = contacts.firstOrNull { it.key == key } ?: return@execute
+        Native.setVerified(sessionPtr, key, !c.verified)
+        refreshContactsNow()
+    }
+
+    fun rename(key: String, name: String) = ops.execute {
+        Native.renameContact(sessionPtr, key, name)
+        refreshContactsNow()
+    }
+
+    /** Удалить контакт вместе с перепиской (движок стирает и историю). */
+    fun remove(key: String) = ops.execute {
+        Native.removeContact(sessionPtr, key)
+        if (currentChat == key) currentChat = null
+        forgetChatLocally(key)
+        refreshContactsNow()
+    }
+
+    /** Очистить историю личного чата у себя (контакт остаётся). Вместе с ней уходит
+     *  и неотправленное — иначе оно ушло бы позже и вернулось в пустой чат. */
+    fun clearHistory(key: String) = ops.execute {
+        Native.clearDmHistory(sessionPtr, key)
+        forgetChatLocally(key)
+    }
+
+    /** Убрать из памяти клиента то, что движок уже стёр: лог, закрепы, счётчик. */
+    private fun forgetChatLocally(key: String) {
+        messages[chatKey(key, group = false)]?.clear()
+        pinned.remove(key) // закрепы — по голому ключу собеседника
+        unread.remove(key)
+        refreshChatSummariesNow()
+    }
+
+    // ── Гейт контактов (запросы от незнакомцев) ────────────────────────────
+    fun refreshRequests() = ops.execute { refreshRequestsNow() }
+
+    private fun refreshRequestsNow() {
+        val list = decodeList<ContactRequestDto>(Native.contactRequests(sessionPtr))
+            .map { ContactRequest(it.key, it.fingerprint, it.preview, it.time) }
+            .sortedByDescending { it.time }
+        contactRequests.replaceWith(list)
+    }
+
+    /** Одобрить запрос: незнакомец становится контактом. */
+    fun acceptRequest(key: String) = ops.execute {
+        if (Native.acceptContactRequest(sessionPtr, key)) {
+            refreshRequestsNow()
+            refreshContactsNow()
+            // Движок положил первое сообщение незнакомца в чат — показать его в списке.
+            refreshChatSummariesNow()
+        }
+    }
+
+    /** Отклонить запрос (тихо). */
+    fun declineRequest(key: String) = ops.execute {
+        Native.declineContactRequest(sessionPtr, key)
+        refreshRequestsNow()
+    }
+
+    /** Заблокировать пира: будущие сообщения тихо дропаются. */
+    fun blockRequest(key: String) = ops.execute {
+        Native.blockContact(sessionPtr, key)
+        refreshRequestsNow()
+        refreshContactsNow()
+    }
+
+    /** Применить одно событие из ядра. Вызывается из [pollThread] (фон). */
+    private fun applyEvent(json: String) {
+        if (json.isEmpty()) return
+        // Разбор по ТИПУ, а не по строковым ключам: набор полей каждого события
+        // зафиксирован в Dto.kt и сверяется компилятором с dto.rs.
+        val ev = parseEvent(json)
+        // Что меняет ПОСЛЕДНЕЕ сообщение чата или его статус — меняет и строку в
+        // списке. Флаг, а не пересчёт на месте: он гасится один раз за пачку.
+        when (ev) {
+            is EngineEvent.MessageEv, is EngineEvent.Ack,
+            is EngineEvent.Retracted, is EngineEvent.MessageEdited,
+            EngineEvent.GroupsChanged,
+            is EngineEvent.Undelivered,
+            -> markSummariesDirty()
+            else -> {}
+        }
+        when (ev) {
+            is EngineEvent.Presence -> {
+                online[ev.peer] = ev.online
+                if (contacts.none { it.key == ev.peer }) refreshContactsNow()
+            }
+            is EngineEvent.MessageEv -> {
+                val m = ev.msg.toModel()
+                if (!ev.group && contacts.none { it.key == ev.chat }) refreshContactsNow()
+                // Миниатюра — отдельный мелкий блоб: подтянем, если уже есть. Байты
+                // самого вложения лента возьмёт при показе.
+                m.thumbId.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
+                upsert(if (ev.group) groupLog(ev.chat) else log(ev.chat), m)
+                // Своё и системные строки (кто вошёл/вышел) непрочитанным не считаем:
+                // счётчик обещает сообщения, за которыми стоит человек.
+                if (!m.mine && !m.system) {
+                    if (ev.group) {
+                        if (currentGroup != ev.chat) {
+                            groupUnread[ev.chat] = (groupUnread[ev.chat] ?: 0) + 1
+                            if (m.mentions.any { it.key == me?.pubkey }) groupMentioned[ev.chat] = true
+                        }
+                    } else if (currentChat != ev.chat) {
+                        unread[ev.chat] = (unread[ev.chat] ?: 0) + 1
+                    }
+                }
+            }
+            // Собеседник отозвал своё сообщение: движок уже удалил его из истории,
+            // здесь убираем из открытой ленты, чтобы не ждать перезахода в чат.
+            is EngineEvent.Retracted -> {
+                messages[chatKey(ev.peer, group = false)]?.removeAll { it.id == ev.id && !it.mine }
+            }
+            is EngineEvent.Ack -> updateStatus(ev.peer, ev.id, "delivered")
+            // Ретраи в памяти выдохлись, сообщение ждёт в очереди движка и уйдёт,
+            // когда собеседник появится.
+            is EngineEvent.Undelivered -> updateStatus(ev.peer, ev.id, "queued")
+            is EngineEvent.RoomInvite -> {
+                // Стабильная комната: если мы УЖЕ в этой комнате с этим пиром, он
+                // просто перезашёл — остаёмся в звонке, его возврат отразит presence.
+                // НЕ рвём звонок и не показываем промпт заново (иначе teardown +
+                // каскад decline — это и было «реентри ломает звонок»).
+                if (currentRoom == ev.roomId && dmCallPeer == ev.peer) return
+                val existing = incomingCall
+                // Свободны — обычный входящий. Тот же собеседник перезванивает —
+                // обновляем экран входящего. От другого пира, пока заняты — игнор.
+                if (existing == null || existing.peer == ev.peer) {
+                    incomingCall = IncomingRoomCall(ev.peer, ev.roomId, ev.audio, ev.video)
+                    val callerName = contacts.firstOrNull { it.key == ev.peer }?.displayName
+                        ?: appContext?.getString(R.string.common_contact).orEmpty()
+                    appContext?.let { IncomingCallReceiver.show(it, callerName) }
+                }
+            }
+            is EngineEvent.RoomDecline -> {
+                if (ev.peer == dmCallPeer) leaveRoom()
+                // Звонящий сбросил до того как мы ответили — гасим уведомление.
+                if (incomingCall?.peer == ev.peer) {
+                    incomingCall = null
+                    appContext?.let { IncomingCallReceiver.cancel(it) }
+                }
+            }
+            is EngineEvent.RoomPresence -> if (ev.gid == currentRoom) {
+                // Мгновенно отражаем участника, не дожидаясь опроса тикером.
+                if (ev.left) {
+                    roomMembers.removeAll { it.peer == ev.peer } // явный выход — убрать сразу
+                } else {
+                    val rm = RoomMember(ev.peer, ev.flags and 0b01 != 0, ev.flags and 0b10 != 0)
+                    val idx = roomMembers.indexOfFirst { it.peer == ev.peer }
+                    if (idx >= 0) roomMembers[idx] = rm else roomMembers.add(rm)
+                }
+            }
+            // Гейт: незнакомец постучался — обновить очередь запросов (карточка в UI).
+            is EngineEvent.ContactRequestEv -> refreshRequestsNow()
+            // Приглашение в группу пришло/принято/отклонено — обновить карточки.
+            EngineEvent.GroupInvitesChanged -> refreshGroupInvitesNow()
+            // Закреп общий для всех: его мог поставить собеседник или админ группы.
+            is EngineEvent.PinsChanged -> refreshPins(ev.chat, groups.any { it.gid == ev.chat })
+            // Правка приходит и на свои сообщения (эхо движка), и на чужие: меняем
+            // текст на месте, чтобы не перечитывать всю ленту.
+            is EngineEvent.MessageEdited -> {
+                val stamp = System.currentTimeMillis() / 1000
+                messages[chatKey(ev.chat, group = false)]?.let { list ->
+                    val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
+                    if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp)
+                }
+                messages[chatKey(ev.chat, group = true)]?.let { list ->
+                    val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
+                    // Упоминания заменяются вместе с текстом: их участки привязаны к нему.
+                    if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp, mentions = ev.mentions)
+                }
+                if (ev.chat == me?.pubkey) {
+                    val i = notes.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
+                    if (i >= 0) notes[i] = notes[i].copy(text = ev.text, editedAt = stamp)
+                }
+            }
+            // M2: контакт прислал профиль (имя/аватар) → перечитать список.
+            EngineEvent.ContactsChanged -> refreshContactsNow()
+            // Адрес сменился: обновляем показ и завершаем карточку хода.
+            is EngineEvent.TransportRotated -> {
+                transportEpoch = ev.epoch
+                offline = false
+                rotation = rotation?.copy(secondsLeft = 0, newAddress = ev.address)
+                me = me?.copy(address = ev.address)
+            }
+            // Новый узел не поднялся: карточку хода закрываем и говорим, что вышло.
+            // Адрес прежний; если и на него вернуться не удалось — мы офлайн, и
+            // вернёт сеть обычная кнопка «онлайн».
+            is EngineEvent.TransportRotateFailed -> {
+                rotation = null
+                offline = !ev.online
+                val msg = if (ev.online) R.string.rotate_failed else R.string.rotate_failed_offline
+                appContext?.let { ctx ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        android.widget.Toast.makeText(ctx, ctx.getString(msg), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            is EngineEvent.BlobProgress -> {
+                if (ev.total > 0) downloads[ev.id] = ev.done / ev.total.toFloat()
+            }
+            // Докачка не началась — карточка снова предлагает «Скачать», а человек
+            // узнаёт причину, а не смотрит на вечный кружок.
+            is EngineEvent.BlobFailed -> {
+                downloads.remove(ev.id)
+                val msg = if (ev.reason == "no_space") R.string.download_no_space else R.string.download_too_large
+                appContext?.let { ctx ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        android.widget.Toast.makeText(ctx, ctx.getString(msg), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            // Докачался блоб: аватар контакта — перечитать контакты; вложение чата —
+            // положить байты в реактивный кэш (пузырь перерисуется).
+            is EngineEvent.BlobReceived -> {
+                downloads.remove(ev.id)
+                savedBlobs[ev.id] = true
+                // Пометка «скачано» — на месте во всех открытых лентах: блоб
+                // контент-адресный, один файл мог прийти в несколько чатов.
+                for (list in messages.values) {
+                    for (i in list.indices) {
+                        val m = list[i]
+                        if (m.blobId == ev.id && !m.downloaded) list[i] = m.copy(downloaded = true)
+                    }
+                }
+                if (contacts.any { it.avatarId == ev.id }) refreshContactsNow()
+                // Байты в память — только тому, что рисуется из памяти (фото,
+                // голосовое, аватар). Докачанное видео на гигабайт сюда не читаем.
+                if (ev.size <= INLINE_BLOB_MAX) reads.execute { cacheBlob(ev.id) }
+            }
+            EngineEvent.GroupsChanged -> {
+                refreshGroupsNow()
+                currentGroup?.let {
+                    loadGroupHistory(it)
+                    loadGroupMembers(it)
+                }
+            }
+            is EngineEvent.GroupRemoved -> {
+                // ADR-004: нас отозвали. Если открыт этот чат — выходим и уведомляем.
+                if (currentGroup == ev.gid) currentGroup = null
+                appContext?.let { ctx ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        android.widget.Toast.makeText(
+                            ctx,
+                            ctx.getString(R.string.group_you_removed),
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
+            }
+            is EngineEvent.GroupRetracted -> loadGroupHistory(ev.gid)
+            // Событие, которого этот клиент ещё не знает: молча пропускаем.
+            EngineEvent.Unknown -> Unit
+        }
+    }
+
+    private fun updateStatus(peer: String, id: Long, status: String) {
+        val l = messages[chatKey(peer, group = false)] ?: return
+        val idx = l.indexOfFirst { it.id == id && it.mine }
+        if (idx >= 0) l[idx] = l[idx].copy(status = status)
+    }
+
+    // ── DM-звонки (через комнату) ─────────────────────────────────────────────
+
+    /** Позвонить пиру: создать DM-комнату, отправить приглашение, начать медиа. */
+    fun callDm(peer: String, audio: Boolean = true, video: Boolean = false) {
+        if (currentRoom != null) return
+        val ctx = appContext ?: return
+        val name = contacts.firstOrNull { it.key == peer }?.displayName ?: ""
+        startCall {
+            val roomId = Native.roomInviteDm(sessionPtr, peer, audio, video)
+            if (roomId.isEmpty()) return@startCall
+            currentRoom = roomId
+            dmCallPeer = peer
+            roomMembers.clear()
+            CallService.start(ctx, name)
+            startRoomMedia(ctx, roomId, video)
+        }
+    }
+
+    /** Принять входящий звонок с ПРЕСЕТОМ своего mic/video (выбор join'ера до
+     *  входа, НЕ флаги звонящего). Дефолт — мик вкл, видео выкл. Зовут либо в
+     *  личную комнату, либо в комнату группы — туда и входим. */
+    fun acceptDmCall(audio: Boolean = true, video: Boolean = false) {
+        val ic = incomingCall ?: return
+        incomingCall = null
+        val ctx = appContext ?: return
+        IncomingCallReceiver.cancel(ctx)
+        if (isGroupRoom(ic.roomId)) {
+            muted = !audio
+            joinRoom(ic.roomId, audio, video)
+            return
+        }
+        val name = contacts.firstOrNull { it.key == ic.peer }?.displayName ?: ""
+        muted = !audio // мик-пресет → стартовое состояние мьюта
+        startCall {
+            val roomId = Native.roomJoinDm(sessionPtr, ic.peer, audio, video)
+            if (roomId.isEmpty()) return@startCall
+            currentRoom = roomId
+            dmCallPeer = ic.peer
+            roomMembers.clear()
+            CallService.start(ctx, name)
+            startRoomMedia(ctx, roomId, video)
+        }
+    }
+
+    /** Отклонить входящий DM-звонок. */
+    fun declineDmCall() {
+        val ic = incomingCall ?: return
+        incomingCall = null
+        appContext?.let { IncomingCallReceiver.cancel(it) }
+        if (isGroupRoom(ic.roomId)) {
+            ops.execute { Native.roomDeclineGroup(sessionPtr) }
+        } else {
+            ops.execute { Native.roomDeclineDm(sessionPtr, ic.peer) }
+        }
+    }
+
+    /** Комната — групповая (её id = gid группы), а не личная. */
+    fun isGroupRoom(roomId: String): Boolean = groups.any { it.gid == roomId }
+
+    /** Кого из группы можно позвать в текущую комнату: ростер минус те, кто уже тут.
+     *  В личном звонке звать некого — там нет ростера. */
+    fun ringCandidates(): List<String> {
+        val gid = currentRoom ?: return emptyList()
+        if (dmCallPeer != null) return emptyList()
+        val here = roomMembers.map { it.peer }.toSet()
+        return (groupMemberKeys[gid] ?: emptyList()).filter { it !in here }
+    }
+
+    /** Позвать выбранных участников группы в текущую комнату. */
+    fun ringIntoRoom(peers: List<String>) {
+        val gid = currentRoom ?: return
+        if (peers.isEmpty()) return
+        val audio = !muted
+        val video = videoActive
+        ops.execute {
+            val sent = Native.roomRing(sessionPtr, gid, peers.joinToString(","), audio, video)
+            val ctx = appContext ?: return@execute
+            val text = if (sent > 0) {
+                ctx.resources.getQuantityString(R.plurals.call_ring_sent, sent, sent)
+            } else {
+                ctx.getString(R.string.call_ring_failed)
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(ctx, text, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** Создать аудио-сессию комнаты (Opus-битрейт/режим + fx + устройство из настроек).
+     *  Используется при старте звонка и при «Применить» в настройках звука (рестарт). */
+    private fun startRoomAudioSession(ctx: android.content.Context, gid: String) {
+        // битрейт/режим из настроек звука (audioBitrate: дефолт 24к=голос при «Авто»);
+        // music = Opus Audio-режим на верхней половине диапазона.
+        val params = decodeOrNull<CallParamsDto>(
+            Native.roomAudioStart(sessionPtr, gid, audioBitrate, audioBitrate >= 32_000),
+        )
+        val sr = params?.sampleRate?.takeIf { it > 0 } ?: 48_000
+        val ch = params?.channels?.takeIf { it > 0 } ?: 1
+        roomAudio = CallAudio(
+            ctx,
+            { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
+            { out -> Native.roomPullAudio(sessionPtr, out) },
+            { m -> Native.roomSetMuted(sessionPtr, m) },
+            fx = audioFx,
+            inputDevice = selectedInputDevice(),
+            onLevel = { lvl -> if (showAudioSettings) micLevel = lvl }, // только когда экран открыт
+        ).also {
+            it.start(sr, ch)
+            it.setMuted(muted)
+        } // mic-пресет применяем сразу
+        applyOutputDevice() // применить выбранный вывод (встроенный/динамик/bt) к свежей сессии
+    }
+
+    /** Применить настройки звука НА ЛЕТУ — без перезвона и без дыры в звуке:
+     *  вывод/вход/AEC-NS-AGC/битрейт меняются на работающей сессии. Режим Opus
+     *  (Голос↔Аудио) — только на следующем звонке (live менять нельзя). */
+    fun applyAudioSettings() {
+        showAudioSettings = false
+        applyOutputDevice() // вывод — через AudioManager
+        roomAudio?.applyFx(audioFx) // обработка — на существующих эффектах
+        roomAudio?.setInputDevice(selectedInputDevice()) // вход — preferredDevice
+        if (currentRoom != null) {
+            ops.execute { Native.roomSetAudioBitrate(sessionPtr, audioBitrate) }
+        }
+    }
+
+    private fun startRoomMedia(ctx: android.content.Context, gid: String, video: Boolean) {
+        startRoomAudioSession(ctx, gid)
+        if (video) {
+            videoActive = true
+            maybeStartVideoSender() // стартует, когда surface тайла «Вы» будет готов
+        }
+    }
+
+    /** Подключить surface тайла к видео-потоку участника. Идемпотентно: если у пира
+     *  уже есть приёмник — не пересоздаём (защита от тёрки декодеров). */
+    fun attachVideoReceiver(peerHex: String, surface: android.view.Surface) {
+        if (videoReceivers.containsKey(peerHex)) return
+        videoReceivers[peerHex] = VideoReceiver(
+            surface,
+            videoQuality.width,
+            videoQuality.height,
+            videoQuality.fps,
+            onRotation = { rot -> roomMemberRotation[peerHex] = rot },
+        ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
+    }
+
+    /** Отключить приёмник пира (его тайл ушёл — вышел / перестал слать видео). */
+    fun detachVideoReceiver(peerHex: String) {
+        videoReceivers.remove(peerHex)?.stop()
+    }
+
+    /** Переключить заглушение микрофона (кнопка в экране звонка). */
+    fun toggleMute() {
+        muted = !muted
+        roomAudio?.setMuted(muted)
+        propagateAvFlags()
+    }
+
+    /** Вкл/выкл свою камеру по ходу звонка (кнопка «Видео»). */
+    fun toggleVideo() {
+        if (videoActive) {
+            videoActive = false
+            stopVideoSender()
+        } else {
+            videoActive = true
+            maybeStartVideoSender() // реально стартует, когда surface тайла «Вы» готов
+        }
+        propagateAvFlags()
+    }
+
+    /** Разослать текущие A/V-флаги (маячок), чтобы собеседники знали, что у нас
+     *  сейчас включено, и подписались/отписались на наше видео. roomJoin обновляет
+     *  флаги комнаты + шлёт presence (для DM — пиру). */
+    private fun propagateAvFlags() {
+        val gid = currentRoom ?: return
+        val audioOn = !muted
+        val videoOn = videoActive
+        ops.execute { Native.roomJoin(sessionPtr, gid, audioOn, videoOn) }
+    }
+
+    /** Стартуем отправку видео ТОЛЬКО когда совпало: видео включено, surface тайла
+     *  «Вы» готов (он же — превью), отправитель ещё не запущен. Камера рендерит в
+     *  энкодер + превью ОДНОЙ сессией (без хрупкой пересборки). Нет surface (ты
+     *  один) → не кодируем/не шлём — ровно как в дизайне. */
+    private fun maybeStartVideoSender() {
+        val ctx = appContext ?: return
+        val preview = selfPreviewSurface
+        if (!videoActive || videoSender != null || preview == null) return
+        val cap = when {
+            videoQuality.height >= 1080 -> 24
+            videoQuality.height >= 720 -> 14
+            else -> 9
+        }
+        Native.roomSetVideoCap(sessionPtr, cap)
+        // Стартуем с текущей стороны камеры (cameraFront): дефолт — фронталка, но
+        // экран шаринга мог выбрать тыловую (applyVideoShare ставит cameraFront).
+        videoSender = VideoSender(
+            ctx,
+            videoQuality.width,
+            videoQuality.height,
+            videoQuality.fps,
+            videoQuality.bitrate,
+            startFront = cameraFront,
+        ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start(preview) }
+    }
+
+    private fun stopVideoSender() {
+        val vs = videoSender
+        videoSender = null
+        Thread { runCatching { vs?.stop() } }.apply { isDaemon = true }.start()
+    }
+
+    /** Переключить фронт/тыл по ходу звонка (чип смены камеры). */
+    fun switchCamera() {
+        cameraFront = !cameraFront
+        videoSender?.switchCamera()
+    }
+
+    /** Surface тайла «Вы» появился/ушёл. Появился → можно стартовать отправку;
+     *  ушёл при включённом видео (ты остался один, тайла «Вы» нет) → стоп отправки. */
+    fun setSelfPreviewSurface(surface: android.view.Surface?) {
+        selfPreviewSurface = surface
+        if (surface != null) {
+            maybeStartVideoSender()
+        } else if (videoActive) {
+            stopVideoSender()
+        }
+    }
+
+    // ── Комната-звонок (присутствие, Discord-style) ───────────────────────────
+
+    /** Войти в комнату группы: маячок присутствия + мультипати аудио (микрофон
+     *  всем участникам, приём от каждого с миксом). */
+    fun joinRoom(gid: String, audio: Boolean = true, video: Boolean = false) {
+        currentRoom = gid
+        dmCallPeer = null
+        roomMembers.clear()
+        val ctx = appContext ?: return
+        val name = groups.firstOrNull { it.gid == gid }?.name ?: ""
+        startCall {
+            Native.roomJoin(sessionPtr, gid, audio, video)
+            CallService.start(ctx, name)
+            startRoomMedia(ctx, gid, video)
+        }
+    }
+
+    /** Выйти из комнаты: стоп медиа + маячок «вышел». */
+    fun leaveRoom() {
+        val gid = currentRoom ?: return
+        // Запомнить ДО очистки. peerPresent: активный звонок (пир в комнате) vs
+        // ещё дозваниваемся (пира в комнате нет) — от этого зависит, слать ли decline.
+        val peer = dmCallPeer
+        val peerPresent = peer != null && roomMembers.any { it.peer == peer }
+        currentRoom = null
+        dmCallPeer = null
+        videoActive = false
+        roomMembers.clear()
+        muted = false
+        micLevel = 0f // вывод (audioOut) теперь персистится как настройка — не сбрасываем
+        callGen.incrementAndGet() // отложенный старт этого звонка уже не начнётся
+        val vrs = videoReceivers.values.toList()
+        videoReceivers.clear()
+        val ctx = appContext
+        // Мимо ops — см. [callGen]. Сначала гасим отправку и захват, потом остальное.
+        Thread {
+            synchronized(callLock) {
+                Native.roomAudioStop(sessionPtr)
+                val a = roomAudio
+                roomAudio = null
+                val vs = videoSender
+                videoSender = null
+                runCatching { a?.stop() }
+                runCatching { vs?.stop() }
+                // RoomDecline шлём ТОЛЬКО чтобы отменить ДОЗВОН (пир ещё не вошёл) → у
+                // него гаснет экран входящего+уведомление. Выход из АКТИВНОЙ комнаты —
+                // только presence LEFT (roomLeave): пир ОСТАЁТСЯ в комнате (комнатная
+                // модель), мы не «кладём ему трубку».
+                if (peer != null && !peerPresent) Native.roomDeclineDm(sessionPtr, peer)
+                Native.roomLeave(sessionPtr, gid)
+                if (ctx != null) CallService.stop(ctx)
+            }
+            vrs.forEach { runCatching { it.stop() } }
+        }.apply { isDaemon = true }.start()
+    }
+
+    // ── Группы ──────────────────────────────────────────────────────────────
+
+    fun refreshGroups() = ops.execute { refreshGroupsNow() }
+
+    private fun refreshGroupsNow() {
+        val list = decodeList<GroupRowDto>(Native.groupList(sessionPtr))
+            .map { Group(it.gid, it.name, it.members, it.admin, it.archived) }
+        groups.replaceWith(list)
+    }
+
+    // ── Сводка чатов для главной ────────────────────────────────────────────
+
+    /** Строки списка чатов по ключу `dm:<hex>` / `g:<gid>`. Заполняется движком:
+     *  последнее сообщение, закреп и «без звука». Непрочитанные и присутствие —
+     *  не отсюда ([unread], [online], [groupPresence]). */
+    val chatSummaries = mutableStateMapOf<String, ChatSummary>()
+
+    /** Ключ строки в [chatSummaries]: вид чата входит в ключ, потому что hex группы
+     *  и hex контакта живут в одном пространстве имён и однажды совпали бы. */
+    fun chatKey(id: String, group: Boolean): String = if (group) "g:$id" else "dm:$id"
+
+    /** Взведён — сводку надо перечитать. Гасится в [startLoops] после пачки событий. */
+    @Volatile private var summariesDirty = false
+
+    /** Пометить список чатов устаревшим (последнее сообщение/статус изменились). */
+    internal fun markSummariesDirty() {
+        summariesDirty = true
+    }
+
+    fun refreshChatSummaries() = ops.execute { refreshChatSummariesNow() }
+
+    private fun refreshChatSummariesNow() {
+        val rows = decodeList<ChatSummaryDto>(Native.chatSummaries(sessionPtr))
+        val fresh = rows.associate { s ->
+            val last = s.last
+            chatKey(s.chat, s.group) to ChatSummary(
+                id = s.chat,
+                group = s.group,
+                pinnedAt = s.pinnedAt,
+                muted = s.muted,
+                lastText = last?.text.orEmpty(),
+                lastTime = last?.time ?: 0,
+                lastMine = last?.mine ?: false,
+                lastSender = last?.sender.orEmpty(),
+                lastKind = last?.kind ?: "text",
+                lastStatus = last?.status.orEmpty(),
+                lastSystem = last?.system ?: false,
+            )
+        }
+        // Не clear+addAll: снапшот-карта уведомляет по ключам, и полная очистка
+        // заставила бы список мигнуть пустотой на каждом входящем сообщении.
+        chatSummaries.keys.retainAll(fresh.keys)
+        chatSummaries.putAll(fresh)
+    }
+
+    /** Закрепить чат в списке / снять. Пометка локальная — собеседник не узнает. */
+    fun pinChat(id: String, group: Boolean, on: Boolean) = ops.execute {
+        Native.setChatPinned(sessionPtr, id, group, on)
+        refreshChatSummariesNow()
+    }
+
+    /** Выключить/включить звук чата (тоже локально). */
+    fun muteChat(id: String, group: Boolean, muted: Boolean) = ops.execute {
+        Native.setChatMuted(sessionPtr, id, group, muted)
+        refreshChatSummariesNow()
+    }
+
+    // ── Приглашения в группы (карточки на одобрение) ───────────────────────
+    fun refreshGroupInvites() = ops.execute { refreshGroupInvitesNow() }
+
+    private fun refreshGroupInvitesNow() {
+        val list = decodeList<GroupInviteDto>(Native.groupInvites(sessionPtr))
+            .map { GroupInvite(it.gid, it.name, it.inviter, it.waiting) }
+        groupInvites.replaceWith(list)
+    }
+
+    /** Принять приглашение: вступление завершится по `groups_changed`. */
+    fun acceptGroupInvite(gid: String) = ops.execute {
+        Native.acceptGroupInvite(sessionPtr, gid)
+        // Состояние карточки («ждём ответа») выставит движок — команду исполняет
+        // актор в своём потоке, и читать сразу после вызова рано.
+    }
+
+    /** Отклонить приглашение (тихо). */
+    fun declineGroupInvite(gid: String) = ops.execute {
+        Native.declineGroupInvite(sessionPtr, gid)
+        refreshGroupInvitesNow()
+    }
+
+    /** Ключи участников группы (hex, кроме себя) — для экрана управления. */
+    val groupMemberKeys = mutableStateMapOf<String, List<String>>()
+
+    /** Мы ли админ группы (гейт кнопки «удалить»). */
+    fun isGroupAdmin(gid: String): Boolean = groups.firstOrNull { it.gid == gid }?.admin == true
+
+    /** Имя для показа по hex-ключу: имя контакта (local→profile→hex) либо укороченный ключ. */
+    /** Имя собеседника для показа — единственный способ получить его по ключу:
+     *  локальное имя контакта обычно пустое ([Contact.localName]). */
+    fun peerName(hex: String): String =
+        contacts.firstOrNull { it.key == hex }?.displayName ?: (hex.take(8) + "…")
+
+    /** Фото собеседника (или своё — по своему ключу); null — рисуем букву. */
+    fun peerAvatar(hex: String): ByteArray? = if (hex == me?.pubkey) {
+        selfAvatar
+    } else {
+        contacts.firstOrNull { it.key == hex }?.avatarId?.let { contactAvatars[it] }
+    }
+
+    fun loadGroupMembers(gid: String) = ops.execute {
+        groupMemberKeys[gid] = decodeList<String>(Native.groupMembers(sessionPtr, gid))
+    }
+
+    /** Отозвать участника (ADR-004, только админ). Ростер обновит `groups_changed`. */
+    fun removeGroupMember(gid: String, peerHex: String) = ops.execute {
+        Native.groupRemoveMember(sessionPtr, gid, peerHex)
+        loadGroupMembers(gid)
+    }
+
+    /** Выйти из группы (ADR-004). Локально забываем сразу; движок просит админа отозвать. */
+    fun leaveGroup(gid: String) {
+        if (currentGroup == gid) currentGroup = null
+        ops.execute { Native.groupLeave(sessionPtr, gid) }
+    }
+
+    /** Создать группу (fire-and-forget). Появится в списке по событию
+     *  `groups_changed` (см. applyEvent → refreshGroupsNow). */
+    fun createGroup(name: String) = ops.execute {
+        Native.groupCreate(sessionPtr, name.ifBlank { appContext?.getString(R.string.group_default_name) ?: "Group" })
+    }
+
+    fun openGroup(gid: String) {
+        leaveChat()
+        currentGroup = gid
+        currentGroupRoster = null // тикер подтянет свежий агрегат
+        groupUnread[gid] = 0
+        groupMentioned.remove(gid)
+        loadGroupMembers(gid)
+        ops.execute { loadGroupHistory(gid) }
+    }
+
+    private fun loadGroupHistory(gid: String) {
+        // Флаг `downloaded` из истории уточняем фактом наличия блоба: своё вложение
+        // и всё скачанное до появления флага иначе показывалось бы карточкой
+        // «скачать». Проверка не читает байты — только наличие файла.
+        val list = decodeList<MessageDto>(Native.groupHistory(sessionPtr, gid)).map { it.toModel() }
+            .map {
+                if (!it.downloaded && it.blobId.isNotEmpty() && Native.blobExists(sessionPtr, it.blobId)) {
+                    it.copy(downloaded = true)
+                } else {
+                    it
+                }
+            }
+        messages[chatKey(gid, group = true)] = list.toMutableStateList()
+        atChatStart -= "g:$gid"
+        // Байты вложений и миниатюры подтянет `blob()` при показе — заранее
+        // читать всю страницу с диска незачем.
+    }
+
+    private fun groupLog(gid: String): SnapshotStateList<Message> =
+        messages.getOrPut(chatKey(gid, group = true)) { mutableListOf<Message>().toMutableStateList() }
+
+    /**
+     * Строка из события: уже есть в ленте (та же пара «автор + id» — например, лента
+     * успела перечитаться) — заменить на месте, иначе дописать в конец. Дубль
+     * недопустим: по этой паре лента держит ключи элементов.
+     */
+    private fun upsert(list: SnapshotStateList<Message>, m: Message) {
+        val i = list.indexOfFirst { it.id == m.id && it.sender == m.sender }
+        if (i >= 0) list[i] = m else list.add(m)
+    }
+
+    fun inviteToGroup(gid: String, peerHex: String) = ops.execute { Native.groupInvite(sessionPtr, gid, peerHex) }
+
+    private fun sendGroup(gid: String, text: String, mentions: List<Mention>) {
+        if (text.isBlank()) return
+        val reply = replyTarget
+        replyTarget = null
+        ops.execute {
+            Native.groupSendTextReply(
+                sessionPtr,
+                gid,
+                text,
+                reply?.id ?: 0,
+                reply?.sender.orEmpty(),
+                mentionsJson(mentions),
+            )
+            // Строку в ленту добавит событие `message` от движка: id сообщению
+            // присваивает поток-актор, и сразу после возврата из JNI его ещё нет.
+        }
+    }
+
+    // ── Действия с групповым сообщением (ADR-006) ────────────────────────────
+
+    /** id сообщения, к которому просят прокрутить ленту («показать в чате» из
+     *  просмотрщика). Лента сама гасит его после прокрутки — иначе повторный вход
+     *  в чат снова уезжал бы к старому вложению. */
+    var jumpTo by mutableStateOf(0L)
+
+    // ── Диагностика: тест пропускной способности ─────────────────────────────
+
+    /** Включить режим приёмника бенча (живая скорость в [benchRecvMbps]). */
+    fun startBenchRecv() {
+        benchRecv = true
+        ops.execute { Native.benchRecvStart(sessionPtr) }
+    }
+
+    /** Блб ~30 МБ на пира; результат отправки в [benchResult]. */
+    fun blastBench(peerHex: String) {
+        benchResult = appContext?.getString(R.string.bench_sending).orEmpty()
+        ops.execute {
+            val r = decodeOrNull<BenchDto>(Native.benchBlast(sessionPtr, peerHex, 30_000))
+            benchResult = appContext?.getString(
+                R.string.bench_sent,
+                r?.mbps ?: 0.0,
+                (r?.sentBytes ?: 0L) / 1e6,
+            ).orEmpty()
+        }
+    }
+}

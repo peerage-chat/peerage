@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "p2p-messenger"
+rootProject.name = "peerage-messenger"
 include(":app")

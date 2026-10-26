@@ -1,17 +1,17 @@
 //! JNI-кодек диагностики пропускной способности меша (bench). Тонкий слой над
-//! методами [`p2p_engine::Engine`].
+//! методами [`peerage_engine::Engine`].
 
 use jni::objects::{JClass, JString};
 use jni::sys::{jint, jlong, jstring};
 use jni::JNIEnv;
 
-use p2p_engine::parse_key;
+use peerage_engine::parse_key;
 
 use crate::{engine, jni_safe, jstr, ret};
 
 /// Включить приём бенч-датаграмм.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStart<'local>(
+pub extern "system" fn Java_chat_peerage_Native_benchRecvStart<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -23,7 +23,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStart<'local>(
 
 /// Статистика приёмника: JSON {pkts, bytes, secs, mbps}.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStats<'local>(
+pub extern "system" fn Java_chat_peerage_Native_benchRecvStats<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -36,7 +36,7 @@ pub extern "system" fn Java_dev_p2p_messenger_Native_benchRecvStats<'local>(
 
 /// Бластить total_kb КБ на пира. Возвращает JSON {sent_pkts, sent_bytes, secs, mbps}.
 #[no_mangle]
-pub extern "system" fn Java_dev_p2p_messenger_Native_benchBlast<'local>(
+pub extern "system" fn Java_chat_peerage_Native_benchBlast<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,

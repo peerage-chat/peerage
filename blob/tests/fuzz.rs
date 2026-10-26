@@ -1,7 +1,7 @@
 //! Property-тесты блоб-слоя (веха M6): парсер манифеста и приём чанков не паникуют
 //! ни на каком входе; валидный блоб всегда собирается байт-в-байт. Хост, `cargo test`.
 
-use p2p_blob::{build, Limits, Manifest, Reassembler};
+use peerage_blob::{build, Limits, Manifest, Reassembler};
 use proptest::prelude::*;
 
 proptest! {
@@ -37,6 +37,6 @@ proptest! {
         }
         let out = r.finish().unwrap();
         prop_assert_eq!(&out, &content);
-        prop_assert_eq!(expect_id, p2p_blob::blob_id(&content));
+        prop_assert_eq!(expect_id, peerage_blob::blob_id(&content));
     }
 }

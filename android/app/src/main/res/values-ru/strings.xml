@@ -309,7 +309,7 @@
     <string name="notif_incoming_channel">Входящие звонки</string>
     <string name="notif_incoming_channel_desc">Уведомление о входящем звонке</string>
     <string name="notif_conn_channel">Соединение</string>
-    <string name="notif_conn_channel_desc">p2p в сети — mesh-узел активен</string>
+    <string name="notif_conn_channel_desc">В сети — mesh-узел активен</string>
     <string name="notif_conn_text">В сети — держим mesh-соединение</string>
     <string name="notif_disconnect">Отключить</string>
     <string name="notif_call_channel">Звонки</string>
@@ -642,7 +642,7 @@
     <string name="backup_working_restore">Восстанавливаем</string>
     <string name="backup_working_hint">Не закрывайте экран. Проверка пароля занимает около секунды — намеренно: столько же она займёт у того, кто станет перебирать.</string>
     <string name="backup_pick_file">Выберите файл копии</string>
-    <string name="backup_pick_hint">Нажмите, чтобы найти файл .p2pbak</string>
+    <string name="backup_pick_hint">Нажмите, чтобы найти файл .peerage</string>
     <string name="backup_merge_title">Данные сольются</string>
     <string name="backup_merge_text">Ничего не удаляется: то, что пришло после копии, останется на месте. Повторное восстановление того же файла ничего не задвоит.</string>
     <string name="backup_restore_go">Восстановить</string>

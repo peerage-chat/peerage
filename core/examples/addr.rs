@@ -1,9 +1,9 @@
 //! Печатает адрес Yggdrasil для заданного hex-публичного ключа ed25519.
 //! Используется для кросс-проверки с yggdrasil-go (см. ygg/cmd/yggaddr).
 //!
-//! Запуск: `cargo run -p p2p-core --example addr -- <hex-pubkey>`
+//! Запуск: `cargo run -p peerage-core --example addr -- <hex-pubkey>`
 
-use p2p_core::identity::addr_for_key;
+use peerage_core::identity::addr_for_key;
 
 fn main() {
     let arg = std::env::args().nth(1).expect("укажите hex-публичный ключ (32 байта)");

@@ -8,13 +8,13 @@
 //!         контактом и обменяться сообщениями ЧЕРЕЗ ГЛОБАЛЬНУЮ СЕТЬ (без прямого
 //!         пиринга между собой). Завершается успехом, если получил текст пира.
 //!
-//! Запуск (WSL): cargo run -p p2p-messenger --example chat -- run <...>
+//! Запуск (WSL): cargo run -p peerage-messenger --example chat -- run <...>
 
 use std::time::{Duration, Instant};
 
-use p2p_core::Identity;
-use p2p_messenger::{Event, Messenger};
-use p2p_ygg::Node;
+use peerage_core::Identity;
+use peerage_messenger::{Event, Messenger};
+use peerage_ygg::Node;
 
 fn parse_seed(hex_str: &str) -> [u8; 32] {
     let bytes = hex::decode(hex_str).expect("seed: неверный hex");

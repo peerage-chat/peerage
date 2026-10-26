@@ -2,4 +2,4 @@
 -keepclasseswithmembernames class * {
     native <methods>;
 }
--keep class dev.p2p.messenger.Native { *; }
+-keep class chat.peerage.Native { *; }

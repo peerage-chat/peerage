@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::{ChatKey, Engine, MediaInfo};
-use p2p_messenger::loopback::LoopbackNet;
+use peerage_core::Identity;
+use peerage_engine::{ChatKey, Engine, MediaInfo};
+use peerage_messenger::loopback::LoopbackNet;
 use serde_json::Value;
 
 fn id(n: u8) -> Identity {
@@ -19,7 +19,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-uiev-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-uiev-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }

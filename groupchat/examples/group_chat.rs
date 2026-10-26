@@ -2,17 +2,17 @@
 //! сетевым онбордингом: админ A приглашает B и C → они присылают KeyPackage по
 //! сети → A добавляет (Commit/Welcome по mesh) → все обмениваются E2E-сообщениями.
 //!
-//! Запуск (WSL): cargo run -p p2p-groupchat --example group_chat
+//! Запуск (WSL): cargo run -p peerage-groupchat --example group_chat
 
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_core::Identity;
-use p2p_groupchat::GroupChat;
-use p2p_messenger::{Event, Messenger};
-use p2p_ygg::Node;
+use peerage_core::Identity;
+use peerage_groupchat::GroupChat;
+use peerage_messenger::{Event, Messenger};
+use peerage_ygg::Node;
 
 /// Прокрутить события админа `secs` секунд: на KeyReply — добавить участника,
 /// на Group — обработать (Commit/app). Вернуть прикладные тексты.
@@ -25,7 +25,7 @@ fn pump_admin(rx: &Receiver<Event>, a: &mut GroupChat, secs: u64) -> Vec<String>
                 let _ = a.add_member(peer, &key_package);
             }
             Ok(Event::Group { data, .. }) => {
-                if let Ok(p2p_groupchat::Inbound::Message { text, .. }) = a.handle(&data) {
+                if let Ok(peerage_groupchat::Inbound::Message { text, .. }) = a.handle(&data) {
                     texts.push(text);
                 }
             }

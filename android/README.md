@@ -1,11 +1,11 @@
 # Android client
 
 A Jetpack Compose app on top of the Rust engine. The UI is Kotlin; all domain logic
-(identity, crypto, messaging, MLS groups, blobs, rooms) lives in the `p2p-engine` crate and
-is reached through the thin JNI bridge `androidjni` (cdylib `libp2p_android.so`).
+(identity, crypto, messaging, MLS groups, blobs, rooms) lives in the `peerage-engine` crate and
+is reached through the thin JNI bridge `androidjni` (cdylib `libpeerage_android.so`).
 
 ```
-Kotlin/Compose  ──JNI──▶  libp2p_android.so (androidjni → p2p-engine)
+Kotlin/Compose  ──JNI──▶  libpeerage_android.so (androidjni → peerage-engine)
                               │ depends on
                               ▼
                           libygg.so (Go c-shared, Yggdrasil)
@@ -17,7 +17,7 @@ can do and how it was verified: [project-state.md](../docs/project-state.md).
 
 ## Building the native libraries
 
-Each ABI needs **two** libraries: `libygg.so` (Go) and `libp2p_android.so` (Rust). They are
+Each ABI needs **two** libraries: `libygg.so` (Go) and `libpeerage_android.so` (Rust). They are
 built on Linux or WSL (Go's cgo needs the Linux NDK).
 
 ### One-time toolchain setup (Linux / WSL)
@@ -37,7 +37,7 @@ cargo install cargo-ndk
 
 ```bash
 bash scripts/build-android-libs.sh arm64-v8a   # phones; x86_64 for the emulator
-bash scripts/rebuild-p2p-android.sh x86_64     # faster: only the Rust library
+bash scripts/rebuild-peerage-android.sh x86_64     # faster: only the Rust library
 ```
 
 The scripts put the libraries into `android/app/src/main/jniLibs/<ABI>/` (not in git).

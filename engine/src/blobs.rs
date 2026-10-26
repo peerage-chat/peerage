@@ -15,10 +15,10 @@ use std::time::{Duration, Instant};
 
 use std::path::{Path, PathBuf};
 
-use p2p_blob::disk::DiskAssembler;
-use p2p_core::vault;
-use p2p_blob::{Hash, Limits, Manifest, ManifestAssembler, ManifestPart, Reassembler};
-use p2p_messenger::{Messenger, PeerKey};
+use peerage_blob::disk::DiskAssembler;
+use peerage_core::vault;
+use peerage_blob::{Hash, Limits, Manifest, ManifestAssembler, ManifestPart, Reassembler};
+use peerage_messenger::{Messenger, PeerKey};
 
 /// Сколько чанков одной докачки держим запрошенными. Больше — отдающий режет
 /// всплеск и половина запросов уходит впустую; меньше — простаивает канал.
@@ -313,7 +313,7 @@ impl BlobManager {
 
     /// Отдать пиру мелкий блоб из памяти: нарезать, запомнить, отправить манифест.
     pub fn offer(&mut self, peer: PeerKey, content: &[u8], mime: &str) -> Hash {
-        let (manifest, chunks) = p2p_blob::build(content, mime);
+        let (manifest, chunks) = peerage_blob::build(content, mime);
         let id = manifest.id;
         self.send_manifest(&peer, &manifest);
         self.remember(peer, manifest, Source::Memory(chunks));
@@ -355,7 +355,7 @@ impl BlobManager {
         let chunk = match &out.source {
             Source::Memory(chunks) => chunks.get(index as usize).cloned(),
             Source::Stored(path) => {
-                p2p_blob::disk::read_chunk(path, index as usize, |i, b| {
+                peerage_blob::disk::read_chunk(path, index as usize, |i, b| {
                     vault::open(&vault::chunk_purpose(&id, i), b).ok()
                 })
             }

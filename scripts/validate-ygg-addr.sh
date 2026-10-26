@@ -18,9 +18,9 @@ echo "go addr     : $GOADDR"
 # Если cargo доступен в WSL — посчитаем и сверим прямо здесь.
 if command -v cargo >/dev/null 2>&1; then
   cd "$ROOT"
-  RSADDR=$(cargo run -q -p p2p-core --example addr -- "$PUB")
+  RSADDR=$(cargo run -q -p peerage-core --example addr -- "$PUB")
   echo "rust addr   : $RSADDR"
   if [ "$GOADDR" = "$RSADDR" ]; then echo "MATCH ✓"; else echo "MISMATCH ✗"; exit 1; fi
 else
-  echo "(cargo нет в WSL — сверьте вручную: cargo run -p p2p-core --example addr -- $PUB)"
+  echo "(cargo нет в WSL — сверьте вручную: cargo run -p peerage-core --example addr -- $PUB)"
 fi

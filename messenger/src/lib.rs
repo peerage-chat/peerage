@@ -1,5 +1,5 @@
-//! p2p-messenger — слой сессии: связывает транспорт Yggdrasil ([`p2p_ygg`]) и
-//! протокол/крипто ядра ([`p2p_core`]) в надёжный зашифрованный канал сообщений.
+//! peerage-messenger — слой сессии: связывает транспорт Yggdrasil ([`peerage_ygg`]) и
+//! протокол/крипто ядра ([`peerage_core`]) в надёжный зашифрованный канал сообщений.
 //!
 //! Обязанности:
 //!   * приёмный цикл: читает датаграммы, расшифровывает, диспетчеризует;
@@ -18,21 +18,21 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::media::{
+use peerage_core::media::{
     parse_media, write_media_header, CHAN_CHAT, CHAN_MEDIA, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN,
 };
-use p2p_core::protocol::{Payload, ProtocolError};
-use p2p_core::session::{Received, Sessions};
+use peerage_core::protocol::{Payload, ProtocolError};
+use peerage_core::session::{Received, Sessions};
 use rand_core::OsRng;
-use p2p_core::budget::Tier;
-use p2p_core::ratelimit::{RateLimiter, TieredRateLimiter};
-use p2p_core::Identity;
-use p2p_ygg::{Node, YggError};
+use peerage_core::budget::Tier;
+use peerage_core::ratelimit::{RateLimiter, TieredRateLimiter};
+use peerage_core::Identity;
+use peerage_ygg::{Node, YggError};
 
 /// Публичный ключ ed25519 пира — он же его идентификатор.
 pub type PeerKey = [u8; 32];
 
-/// Абстракция транспорта датаграмм по ключу пира. Реальный меш — [`p2p_ygg::Node`];
+/// Абстракция транспорта датаграмм по ключу пира. Реальный меш — [`peerage_ygg::Node`];
 /// для тестов — loopback-двойник (см. [`loopback`]), что позволяет прогонять весь
 /// сетевой слой (инвайт/группы/resync/доставка) в одном процессе без устройств.
 pub trait Transport: Send + Sync {
@@ -214,10 +214,10 @@ pub struct MediaMeta {
 /// Обрезать подпись до `MAX_CAPTION` БАЙТ по границе символа: рвать UTF-8 посередине
 /// нельзя, а считать в символах бессмысленно — в бакет мы упираемся байтами.
 pub(crate) fn truncate_caption(s: &str) -> String {
-    if s.len() <= p2p_core::protocol::MAX_CAPTION {
+    if s.len() <= peerage_core::protocol::MAX_CAPTION {
         return s.to_string();
     }
-    let mut end = p2p_core::protocol::MAX_CAPTION;
+    let mut end = peerage_core::protocol::MAX_CAPTION;
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
@@ -342,7 +342,7 @@ struct Shared {
     pending: Mutex<HashMap<u64, Pending>>,
     /// Персистентная очередь исходящих (ставит движок). Без неё — только память
     /// (`message_ttl`), как у голого мессенджера в тестах.
-    outbox: std::sync::OnceLock<p2p_core::outbox::OutboxStore>,
+    outbox: std::sync::OnceLock<peerage_core::outbox::OutboxStore>,
     /// Темп досылки по пирам: (начало текущей секунды, сколько ушло в ней).
     pace: Mutex<HashMap<PeerKey, (Instant, usize)>>,
     /// Пиры, кому из очереди осталось что слать сверх темпа: дотягивает maintenance.
@@ -808,7 +808,7 @@ impl Messenger {
     /// Подключить персистентную очередь исходящих и дослать всё, что в ней ждёт.
     /// Один раз за жизнь мессенджера; до этого надёжные сообщения живут только в
     /// памяти.
-    pub fn set_outbox(&self, store: p2p_core::outbox::OutboxStore) {
+    pub fn set_outbox(&self, store: peerage_core::outbox::OutboxStore) {
         let peers = store.peers().unwrap_or_default();
         if self.shared.outbox.set(store).is_err() {
             return;
@@ -1068,7 +1068,7 @@ impl Messenger {
     /// контакт, отсутствовавший в момент смены, обязан узнать новый адрес по
     /// возвращении — иначе связь с ним рвётся навсегда.
     ///
-    /// `sig` строит владелец личности ([`p2p_core::Identity::sign_transport_rotate`]):
+    /// `sig` строит владелец личности ([`peerage_core::Identity::sign_transport_rotate`]):
     /// подпись — единственное, что связывает старую личность с новым адресом.
     /// `notify=false` — это служебное объявление, в UI как «доставлено сообщение»
     /// оно показываться не должно.
@@ -1146,7 +1146,7 @@ impl Messenger {
         dg.push(CHAN_MEDIA);
         dg.extend_from_slice(&sealed);
         if let Err(e) = self.shared.node().write(&self.shared.transport_of(peer), &dg) {
-            log::warn!("p2p-media: node.write failed for track={} len={}: {:?}", track, dg.len(), e);
+            log::warn!("peerage-media: node.write failed for track={} len={}: {:?}", track, dg.len(), e);
             return Err(MessengerError::Transport(e));
         }
         Ok(())
@@ -1369,7 +1369,7 @@ fn receive_loop(shared: Arc<Shared>) {
     //  · медиа (CHAN_MEDIA) — щедрый (звонок легитимно высокочастотен: ~50 ауд/с +
     //    видео), но абсурдный флуд (>~600/с устойчиво) всё равно режется.
     // M3: бюджет градуирован по доверию, конкретные числа — в ЕДИНОМ источнике
-    // `p2p_core::budget::Tier` (сверенный > контакт > чужой; чужие делят одну корзину
+    // `peerage_core::budget::Tier` (сверенный > контакт > чужой; чужие делят одну корзину
     // класса → Sybil из 1000 ключей не расширяет бюджет; заблокированный режется до
     // расшифровки). Медиа — щедрый per-source (звонок легитимно высокочастотен).
     let mut chat_rl = TieredRateLimiter::new();
@@ -1458,7 +1458,7 @@ fn receive_loop(shared: Arc<Shared>) {
             let Some(tx) = shared.media_tx.lock().unwrap().clone() else {
                 media_orphan = media_orphan.wrapping_add(1);
                 if media_orphan % 512 == 1 {
-                    log::info!("p2p-media: пакет вне звонка, дроп (всего {media_orphan})");
+                    log::info!("peerage-media: пакет вне звонка, дроп (всего {media_orphan})");
                 }
                 continue;
             };
@@ -1479,14 +1479,14 @@ fn receive_loop(shared: Arc<Shared>) {
                     if err.is_err() {
                         media_full = media_full.wrapping_add(1);
                         if media_full % 512 == 1 {
-                            log::warn!("p2p-media: очередь полна, дроп (track={}, всего {media_full})", f.track);
+                            log::warn!("peerage-media: очередь полна, дроп (track={}, всего {media_full})", f.track);
                         }
                     }
                 }
             } else {
                 media_bad = media_bad.wrapping_add(1);
                 if media_bad % 512 == 1 {
-                    log::warn!("p2p-media: не расшифровать или битый медиа-пакет (n={n}, всего {media_bad})");
+                    log::warn!("peerage-media: не расшифровать или битый медиа-пакет (n={n}, всего {media_bad})");
                 }
             }
             continue;
@@ -1559,7 +1559,7 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::TransportRotate { epoch, transport_pub, sig, .. }
                 if transport_pub.as_slice() == src.as_slice()
                     && <[u8; 64]>::try_from(sig.as_slice())
-                        .map(|s| p2p_core::identity::verify_transport_rotate(&from, *epoch, &src, &s))
+                        .map(|s| peerage_core::identity::verify_transport_rotate(&from, *epoch, &src, &s))
                         .unwrap_or(false)
         );
         if !bound && !self_authenticating {
@@ -1948,7 +1948,7 @@ pub mod loopback {
 mod tests {
     use super::loopback::LoopbackNet;
     use super::*;
-    use p2p_core::Identity;
+    use peerage_core::Identity;
     use std::time::Duration;
 
     fn id(n: u8) -> Identity {

@@ -3,7 +3,7 @@
 //! шаринг экрана это просто «источник = экран».
 
 use image::imageops::FilterType;
-use p2p_media::VideoSource;
+use peerage_media::VideoSource;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {

@@ -2,18 +2,18 @@
 //! → H.264 энкод → фрагментация → реальный Yggdrasil → реассемблер → H.264 декод
 //! → кадры RGB. Аудио выключено (нет устройств в WSL).
 //!
-//! Запуск (WSL): cargo run -p p2p-call --example video_loopback
+//! Запуск (WSL): cargo run -p peerage-call --example video_loopback
 
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_call::Call;
-use p2p_core::settings::VideoSettings;
-use p2p_core::Identity;
-use p2p_media::VideoSource;
-use p2p_messenger::Messenger;
-use p2p_ygg::Node;
+use peerage_call::Call;
+use peerage_core::settings::VideoSettings;
+use peerage_core::Identity;
+use peerage_media::VideoSource;
+use peerage_messenger::Messenger;
+use peerage_ygg::Node;
 
 /// Синтетический источник: анимированный градиент заданного размера.
 struct TestSource {

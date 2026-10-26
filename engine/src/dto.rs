@@ -129,7 +129,7 @@ pub enum UiEvent {
     /// ровно та строка, что легла в историю (подпись, «переслано», ответ, номер
     /// строки): одна форма для ленты и для истории, и открытый чат не расходится с
     /// тем, что покажет перезаход.
-    Message { chat: String, group: bool, msg: p2p_core::store::StoredMessage },
+    Message { chat: String, group: bool, msg: peerage_core::store::StoredMessage },
     Ack { peer: String, id: u64 },
     /// Собеседник отозвал своё сообщение — строка исчезла из истории.
     Retracted { peer: String, id: u64 },
@@ -150,7 +150,7 @@ pub enum UiEvent {
         sender: String,
         text: String,
         #[serde(skip_serializing_if = "Vec::is_empty")]
-        mentions: Vec<p2p_core::mention::Mention>,
+        mentions: Vec<peerage_core::mention::Mention>,
     },
     GroupRemoved { gid: String },
     RoomInvite { peer: String, room_id: String, audio: bool, video: bool },
@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(ev.to_json(), r#"{"type":"blob_progress","id":"cc","done":3,"total":10}"#);
 
         // Строка переписки едет целиком — теми же полями, что и в истории.
-        let msg = p2p_core::store::StoredMessage {
+        let msg = peerage_core::store::StoredMessage {
             id: 5,
             sender: "aa".into(),
             text: "подпись".into(),

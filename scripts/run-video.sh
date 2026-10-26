@@ -8,4 +8,4 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 export LD_LIBRARY_PATH="$ROOT/ygg/libygg:${LD_LIBRARY_PATH:-}"
 bash scripts/build-ygg.sh >/dev/null
-cargo run -q -p p2p-call --example video_loopback
+cargo run -q -p peerage-call --example video_loopback

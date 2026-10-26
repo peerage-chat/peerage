@@ -4,7 +4,7 @@
 
 use libfuzzer_sys::arbitrary::{self, Arbitrary};
 use libfuzzer_sys::fuzz_target;
-use p2p_blob::{Limits, Manifest, ManifestAssembler, ManifestPart, Reassembler};
+use peerage_blob::{Limits, Manifest, ManifestAssembler, ManifestPart, Reassembler};
 
 #[derive(Arbitrary, Debug)]
 struct Part {

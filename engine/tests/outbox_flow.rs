@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::{ChatKey, Engine};
-use p2p_messenger::loopback::LoopbackNet;
+use peerage_core::Identity;
+use peerage_engine::{ChatKey, Engine};
+use peerage_messenger::loopback::LoopbackNet;
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -18,7 +18,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-outbox-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-outbox-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -26,8 +26,8 @@ fn tmpdir(tag: &str) -> PathBuf {
 /// Короткие сроки: штатные 5 минут ретраев в тесте не подождать, а нам важно
 /// именно то, что происходит ПОСЛЕ них. Офлайн-порог тоже короткий: возвращение
 /// получателя отправитель замечает по переходу «офлайн → онлайн».
-fn cfg() -> p2p_messenger::Config {
-    p2p_messenger::Config {
+fn cfg() -> peerage_messenger::Config {
+    peerage_messenger::Config {
         message_ttl: Duration::from_secs(2),
         retry_interval: Duration::from_millis(200),
         ping_interval: Duration::from_millis(300),

@@ -1,6 +1,6 @@
-//! p2p-groupchat — групповой чат поверх Yggdrasil, БЕЗ сервера.
+//! peerage-groupchat — групповой чат поверх Yggdrasil, БЕЗ сервера.
 //!
-//! Связывает MLS-группу ([`p2p_group`]) с транспортом ([`p2p_messenger`]):
+//! Связывает MLS-группу ([`peerage_group`]) с транспортом ([`peerage_messenger`]):
 //! рассылает MLS-сообщения участникам напрямую через mesh; список получателей
 //! берётся из самой группы (MLS знает участников по их публичным ключам).
 //!
@@ -11,10 +11,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use p2p_core::mention::{self, Mention};
-use p2p_core::Identity;
-use p2p_group::{GroupError, Incoming, Member};
-use p2p_messenger::Messenger;
+use peerage_core::mention::{self, Mention};
+use peerage_core::Identity;
+use peerage_group::{GroupError, Incoming, Member};
+use peerage_messenger::Messenger;
 use serde::{Deserialize, Serialize};
 
 pub type PeerKey = [u8; 32];
@@ -47,7 +47,7 @@ enum AppMsg {
         /// «Переслано, автора не называем» — ключ автора не отправляется.
         #[serde(default)]
         fwd_anon: bool,
-        /// Упоминания: ссылки на людей поверх участков `text` (p2p_core::mention).
+        /// Упоминания: ссылки на людей поверх участков `text` (peerage_core::mention).
         /// Пустой список не сериализуется — тело обычного сообщения не меняется.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         mentions: Vec<Mention>,
@@ -161,10 +161,10 @@ pub enum Inbound {
 /// Обрезать подпись до `MAX_CAPTION` БАЙТ по границе символа — как в DM. Групповое
 /// тело шифруется MLS и едет тем же `CHAN_CHAT`, поэтому потолок общий.
 fn truncate_caption(s: &str) -> String {
-    if s.len() <= p2p_core::protocol::MAX_CAPTION {
+    if s.len() <= peerage_core::protocol::MAX_CAPTION {
         return s.to_string();
     }
-    let mut end = p2p_core::protocol::MAX_CAPTION;
+    let mut end = peerage_core::protocol::MAX_CAPTION;
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
@@ -217,7 +217,7 @@ impl GroupChat {
     }
 
     /// Администратор приглашает контакт: просит его KeyPackage (контакт ответит
-    /// [`p2p_messenger::Event::GroupKeyReply`], после чего вызываем [`add_member`]).
+    /// [`peerage_messenger::Event::GroupKeyReply`], после чего вызываем [`add_member`]).
     pub fn invite(&self, peer: PeerKey) {
         if let Some(gid) = self.group_id() {
             let _ = self.messenger.send_group_key_request(&peer, &gid);
@@ -347,7 +347,7 @@ impl GroupChat {
         Ok(())
     }
 
-    /// Обработать входящее групповое сообщение ([`p2p_messenger::Event::Group`]).
+    /// Обработать входящее групповое сообщение ([`peerage_messenger::Event::Group`]).
     /// Если мы ещё не в группе — это Welcome (вступаем). Возвращает отправителя
     /// и текст для прикладных сообщений либо актора смены состава.
     pub fn handle(&mut self, data: &[u8]) -> Result<Inbound, GroupChatError> {

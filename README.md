@@ -1,4 +1,4 @@
-# interlace
+# Peerage
 
 A serverless, end-to-end encrypted messenger. Phones talk to each other directly over the
 [Yggdrasil](https://yggdrasil-network.github.io/) mesh — there is no server of ours in the

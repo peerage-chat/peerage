@@ -1,4 +1,4 @@
-module p2p/ygg
+module ygg
 
 go 1.24.0
 

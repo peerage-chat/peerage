@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Собрать обе нативные библиотеки под Android и разложить в jniLibs приложения.
 #   1) libygg.so   — Go c-shared (yggdrasil) через Linux-NDK
-#   2) libp2p_android.so — Rust cdylib (ядро+мессенджер+JNI) через cargo-ndk
-# Результат: android/app/src/main/jniLibs/<ABI>/{libygg.so,libp2p_android.so}
+#   2) libpeerage_android.so — Rust cdylib (ядро+мессенджер+JNI) через cargo-ndk
+# Результат: android/app/src/main/jniLibs/<ABI>/{libygg.so,libpeerage_android.so}
 #
 # Требуется (см. android/README.md):
 #   - ANDROID_NDK_HOME → Linux-NDK (для Go cgo)
@@ -33,7 +33,7 @@ target="${RUST_TARGET[$ABI]:?неизвестный ABI: $ABI}"
 echo "== 1/3 libygg ($ABI) =="
 bash scripts/build-ygg-android.sh "$ABI"
 
-echo "== 2/3 libp2p_android ($ABI) =="
+echo "== 2/3 libpeerage_android ($ABI) =="
 rustup target add "$target" >/dev/null 2>&1 || true
 # Кросс-компиляция C/C++-зависимостей (opus через cmake, openh264 через cc).
 # Используем ВСТРОЕННУЮ поддержку Android в cmake: она находит NDK по
@@ -44,14 +44,14 @@ export ANDROID_NDK="$NDK"
 export CMAKE_GENERATOR="Ninja"
 # Чистим возможный stale CMakeCache от предыдущей сборки (смена генератора/ABI).
 find "$T/$target" -type d -name build -path '*audiopus_sys*' -exec rm -rf {} + 2>/dev/null || true
-cargo ndk -t "$ABI" -o /tmp/p2p-jnilibs build -p p2p-android --release
+cargo ndk -t "$ABI" -o /tmp/jnilibs build -p peerage-android --release
 
 echo "== 3/3 стейджинг в jniLibs =="
 dst="android/app/src/main/jniLibs/$ABI"
 mkdir -p "$dst"
 cp "ygg/libygg/android/$ABI/libygg.so" "$dst/"
-cp "/tmp/p2p-jnilibs/$ABI/libp2p_android.so" "$dst/"
-# libc++_shared.so из NDK — нужна libp2p_android.so (C++ openh264).
+cp "/tmp/jnilibs/$ABI/libpeerage_android.so" "$dst/"
+# libc++_shared.so из NDK — нужна libpeerage_android.so (C++ openh264).
 TRIPLE_DIR="aarch64-linux-android"
 case "$ABI" in
     armeabi-v7a) TRIPLE_DIR="arm-linux-androideabi" ;;

@@ -130,7 +130,7 @@ understand them before trusting the system with sensitive conversations.
     control / application / blob body. Full uniformity at one size was rejected: padding
     a presence beacon (every 2 s) to 4 KiB is ×40 traffic and battery.
 - **N8. Incoming traffic cannot be cut at the application layer.** The ingress budget
-  (`p2p_core::budget::Tier`) drops packets of a blocked or flooding peer BEFORE
+  (`peerage_core::budget::Tier`) drops packets of a blocked or flooding peer BEFORE
   decryption, so no CPU, battery or storage is spent. But **the bytes have already reached
   the radio** — the mobile data is already paid for. This is a property of any open
   addressable network: whoever knows the address can send (like mail reaching a server
@@ -225,7 +225,7 @@ understand them before trusting the system with sensitive conversations.
   because later it would not fit into the CONTROL bucket of 256 B (N7) without losing
   size indistinguishability.
 
-- **N10. A data backup is an asset that lives OFF the device.** A `.p2pbak` file by its
+- **N10. A data backup is an asset that lives OFF the device.** A `.peerage` file by its
   nature goes to the cloud, to an SD card, to someone else's computer, and is protected
   only by a password (Argon2id + XChaCha20-Poly1305; the Keystore key is not available
   there and would not help — the backup has to open on another device). Honestly, that

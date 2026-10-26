@@ -1,4 +1,4 @@
-//! p2p-media — медиа-цепочка поверх лёгкого транспорта [`p2p_messenger`].
+//! peerage-media — медиа-цепочка поверх лёгкого транспорта [`peerage_messenger`].
 //!
 //! Сейчас: аудио-кодек (Opus, полное качество) и джиттер-буфер. Захват/вывод
 //! (cpal) и видео (H.264) подключаются поверх этих примитивов.
@@ -17,4 +17,4 @@ pub use video::{
     VideoSource,
 };
 // Параметры кодека живут в ядре (настраиваются пользователем, сохраняются).
-pub use p2p_core::settings::{AudioSettings, OpusMode, VideoSettings};
+pub use peerage_core::settings::{AudioSettings, OpusMode, VideoSettings};

@@ -3,7 +3,7 @@
 //! A шлёт поток «голосовых» пакетов + один текст; B принимает медиа из bounded-
 //! канала и текст из событий.
 //!
-//! Запуск (WSL): cargo run -p p2p-messenger --example media_loopback
+//! Запуск (WSL): cargo run -p peerage-messenger --example media_loopback
 
 use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
@@ -11,10 +11,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_core::media::TRACK_AUDIO;
-use p2p_core::Identity;
-use p2p_messenger::{Event, MediaPacket, Messenger};
-use p2p_ygg::Node;
+use peerage_core::media::TRACK_AUDIO;
+use peerage_core::Identity;
+use peerage_messenger::{Event, MediaPacket, Messenger};
+use peerage_ygg::Node;
 
 const N: u16 = 200;
 

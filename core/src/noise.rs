@@ -28,7 +28,7 @@ pub const KEM_PK_LEN: usize = 1184;
 /// Размер шифртекста ML-KEM-768.
 pub const KEM_CT_LEN: usize = 1088;
 /// Метка вывода ключей медиа-канала из цепного ключа рукопожатия.
-const MEDIA_LABEL: &[u8] = b"dev.p2p.media-keys.v1";
+const MEDIA_LABEL: &[u8] = b"peerage:media-keys:v1";
 
 #[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq)]
 pub enum NoiseError {
@@ -426,7 +426,7 @@ mod tests {
     }
     impl CryptoRng for Fixed {}
 
-    const PROLOGUE: &[u8] = b"interlace test prologue";
+    const PROLOGUE: &[u8] = b"peerage test prologue";
 
     /// Классическая часть — байт-в-байт со `snow`: те же статические и эфемерные
     /// ключи, тот же пролог и полезные нагрузки дают те же три сообщения и те же

@@ -17,13 +17,13 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use p2p_core::media::{
+use peerage_core::media::{
     fragment_video, parse_video_frag, CompleteFrame, VideoReassembler,
     TRACK_AUDIO, TRACK_VIDEO,
 };
-use p2p_core::settings::AudioSettings;
-use p2p_media::{AudioDecoder, AudioEncoder, JitterBuffer, JitterOut};
-use p2p_messenger::Messenger;
+use peerage_core::settings::AudioSettings;
+use peerage_media::{AudioDecoder, AudioEncoder, JitterBuffer, JitterOut};
+use peerage_messenger::Messenger;
 
 use crate::LockRecover;
 

@@ -360,7 +360,7 @@ pub const MAX_CAPTION: usize = 1024;
 
 pub const CONTROL_BUCKET: usize = 256;
 pub const APP_BUCKET: usize = 4096;
-/// Чанк блоба 12 КБ (`p2p_blob::CHUNK_SIZE`) плюс запас на поля сообщения (id,
+/// Чанк блоба 12 КБ (`peerage_blob::CHUNK_SIZE`) плюс запас на поля сообщения (id,
 /// индекс, имена полей, префикс длины паддинга). Полный чанк обязан влезать в бакет
 /// целиком — иначе хвостовой чанк стал бы отличим от полного; на это есть тест
 /// `padded_blob_chunk_fits_datagram`.

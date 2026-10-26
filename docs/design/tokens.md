@@ -3,7 +3,7 @@
 Единый источник истины по визуальному языку Android-клиента: цвета, отступы,
 радиусы, размеры компонентов, типографика.
 
-**Код:** `android/app/src/main/java/dev/p2p/messenger/Tokens.kt` — объект `Tokens`.
+**Код:** `android/app/src/main/java/chat/peerage/Tokens.kt` — объект `Tokens`.
 `Theme.kt` держит семантические псевдонимы (`HoloAccent`, `ScreenPad`, `BubbleIn`, …),
 которые теперь бэкаются из `Tokens` — старые экраны не трогаем, мигрируем по ходу.
 

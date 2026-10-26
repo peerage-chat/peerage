@@ -1,9 +1,9 @@
 //! Демонстрация модуля идентичности: генерирует новую идентичность
 //! и печатает адрес Yggdrasil, ключи и BIP39-fingerprint.
 //!
-//! Запуск: `cargo run -p p2p-core --example whoami`
+//! Запуск: `cargo run -p peerage-core --example whoami`
 
-use p2p_core::Identity;
+use peerage_core::Identity;
 
 fn main() {
     let id = Identity::generate();

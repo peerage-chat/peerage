@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Сборка и запуск десктоп-приложения (Slint, отображается через WSLg).
 # Запуск из WSL: bash scripts/run-desktop.sh
-# Для второй копии локально: P2P_DATA_DIR=/tmp/u2 bash scripts/run-desktop.sh
+# Для второй копии локально: PEERAGE_DATA_DIR=/tmp/u2 bash scripts/run-desktop.sh
 set -euo pipefail
 export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$PATH"
 export CARGO_TARGET_DIR=target-wsl
@@ -12,4 +12,4 @@ export DISPLAY="${DISPLAY:-:0}"
 export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 
 bash scripts/build-ygg.sh >/dev/null
-cargo run -p p2p-desktop
+cargo run -p peerage-desktop

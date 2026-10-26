@@ -94,7 +94,7 @@ impl Identity {
 
     /// Доменно-разделённый под-ключ (32 байта) из seed по контекстной метке
     /// (SEC-5). BLAKE3 в режиме KDF: `context` — уникальная незасекреченная строка-
-    /// домен (напр. `"dev.p2p.blob-at-rest.v1"`), одна метка → один детерминированный
+    /// домен (напр. `"peerage:blob-at-rest:v1"`), одна метка → один детерминированный
     /// ключ, независимый от seed и от ключей других доменов.
     ///
     /// ПОЛИТИКА: **любой новый ключ** (шифрование блобов at-rest, ключи медиа,
@@ -126,7 +126,7 @@ impl Identity {
         if epoch == 0 {
             return self.seed();
         }
-        self.derive_subkey(&format!("dev.p2p.transport.v1/{epoch}"))
+        self.derive_subkey(&format!("peerage:transport:v1/{epoch}"))
     }
 
     /// Публичный транспортный ключ эпохи — то, что видит сеть как наш адрес.
@@ -153,7 +153,7 @@ impl Identity {
     /// Секрет статического ключа сессий 1:1. Детерминирован из seed — после
     /// восстановления из мнемоники он тот же, хранить отдельно нечего.
     pub fn session_static_secret(&self) -> [u8; 32] {
-        self.derive_subkey("dev.p2p.session-static.v1")
+        self.derive_subkey("peerage:session-static:v1")
     }
 
     /// Подписать свой статический ключ сессий ключом ЛИЧНОСТИ.
@@ -175,7 +175,7 @@ impl Identity {
 
 /// Домен подписи объявления о смене адреса. Входит в подписываемые байты, чтобы
 /// подпись из одного контекста не годилась в другом (SEC-5, доменное разделение).
-const ROTATE_DOMAIN: &[u8] = b"dev.p2p.transport-rotate.v1";
+const ROTATE_DOMAIN: &[u8] = b"peerage:transport-rotate:v1";
 
 /// Байты, которые подписывает владелец личности при смене адреса.
 fn rotate_msg(epoch: u32, transport_pub: &[u8; 32]) -> Vec<u8> {
@@ -206,7 +206,7 @@ pub fn verify_transport_rotate(
 }
 
 /// Домен подписи статического ключа сессий (ADR-012).
-const SESSION_STATIC_DOMAIN: &[u8] = b"dev.p2p.session-static.v1";
+const SESSION_STATIC_DOMAIN: &[u8] = b"peerage:session-static:v1";
 
 fn session_static_msg(static_pub: &[u8; 32]) -> Vec<u8> {
     [SESSION_STATIC_DOMAIN, static_pub.as_slice()].concat()
@@ -301,7 +301,7 @@ pub fn visual_fingerprint(public_key: &[u8; 32]) -> [u8; VISUAL_FP_LEN] {
     // Домен-сепаратор с версией: тот же ключ в другой роли (или в другой версии
     // набора) обязан давать другой отпечаток.
     let mut hasher = Sha256::new();
-    hasher.update(b"p2p-visual-fingerprint-v");
+    hasher.update(b"peerage:visual-fingerprint:v");
     hasher.update([VISUAL_FP_VERSION]);
     hasher.update(public_key);
     let hash = hasher.finalize();
@@ -354,9 +354,9 @@ mod tests {
     #[test]
     fn derive_subkey_is_domain_separated_and_deterministic() {
         let id = Identity::from_seed(&[5u8; 32]).unwrap();
-        let a1 = id.derive_subkey("dev.p2p.blob-at-rest.v1");
-        let a2 = id.derive_subkey("dev.p2p.blob-at-rest.v1");
-        let b = id.derive_subkey("dev.p2p.media-key.v1");
+        let a1 = id.derive_subkey("peerage:blob-at-rest:v1");
+        let a2 = id.derive_subkey("peerage:blob-at-rest:v1");
+        let b = id.derive_subkey("peerage:media-key:v1");
         // Детерминирован по (seed, context).
         assert_eq!(a1, a2);
         // Разные домены → разные ключи.
@@ -365,7 +365,7 @@ mod tests {
         assert_ne!(a1, id.seed());
         // Разные идентичности → разные под-ключи для того же домена.
         let other = Identity::from_seed(&[6u8; 32]).unwrap();
-        assert_ne!(a1, other.derive_subkey("dev.p2p.blob-at-rest.v1"));
+        assert_ne!(a1, other.derive_subkey("peerage:blob-at-rest:v1"));
     }
 
     #[test]

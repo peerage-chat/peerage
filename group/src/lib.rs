@@ -1,4 +1,4 @@
-//! p2p-group — групповое E2E-шифрование на MLS (RFC 9420) через openmls.
+//! peerage-group — групповое E2E-шифрование на MLS (RFC 9420) через openmls.
 //!
 //! Один участник = [`Member`]: держит MLS-провайдер, ключ подписи и состояние
 //! группы. Идентичность участника (credential) — наш публичный ключ ed25519.
@@ -15,7 +15,7 @@ use std::path::Path;
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::{MemoryStorage, OpenMlsRustCrypto};
-use p2p_core::Identity;
+use peerage_core::Identity;
 use tls_codec::{Deserialize as _, Serialize as _};
 
 /// Шифрсьют MLS на X25519/AES128-GCM/SHA256/Ed25519.
@@ -113,14 +113,14 @@ impl Member {
         }
         // Атомарно: убитый посреди записи процесс не должен оставить обрезанное
         // MLS-состояние — такую группу уже не загрузить.
-        p2p_core::fsutil::write_atomic(path, &p2p_core::vault::seal(&state_purpose(), &out)).map_err(mls)?;
+        peerage_core::fsutil::write_atomic(path, &peerage_core::vault::seal(&state_purpose(), &out)).map_err(mls)?;
         Ok(())
     }
 
     /// Загрузить состояние группы с диска.
     pub fn load(path: &Path, identity: &Identity) -> Result<Self, GroupError> {
         let raw = std::fs::read(path).map_err(mls)?;
-        let data = p2p_core::vault::open(&state_purpose(), &raw).map_err(mls)?;
+        let data = peerage_core::vault::open(&state_purpose(), &raw).map_err(mls)?;
         if data.len() < 4 {
             return Err(GroupError::Mls("повреждённый файл группы".into()));
         }
@@ -337,10 +337,10 @@ pub fn peek_group_id(message: &[u8]) -> Option<Vec<u8>> {
     Some(protocol.group_id().as_slice().to_vec())
 }
 
-/// AAD файла MLS-состояния (см. `p2p_core::vault::purpose`). Id группы в него не
+/// AAD файла MLS-состояния (см. `peerage_core::vault::purpose`). Id группы в него не
 /// входит — он лежит внутри файла, и слой групп сверяет его с ожидаемым при загрузке.
 fn state_purpose() -> Vec<u8> {
-    p2p_core::vault::purpose("mls-group", &[], 0)
+    peerage_core::vault::purpose("mls-group", &[], 0)
 }
 
 #[cfg(test)]
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn group_state_survives_save_load() {
-        let dir = std::env::temp_dir().join(format!("p2p-grp-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("test-grp-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("a.group");
 

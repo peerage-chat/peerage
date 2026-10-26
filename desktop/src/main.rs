@@ -1,5 +1,5 @@
 //! Десктоп-приложение: Holo-интерфейс на Slint (нативная отрисовка) поверх
-//! движка p2p-messenger. Ядро/транспорт/мессенджер не зависят от UI.
+//! движка peerage-messenger. Ядро/транспорт/мессенджер не зависят от UI.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -9,16 +9,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use slint::{ComponentHandle, Image, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
-use p2p_call::capture::{CameraSource, ScreenSource};
-use p2p_call::{Call, GroupCall};
-use p2p_core::settings::{AudioSettings, OpusMode, Settings, VideoSettings};
-use p2p_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
-use p2p_core::Identity;
-use p2p_group::peek_group_id;
-use p2p_groupchat::GroupChat;
-use p2p_media::{push_source, DecodedFrame, VideoSource};
-use p2p_messenger::{Event, Messenger};
-use p2p_ygg::Node;
+use peerage_call::capture::{CameraSource, ScreenSource};
+use peerage_call::{Call, GroupCall};
+use peerage_core::settings::{AudioSettings, OpusMode, Settings, VideoSettings};
+use peerage_core::store::{ContactStore, MessageStore, Profile, StoredMessage};
+use peerage_core::Identity;
+use peerage_group::peek_group_id;
+use peerage_groupchat::GroupChat;
+use peerage_media::{push_source, DecodedFrame, VideoSource};
+use peerage_messenger::{Event, Messenger};
+use peerage_ygg::Node;
 
 slint::include_modules!();
 
@@ -372,13 +372,13 @@ fn save_group_msgs(core: &Arc<Core>, id: &[u8]) {
     });
     let _ = std::fs::create_dir_all(core.data_dir.join("groups"));
     if let Ok(j) = serde_json::to_vec(&arr) {
-        let _ = std::fs::write(group_msgs_path(core, id), p2p_core::vault::seal(&j));
+        let _ = std::fs::write(group_msgs_path(core, id), peerage_core::vault::seal(&j));
     }
 }
 
 fn load_group_msgs(core: &Arc<Core>, id: &[u8]) -> Vec<GMsg> {
     let Ok(raw) = std::fs::read(group_msgs_path(core, id)) else { return Vec::new() };
-    let Ok(bytes) = p2p_core::vault::open(&raw) else { return Vec::new() };
+    let Ok(bytes) = peerage_core::vault::open(&raw) else { return Vec::new() };
     let Ok(arr) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) else { return Vec::new() };
     arr.iter()
         .filter_map(|v| {
@@ -451,14 +451,14 @@ fn group_push(id: &[u8], mine: bool, text: String) {
 
 fn main() -> Result<(), slint::PlatformError> {
     // --- движок ---
-    let dir = match std::env::var_os("P2P_DATA_DIR") {
+    let dir = match std::env::var_os("PEERAGE_DATA_DIR") {
         Some(d) => std::path::PathBuf::from(d),
         None => directories_data_dir(),
     };
     std::fs::create_dir_all(&dir).ok();
 
     // Шифрование данных на диске (ключ — в системном keyring ОС).
-    if let Err(e) = p2p_core::vault::init() {
+    if let Err(e) = peerage_core::vault::init() {
         eprintln!("[security] at-rest шифрование недоступно ({e}); данные пишутся открытым текстом");
     }
 
@@ -1030,7 +1030,7 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
             if let Some(gid) = known_gid {
                 let text = GROUPS.with(|g| {
                     g.borrow_mut().groups.get_mut(&gid).and_then(|e| match e.chat.handle(&data) {
-                        Ok(p2p_groupchat::Inbound::Message { text, .. }) => Some(text),
+                        Ok(peerage_groupchat::Inbound::Message { text, .. }) => Some(text),
                         _ => None,
                     })
                 });
@@ -1080,13 +1080,13 @@ fn handle_event(ui: &AppWindow, core: &Arc<Core>, ev: Event) {
     }
 }
 
-/// Каталог данных по умолчанию: $XDG_DATA_HOME/p2p-messenger или ~/.local/share/...
+/// Каталог данных по умолчанию: $XDG_DATA_HOME/peerage или ~/.local/share/...
 fn directories_data_dir() -> std::path::PathBuf {
     if let Some(x) = std::env::var_os("XDG_DATA_HOME") {
-        return std::path::PathBuf::from(x).join("p2p-messenger");
+        return std::path::PathBuf::from(x).join("peerage");
     }
     if let Some(h) = std::env::var_os("HOME") {
-        return std::path::PathBuf::from(h).join(".local/share/p2p-messenger");
+        return std::path::PathBuf::from(h).join(".local/share/peerage");
     }
-    std::path::PathBuf::from("./p2p-data")
+    std::path::PathBuf::from("./peerage-data")
 }

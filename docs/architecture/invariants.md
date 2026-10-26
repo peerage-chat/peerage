@@ -96,7 +96,7 @@ The save itself must be crash-safe — see §11.
 
 ## 6. Domain separation of keys (SEC-5) — ✅ (a rule for NEW keys)
 
-> **Every new symmetric key is derived with `Identity::derive_subkey("dev.p2p.<domain>.vN")`
+> **Every new symmetric key is derived with `Identity::derive_subkey("peerage:<domain>:vN")`
 > (BLAKE3 KDF), NOT by reusing the seed, the identity or the Box key.**
 
 Each domain has its own unique label → an independent key. This prevents cross-protocol
@@ -123,7 +123,7 @@ compatibility):
 
 A Yggdrasil address is derived from the node key, so "change the address" = "change the
 key". So that this does not cost the identity, the transport key is separate:
-`TK_n = derive_subkey("dev.p2p.transport.v1/" + n)`, and **epoch 0 is the identity key
+`TK_n = derive_subkey("peerage:transport:v1/" + n)`, and **epoch 0 is the identity key
 itself** (installations that never changed their address work as before).
 
 Practical consequences, each paid for by a bug found:
@@ -150,7 +150,7 @@ length) must store those parameters (or a profile number) inside. Keeping them o
 means losing data at the first update: a key derived with other parameters is a DIFFERENT
 key, and the user sees "wrong password" for the right password and blames themselves.
 
-Applies to `vault.meta` (the third line is the profile number) and the `.p2pbak` header
+Applies to `vault.meta` (the third line is the profile number) and the `.peerage` header
 (the profile byte). The profile is stored as a NUMBER from the table `core::kdf::profile`,
 not as numbers: numbers from a file are input, and "memory 4 GiB" would take the app down
 before any password check. The meaning of an existing number must never change — only new
@@ -192,7 +192,7 @@ Android kills the process at any moment. A plain `fs::write` truncates the file 
 writes afterwards; being killed in between leaves an empty or cut file — for MLS state that
 is a group that can no longer be loaded, for the profile a lost identity.
 
-> **Every state file is written through `p2p_core::fsutil::write_atomic`** (or
+> **Every state file is written through `peerage_core::fsutil::write_atomic`** (or
 > `write_atomic_private` for keys and seeds, 0600): a temp file next to the target →
 > `sync_all` → `rename` over it.
 

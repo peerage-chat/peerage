@@ -95,7 +95,7 @@ Incrementally, subsystem by subsystem, not "rewrite everything at once":
 
 ## State as of 2026-09
 
-- **Done:** the `p2p-engine` crate holds all device-independent domain logic (`Engine`,
+- **Done:** the `peerage-engine` crate holds all device-independent domain logic (`Engine`,
   the event pump, `GroupManager`, `BlobManager`, `RoomCallEngine`, aggregates); `androidjni`
   is a thin codec with a panic guard on every entry point. Network statistics, group
   presence, the offline queue and its policy (now per trust tier), settings and the message

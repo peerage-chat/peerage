@@ -4,7 +4,7 @@
          Activity (фон окна, системные полосы, без ActionBar).
          Значения — зеркало Tokens.Colors.bg (#0F0F11): системные полосы должны
          сливаться с фоном экрана, иначе окно выглядит вставленным в чужую рамку. -->
-    <style name="Theme.P2P" parent="@android:style/Theme.Material.NoActionBar">
+    <style name="Theme.App" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:statusBarColor">#0f0f11</item>
         <item name="android:windowBackground">#0f0f11</item>
         <item name="android:navigationBarColor">#0f0f11</item>

@@ -2,10 +2,10 @@
 //! паниковать НИ НА КАКОМ входе — только возвращать None/Err. proptest подсовывает
 //! тысячи случайных байтовых последовательностей. Гоняется на хосте (`cargo test`).
 
-use p2p_core::media::{parse_media, parse_video_frag, VideoReassembler};
-use p2p_core::protocol::Payload;
-use p2p_core::session::Sessions;
-use p2p_core::Identity;
+use peerage_core::media::{parse_media, parse_video_frag, VideoReassembler};
+use peerage_core::protocol::Payload;
+use peerage_core::session::Sessions;
+use peerage_core::Identity;
 use proptest::prelude::*;
 
 proptest! {

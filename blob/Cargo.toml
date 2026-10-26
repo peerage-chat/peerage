@@ -1,14 +1,14 @@
 [package]
-name = "p2p-blob"
+name = "peerage-blob"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [lib]
-name = "p2p_blob"
+name = "peerage_blob"
 
-# Чистый крейт без транспорта — тестируется на любом хосте (`cargo test -p p2p-blob`).
+# Чистый крейт без транспорта — тестируется на любом хосте (`cargo test -p peerage-blob`).
 [dependencies]
 blake3.workspace = true
 serde.workspace = true

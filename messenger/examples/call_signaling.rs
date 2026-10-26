@@ -1,16 +1,16 @@
 //! Проверка сигнализации звонка: A приглашает → B принимает → A завершает.
 //! Чисто сигнальный поток (без медиа), по надёжному каналу через Yggdrasil.
 //!
-//! Запуск (WSL): cargo run -p p2p-messenger --example call_signaling
+//! Запуск (WSL): cargo run -p peerage-messenger --example call_signaling
 
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_core::Identity;
-use p2p_messenger::{Event, Messenger};
-use p2p_ygg::Node;
+use peerage_core::Identity;
+use peerage_messenger::{Event, Messenger};
+use peerage_ygg::Node;
 
 fn wait<F: Fn(&Event) -> bool>(rx: &Receiver<Event>, pred: F, t: Duration) -> bool {
     let dl = Instant::now() + t;

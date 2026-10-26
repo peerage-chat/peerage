@@ -82,7 +82,7 @@ Separate the **long-term identity** from the **transport key**.
 TK is derived from the same seed with domain separation — by an epoch counter:
 
 ```
-TK_n = Identity::derive_subkey("dev.p2p.transport.v1/" + n)     // BLAKE3 KDF
+TK_n = Identity::derive_subkey("peerage:transport:v1/" + n)     // BLAKE3 KDF
 ```
 
 Determinism matters: restoring from the mnemonic keeps working (seed + epoch number = the same
@@ -263,7 +263,7 @@ receiver — the contact gate is propped up by the transport. But:
 - **it is an implementation detail, not a protocol guarantee.** The header of `session.go` has a
   TODO about exactly this area (keep the private keys of sent inits / answer an ack with an ack).
   Nothing may be built on it; re-check on every ironwood update
-  (`cargo run -p p2p-ygg --example silent_victim`).
+  (`cargo run -p peerage-ygg --example silent_victim`).
 
 ## Revision of the decision after the experiments
 

@@ -56,7 +56,7 @@ form and encrypts at the moment of sending.
 ### 2.1 Sessions (ADR-012)
 
 A session is created by a `Noise_XXhfs_25519+MLKEM768_ChaChaPoly_BLAKE2s` handshake
-(prologue `dev.p2p.dm-session.v2`) and lives in memory only. Indices are little-endian.
+(prologue `peerage:dm-session:v2`) and lives in memory only. Indices are little-endian.
 
 ```text
 msg1  sender_idx(4) | e(32) | e1(1184) | mac1(16)                   | random padding → 4124 B
@@ -69,12 +69,12 @@ data  receiver_idx(4) | counter(8) | ChaCha20-Poly1305(padded payload), AD = the
   bytes (pending msg2, pending msg3 or a live session); an unknown index of the APP size is
   tried as msg1. msg1/msg2 have the size of an APP data packet, msg3 the size of a
   CONTROL one, so a handshake is not told apart from traffic by size.
-- **`mac1`** = first 16 bytes of `BLAKE3-keyed(derive_key("dev.p2p.session-mac1.v1",
+- **`mac1`** = first 16 bytes of `BLAKE3-keyed(derive_key("peerage:session-mac1:v1",
   responder_identity), msg1 without mac1)`. Without it the responder stays silent: only
   someone who already knows our identity can make us reveal it (address rotation, ADR-007).
 - **`auth`** = identity public key (32) ‖ Ed25519 signature by that identity over
-  `"dev.p2p.session-static.v1" ‖ static_pub` (64), encrypted inside the handshake. The
-  static X25519 key is `derive_subkey("dev.p2p.session-static.v1")`. The initiator
+  `"peerage:session-static:v1" ‖ static_pub` (64), encrypted inside the handshake. The
+  static X25519 key is `derive_subkey("peerage:session-static:v1")`. The initiator
   requires the responder's identity to be the peer it called; the responder learns the
   initiator's identity from msg3.
 - **Data:** the counter is the AEAD nonce; a 2048-packet sliding window rejects replays
@@ -98,7 +98,7 @@ data  receiver_idx(4) | counter(8) | ChaCha20-Poly1305(padded payload), AD = the
   the probe.
 - **Media (`CHAN_MEDIA`, SEC-4)** uses the same packet layout — `receiver_idx(4) |
   counter(8) | ChaCha20-Poly1305` — with the session's *media* keys
-  (`HKDF(ck, "dev.p2p.media-keys.v1")`, one per direction, independent of the chat keys),
+  (`HKDF(ck, "peerage:media-keys:v1")`, one per direction, independent of the chat keys),
   its own counter and its own replay window. The plaintext is the media frame
   (`track | seq | ts | payload`, `core/src/media.rs`), so track and sequence numbers are
   no longer visible on the wire. Without a session the frame is dropped (late media is
@@ -134,13 +134,13 @@ Inside an MLS group, the application body is `AppMsg` (`groupchat/src/lib.rs`): 
 ## 3. Anti-abuse (ingress)
 
 - **Mechanism (M1):** a receiver-enforced token bucket per source
-  (`p2p_core::ratelimit::RateLimiter`) in the messenger's receive loop. It is applied by
+  (`peerage_core::ratelimit::RateLimiter`) in the messenger's receive loop. It is applied by
   the Yggdrasil source key **before decryption**, so a flood is dropped before expensive
   crypto. Separate budgets: strict for CHAN_CHAT (the spam vector), generous for
   CHAN_MEDIA (a call is legitimately high-rate). The receiver enforces it, so modifying
   the sender does not get around it. For a mesh source that cannot be disconnected at the
   link level, an exhausted budget means "the session is cut" on input.
-- **One budget per peer (M3):** `p2p_core::budget::Tier` is the ONE place from which the
+- **One budget per peer (M3):** `peerage_core::budget::Tier` is the ONE place from which the
   ingress limit, the outbox cap and the outbox lifetime are derived (earlier these
   policies lived in five places with their own constants):
 
@@ -187,7 +187,7 @@ MLS credential and the contact record hang on it. It never changes.
 consumable: it is changed to cut off someone's flood.
 
 ```
-TK_n = Identity::derive_subkey("dev.p2p.transport.v1/" + n)     // BLAKE3 KDF
+TK_n = Identity::derive_subkey("peerage:transport:v1/" + n)     // BLAKE3 KDF
 TK_0 = IK                                                       // epoch 0
 ```
 
@@ -200,7 +200,7 @@ secret is stored.
 
 ```rust
 Payload::TransportRotate { id, epoch, transport_pub, sig }
-// sig = IK.sign("dev.p2p.transport-rotate.v1" || epoch_be || transport_pub)
+// sig = IK.sign("peerage:transport-rotate:v1" || epoch_be || transport_pub)
 ```
 
 The receiver applies it only if ALL of these hold: the sender is a known contact; the
@@ -279,7 +279,7 @@ MLS and travels on the same `CHAN_CHAT`), with the same ceiling.
 
 ### Sending large attachments as a stream
 
-The manifest of a large file is computed **as a stream** (`p2p_blob::manifest_of_file`):
+The manifest of a large file is computed **as a stream** (`peerage_blob::manifest_of_file`):
 the file is read one chunk at a time, and the hashes and the overall id accumulate on the
 fly. When serving, chunks are read from disk by index (`read_file_chunk`), and our own copy
 is written in the same chunked, encrypted format as received blobs. Result: sending a
@@ -454,13 +454,13 @@ change the bytes on the wire.
 
 ---
 
-## 7. Data backup file (`.p2pbak`)
+## 7. Data backup file (`.peerage`)
 
 Not a network format, but just as long-lived a contract: a file created today must open in
 future versions. Implementation — `core/src/backup.rs`, contents — `engine/src/backup.rs`.
 
 ```text
-"P2PBAK" | version u8 | kdf_profile u8 | salt[16]
+"PEERBK" | version u8 | kdf_profile u8 | salt[16]
 frame*:   len u32 LE | nonce[24] | ciphertext(XChaCha20-Poly1305)
 ```
 

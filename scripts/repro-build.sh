@@ -8,7 +8,7 @@
 # релиза с этой сборкой — reproducible/README.md.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-IMAGE=p2p-repro:1
+IMAGE=peerage-repro:1
 
 docker build -q -t "$IMAGE" "$ROOT/reproducible" >/dev/null
 

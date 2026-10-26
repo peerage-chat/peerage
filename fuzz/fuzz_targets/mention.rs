@@ -5,7 +5,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use p2p_core::mention::{clean, Mention, MAX_MENTIONS};
+use peerage_core::mention::{clean, Mention, MAX_MENTIONS};
 
 fuzz_target!(|data: &[u8]| {
     // Первые 2 байта — длина текста, дальше текст, остаток — тройки (at, len, ключ).

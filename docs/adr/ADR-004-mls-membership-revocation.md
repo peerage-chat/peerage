@@ -180,7 +180,7 @@ DAG).
        thread; laggards heal through resync.
 
 **Status 2026-07-03: ADR-004 IMPLEMENTED AND VERIFIED** — items 1–7 closed; unit tests
-(`p2p-group`, `p2p-core` roundtrip, loopback invite/kick/leave, `engine/tests/group_flow.rs`
+(`peerage-group`, `peerage-core` roundtrip, loopback invite/kick/leave, `engine/tests/group_flow.rs`
 including packet loss) + **a live run phone ↔ emulator**: a group invitation (the former
 blocker) works, kick → "you were removed" + leaving, leave → revocation by the admin. Groups
 created before `admins.json` existed show up as non-admin (not migratable).

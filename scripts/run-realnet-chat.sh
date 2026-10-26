@@ -10,7 +10,7 @@ cd "$ROOT"
 export LD_LIBRARY_PATH="$ROOT/ygg/libygg:${LD_LIBRARY_PATH:-}"
 
 bash scripts/build-ygg.sh >/dev/null
-cargo build -q -p p2p-messenger --example chat
+cargo build -q -p peerage-messenger --example chat
 CHAT="$CARGO_TARGET_DIR/debug/examples/chat"
 
 # Детерминированные seed-ы → известные публичные ключи.

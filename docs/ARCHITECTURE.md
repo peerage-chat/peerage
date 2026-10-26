@@ -46,7 +46,7 @@ blob/        content-addressed blobs: BLAKE3-verified chunks, resumable pull, li
              EXIF/GPS scrubbing
 engine/      DOMAIN LOGIC for clients: the Engine facade, GroupManager (an actor for the
              !Send MLS state), BlobManager, RoomCallEngine (multi-party rooms), backup
-androidjni/  THIN JNI bridge (cdylib libp2p_android.so): marshals arguments to Engine calls
+androidjni/  THIN JNI bridge (cdylib libpeerage_android.so): marshals arguments to Engine calls
 call/        desktop call engine (cpal audio + H.264); used only by the desktop client
 desktop/     desktop client (Slint). Predates the engine and currently does not compile
 ntfy/        client for ntfy.sh push wake-up. Written but not wired into any client yet
@@ -68,7 +68,7 @@ is planned work.
 
 ## 3. The engine ↔ client boundary
 
-Domain logic lives in `engine` (crate `p2p-engine`), not in JNI or the UI.
+Domain logic lives in `engine` (crate `peerage-engine`), not in JNI or the UI.
 - **`Engine`** is the facade: it owns the messenger session, contacts, groups, blobs and
   rooms. The client calls its methods; the engine reports back through an **event queue**
   (JSON) that the client polls. Everything the UI shows can be rebuilt from the engine.
@@ -242,7 +242,7 @@ Gradle 8.9 + JDK 21. The Rust and Go parts are built on Linux (WSL on Windows).
 **Android:**
 ```sh
 # Rust only (fast; when only Rust changed):
-bash scripts/rebuild-p2p-android.sh <ABI>      # x86_64 (emulator) | arm64-v8a (phone)
+bash scripts/rebuild-peerage-android.sh <ABI>      # x86_64 (emulator) | arm64-v8a (phone)
 # Full (when the ygg.go FFI changed): libygg + Rust
 bash scripts/build-android-libs.sh <ABI>
 ./gradlew :app:assembleDebug                   # APK

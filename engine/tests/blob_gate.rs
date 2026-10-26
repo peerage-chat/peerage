@@ -9,10 +9,10 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::{Engine, MediaInfo};
-use p2p_messenger::loopback::LoopbackNet;
-use p2p_messenger::{Config, Event, Messenger};
+use peerage_core::Identity;
+use peerage_engine::{Engine, MediaInfo};
+use peerage_messenger::loopback::LoopbackNet;
+use peerage_messenger::{Config, Event, Messenger};
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -20,7 +20,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-blobgate-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-blobgate-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -72,7 +72,7 @@ fn unsolicited_manifest_is_ignored() {
     let (m, m_rx) = raw(&net, m_id);
 
     let content = vec![0x42u8; 50_000];
-    let (manifest, _chunks) = p2p_blob::build(&content, "application/octet-stream");
+    let (manifest, _chunks) = peerage_blob::build(&content, "application/octet-stream");
     for p in manifest.split() {
         let hashes: Vec<u8> = p.hashes.iter().flatten().copied().collect();
         m.send_blob_manifest_part(&a_key, &p.id, &p.mime, p.size, p.part, p.total, &hashes).unwrap();
@@ -94,7 +94,7 @@ fn stored_blob_is_served_to_contact_only() {
     let (s, s_rx) = raw(&net, s_id);
 
     let content: Vec<u8> = (0..30_000u32).map(|i| (i * 13) as u8).collect();
-    let blob = p2p_blob::blob_id(&content);
+    let blob = peerage_blob::blob_id(&content);
     a.send_media(&c_key, content, "application/pdf", "doc.pdf").unwrap();
     assert!(wait(5, || a.blob_exists(&hex::encode(blob))), "своя копия сохранена");
     // Отправитель больше не толкает файл сам: получатель попросит по хэшу.
@@ -126,7 +126,7 @@ fn large_file_downloads_by_button() {
     let content: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
     let src = tmpdir("src").join("video.mp4");
     std::fs::write(&src, &content).unwrap();
-    let blob = hex::encode(p2p_blob::blob_id(&content));
+    let blob = hex::encode(peerage_blob::blob_id(&content));
     a.send_media_file(&b_key, &src, "video/mp4", "video.mp4", MediaInfo::default()).unwrap();
 
     assert!(wait(10, || b.history_json(&a_key).contains(&blob)), "карточка пришла");
@@ -161,9 +161,9 @@ fn clearing_attachments_keeps_avatar_and_thumbs() {
     let avatar = a.set_self_avatar(vec![5u8; 300], "image/png");
     // Мелкое вложение с миниатюрой — приезжает само.
     let thumb = vec![6u8; 200];
-    let thumb_id = hex::encode(p2p_blob::blob_id(&thumb));
+    let thumb_id = hex::encode(peerage_blob::blob_id(&thumb));
     let small: Vec<u8> = (0..20_000u32).map(|i| (i % 13) as u8).collect();
-    let small_id = hex::encode(p2p_blob::blob_id(&small));
+    let small_id = hex::encode(peerage_blob::blob_id(&small));
     let info = MediaInfo { thumb: Some(thumb), ..Default::default() };
     b.send_media_with(&a_key, small, "application/pdf", "doc.pdf", info).unwrap();
     assert!(wait(10, || a.blob_exists(&small_id) && a.blob_exists(&thumb_id)), "вложение и миниатюра у A");
@@ -172,7 +172,7 @@ fn clearing_attachments_keeps_avatar_and_thumbs() {
     let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
     let src = tmpdir("src4").join("v.mp4");
     std::fs::write(&src, &big).unwrap();
-    let big_id = hex::encode(p2p_blob::blob_id(&big));
+    let big_id = hex::encode(peerage_blob::blob_id(&big));
     b.send_media_file(&a_key, &src, "video/mp4", "v.mp4", MediaInfo::default()).unwrap();
     assert!(wait(10, || a.history_json(&b_key).contains(&big_id)), "карточка крупного пришла");
     assert!(a.download_media(&b_key, &big_id));

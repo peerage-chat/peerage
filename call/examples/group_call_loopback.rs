@@ -2,19 +2,19 @@
 //! A; A принимает кадры ПО ИСТОЧНИКАМ (per-source декод). Аудио выключено (нет
 //! устройств в WSL).
 //!
-//! Запуск (WSL): cargo run -p p2p-call --example group_call_loopback
+//! Запуск (WSL): cargo run -p peerage-call --example group_call_loopback
 
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use p2p_call::GroupCall;
-use p2p_core::settings::VideoSettings;
-use p2p_core::Identity;
-use p2p_media::VideoSource;
-use p2p_messenger::Messenger;
-use p2p_ygg::Node;
+use peerage_call::GroupCall;
+use peerage_core::settings::VideoSettings;
+use peerage_core::Identity;
+use peerage_media::VideoSource;
+use peerage_messenger::Messenger;
+use peerage_ygg::Node;
 
 struct TestSource {
     w: u32,

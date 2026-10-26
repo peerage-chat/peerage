@@ -71,7 +71,7 @@ practical difference is small, and the failure modes of A are far simpler.
 
 - **Static keys are separate from the identity (closes SEC-5 for 1:1).** Each side has a
   static X25519 key derived from its seed with its own domain label
-  (`dev.p2p.session-static.v1`) and **signed by the Ed25519 identity**. The signature
+  (`peerage:session-static:v1`) and **signed by the Ed25519 identity**. The signature
   travels in the handshake payload next to the identity key; the receiver checks it and
   that the identity is the one it expects. Precedent: libp2p's Noise handshake signs its
   static key with the peer's identity key the same way.

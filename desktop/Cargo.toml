@@ -1,5 +1,5 @@
 [package]
-name = "p2p-desktop"
+name = "peerage-desktop"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -13,10 +13,10 @@ slint = "1"
 arboard = "3"
 hex.workspace = true
 serde_json.workspace = true
-p2p-core = { path = "../core" }
-p2p-ygg = { path = "../transport" }
-p2p-messenger = { path = "../messenger" }
-p2p-media = { path = "../media" }
-p2p-call = { path = "../call", features = ["capture"] }
-p2p-group = { path = "../group" }
-p2p-groupchat = { path = "../groupchat" }
+peerage-core = { path = "../core" }
+peerage-ygg = { path = "../transport" }
+peerage-messenger = { path = "../messenger" }
+peerage-media = { path = "../media" }
+peerage-call = { path = "../call", features = ["capture"] }
+peerage-group = { path = "../group" }
+peerage-groupchat = { path = "../groupchat" }

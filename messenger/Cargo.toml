@@ -1,17 +1,17 @@
 [package]
-name = "p2p-messenger"
+name = "peerage-messenger"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [lib]
-name = "p2p_messenger"
+name = "peerage_messenger"
 
 [dependencies]
 log = "0.4"
-p2p-core = { path = "../core" }
-p2p-ygg = { path = "../transport" }
+peerage-core = { path = "../core" }
+peerage-ygg = { path = "../transport" }
 rand_core.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

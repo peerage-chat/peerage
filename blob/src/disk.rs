@@ -8,11 +8,11 @@
 //! Здесь чанк проверяется по BLAKE3 из манифеста, **шифруется вызывающим** и
 //! кладётся в файл по фиксированному смещению. В памяти остаётся только карта
 //! «получен/нет» (1 байт на чанк). Крейт остаётся чистым: шифрование инъектируется
-//! замыканием, поэтому `p2p-blob` по-прежнему не зависит от `p2p-core`.
+//! замыканием, поэтому `peerage-blob` по-прежнему не зависит от `peerage-core`.
 //!
 //! Формат файла (чтобы читать чанк не разбирая весь блоб):
 //! ```text
-//! "P2PB" | ver:u8 | chunk_size:u32 | n_chunks:u32 | size:u64 | слоты…
+//! "PRGB" | ver:u8 | chunk_size:u32 | n_chunks:u32 | size:u64 | слоты…
 //! слот = len:u32 | запечатанные байты чанка | добивка до slot_size
 //! ```
 //! Первый байт «P» отличает его от формата [`vault::seal`] (там 0 или 1): мелкие
@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use crate::{hash_of, BlobError, Hash, Manifest, CHUNK_SIZE};
 
 /// Магия формата чанкованного блоба на диске.
-pub const MAGIC: &[u8; 4] = b"P2PB";
+pub const MAGIC: &[u8; 4] = b"PRGB";
 /// Версия формата.
 pub const VERSION: u8 = 1;
 /// Максимальный оверхед шифрования на чанк (`vault::seal`: 1 + nonce 24 + tag 16).
@@ -260,7 +260,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let d = std::env::temp_dir().join(format!("p2p-disk-{tag}-{n}"));
+        let d = std::env::temp_dir().join(format!("test-disk-{tag}-{n}"));
         std::fs::create_dir_all(&d).unwrap();
         d.join("blob")
     }

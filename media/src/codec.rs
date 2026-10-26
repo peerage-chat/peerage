@@ -3,7 +3,7 @@
 
 use opus::{Application, Channels, Decoder, Encoder};
 
-pub use p2p_core::settings::{AudioSettings, OpusMode};
+pub use peerage_core::settings::{AudioSettings, OpusMode};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CodecError {

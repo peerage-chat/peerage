@@ -8,7 +8,7 @@
 set -euo pipefail
 REF="${REF:-HEAD}"
 ABI="${ABI:-arm64-v8a}"
-W=/build/p2p
+W=/build/src
 
 git config --global --add safe.directory '*'
 git clone -q --no-hardlinks /src "$W"
@@ -23,8 +23,8 @@ export TZ=UTC LC_ALL=C.UTF-8
 export REPRO=1
 export CARGO_TARGET_DIR=/build/target
 # Пути в отладочной информации — к постоянным именам.
-export RUSTFLAGS="--remap-path-prefix=$W=/p2p --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup"
-export CFLAGS="-ffile-prefix-map=$W=/p2p -ffile-prefix-map=$CARGO_HOME=/cargo"
+export RUSTFLAGS="--remap-path-prefix=$W=/src --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup"
+export CFLAGS="-ffile-prefix-map=$W=/src -ffile-prefix-map=$CARGO_HOME=/cargo"
 export CXXFLAGS="$CFLAGS"
 
 bash scripts/build-android-libs.sh "$ABI"

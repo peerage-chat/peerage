@@ -2,7 +2,7 @@
 //
 // Экспортирует датаграммный API поверх mesh-сети Yggdrasil, адресуемый по
 // публичному ключу ed25519 узла. TUN не используется — встраивается как
-// библиотека, не требует прав root. Линкуется из Rust (crate p2p-ygg).
+// библиотека, не требует прав root. Линкуется из Rust (crate peerage-ygg).
 //
 // Сборка: go build -buildmode=c-shared -o libygg.so ./libygg
 package main

@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use p2p_core::Identity;
-use p2p_engine::Engine;
-use p2p_messenger::loopback::LoopbackNet;
+use peerage_core::Identity;
+use peerage_engine::Engine;
+use peerage_messenger::loopback::LoopbackNet;
 
 fn id(n: u8) -> Identity {
     Identity::from_seed(&[n; 32]).unwrap()
@@ -17,7 +17,7 @@ fn id(n: u8) -> Identity {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("p2p-chat-{tag}-{n}"));
+    let d = std::env::temp_dir().join(format!("test-chat-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
@@ -130,10 +130,10 @@ fn undelivered_message_is_queued_not_failed() {
     let (a_id, b_id) = (id(7), id(8));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
     // Короткий message_ttl: штатные 5 минут в тесте не подождать.
-    let cfg = p2p_messenger::Config {
+    let cfg = peerage_messenger::Config {
         message_ttl: Duration::from_secs(2),
         retry_interval: Duration::from_millis(200),
-        ..p2p_messenger::Config::default()
+        ..peerage_messenger::Config::default()
     };
     let a = Engine::start_with_transport_cfg(tmpdir("a"), a_id, net.endpoint(a_key), cfg)
         .unwrap()

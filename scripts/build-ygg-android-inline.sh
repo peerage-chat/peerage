@@ -3,7 +3,7 @@ export PATH="/usr/local/go/bin:/usr/bin:/bin:$PATH"
 NDK="/home/fixman/android-ndk-r28c"
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 API=24
-ROOT="/mnt/c/Users/fixman/Documents/projects/p2p/ygg"
+ROOT="$(cd "$(dirname "$0")/../ygg" && pwd)"
 cd "$ROOT" || exit 1
 
 build_abi() {
