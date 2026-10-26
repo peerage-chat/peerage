@@ -34,6 +34,44 @@ pub fn unpad(padded: &[u8]) -> Option<Vec<u8>> {
     Some(padded[4..end].to_vec())
 }
 
+/// Доказательства Kani: для ВСЕХ входов ограниченной длины, а не для выборки, как
+/// у фаззера. `unpad` разбирает открытый текст, присланный контактом под валидным
+/// шифром, — паника здесь была бы удалённым падением процесса.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Любой вход до 12 байт: без паники, а результат не длиннее полезной части.
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn unpad_never_panics() {
+        let buf: [u8; 12] = kani::any();
+        let n: usize = kani::any();
+        kani::assume(n <= buf.len());
+        if let Some(v) = unpad(&buf[..n]) {
+            assert!(v.len() + 4 <= n);
+            assert_eq!(&v[..], &buf[4..4 + v.len()]);
+        }
+    }
+
+    /// `unpad(pad(x, b)) == x` для любого содержимого до 6 байт и любого бакета до
+    /// 16, а длина кратна бакету — иначе паддинг выдавал бы размер.
+    #[kani::proof]
+    #[kani::unwind(18)]
+    fn pad_round_trips() {
+        let content: [u8; 6] = kani::any();
+        let n: usize = kani::any();
+        let bucket: usize = kani::any();
+        kani::assume(n <= content.len() && bucket <= 16);
+        let padded = pad(&content[..n], bucket);
+        if bucket > 0 {
+            assert_eq!(padded.len() % bucket, 0);
+        }
+        assert!(padded.len() >= 4 + n);
+        assert_eq!(unpad(&padded).as_deref(), Some(&content[..n]));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

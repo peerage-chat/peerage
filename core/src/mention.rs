@@ -38,16 +38,8 @@ pub fn clean(text: &str, mut mentions: Vec<Mention>) -> Vec<Mention> {
         if out.len() == MAX_MENTIONS {
             break;
         }
-        let (at, len) = (m.at as usize, m.len as usize);
-        let Some(end) = at.checked_add(len) else { continue };
-        let fits = len > 0
-            && end <= text.len()
-            && text.is_char_boundary(at)
-            && text.is_char_boundary(end);
         let key_ok = m.key.len() == 64 && m.key.bytes().all(|b| b.is_ascii_hexdigit());
-        if !fits || !key_ok || at < end_prev {
-            continue;
-        }
+        let Some(end) = span(text, m.at, m.len, end_prev).filter(|_| key_ok) else { continue };
         m.key.make_ascii_lowercase();
         end_prev = end;
         out.push(m);
@@ -55,9 +47,46 @@ pub fn clean(text: &str, mut mentions: Vec<Mention>) -> Vec<Mention> {
     out
 }
 
+/// Можно ли взять участок `[at, at+len)` после предыдущего, кончившегося на
+/// `end_prev`: непустой, внутри текста, на границах символов, без перекрытия.
+/// Возвращает конец участка. Вынесено отдельно ради доказательства Kani — это ровно
+/// то условие, от которого зависит, не упадёт ли срез строки у получателя.
+fn span(text: &str, at: u32, len: u32, end_prev: usize) -> Option<usize> {
+    let (at, len) = (at as usize, len as usize);
+    let end = at.checked_add(len)?;
+    let ok = len > 0
+        && at >= end_prev
+        && end <= text.len()
+        && text.is_char_boundary(at)
+        && text.is_char_boundary(end);
+    ok.then_some(end)
+}
+
 /// Упомянут ли `key_hex` в списке (регистр hex не важен).
 pub fn mentions_key(mentions: &[Mention], key_hex: &str) -> bool {
     mentions.iter().any(|m| m.key.eq_ignore_ascii_case(key_hex))
+}
+
+/// Доказательство Kani: какие бы числа ни прислал участник группы, участок,
+/// который пропускает [`span`] (а значит и [`clean`]), режет текст без паники и не
+/// заходит на предыдущий. Ключи и повторная чистка — на тестах ниже и фаззере
+/// `mention`: строки на 64 символа верификатору не по силам за разумное время.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn accepted_span_is_safe_to_slice() {
+        // Кириллица (2 байта) и эмодзи (4): границы символов не совпадают с байтами.
+        const TEXT: &str = "@Я 👋";
+        let (at, len, end_prev): (u32, u32, usize) = (kani::any(), kani::any(), kani::any());
+        if let Some(end) = span(TEXT, at, len, end_prev) {
+            let at = at as usize;
+            assert!(end_prev <= at && at < end && end <= TEXT.len());
+            let _ = &TEXT[at..end]; // паника здесь = кривой участок прошёл проверку
+        }
+    }
 }
 
 #[cfg(test)]

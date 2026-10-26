@@ -112,7 +112,12 @@ fn pad_random<R: RngCore>(mut v: Vec<u8>, len: usize, rng: &mut R) -> Vec<u8> {
 
 /// Окно повторов (как в WireGuard, RFC 6479): принимаем каждый номер один раз и
 /// не старше [`WINDOW`] от самого нового.
+#[cfg(not(kani))]
 const WINDOW: u64 = 2048;
+/// Под Kani окно меньше: код не зависит от размера (годится любое кратное 64), а
+/// цикл сдвига окна верификатор разворачивает целиком.
+#[cfg(kani)]
+const WINDOW: u64 = 128;
 
 #[derive(Clone)]
 struct ReplayWindow {
@@ -161,6 +166,57 @@ impl ReplayWindow {
         }
         let (w, b) = Self::slot(n);
         self.bits[w] |= b;
+    }
+}
+
+/// Доказательства Kani для окна повторов: для ЛЮБЫХ номеров пакетов, а не для
+/// выбранных в тестах. Ошибка здесь — либо повтор чужого пакета принят (атака),
+/// либо настоящий пакет отвергнут (молча пропавшее сообщение).
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Принять номер, как это делает сессия: сначала `check`, потом `update`.
+    fn accept(w: &mut ReplayWindow, n: u64) -> bool {
+        if !w.check(n) {
+            return false;
+        }
+        w.update(n);
+        true
+    }
+
+    /// Два произвольных пакета подряд: один номер не принимается дважды, а после
+    /// приёма повтор любого из принятых отвергается. (Вариант с тремя пакетами не
+    /// укладывается в 15 минут верификатора, а нового свойства не добавляет.)
+    #[kani::proof]
+    #[kani::unwind(130)]
+    fn no_number_accepted_twice() {
+        let mut w = ReplayWindow::new();
+        let (a, b): (u64, u64) = (kani::any(), kani::any());
+        let got_a = accept(&mut w, a);
+        let got_b = accept(&mut w, b);
+        assert!(!(got_a && got_b && a == b));
+        if got_a {
+            assert!(!w.check(a));
+        }
+        if got_b {
+            assert!(!w.check(b));
+        }
+    }
+
+    /// Нет ложных отказов: номер, который ещё не приходил и лежит внутри окна (или
+    /// новее всех), принимается — переупорядочивание сети не теряет пакеты.
+    #[kani::proof]
+    #[kani::unwind(130)]
+    fn fresh_number_in_window_is_accepted() {
+        let mut w = ReplayWindow::new();
+        let (a, b, c): (u64, u64, u64) = (kani::any(), kani::any(), kani::any());
+        let got_a = accept(&mut w, a);
+        let got_b = accept(&mut w, b);
+        kani::assume(c < REJECT_AFTER_MESSAGES);
+        kani::assume(!(got_a && c == a) && !(got_b && c == b));
+        kani::assume(c >= w.top || w.top - c <= WINDOW);
+        assert!(w.check(c));
     }
 }
 

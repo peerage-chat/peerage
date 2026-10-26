@@ -96,7 +96,11 @@ reveals activity), a compromised operating system, physical access to an unlocke
   Android's media sandboxing limits the blast radius.
 - **Blobs.** Chunks are verified with BLAKE3 one by one and as a whole; size and chunk
   count are limited; downloads above a threshold need the user's consent. Property tests
-  cover the parsers; fuzzing with `cargo-fuzz` and Kani proofs are planned (milestone M6).
+  cover the parsers; `cargo-fuzz` targets cover wire, media, blob manifest, scrub,
+  session and mentions (`scripts/fuzz.sh`). Kani proves for all bounded inputs that
+  `unpad` never panics and inverts `pad`, that the session replay window accepts each
+  packet number at most once and never rejects a fresh one in the window, and that an
+  accepted mention span is safe to slice (`scripts/kani.sh`, see plans/beta.md step 6).
 
 ## Dependency scan (cargo-deny)
 

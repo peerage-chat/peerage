@@ -48,3 +48,8 @@ hex = "0.4"
 # Эталон классической части Noise XX в тестах ADR-012 (байт-в-байт).
 snow = "0.10"
 proptest.workspace = true
+
+# Доказательства Kani (план беты, шаг 6): `scripts/kani.sh`. cfg(kani) включает их
+# только под верификатором; объявляем его, чтобы обычная сборка не ругалась.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
