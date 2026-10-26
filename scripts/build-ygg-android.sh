@@ -46,10 +46,11 @@ for abi in "${ABIS[@]}"; do
     out="libygg/android/$abi"
     mkdir -p "$out"
     echo "→ $abi (GOARCH=${GOARCH[$abi]})"
+    # -trimpath и пустой buildid: в бинарнике нет путей машины и случайного id,
+    # одинаковые исходники дают одинаковые байты (шаг 7 плана беты).
     CC="$cc" GOOS=android GOARCH="${GOARCH[$abi]}" \
-        # -trimpath и пустой buildid: в бинарнике нет путей машины и случайного id,
-        # одинаковые исходники дают одинаковые байты (шаг 7 плана беты).
-        go build -buildmode=c-shared -trimpath -buildvcs=false -ldflags=-buildid=             -o "$out/libygg.so" ./libygg
+        go build -buildmode=c-shared -trimpath -buildvcs=false -ldflags=-buildid= \
+        -o "$out/libygg.so" ./libygg
     ls -la "$out/libygg.so"
 done
 echo "готово: ygg/libygg/android/"
