@@ -68,8 +68,17 @@ internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
     }
 }
 
+/** Лента группы. `onOpenPeer` — тап по «@имени»: открыть того, кого упомянули. */
 @Composable
-internal fun GroupChatScreen(model: AppModel) {
+internal fun GroupChatScreen(model: AppModel, onOpenPeer: (String) -> Unit = {}) {
+    // В режиме выделения тап по пузырю переключает выбор — и по «@» тоже, иначе
+    // упоминание было бы дырой, через которую выделение внезапно уводит из чата.
+    val onMention = { key: String -> if (model.selection.isEmpty()) onOpenPeer(key) }
+    CompositionLocalProvider(LocalMentionClick provides onMention) { GroupChatContent(model) }
+}
+
+@Composable
+private fun GroupChatContent(model: AppModel) {
     val gid = model.currentGroup ?: return
     val msgs = model.chat(gid, group = true)
     val archived = model.groups.firstOrNull { it.gid == gid }?.archived == true

@@ -242,6 +242,12 @@ pub enum Payload {
         name: String,
         #[serde(with = "serde_bytes")]
         avatar_hash: Vec<u8>,
+        /// «Пришли свой в ответ». Ставит тот, кто только что принял запрос в контакты:
+        /// профиль, присланный ему ДО одобрения, он выбросил (от незнакомцев профиль не
+        /// принимается), а сам пир повторил бы его лишь на следующем коннекте.
+        /// Ответ идёт без флага — пинг-понга нет.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ask_back: bool,
     },
     /// Объявление о смене АДРЕСА (ADR-007): «моя личность прежняя, слать теперь сюда».
     ///
@@ -497,7 +503,7 @@ mod tests {
             },
             Payload::BlobRequest { id: vec![1u8; 32], index: 2 },
             Payload::BlobChunk { id: vec![2u8; 32], index: 3, data: vec![9, 8, 7] },
-            Payload::ProfileUpdate { name: "Алиса".into(), avatar_hash: vec![3u8; 32] },
+            Payload::ProfileUpdate { name: "Алиса".into(), avatar_hash: vec![3u8; 32], ask_back: true },
             Payload::BlobManifestRequest { id: vec![4u8; 32] },
         ] {
             assert_eq!(roundtrip(&p), p);

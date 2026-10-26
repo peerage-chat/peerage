@@ -178,7 +178,7 @@ pub enum Event {
     /// Пришёл чанк блоба, который мы качаем.
     BlobChunk { peer: PeerKey, id: Vec<u8>, index: u32, data: Vec<u8> },
     /// Обновление профиля контакта (M2): его самоназвание + хэш аватара.
-    ProfileUpdate { peer: PeerKey, name: String, avatar_hash: Vec<u8> },
+    ProfileUpdate { peer: PeerKey, name: String, avatar_hash: Vec<u8>, ask_back: bool },
     /// Пир запросил манифест нашего блоба по id (pull-по-хэшу).
     BlobManifestRequest { peer: PeerKey, id: Vec<u8> },
     /// Контакт объявил СМЕНУ АДРЕСА (ADR-007): личность прежняя (`peer`), адрес
@@ -1275,9 +1275,17 @@ impl Messenger {
     }
 
     /// Рассылка обновления профиля (M2): самоназвание + хэш аватара. Fire-and-forget
-    /// (идемпотентно, повторяется на коннекте).
-    pub fn send_profile_update(&self, peer: &PeerKey, name: &str, avatar_hash: &[u8]) -> Result<(), MessengerError> {
-        self.shared.send(peer, &Payload::ProfileUpdate { name: name.to_string(), avatar_hash: avatar_hash.to_vec() })
+    /// (идемпотентно, повторяется на коннекте). `ask_back` — просьба ответить своим.
+    pub fn send_profile_update(
+        &self,
+        peer: &PeerKey,
+        name: &str,
+        avatar_hash: &[u8],
+        ask_back: bool,
+    ) -> Result<(), MessengerError> {
+        let payload =
+            Payload::ProfileUpdate { name: name.to_string(), avatar_hash: avatar_hash.to_vec(), ask_back };
+        self.shared.send(peer, &payload)
     }
 
     /// Запросить манифест блоба по id (pull-по-хэшу, M2). Fire-and-forget — при потере
@@ -1706,8 +1714,8 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::BlobChunk { id, index, data } => {
                 shared.emit(Event::BlobChunk { peer: peer_id, id, index, data });
             }
-            Payload::ProfileUpdate { name, avatar_hash } => {
-                shared.emit(Event::ProfileUpdate { peer: peer_id, name, avatar_hash });
+            Payload::ProfileUpdate { name, avatar_hash, ask_back } => {
+                shared.emit(Event::ProfileUpdate { peer: peer_id, name, avatar_hash, ask_back });
             }
             Payload::BlobManifestRequest { id } => {
                 shared.emit(Event::BlobManifestRequest { peer: peer_id, id });

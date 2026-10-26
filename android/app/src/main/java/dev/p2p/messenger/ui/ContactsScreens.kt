@@ -734,7 +734,8 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
     val me = model.me ?: return
     // В QR — код обмена, а не голый ключ: после смены адреса по одной лишь
     // личности до нас не достучаться (ADR-007).
-    val code = remember(me.pubkey) { model.myContactCode() }
+    // Самоназвание едет в коде — сменили имя, код другой.
+    val code = remember(me.pubkey, model.selfName) { model.myContactCode() }
     val qr = remember(code) { generateQrBitmap(code) }
     val ctx = LocalContext.current
     Column(
@@ -748,13 +749,9 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
             Modifier.fillMaxWidth().padding(vertical = Tokens.Space.l),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            SquareAvatar(
-                model.selfName.ifBlank { me.pubkey },
-                size = Tokens.Size.avatarBig,
-                avatarBytes = model.selfAvatar,
-                circle = true,
-                ring = HoloBg,
-            )
+            // Аватар меняется прямо здесь: именно тут человек на него смотрит, и
+            // искать смену в настройках никто не догадывается.
+            EditableAvatar(model.selfName.ifBlank { me.pubkey }, model.selfAvatar, rememberAvatarPicker(model))
             Spacer(Modifier.height(Tokens.Space.m))
             Text(
                 model.selfName.ifBlank { stringResource(R.string.common_you) },

@@ -16,6 +16,9 @@ import kotlinx.serialization.builtins.ListSerializer
  * байта на один char, эмодзи — четыре байта на два char.
  */
 object Mentions {
+    /** Тег аннотации с ключом упомянутого (hex) — по нему пузырь ловит тап по «@». */
+    const val TAG = "mention"
+
     /** Упоминания на провод JNI: `[{"at","len","key"}]`. */
     fun toJson(m: List<Mention>): String =
         WireJson.encodeToString(ListSerializer(Mention.serializer()), m)
@@ -141,7 +144,9 @@ object Mentions {
                 } else {
                     SpanStyle(color = accent, fontWeight = FontWeight.Medium)
                 }
+                pushStringAnnotation(TAG, key)
                 withStyle(style) { append("@" + nameOf(key)) }
+                pop()
                 pos = r.last + 1
             }
             append(text, pos, text.length)

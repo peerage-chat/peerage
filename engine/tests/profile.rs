@@ -178,3 +178,85 @@ fn accepted_contact_keeps_blank_name_so_self_name_shows() {
         std::thread::sleep(Duration::from_millis(30));
     }
 }
+
+/// Имена заданы ДО знакомства (обычный случай: имя вводится при первом запуске).
+/// A стучится к B; профиль A, посланный на коннекте, B выбрасывает — A ему ещё
+/// незнакомец. После одобрения B шлёт свой профиль с просьбой ответить — и имена
+/// видят обе стороны без переподключения.
+#[test]
+fn names_set_before_contact_reach_both_sides_on_accept() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(7), id(8));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a4"));
+    let b = start(&net, b_id, tmpdir("b4"));
+    a.set_self_name("Алиса");
+    b.set_self_name("Боб");
+    a.add_contact(&b_key, "");
+    a.send_text(&b_key, "привет");
+
+    let (a_hex, b_hex) = (hex::encode(a_key), hex::encode(b_key));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let rj: serde_json::Value = serde_json::from_str(&b.contact_requests_json()).unwrap();
+        if rj.as_array().map(|r| r.iter().any(|r| r["key"] == a_hex)).unwrap_or(false) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "запрос от A не пришёл за 10с");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(b.accept_contact_request(&a_key));
+
+    let profile_name = |e: &Engine, key: &str| -> String {
+        let cj: serde_json::Value = serde_json::from_str(&e.contacts_json()).unwrap();
+        cj.as_array()
+            .and_then(|arr| arr.iter().find(|c| c["key"] == key))
+            .and_then(|c| c["profile_name"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while profile_name(&b, &a_hex) != "Алиса" || profile_name(&a, &b_hex) != "Боб" {
+        assert!(
+            Instant::now() < deadline,
+            "имена не дошли: у B — «{}», у A — «{}»",
+            profile_name(&b, &a_hex),
+            profile_name(&a, &b_hex)
+        );
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    a.shutdown();
+    b.shutdown();
+}
+
+/// Код обмена (QR) несёт самоназвание: добавивший по нему сразу видит имя, а не
+/// обрывок ключа. Пустое локальное имя остаётся пустым — иначе заглушка навсегда
+/// перекрыла бы самоназвание. Кривой хвост имени не мешает добавлению.
+#[test]
+fn contact_code_carries_self_name() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id, c_id) = (id(9), id(10), id(11));
+    let a_key = a_id.public_key_bytes();
+    let a = start(&net, a_id, tmpdir("a5"));
+    let b = start(&net, b_id, tmpdir("b5"));
+    let c = start(&net, c_id, tmpdir("c5"));
+
+    // Без имени — код как раньше, голый hex.
+    assert_eq!(a.my_contact_code(), hex::encode(a_key));
+    a.set_self_name("Алиса");
+    let code = a.my_contact_code();
+    assert!(code.starts_with(&format!("{}#", hex::encode(a_key))), "имя хвостом: {code}");
+
+    assert_eq!(b.add_contact_code(&code, ""), "added");
+    let cj: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
+    let c0 = cj.as_array().unwrap().iter().find(|c| c["key"] == hex::encode(a_key)).unwrap();
+    assert_eq!(c0["profile_name"], "Алиса");
+    assert_eq!(c0["name"], "", "без заглушки: локальное имя пустое");
+
+    // Хвост не hex — ключ всё равно добавляется, имя просто не берётся.
+    assert_eq!(c.add_contact_code(&format!("{}#не-hex", hex::encode(a_key)), ""), "added");
+
+    a.shutdown();
+    b.shutdown();
+    c.shutdown();
+}

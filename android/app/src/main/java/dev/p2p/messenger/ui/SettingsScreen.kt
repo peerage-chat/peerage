@@ -669,25 +669,14 @@ private fun SettingInfoRow(label: String, value: String, divider: Boolean = true
 @Composable
 internal fun EditProfileScreen(model: AppModel, onDone: () -> Unit) {
     var name by remember { mutableStateOf(model.selfName) }
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        scope.launch(Dispatchers.IO) {
-            val mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
-            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
-            model.setSelfAvatar(bytes, mime)
-        }
-    }
+    val pickAvatar = rememberAvatarPicker(model)
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
         verticalArrangement = Arrangement.spacedBy(FormGap),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.clickable { picker.launch(arrayOf("image/*")) }) {
-            SquareAvatar(name.ifBlank { "?" }, size = 96.dp, avatarBytes = model.selfAvatar)
-        }
+        EditableAvatar(name.ifBlank { "?" }, model.selfAvatar, pickAvatar)
         Text(stringResource(R.string.settings_tap_avatar), color = HoloSecondary, fontSize = 12.sp)
 
         FieldLabel(stringResource(R.string.settings_your_name))

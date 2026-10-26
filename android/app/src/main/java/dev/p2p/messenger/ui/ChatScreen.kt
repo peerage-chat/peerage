@@ -1532,21 +1532,19 @@ internal fun MsgMeta(time: Long, mine: Boolean, edited: Boolean, status: String 
     // время буквально пропадало. 11 — нижняя граница читаемого в интерфейсе, ниже
     // опускаться уже нечему.
     val fg = Color.White.copy(alpha = 0.6f)
+    // Стиль задан ЯВНО у обоих текстов: без него «изм.» брал высоту строки из темы
+    // (24sp) и мета у отредактированного пузыря вырастала, оставляя пустоту снизу.
+    // Моноширинные цифры: время у каждого сообщения своё, а колонка меты общая —
+    // на пропорциональных цифрах она слегка гуляла бы от строки к строке.
+    val style = TextStyle(color = fg, fontSize = 11.sp, fontFeatureSettings = "tnum")
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (edited) {
             // Текст подменился — молчать об этом нельзя, иначе «исправил»
             // неотличимо от «так и было написано».
-            Text(stringResource(R.string.chat_edited), color = fg, fontSize = 11.sp)
+            Text(stringResource(R.string.chat_edited), style = style)
             Spacer(Modifier.width(4.dp))
         }
-        // Моноширинные цифры: время у каждого сообщения своё, а колонка меты общая —
-        // на пропорциональных цифрах она слегка гуляла бы от строки к строке.
-        Text(
-            fmtMsgTime(time),
-            color = fg,
-            fontSize = 11.sp,
-            style = TextStyle(fontFeatureSettings = "tnum"),
-        )
+        Text(fmtMsgTime(time), style = style)
         if (mine) {
             Spacer(Modifier.width(3.dp))
             StatusTick(status)

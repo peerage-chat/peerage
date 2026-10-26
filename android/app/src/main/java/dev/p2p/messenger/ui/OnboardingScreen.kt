@@ -13,7 +13,6 @@ import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -44,7 +43,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.p2p.messenger.*
 import dev.p2p.messenger.R
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 // Онбординг (M4) — реализация по макету docs/design/mockups/onboarding.html.
@@ -348,18 +346,9 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
     // Имя живёт в движке (M2): он его хранит и рассылает контактам. Не в prefs.
     var name by rememberSaveable { mutableStateOf(model.selfName) }
     val save = { if (name.trim() != model.selfName) model.updateSelfName(name) }
-    val scope = rememberCoroutineScope()
-    // Системный Photo Picker (M2): выбор картинки → чтение байт в IO → set_self_avatar
-    // (scrub + блоб на движке). Аватар реактивно показывается из model.selfAvatar.
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { u ->
-            scope.launch(Dispatchers.IO) {
-                val bytes = ctx.contentResolver.openInputStream(u)?.use { it.readBytes() } ?: return@launch
-                val mime = ctx.contentResolver.getType(u) ?: "image/jpeg"
-                model.setSelfAvatar(bytes, mime)
-            }
-        }
-    }
+    // Системный Photo Picker (M2) → квадрат 512 → set_self_avatar. Аватар реактивно
+    // показывается из model.selfAvatar.
+    val pickAvatar = rememberAvatarPicker(model)
     OnbScaffold(
         title = stringResource(R.string.onb_profile_title),
         desc = stringResource(R.string.onb_profile_sub),
@@ -374,9 +363,7 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
     ) {
         Box(
             contentAlignment = Alignment.BottomEnd,
-            modifier = Modifier.clickable {
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            },
+            modifier = Modifier.clickable { pickAvatar() },
         ) {
             Box(
                 // Свой аватар — круг: человек, как и везде в приложении.

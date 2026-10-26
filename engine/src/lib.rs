@@ -397,6 +397,25 @@ pub fn parse_key(s: &str) -> Option<[u8; 32]> {
     hex::decode(s.trim()).ok()?.as_slice().try_into().ok()
 }
 
+/// Самое длинное самоназвание из кода обмена, в символах. Код приходит от кого
+/// угодно (переслали в переписке) — без предела он раздул бы карточку контакта.
+const CODE_NAME_MAX: usize = 64;
+
+/// Самоназвание из хвоста кода обмена (`#<hex UTF-8>`). Кривой хвост — не повод
+/// отказать в добавлении: ключ разобран отдельно, имя просто не берём. Управляющие
+/// символы выбрасываем — им не место в имени.
+fn code_name(tail: &str) -> Option<String> {
+    let bytes = hex::decode(tail.trim()).ok()?;
+    let name: String = String::from_utf8(bytes)
+        .ok()?
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(CODE_NAME_MAX)
+        .collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 // ── Публичный API движка (команды/снапшоты) ─────────────────────────────────
 // Каждый метод — операция контракта. androidjni декодирует аргументы (hex→ключ)
 // и маршалит результат; домейн-логику считает здесь движок.
@@ -1050,14 +1069,25 @@ impl Engine {
     /// Подпись здесь не формальность: код часто пересылают через третьи руки
     /// (переписка, форум), и без неё посредник мог бы подменить адрес, оставив
     /// личность.
+    ///
+    /// Если задано самоназвание, оно едет хвостом `#<hex UTF-8>`: добавивший сразу
+    /// видит имя, а не обрывок ключа. Хвост не подписан и подписи не требует — это
+    /// то же самоназвание, что придёт в профиле, и профиль его перезапишет.
     pub fn my_contact_code(&self) -> String {
         let epoch = self.transport_epoch();
-        if epoch == 0 {
-            return hex::encode(self.me_pub);
+        let mut code = if epoch == 0 {
+            hex::encode(self.me_pub)
+        } else {
+            let tk = self.identity.transport_public(epoch);
+            let sig = self.identity.sign_transport_rotate(epoch, &tk);
+            format!("{}:{}:{}:{}", hex::encode(self.me_pub), epoch, hex::encode(tk), hex::encode(sig))
+        };
+        let name = self.self_name();
+        if !name.trim().is_empty() {
+            code.push('#');
+            code.push_str(&hex::encode(name.trim()));
         }
-        let tk = self.identity.transport_public(epoch);
-        let sig = self.identity.sign_transport_rotate(epoch, &tk);
-        format!("{}:{}:{}:{}", hex::encode(self.me_pub), epoch, hex::encode(tk), hex::encode(sig))
+        code
     }
 
     /// Добавить контакт по коду обмена: либо голый hex личности (как раньше), либо
@@ -1065,9 +1095,18 @@ impl Engine {
     /// принимаем только с верной подписью — тем же путём, что и объявление о смене
     /// адреса.
     pub fn add_contact_code(&self, code: &str, name: &str) -> &'static str {
-        let parts: Vec<&str> = code.trim().split(':').collect();
+        let (code, self_name) = match code.trim().split_once('#') {
+            Some((c, tail)) => (c, code_name(tail)),
+            None => (code.trim(), None),
+        };
+        let parts: Vec<&str> = code.split(':').collect();
         let Some(ik) = parse_key(parts[0]) else { return "error" };
         let outcome = self.add_contact(&ik, name);
+        // Самоназвание из кода — только новому контакту: у знакомого оно уже пришло
+        // профилем, а тот достовернее (пришёл от самого пира, не через третьи руки).
+        if let (Some(n), "added") = (self_name, outcome) {
+            let _ = self.contacts.lock_safe().set_profile(&ik, &n, "");
+        }
         if parts.len() == 4 {
             let epoch = parts[1].parse::<u32>().unwrap_or(0);
             let tk = parse_key(parts[2]);
@@ -1087,15 +1126,14 @@ impl Engine {
     }
 
     pub fn add_contact(&self, key: &[u8; 32], name: &str) -> &'static str {
-        let name = if name.trim().is_empty() {
-            format!("{}…", &hex::encode(key)[..8])
-        } else {
-            name.to_string()
-        };
+        // Пустое имя остаётся пустым: локальное имя — заметка пользователя и
+        // перекрывает самоназвание. Заглушка «ab12cd34…» здесь навсегда прятала бы
+        // имя, которое пир пришлёт профилем (показ: локальное → самоназвание → hex).
+        let name = name.trim();
         // ВАЖНО: гард лока из scrutinee `match` живёт до конца всех арм → refresh_budgets
         // (лочит contacts) внутри арма = повторный лок того же мьютекса = дедлок. Поэтому
         // снимаем результат в переменную (гард освобождается на `;`), затем match.
-        let outcome = self.contacts.lock_safe().add(key, &name, now());
+        let outcome = self.contacts.lock_safe().add(key, name, now());
         match outcome {
             Ok(p2p_core::store::AddOutcome::Added) => {
                 self.refresh_budgets(); // M3: контакт → щедрый ingress-бюджет; и в набор связи
@@ -1424,9 +1462,10 @@ impl Engine {
         }
         self.refresh_budgets();
         self.messenger.poke(key);
-        let m = self.load_profile_meta();
-        let hash = hex::decode(&m.avatar_id).unwrap_or_default();
-        let _ = self.messenger.send_profile_update(key, &m.name, &hash);
+        // Свой профиль — и просьба прислать его: профиль, пришедший до одобрения, мы
+        // выбросили (от незнакомцев не принимаем), а сам пир повторил бы его лишь на
+        // следующем коннекте — и до тех пор оставался бы у нас безымянным.
+        self.send_profile_to(key, true);
         true
     }
 
@@ -1874,14 +1913,19 @@ impl Engine {
         self.blob_read(&self.self_avatar_id()?)
     }
 
-    /// Разослать свой профиль (имя + хэш аватара) всем контактам (M2). Fire-and-forget.
-    pub fn broadcast_profile(&self) {
+    /// Послать свой профиль одному пиру; `ask_back` — попросить его профиль в ответ.
+    fn send_profile_to(&self, peer: &[u8; 32], ask_back: bool) {
         let m = self.load_profile_meta();
         let hash = hex::decode(&m.avatar_id).unwrap_or_default();
+        let _ = self.messenger.send_profile_update(peer, &m.name, &hash, ask_back);
+    }
+
+    /// Разослать свой профиль (имя + хэш аватара) всем контактам (M2). Fire-and-forget.
+    pub fn broadcast_profile(&self) {
         let keys: Vec<[u8; 32]> =
             self.contacts.lock_safe().list().iter().filter_map(|c| parse_key(&c.key)).collect();
         for k in keys {
-            let _ = self.messenger.send_profile_update(&k, &m.name, &hash);
+            self.send_profile_to(&k, false);
         }
     }
 
@@ -2710,9 +2754,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 let is_contact = engine.contacts.lock_safe().contains(&peer);
                 if is_contact {
                     // M2: на коннекте шлём контакту свой профиль (догоняет смену, что была офлайн).
-                    let m = engine.load_profile_meta();
-                    let hash = hex::decode(&m.avatar_id).unwrap_or_default();
-                    let _ = engine.messenger.send_profile_update(&peer, &m.name, &hash);
+                    engine.send_profile_to(&peer, false);
                     // Продолжаем то, что пользователь просил скачать у этого пира.
                     engine.resume_wanted(&peer);
                 }
@@ -3013,7 +3055,7 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             }
         }
         // M2 профиль: контакт прислал самоназвание + хэш аватара.
-        Event::ProfileUpdate { peer, name, avatar_hash } => {
+        Event::ProfileUpdate { peer, name, avatar_hash, ask_back } => {
             // Только от контактов (профиль не принимаем от посторонних). ВАЖНО: гард лока
             // в условии `if` живёт до конца тела → повторный лок внутри = дедлок; поэтому
             // читаем `contains` в переменную (гард снимается на `;`).
@@ -3024,6 +3066,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // Аватар тянем по хэшу ТОЛЬКО если новый и блоба ещё нет (контент-адрес → дедуп).
                 if !avatar_id.is_empty() && !engine.blob_exists(&avatar_id) {
                     engine.request_blob(&peer, &avatar_hash);
+                }
+                // Нас только что приняли в контакты и просят наш профиль. Ответ — без
+                // флага, иначе стороны перебрасывались бы профилями бесконечно.
+                if ask_back {
+                    engine.send_profile_to(&peer, false);
                 }
                 push_event(engine, dto::UiEvent::ContactsChanged);
             }

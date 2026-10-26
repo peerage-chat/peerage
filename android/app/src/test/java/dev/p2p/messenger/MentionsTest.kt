@@ -1,5 +1,6 @@
 package dev.p2p.messenger
 
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -57,6 +58,17 @@ class MentionsTest {
         val text = "ну что, @Боб?"
         val m = Mentions.collect(text, mapOf(bob to "Боб"))
         assertEquals(mapOf(bob to "Боб"), Mentions.picked(text, m))
+    }
+
+    @Test fun rendered_name_carries_key_for_tap() {
+        // Получатель рисует своё имя для ключа — оно длиннее набранного, а тап по
+        // нему всё равно должен приводить к тому же человеку.
+        val text = "@Боб, привет"
+        val m = Mentions.collect(text, mapOf(bob to "Боб"))
+        val shown = Mentions.render(text, m, me = null, nameOf = { "Роберт" }, accent = Color.White, meBg = Color.Black)
+        val tags = shown.getStringAnnotations(Mentions.TAG, 0, shown.length)
+        assertEquals(listOf(bob), tags.map { it.item })
+        assertEquals("@Роберт", shown.text.substring(tags[0].start, tags[0].end))
     }
 
     @Test fun json_matches_engine_shape() {

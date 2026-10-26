@@ -432,7 +432,10 @@ private fun CompactShell(model: AppModel) {
                                     // проверенным; не совпало — ГРОМКО говорим об этом,
                                     // это ровно тот случай, ради которого сверка и нужна.
                                     verifyingPeer = null
-                                    val ok = key.equals(target, ignoreCase = true)
+                                    // Сверяем только личность: код обмена несёт ещё адрес
+                                    // («:…») и самоназвание («#…»), а они меняются.
+                                    val identity = key.trim().substringBefore('#').substringBefore(':')
+                                    val ok = identity.equals(target, ignoreCase = true)
                                     if (ok && model.contacts.firstOrNull { it.key == target }?.verified != true) {
                                         model.toggleVerified(target)
                                     }
@@ -458,7 +461,17 @@ private fun CompactShell(model: AppModel) {
                                 model.openGroup(it)
                                 screen = Screen.GroupChat
                             }
-                            Screen.GroupChat -> GroupChatScreen(model)
+                            Screen.GroupChat -> GroupChatScreen(model) { key ->
+                                // «@я» — свой профиль; контакт — его карточка; с
+                                // незнакомцем из группы открывать нечего.
+                                when {
+                                    key == model.me?.pubkey -> screen = Screen.Me
+                                    model.contacts.any { it.key == key } -> {
+                                        model.openChat(key)
+                                        screen = Screen.Info
+                                    }
+                                }
+                            }
                             Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Contacts }
                             Screen.NewChat -> NewChatScreen(
                                 model,

@@ -7,7 +7,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -30,6 +33,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -513,6 +517,10 @@ internal fun BubbleText(
     meta: @Composable () -> Unit,
 ) = BubbleText(AnnotatedString(text), modifier, color, fontSize, meta)
 
+/** Что делать по тапу на «@имя» в пузыре: получает ключ упомянутого (hex). Задаёт
+ *  экран ленты — пузырю незачем знать, куда ведёт навигация. */
+internal val LocalMentionClick = staticCompositionLocalOf<((String) -> Unit)?> { null }
+
 /** То же для размеченного текста (упоминания): мерка и показ идут по ОДНОЙ строке —
  *  имя в «@» бывает длиннее или короче набранного отправителем. */
 @Composable
@@ -525,6 +533,27 @@ internal fun BubbleText(
 ) {
     val measurer = rememberTextMeasurer()
     val style = TextStyle(color = color, fontSize = fontSize)
+    val onMention = LocalMentionClick.current
+    val tappable = onMention != null && text.getStringAnnotations(Mentions.TAG, 0, text.length).isNotEmpty()
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    // Тап по «@» ловим сами, а не clickable: остальной текст должен отдавать жесты
+    // пузырю (долгий тап — выделение), поэтому событие съедаем, только если короткий
+    // тап пришёлся точно на имя.
+    val mentionTap = if (!tappable) {
+        Modifier
+    } else {
+        Modifier.pointerInput(text) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val key = mentionAt(layout, text, down.position) ?: return@awaitEachGesture
+                val up = waitForUpOrCancellation() ?: return@awaitEachGesture
+                if (up.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis) {
+                    up.consume()
+                    onMention?.invoke(key)
+                }
+            }
+        }
+    }
     SubcomposeLayout(modifier) { constraints ->
         // Мету здесь только ИЗМЕРЯЕМ, чтобы оставить ей место. Рисует её сам пузырь,
         // в своём правом нижнем углу: у пузыря шире текста (метка «Переслано», имя
@@ -538,7 +567,9 @@ internal fun BubbleText(
         // Стиль ОДИН на измерение и на показ: разойдись они хоть на межбуквенный
         // интервал — расчёт «влезает ли мета» пойдёт по одной ширине строки, а
         // нарисуется другая, и время слипнется с текстом.
-        val textP = subcompose("text") { Text(text, style = style) }.first().measure(constraints)
+        val textP = subcompose("text") {
+            Text(text, style = style, onTextLayout = { layout = it }, modifier = mentionTap)
+        }.first().measure(constraints)
 
         // Решаем САМИ, влезает ли мета в конец последней строки: меряем текст и
         // смотрим, где эта строка кончается. Прежний вариант — невидимая вставка
@@ -560,6 +591,16 @@ internal fun BubbleText(
         val height = textP.height + if (fits) 0 else metaH
         layout(width, height) { textP.place(0, 0) }
     }
+}
+
+/** Ключ упомянутого под точкой `pos`, если она попала в сам глиф «@имени», а не
+ *  просто ближе всего к нему (тап справа от конца строки — это тап по пузырю). */
+private fun mentionAt(layout: TextLayoutResult?, text: AnnotatedString, pos: androidx.compose.ui.geometry.Offset): String? {
+    val l = layout ?: return null
+    val o = l.getOffsetForPosition(pos)
+    return listOf(o, o - 1).filter { it in text.indices }
+        .firstOrNull { l.getBoundingBox(it).contains(pos) }
+        ?.let { i -> text.getStringAnnotations(Mentions.TAG, i, i + 1).firstOrNull()?.item }
 }
 
 /** Форма пузыря: «шов» внутри блока — со стороны отправителя. Внешние углы серии
