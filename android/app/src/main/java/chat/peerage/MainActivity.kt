@@ -30,6 +30,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import chat.peerage.ui.*
@@ -281,6 +282,13 @@ private fun CompactShell(model: AppModel) {
     // ADR-004: нас отозвали из открытой группы (currentGroup → null) — уходим на список.
     LaunchedEffect(model.currentGroup) {
         if (model.currentGroup == null) nav.leave(setOf(Screen.GroupChat, Screen.AddMember))
+    }
+    // Вошли в комнату группы по приглашению — показываем её чат (там звонок).
+    LaunchedEffect(model.openGroupRequest) {
+        val gid = model.openGroupRequest ?: return@LaunchedEffect
+        model.openGroupRequest = null
+        model.openGroup(gid)
+        screen = Screen.GroupChat
     }
     var scanResult by remember { mutableStateOf<String?>(null) }
     // Папки: единственный источник правды — страница пейджера. Таб и заголовок только
@@ -587,6 +595,11 @@ private fun CompactShell(model: AppModel) {
                 RingSheet(model) { model.showRingSheet = false }
                 BackHandler { model.showRingSheet = false }
             }
+            // Звонок ложится поверх чата, а поле ввода под ним держит фокус — клавиатура
+            // оставалась поверх звонка и закрывала кнопки входящего. Снимаем фокус.
+            val focus = LocalFocusManager.current
+            val callShown = model.incomingCall != null || model.dmCallPeer != null
+            LaunchedEffect(callShown) { if (callShown) focus.clearFocus(force = true) }
             model.incomingCall?.let { IncomingCallOverlay(model, it) }
             // Активный DM-звонок (аудио или видео) — полноэкранная комната-сетка.
             if (model.incomingCall == null) {

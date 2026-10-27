@@ -94,7 +94,7 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
                 when {
                     foc.video && foc.me -> SelfPreviewSurface(model, Modifier.fillMaxSize())
                     foc.video -> VideoSurface(model, foc.id, Modifier.fillMaxSize())
-                    else -> Avatar(tileName(model, foc), 104, tileAvatar(model, foc))
+                    else -> Avatar(avatarName(model, foc), 104, tileAvatar(model, foc))
                 }
             }
             remotes.isEmpty() -> Box(Modifier.fillMaxSize().clickable { chrome = !chrome }) {
@@ -172,10 +172,14 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
     }
 }
 
-/** Имя тайла: «Вы» для себя, иначе имя контакта / короткий ключ. */
 private fun tileAvatar(model: AppModel, t: Tile): ByteArray? =
     if (t.me) model.selfAvatar else model.peerAvatar(t.id)
 
+/** Инициал аватара: своё имя, а не подпись «Вы» — иначе у себя всегда «Y»/«В». */
+private fun avatarName(model: AppModel, t: Tile): String =
+    if (t.me) model.selfName else model.peerName(t.id)
+
+/** Имя тайла: «Вы» для себя, иначе имя контакта / короткий ключ. */
 @Composable
 private fun tileName(model: AppModel, t: Tile): String =
     if (t.me) {
@@ -338,7 +342,7 @@ private fun ParticipantTile(
         when {
             t.video && t.me -> SelfPreviewSurface(model, Modifier.fillMaxSize())
             t.video -> VideoSurface(model, t.id, Modifier.fillMaxSize())
-            else -> Avatar(name, 64, tileAvatar(model, t))
+            else -> Avatar(avatarName(model, t), 64, tileAvatar(model, t))
         }
         // рамка: голубая у себя; зелёная — у говорящего сейчас участника (active-speaker)
         if (t.me) {

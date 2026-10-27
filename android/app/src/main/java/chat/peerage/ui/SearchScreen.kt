@@ -85,7 +85,7 @@ internal fun SearchScreen(
                         Spacer(Modifier.width(Tokens.Space.m))
                         Column(Modifier.weight(1f)) {
                             Text(g.name, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(stringResource(R.string.search_group_subtitle, g.members), color = HoloSecondary, fontSize = Tokens.Font.caption)
+                            Text(pluralOf(R.plurals.search_group_subtitle, g.members.toLong()), color = HoloSecondary, fontSize = Tokens.Font.caption)
                         }
                     }
                 }

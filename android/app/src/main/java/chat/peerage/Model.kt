@@ -746,6 +746,11 @@ class AppModel private constructor() {
      *  живёт в шапке группового чата, а лист рисуется поверх всего приложения. */
     var showRingSheet by mutableStateOf(false)
 
+    /** Группа, чат которой открыть: позвали в её комнату, и мы вошли. Полоса «В
+     *  звонке» и кнопка выхода живут в чате группы — без перехода человек оставался
+     *  на списке и не видел, что он в звонке. Гасит MainActivity, исполнив. */
+    var openGroupRequest by mutableStateOf<String?>(null)
+
     /** Вывод звонка: "builtin" (встроенный/разговорный), "speaker" (громкая), "bluetooth". */
     var audioOut by mutableStateOf("builtin")
         private set
@@ -962,6 +967,13 @@ class AppModel private constructor() {
 
     @Volatile private var started = false
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Запись снапшот-состояния с фонового цикла — на главном потоке (см. тикер). */
+    private fun onMain(write: () -> Unit) {
+        mainHandler.post(write)
+    }
+
     // Офлайн-очередь целиком в движке: недоставленное лежит в его зашифрованной
     // базе и досылается им же. Здесь — только отрицательные id для того, что движок
     // не смог даже поставить в очередь.
@@ -1001,7 +1013,6 @@ class AppModel private constructor() {
             return false
         }
         sessionPtr = started.sessionPtr
-        me = Me(started.pubkey, started.address, started.fingerprint)
         transportEpoch = Native.transportEpoch(sessionPtr)
         val prefs = appContext
             ?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
@@ -1020,6 +1031,11 @@ class AppModel private constructor() {
         // Расшифрованные копии вложений, оставшиеся от прошлого запуска (просмотр,
         // «открыть», «поделиться»): держать их дольше нужного незачем.
         appContext?.cacheDir?.let { c -> listOf("viewer", "shared").forEach { File(c, it).deleteRecursively() } }
+        // `me` — гейт главного экрана (MainActivity), поэтому ПОСЛЕДНИМ: экран начинал
+        // строиться, пока выше ещё грузились имя, контакты и группы. Записи с этого
+        // потока посреди первой (после установки — медленной) композиции терялись,
+        // и шапка жила с пустым именем и «0 пиров» до перезахода.
+        me = Me(started.pubkey, started.address, started.fingerprint)
         startLoops()
         registerNetworkCallback()
         return true
@@ -1077,29 +1093,37 @@ class AppModel private constructor() {
             name = "native-poll"
             start()
         }
+        // Тикер опрашивает движок на своём потоке, а в состояние пишет через [onMain].
+        // Запись отсюда, попавшая на первую композицию экрана, терялась: экран читал
+        // старое значение, а уведомление об изменении уходило мимо ещё не собранной
+        // композиции. Тикер же пишет одно и то же — «0 пиров» висело до перезахода.
+        // На главном потоке запись не может пересечься с композицией: та идёт там же.
         tickerThread = Thread {
             var tick = 0L
             var zeroPeerTicks = 0 // счётчик тиков без пиров
+            var wasOffline = offline
             while (running) {
                 runCatching {
                     val p = Native.netPeers(sessionPtr)
                     val t = Native.netTree(sessionPtr)
-                    netPeers = p
-                    contacts.map { it.key }.forEach { key ->
-                        online[key] = Native.isOnline(sessionPtr, key)
-                    }
+                    val presence = contacts.map { it.key }.associateWith { Native.isOnline(sessionPtr, it) }
                     // Флуд и офлайн — дёшево и нужно даже в фоне: пользователь
                     // платит за чужой поток прямо сейчас.
-                    val wasOffline = offline
-                    offline = Native.isOffline(sessionPtr)
-                    appContext?.let { ctx ->
-                        if (offline && !wasOffline) FloodNotifier.showOffline(ctx)
-                        if (!offline && wasOffline) FloodNotifier.cancelOffline(ctx)
+                    val nowOffline = Native.isOffline(sessionPtr)
+                    onMain {
+                        netPeers = p
+                        presence.forEach { (key, on) -> online[key] = on }
+                        offline = nowOffline
                     }
+                    appContext?.let { ctx ->
+                        if (nowOffline && !wasOffline) FloodNotifier.showOffline(ctx)
+                        if (!nowOffline && wasOffline) FloodNotifier.cancelOffline(ctx)
+                    }
+                    wasOffline = nowOffline
                     val flood = decodeList<FloodPeerDto>(Native.floodPeers(sessionPtr))
                         .map { FloodPeer(it.peer, it.dropped, it.pps, it.blocked) }
                     if (floodPeers != flood) {
-                        floodPeers.replaceWith(flood)
+                        onMain { floodPeers.replaceWith(flood) }
                     }
                     // Уведомление — ОДИН раз на эпизод: иначе оно само станет вторым
                     // флудом. Эпизод считается законченным, когда поток стих.
@@ -1117,7 +1141,8 @@ class AppModel private constructor() {
                         floodNotified = false
                     }
                     if (benchRecv) {
-                        benchRecvMbps = decodeOrNull<BenchDto>(Native.benchRecvStats(sessionPtr))?.mbps ?: 0.0
+                        val mbps = decodeOrNull<BenchDto>(Native.benchRecvStats(sessionPtr))?.mbps ?: 0.0
+                        onMain { benchRecvMbps = mbps }
                     }
                     // Очередь недоставленного: раз в ~10 тиков хватает (ничего не
                     // теряется, это только повод показать предупреждение).
@@ -1125,7 +1150,7 @@ class AppModel private constructor() {
                     // Снапшот стата сети — только на переднем плане (экран «Сеть»).
                     if (foreground) {
                         decodeOrNull<NetStatsDto>(Native.netStats(sessionPtr))?.let { n ->
-                            netStats = NetStats(
+                            val stats = NetStats(
                                 n.peerCount,
                                 n.tree,
                                 n.pingMs,
@@ -1135,13 +1160,15 @@ class AppModel private constructor() {
                                     NetPeer(it.key, it.inbound, it.up, it.latencyMs, it.rxRate, it.txRate, it.uptimeS)
                                 },
                             )
+                            onMain { netStats = stats }
                         }
                     }
                     // Присутствие открытой группы «N уч · M в сети» — агрегат
                     // (ростер ∩ онлайн) считает движок, клиент лишь рендерит.
                     currentGroup?.let { gid ->
                         decodeOrNull<GroupRosterDto>(Native.groupPresence(sessionPtr, gid))?.let {
-                            currentGroupRoster = GroupRoster(it.total, it.online)
+                            val roster = GroupRoster(it.total, it.online)
+                            onMain { if (currentGroup == gid) currentGroupRoster = roster }
                         }
                     }
                     // Присутствие в комнате: кто сейчас внутри (по свежим маячкам).
@@ -1151,7 +1178,7 @@ class AppModel private constructor() {
                         // Только при реальном изменении состава/флагов — иначе каждый тик
                         // (2с в звонке) форсит рекомпозицию всего экрана → рывок видео.
                         if (roomMembers != list) {
-                            roomMembers.replaceWith(list)
+                            onMain { if (currentRoom == gid) roomMembers.replaceWith(list) }
                         }
                     }
                     // Присутствие в группах, к которым мы НЕ подключены:
@@ -1160,7 +1187,7 @@ class AppModel private constructor() {
                         if (g.gid == currentRoom) return@forEach
                         val list = decodeList<RoomMemberDto>(Native.roomPresencePeers(sessionPtr, g.gid))
                             .map { RoomMember(it.peer, it.audio, it.video) }
-                        if (groupPresence[g.gid] != list) groupPresence[g.gid] = list
+                        if (groupPresence[g.gid] != list) onMain { groupPresence[g.gid] = list }
                     }
                     // Диагностика + авто-реконнект меша.
                     // peers=0 два тика подряд (~6с) → Yggdrasil потерял все пиры.
@@ -1309,14 +1336,25 @@ class AppModel private constructor() {
                     Native.historyPage(sessionPtr, key, top.time, top.row),
                 ).map { it.toModel() }
                 if (page.isEmpty()) atChatStart += key
-                if (page.isNotEmpty()) {
-                    list.addAll(0, page)
-                }
-                done(page.size)
+                val fresh = withoutShown(list, page)
+                if (fresh.isNotEmpty()) list.addAll(0, fresh)
+                done(fresh.size)
             } finally {
                 loadingOlder -= key
             }
         }
+    }
+
+    /**
+     * Страница истории без того, что уже в ленте. Своё только что отправленное лежит
+     * в ленте без номера строки, и курсор страницы берётся с ПЕРВОЙ строки с номером
+     * — а это может быть пришедший позже ответ. Тогда страница «старше ответа»
+     * приносит наше же сообщение второй раз, с тем же (id, автор): LazyColumn падал
+     * на повторе ключа, а в ленте висел бы дубль.
+     */
+    private fun withoutShown(list: List<Message>, page: List<Message>): List<Message> {
+        val shown = list.mapTo(HashSet()) { it.id to it.sender }
+        return page.filter { (it.id to it.sender) !in shown }
     }
 
     /** То же для группы: путь общий, отличается только источник страницы. */
@@ -1334,10 +1372,9 @@ class AppModel private constructor() {
                     Native.groupHistoryPage(sessionPtr, gid, top.time, top.row),
                 ).map { it.toModel() }
                 if (page.isEmpty()) atChatStart += mark
-                if (page.isNotEmpty()) {
-                    list.addAll(0, page)
-                }
-                done(page.size)
+                val fresh = withoutShown(list, page)
+                if (fresh.isNotEmpty()) list.addAll(0, fresh)
+                done(fresh.size)
             } finally {
                 loadingOlder -= mark
             }
@@ -2066,6 +2103,7 @@ class AppModel private constructor() {
         muted = !audio // мик-пресет → стартовое состояние мьюта
         if (isGroupRoom(ic.roomId)) {
             enterRoom(ic.roomId, audio, video, leaving)
+            openGroupRequest = ic.roomId
             return
         }
         val name = contacts.firstOrNull { it.key == ic.peer }?.displayName ?: ""

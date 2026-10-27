@@ -246,7 +246,7 @@ private fun GroupChatContent(model: AppModel) {
             val audio = if (isMe) !model.muted else model.roomMembers.firstOrNull { it.peer == key }?.audio ?: true
             val video = if (isMe) model.videoActive else model.roomMembers.firstOrNull { it.peer == key }?.video ?: false
             val photo = if (isMe) model.selfAvatar else model.peerAvatar(key)
-            ParticipantFullscreen(name, audio, video, isMe, photo) { focusedParticipant = null }
+            ParticipantFullscreen(name, audio, video, isMe, photo, if (isMe) model.selfName else name) { focusedParticipant = null }
             BackHandler { focusedParticipant = null }
         }
     }
@@ -291,7 +291,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(stringResource(R.string.group_presence, total, onlineN), color = HoloSecondary, fontSize = Tokens.Font.caption)
+                Text(pluralOf(R.plurals.group_presence, total.toLong(), onlineN), color = HoloSecondary, fontSize = Tokens.Font.caption)
             }
         }
         if (gid != null) {

@@ -141,7 +141,10 @@
     <string name="status_online">online</string>
     <string name="status_offline">offline</string>
     <string name="status_in_network">online</string>
-    <string name="group_presence">%1$d members · %2$d online</string>
+    <plurals name="group_presence">
+        <item quantity="one">%1$d member · %2$d online</item>
+        <item quantity="other">%1$d members · %2$d online</item>
+    </plurals>
     <string name="room_in_call">%1$d in call</string>
     <string name="room_join">Join</string>
 
@@ -235,7 +238,10 @@
     <string name="search_hint">Name, key or group title</string>
     <string name="search_prompt">Start typing — we\'ll find contacts and groups</string>
     <string name="search_empty">Nothing found</string>
-    <string name="search_group_subtitle">%1$d members · group</string>
+    <plurals name="search_group_subtitle">
+        <item quantity="one">%1$d member · group</item>
+        <item quantity="other">%1$d members · group</item>
+    </plurals>
 
     <!-- ── Empty states (stubs) ────────────────────────────────────────── -->
     <string name="calls_empty_title">No calls yet</string>
@@ -330,7 +336,7 @@
     <string name="onb_profile_sub">Optional — you can change it later</string>
     <string name="onb_done">Done</string>
     <string name="onb_skip">Skip</string>
-    <string name="onb_profile_hint">Visible only via your QR code</string>
+    <string name="onb_profile_hint">Visible only to your contacts and to whoever you give your code</string>
     <string name="onb_name">Name</string>
     <string name="onb_key_title">Key backup</string>
     <string name="onb_key_sub">Write down the 24 words and keep them offline — the only way to restore access</string>

@@ -137,7 +137,12 @@
     <string name="status_online">онлайн</string>
     <string name="status_offline">не в сети</string>
     <string name="status_in_network">в сети</string>
-    <string name="group_presence">%1$d уч. · %2$d в сети</string>
+    <plurals name="group_presence">
+        <item quantity="one">%1$d участник · %2$d в сети</item>
+        <item quantity="few">%1$d участника · %2$d в сети</item>
+        <item quantity="many">%1$d участников · %2$d в сети</item>
+        <item quantity="other">%1$d участника · %2$d в сети</item>
+    </plurals>
     <string name="room_in_call">%1$d в звонке</string>
     <string name="room_join">Войти</string>
 
@@ -233,7 +238,12 @@
     <string name="search_hint">Имя, ключ или название группы</string>
     <string name="search_prompt">Начните вводить — найдём контакты и группы</string>
     <string name="search_empty">Ничего не найдено</string>
-    <string name="search_group_subtitle">%1$d уч. · группа</string>
+    <plurals name="search_group_subtitle">
+        <item quantity="one">%1$d участник · группа</item>
+        <item quantity="few">%1$d участника · группа</item>
+        <item quantity="many">%1$d участников · группа</item>
+        <item quantity="other">%1$d участника · группа</item>
+    </plurals>
 
     <!-- ── Пустые состояния ────────────────────────────────────────────── -->
     <string name="calls_empty_title">Пока нет звонков</string>
@@ -328,7 +338,7 @@
     <string name="onb_profile_sub">Необязательно — можно изменить позже</string>
     <string name="onb_done">Готово</string>
     <string name="onb_skip">Пропустить</string>
-    <string name="onb_profile_hint">Видно только по вашему QR-коду</string>
+    <string name="onb_profile_hint">Видно только вашим контактам и тем, кому вы дадите свой код</string>
     <string name="onb_name">Имя</string>
     <string name="onb_key_title">Резервная копия ключа</string>
     <string name="onb_key_sub">Запишите 24 слова и храните офлайн — единственный способ восстановить доступ</string>

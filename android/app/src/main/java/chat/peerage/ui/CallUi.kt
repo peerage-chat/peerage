@@ -71,7 +71,15 @@ internal fun RoomGrid(
                             model.peerName(key)
                         }
                         val photo = if (isMe) model.selfAvatar else model.peerAvatar(key)
-                        GridTile(name, audio, video, isMe, photo, Modifier.weight(1f)) { onFocus(key) }
+                        GridTile(
+                            name,
+                            audio,
+                            video,
+                            isMe,
+                            photo,
+                            avatarName = if (isMe) model.selfName else name,
+                            modifier = Modifier.weight(1f),
+                        ) { onFocus(key) }
                     }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
@@ -87,6 +95,8 @@ internal fun GridTile(
     video: Boolean,
     me: Boolean,
     photo: ByteArray?,
+    // Откуда инициал: у себя подпись «Вы», а буква — своего имени, не «В»/«Y».
+    avatarName: String = name,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -109,7 +119,7 @@ internal fun GridTile(
             ) {
                 PhotoOr(photo, 64.dp) {
                     Text(
-                        initialOf(name),
+                        initialOf(avatarName),
                         color = if (me) HoloAccentDark else Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = Tokens.Font.initial(64.dp),
@@ -150,6 +160,7 @@ internal fun ParticipantFullscreen(
     video: Boolean,
     me: Boolean,
     photo: ByteArray?,
+    avatarName: String = name,
     onDismiss: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize().background(Tokens.Colors.overlay).clickable { onDismiss() }) {
@@ -186,7 +197,7 @@ internal fun ParticipantFullscreen(
             ) {
                 PhotoOr(photo, 128.dp) {
                     Text(
-                        initialOf(name),
+                        initialOf(avatarName),
                         color = if (me) HoloAccentDark else Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = Tokens.Font.initial(128.dp),
