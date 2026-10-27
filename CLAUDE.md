@@ -1,7 +1,7 @@
 # Peerage (P2P-мессенджер) — рабочие правила
 
 Serverless E2E-мессенджер: Yggdrasil-меш, MLS-группы (openmls), Rust-ядро,
-Android Jetpack Compose. GPL-3.0. Цель — v1.0 под грант NLnet/NGI Zero.
+Android Jetpack Compose. GPL-3.0. Цель — v1.0 (на гранты не подаёмся).
 
 ## Каноничные доки (читать перед правкой соответствующей зоны)
 
