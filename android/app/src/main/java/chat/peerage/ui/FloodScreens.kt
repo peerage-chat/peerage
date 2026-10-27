@@ -26,7 +26,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -57,14 +56,14 @@ internal fun FloodCard(model: AppModel, onDetails: () -> Unit) {
                 Text(
                     stringResource(R.string.flood_title),
                     color = HoloWarn,
-                    fontSize = 15.sp,
+                    fontSize = Tokens.Font.label,
                     fontWeight = FontWeight.Medium,
                 )
             }
             Text(
                 stringResource(R.string.flood_card_body, flood.size),
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
@@ -79,7 +78,7 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         SurfaceCard(outer = 0.dp) {
-            Text(stringResource(R.string.flood_explain), color = HoloSecondary, fontSize = 13.sp)
+            Text(stringResource(R.string.flood_explain), color = HoloSecondary, fontSize = Tokens.Font.body)
         }
 
         FieldLabel(stringResource(R.string.flood_sources))
@@ -92,7 +91,7 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
                             Text(
                                 name ?: (f.peer.take(8) + "…"),
                                 color = Color.White,
-                                fontSize = 15.sp,
+                                fontSize = Tokens.Font.label,
                                 fontFamily = if (name == null) FontFamily.Monospace else FontFamily.Default,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -103,7 +102,7 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
                                 Text(
                                     stringResource(R.string.flood_blocked_tag),
                                     color = HoloError,
-                                    fontSize = 11.sp,
+                                    fontSize = Tokens.Font.caption,
                                 )
                             }
                         }
@@ -113,14 +112,14 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
                                 f.dropped,
                             ),
                             color = HoloSecondary,
-                            fontSize = 12.sp,
+                            fontSize = Tokens.Font.small,
                             modifier = Modifier.padding(top = 2.dp),
                         )
                     }
                     Spacer(Modifier.width(10.dp))
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("%.0f".format(f.pps), color = HoloWarn, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        Text(stringResource(R.string.flood_pps), color = HoloSecondary, fontSize = 11.sp)
+                        Text("%.0f".format(f.pps), color = HoloWarn, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.flood_pps), color = HoloSecondary, fontSize = Tokens.Font.caption)
                     }
                 }
             }
@@ -148,7 +147,7 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
         Text(
             stringResource(R.string.flood_footer),
             color = HoloSecondary,
-            fontSize = 12.sp,
+            fontSize = Tokens.Font.small,
         )
     }
 }
@@ -161,8 +160,8 @@ private fun ActionExplain(icon: androidx.compose.ui.graphics.vector.ImageVector,
             Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(12.dp))
             Column {
-                Text(title, color = Color.White, fontSize = 15.sp)
-                Text(desc, color = HoloSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                Text(title, color = Color.White, fontSize = Tokens.Font.label)
+                Text(desc, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
             }
         }
     }
@@ -190,7 +189,7 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         SurfaceCard(outer = 0.dp) {
-            Text(stringResource(R.string.rotate_explain), color = HoloSecondary, fontSize = 13.sp)
+            Text(stringResource(R.string.rotate_explain), color = HoloSecondary, fontSize = Tokens.Font.body)
         }
 
         FieldLabel(stringResource(R.string.rotate_tell_whom))
@@ -207,14 +206,14 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
                     SquareAvatar(c.displayName, size = 34.dp, online = model.online[c.key] == true)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(c.displayName, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(c.displayName, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val hint = when {
                             c.key in flooders -> stringResource(R.string.rotate_hint_flooder)
                             model.online[c.key] != true -> stringResource(R.string.rotate_hint_offline)
                             else -> null
                         }
                         if (hint != null) {
-                            Text(hint, color = HoloWarn, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                            Text(hint, color = HoloWarn, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
                         }
                     }
                 }
@@ -226,14 +225,14 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
                 Text(
                     stringResource(R.string.rotate_selected, chosen.size, model.contacts.size),
                     color = Color.White,
-                    fontSize = 15.sp,
+                    fontSize = Tokens.Font.label,
                 )
                 val lost = model.contacts.filter { selected[it.key] != true }
                 if (lost.isNotEmpty()) {
                     Text(
                         stringResource(R.string.rotate_will_lose, lost.joinToString { it.displayName }),
                         color = HoloSecondary,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -249,7 +248,7 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
             model.rotateAddress(chosen.map { it.key })
             onDone()
         }
-        Text(stringResource(R.string.rotate_no_undo), color = HoloSecondary, fontSize = 12.sp)
+        Text(stringResource(R.string.rotate_no_undo), color = HoloSecondary, fontSize = Tokens.Font.small)
     }
 }
 
@@ -258,7 +257,7 @@ private fun StepRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text:
     Row(Modifier.padding(vertical = 2.dp)) {
         Icon(icon, null, tint = HoloIconMuted, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(12.dp))
-        Text(text, color = HoloSecondary, fontSize = 13.sp)
+        Text(text, color = HoloSecondary, fontSize = Tokens.Font.body)
     }
 }
 
@@ -280,14 +279,14 @@ internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
             Text(
                 "0:%02d".format(st.secondsLeft),
                 color = Color.White,
-                fontSize = 44.sp,
+                fontSize = Tokens.Font.huge,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(top = 28.dp),
             )
             Text(
                 stringResource(R.string.rotate_wait_body),
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
             )
         }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -302,12 +301,12 @@ internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.CheckCircle, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.rotate_done), color = HoloOnline, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.rotate_done), color = HoloOnline, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
                     }
                     Text(
                         st.newAddress,
                         color = Color.White,
-                        fontSize = 13.sp,
+                        fontSize = Tokens.Font.body,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.padding(top = 6.dp),
                     )
@@ -317,9 +316,9 @@ internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
                 model.dismissRotation()
                 onFinish()
             }
-            Text(stringResource(R.string.rotate_if_continues), color = HoloSecondary, fontSize = 12.sp)
+            Text(stringResource(R.string.rotate_if_continues), color = HoloSecondary, fontSize = Tokens.Font.small)
         } else {
-            Text(stringResource(R.string.rotate_wait_footer), color = HoloSecondary, fontSize = 12.sp)
+            Text(stringResource(R.string.rotate_wait_footer), color = HoloSecondary, fontSize = Tokens.Font.small)
         }
     }
 }
@@ -334,6 +333,6 @@ private fun ProgressStep(done: Boolean, text: String) {
             modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(12.dp))
-        Text(text, color = if (done) Color.White else HoloSecondary, fontSize = 13.sp)
+        Text(text, color = if (done) Color.White else HoloSecondary, fontSize = Tokens.Font.body)
     }
 }

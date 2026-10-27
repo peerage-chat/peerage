@@ -34,7 +34,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
@@ -168,7 +167,7 @@ internal fun AttachSheet(
                         fmtSizeLong(selected.sumOf { it.size }),
                     ),
                     color = HoloSecondary,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                 )
             }
         }
@@ -192,7 +191,7 @@ internal fun AttachSheet(
                 Text(
                     stringResource(R.string.attach_need_gallery),
                     color = HoloSecondary,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                 )
                 Spacer(Modifier.height(Tokens.Space.m))
                 AccentButton(stringResource(R.string.attach_allow)) {
@@ -224,7 +223,7 @@ private fun SourceTile(icon: ImageVector, labelRes: Int, modifier: Modifier, onC
     ) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(23.dp))
         Spacer(Modifier.height(4.dp))
-        Text(stringResource(labelRes), color = Color.White, fontSize = 11.sp)
+        Text(stringResource(labelRes), color = Color.White, fontSize = Tokens.Font.caption)
     }
 }
 
@@ -238,7 +237,7 @@ private fun CameraTile(onClick: () -> Unit) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.PhotoCamera, null, tint = HoloAccent, modifier = Modifier.size(26.dp))
             Spacer(Modifier.height(4.dp))
-            Text(stringResource(R.string.attach_camera), color = HoloAccent, fontSize = 11.sp)
+            Text(stringResource(R.string.attach_camera), color = HoloAccent, fontSize = Tokens.Font.caption)
         }
     }
 }
@@ -275,7 +274,7 @@ private fun GalleryTile(g: GalleryItem, pickedAt: Int, onClick: () -> Unit) {
                 Text(
                     "${pickedAt + 1}",
                     color = HoloAccentDark,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                     fontWeight = FontWeight.Medium,
                 )
             }
@@ -291,6 +290,6 @@ private fun BoxScope.TileChip(text: String, align: Alignment, big: Boolean = fal
         Modifier.align(align).padding(4.dp).clip(RoundedCornerShape(Tokens.Radius.badge))
             .background(Tokens.Colors.tileScrim).padding(horizontal = 5.dp, vertical = 1.dp),
     ) {
-        Text(text, color = if (big) WarnColor else Color.White, fontSize = 10.sp)
+        Text(text, color = if (big) WarnColor else Color.White, fontSize = Tokens.Font.caption)
     }
 }

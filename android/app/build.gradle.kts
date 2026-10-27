@@ -96,3 +96,28 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }
+
+// Хардкод стиля, который уже вычищен, не должен вернуться: размер шрифта и цвет в экранах —
+// только из Tokens (docs/design/tokens.md). Проверка до сборки, чтобы ловилось сразу, а не
+// на ревью. Отступы (`N.dp`) добавятся сюда, когда их тоже переведут на токены.
+val checkTokens by tasks.registering {
+    val src = fileTree("src/main/java") {
+        include("**/*.kt")
+        exclude("**/Tokens.kt")
+    }
+    inputs.files(src)
+    doLast {
+        val rules = listOf(
+            Regex("""(?<![\w.])\d+(\.\d+)?\.sp\b""") to "размер шрифта — Tokens.Font",
+            Regex("""Color\(0x""") to "цвет — Tokens.Colors",
+        )
+        val hits = src.files.flatMap { f ->
+            f.readLines().withIndex().flatMap { (i, line) ->
+                rules.filter { it.first.containsMatchIn(line) }
+                    .map { "${f.relativeTo(projectDir)}:${i + 1}: ${it.second}: ${line.trim()}" }
+            }
+        }
+        if (hits.isNotEmpty()) throw GradleException("Хардкод вместо токенов:\n" + hits.joinToString("\n"))
+    }
+}
+tasks.named("preBuild") { dependsOn(checkTokens) }

@@ -32,7 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.ui.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -185,7 +184,7 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
 @Composable
 internal fun CenterMessage(text: String) {
     Box(Modifier.fillMaxSize().background(HoloBg), contentAlignment = Alignment.Center) {
-        Text(text, color = HoloSecondary, fontSize = 14.sp)
+        Text(text, color = HoloSecondary, fontSize = Tokens.Font.body)
     }
 }
 

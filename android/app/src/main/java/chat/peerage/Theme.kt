@@ -1,6 +1,7 @@
 package chat.peerage
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -30,9 +31,33 @@ private val Scheme = darkColorScheme(
     error = HoloError,
 )
 
+// Все слоты Material (Text по умолчанию, кнопки, диалоги, меню) — на нашей основе:
+// пропорциональный интервал и без разрядки. Размер у слотов остаётся свой, но в наших
+// экранах его всё равно задаёт Tokens.Font.
+private val AppTypography = Typography().run {
+    val b = Tokens.Text.base
+    Typography(
+        displayLarge = displayLarge.merge(b.copy(fontSize = displayLarge.fontSize)),
+        displayMedium = displayMedium.merge(b.copy(fontSize = displayMedium.fontSize)),
+        displaySmall = displaySmall.merge(b.copy(fontSize = displaySmall.fontSize)),
+        headlineLarge = headlineLarge.merge(b.copy(fontSize = headlineLarge.fontSize)),
+        headlineMedium = headlineMedium.merge(b.copy(fontSize = headlineMedium.fontSize)),
+        headlineSmall = headlineSmall.merge(b.copy(fontSize = Tokens.Font.title)),
+        titleLarge = titleLarge.merge(b.copy(fontSize = Tokens.Font.title)),
+        titleMedium = titleMedium.merge(b.copy(fontSize = Tokens.Font.label)),
+        titleSmall = titleSmall.merge(b.copy(fontSize = Tokens.Font.body)),
+        bodyLarge = bodyLarge.merge(b.copy(fontSize = Tokens.Font.label)),
+        bodyMedium = bodyMedium.merge(b.copy(fontSize = Tokens.Font.label)),
+        bodySmall = bodySmall.merge(b.copy(fontSize = Tokens.Font.small)),
+        labelLarge = labelLarge.merge(b.copy(fontSize = Tokens.Font.label)),
+        labelMedium = labelMedium.merge(b.copy(fontSize = Tokens.Font.small)),
+        labelSmall = labelSmall.merge(b.copy(fontSize = Tokens.Font.caption)),
+    )
+}
+
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Scheme, content = content)
+    MaterialTheme(colorScheme = Scheme, typography = AppTypography, content = content)
 }
 
 // ── Сетка размеров/отступов и семантические цвета — псевдонимы из Tokens ─────

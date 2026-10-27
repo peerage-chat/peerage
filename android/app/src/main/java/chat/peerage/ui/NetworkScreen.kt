@@ -36,7 +36,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -78,11 +77,11 @@ internal fun NetworkScreen(
                 Spacer(Modifier.width(10.dp))
                 if (model.offline) {
                     Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.notif_offline_title), color = Color.White, fontSize = 15.sp)
+                        Text(stringResource(R.string.notif_offline_title), color = Color.White, fontSize = Tokens.Font.label)
                         Text(
                             stringResource(R.string.notif_offline_body),
                             color = HoloSecondary,
-                            fontSize = 12.sp,
+                            fontSize = Tokens.Font.small,
                             modifier = Modifier.padding(top = 2.dp),
                         )
                     }
@@ -90,7 +89,7 @@ internal fun NetworkScreen(
                     Text(
                         stringResource(R.string.flood_back_online),
                         color = HoloAccent,
-                        fontSize = 13.sp,
+                        fontSize = Tokens.Font.body,
                         modifier = Modifier.clickable { model.goOnline() },
                     )
                 } else {
@@ -100,10 +99,10 @@ internal fun NetworkScreen(
                         Text(
                             stringResource(R.string.net_connected_to).trim(),
                             color = Color.White,
-                            fontSize = 15.sp,
+                            fontSize = Tokens.Font.label,
                         )
                         Spacer(Modifier.width(Tokens.Space.xs))
-                        Text("mesh", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("mesh", color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -129,7 +128,7 @@ internal fun NetworkScreen(
                 Text(
                     me.address,
                     color = Color.White,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -157,7 +156,7 @@ internal fun NetworkScreen(
                 Icon(Icons.Filled.Autorenew, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.net_rotate_row), color = Color.White, fontSize = 15.sp)
+                    Text(stringResource(R.string.net_rotate_row), color = Color.White, fontSize = Tokens.Font.label)
                     Text(
                         if (model.transportEpoch > 0) {
                             stringResource(R.string.net_epoch, model.transportEpoch)
@@ -165,7 +164,7 @@ internal fun NetworkScreen(
                             stringResource(R.string.net_rotate_row_desc)
                         },
                         color = HoloSecondary,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -181,11 +180,11 @@ internal fun NetworkScreen(
                     Icon(Icons.Filled.Share, null, tint = HoloOnline, modifier = Modifier.size(26.dp))
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.net_node_mode), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.net_node_mode), color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
                         Text(
                             stringResource(R.string.net_node_mode_desc),
                             color = HoloSecondary,
-                            fontSize = 12.sp,
+                            fontSize = Tokens.Font.small,
                         )
                     }
                     Spacer(Modifier.width(8.dp))
@@ -220,7 +219,7 @@ internal fun NetworkScreen(
                 Text(
                     stringResource(R.string.net_no_peers),
                     color = HoloSecondary,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
             } else {
@@ -243,11 +242,11 @@ internal fun NetworkScreen(
                 Icon(Icons.Filled.Speed, null, tint = HoloSecondary, modifier = Modifier.size(26.dp))
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.net_bench_row), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.net_bench_row), color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
                     Text(
                         model.benchResult.ifEmpty { stringResource(R.string.net_bench_row_desc) },
                         color = HoloSecondary,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                     )
                 }
                 Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
@@ -260,8 +259,8 @@ internal fun NetworkScreen(
                 Icon(Icons.Filled.Schedule, null, tint = HoloAccent, modifier = Modifier.size(26.dp))
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.net_offline_queue, queued), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    Text(stringResource(R.string.net_offline_queue_desc), color = HoloSecondary, fontSize = 12.sp)
+                    Text(stringResource(R.string.net_offline_queue, queued), color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.net_offline_queue_desc), color = HoloSecondary, fontSize = Tokens.Font.small)
                 }
                 Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
             }
@@ -290,7 +289,7 @@ internal fun NetworkScreen(
                             ) {
                                 SquareAvatar(c.displayName, size = 32.dp, circle = true)
                                 Spacer(Modifier.width(12.dp))
-                                Text(c.displayName, color = Color.White, fontSize = 15.sp)
+                                Text(c.displayName, color = Color.White, fontSize = Tokens.Font.label)
                             }
                         }
                     }
@@ -349,13 +348,13 @@ internal fun SurfaceCard(
 internal fun MetricCard(label: String, value: String, unit: String?, modifier: Modifier = Modifier) {
     Box(modifier.clip(RoundedCornerShape(Tokens.Radius.card)).background(Tokens.Colors.surface).padding(14.dp)) {
         Column {
-            Text(label, color = HoloSecondary, fontSize = 11.sp)
+            Text(label, color = HoloSecondary, fontSize = Tokens.Font.caption)
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(value, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                Text(value, color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
                 if (unit != null) {
                     Spacer(Modifier.width(3.dp))
-                    Text(unit, color = HoloSecondary, fontSize = 11.sp, modifier = Modifier.padding(bottom = 3.dp))
+                    Text(unit, color = HoloSecondary, fontSize = Tokens.Font.caption, modifier = Modifier.padding(bottom = 3.dp))
                 }
             }
         }
@@ -373,7 +372,7 @@ internal fun OutlineAction(text: String, icon: ImageVector, modifier: Modifier =
     ) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
-        Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(text, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -383,7 +382,7 @@ internal fun BenefitRow(icon: ImageVector, tint: Color, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(12.dp))
-        Text(text, color = if (tint == HoloSecondary) HoloSecondary else Color.White, fontSize = 13.sp)
+        Text(text, color = if (tint == HoloSecondary) HoloSecondary else Color.White, fontSize = Tokens.Font.body)
     }
 }
 
@@ -391,12 +390,12 @@ internal fun BenefitRow(icon: ImageVector, tint: Color, text: String) {
 @Composable
 internal fun PeerRow(p: NetPeer) {
     Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(if (p.inbound) "↙" else "↗", color = HoloSecondary, fontSize = 15.sp)
+        Text(if (p.inbound) "↙" else "↗", color = HoloSecondary, fontSize = Tokens.Font.label)
         Spacer(Modifier.width(10.dp))
         Text(
             shortHex(p.key),
             color = Color.White,
-            fontSize = 13.sp,
+            fontSize = Tokens.Font.body,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.weight(1f),
         )
@@ -407,7 +406,7 @@ internal fun PeerRow(p: NetPeer) {
             ms < 150 -> WarnColor
             else -> HoloError
         }
-        Text(if (ms <= 0) "—" else stringResource(R.string.net_ms_value, "%.0f".format(ms)), color = col, fontSize = 13.sp)
+        Text(if (ms <= 0) "—" else stringResource(R.string.net_ms_value, "%.0f".format(ms)), color = col, fontSize = Tokens.Font.body)
     }
 }
 

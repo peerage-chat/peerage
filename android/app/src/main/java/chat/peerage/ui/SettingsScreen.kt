@@ -47,7 +47,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
@@ -226,17 +225,17 @@ internal fun SettingsPrivacyScreen() {
                 )
                 Spacer(Modifier.width(Tokens.Space.m))
                 Column {
-                    Text(stringResource(R.string.settings_privacy_none), color = Color.White, fontSize = 15.sp)
+                    Text(stringResource(R.string.settings_privacy_none), color = Color.White, fontSize = Tokens.Font.label)
                     Text(
                         stringResource(R.string.settings_privacy_none_desc),
                         color = Tokens.Colors.secondary,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                         modifier = Modifier.padding(top = Tokens.Space.xs),
                     )
                     Text(
                         stringResource(R.string.settings_privacy_presence),
                         color = Tokens.Colors.secondary,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                         modifier = Modifier.padding(top = Tokens.Space.s),
                     )
                 }
@@ -388,8 +387,8 @@ internal fun SettingsMediaScreen(model: AppModel) {
                 },
             ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(stringResource(R.string.audio_quality_voice), color = Tokens.Colors.secondary, fontSize = 11.sp)
-                    Text(stringResource(R.string.audio_quality_audio), color = Tokens.Colors.secondary, fontSize = 11.sp)
+                    Text(stringResource(R.string.audio_quality_voice), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
+                    Text(stringResource(R.string.audio_quality_audio), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
                 }
                 Slider(
                     value = model.audioBitrate.toFloat(),
@@ -414,7 +413,7 @@ internal fun SettingsMediaScreen(model: AppModel) {
                         stringResource(R.string.audio_quality_rate, model.audioBitrate / 1000)
                     },
                     color = Tokens.Colors.secondary,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                 )
             }
         }
@@ -434,7 +433,7 @@ internal fun SettingsMediaScreen(model: AppModel) {
         Text(
             stringResource(R.string.media_defaults_hint),
             color = Tokens.Colors.secondary,
-            fontSize = 12.sp,
+            fontSize = Tokens.Font.small,
             modifier = Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         )
     }
@@ -465,12 +464,12 @@ private fun OptionBlock(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
         ) {
-            Text(label, color = Color.White, fontSize = 15.sp)
+            Text(label, color = Color.White, fontSize = Tokens.Font.label)
             if (badge != null) {
                 Text(
                     badge,
                     color = Tokens.Colors.accent,
-                    fontSize = 10.sp,
+                    fontSize = Tokens.Font.caption,
                     modifier = Modifier.clip(RoundedCornerShape(Tokens.Radius.badge))
                         .background(Tokens.Colors.accentBadge)
                         .padding(horizontal = 7.dp, vertical = 2.dp),
@@ -555,7 +554,7 @@ internal fun SettingsAboutScreen() {
         Text(
             stringResource(R.string.settings_about_future),
             color = Tokens.Colors.secondary,
-            fontSize = 12.sp,
+            fontSize = Tokens.Font.small,
             modifier = Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         )
     }
@@ -575,9 +574,9 @@ private fun SettingRow(
         Icon(icon, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
         Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 15.sp)
+            Text(title, color = Color.White, fontSize = Tokens.Font.label)
             if (value != null) {
-                Text(value, color = valueColor, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                Text(value, color = valueColor, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
             }
         }
         if (onClick != null) {
@@ -607,9 +606,9 @@ private fun SettingSwitchRow(
         Icon(icon, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
         Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 15.sp)
+            Text(title, color = Color.White, fontSize = Tokens.Font.label)
             if (value != null) {
-                Text(value, color = valueColor, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                Text(value, color = valueColor, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
             }
         }
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
@@ -632,10 +631,10 @@ private fun SeedPhraseSheet(model: AppModel, onClose: () -> Unit) {
         Text(
             stringResource(R.string.onb_phrase_title),
             color = Color.White,
-            fontSize = 19.sp,
+            fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
         )
-        Text(stringResource(R.string.onb_phrase_sub), color = HoloSecondary, fontSize = 13.sp)
+        Text(stringResource(R.string.onb_phrase_sub), color = HoloSecondary, fontSize = Tokens.Font.body)
         PhraseGrid(model.revealedPhrase)
         AccentButton(stringResource(R.string.onb_wrote_down)) {
             model.markKeyBackupDone()
@@ -645,7 +644,7 @@ private fun SeedPhraseSheet(model: AppModel, onClose: () -> Unit) {
         Text(
             stringResource(R.string.common_back),
             color = HoloAccent,
-            fontSize = 14.sp,
+            fontSize = Tokens.Font.label,
             modifier = Modifier.clickable {
                 model.clearRevealedPhrase()
                 onClose()
@@ -660,8 +659,8 @@ private fun SettingInfoRow(label: String, value: String, divider: Boolean = true
     // Справочная строка (версия, транспорт, лицензия) живёт в той же карточке, что и
     // настраиваемое, но без иконки — разделитель у неё идёт во всю ширину.
     CardRow(divider = divider, inset = 0.dp) {
-        Text(label, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        Text(value, color = Tokens.Colors.secondary, fontSize = 13.sp)
+        Text(label, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
+        Text(value, color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
     }
 }
 
@@ -677,11 +676,11 @@ internal fun EditProfileScreen(model: AppModel, onDone: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         EditableAvatar(name.ifBlank { "?" }, model.selfAvatar, pickAvatar)
-        Text(stringResource(R.string.settings_tap_avatar), color = HoloSecondary, fontSize = 12.sp)
+        Text(stringResource(R.string.settings_tap_avatar), color = HoloSecondary, fontSize = Tokens.Font.small)
 
         FieldLabel(stringResource(R.string.settings_your_name))
         TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors(), singleLine = true)
-        Text(stringResource(R.string.settings_name_hint), color = HoloSecondary, fontSize = 12.sp)
+        Text(stringResource(R.string.settings_name_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
 
         AccentButton(stringResource(R.string.common_done)) {
             model.updateSelfName(name.trim())
@@ -703,11 +702,11 @@ internal fun LockScreen(onUnlock: () -> Unit) {
         Text(
             stringResource(R.string.lock_title),
             color = Color.White,
-            fontSize = 19.sp,
+            fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
         )
         Spacer(Modifier.height(8.dp))
-        Text(stringResource(R.string.lock_subtitle), color = HoloSecondary, fontSize = 13.sp)
+        Text(stringResource(R.string.lock_subtitle), color = HoloSecondary, fontSize = Tokens.Font.body)
         Spacer(Modifier.height(28.dp))
         AccentButton(stringResource(R.string.lock_unlock), onClick = onUnlock)
     }
@@ -735,14 +734,14 @@ internal fun VaultUnlockScreen(onSubmit: (String, (Boolean) -> Unit) -> Unit) {
         Text(
             stringResource(R.string.vault_unlock_title),
             color = Color.White,
-            fontSize = 19.sp,
+            fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
         )
         Spacer(Modifier.height(8.dp))
         Text(
             stringResource(R.string.vault_unlock_sub),
             color = HoloSecondary,
-            fontSize = 13.sp,
+            fontSize = Tokens.Font.body,
         )
         Spacer(Modifier.height(22.dp))
         TextField(
@@ -759,14 +758,14 @@ internal fun VaultUnlockScreen(onSubmit: (String, (Boolean) -> Unit) -> Unit) {
         )
         if (wrong) {
             Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.vault_wrong), color = HoloError, fontSize = 13.sp)
+            Text(stringResource(R.string.vault_wrong), color = HoloError, fontSize = Tokens.Font.body)
         }
         Spacer(Modifier.height(18.dp))
         if (busy) {
             // Argon2id считается ~секунду: без индикатора это выглядит зависанием.
             CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
             Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = 12.sp)
+            Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = Tokens.Font.small)
         } else {
             AccentButton(stringResource(R.string.vault_unlock_btn)) {
                 if (password.isEmpty()) return@AccentButton
@@ -858,12 +857,12 @@ internal fun VaultLevelScreen(model: AppModel, dataDir: String, onDone: () -> Un
                 visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
             )
             if (repeat.isNotEmpty() && repeat != newPassword) {
-                Text(stringResource(R.string.vault_mismatch), color = HoloError, fontSize = 12.sp)
+                Text(stringResource(R.string.vault_mismatch), color = HoloError, fontSize = Tokens.Font.small)
             }
-            Text(stringResource(R.string.vault_no_recovery), color = HoloWarn, fontSize = 12.sp)
+            Text(stringResource(R.string.vault_no_recovery), color = HoloWarn, fontSize = Tokens.Font.small)
         }
         if (failed) {
-            Text(stringResource(R.string.vault_change_failed), color = HoloError, fontSize = 13.sp)
+            Text(stringResource(R.string.vault_change_failed), color = HoloError, fontSize = Tokens.Font.body)
         }
 
         val ready = when {
@@ -872,7 +871,7 @@ internal fun VaultLevelScreen(model: AppModel, dataDir: String, onDone: () -> Un
             else -> newPassword.isNotEmpty() && newPassword == repeat
         }
         if (busy) {
-            Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = 13.sp)
+            Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = Tokens.Font.body)
         } else {
             AccentButton(stringResource(R.string.vault_apply)) {
                 if (!ready) return@AccentButton
@@ -910,8 +909,8 @@ private fun LevelOption(
             )
             Spacer(Modifier.width(8.dp))
             Column {
-                Text(title, color = Color.White, fontSize = 15.sp)
-                Text(desc, color = HoloSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                Text(title, color = Color.White, fontSize = Tokens.Font.label)
+                Text(desc, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
             }
         }
     }

@@ -31,7 +31,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -49,7 +48,7 @@ internal fun RoomGrid(
             Text(
                 stringResource(if (inRoom) R.string.call_in_room_caps else R.string.call_in_room_presence_caps, total),
                 color = HoloSecondary,
-                fontSize = 11.sp,
+                fontSize = Tokens.Font.caption,
                 modifier = Modifier.padding(start = 2.dp, bottom = 8.dp),
             )
             val all = if (inRoom) {
@@ -111,7 +110,7 @@ internal fun GridTile(
                         name.take(1).uppercase(),
                         color = if (me) HoloAccentDark else Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 26.sp,
+                        fontSize = Tokens.Font.initial(64.dp),
                     )
                 }
             }
@@ -119,7 +118,7 @@ internal fun GridTile(
             Text(
                 name,
                 color = if (me) HoloAccent else Color.White,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(),
@@ -188,12 +187,12 @@ internal fun ParticipantFullscreen(
                         name.take(1).uppercase(),
                         color = if (me) HoloAccentDark else Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 52.sp,
+                        fontSize = Tokens.Font.initial(128.dp),
                     )
                 }
             }
             Spacer(Modifier.height(20.dp))
-            Text(name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Medium)
+            Text(name, color = Color.White, fontSize = Tokens.Font.big, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(10.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -207,7 +206,7 @@ internal fun ParticipantFullscreen(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(14.dp))
-                        Text(stringResource(R.string.call_mic_off), color = WarnColor, fontSize = 12.sp)
+                        Text(stringResource(R.string.call_mic_off), color = WarnColor, fontSize = Tokens.Font.small)
                     }
                 }
                 if (video) {
@@ -218,7 +217,7 @@ internal fun ParticipantFullscreen(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
-                        Text(stringResource(R.string.call_btn_video), color = HoloSecondary, fontSize = 12.sp)
+                        Text(stringResource(R.string.call_btn_video), color = HoloSecondary, fontSize = Tokens.Font.small)
                     }
                 }
             }
@@ -250,11 +249,11 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                     contentAlignment = Alignment.Center,
                 ) {
                     PhotoOr(model.peerAvatar(ic.peer), 88.dp) {
-                        Text(name.take(1).uppercase(), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = 40.sp)
+                        Text(name.take(1).uppercase(), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = Tokens.Font.initial(88.dp))
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                Text(name, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+                Text(name, color = Color.White, fontSize = Tokens.Font.big, fontWeight = FontWeight.Medium)
                 val groupName = model.groups.firstOrNull { it.gid == ic.roomId }?.name
                 Text(
                     if (groupName != null) {
@@ -263,7 +262,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                         stringResource(R.string.call_invite_subtitle)
                     },
                     color = HoloSecondary,
-                    fontSize = 15.sp,
+                    fontSize = Tokens.Font.label,
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 // Кто уже в комнате: «Боря [и ещё N] в комнате» (мини-аватар). 1:1 — нет.
@@ -277,7 +276,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.size(22.dp).clip(RoundedCornerShape(Tokens.Radius.badge)).background(HoloOnline), contentAlignment = Alignment.Center) {
-                            Text(firstName.take(1).uppercase(), color = Tokens.Colors.onOnline, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(firstName.take(1).uppercase(), color = Tokens.Colors.onOnline, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Bold)
                         }
                         Text(
                             if (more > 0) {
@@ -286,17 +285,17 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                                 firstName
                             },
                             color = HoloSecondary,
-                            fontSize = 13.sp,
+                            fontSize = Tokens.Font.body,
                         )
                     }
                 }
                 // Ожидаемый суммарный входящий трафик.
                 Spacer(Modifier.height(22.dp))
-                Text(stringResource(R.string.call_traffic_rate, trafficMb), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.call_traffic_rate, trafficMb), color = Color.White, fontSize = Tokens.Font.huge, fontWeight = FontWeight.Bold)
                 Text(
                     stringResource(R.string.call_invite_traffic_caption),
                     color = HoloSecondary,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }

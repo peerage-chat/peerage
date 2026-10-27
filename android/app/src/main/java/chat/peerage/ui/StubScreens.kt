@@ -20,10 +20,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.HoloBg
 import chat.peerage.HoloBorder
 import chat.peerage.HoloSecondary
+import chat.peerage.Tokens
 
 /** Аккуратное пустое состояние: приглушённая иконка + заголовок + подсказка. */
 @Composable
@@ -35,9 +35,9 @@ internal fun EmptyState(icon: ImageVector, title: String, hint: String) {
         ) {
             Icon(icon, null, tint = HoloBorder, modifier = Modifier.size(56.dp))
             Spacer(Modifier.height(14.dp))
-            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text(title, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(6.dp))
-            Text(hint, color = HoloSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
+            Text(hint, color = HoloSecondary, fontSize = Tokens.Font.body, textAlign = TextAlign.Center)
         }
     }
 }

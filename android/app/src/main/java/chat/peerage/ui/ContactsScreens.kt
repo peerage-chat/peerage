@@ -45,7 +45,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -162,12 +161,12 @@ internal fun ContactsScreen(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("⚠", color = Tokens.Colors.noticeText, fontSize = 15.sp)
+                Text("⚠", color = Tokens.Colors.noticeText, fontSize = Tokens.Font.label)
                 Spacer(Modifier.width(10.dp))
                 Text(
                     stringResource(R.string.outbox_warn, model.outboxPending),
                     color = Tokens.Colors.noticeText,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -178,7 +177,7 @@ internal fun ContactsScreen(
             Text(
                 stringResource(R.string.bench_recv_rate, "%.1f".format(model.benchRecvMbps)),
                 color = HoloAccent,
-                fontSize = 11.sp,
+                fontSize = Tokens.Font.caption,
                 modifier = Modifier.padding(horizontal = ScreenPad, vertical = 6.dp),
             )
         }
@@ -194,7 +193,7 @@ internal fun ContactsScreen(
                         Text(
                             stringResource(R.string.requests_header, model.contactRequests.size),
                             color = HoloAccent,
-                            fontSize = 12.sp,
+                            fontSize = Tokens.Font.small,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(start = ScreenPad, end = ScreenPad, top = 10.dp, bottom = 4.dp),
                         )
@@ -209,7 +208,7 @@ internal fun ContactsScreen(
                         Text(
                             stringResource(R.string.group_invites_header, model.groupInvites.size),
                             color = HoloAccent,
-                            fontSize = 12.sp,
+                            fontSize = Tokens.Font.small,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(start = ScreenPad, end = ScreenPad, top = 10.dp, bottom = 4.dp),
                         )
@@ -316,7 +315,7 @@ private fun ChatListRow(
                         Text(
                             row.title,
                             color = Color.White,
-                            fontSize = 15.sp,
+                            fontSize = Tokens.Font.label,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -346,7 +345,7 @@ private fun ChatListRow(
                         Text(
                             chatPreview(model, row),
                             color = Tokens.Colors.secondary,
-                            fontSize = 13.sp,
+                            fontSize = Tokens.Font.body,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -364,7 +363,7 @@ private fun ChatListRow(
                         Text(
                             fmtListTime(row.time),
                             color = Tokens.Colors.tertiary,
-                            fontSize = 11.sp,
+                            fontSize = Tokens.Font.caption,
                             maxLines = 1,
                             softWrap = false,
                         )
@@ -397,7 +396,7 @@ private fun ChatRowBadge(row: ChatRowUi) {
                     .padding(horizontal = 5.dp, vertical = 1.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("@", color = HoloAccentDark, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text("@", color = HoloAccentDark, fontSize = Tokens.Font.caption, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.width(Tokens.Space.xs))
             UnreadCount(row)
@@ -448,7 +447,7 @@ private fun UnreadCount(row: ChatRowUi) {
         Text(
             if (row.unread > 99) "99+" else "${row.unread}",
             color = if (row.muted) Tokens.Colors.unreadMutedText else HoloAccentDark,
-            fontSize = 11.sp,
+            fontSize = Tokens.Font.caption,
             fontWeight = FontWeight.SemiBold,
         )
     }
@@ -526,7 +525,7 @@ private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
                 Text(
                     r.shortKey + "…",
                     color = Color.White,
-                    fontSize = 15.sp,
+                    fontSize = Tokens.Font.label,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -535,7 +534,7 @@ private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
                     Text(
                         r.preview,
                         color = HoloSecondary,
-                        fontSize = 13.sp,
+                        fontSize = Tokens.Font.body,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -548,14 +547,14 @@ private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
                 onClick = { model.acceptRequest(r.key) },
                 colors = ButtonDefaults.buttonColors(containerColor = HoloAccent, contentColor = HoloAccentDark),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-            ) { Text(stringResource(R.string.req_accept), fontSize = 13.sp) }
+            ) { Text(stringResource(R.string.req_accept), fontSize = Tokens.Font.body) }
             Spacer(Modifier.width(8.dp))
             TextButton(onClick = { model.declineRequest(r.key) }) {
-                Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = 13.sp)
+                Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = Tokens.Font.body)
             }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { model.blockRequest(r.key) }) {
-                Text(stringResource(R.string.req_block), color = HoloError, fontSize = 13.sp)
+                Text(stringResource(R.string.req_block), color = HoloError, fontSize = Tokens.Font.body)
             }
         }
     }
@@ -582,14 +581,14 @@ private fun GroupInviteCard(model: AppModel, inv: GroupInvite) {
                 Text(
                     inv.name.ifBlank { stringResource(R.string.group_default_name) },
                     color = Color.White,
-                    fontSize = 15.sp,
+                    fontSize = Tokens.Font.label,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     stringResource(R.string.group_invite_from, model.peerName(inv.inviter)),
                     color = HoloSecondary,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -603,7 +602,7 @@ private fun GroupInviteCard(model: AppModel, inv: GroupInvite) {
             Text(
                 stringResource(R.string.group_invite_waiting),
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
             )
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -611,10 +610,10 @@ private fun GroupInviteCard(model: AppModel, inv: GroupInvite) {
                     onClick = { model.acceptGroupInvite(inv.gid) },
                     colors = ButtonDefaults.buttonColors(containerColor = HoloAccent, contentColor = HoloAccentDark),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                ) { Text(stringResource(R.string.group_invite_join), fontSize = 13.sp) }
+                ) { Text(stringResource(R.string.group_invite_join), fontSize = Tokens.Font.body) }
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { model.declineGroupInvite(inv.gid) }) {
-                    Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = 13.sp)
+                    Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = Tokens.Font.body)
                 }
             }
         }
@@ -663,7 +662,7 @@ internal fun ContactListScreen(model: AppModel, onOpen: (String) -> Unit) {
                             Text(
                                 c.displayName,
                                 color = Color.White,
-                                fontSize = 15.sp,
+                                fontSize = Tokens.Font.label,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -677,7 +676,7 @@ internal fun ContactListScreen(model: AppModel, onOpen: (String) -> Unit) {
                         Text(
                             stringResource(if (online) R.string.status_online else R.string.status_offline),
                             color = if (online) HoloOnline else Tokens.Colors.tertiary,
-                            fontSize = 12.sp,
+                            fontSize = Tokens.Font.small,
                         )
                     }
                 }
@@ -725,7 +724,7 @@ internal fun AddScreen(
             "error" -> stringResource(R.string.add_error)
             else -> ""
         }
-        if (msg.isNotEmpty()) Text(msg, color = HoloError, fontSize = 13.sp)
+        if (msg.isNotEmpty()) Text(msg, color = HoloError, fontSize = Tokens.Font.body)
     }
 }
 
@@ -756,13 +755,13 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
             Text(
                 model.selfName.ifBlank { stringResource(R.string.common_you) },
                 color = Color.White,
-                fontSize = 20.sp,
+                fontSize = Tokens.Font.title,
                 fontWeight = FontWeight.Medium,
             )
             Text(
                 stringResource(R.string.peers_online, model.netPeers),
                 color = if (model.netPeers > 0) HoloOnline else Tokens.Colors.tertiary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
                 modifier = Modifier.padding(top = Tokens.Space.xxs),
             )
         }
@@ -785,7 +784,7 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                 Text(
                     stringResource(R.string.me_qr_hint),
                     color = Tokens.Colors.secondary,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
@@ -795,7 +794,7 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                     Text(
                         me.address,
                         color = Color.White,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -821,13 +820,13 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                 Text(
                     stringResource(R.string.fp_self_hint),
                     color = Tokens.Colors.secondary,
-                    fontSize = 11.sp,
+                    fontSize = Tokens.Font.caption,
                     modifier = Modifier.padding(top = Tokens.Space.s),
                 )
                 Text(
                     me.fingerprint,
                     color = HoloAccent,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     modifier = Modifier.padding(top = Tokens.Space.xs),
                 )
             }
@@ -850,7 +849,7 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                 CardRow(onClick = { navigate(dest) }, divider = i > 0) {
                     Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
                     Spacer(Modifier.width(Tokens.Space.m))
-                    Text(label, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    Text(label, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
                     Icon(
                         TablerIcons.ChevronRight,
                         null,
@@ -865,7 +864,7 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
         Text(
             stringResource(R.string.app_name) + " · " + stringResource(R.string.settings_version_value),
             color = Tokens.Colors.tertiary,
-            fontSize = 11.sp,
+            fontSize = Tokens.Font.caption,
             modifier = Modifier.padding(Tokens.Space.l),
         )
     }

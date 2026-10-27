@@ -50,7 +50,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import chat.peerage.ui.PhotoOr
 import chat.peerage.ui.rememberPermissionRunner
@@ -204,7 +203,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
             Text(
                 stringResource(R.string.call_settings_title),
                 color = Color.White,
-                fontSize = 19.sp,
+                fontSize = Tokens.Font.title,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f),
             )
@@ -214,7 +213,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
             ) { Icon(Icons.Filled.Close, stringResource(R.string.call_close), tint = Color.White, modifier = Modifier.size(18.dp)) }
         }
 
-        Text(stringResource(R.string.call_audio_output), color = HoloSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(stringResource(R.string.call_audio_output), color = HoloSecondary, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { model.toggleSpeaker() }
@@ -228,7 +227,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                 modifier = Modifier.size(22.dp),
             )
             Spacer(Modifier.width(14.dp))
-            Text(stringResource(R.string.call_speaker), color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.call_speaker), color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
             Switch(
                 checked = model.speakerOn,
                 onCheckedChange = { model.toggleSpeaker() },
@@ -247,7 +246,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                 .background(Tokens.Colors.tile).padding(horizontal = 14.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(stringResource(R.string.call_tech_info), color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.call_tech_info), color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
             Switch(
                 checked = model.showTechInfo,
                 onCheckedChange = { model.toggleTechInfo() },
@@ -277,11 +276,11 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
             Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.call_video_settings), color = Color.White, fontSize = 15.sp)
+                Text(stringResource(R.string.call_video_settings), color = Color.White, fontSize = Tokens.Font.label)
                 Text(
                     "${vq.height}p · ${stringResource(R.string.share_fps_value, vq.fps)}",
                     color = HoloSecondary,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                 )
             }
             Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(20.dp))
@@ -360,7 +359,7 @@ private fun ParticipantTile(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (!t.audio) Icon(Icons.Filled.MicOff, null, tint = Tokens.Colors.iconDangerMuted, modifier = Modifier.size(13.dp))
-                Text(name, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(name, color = Color.White, fontSize = Tokens.Font.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         // Тех-инфо чип (тумблер в ⚙️) — ЧАСТЬ оверлея, право-верх тайла. 4 строки:
@@ -390,7 +389,7 @@ private fun ParticipantTile(
 /** Строка тех-инфо чипа (цвет/размер chrome-оверлея). */
 @Composable
 private fun TechLine(text: String) {
-    Text(text, color = Tokens.Colors.iconChrome, fontSize = 10.sp, maxLines = 1)
+    Text(text, color = Tokens.Colors.iconChrome, fontSize = Tokens.Font.caption, maxLines = 1)
 }
 
 /** Строка трафика: иконка направления (↑ исходящий своё · ↓ входящий чужое) + kbps. */
@@ -403,7 +402,7 @@ private fun TechRate(up: Boolean, kbps: Int) {
             tint = Tokens.Colors.iconChrome,
             modifier = Modifier.size(11.dp),
         )
-        Text("$kbps kbps", color = Tokens.Colors.iconChrome, fontSize = 10.sp, maxLines = 1)
+        Text("$kbps kbps", color = Tokens.Colors.iconChrome, fontSize = Tokens.Font.caption, maxLines = 1)
     }
 }
 
@@ -429,13 +428,13 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
                 Text(
                     stringResource(R.string.call_alone_title),
                     color = Color.White,
-                    fontSize = 18.sp,
+                    fontSize = Tokens.Font.title,
                     fontWeight = FontWeight.Medium,
                 )
                 Text(
                     stringResource(R.string.call_alone_subtitle),
                     color = HoloSecondary,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     modifier = Modifier.padding(top = 5.dp),
                 )
             }
@@ -560,7 +559,7 @@ private fun RingSheet(model: AppModel, onClose: () -> Unit) {
             Text(
                 stringResource(R.string.call_ring_title),
                 color = Color.White,
-                fontSize = 19.sp,
+                fontSize = Tokens.Font.title,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f),
             )
@@ -573,7 +572,7 @@ private fun RingSheet(model: AppModel, onClose: () -> Unit) {
             Text(
                 stringResource(R.string.call_ring_empty),
                 color = HoloSecondary,
-                fontSize = 15.sp,
+                fontSize = Tokens.Font.label,
                 modifier = Modifier.padding(top = 8.dp),
             )
             return@Column
@@ -594,7 +593,7 @@ private fun RingSheet(model: AppModel, onClose: () -> Unit) {
                     Text(
                         name,
                         color = if (on) HoloAccent else Color.White,
-                        fontSize = 15.sp,
+                        fontSize = Tokens.Font.label,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -621,7 +620,7 @@ private fun RingSheet(model: AppModel, onClose: () -> Unit) {
             Text(
                 stringResource(R.string.call_ring_btn),
                 color = if (picked.isEmpty()) HoloSecondary else HoloAccentDark,
-                fontSize = 15.sp,
+                fontSize = Tokens.Font.label,
                 fontWeight = FontWeight.Medium,
             )
         }
@@ -703,7 +702,7 @@ private fun NamePill(name: String) {
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(name, color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -717,7 +716,7 @@ private fun TrafficChip(mbMin: Int) {
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Icon(Icons.Filled.ArrowDownward, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
-        Text(stringResource(R.string.call_traffic_rate, mbMin), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(stringResource(R.string.call_traffic_rate, mbMin), color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -732,7 +731,7 @@ private fun Avatar(name: String, size: Int, photo: ByteArray?) {
                 name.take(1).uppercase(),
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
-                fontSize = (size / 2.4f).sp,
+                fontSize = Tokens.Font.initial(size.dp),
             )
         }
     }

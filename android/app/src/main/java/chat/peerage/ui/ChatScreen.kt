@@ -68,12 +68,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
@@ -116,7 +114,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                     Text(
                         name,
                         color = Color.White,
-                        fontSize = 16.sp,
+                        fontSize = Tokens.Font.label,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -130,7 +128,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                 Text(
                     stringResource(if (online) R.string.status_in_network else R.string.status_offline),
                     color = if (online) HoloOnline else HoloSecondary,
-                    fontSize = 11.sp,
+                    fontSize = Tokens.Font.caption,
                 )
             }
         }
@@ -388,7 +386,7 @@ internal fun QuoteBlock(
         val hasThumb = src != null && src.kind != "text" &&
             QuoteThumb(model, src.blobId, src.thumbId, src.kind)
         Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
-            Text(who, color = HoloAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Text(who, color = HoloAccent, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium)
             Text(
                 src?.let {
                     when {
@@ -399,7 +397,7 @@ internal fun QuoteBlock(
                     }
                 } ?: stringResource(R.string.chat_reply_gone),
                 color = Color.White.copy(alpha = 0.7f),
-                fontSize = 12.sp,
+                fontSize = Tokens.Font.small,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -434,13 +432,13 @@ internal fun ReplyStrip(model: AppModel, m: Message) {
             Text(
                 if (m.mine) stringResource(R.string.chat_reply_you) else groupSenderName(model, m.sender),
                 color = HoloAccent,
-                fontSize = 12.sp,
+                fontSize = Tokens.Font.small,
                 fontWeight = FontWeight.Medium,
             )
             Text(
                 if (m.text.isNotEmpty()) m.text else m.name.ifEmpty { quoteKind(m.kind) },
                 color = HoloSecondary,
-                fontSize = 12.sp,
+                fontSize = Tokens.Font.small,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -465,7 +463,7 @@ internal fun E2EBanner() {
         ) {
             Icon(Icons.Filled.Lock, null, tint = HoloSecondary, modifier = Modifier.size(12.dp))
             Spacer(Modifier.width(5.dp))
-            Text(stringResource(R.string.chat_e2e_banner), color = HoloSecondary, fontSize = 11.sp)
+            Text(stringResource(R.string.chat_e2e_banner), color = HoloSecondary, fontSize = Tokens.Font.caption)
         }
     }
 }
@@ -493,7 +491,7 @@ internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
         Text(
             sel.size.toString(),
             color = Color.White,
-            fontSize = 18.sp,
+            fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f).padding(start = 8.dp),
         )
@@ -585,7 +583,7 @@ internal fun DateChip(label: String) {
         Box(
             Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.labelScrim)
                 .padding(horizontal = 11.dp, vertical = 3.dp),
-        ) { Text(label, color = HoloSecondary, fontSize = 11.sp) }
+        ) { Text(label, color = HoloSecondary, fontSize = Tokens.Font.caption) }
     }
 }
 
@@ -608,7 +606,7 @@ private fun MentionSuggestions(candidates: List<Pair<String, String>>, onPick: (
                     Text(
                         name,
                         color = Color.White,
-                        fontSize = 15.sp,
+                        fontSize = Tokens.Font.label,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -776,7 +774,7 @@ internal fun MessageInput(
                     value = field,
                     onValueChange = setField,
                     modifier = Modifier.weight(1f).padding(vertical = 12.dp),
-                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                    textStyle = Tokens.Text.base.copy(color = Color.White),
                     cursorBrush = SolidColor(HoloAccent),
                     maxLines = 4,
                     decorationBox = { inner ->
@@ -785,7 +783,7 @@ internal fun MessageInput(
                                 Text(
                                     stringResource(if (recording) R.string.chat_recording else R.string.chat_input_hint),
                                     color = if (recording) HoloError else HoloSecondary,
-                                    fontSize = 15.sp,
+                                    fontSize = Tokens.Font.label,
                                 )
                             }
                             inner()
@@ -851,7 +849,7 @@ internal fun MessageInput(
                     Text(
                         "${picked.size}",
                         color = HoloAccentDark,
-                        fontSize = 10.sp,
+                        fontSize = Tokens.Font.caption,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 5.dp),
                     )
@@ -911,7 +909,7 @@ internal fun MessageRow(
                         .background(Tokens.Colors.labelScrim)
                         .padding(horizontal = 11.dp, vertical = 3.dp),
                 ) {
-                    Text(text, color = HoloSecondary, fontSize = 11.sp)
+                    Text(text, color = HoloSecondary, fontSize = Tokens.Font.caption)
                 }
             }
         }
@@ -1066,7 +1064,7 @@ internal fun MessageBubble(
                             Text(
                                 senderName,
                                 color = senderColor,
-                                fontSize = 12.sp,
+                                fontSize = Tokens.Font.small,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -1281,7 +1279,7 @@ internal fun VideoAttachment(
             Text(
                 fmtDuration(durationMs),
                 color = Color.White,
-                fontSize = 11.sp,
+                fontSize = Tokens.Font.caption,
                 modifier = Modifier.align(Alignment.BottomStart)
                     .padding(6.dp)
                     .clip(RoundedCornerShape(Tokens.Radius.badge))
@@ -1321,11 +1319,11 @@ internal fun FileAttachment(
         }
         Spacer(Modifier.width(8.dp))
         Column {
-            Text(name.ifBlank { stringResource(R.string.chat_file) }, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(name.ifBlank { stringResource(R.string.chat_file) }, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 if (ready) fmtSizeLong(size) else stringResource(R.string.chat_downloading),
                 color = HoloSecondary,
-                fontSize = 11.sp,
+                fontSize = Tokens.Font.caption,
             )
         }
     }
@@ -1395,7 +1393,7 @@ internal fun VoiceAttachment(bytes: ByteArray?) {
         Text(
             if (durationMs > 0) fmtDuration(durationMs) else stringResource(R.string.chat_voice),
             color = Color.White,
-            fontSize = 13.sp,
+            fontSize = Tokens.Font.body,
             modifier = Modifier.padding(end = 8.dp),
         )
     }
@@ -1454,7 +1452,7 @@ internal fun PendingAttachmentCard(
             Text(
                 name.ifBlank { stringResource(R.string.chat_file) },
                 color = Color.White,
-                fontSize = 14.sp,
+                fontSize = Tokens.Font.label,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1464,7 +1462,7 @@ internal fun PendingAttachmentCard(
                     if (size > 0) add(fmtSizeLong(size))
                 }.joinToString(" · "),
                 color = HoloSecondary,
-                fontSize = 11.sp,
+                fontSize = Tokens.Font.caption,
             )
         }
         Spacer(Modifier.width(8.dp))
@@ -1536,7 +1534,7 @@ internal fun MsgMeta(time: Long, mine: Boolean, edited: Boolean, status: String 
     // (24sp) и мета у отредактированного пузыря вырастала, оставляя пустоту снизу.
     // Моноширинные цифры: время у каждого сообщения своё, а колонка меты общая —
     // на пропорциональных цифрах она слегка гуляла бы от строки к строке.
-    val style = TextStyle(color = fg, fontSize = 11.sp, fontFeatureSettings = "tnum")
+    val style = Tokens.Text.meta.copy(color = fg)
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (edited) {
             // Текст подменился — молчать об этом нельзя, иначе «исправил»
@@ -1580,6 +1578,6 @@ internal fun StatusTick(status: String) {
             tint = tint.copy(alpha = 0.7f),
             modifier = Modifier.size(12.dp),
         )
-        "failed" -> Text("!", color = HoloError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        "failed" -> Text("!", color = HoloError, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Bold)
     }
 }

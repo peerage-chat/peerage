@@ -32,7 +32,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
@@ -240,7 +239,7 @@ private fun PickParts(
             Text(
                 stringResource(R.string.backup_big_hint),
                 color = HoloSecondary,
-                fontSize = 12.sp,
+                fontSize = Tokens.Font.small,
             )
         }
 
@@ -308,15 +307,15 @@ private fun PasswordStep(
             visualTransformation = PasswordVisualTransformation(),
         )
         if (repeat.isNotEmpty() && repeat != password) {
-            Text(stringResource(R.string.vault_mismatch), color = HoloError, fontSize = 12.sp)
+            Text(stringResource(R.string.vault_mismatch), color = HoloError, fontSize = Tokens.Font.small)
         }
-        Text(stringResource(R.string.backup_pw_no_recovery), color = HoloWarn, fontSize = 12.sp)
+        Text(stringResource(R.string.backup_pw_no_recovery), color = HoloWarn, fontSize = Tokens.Font.small)
 
         val ready = password.isNotEmpty() && password == repeat
         AccentButton(stringResource(R.string.backup_create), Modifier.fillMaxWidth()) {
             if (ready) onGo()
         }
-        Text(stringResource(R.string.backup_where_hint), color = HoloSecondary, fontSize = 12.sp)
+        Text(stringResource(R.string.backup_where_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
     }
 }
 
@@ -330,14 +329,14 @@ private fun WorkingStep(restoring: Boolean) {
         Text(
             stringResource(if (restoring) R.string.backup_working_restore else R.string.backup_working),
             color = Color.White,
-            fontSize = 20.sp,
+            fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
         )
         Spacer(Modifier.height(20.dp))
         LinearProgressIndicator(color = HoloAccent, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(20.dp))
         // Про секунду сказано намеренно: без этого пауза читается как «подвисло».
-        Text(stringResource(R.string.backup_working_hint), color = HoloSecondary, fontSize = 12.sp)
+        Text(stringResource(R.string.backup_working_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
     }
 }
 
@@ -362,12 +361,12 @@ private fun RestoreStep(
                     Text(
                         fileName ?: stringResource(R.string.backup_pick_file),
                         color = Color.White,
-                        fontSize = 15.sp,
+                        fontSize = Tokens.Font.label,
                     )
                     Text(
                         stringResource(R.string.backup_pick_hint),
                         color = HoloSecondary,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -397,7 +396,7 @@ private fun RestoreStep(
         Text(
             stringResource(R.string.backup_verify_again),
             color = HoloWarn,
-            fontSize = 12.sp,
+            fontSize = Tokens.Font.small,
         )
 
         AccentButton(stringResource(R.string.backup_restore_go), Modifier.fillMaxWidth()) {
@@ -416,14 +415,14 @@ private fun DoneStep(stats: BackupStatsDto?, restoring: Boolean, onDone: () -> U
         Spacer(Modifier.height(50.dp))
         val err = stats?.error.orEmpty()
         if (err.isNotEmpty()) {
-            Text(stringResource(R.string.backup_failed), color = HoloError, fontSize = 20.sp, fontWeight = FontWeight.Medium)
-            Text(err, color = HoloSecondary, fontSize = 13.sp)
+            Text(stringResource(R.string.backup_failed), color = HoloError, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
+            Text(err, color = HoloSecondary, fontSize = Tokens.Font.body)
         } else {
             Icon(Icons.Filled.CheckCircle, null, tint = HoloOnline, modifier = Modifier.size(46.dp))
             Text(
                 stringResource(if (restoring) R.string.backup_done_restore else R.string.backup_done_export),
                 color = Color.White,
-                fontSize = 20.sp,
+                fontSize = Tokens.Font.title,
                 fontWeight = FontWeight.Medium,
             )
             val s = stats ?: BackupStatsDto()
@@ -436,7 +435,7 @@ private fun DoneStep(stats: BackupStatsDto?, restoring: Boolean, onDone: () -> U
                     s.attachments,
                 ),
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
             )
             if (restoring) {
                 InfoCard(
@@ -448,7 +447,7 @@ private fun DoneStep(stats: BackupStatsDto?, restoring: Boolean, onDone: () -> U
                 Text(
                     stringResource(R.string.backup_verify_again),
                     color = HoloSecondary,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                 )
             }
         }
@@ -491,11 +490,11 @@ private fun PartRow(
             Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(21.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontSize = 15.sp)
-                Text(sub, color = HoloSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                Text(title, color = Color.White, fontSize = Tokens.Font.label)
+                Text(sub, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
             }
             if (size != null) {
-                Text(size, color = HoloSecondary, fontSize = 13.sp)
+                Text(size, color = HoloSecondary, fontSize = Tokens.Font.body)
             }
         }
     }
@@ -514,12 +513,12 @@ private fun InfoCard(icon: ImageVector, title: String, text: String, warn: Boole
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(Tokens.Space.s))
-                Text(title, color = tint, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(title, color = tint, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
             }
             Text(
                 text,
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }

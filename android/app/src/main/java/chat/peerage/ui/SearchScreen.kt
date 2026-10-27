@@ -28,7 +28,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.AppModel
 import chat.peerage.CenterMessage
@@ -86,8 +85,8 @@ internal fun SearchScreen(
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(g.name, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(stringResource(R.string.search_group_subtitle, g.members), color = HoloSecondary, fontSize = 11.sp)
+                            Text(g.name, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(stringResource(R.string.search_group_subtitle, g.members), color = HoloSecondary, fontSize = Tokens.Font.caption)
                         }
                     }
                 }
@@ -112,11 +111,11 @@ internal fun SearchScreen(
                             Text(
                                 hit.text,
                                 color = Color.White,
-                                fontSize = 14.sp,
+                                fontSize = Tokens.Font.label,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(title, color = HoloSecondary, fontSize = 11.sp, maxLines = 1)
+                            Text(title, color = HoloSecondary, fontSize = Tokens.Font.caption, maxLines = 1)
                         }
                     }
                 }
@@ -126,11 +125,11 @@ internal fun SearchScreen(
                         SquareAvatar(c.displayName, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c.avatarId])
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(c.displayName, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(c.displayName, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
                                 stringResource(if (online) R.string.status_online else R.string.status_offline),
                                 color = if (online) HoloOnline else HoloSecondary,
-                                fontSize = 11.sp,
+                                fontSize = Tokens.Font.caption,
                             )
                         }
                     }

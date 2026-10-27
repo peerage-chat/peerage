@@ -32,11 +32,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -94,7 +92,7 @@ internal fun ContactProfileScreen(
                 Modifier.padding(top = Tokens.Space.m),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(c.displayName, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                Text(c.displayName, color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
                 if (c.verified) {
                     Spacer(Modifier.width(6.dp))
                     Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(19.dp))
@@ -103,7 +101,7 @@ internal fun ContactProfileScreen(
             Text(
                 stringResource(if (online) R.string.status_online else R.string.status_offline),
                 color = if (online) HoloOnline else HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
             )
         }
 
@@ -118,7 +116,7 @@ internal fun ContactProfileScreen(
                     Text(
                         c.key.take(10) + "…" + c.key.takeLast(6),
                         color = Color.White,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1,
                     )
@@ -165,7 +163,7 @@ internal fun ContactProfileScreen(
                     Text(
                         stringResource(if (c.verified) R.string.info_verified else R.string.info_not_verified),
                         color = if (c.verified) HoloVerified else WarnColor,
-                        fontSize = 15.sp,
+                        fontSize = Tokens.Font.label,
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
@@ -173,7 +171,7 @@ internal fun ContactProfileScreen(
                             if (c.verified) R.string.profile_verify_done else R.string.profile_verify_todo,
                         ),
                         color = HoloSecondary,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -198,14 +196,14 @@ internal fun ContactProfileScreen(
                             c.displayName,
                         ),
                         color = HoloSecondary,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                     )
                     FingerprintGrid(model.visualFingerprint(key), Modifier.padding(top = Tokens.Space.l))
                     // Слова — тот же отпечаток, но их удобно диктовать голосом.
                     Text(
                         c.fingerprint,
                         color = HoloAccent,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                         modifier = Modifier.padding(top = Tokens.Space.m),
                     )
                     Spacer(Modifier.height(Tokens.Space.l))
@@ -250,7 +248,7 @@ internal fun ContactProfileScreen(
                 Text(
                     stringResource(R.string.profile_mute),
                     color = Color.White,
-                    fontSize = 15.sp,
+                    fontSize = Tokens.Font.label,
                     modifier = Modifier.weight(1f),
                 )
                 Switch(checked = muted, onCheckedChange = { model.muteChat(key, false, it) })
@@ -378,7 +376,7 @@ private fun RenameDialog(model: AppModel, key: String, current: String, onClose:
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
-                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                    textStyle = Tokens.Text.base.copy(color = Color.White),
                     cursorBrush = SolidColor(HoloAccent),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -407,7 +405,7 @@ private fun ActionTile(icon: ImageVector, labelRes: Int, modifier: Modifier, onC
     ) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.height(5.dp))
-        Text(stringResource(labelRes), color = HoloAccent, fontSize = 12.sp)
+        Text(stringResource(labelRes), color = HoloAccent, fontSize = Tokens.Font.small)
     }
 }
 
@@ -416,8 +414,8 @@ private fun InfoRow(icon: ImageVector, label: String, value: String, divider: Bo
     CardRow(divider = divider) {
         Icon(icon, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
-        Text(label, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
-        Text(value, color = Tokens.Colors.secondary, fontSize = 13.sp)
+        Text(label, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
+        Text(value, color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
     }
 }
 
@@ -432,7 +430,7 @@ private fun DangerRow(
     CardRow(onClick = onClick, divider = divider) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
-        Text(label, color = tint, fontSize = 15.sp)
+        Text(label, color = tint, fontSize = Tokens.Font.label)
     }
 }
 

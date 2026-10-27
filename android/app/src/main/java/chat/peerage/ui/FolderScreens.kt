@@ -20,9 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -57,7 +55,7 @@ internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
         Text(
             stringResource(R.string.folders_hint),
             color = HoloSecondary,
-            fontSize = 13.sp,
+            fontSize = Tokens.Font.body,
             modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.m),
         )
 
@@ -76,10 +74,10 @@ internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
                     Text(
                         stringResource(labelRes),
                         color = Color.White,
-                        fontSize = 15.sp,
+                        fontSize = Tokens.Font.label,
                         modifier = Modifier.weight(1f),
                     )
-                    Text("$count", color = Tokens.Colors.secondary, fontSize = 13.sp)
+                    Text("$count", color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
                 }
             }
         }
@@ -96,7 +94,7 @@ internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
                         Icon(folderIcon(f.icon), null, tint = HoloAccent, modifier = Modifier.size(19.dp))
                     }
                     Spacer(Modifier.width(Tokens.Space.m))
-                    Text(f.name, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    Text(f.name, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
                     Icon(
                         TablerIcons.ChevronRight,
                         null,
@@ -114,7 +112,7 @@ internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
             CardRow(onClick = { onEdit(null) }, divider = false) {
                 Icon(TablerIcons.Plus, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
                 Spacer(Modifier.width(Tokens.Space.m))
-                Text(stringResource(R.string.folder_create), color = HoloAccent, fontSize = 15.sp)
+                Text(stringResource(R.string.folder_create), color = HoloAccent, fontSize = Tokens.Font.label)
             }
         }
         Spacer(Modifier.height(Tokens.Space.l))
@@ -159,13 +157,13 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
                 BasicTextField(
                     value = name,
                     onValueChange = { name = it },
-                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                    textStyle = Tokens.Text.base.copy(color = Color.White),
                     cursorBrush = SolidColor(HoloAccent),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { inner ->
                         if (name.isEmpty()) {
-                            Text(stringResource(R.string.folder_name_hint), color = HoloSecondary, fontSize = 15.sp)
+                            Text(stringResource(R.string.folder_name_hint), color = HoloSecondary, fontSize = Tokens.Font.label)
                         }
                         inner()
                     },
@@ -206,7 +204,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
         Text(
             stringResource(R.string.folder_pick_chats),
             color = HoloSecondary,
-            fontSize = 12.sp,
+            fontSize = Tokens.Font.small,
             modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
         )
         model.groups.forEach { g ->
@@ -237,7 +235,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
             Text(
                 stringResource(R.string.folder_counter, hits),
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
             )
         }
 
@@ -268,7 +266,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
             ) {
                 Icon(Icons.Filled.Delete, null, tint = HoloError, modifier = Modifier.size(21.dp))
                 Spacer(Modifier.width(Tokens.Space.m))
-                Text(stringResource(R.string.folder_delete), color = HoloError, fontSize = 15.sp)
+                Text(stringResource(R.string.folder_delete), color = HoloError, fontSize = Tokens.Font.label)
             }
         }
         Spacer(Modifier.height(Tokens.Space.l))
@@ -311,7 +309,7 @@ private fun RowScope.TypeChip(icon: ImageVector, labelRes: Int, on: Boolean, onC
         Text(
             stringResource(labelRes),
             color = if (on) HoloAccent else HoloSecondary,
-            fontSize = 13.sp,
+            fontSize = Tokens.Font.body,
         )
     }
 }
@@ -325,7 +323,7 @@ private fun PickRow(name: String, checked: Boolean, avatar: ByteArray?, onToggle
     ) {
         SquareAvatar(name, size = 38.dp, avatarBytes = avatar)
         Spacer(Modifier.width(Tokens.Space.m))
-        Text(name, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Text(name, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
         Box(
             Modifier.size(22.dp).clip(CircleShape)
                 .background(if (checked) HoloAccent else Color.Transparent),

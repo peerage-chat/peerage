@@ -31,7 +31,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.launch
@@ -237,7 +236,7 @@ private fun SectionLabel(text: String) {
     Text(
         text.uppercase(),
         color = HoloSecondary,
-        fontSize = 11.sp,
+        fontSize = Tokens.Font.caption,
         fontWeight = FontWeight.Medium,
         modifier = Modifier.padding(start = Tokens.Space.l, top = Tokens.Space.s, bottom = Tokens.Space.xs),
     )
@@ -250,6 +249,6 @@ private fun EmojiCell(emoji: String, modifier: Modifier = Modifier, onClick: () 
         modifier.height(44.dp).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Text(emoji, fontSize = 25.sp)
+        Text(emoji, fontSize = Tokens.Font.big)
     }
 }

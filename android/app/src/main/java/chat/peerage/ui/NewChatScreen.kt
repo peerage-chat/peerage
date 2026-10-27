@@ -30,7 +30,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.AppModel
 import chat.peerage.HoloAccent
 import chat.peerage.HoloOnline
@@ -93,7 +92,7 @@ internal fun NewChatScreen(
                         Text(
                             c.displayName,
                             color = Color.White,
-                            fontSize = 15.sp,
+                            fontSize = Tokens.Font.label,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -101,7 +100,7 @@ internal fun NewChatScreen(
                         Text(
                             stringResource(if (online) R.string.status_online else R.string.status_offline),
                             color = if (online) HoloOnline else Tokens.Colors.tertiary,
-                            fontSize = 12.sp,
+                            fontSize = Tokens.Font.small,
                         )
                     }
                 }
@@ -123,14 +122,14 @@ private fun ActionRow(
     CardRow(onClick = onClick, divider = divider) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
-        Text(title, color = if (tint == HoloAccent) Color.White else tint, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Text(title, color = if (tint == HoloAccent) Color.White else tint, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
         if (badge != null) {
             Box(
                 Modifier.clip(RoundedCornerShape(Tokens.Radius.badge))
                     .background(Tokens.Colors.accentBadge)
                     .padding(horizontal = Tokens.Space.s, vertical = 2.dp),
             ) {
-                Text(badge, color = HoloAccent, fontSize = 11.sp)
+                Text(badge, color = HoloAccent, fontSize = Tokens.Font.caption)
             }
         }
     }

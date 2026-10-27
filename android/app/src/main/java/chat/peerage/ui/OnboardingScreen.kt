@@ -36,11 +36,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.launch
@@ -121,7 +119,7 @@ private fun ImportKeyStep(model: AppModel, onBack: () -> Unit) {
         secondary = stringResource(R.string.common_back),
         onSecondary = onBack,
         caption = {
-            if (error) Text(stringResource(R.string.onb_bad_phrase), color = HoloError, fontSize = 11.sp)
+            if (error) Text(stringResource(R.string.onb_bad_phrase), color = HoloError, fontSize = Tokens.Font.caption)
         },
     ) {
         PhraseInput(phrase, error) {
@@ -138,11 +136,11 @@ private fun ColumnScope.PhraseInput(phrase: String, error: Boolean, onChange: (S
         Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
             .border(1.dp, if (error) HoloError else HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
     ) {
-        if (phrase.isEmpty()) Text(stringResource(R.string.onb_phrase_placeholder), color = HoloSecondary, fontSize = 15.sp)
+        if (phrase.isEmpty()) Text(stringResource(R.string.onb_phrase_placeholder), color = HoloSecondary, fontSize = Tokens.Font.label)
         BasicTextField(
             value = phrase,
             onValueChange = onChange,
-            textStyle = TextStyle(color = Color.White, fontSize = 15.sp, lineHeight = 24.sp),
+            textStyle = Tokens.Text.base.copy(color = Color.White, lineHeight = Tokens.Font.lineHeightLoose),
             cursorBrush = SolidColor(HoloAccent),
             modifier = Modifier.fillMaxSize(),
         )
@@ -162,7 +160,7 @@ internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Int?>(null) }
     val caption: @Composable RowScope.() -> Unit = {
-        error?.let { Text(stringResource(it), color = HoloError, fontSize = 11.sp) }
+        error?.let { Text(stringResource(it), color = HoloError, fontSize = Tokens.Font.caption) }
     }
     val back = {
         step = 0
@@ -217,7 +215,7 @@ internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
             onSecondary = back,
             caption = caption,
         ) {
-            Text(stringResource(R.string.recovery_new_body), color = HoloSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.recovery_new_body), color = HoloSecondary, fontSize = Tokens.Font.body, textAlign = TextAlign.Center)
         }
         else -> OnbScaffold(
             title = stringResource(R.string.recovery_title),
@@ -230,9 +228,9 @@ internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
             Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(32.dp))
             Spacer(Modifier.height(16.dp))
             val reason = if (why == Recovery.KEY_LOST) R.string.recovery_reason_key_lost else R.string.recovery_reason_mismatch
-            Text(stringResource(reason), color = Color.White, fontSize = 14.sp, textAlign = TextAlign.Center)
+            Text(stringResource(reason), color = Color.White, fontSize = Tokens.Font.label, textAlign = TextAlign.Center)
             Spacer(Modifier.height(12.dp))
-            Text(stringResource(R.string.recovery_body), color = HoloSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.recovery_body), color = HoloSecondary, fontSize = Tokens.Font.body, textAlign = TextAlign.Center)
         }
     }
 }
@@ -263,10 +261,10 @@ private fun OnbScaffold(
         Modifier.fillMaxSize().background(HoloBg).padding(horizontal = 24.dp).padding(top = 24.dp, bottom = 22.dp),
     ) {
         Box(Modifier.fillMaxWidth().height(56.dp), Alignment.Center) {
-            Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
+            Text(title, color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
         }
         Box(Modifier.fillMaxWidth().height(40.dp), Alignment.Center) {
-            Text(desc, color = HoloSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
+            Text(desc, color = HoloSecondary, fontSize = Tokens.Font.body, textAlign = TextAlign.Center)
         }
         Column(
             Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp),
@@ -302,7 +300,7 @@ private fun OnbButton(text: String, filled: Boolean, onClick: () -> Unit) {
         Text(
             text,
             color = if (filled) HoloAccentDark else Tokens.Colors.iconChrome,
-            fontSize = 15.sp,
+            fontSize = Tokens.Font.label,
             fontWeight = FontWeight.Medium,
         )
     }
@@ -313,7 +311,7 @@ private fun Bullet(icon: ImageVector, text: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(12.dp))
-        Text(text, color = Color.White, fontSize = 14.sp)
+        Text(text, color = Color.White, fontSize = Tokens.Font.label)
     }
 }
 
@@ -326,7 +324,7 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
         onPrimary = onStart,
         secondary = stringResource(R.string.onb_have_key),
         onSecondary = onImport,
-        caption = { Text(stringResource(R.string.onb_opensource), color = HoloSecondary, fontSize = 11.sp) },
+        caption = { Text(stringResource(R.string.onb_opensource), color = HoloSecondary, fontSize = Tokens.Font.caption) },
     ) {
         Box(
             Modifier.size(62.dp).clip(RoundedCornerShape(Tokens.Radius.pill)).background(HoloAccentDark),
@@ -359,7 +357,7 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
         },
         secondary = stringResource(R.string.onb_skip),
         onSecondary = onSkip,
-        caption = { Text(stringResource(R.string.onb_profile_hint), color = HoloSecondary, fontSize = 11.sp) },
+        caption = { Text(stringResource(R.string.onb_profile_hint), color = HoloSecondary, fontSize = Tokens.Font.caption) },
     ) {
         Box(
             contentAlignment = Alignment.BottomEnd,
@@ -395,11 +393,11 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
                 value = name,
                 onValueChange = { name = it },
                 singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                textStyle = Tokens.Text.base.copy(color = Color.White),
                 cursorBrush = SolidColor(HoloAccent),
                 modifier = Modifier.weight(1f),
                 decorationBox = { inner ->
-                    if (name.isEmpty()) Text(hint, color = HoloSecondary, fontSize = 15.sp)
+                    if (name.isEmpty()) Text(hint, color = HoloSecondary, fontSize = Tokens.Font.label)
                     inner()
                 },
             )
@@ -429,7 +427,7 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
             caption = {
                 Icon(TablerIcons.ShieldCheck, null, tint = HoloOnline, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.onb_screen_secure), color = HoloOnline, fontSize = 11.sp)
+                Text(stringResource(R.string.onb_screen_secure), color = HoloOnline, fontSize = Tokens.Font.caption)
             },
         ) { PhraseGrid(model.revealedPhrase) }
         return
@@ -458,8 +456,7 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
             Text(
                 stringResource(R.string.onb_key_warn),
                 color = WarnText,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
+                fontSize = Tokens.Font.body,
             )
         }
     }
@@ -472,7 +469,7 @@ internal fun ColumnScope.PhraseGrid(phrase: String?) {
     val words = phrase?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
     if (words.size < 24) {
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-            Text("…", color = HoloSecondary, fontSize = 20.sp)
+            Text("…", color = HoloSecondary, fontSize = Tokens.Font.title)
         }
         return
     }
@@ -486,8 +483,8 @@ internal fun ColumnScope.PhraseGrid(phrase: String?) {
                 for (row in 0 until 12) {
                     val i = col * 12 + row
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${i + 1}", color = HoloSecondary, fontSize = 12.sp, modifier = Modifier.width(22.dp))
-                        Text(words[i], color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text("${i + 1}", color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.width(22.dp))
+                        Text(words[i], color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -594,10 +591,10 @@ private fun ColumnScope.PermCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(10.dp))
-            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(title, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
         }
         Spacer(Modifier.height(9.dp))
-        Text(desc, color = HoloSecondary, fontSize = 12.5.sp, lineHeight = 17.sp)
+        Text(desc, color = HoloSecondary, fontSize = Tokens.Font.small)
         Spacer(Modifier.height(11.dp))
         // Высота зоны кнопок постоянна (38.dp) — карточки не «прыгают» после гранта.
         Box(Modifier.fillMaxWidth().height(38.dp), contentAlignment = Alignment.CenterStart) {
@@ -605,20 +602,20 @@ private fun ColumnScope.PermCard(
                 granted -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(TablerIcons.Check, null, tint = HoloOnline, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.onb_granted), color = HoloOnline, fontSize = 13.sp)
+                    Text(stringResource(R.string.onb_granted), color = HoloOnline, fontSize = Tokens.Font.body)
                 }
-                dismissed -> Text(stringResource(R.string.onb_later_hint), color = HoloSecondary, fontSize = 12.5.sp)
+                dismissed -> Text(stringResource(R.string.onb_later_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
                 else -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(
                         Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloAccent)
                             .clickable(onClick = onGrant),
                         contentAlignment = Alignment.Center,
-                    ) { Text(stringResource(R.string.onb_allow), color = HoloAccentDark, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+                    ) { Text(stringResource(R.string.onb_allow), color = HoloAccentDark, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium) }
                     Box(
                         Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(Tokens.Radius.chip))
                             .border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.chip)).clickable { dismissed = true },
                         contentAlignment = Alignment.Center,
-                    ) { Text(stringResource(R.string.onb_later), color = HoloSecondary, fontSize = 13.sp) }
+                    ) { Text(stringResource(R.string.onb_later), color = HoloSecondary, fontSize = Tokens.Font.body) }
                 }
             }
         }

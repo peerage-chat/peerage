@@ -61,7 +61,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -182,7 +181,7 @@ internal fun MediaViewer(
                         Text(
                             item.author,
                             color = Color.White,
-                            fontSize = 15.sp,
+                            fontSize = Tokens.Font.label,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -202,7 +201,7 @@ internal fun MediaViewer(
                                 fmtViewerDate(item.time)
                             },
                             color = HoloSecondary,
-                            fontSize = 12.sp,
+                            fontSize = Tokens.Font.small,
                         )
                     }
                     Box {
@@ -318,7 +317,7 @@ private fun ViewerMenuItem(
     onClick: () -> Unit,
 ) {
     DropdownMenuItem(
-        text = { Text(stringResource(labelRes), color = tint, fontSize = 14.sp) },
+        text = { Text(stringResource(labelRes), color = tint, fontSize = Tokens.Font.label) },
         leadingIcon = {
             Icon(
                 icon,
@@ -433,7 +432,7 @@ private fun MediaPage(
             bytes == null -> Text(
                 stringResource(R.string.chat_downloading),
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
             )
             else -> {
                 // Под размер экрана: зум до 6× работает по этому же битмапу —
@@ -602,7 +601,7 @@ private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
                 fmtDuration(position)
             },
             color = Color.White.copy(alpha = 0.75f),
-            fontSize = 11.sp,
+            fontSize = Tokens.Font.caption,
             maxLines = 1,
         )
         Spacer(Modifier.width(Tokens.Space.s))

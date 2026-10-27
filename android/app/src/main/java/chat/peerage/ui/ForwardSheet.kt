@@ -31,7 +31,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.AppModel
 import chat.peerage.ChatTarget
 import chat.peerage.HoloAccent
@@ -61,7 +60,7 @@ internal fun ForwardSheet(model: AppModel) {
         Text(
             stringResource(R.string.forward_title, pending.second.size),
             color = Color.White,
-            fontSize = 17.sp,
+            fontSize = Tokens.Font.title,
             modifier = Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         )
         // Скрыть автора — решение на эту пересылку. Ключ автора при этом не уходит
@@ -79,11 +78,11 @@ internal fun ForwardSheet(model: AppModel) {
             )
             Spacer(Modifier.width(4.dp))
             Column {
-                Text(stringResource(R.string.forward_hide_author), color = Color.White, fontSize = 15.sp)
+                Text(stringResource(R.string.forward_hide_author), color = Color.White, fontSize = Tokens.Font.label)
                 Text(
                     stringResource(R.string.forward_hide_author_hint),
                     color = HoloSecondary,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                 )
             }
         }
@@ -116,7 +115,7 @@ private fun TargetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, tit
     ListRow(onClick = onClick) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
-        Text(title, color = Color.White, fontSize = 16.sp)
+        Text(title, color = Color.White, fontSize = Tokens.Font.label)
     }
 }
 
@@ -161,6 +160,6 @@ internal fun ForwardMark(model: AppModel, fwdFrom: String, anon: Boolean = false
             modifier = Modifier.size(12.dp),
         )
         Spacer(Modifier.width(4.dp))
-        Text(label, color = tint, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, color = tint, fontSize = Tokens.Font.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

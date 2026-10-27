@@ -21,7 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -107,7 +106,7 @@ private fun CallRow(
             Text(
                 name,
                 color = if (missed) HoloError else Color.White,
-                fontSize = 15.sp,
+                fontSize = Tokens.Font.label,
                 fontWeight = FontWeight.Medium,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -123,10 +122,10 @@ private fun CallRow(
                     modifier = Modifier.size(15.dp),
                 )
                 Spacer(Modifier.width(5.dp))
-                Text(outcomeLabel(e, isRoom), color = tint, fontSize = 13.sp)
+                Text(outcomeLabel(e, isRoom), color = tint, fontSize = Tokens.Font.body)
             }
         }
-        Text(fmtCallTime(e.started), color = Tokens.Colors.tertiary, fontSize = 12.sp)
+        Text(fmtCallTime(e.started), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.small)
         Spacer(Modifier.width(Tokens.Space.m))
         if (isRoom) {
             // Комната может звучать прямо сейчас — предлагаем войти, а не перезвонить.
@@ -139,7 +138,7 @@ private fun CallRow(
             ) {
                 Icon(Icons.AutoMirrored.Filled.Login, null, tint = HoloOnline, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(5.dp))
-                Text(stringResource(R.string.calls_join), color = HoloOnline, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.calls_join), color = HoloOnline, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
             }
         } else {
             Box(
@@ -176,7 +175,7 @@ private fun FilterChip(label: String, on: Boolean, onClick: () -> Unit) {
             .clickable { onClick() }
             .padding(horizontal = Tokens.Space.m, vertical = 6.dp),
     ) {
-        Text(label, color = if (on) HoloAccent else HoloSecondary, fontSize = 13.sp)
+        Text(label, color = if (on) HoloAccent else HoloSecondary, fontSize = Tokens.Font.body)
     }
 }
 

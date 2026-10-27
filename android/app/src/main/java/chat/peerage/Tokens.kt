@@ -1,7 +1,11 @@
 package chat.peerage
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 /**
@@ -214,14 +218,50 @@ object Tokens {
         val metaSlot = 46.dp // ширина правой колонки строки (время + значок)
     }
 
-    /** Размеры шрифта (sp). */
+    /**
+     * ЗАКРЫТАЯ шкала шрифтов: семь ступеней, и ничего между ними. Литерал `N.sp` в экране —
+     * хардкод; размер берётся отсюда, межстрочный интервал задаёт тема (см. [Text.base]).
+     * Промежуточные размеры схлопнуты (2026-10-27): 10 → caption, 12.5 → small,
+     * 13.5 → body, 14 → body (вторичный текст, чипы) или label (основной), 16 → label,
+     * 17-22 → title, 24-25 → big, 44 → huge.
+     */
     object Font {
-        val caption = 11.sp
-        val small = 12.sp
-        val body = 13.sp
-        val label = 15.sp
-        val title = 19.sp
-        val big = 26.sp
-        val huge = 28.sp
+        val caption = 11.sp // подписи, caps-метки секций, время, счётчики
+        val small = 12.sp // мелкие подписи, бейджи
+        val body = 13.sp // вторичный текст, чипы, имена в тайлах
+        val label = 15.sp // основной текст: строки, сообщения, поля ввода, кнопки
+        val title = 19.sp // заголовки экранов и листов, имя в профиле
+        val big = 26.sp // имя во входящем звонке, эмодзи в панели
+        val huge = 28.sp // крупные числа (трафик, обратный отсчёт)
+
+        /** Межстрочный интервал — доля размера, а не sp: тогда он верен для любой ступени. */
+        val lineHeight = 1.3.em
+
+        /** Для длинного чтения и ввода фразы восстановления. */
+        val lineHeightLoose = 1.5.em
+
+        /** Буква-заглушка в аватаре: 40% его стороны при любом размере аватара. */
+        fun initial(avatar: Dp) = (avatar.value * 0.4f).sp
+    }
+
+    /**
+     * Составные стили текста. [base] тема подкладывает под ЛЮБОЙ `Text` (см. Theme.kt);
+     * остальные — для ролей, где кроме размера важно что-то ещё.
+     */
+    object Text {
+        /**
+         * Пропорциональный интервал и строка, отцентрованная по высоте. Без этого Material
+         * подкладывал bodyLarge: 24sp интервала при любом размере и разрядку 0.5sp, и мелкий
+         * текст в бейдже съезжал с центра.
+         */
+        val base = TextStyle(
+            fontSize = Font.label,
+            lineHeight = Font.lineHeight,
+            letterSpacing = 0.sp,
+            lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
+        )
+
+        /** Время, «изм.», счётчики: цифры одной ширины, чтобы колонка не дрожала. */
+        val meta = base.copy(fontSize = Font.caption, fontFeatureSettings = "tnum")
     }
 }

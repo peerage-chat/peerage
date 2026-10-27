@@ -44,7 +44,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
 /**
@@ -68,7 +67,7 @@ fun AudioSettingsScreen(model: AppModel) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Color.White, modifier = Modifier.size(24.dp))
             }
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.audio_settings_title), color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.audio_settings_title), color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
         }
 
         // Живой уровень микрофона (20 сегментов).
@@ -76,7 +75,7 @@ fun AudioSettingsScreen(model: AppModel) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Filled.Mic, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(17.dp))
-                    Text(stringResource(R.string.audio_mic_level), color = Tokens.Colors.secondary, fontSize = 13.sp)
+                    Text(stringResource(R.string.audio_mic_level), color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
                 }
                 Spacer(Modifier.height(11.dp))
                 val lit = (model.micLevel * 20).roundToInt().coerceIn(0, 20)
@@ -110,7 +109,7 @@ fun AudioSettingsScreen(model: AppModel) {
 
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.audio_quality), color = Tokens.Colors.secondary, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.audio_quality), color = Tokens.Colors.secondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             val auto = model.audioQualityAuto
             Row(
                 Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
@@ -122,13 +121,13 @@ fun AudioSettingsScreen(model: AppModel) {
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Icon(Icons.Filled.Bolt, null, tint = if (auto) Tokens.Colors.accent else Tokens.Colors.secondary, modifier = Modifier.size(13.dp))
-                Text(stringResource(R.string.audio_quality_auto), color = if (auto) Tokens.Colors.accent else Color.White, fontSize = 11.sp)
+                Text(stringResource(R.string.audio_quality_auto), color = if (auto) Tokens.Colors.accent else Color.White, fontSize = Tokens.Font.caption)
             }
         }
         Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(stringResource(R.string.audio_quality_voice), color = Tokens.Colors.secondary, fontSize = 11.sp)
-            Text(stringResource(R.string.audio_quality_audio), color = Tokens.Colors.secondary, fontSize = 11.sp)
+            Text(stringResource(R.string.audio_quality_voice), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
+            Text(stringResource(R.string.audio_quality_audio), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
         }
         Slider(
             value = model.audioBitrate.toFloat(),
@@ -150,7 +149,7 @@ fun AudioSettingsScreen(model: AppModel) {
                 stringResource(R.string.audio_quality_rate, model.audioBitrate / 1000)
             },
             color = Tokens.Colors.secondary,
-            fontSize = 12.sp,
+            fontSize = Tokens.Font.small,
             modifier = Modifier.fillMaxWidth(),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
@@ -166,7 +165,7 @@ fun AudioSettingsScreen(model: AppModel) {
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.accent)
                 .clickable { model.applyAudioSettings() }.padding(vertical = 15.dp),
             contentAlignment = Alignment.Center,
-        ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+        ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = Tokens.Font.label, fontWeight = FontWeight.Bold) }
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -181,7 +180,7 @@ private fun DevChip(icon: ImageVector, label: String, selected: Boolean, onClick
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(icon, null, tint = if (selected) Tokens.Colors.accent else Color.White, modifier = Modifier.size(15.dp))
-        Text(label, color = if (selected) Tokens.Colors.accent else Color.White, fontSize = 13.sp)
+        Text(label, color = if (selected) Tokens.Colors.accent else Color.White, fontSize = Tokens.Font.body)
     }
 }
 
@@ -192,7 +191,7 @@ private fun FxToggle(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
             .clickable { onChange(!on) }.padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(label, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
         Switch(
             checked = on,
             onCheckedChange = onChange,
@@ -213,10 +212,10 @@ private fun SectionLabel(text: String, badge: String? = null) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(text, color = Tokens.Colors.secondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(text, color = Tokens.Colors.secondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium)
         if (badge != null) {
             Box(Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.accentBadge).padding(horizontal = 7.dp, vertical = 2.dp)) {
-                Text(badge, color = Tokens.Colors.accent, fontSize = 10.sp)
+                Text(badge, color = Tokens.Colors.accent, fontSize = Tokens.Font.caption)
             }
         }
     }

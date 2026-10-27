@@ -36,7 +36,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
@@ -52,7 +51,7 @@ internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
                 ListRow(onClick = { onOpen(g.gid) }) {
                     Icon(Icons.Filled.Group, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text(g.name, color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Text(g.name, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
                     Text(
                         if (g.archived) {
                             stringResource(R.string.group_archived)
@@ -60,7 +59,7 @@ internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
                             stringResource(R.string.members_count, g.members)
                         },
                         color = HoloSecondary,
-                        fontSize = 12.sp,
+                        fontSize = Tokens.Font.small,
                     )
                 }
             }
@@ -210,7 +209,7 @@ private fun GroupChatContent(model: AppModel) {
                 Text(
                     stringResource(R.string.group_archived),
                     color = HoloSecondary,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     modifier = Modifier.fillMaxWidth().padding(Tokens.Space.m),
                     textAlign = TextAlign.Center,
                 )
@@ -317,12 +316,12 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
                 Text(
                     name,
                     color = Color.White,
-                    fontSize = 16.sp,
+                    fontSize = Tokens.Font.label,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(stringResource(R.string.group_presence, total, onlineN), color = HoloSecondary, fontSize = 11.sp)
+                Text(stringResource(R.string.group_presence, total, onlineN), color = HoloSecondary, fontSize = Tokens.Font.caption)
             }
         }
         if (gid != null) {
@@ -349,12 +348,12 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(stringResource(R.string.room_in_call, members.size), color = HoloOnline, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.room_in_call, members.size), color = HoloOnline, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
             if (names.isNotEmpty()) {
                 Text(
                     names,
                     color = HoloSecondary,
-                    fontSize = 11.sp,
+                    fontSize = Tokens.Font.caption,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -364,7 +363,7 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         Box(
             Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloOnline)
                 .clickable { onJoin() }.padding(horizontal = 18.dp, vertical = 8.dp),
-        ) { Text(stringResource(R.string.room_join), color = Tokens.Colors.onOnline, fontSize = 14.sp, fontWeight = FontWeight.Medium) }
+        ) { Text(stringResource(R.string.room_join), color = Tokens.Colors.onOnline, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium) }
     }
 }
 
@@ -385,7 +384,7 @@ internal fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
         Text(
             stringResource(R.string.create_hint),
             color = HoloSecondary,
-            fontSize = 11.sp,
+            fontSize = Tokens.Font.caption,
         )
     }
 }
@@ -403,13 +402,13 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
                 ListRow(onClick = {}) {
                     StatusDot(model.online[key] == true)
                     Spacer(Modifier.width(12.dp))
-                    Text(model.peerName(key), color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Text(model.peerName(key), color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
                     if (isAdmin) {
                         TextButton(onClick = { model.removeGroupMember(gid, key) }) {
                             Text(
                                 stringResource(R.string.group_remove_member),
                                 color = Tokens.Colors.destructive,
-                                fontSize = 14.sp,
+                                fontSize = Tokens.Font.body,
                             )
                         }
                     }
@@ -422,7 +421,7 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
                 Text(
                     stringResource(R.string.addmember_empty),
                     color = HoloSecondary,
-                    fontSize = 14.sp,
+                    fontSize = Tokens.Font.body,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
@@ -434,7 +433,7 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
                 }) {
                     StatusDot(model.online[c.key] == true)
                     Spacer(Modifier.width(12.dp))
-                    Text(c.displayName, color = Color.White, fontSize = 16.sp)
+                    Text(c.displayName, color = Color.White, fontSize = Tokens.Font.label)
                 }
             }
         }
@@ -444,7 +443,7 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
                 Text(
                     stringResource(R.string.group_leave),
                     color = Tokens.Colors.destructive,
-                    fontSize = 16.sp,
+                    fontSize = Tokens.Font.label,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
@@ -457,7 +456,7 @@ private fun SectionHeader(text: String) {
     Text(
         text,
         color = HoloSecondary,
-        fontSize = 12.sp,
+        fontSize = Tokens.Font.small,
         fontWeight = FontWeight.Medium,
         modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
     )

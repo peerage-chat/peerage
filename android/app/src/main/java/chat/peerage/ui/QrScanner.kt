@@ -28,7 +28,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import chat.peerage.*
 import chat.peerage.R
@@ -115,7 +114,7 @@ private fun ScannerContent(onResult: (String) -> Unit) {
         Text(
             stringResource(R.string.qr_scan_hint),
             color = Color.White,
-            fontSize = 14.sp,
+            fontSize = Tokens.Font.label,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 56.dp),
         )
     }

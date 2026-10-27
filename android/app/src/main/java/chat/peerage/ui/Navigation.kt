@@ -29,7 +29,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -134,7 +133,7 @@ private fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
     ) {
-        Text(label, color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(label, color = fg, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium, maxLines = 1)
         if (badge > 0) {
             Box(
                 Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(HoloAccent)
@@ -143,7 +142,7 @@ private fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () 
                 Text(
                     if (badge > 99) "99+" else "$badge",
                     color = HoloAccentDark,
-                    fontSize = 10.sp,
+                    fontSize = Tokens.Font.caption,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -173,7 +172,7 @@ internal fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
             Text(
                 savedName ?: stringResource(R.string.common_you),
                 color = Color.White,
-                fontSize = 18.sp,
+                fontSize = Tokens.Font.title,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f),
             )
@@ -195,7 +194,7 @@ internal fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
         Text(
             "Peerage · v0.3",
             color = HoloSecondary,
-            fontSize = 11.sp,
+            fontSize = Tokens.Font.caption,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
         )
     }
@@ -210,6 +209,6 @@ internal fun DrawerItem(icon: ImageVector, label: String, onClick: () -> Unit) {
     ) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(18.dp))
-        Text(label, color = Color.White, fontSize = 15.sp)
+        Text(label, color = Color.White, fontSize = Tokens.Font.label)
     }
 }

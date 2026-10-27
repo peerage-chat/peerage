@@ -23,7 +23,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.launch
@@ -61,13 +60,13 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
             Text(
                 stringResource(R.string.outbox_total, total),
                 color = Color.White,
-                fontSize = 15.sp,
+                fontSize = Tokens.Font.label,
                 fontWeight = FontWeight.Medium,
             )
             Text(
                 stringResource(R.string.outbox_lead_hint),
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
@@ -78,19 +77,19 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
                 Text(
                     stringResource(R.string.outbox_warn_title),
                     color = WarnColor,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     fontWeight = FontWeight.Medium,
                 )
                 Text(
                     stringResource(R.string.outbox_warn_hint),
                     color = HoloSecondary,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                     modifier = Modifier.padding(top = 3.dp),
                 )
                 Text(
                     stringResource(R.string.outbox_warn_off),
                     color = HoloAccent,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                     modifier = Modifier.padding(top = 8.dp).clickable { model.toggleOutboxWarning() },
                 )
             }
@@ -101,7 +100,7 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
         Text(
             stringResource(R.string.outbox_longpress_hint),
             color = HoloSecondary,
-            fontSize = 12.sp,
+            fontSize = Tokens.Font.small,
             modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
         )
 
@@ -113,12 +112,12 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
         ) {
             Icon(Icons.Filled.Delete, null, tint = HoloError, modifier = Modifier.size(21.dp))
             Spacer(Modifier.width(Tokens.Space.m))
-            Text(stringResource(R.string.outbox_clear_all), color = HoloError, fontSize = 15.sp)
+            Text(stringResource(R.string.outbox_clear_all), color = HoloError, fontSize = Tokens.Font.label)
         }
         Text(
             stringResource(R.string.outbox_clear_all_hint),
             color = HoloSecondary,
-            fontSize = 12.sp,
+            fontSize = Tokens.Font.small,
             modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.xs),
         )
         Spacer(Modifier.height(Tokens.Space.l))
@@ -230,7 +229,7 @@ private fun OutboxRow(model: AppModel, r: OutboxPeer, onLongPress: () -> Unit) {
         SquareAvatar(name, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c?.avatarId])
         Spacer(Modifier.width(Tokens.Space.m))
         Column(Modifier.weight(1f)) {
-            Text(name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(name, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     if (online) Icons.Filled.Send else Icons.Filled.Schedule,
@@ -244,13 +243,13 @@ private fun OutboxRow(model: AppModel, r: OutboxPeer, onLongPress: () -> Unit) {
                 Text(
                     if (online) stringResource(R.string.outbox_sending) else stringResource(R.string.outbox_offline_for, agoLabel(r.oldest)),
                     color = if (online) HoloOnline else HoloSecondary,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                 )
             }
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text("${r.count}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(fmtSizeLong(r.bytes), color = HoloSecondary, fontSize = 12.sp)
+            Text("${r.count}", color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
+            Text(fmtSizeLong(r.bytes), color = HoloSecondary, fontSize = Tokens.Font.small)
         }
     }
 }
@@ -318,8 +317,8 @@ internal fun HoldToConfirmDialog(
 @Composable
 private fun SumRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-        Text(label, color = HoloSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = HoloSecondary, fontSize = Tokens.Font.body, modifier = Modifier.weight(1f))
+        Text(value, color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
     }
 }
 

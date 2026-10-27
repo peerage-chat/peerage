@@ -27,7 +27,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -135,13 +134,13 @@ internal fun SavedScreen(model: AppModel) {
                 androidx.compose.foundation.text.BasicTextField(
                     value = input,
                     onValueChange = { input = it },
-                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 15.sp),
+                    textStyle = Tokens.Text.base.copy(color = Color.White),
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(HoloAccent),
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { inner ->
                         if (input.isEmpty()) {
-                            Text(stringResource(R.string.saved_hint), color = HoloSecondary, fontSize = 15.sp)
+                            Text(stringResource(R.string.saved_hint), color = HoloSecondary, fontSize = Tokens.Font.label)
                         }
                         inner()
                     },
@@ -184,7 +183,7 @@ private fun SavedSelectionBar(model: AppModel) {
         Text(
             sel.size.toString(),
             color = Color.White,
-            fontSize = 16.sp,
+            fontSize = Tokens.Font.label,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f).padding(start = 8.dp),
         )

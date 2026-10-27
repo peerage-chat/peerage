@@ -35,7 +35,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,7 +42,6 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.HoloSurface
 import chat.peerage.R
@@ -94,7 +92,7 @@ internal fun TopBar(
         Text(
             title,
             color = Color.White,
-            fontSize = 19.sp,
+            fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f),
             maxLines = 1,
@@ -137,7 +135,7 @@ internal fun PeerIndicator(peers: Int, onTap: () -> Unit = {}, onLongPress: () -
             tint = if (peers > 0) HoloOnline else HoloSecondary,
             modifier = Modifier.size(18.dp),
         )
-        Text("$peers", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text("$peers", color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -182,7 +180,7 @@ internal fun SquareAvatar(
                 else -> Text(
                     name.take(1).uppercase(),
                     color = Color.White,
-                    fontSize = (size.value * 0.4f).sp,
+                    fontSize = Tokens.Font.initial(size),
                     fontWeight = FontWeight.Medium,
                 )
             }
@@ -209,7 +207,7 @@ internal fun ListRow(onClick: () -> Unit, content: @Composable RowScope.() -> Un
 
 @Composable
 internal fun FieldLabel(text: String) {
-    Text(text, color = HoloSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    Text(text, color = HoloSecondary, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Medium)
 }
 
 // ── Карточки-секции ─────────────────────────────────────────────────────────
@@ -223,7 +221,7 @@ internal fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
         color = Tokens.Colors.secondary,
-        fontSize = 12.sp,
+        fontSize = Tokens.Font.small,
         fontWeight = FontWeight.Medium,
         modifier = modifier.padding(
             start = Tokens.Space.l,
@@ -343,7 +341,7 @@ internal fun OptionChip(
                 modifier = Modifier.size(if (compact) 13.dp else 16.dp),
             )
         }
-        Text(text, color = fg, fontSize = if (compact) 11.sp else 14.sp, maxLines = 1)
+        Text(text, color = fg, fontSize = if (compact) Tokens.Font.caption else Tokens.Font.body, maxLines = 1)
     }
 }
 
@@ -514,7 +512,7 @@ internal fun BubbleText(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = Color.White,
-    fontSize: TextUnit = 15.sp,
+    fontSize: TextUnit = Tokens.Font.label,
     meta: @Composable () -> Unit,
 ) = BubbleText(AnnotatedString(text), modifier, color, fontSize, meta)
 
@@ -529,11 +527,11 @@ internal fun BubbleText(
     text: AnnotatedString,
     modifier: Modifier = Modifier,
     color: Color = Color.White,
-    fontSize: TextUnit = 15.sp,
+    fontSize: TextUnit = Tokens.Font.label,
     meta: @Composable () -> Unit,
 ) {
     val measurer = rememberTextMeasurer()
-    val style = TextStyle(color = color, fontSize = fontSize)
+    val style = Tokens.Text.base.copy(color = color, fontSize = fontSize)
     val onMention = LocalMentionClick.current
     val tappable = onMention != null && text.getStringAnnotations(Mentions.TAG, 0, text.length).isNotEmpty()
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -713,12 +711,12 @@ internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: 
                     stringResource(R.string.pin_title)
                 },
                 color = HoloAccent,
-                fontSize = 11.sp,
+                fontSize = Tokens.Font.caption,
             )
             Text(
                 top.text.ifEmpty { stringResource(R.string.pin_attachment) },
                 color = Color.White,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -748,13 +746,13 @@ internal fun EditStrip(text: String, onCancel: () -> Unit) {
             Text(
                 stringResource(R.string.chat_editing),
                 color = HoloAccent,
-                fontSize = 12.sp,
+                fontSize = Tokens.Font.small,
                 fontWeight = FontWeight.Medium,
             )
             Text(
                 text,
                 color = HoloSecondary,
-                fontSize = 12.sp,
+                fontSize = Tokens.Font.small,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

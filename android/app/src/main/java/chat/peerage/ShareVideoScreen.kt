@@ -43,7 +43,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 /**
  * Экран «Показать видео» (долгий тап «Видео» в звонке). Дизайн — макет v2:
@@ -70,7 +69,7 @@ fun ShareVideoScreen(model: AppModel) {
                 Modifier.clip(CircleShape).clickable { model.closeVideoShare() }.padding(6.dp),
             ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Color.White, modifier = Modifier.size(24.dp)) }
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.share_title), color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.share_title), color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
         }
 
         // Источник: камера / экран.
@@ -110,7 +109,7 @@ fun ShareVideoScreen(model: AppModel) {
                             else -> stringResource(R.string.share_preview_back)
                         },
                         color = HoloSecondary,
-                        fontSize = 13.sp,
+                        fontSize = Tokens.Font.body,
                     )
                 }
             }
@@ -139,7 +138,7 @@ fun ShareVideoScreen(model: AppModel) {
             }
 
             Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.share_bitrate), color = HoloSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.share_bitrate), color = HoloSecondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 val auto = model.shareBitrateAuto
                 Row(
                     Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(if (auto) Tokens.Colors.accentMuted else Tokens.Colors.tile)
@@ -149,7 +148,7 @@ fun ShareVideoScreen(model: AppModel) {
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     Icon(Icons.Filled.Bolt, null, tint = if (auto) HoloAccent else HoloSecondary, modifier = Modifier.size(13.dp))
-                    Text(stringResource(R.string.share_auto), color = if (auto) HoloAccent else Color.White, fontSize = 11.sp)
+                    Text(stringResource(R.string.share_auto), color = if (auto) HoloAccent else Color.White, fontSize = Tokens.Font.caption)
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -171,7 +170,7 @@ fun ShareVideoScreen(model: AppModel) {
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloAccent)
                 .clickable { model.applyVideoShare() }.padding(vertical = 15.dp),
             contentAlignment = Alignment.Center,
-        ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+        ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = Tokens.Font.label, fontWeight = FontWeight.Bold) }
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -186,7 +185,7 @@ private fun SegButton(icon: ImageVector, label: String, selected: Boolean, modif
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = if (selected) HoloAccent else HoloSecondary, modifier = Modifier.size(18.dp))
-        Text(label, color = if (selected) HoloAccent else Color.White, fontSize = 14.sp)
+        Text(label, color = if (selected) HoloAccent else Color.White, fontSize = Tokens.Font.body)
     }
 }
 
@@ -197,7 +196,7 @@ private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
             .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
             .clickable { onClick() }.padding(horizontal = 16.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(text, color = if (selected) HoloAccent else Color.White, fontSize = 14.sp) }
+    ) { Text(text, color = if (selected) HoloAccent else Color.White, fontSize = Tokens.Font.body) }
 }
 
 @Composable
@@ -207,11 +206,11 @@ private fun SectionLabel(text: String, badge: String? = null) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(text, color = HoloSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(text, color = HoloSecondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium)
         if (badge != null) {
             Box(
                 Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.accentBadge).padding(horizontal = 7.dp, vertical = 2.dp),
-            ) { Text(badge, color = HoloAccent, fontSize = 10.sp) }
+            ) { Text(badge, color = HoloAccent, fontSize = Tokens.Font.caption) }
         }
     }
 }

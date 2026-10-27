@@ -19,7 +19,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -44,11 +43,11 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
             Modifier.fillMaxWidth().padding(top = Tokens.Space.xl, bottom = Tokens.Space.m),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(fmtSizeLong(total), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Medium)
+            Text(fmtSizeLong(total), color = Color.White, fontSize = Tokens.Font.huge, fontWeight = FontWeight.Medium)
             Text(
                 stringResource(R.string.storage_total_sub, model.storageBlobs),
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
@@ -74,7 +73,7 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
             Text(
                 stringResource(R.string.storage_empty),
                 color = HoloSecondary,
-                fontSize = 13.sp,
+                fontSize = Tokens.Font.body,
                 modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
             )
         }
@@ -92,14 +91,14 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
                     )
                     Spacer(Modifier.width(Tokens.Space.m))
                     Column(Modifier.weight(1f)) {
-                        Text(name, color = Color.White, fontSize = 15.sp)
+                        Text(name, color = Color.White, fontSize = Tokens.Font.label)
                         Text(
                             stringResource(R.string.storage_files, files),
                             color = HoloSecondary,
-                            fontSize = 12.sp,
+                            fontSize = Tokens.Font.small,
                         )
                     }
-                    Text(fmtSizeLong(bytes), color = Tokens.Colors.secondary, fontSize = 13.sp)
+                    Text(fmtSizeLong(bytes), color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
                 }
             }
         }
@@ -117,16 +116,16 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
                 Text(
                     stringResource(R.string.storage_clear_attachments),
                     color = if (model.storageBlobs > 0) HoloAccent else HoloSecondary,
-                    fontSize = 15.sp,
+                    fontSize = Tokens.Font.label,
                     modifier = Modifier.weight(1f),
                 )
-                Text(fmtSizeLong(total), color = Tokens.Colors.secondary, fontSize = 13.sp)
+                Text(fmtSizeLong(total), color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
             }
         }
         Text(
             stringResource(R.string.storage_attachments_hint),
             color = HoloSecondary,
-            fontSize = 12.sp,
+            fontSize = Tokens.Font.small,
             modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.xs),
         )
 
@@ -161,7 +160,7 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
                         stringResource(R.string.storage_backup_none)
                     },
                     color = accentColor,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     fontWeight = FontWeight.Medium,
                 )
                 Text(
@@ -169,13 +168,13 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
                         if (hasBackup) R.string.storage_backup_done_hint else R.string.storage_backup_hint,
                     ),
                     color = HoloSecondary,
-                    fontSize = 12.sp,
+                    fontSize = Tokens.Font.small,
                     modifier = Modifier.padding(top = 3.dp),
                 )
                 Text(
                     stringResource(R.string.storage_backup_open),
                     color = HoloAccent,
-                    fontSize = 13.sp,
+                    fontSize = Tokens.Font.body,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
@@ -214,8 +213,8 @@ private fun KindLegend(kinds: List<Pair<String, Long>>) {
             ) {
                 Box(Modifier.size(9.dp).clip(RoundedCornerShape(3.dp)).background(kindColor(kind)))
                 Spacer(Modifier.width(Tokens.Space.s))
-                Text(kindLabel(kind), color = HoloSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Text(fmtSizeLong(bytes), color = HoloSecondary, fontSize = 12.sp)
+                Text(kindLabel(kind), color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.weight(1f))
+                Text(fmtSizeLong(bytes), color = HoloSecondary, fontSize = Tokens.Font.small)
             }
         }
     }
