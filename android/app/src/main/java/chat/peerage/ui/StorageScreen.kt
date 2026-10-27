@@ -45,10 +45,10 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
         ) {
             Text(fmtSizeLong(total), color = Color.White, fontSize = Tokens.Font.huge, fontWeight = FontWeight.Medium)
             Text(
-                stringResource(R.string.storage_total_sub, model.storageBlobs),
+                pluralOf(R.plurals.storage_total_sub, model.storageBlobs),
                 color = HoloSecondary,
                 fontSize = Tokens.Font.body,
-                modifier = Modifier.padding(top = 2.dp),
+                modifier = Modifier.padding(top = Tokens.Space.xxs),
             )
         }
 
@@ -81,10 +81,10 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
             model.storageChats.forEachIndexed { i, (peer, files, bytes) ->
                 val c = model.contacts.firstOrNull { it.key == peer }
                 val name = c?.displayName ?: peer.take(12)
-                CardRow(divider = i > 0, inset = 62.dp) {
+                CardRow(divider = i > 0, inset = Tokens.Space.m + Tokens.Size.avatarHead + Tokens.Space.m) {
                     SquareAvatar(
                         name,
-                        size = 38.dp,
+                        size = Tokens.Size.avatarHead,
                         avatarBytes = model.contactAvatars[c?.avatarId],
                         circle = true,
                         ring = Tokens.Colors.surface,
@@ -93,7 +93,7 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
                     Column(Modifier.weight(1f)) {
                         Text(name, color = Color.White, fontSize = Tokens.Font.label)
                         Text(
-                            stringResource(R.string.storage_files, files),
+                            pluralOf(R.plurals.storage_files, files),
                             color = HoloSecondary,
                             fontSize = Tokens.Font.small,
                         )
@@ -110,7 +110,7 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
                     Icons.Filled.HideImage,
                     null,
                     tint = if (model.storageBlobs > 0) HoloAccent else HoloSecondary,
-                    modifier = Modifier.size(21.dp),
+                    modifier = Modifier.size(Tokens.Size.iconM),
                 )
                 Spacer(Modifier.width(Tokens.Space.m))
                 Text(
@@ -149,7 +149,7 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
                 if (hasBackup) Icons.Filled.CheckCircle else Icons.Filled.Warning,
                 null,
                 tint = accentColor,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(Tokens.Size.iconM),
             )
             Spacer(Modifier.width(Tokens.Space.m))
             Column {
@@ -169,13 +169,13 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
                     ),
                     color = HoloSecondary,
                     fontSize = Tokens.Font.small,
-                    modifier = Modifier.padding(top = 3.dp),
+                    modifier = Modifier.padding(top = Tokens.Space.xxs),
                 )
                 Text(
                     stringResource(R.string.storage_backup_open),
                     color = HoloAccent,
                     fontSize = Tokens.Font.body,
-                    modifier = Modifier.padding(top = 8.dp),
+                    modifier = Modifier.padding(top = Tokens.Space.s),
                 )
             }
         }
@@ -208,7 +208,7 @@ private fun KindLegend(kinds: List<Pair<String, Long>>) {
     Column(Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s)) {
         kinds.forEach { (kind, bytes) ->
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                Modifier.fillMaxWidth().padding(vertical = Tokens.Space.xxs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.size(9.dp).clip(RoundedCornerShape(3.dp)).background(kindColor(kind)))

@@ -503,11 +503,7 @@ internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
         BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
             val text = model.selectedTextOf(key, group)
             if (text.isNotEmpty()) {
-                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                    as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("message", text))
-                android.widget.Toast
-                    .makeText(ctx, R.string.chat_copied, android.widget.Toast.LENGTH_SHORT).show()
+                copyToClipboard(ctx, text, "message")
             }
             model.clearSelection()
         }

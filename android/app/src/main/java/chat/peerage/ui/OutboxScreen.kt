@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -58,7 +59,7 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
         // Что это вообще такое — сразу, а не мелким шрифтом внизу.
         InfoCard(Icons.Filled.Schedule, HoloAccent) {
             Text(
-                stringResource(R.string.outbox_total, total),
+                pluralStringResource(R.plurals.outbox_total, total, total),
                 color = Color.White,
                 fontSize = Tokens.Font.label,
                 fontWeight = FontWeight.Medium,
@@ -67,7 +68,7 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
                 stringResource(R.string.outbox_lead_hint),
                 color = HoloSecondary,
                 fontSize = Tokens.Font.body,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = Tokens.Space.xs),
             )
         }
 
@@ -84,19 +85,20 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
                     stringResource(R.string.outbox_warn_hint),
                     color = HoloSecondary,
                     fontSize = Tokens.Font.small,
-                    modifier = Modifier.padding(top = 3.dp),
+                    modifier = Modifier.padding(top = Tokens.Space.xxs),
                 )
-                Text(
-                    stringResource(R.string.outbox_warn_off),
-                    color = HoloAccent,
-                    fontSize = Tokens.Font.small,
-                    modifier = Modifier.padding(top = 8.dp).clickable { model.toggleOutboxWarning() },
-                )
+                // Кнопкой: у голого текста зона касания — высота строки мелкого шрифта.
+                TextButton(
+                    onClick = { model.toggleOutboxWarning() },
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Text(stringResource(R.string.outbox_warn_off), color = HoloAccent, fontSize = Tokens.Font.small)
+                }
             }
         }
 
         SectionTitle(stringResource(R.string.outbox_by_peer))
-        rows.forEach { r -> OutboxRow(model, r) { menuFor = r } }
+        rows.forEach { r -> OutboxRow(model, r, onTap = { onOpenChat(r.peer) }) { menuFor = r } }
         Text(
             stringResource(R.string.outbox_longpress_hint),
             color = HoloSecondary,
@@ -110,7 +112,7 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
                 .padding(horizontal = ScreenPad, vertical = RowPadV),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Delete, null, tint = HoloError, modifier = Modifier.size(21.dp))
+            Icon(Icons.Filled.Delete, null, tint = HoloError, modifier = Modifier.size(Tokens.Size.iconM))
             Spacer(Modifier.width(Tokens.Space.m))
             Text(stringResource(R.string.outbox_clear_all), color = HoloError, fontSize = Tokens.Font.label)
         }
@@ -181,12 +183,14 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
             title = { Text(stringResource(R.string.outbox_clear_all_title)) },
             text = {
                 Column {
-                    Text(stringResource(R.string.outbox_clear_all_body, rows.size))
+                    Text(pluralStringResource(R.plurals.outbox_clear_all_body, rows.size, rows.size))
                     Spacer(Modifier.height(Tokens.Space.s))
                     rows.take(6).forEach { r ->
                         val nm = model.contacts.firstOrNull { it.key == r.peer }?.displayName ?: r.peer.take(8)
                         SumRow(nm, "${r.count} · ${fmtSizeLong(r.bytes)}")
                     }
+                    // Остальные — не молча: шесть строк из двадцати читались бы как «все».
+                    if (rows.size > 6) SumRow(stringResource(R.string.outbox_more, rows.size - 6), "")
                 }
             },
             confirmButton = {
@@ -203,7 +207,7 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
     }
     if (confirmAll == 2) {
         HoldToConfirmDialog(
-            title = stringResource(R.string.outbox_clear_all_final, total),
+            title = pluralStringResource(R.plurals.outbox_clear_all_final, total, total),
             hint = stringResource(R.string.outbox_hold_hint),
             onCancel = { confirmAll = 0 },
             onConfirm = {
@@ -216,17 +220,17 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
 
 /** Строка получателя: сколько ждёт, сколько весит и почему не уходит. */
 @Composable
-private fun OutboxRow(model: AppModel, r: OutboxPeer, onLongPress: () -> Unit) {
+private fun OutboxRow(model: AppModel, r: OutboxPeer, onTap: () -> Unit, onLongPress: () -> Unit) {
     val c = model.contacts.firstOrNull { it.key == r.peer }
     val name = c?.displayName ?: r.peer.take(12)
     val online = model.online[r.peer] == true
     Row(
         Modifier.fillMaxWidth()
-            .pointerInput(r.peer) { detectTapGestures(onLongPress = { onLongPress() }) }
+            .pointerInput(r.peer) { detectTapGestures(onTap = { onTap() }, onLongPress = { onLongPress() }) }
             .padding(horizontal = ScreenPad, vertical = RowPadV),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SquareAvatar(name, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c?.avatarId])
+        SquareAvatar(name, size = Tokens.Size.avatarRow, online = online, avatarBytes = model.contactAvatars[c?.avatarId])
         Spacer(Modifier.width(Tokens.Space.m))
         Column(Modifier.weight(1f)) {
             Text(name, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
@@ -237,7 +241,7 @@ private fun OutboxRow(model: AppModel, r: OutboxPeer, onLongPress: () -> Unit) {
                     tint = if (online) HoloOnline else HoloSecondary,
                     modifier = Modifier.size(14.dp),
                 )
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(Tokens.Space.xs))
                 // Причина, а не только факт: разросшаяся очередь к человеку, которого
                 // месяц не было в сети, — это ожидаемое поведение, а не поломка.
                 Text(
@@ -334,7 +338,7 @@ private fun InfoCard(
         Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = Tokens.Space.s)
             .clip(RoundedCornerShape(Tokens.Radius.tile)).background(bg).padding(Tokens.Space.l),
     ) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
         Column(content = content)
     }
@@ -345,8 +349,8 @@ private fun InfoCard(
 private fun agoLabel(since: Long): String {
     val sec = (System.currentTimeMillis() / 1000 - since).coerceAtLeast(0)
     return when {
-        sec >= 86_400 -> stringResource(R.string.ago_days, sec / 86_400)
-        sec >= 3_600 -> stringResource(R.string.ago_hours, sec / 3_600)
+        sec >= 86_400 -> (sec / 86_400).toInt().let { pluralStringResource(R.plurals.ago_days, it, it) }
+        sec >= 3_600 -> (sec / 3_600).toInt().let { pluralStringResource(R.plurals.ago_hours, it, it) }
         else -> stringResource(R.string.ago_minutes, (sec / 60).coerceAtLeast(1))
     }
 }

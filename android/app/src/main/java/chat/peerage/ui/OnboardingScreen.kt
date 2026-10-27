@@ -142,6 +142,11 @@ private fun ColumnScope.PhraseInput(phrase: String, error: Boolean, onChange: (S
             onValueChange = onChange,
             textStyle = Tokens.Text.base.copy(color = Color.White, lineHeight = Tokens.Font.lineHeightLoose),
             cursorBrush = SolidColor(HoloAccent),
+            // 24 слова — это ключ целиком. Обычная клавиатура запоминает набранное,
+            // подсказывает его потом в других приложениях и может синхронизировать
+            // свой словарь в облако. Тип «пароль» это выключает; маски нет — слова
+            // надо видеть, чтобы сверить с бумагой.
+            keyboardOptions = PasswordKeyboard,
             modifier = Modifier.fillMaxSize(),
         )
     }

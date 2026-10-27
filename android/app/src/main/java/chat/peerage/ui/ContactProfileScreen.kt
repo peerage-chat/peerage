@@ -115,7 +115,7 @@ internal fun ContactProfileScreen(
         // вёрстки. Сверяют собеседника всё равно не по нему, а по отпечатку ниже
         // (знаки + слова); ключ нужен, чтобы его СКОПИРОВАТЬ — тап это и делает.
         CardSection {
-            CardRow(onClick = { copyToClipboard(ctx, c.key) }, divider = false, inset = 0.dp) {
+            CardRow(onClick = { copyToClipboard(ctx, c.key, "key") }, divider = false, inset = 0.dp) {
                 Column(Modifier.weight(1f)) {
                     FieldLabel(stringResource(R.string.me_pubkey_label))
                     Text(
@@ -442,9 +442,4 @@ private fun DangerRow(
         Spacer(Modifier.width(Tokens.Space.m))
         Text(label, color = tint, fontSize = Tokens.Font.label)
     }
-}
-
-private fun copyToClipboard(ctx: android.content.Context, text: String) {
-    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-    cm.setPrimaryClip(android.content.ClipData.newPlainText("key", text))
 }

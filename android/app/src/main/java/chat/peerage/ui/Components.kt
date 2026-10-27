@@ -142,6 +142,13 @@ internal fun TagBadge(text: String) {
     }
 }
 
+/** Битрейт словами: «1,5» или «2» — без хвоста «,0» у целых. Число в локали
+ *  устройства: по-русски запятая. */
+internal fun fmtMbps(bps: Int): String {
+    val v = bps / 1_000_000.0
+    return if (v % 1.0 == 0.0) "%d".format(v.toInt()) else "%.1f".format(v)
+}
+
 /** Число для бейджа: больше 99 — «99+», точное число в узком бейдже не читается. */
 internal fun badgeCount(n: Int): String = if (n > 99) "99+" else "$n"
 
@@ -738,6 +745,34 @@ internal fun generateQrBitmap(data: String): android.graphics.Bitmap? = runCatch
     android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
         .also { it.setPixels(pixels, 0, size, 0, 0, size, size) }
 }.getOrNull()
+
+/** Склонение по числу, когда число — Long: плюралы Android принимают только Int. */
+@Composable
+internal fun pluralOf(id: Int, n: Long, vararg rest: Any): String =
+    androidx.compose.ui.res.pluralStringResource(id, n.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), n, *rest)
+
+/**
+ * Копирование в буфер — одно на всё приложение. С Android 13 система сама
+ * показывает плашку «скопировано»; свой тост — только на старых версиях, иначе
+ * их два (так было в чате и «Сохранённом»), а профиль контакта не говорил ничего.
+ */
+internal fun copyToClipboard(ctx: android.content.Context, text: String, label: String) {
+    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+        android.widget.Toast.makeText(ctx, ctx.getString(R.string.common_copied), android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * Клавиатура для пароля: тип «пароль» и без автоисправления. Иначе клавиатура
+ * учит набранное и потом подсказывает его в других приложениях — пароль от
+ * хранилища или копии оказывался в её словаре.
+ */
+internal val PasswordKeyboard = androidx.compose.foundation.text.KeyboardOptions(
+    keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+    autoCorrect = false,
+)
 
 @Composable
 internal fun inputColors() = TextFieldDefaults.colors(

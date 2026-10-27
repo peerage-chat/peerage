@@ -61,6 +61,14 @@ class AppModel private constructor() {
         /** Докачка заказана, но чанки ещё не пошли (пир офлайн / идёт манифест). */
         const val DOWNLOAD_INIT = -1f
 
+        /** Пределы битрейта голоса (Opus, бит/с): ниже речь рассыпается, выше — уже
+         *  музыка, которой звонку не нужно. Один источник для ползунков и подписи. */
+        const val AUDIO_BITRATE_MIN = 16_000
+        const val AUDIO_BITRATE_MAX = 48_000
+
+        /** Шаг вариантов битрейта видео: 0,5 Мбит/с — мельче разница не видна. */
+        const val VIDEO_BITRATE_STEP = 500_000
+
         /** Сколько недавних эмодзи помним (ряд на 8 + запас на вытеснение). */
         const val RECENT_EMOJI_MAX = 24
     }
@@ -288,10 +296,6 @@ class AppModel private constructor() {
     /** Снапшот стата сети (экран «Сеть»). Обновляется тикером на переднем плане. */
     var netStats by mutableStateOf<NetStats?>(null)
 
-    /** Режим «узел сети» (ретрансляция чужого трафика). Пока только UI-флаг —
-     *  привязка к движку (вкл/выкл relay) — TODO, когда появится нативный вызов. */
-    var relayEnabled by mutableStateOf(true)
-
     /** Результат последней попытки добавить контакт ("" | added | known | error). */
     var addStatus by mutableStateOf("")
 
@@ -353,8 +357,15 @@ class AppModel private constructor() {
 
     /** Три варианта битрейта (бит/с) под разрешение/fps: ниже · рекоменд. · выше. */
     fun bitrateOptions(w: Int, h: Int, fps: Int): List<Int> {
-        val a = autoBitrate(w, h, fps)
-        return listOf(a * 6 / 10, a, a * 3 / 2).map { (it / 1_000_000).coerceAtLeast(1) * 1_000_000 }
+        // Три РАЗНЫХ варианта: ниже · рекомендация · выше. Раньше всё округлялось до
+        // целого мегабита, а рекомендация не бывает меньше 1 Мбит/с, — на 480p все три
+        // чипа были «1 Мбит/с».
+        val step = VIDEO_BITRATE_STEP
+        fun snap(x: Int) = ((x + step / 2) / step * step).coerceAtLeast(step)
+        val mid = snap(autoBitrate(w, h, fps))
+        val low = snap(mid * 6 / 10).coerceAtMost(mid - step).coerceAtLeast(step)
+        val high = snap(mid * 3 / 2).coerceAtLeast(mid + step)
+        return listOf(low, mid, high)
     }
 
     /** Изменить видео по умолчанию (что не передано — остаётся) и сохранить. */
@@ -771,7 +782,7 @@ class AppModel private constructor() {
 
     fun setAudioQuality(auto: Boolean, bitrate: Int = audioBitrate) {
         audioQualityAuto = auto
-        audioBitrate = bitrate.coerceIn(16_000, 48_000)
+        audioBitrate = bitrate.coerceIn(AUDIO_BITRATE_MIN, AUDIO_BITRATE_MAX)
         saveAudioPrefs() // TODO: Opus bitrate/mode на сессию — нужен JNI-сеттер (+ adaptive)
     }
 

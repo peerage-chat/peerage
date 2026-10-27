@@ -77,13 +77,17 @@ internal fun BackupScreen(model: AppModel, onDone: () -> Unit) {
         step = Step.Working
         scope.launch(Dispatchers.IO) {
             val tmp = java.io.File(ctx.cacheDir, "backup.tmp")
-            val stats = model.exportBackupBlocking(tmp.absolutePath, parts, password)
+            var stats = model.exportBackupBlocking(tmp.absolutePath, parts, password)
             if (stats.error.isEmpty()) {
-                runCatching {
+                // Копия собрана — но ещё не записана туда, куда выбрал человек. Сбой
+                // записи (флешка вынута, провайдер отказал) раньше проглатывался, и
+                // экран говорил «Копия готова» про файл, которого нет.
+                val written = runCatching {
                     ctx.contentResolver.openOutputStream(uri)?.use { out ->
                         tmp.inputStream().use { it.copyTo(out) }
-                    }
-                }
+                    } != null
+                }.getOrDefault(false)
+                if (!written) stats = stats.copy(error = ctx.getString(R.string.backup_write_failed))
             }
             // Кэш чистим всегда: незашифрованного там нет, но копия переписки во
             // временном файле пережила бы экран, и это лишнее.
@@ -194,7 +198,7 @@ private fun PickParts(
         PartRow(
             Icons.Filled.Message,
             stringResource(R.string.backup_part_messages),
-            stringResource(R.string.backup_n_messages, est.messages),
+            pluralOf(R.plurals.backup_n_messages, est.messages),
             null,
             parts.messages,
         ) { onParts(parts.copy(messages = it)) }
@@ -202,7 +206,7 @@ private fun PickParts(
         PartRow(
             Icons.Filled.Groups,
             stringResource(R.string.backup_part_groups),
-            stringResource(R.string.backup_n_group_messages, est.groupMessages),
+            pluralOf(R.plurals.backup_n_group_messages, est.groupMessages),
             null,
             parts.groups,
         ) { onParts(parts.copy(groups = it)) }
@@ -218,7 +222,7 @@ private fun PickParts(
         PartRow(
             Icons.Filled.Phone,
             stringResource(R.string.backup_part_calls),
-            stringResource(R.string.backup_n_calls, est.calls),
+            pluralOf(R.plurals.backup_n_calls, est.calls),
             null,
             parts.calls,
         ) { onParts(parts.copy(calls = it)) }
@@ -227,9 +231,9 @@ private fun PickParts(
             Icons.Filled.Photo,
             stringResource(R.string.backup_part_attachments),
             if (est.skippedBig > 0) {
-                stringResource(R.string.backup_n_attachments_skipped, est.attachments, est.skippedBig)
+                pluralOf(R.plurals.backup_n_attachments_skipped, est.attachments, est.skippedBig)
             } else {
-                stringResource(R.string.backup_n_attachments, est.attachments)
+                pluralOf(R.plurals.backup_n_attachments, est.attachments)
             },
             fmtSizeLong(est.attachmentBytes),
             parts.attachments,
@@ -254,9 +258,9 @@ private fun PickParts(
 
         val any = parts.contacts || parts.messages || parts.groups ||
             parts.notes || parts.calls || parts.attachments
-        AccentButton(stringResource(R.string.backup_next), Modifier.fillMaxWidth()) {
-            if (any) onNext()
-        }
+        // Ничего не выбрано — кнопка серая, а не глухая: нажатие без ответа
+        // читается как зависание.
+        AccentButton(stringResource(R.string.backup_next), Modifier.fillMaxWidth(), enabled = any, onClick = onNext)
         OutlineButton(
             stringResource(R.string.backup_restore),
             Modifier.fillMaxWidth(),
@@ -294,6 +298,7 @@ private fun PasswordStep(
             singleLine = true,
             placeholder = { Text(stringResource(R.string.vault_ph_password), color = HoloSecondary) },
             visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = PasswordKeyboard,
         )
         FieldLabel(stringResource(R.string.backup_pw_repeat))
         TextField(
@@ -305,6 +310,7 @@ private fun PasswordStep(
             placeholder = { Text(stringResource(R.string.vault_ph_repeat), color = HoloSecondary) },
             isError = repeat.isNotEmpty() && repeat != password,
             visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = PasswordKeyboard,
         )
         if (repeat.isNotEmpty() && repeat != password) {
             Text(stringResource(R.string.vault_mismatch), color = HoloError, fontSize = Tokens.Font.small)
@@ -312,9 +318,7 @@ private fun PasswordStep(
         Text(stringResource(R.string.backup_pw_no_recovery), color = HoloWarn, fontSize = Tokens.Font.small)
 
         val ready = password.isNotEmpty() && password == repeat
-        AccentButton(stringResource(R.string.backup_create), Modifier.fillMaxWidth()) {
-            if (ready) onGo()
-        }
+        AccentButton(stringResource(R.string.backup_create), Modifier.fillMaxWidth(), enabled = ready, onClick = onGo)
         Text(stringResource(R.string.backup_where_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
     }
 }
@@ -382,6 +386,7 @@ private fun RestoreStep(
             singleLine = true,
             placeholder = { Text(stringResource(R.string.vault_ph_password), color = HoloSecondary) },
             visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = PasswordKeyboard,
         )
 
         // Страх «а не затрёт ли новое» — главная причина не нажимать эту кнопку.
@@ -399,9 +404,12 @@ private fun RestoreStep(
             fontSize = Tokens.Font.small,
         )
 
-        AccentButton(stringResource(R.string.backup_restore_go), Modifier.fillMaxWidth()) {
-            if (file != null && password.isNotEmpty()) onGo()
-        }
+        AccentButton(
+            stringResource(R.string.backup_restore_go),
+            Modifier.fillMaxWidth(),
+            enabled = file != null && password.isNotEmpty(),
+            onClick = onGo,
+        )
     }
 }
 

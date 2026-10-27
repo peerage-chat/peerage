@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -47,12 +48,12 @@ internal fun FloodCard(model: AppModel, onDetails: () -> Unit) {
             .clip(RoundedCornerShape(Tokens.Radius.button))
             .background(HoloWarn.copy(alpha = 0.08f))
             .clickable { onDetails() }
-            .padding(12.dp),
+            .padding(Tokens.Space.m),
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Warning, null, tint = HoloWarn, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Tokens.Space.s))
                 Text(
                     stringResource(R.string.flood_title),
                     color = HoloWarn,
@@ -61,10 +62,10 @@ internal fun FloodCard(model: AppModel, onDetails: () -> Unit) {
                 )
             }
             Text(
-                stringResource(R.string.flood_card_body, flood.size),
+                pluralStringResource(R.plurals.flood_card_body, flood.size, flood.size),
                 color = HoloSecondary,
                 fontSize = Tokens.Font.body,
-                modifier = Modifier.padding(top = 6.dp),
+                modifier = Modifier.padding(top = Tokens.Space.s),
             )
         }
     }
@@ -75,7 +76,7 @@ internal fun FloodCard(model: AppModel, onDetails: () -> Unit) {
 internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         SurfaceCard(outer = 0.dp) {
             Text(stringResource(R.string.flood_explain), color = HoloSecondary, fontSize = Tokens.Font.body)
@@ -98,7 +99,7 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
                                 modifier = Modifier.weight(1f, fill = false),
                             )
                             if (f.blocked) {
-                                Spacer(Modifier.width(6.dp))
+                                Spacer(Modifier.width(Tokens.Space.s))
                                 Text(
                                     stringResource(R.string.flood_blocked_tag),
                                     color = HoloError,
@@ -107,16 +108,17 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
                             }
                         }
                         Text(
-                            stringResource(
-                                if (name == null) R.string.flood_src_stranger else R.string.flood_src_dropped,
-                                f.dropped,
-                            ),
+                            if (name == null) {
+                                stringResource(R.string.flood_src_stranger, f.dropped)
+                            } else {
+                                pluralOf(R.plurals.flood_src_dropped, f.dropped)
+                            },
                             color = HoloSecondary,
                             fontSize = Tokens.Font.small,
-                            modifier = Modifier.padding(top = 2.dp),
+                            modifier = Modifier.padding(top = Tokens.Space.xxs),
                         )
                     }
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(Tokens.Space.m))
                     Column(horizontalAlignment = Alignment.End) {
                         Text("%.0f".format(f.pps), color = HoloWarn, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
                         Text(stringResource(R.string.flood_pps), color = HoloSecondary, fontSize = Tokens.Font.caption)
@@ -136,7 +138,7 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
             stringResource(R.string.flood_rotate),
             stringResource(R.string.flood_rotate_desc),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
             OutlineAction(
                 stringResource(if (model.offline) R.string.flood_back_online else R.string.flood_offline_btn),
                 Icons.Filled.PowerSettingsNew,
@@ -158,10 +160,10 @@ private fun ActionExplain(icon: androidx.compose.ui.graphics.vector.ImageVector,
     SurfaceCard(outer = 0.dp) {
         Row {
             Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             Column {
                 Text(title, color = Color.White, fontSize = Tokens.Font.label)
-                Text(desc, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
+                Text(desc, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = Tokens.Space.xxs))
             }
         }
     }
@@ -186,7 +188,7 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         SurfaceCard(outer = 0.dp) {
             Text(stringResource(R.string.rotate_explain), color = HoloSecondary, fontSize = Tokens.Font.body)
@@ -202,9 +204,9 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
                         onCheckedChange = { selected[c.key] = it },
                         colors = CheckboxDefaults.colors(checkedColor = HoloAccent, uncheckedColor = HoloSecondary),
                     )
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(Tokens.Space.xs))
                     SquareAvatar(c.displayName, size = 34.dp, online = model.online[c.key] == true)
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(Tokens.Space.m))
                     Column(Modifier.weight(1f)) {
                         Text(c.displayName, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val hint = when {
@@ -213,7 +215,7 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
                             else -> null
                         }
                         if (hint != null) {
-                            Text(hint, color = HoloWarn, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
+                            Text(hint, color = HoloWarn, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = Tokens.Space.xxs))
                         }
                     }
                 }
@@ -233,14 +235,14 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
                         stringResource(R.string.rotate_will_lose, lost.joinToString { it.displayName }),
                         color = HoloSecondary,
                         fontSize = Tokens.Font.small,
-                        modifier = Modifier.padding(top = 2.dp),
+                        modifier = Modifier.padding(top = Tokens.Space.xxs),
                     )
                 }
             }
         }
 
         FieldLabel(stringResource(R.string.rotate_how))
-        StepRow(Icons.Filled.PowerSettingsNew, stringResource(R.string.rotate_step_offline, AppModel.ROTATE_GAP_SECS))
+        StepRow(Icons.Filled.PowerSettingsNew, pluralStringResource(R.plurals.rotate_step_offline, AppModel.ROTATE_GAP_SECS, AppModel.ROTATE_GAP_SECS))
         StepRow(Icons.Filled.Autorenew, stringResource(R.string.rotate_step_up))
         StepRow(Icons.Filled.Send, stringResource(R.string.rotate_step_tell))
 
@@ -254,9 +256,9 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
 
 @Composable
 private fun StepRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
-    Row(Modifier.padding(vertical = 2.dp)) {
+    Row(Modifier.padding(vertical = Tokens.Space.xxs)) {
         Icon(icon, null, tint = HoloIconMuted, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Tokens.Space.m))
         Text(text, color = HoloSecondary, fontSize = Tokens.Font.body)
     }
 }
@@ -272,7 +274,7 @@ internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
     val done = st.newAddress.isNotEmpty()
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (!done) {
@@ -289,18 +291,18 @@ internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
                 fontSize = Tokens.Font.body,
             )
         }
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             ProgressStep(true, stringResource(R.string.rotate_p_stopped))
             ProgressStep(st.secondsLeft == 0, stringResource(R.string.rotate_p_pause, st.secondsLeft))
             ProgressStep(done, stringResource(R.string.rotate_p_up))
-            ProgressStep(done, stringResource(R.string.rotate_p_told, st.told))
+            ProgressStep(done, pluralStringResource(R.plurals.rotate_p_told, st.told, st.told))
         }
         if (done) {
             SurfaceCard(outer = 0.dp) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.CheckCircle, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(Tokens.Space.s))
                         Text(stringResource(R.string.rotate_done), color = HoloOnline, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
                     }
                     Text(
@@ -308,7 +310,7 @@ internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
                         color = Color.White,
                         fontSize = Tokens.Font.body,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(top = 6.dp),
+                        modifier = Modifier.padding(top = Tokens.Space.s),
                     )
                 }
             }
@@ -332,7 +334,7 @@ private fun ProgressStep(done: Boolean, text: String) {
             tint = if (done) HoloOnline else HoloIconMuted,
             modifier = Modifier.size(18.dp),
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Tokens.Space.m))
         Text(text, color = if (done) Color.White else HoloSecondary, fontSize = Tokens.Font.body)
     }
 }

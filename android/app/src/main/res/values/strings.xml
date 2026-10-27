@@ -62,7 +62,7 @@
     <string name="share_preview_back">preview · back camera</string>
     <string name="share_preview_screen">preview · device screen</string>
     <string name="share_fps_value">%1$d fps</string>
-    <string name="share_bitrate_value">%1$d Mbps</string>
+    <string name="share_bitrate_value">%1$s Mbps</string>
     <string name="audio_settings_title">Sound settings</string>
     <string name="audio_mic_level">microphone level</string>
     <string name="audio_input">Microphone</string>
@@ -110,7 +110,10 @@
     <string name="menu_storage">Storage</string>
     <!-- Storage screen (deliberately simple for now) -->
     <string name="storage_attachments">Attachments</string>
-    <string name="storage_files">%1$d files</string>
+    <plurals name="storage_files">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
     <string name="storage_attachments_hint">Photos, files and voice messages you sent or received. Clearing them does not delete messages — the files can be downloaded from the sender again.</string>
     <string name="storage_clear_attachments">Clear attachments</string>
     <string name="storage_clear_confirm">Delete downloaded attachments? Messages stay; files can be downloaded again while the sender still has them.</string>
@@ -148,7 +151,10 @@
     <string name="contacts_empty_hint">Add a peer by key or QR — using the button above</string>
     <string name="channels_soon">Channels — soon</string>
     <!-- Offline queue growth warning (nothing is ever deleted, this is just a notice) -->
-    <string name="outbox_warn">%1$d messages are still waiting to be delivered. They are kept — recipients will get them once online.</string>
+    <plurals name="outbox_warn">
+        <item quantity="one">%d message is still waiting to be delivered. It is kept and goes out once the recipient is online.</item>
+        <item quantity="other">%d messages are still waiting to be delivered. They are kept — recipients will get them once online.</item>
+    </plurals>
     <string name="settings_outbox_warn">Warn about a growing outbox</string>
     <string name="settings_outbox_warn_hint">Messages are never deleted — this only shows a notice</string>
     <!-- Contact requests (gate instead of TOFU auto-add) -->
@@ -237,7 +243,6 @@
     <string name="saved_empty_hint">Messages you save will appear here</string>
 
     <!-- ── Network screen ──────────────────────────────────────────────── -->
-    <string name="net_connected_to">Connected to </string>
     <string name="net_metric_peers">Peers</string>
     <string name="net_metric_ping">Ping</string>
     <string name="net_unit_ms">ms</string>
@@ -249,10 +254,12 @@
     <string name="net_my_qr">My QR</string>
     <string name="net_share">Share</string>
     <string name="net_mode">Participation mode</string>
+    <string name="net_connected">Connected to the mesh</string>
+    <string name="net_peer_connecting">connecting…</string>
+    <string name="net_peer_inbound">Incoming</string>
+    <string name="net_peer_outbound">Outgoing</string>
     <string name="net_node_mode">Network node</string>
-    <string name="net_node_mode_desc">Relaying others\' traffic — helping the network</string>
-    <string name="net_benefit_priority">Priority delivery of your messages</string>
-    <string name="net_benefit_queue">Offline queue kept longer</string>
+    <string name="net_node_mode_desc">While online, the phone relays other people\'s traffic — that is what keeps the mesh alive</string>
     <string name="net_benefit_cost">Cost: higher battery and data use</string>
     <string name="net_peers_label">Peers · %1$d</string>
     <string name="net_no_peers">No direct peers</string>
@@ -370,7 +377,10 @@
     <string name="attach_gallery_denied">Gallery access denied</string>
     <string name="outbox_empty_title">Everything delivered</string>
     <string name="outbox_empty_hint">Messages sent while a contact was offline wait here and go out on their own.</string>
-    <string name="outbox_total">%1$d messages waiting</string>
+    <plurals name="outbox_total">
+        <item quantity="one">%d message waiting</item>
+        <item quantity="other">%d messages waiting</item>
+    </plurals>
     <string name="outbox_lead_hint">They will go out as soon as the recipient comes online. There is no server to hold them for us — so the queue is never trimmed by age or size.</string>
     <string name="outbox_warn_title">The queue has grown</string>
     <string name="outbox_warn_hint">Over a thousand undelivered — usually that means the other side has been away for a while. They take up space on this device.</string>
@@ -392,15 +402,31 @@
     <string name="outbox_clear_all">Clear everything</string>
     <string name="outbox_clear_all_hint">Deletes YOUR messages that have not reached anyone yet. This cannot be undone.</string>
     <string name="outbox_clear_all_title">Clear the whole queue?</string>
-    <string name="outbox_clear_all_body">%1$d recipients are waiting. Everything they have not received will be gone for good.</string>
-    <string name="outbox_clear_all_final">%1$d messages will be lost</string>
+    <plurals name="outbox_clear_all_body">
+        <item quantity="one">%d recipient is waiting. Everything not yet delivered will be gone for good.</item>
+        <item quantity="other">%d recipients are waiting. Everything not yet delivered will be gone for good.</item>
+    </plurals>
+    <string name="outbox_more">and %1$d more</string>
+    <plurals name="outbox_clear_all_final">
+        <item quantity="one">%d message will be lost</item>
+        <item quantity="other">%d messages will be lost</item>
+    </plurals>
     <string name="outbox_hold_hint">There is no undo. Hold the button to confirm.</string>
     <string name="common_hold">Hold…</string>
     <string name="common_next">Next</string>
-    <string name="ago_days">%1$d days</string>
-    <string name="ago_hours">%1$d hours</string>
+    <plurals name="ago_days">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <plurals name="ago_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
     <string name="ago_minutes">%1$d min</string>
-    <string name="storage_total_sub">used by attachments · %1$d files</string>
+    <plurals name="storage_total_sub">
+        <item quantity="one">used by attachments · %d file</item>
+        <item quantity="other">used by attachments · %d files</item>
+    </plurals>
     <string name="storage_by_chat">By chat</string>
     <string name="storage_free_up">Free up space</string>
     <string name="storage_backup">Data backup</string>
@@ -443,7 +469,10 @@
     <string name="folder_pick_chats">Or pick specific chats:</string>
     <string name="folder_exclude">Exclude</string>
     <string name="folder_exclude_read">Read</string>
-    <string name="folder_counter">%1$d chats fall into this folder</string>
+    <plurals name="folder_counter">
+        <item quantity="one">%d chat falls into this folder</item>
+        <item quantity="other">%d chats fall into this folder</item>
+    </plurals>
     <string name="folder_delete">Delete folder</string>
     <string name="folder_delete_confirm">The chats stay where they are — only the view disappears.</string>
     <string name="folder_delete_ok">Delete</string>
@@ -497,12 +526,18 @@
 
     <!-- Traffic flood and address rotation (ADR-007) -->
     <string name="flood_title">You are being flooded</string>
-    <string name="flood_card_body">A stream is coming from %1$d addresses; the app drops it. The content never reaches you, but the mobile data is already spent: foreign packets cannot be stopped on the device.</string>
+    <plurals name="flood_card_body">
+        <item quantity="one">A stream is coming from %d address; the app drops it. The content never reaches you, but the mobile data is already spent: foreign packets cannot be stopped on the device.</item>
+        <item quantity="other">A stream is coming from %d addresses; the app drops it. The content never reaches you, but the mobile data is already spent: foreign packets cannot be stopped on the device.</item>
+    </plurals>
     <string name="flood_screen_title">Traffic flood</string>
     <string name="flood_explain">The app drops these packets before decryption — no CPU, battery or storage is spent, and nothing is shown. But the bytes already reached the radio, and you paid for them. That is how any open network works: whoever knows the address can send.</string>
     <string name="flood_sources">Sources</string>
     <string name="flood_blocked_tag">blocked</string>
-    <string name="flood_src_dropped">%1$d packets dropped</string>
+    <plurals name="flood_src_dropped">
+        <item quantity="one">%d packet dropped</item>
+        <item quantity="other">%d packets dropped</item>
+    </plurals>
     <string name="flood_src_stranger">not a contact · %1$d dropped</string>
     <string name="flood_pps">pkt/s</string>
     <string name="flood_what_to_do">What you can do</string>
@@ -523,7 +558,10 @@
     <string name="rotate_selected">Selected %1$d of %2$d</string>
     <string name="rotate_will_lose">Will keep the old address: %1$s</string>
     <string name="rotate_how">How it will go</string>
-    <string name="rotate_step_offline">We go offline for exactly %1$d seconds — that is how long the old address takes to disappear from the network. Without the pause the stream keeps coming.</string>
+    <plurals name="rotate_step_offline">
+        <item quantity="one">We go offline for exactly %d second — that is how long the old address takes to disappear from the network. Without the pause the stream keeps coming.</item>
+        <item quantity="other">We go offline for exactly %d seconds — that is how long the old address takes to disappear from the network. Without the pause the stream keeps coming.</item>
+    </plurals>
     <string name="rotate_step_up">We come back up under the new address.</string>
     <string name="rotate_step_tell">Selected contacts receive a signed notice — nothing to forward by hand.</string>
     <string name="rotate_btn">Change address</string>
@@ -533,7 +571,10 @@
     <string name="rotate_p_stopped">Old address shut down</string>
     <string name="rotate_p_pause">Pause — %1$d s left</string>
     <string name="rotate_p_up">Coming up under the new address</string>
-    <string name="rotate_p_told">Notice to %1$d contacts</string>
+    <plurals name="rotate_p_told">
+        <item quantity="one">Notice to %d contact</item>
+        <item quantity="other">Notice to %d contacts</item>
+    </plurals>
     <string name="rotate_failed">Could not change the address — you are back on the old one</string>
     <string name="rotate_failed_offline">Could not change the address. You are offline — tap “Back online”</string>
     <string name="rotate_done">Address changed</string>
@@ -605,11 +646,23 @@
     <string name="backup_part_calls">Call log</string>
     <string name="backup_part_attachments">Attachments</string>
     <string name="backup_n_contacts">%1$d · with avatars</string>
-    <string name="backup_n_messages">%1$d messages</string>
+    <plurals name="backup_n_messages">
+        <item quantity="one">%d message</item>
+        <item quantity="other">%d messages</item>
+    </plurals>
     <string name="backup_n_notes">%1$d</string>
-    <string name="backup_n_calls">%1$d entries · never leaves this device</string>
-    <string name="backup_n_attachments">%1$d files</string>
-    <string name="backup_n_attachments_skipped">%1$d files · %2$d large ones excluded</string>
+    <plurals name="backup_n_calls">
+        <item quantity="one">%d entry · never leaves this device</item>
+        <item quantity="other">%d entries · never leaves this device</item>
+    </plurals>
+    <plurals name="backup_n_attachments">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
+    <plurals name="backup_n_attachments_skipped">
+        <item quantity="one">%1$d file · large ones left out: %2$d</item>
+        <item quantity="other">%1$d files · large ones left out: %2$d</item>
+    </plurals>
     <string name="backup_big_hint">Large files do not fit into the archive, but they can be downloaded from the sender again — they are addressed by content.</string>
     <string name="backup_groups_title">Group membership is not included</string>
     <string name="backup_groups_text">Group messages are included, keys are not: the archive restores what to read, not what to decrypt with. A restored group state would be stale and would break the group for everyone, so the group opens read-only until you are invited again.</string>
@@ -631,6 +684,7 @@
     <string name="backup_merge_text">Nothing is deleted: whatever arrived after the backup stays. Restoring the same file twice adds nothing.</string>
     <string name="backup_restore_go">Restore</string>
     <string name="backup_read_failed">Could not read the file</string>
+    <string name="backup_write_failed">Couldn\'t write the file where you chose. Try another place.</string>
     <string name="backup_failed">Did not work</string>
     <string name="backup_done_export">Backup ready</string>
     <string name="backup_done_restore">Restored</string>
@@ -645,7 +699,6 @@
     <string name="backup_verify_again">Contact verification is not restored: a file can be handed to you, and «verified» means the fingerprint was checked in person. Verify again after restoring.</string>
 
     <string name="chat_copy">Copy</string>
-    <string name="chat_copied">Copied</string>
     <string name="chat_reply">Reply</string>
     <string name="chat_delete">Delete</string>
     <string name="chat_delete_title">Delete messages: %1$d</string>
@@ -660,7 +713,10 @@
 
     <string name="group_invite_waiting">You accepted — waiting for the person who invited you. It will complete as soon as they are online.</string>
     <string name="backup_part_groups">Group chats</string>
-    <string name="backup_n_group_messages">%1$d messages</string>
+    <plurals name="backup_n_group_messages">
+        <item quantity="one">%d message</item>
+        <item quantity="other">%d messages</item>
+    </plurals>
     <string name="group_archived">Archive from a backup · you are not in this group</string>
     <string name="forward_action">Forward</string>
     <string name="forward_title">Forward (%1$d) to</string>
@@ -694,7 +750,10 @@
     <string name="me_title">Profile</string>
     <string name="me_qr_card">My exchange code</string>
     <string name="me_qr_hint">Show it to someone — they add you without any server</string>
-    <string name="peers_online">%1$d peers online</string>
+    <plurals name="peers_online">
+        <item quantity="one">%d peer online</item>
+        <item quantity="other">%d peers online</item>
+    </plurals>
     <string name="settings_title_sections">Sections</string>
     <string name="settings_title_profile_data">Profile and data</string>
     <!-- ── Settings: categories ─────────────────────────────────────────── -->

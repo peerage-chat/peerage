@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
@@ -82,25 +83,29 @@ internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
             }
         }
 
-        SectionTitle(stringResource(R.string.folders_mine))
-        CardSection {
-            model.folders.forEachIndexed { i, f ->
-                CardRow(onClick = { onEdit(f.id) }, divider = i > 0, inset = 62.dp) {
-                    Box(
-                        Modifier.size(38.dp).clip(RoundedCornerShape(Tokens.Radius.button))
-                            .background(FolderSelected),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(folderIcon(f.icon), null, tint = HoloAccent, modifier = Modifier.size(19.dp))
+        // Своих папок нет — нет и раздела: пустая карточка под заголовком читалась
+        // как недогрузившийся список.
+        if (model.folders.isNotEmpty()) {
+            SectionTitle(stringResource(R.string.folders_mine))
+            CardSection {
+                model.folders.forEachIndexed { i, f ->
+                    CardRow(onClick = { onEdit(f.id) }, divider = i > 0, inset = Tokens.Space.m + Tokens.Size.avatarHead + Tokens.Space.m) {
+                        Box(
+                            Modifier.size(Tokens.Size.avatarHead).clip(RoundedCornerShape(Tokens.Radius.button))
+                                .background(FolderSelected),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(folderIcon(f.icon), null, tint = HoloAccent, modifier = Modifier.size(19.dp))
+                        }
+                        Spacer(Modifier.width(Tokens.Space.m))
+                        Text(f.name, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
+                        Icon(
+                            TablerIcons.ChevronRight,
+                            null,
+                            tint = Tokens.Colors.tertiary,
+                            modifier = Modifier.size(Tokens.Size.iconS),
+                        )
                     }
-                    Spacer(Modifier.width(Tokens.Space.m))
-                    Text(f.name, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
-                    Icon(
-                        TablerIcons.ChevronRight,
-                        null,
-                        tint = Tokens.Colors.tertiary,
-                        modifier = Modifier.size(Tokens.Size.iconS),
-                    )
                 }
             }
         }
@@ -233,29 +238,29 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                stringResource(R.string.folder_counter, hits),
+                pluralStringResource(R.plurals.folder_counter, hits, hits),
                 color = HoloSecondary,
                 fontSize = Tokens.Font.body,
             )
         }
 
+        // Без имени — серая, а не глухая кнопка.
         AccentButton(
             stringResource(R.string.common_save),
             Modifier.fillMaxWidth().padding(horizontal = ScreenPad),
+            enabled = name.isNotBlank(),
         ) {
-            if (name.isNotBlank()) {
-                model.saveFolder(
-                    Folder(
-                        id = folderId ?: "f${System.currentTimeMillis()}",
-                        name = name.trim(),
-                        icon = icon,
-                        types = types,
-                        chats = chats,
-                        excludeRead = excludeRead,
-                    ),
-                )
-                onDone()
-            }
+            model.saveFolder(
+                Folder(
+                    id = folderId ?: "f${System.currentTimeMillis()}",
+                    name = name.trim(),
+                    icon = icon,
+                    types = types,
+                    chats = chats,
+                    excludeRead = excludeRead,
+                ),
+            )
+            onDone()
         }
 
         if (existing != null) {
@@ -305,7 +310,7 @@ private fun RowScope.TypeChip(icon: ImageVector, labelRes: Int, on: Boolean, onC
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = if (on) HoloAccent else HoloSecondary, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(Tokens.Space.s))
         Text(
             stringResource(labelRes),
             color = if (on) HoloAccent else HoloSecondary,

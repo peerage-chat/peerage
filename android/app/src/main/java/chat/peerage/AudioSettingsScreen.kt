@@ -132,7 +132,7 @@ fun AudioSettingsScreen(model: AppModel) {
         Slider(
             value = model.audioBitrate.toFloat(),
             onValueChange = { model.setAudioQuality(false, it.roundToInt()) },
-            valueRange = 16_000f..48_000f,
+            valueRange = AppModel.AUDIO_BITRATE_MIN.toFloat()..AppModel.AUDIO_BITRATE_MAX.toFloat(),
             enabled = !model.audioQualityAuto,
             colors = SliderDefaults.colors(
                 thumbColor = Tokens.Colors.accent,
@@ -144,7 +144,7 @@ fun AudioSettingsScreen(model: AppModel) {
         )
         Text(
             if (model.audioQualityAuto) {
-                stringResource(R.string.audio_quality_adaptive, 16, 48)
+                stringResource(R.string.audio_quality_adaptive, AppModel.AUDIO_BITRATE_MIN / 1000, AppModel.AUDIO_BITRATE_MAX / 1000)
             } else {
                 stringResource(R.string.audio_quality_rate, model.audioBitrate / 1000)
             },

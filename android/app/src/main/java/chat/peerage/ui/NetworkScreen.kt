@@ -2,7 +2,6 @@
 
 package chat.peerage.ui
 
-import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,12 +13,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.BatteryStd
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SouthWest
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -74,7 +74,7 @@ internal fun NetworkScreen(
                     Modifier.size(10.dp).clip(CircleShape)
                         .background(if (model.offline) HoloWarn else HoloOnline),
                 )
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(Tokens.Space.m))
                 if (model.offline) {
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(R.string.notif_offline_title), color = Color.White, fontSize = Tokens.Font.label)
@@ -82,28 +82,17 @@ internal fun NetworkScreen(
                             stringResource(R.string.notif_offline_body),
                             color = HoloSecondary,
                             fontSize = Tokens.Font.small,
-                            modifier = Modifier.padding(top = 2.dp),
+                            modifier = Modifier.padding(top = Tokens.Space.xxs),
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        stringResource(R.string.flood_back_online),
-                        color = HoloAccent,
-                        fontSize = Tokens.Font.body,
-                        modifier = Modifier.clickable { model.goOnline() },
-                    )
+                    Spacer(Modifier.width(Tokens.Space.s))
+                    TextButton(onClick = { model.goOnline() }) {
+                        Text(stringResource(R.string.flood_back_online), color = HoloAccent, fontSize = Tokens.Font.body)
+                    }
                 } else {
-                    Row {
-                        // Пробел ставит РАЗМЕТКА, а не хвост строки в ресурсе: XML
-                        // обрезает концевые пробелы, и получалось «Connected tomesh».
-                        Text(
-                            stringResource(R.string.net_connected_to).trim(),
-                            color = Color.White,
-                            fontSize = Tokens.Font.label,
-                        )
-                        Spacer(Modifier.width(Tokens.Space.xs))
-                        Text("mesh", color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Bold)
-                    }
+                    // Одной строкой ресурса: склейка «Подключено к » + "mesh" держала
+                    // английское слово прямо в коде и не переводилась.
+                    Text(stringResource(R.string.net_connected), color = Color.White, fontSize = Tokens.Font.label)
                 }
             }
         }
@@ -134,13 +123,10 @@ internal fun NetworkScreen(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(8.dp))
-                Icon(
-                    Icons.Filled.ContentCopy,
-                    stringResource(R.string.net_copy_address),
-                    tint = HoloAccent,
-                    modifier = Modifier.size(20.dp).clickable { copyToClipboard(ctx, me.address, ctx.getString(R.string.net_address)) },
-                )
+                // Плашкой BarIcon: голая иконка 20dp была мишенью меньше пальца.
+                BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.net_copy_address), tint = HoloAccent) {
+                    copyToClipboard(ctx, me.address, ctx.getString(R.string.net_address))
+                }
             }
         }
         Row(
@@ -153,8 +139,8 @@ internal fun NetworkScreen(
         // Смена адреса живёт рядом с самим адресом — тут её и ищут.
         SurfaceCard(onClick = onRotate) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Autorenew, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
-                Spacer(Modifier.width(12.dp))
+                Icon(Icons.Filled.Autorenew, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
+                Spacer(Modifier.width(Tokens.Space.m))
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.net_rotate_row), color = Color.White, fontSize = Tokens.Font.label)
                     Text(
@@ -165,20 +151,24 @@ internal fun NetworkScreen(
                         },
                         color = HoloSecondary,
                         fontSize = Tokens.Font.small,
-                        modifier = Modifier.padding(top = 2.dp),
+                        modifier = Modifier.padding(top = Tokens.Space.xxs),
                     )
                 }
-                Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
             }
         }
 
-        // 4. Режим участия — выгоды + цена.
+        // 4. Режим участия. Здесь был переключатель «Узел сети» с обещанными
+        // выгодами — он не был подключён ни к чему: узел Yggdrasil пересылает чужой
+        // трафик всегда, а приоритета и длинной очереди нет. Выключатель, который
+        // ничего не выключает, хуже его отсутствия — человек думает, что сберёг
+        // батарею. Пока режима нет в движке, экран говорит как есть.
         SectionTitle(stringResource(R.string.net_mode))
         SurfaceCard {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Share, null, tint = HoloOnline, modifier = Modifier.size(26.dp))
-                    Spacer(Modifier.width(14.dp))
+                    Icon(Icons.Filled.Share, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconL))
+                    Spacer(Modifier.width(Tokens.Space.m))
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(R.string.net_node_mode), color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
                         Text(
@@ -187,23 +177,8 @@ internal fun NetworkScreen(
                             fontSize = Tokens.Font.small,
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Switch(
-                        checked = model.relayEnabled,
-                        onCheckedChange = { model.relayEnabled = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = HoloAccent,
-                            uncheckedThumbColor = HoloSecondary,
-                            uncheckedTrackColor = HoloBg,
-                        ),
-                    )
                 }
-                HorizontalDivider(color = HoloBorder, modifier = Modifier.padding(vertical = 12.dp))
-                BenefitRow(Icons.Filled.Bolt, HoloOnline, stringResource(R.string.net_benefit_priority))
-                Spacer(Modifier.height(10.dp))
-                BenefitRow(Icons.Filled.Schedule, HoloOnline, stringResource(R.string.net_benefit_queue))
-                Spacer(Modifier.height(10.dp))
+                HorizontalDivider(color = Tokens.Colors.divider, modifier = Modifier.padding(vertical = Tokens.Space.m))
                 BenefitRow(Icons.Filled.BatteryStd, HoloSecondary, stringResource(R.string.net_benefit_cost))
             }
         }
@@ -220,13 +195,13 @@ internal fun NetworkScreen(
                     stringResource(R.string.net_no_peers),
                     color = HoloSecondary,
                     fontSize = Tokens.Font.body,
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = Tokens.Space.xs),
                 )
             } else {
                 Column {
                     peers.forEachIndexed { i, p ->
                         PeerRow(p)
-                        if (i < peers.lastIndex) HorizontalDivider(color = HoloBorder, thickness = 0.5.dp)
+                        if (i < peers.lastIndex) HorizontalDivider(color = Tokens.Colors.divider, thickness = 0.5.dp)
                     }
                 }
             }
@@ -239,8 +214,8 @@ internal fun NetworkScreen(
         SectionTitle(stringResource(R.string.net_diagnostics))
         SurfaceCard(onClick = { benchPick = true }) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Speed, null, tint = HoloSecondary, modifier = Modifier.size(26.dp))
-                Spacer(Modifier.width(14.dp))
+                Icon(Icons.Filled.Speed, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconL))
+                Spacer(Modifier.width(Tokens.Space.m))
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.net_bench_row), color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
                     Text(
@@ -249,20 +224,20 @@ internal fun NetworkScreen(
                         fontSize = Tokens.Font.small,
                     )
                 }
-                Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+                Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
             }
         }
 
         // 7. Офлайн-очередь.
         SurfaceCard(onClick = onOpenOutbox) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Schedule, null, tint = HoloAccent, modifier = Modifier.size(26.dp))
-                Spacer(Modifier.width(14.dp))
+                Icon(Icons.Filled.Schedule, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconL))
+                Spacer(Modifier.width(Tokens.Space.m))
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.net_offline_queue, queued), color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
                     Text(stringResource(R.string.net_offline_queue_desc), color = HoloSecondary, fontSize = Tokens.Font.small)
                 }
-                Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+                Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
             }
         }
     }
@@ -284,11 +259,11 @@ internal fun NetworkScreen(
                                 Modifier.fillMaxWidth().clickable {
                                     benchPick = false
                                     benchTarget = c
-                                }.padding(vertical = 10.dp),
+                                }.padding(vertical = Tokens.Space.m),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 SquareAvatar(c.displayName, size = 32.dp, circle = true)
-                                Spacer(Modifier.width(12.dp))
+                                Spacer(Modifier.width(Tokens.Space.m))
                                 Text(c.displayName, color = Color.White, fontSize = Tokens.Font.label)
                             }
                         }
@@ -340,21 +315,21 @@ internal fun SurfaceCard(
     val base = Modifier.fillMaxWidth().padding(horizontal = outer)
         .clip(RoundedCornerShape(Tokens.Radius.card))
         .background(Tokens.Colors.surface)
-    Box((if (onClick != null) base.clickable { onClick() } else base).padding(14.dp)) { content() }
+    Box((if (onClick != null) base.clickable { onClick() } else base).padding(Tokens.Space.m)) { content() }
 }
 
 /** Метрика: подпись + крупное значение (+ опц. единица). */
 @Composable
 internal fun MetricCard(label: String, value: String, unit: String?, modifier: Modifier = Modifier) {
-    Box(modifier.clip(RoundedCornerShape(Tokens.Radius.card)).background(Tokens.Colors.surface).padding(14.dp)) {
+    Box(modifier.clip(RoundedCornerShape(Tokens.Radius.card)).background(Tokens.Colors.surface).padding(Tokens.Space.m)) {
         Column {
             Text(label, color = HoloSecondary, fontSize = Tokens.Font.caption)
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(Tokens.Space.s))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(value, color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
                 if (unit != null) {
-                    Spacer(Modifier.width(3.dp))
-                    Text(unit, color = HoloSecondary, fontSize = Tokens.Font.caption, modifier = Modifier.padding(bottom = 3.dp))
+                    Spacer(Modifier.width(Tokens.Space.xxs))
+                    Text(unit, color = HoloSecondary, fontSize = Tokens.Font.caption, modifier = Modifier.padding(bottom = Tokens.Space.xxs))
                 }
             }
         }
@@ -366,12 +341,12 @@ internal fun MetricCard(label: String, value: String, unit: String?, modifier: M
 internal fun OutlineAction(text: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
         modifier.clip(RoundedCornerShape(Tokens.Radius.button)).border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.button))
-            .clickable { onClick() }.padding(vertical = 12.dp),
+            .clickable { onClick() }.padding(vertical = Tokens.Space.m),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
+        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconS))
+        Spacer(Modifier.width(Tokens.Space.s))
         Text(text, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
     }
 }
@@ -380,8 +355,8 @@ internal fun OutlineAction(text: String, icon: ImageVector, modifier: Modifier =
 @Composable
 internal fun BenefitRow(icon: ImageVector, tint: Color, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(12.dp))
+        Icon(icon, null, tint = tint, modifier = Modifier.size(Tokens.Size.iconS))
+        Spacer(Modifier.width(Tokens.Space.m))
         Text(text, color = if (tint == HoloSecondary) HoloSecondary else Color.White, fontSize = Tokens.Font.body)
     }
 }
@@ -389,14 +364,23 @@ internal fun BenefitRow(icon: ImageVector, tint: Color, text: String) {
 /** Строка пира: направление (вход/исход) · короткий адрес · пинг с цветом. */
 @Composable
 internal fun PeerRow(p: NetPeer) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(if (p.inbound) "↙" else "↗", color = HoloSecondary, fontSize = Tokens.Font.label)
-        Spacer(Modifier.width(10.dp))
+    Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
+        // Направление — иконкой с подписью: стрелки-глифы TalkBack читал как
+        // «стрелка влево вниз», а шрифт мог их и не иметь.
+        Icon(
+            if (p.inbound) Icons.Filled.SouthWest else Icons.Filled.NorthEast,
+            stringResource(if (p.inbound) R.string.net_peer_inbound else R.string.net_peer_outbound),
+            tint = HoloSecondary,
+            modifier = Modifier.size(Tokens.Size.iconS),
+        )
+        Spacer(Modifier.width(Tokens.Space.m))
+        // Пир из конфига, с которым соединение ещё не поднялось: ключа у него нет,
+        // и строка была пустой — будто сломанная запись.
         Text(
-            shortHex(p.key),
-            color = Color.White,
+            if (p.key.isEmpty()) stringResource(R.string.net_peer_connecting) else shortHex(p.key),
+            color = if (p.up && p.key.isNotEmpty()) Color.White else HoloSecondary,
             fontSize = Tokens.Font.body,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = if (p.key.isEmpty()) null else FontFamily.Monospace,
             modifier = Modifier.weight(1f),
         )
         val ms = p.latencyMs
@@ -413,14 +397,6 @@ internal fun PeerRow(p: NetPeer) {
 /** Короткий вид hex-адреса: первые 8 … последние 4. */
 internal fun shortHex(h: String): String =
     if (h.length > 14) h.take(8) + "…" + h.takeLast(4) else h
-
-internal fun copyToClipboard(ctx: android.content.Context, text: String, label: String) {
-    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-    cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
-    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
-        android.widget.Toast.makeText(ctx, ctx.getString(R.string.common_copied), android.widget.Toast.LENGTH_SHORT).show()
-    }
-}
 
 internal fun shareText(ctx: android.content.Context, text: String) {
     val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {

@@ -5,7 +5,6 @@
 
 package chat.peerage.ui
 
-import android.os.Build
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -43,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -167,7 +167,7 @@ internal fun ContactsScreen(
                 Icon(Icons.Filled.Warning, null, tint = Tokens.Colors.noticeText, modifier = Modifier.size(Tokens.Size.iconS))
                 Spacer(Modifier.width(Tokens.Space.m))
                 Text(
-                    stringResource(R.string.outbox_warn, model.outboxPending),
+                    pluralStringResource(R.plurals.outbox_warn, model.outboxPending, model.outboxPending),
                     color = Tokens.Colors.noticeText,
                     fontSize = Tokens.Font.body,
                     modifier = Modifier.weight(1f),
@@ -719,7 +719,7 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                stringResource(R.string.peers_online, model.netPeers),
+                pluralStringResource(R.plurals.peers_online, model.netPeers, model.netPeers),
                 color = if (model.netPeers > 0) HoloOnline else Tokens.Colors.tertiary,
                 fontSize = Tokens.Font.body,
                 modifier = Modifier.padding(top = Tokens.Space.xxs),
@@ -752,14 +752,7 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
             // только текстом. Иконка в строке адреса копировала не адрес, а код.
             // Копируется ТОТ ЖЕ код, что в QR: голый ключ после смены адреса уже не
             // ведёт к нам (ADR-007), а «Добавить» принимает и то, и другое.
-            CardRow(onClick = {
-                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                    as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("exchange code", code))
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                    android.widget.Toast.makeText(ctx, ctx.getString(R.string.common_copied), android.widget.Toast.LENGTH_SHORT).show()
-                }
-            }, inset = 0.dp) {
+            CardRow(onClick = { copyToClipboard(ctx, code, "exchange code") }, inset = 0.dp) {
                 Icon(Icons.Filled.ContentCopy, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
                 Spacer(Modifier.width(Tokens.Space.m))
                 Text(stringResource(R.string.me_copy_key), color = Color.White, fontSize = Tokens.Font.label)

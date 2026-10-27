@@ -80,7 +80,7 @@ internal fun SavedScreen(model: AppModel) {
             LazyColumn(
                 state = listState,
                 reverseLayout = true,
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = Tokens.Space.m),
             ) {
                 // От свежей к старой: лента привязана к низу.
                 items(model.notes.asReversed(), key = { it.id }) { n ->
@@ -91,7 +91,7 @@ internal fun SavedScreen(model: AppModel) {
                         horizontalArrangement = Arrangement.End,
                     ) {
                         Box(
-                            Modifier.widthIn(max = 290.dp).clip(RoundedCornerShape(Tokens.Radius.bubble))
+                            Modifier.widthIn(max = Tokens.Size.bubbleMax).clip(RoundedCornerShape(Tokens.Radius.bubble))
                                 .background(BubbleOut)
                                 .then(
                                     if (selected) {
@@ -104,7 +104,7 @@ internal fun SavedScreen(model: AppModel) {
                                     onLongClick = { model.toggleSelect(n) },
                                     onClick = { if (selection.isNotEmpty()) model.toggleSelect(n) },
                                 )
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
                         ) {
                             // Заметка себе: галочек нет — доставлять некому.
                             val meta: @Composable () -> Unit = {
@@ -122,13 +122,16 @@ internal fun SavedScreen(model: AppModel) {
         // Ввод как в чате, но без скрепки и микрофона: вложения себе — отдельная
         // работа (блоб надо положить и связать), а рисовать неработающее нельзя.
         Row(
-            Modifier.fillMaxWidth().background(HoloBg).padding(horizontal = 8.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().background(HoloBg).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.weight(1f).height(Tokens.Size.inputField)
+                // Высота — от содержимого (не меньше поля чата): при фиксированной
+                // высоте и maxLines = 4 вторая строка заметки уходила под край.
+                Modifier.weight(1f).heightIn(min = Tokens.Size.inputField)
                     .clip(RoundedCornerShape(Tokens.Radius.button))
-                    .background(Tokens.Colors.surface).padding(horizontal = Tokens.Space.m),
+                    .background(Tokens.Colors.surface)
+                    .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 androidx.compose.foundation.text.BasicTextField(
@@ -176,7 +179,7 @@ private fun SavedSelectionBar(model: AppModel) {
     var confirm by remember { mutableStateOf(false) }
 
     Row(
-        Modifier.fillMaxWidth().background(HoloSurface).padding(horizontal = 8.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().background(HoloSurface).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel)) { model.clearSelection() }
@@ -185,7 +188,7 @@ private fun SavedSelectionBar(model: AppModel) {
             color = Color.White,
             fontSize = Tokens.Font.label,
             fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f).padding(start = 8.dp),
+            modifier = Modifier.weight(1f).padding(start = Tokens.Space.s),
         )
         BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
             model.beginForward(myKey)
@@ -209,11 +212,7 @@ private fun SavedSelectionBar(model: AppModel) {
         BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
             val text = model.selectedText(myKey)
             if (text.isNotEmpty()) {
-                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                    as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("message", text))
-                android.widget.Toast
-                    .makeText(ctx, R.string.chat_copied, android.widget.Toast.LENGTH_SHORT).show()
+                copyToClipboard(ctx, text, "message")
             }
             model.clearSelection()
         }

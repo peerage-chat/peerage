@@ -6,10 +6,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
@@ -40,7 +38,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -51,17 +48,9 @@ import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
-/**
- * Настройки (M4) — по app-ui.md: профиль-шапка, затем группы «Конфиденциальность»,
- * «Безопасность», «Медиа и сеть», футер «О программе».
- *
- * Про конфиденциальность: тумблеров нет намеренно. Отчёты о прочтении и индикатор
- * набора мы не отправляем ВООБЩЕ — переключатель подразумевал бы, что сигнал есть и
- * его можно выключить. Показываем факт, а не иллюзию выбора. Появится сигнал —
- * появится и тумблер.
- */
 /**
  * Настройки — ОГЛАВЛЕНИЕ, а не простыня.
  *
@@ -268,8 +257,10 @@ internal fun SettingsMediaScreen(model: AppModel) {
         val resOk = resolutions.isEmpty() || resolutions.any { it.width == q.width && it.height == q.height }
         val fpsOk = q.fps == 30 || has60
         if (!resOk || !fpsOk) {
-            val r = resolutions.firstOrNull { it.width == q.width && it.height == q.height } ?: resolutions.first()
-            model.setVideoDefaults(w = r.width, h = r.height, fps = if (fpsOk) q.fps else 30)
+            // Список бывает пуст (нет камеры, эмулятор): тогда разрешение не трогаем,
+            // а `first()` здесь ронял экран, если сохранены 60 fps.
+            val r = resolutions.firstOrNull { it.width == q.width && it.height == q.height } ?: resolutions.firstOrNull()
+            model.setVideoDefaults(w = r?.width ?: q.width, h = r?.height ?: q.height, fps = if (fpsOk) q.fps else 30)
         }
     }
     val outs = model.availableAudioOuts()
@@ -324,7 +315,7 @@ internal fun SettingsMediaScreen(model: AppModel) {
                 ) {
                     model.bitrateOptions(q.width, q.height, q.fps).forEachIndexed { i, bps ->
                         OptionChip(
-                            stringResource(R.string.share_bitrate_value, bps / 1_000_000),
+                            stringResource(R.string.share_bitrate_value, fmtMbps(bps)),
                             !model.videoBitrateAuto && model.videoBitrateIdx == i,
                         ) { model.setVideoDefaults(bitrateAuto = false, bitrateIdx = i) }
                     }
@@ -393,7 +384,7 @@ internal fun SettingsMediaScreen(model: AppModel) {
                 Slider(
                     value = model.audioBitrate.toFloat(),
                     onValueChange = { model.setAudioQuality(false, it.roundToInt()) },
-                    valueRange = 16_000f..48_000f,
+                    valueRange = AppModel.AUDIO_BITRATE_MIN.toFloat()..AppModel.AUDIO_BITRATE_MAX.toFloat(),
                     enabled = !model.audioQualityAuto,
                     // Дорожка — tertiary: цвет тайла сливается с фоном карточки, и в
                     // режиме «авто» ползунок висел в пустоте.
@@ -408,7 +399,7 @@ internal fun SettingsMediaScreen(model: AppModel) {
                 )
                 Text(
                     if (model.audioQualityAuto) {
-                        stringResource(R.string.audio_quality_adaptive, 16, 48)
+                        stringResource(R.string.audio_quality_adaptive, AppModel.AUDIO_BITRATE_MIN / 1000, AppModel.AUDIO_BITRATE_MAX / 1000)
                     } else {
                         stringResource(R.string.audio_quality_rate, model.audioBitrate / 1000)
                     },
@@ -465,16 +456,7 @@ private fun OptionBlock(
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
         ) {
             Text(label, color = Color.White, fontSize = Tokens.Font.label)
-            if (badge != null) {
-                Text(
-                    badge,
-                    color = Tokens.Colors.accent,
-                    fontSize = Tokens.Font.caption,
-                    modifier = Modifier.clip(RoundedCornerShape(Tokens.Radius.badge))
-                        .background(Tokens.Colors.accentBadge)
-                        .padding(horizontal = 7.dp, vertical = 2.dp),
-                )
-            }
+            if (badge != null) TagBadge(badge)
             Spacer(Modifier.weight(1f))
             trailing?.invoke()
         }
@@ -641,15 +623,11 @@ private fun SeedPhraseSheet(model: AppModel, onClose: () -> Unit) {
             model.clearRevealedPhrase()
             onClose()
         }
-        Text(
-            stringResource(R.string.common_back),
-            color = HoloAccent,
-            fontSize = Tokens.Font.label,
-            modifier = Modifier.clickable {
-                model.clearRevealedPhrase()
-                onClose()
-            },
-        )
+        // Кнопкой, а не голым текстом: у текста зона касания — высота строки.
+        OutlineButton(stringResource(R.string.common_back)) {
+            model.clearRevealedPhrase()
+            onClose()
+        }
     }
 }
 
@@ -755,6 +733,7 @@ internal fun VaultUnlockScreen(onSubmit: (String, (Boolean) -> Unit) -> Unit) {
             singleLine = true,
             enabled = !busy,
             visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            keyboardOptions = PasswordKeyboard,
         )
         if (wrong) {
             Spacer(Modifier.height(8.dp))
@@ -767,8 +746,7 @@ internal fun VaultUnlockScreen(onSubmit: (String, (Boolean) -> Unit) -> Unit) {
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = Tokens.Font.small)
         } else {
-            AccentButton(stringResource(R.string.vault_unlock_btn)) {
-                if (password.isEmpty()) return@AccentButton
+            AccentButton(stringResource(R.string.vault_unlock_btn), enabled = password.isNotEmpty()) {
                 busy = true
                 onSubmit(password) { ok ->
                     busy = false
@@ -831,6 +809,7 @@ internal fun VaultLevelScreen(model: AppModel, dataDir: String, onDone: () -> Un
                 singleLine = true,
                 placeholder = { Text(stringResource(R.string.vault_ph_current), color = HoloSecondary) },
                 visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                keyboardOptions = PasswordKeyboard,
             )
         }
         if (target != VaultLevel.KEYSTORE) {
@@ -845,6 +824,7 @@ internal fun VaultLevelScreen(model: AppModel, dataDir: String, onDone: () -> Un
                 singleLine = true,
                 placeholder = { Text(stringResource(R.string.vault_ph_password), color = HoloSecondary) },
                 visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                keyboardOptions = PasswordKeyboard,
             )
             TextField(
                 repeat,
@@ -855,6 +835,7 @@ internal fun VaultLevelScreen(model: AppModel, dataDir: String, onDone: () -> Un
                 placeholder = { Text(stringResource(R.string.vault_ph_repeat), color = HoloSecondary) },
                 isError = repeat.isNotEmpty() && repeat != newPassword,
                 visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                keyboardOptions = PasswordKeyboard,
             )
             if (repeat.isNotEmpty() && repeat != newPassword) {
                 Text(stringResource(R.string.vault_mismatch), color = HoloError, fontSize = Tokens.Font.small)
@@ -873,17 +854,22 @@ internal fun VaultLevelScreen(model: AppModel, dataDir: String, onDone: () -> Un
         if (busy) {
             Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = Tokens.Font.body)
         } else {
-            AccentButton(stringResource(R.string.vault_apply)) {
-                if (!ready) return@AccentButton
+            // Неготовая кнопка — серая, а не молча глухая: иначе нажатие ничего не
+            // делало и не объясняло почему.
+            AccentButton(stringResource(R.string.vault_apply), enabled = ready) {
                 busy = true
                 failed = false
-                scope.launch(Dispatchers.IO) {
-                    val ok = VaultKeyManager.changeLevel(
-                        dir,
-                        target,
-                        oldPassword.ifEmpty { null },
-                        newPassword.ifEmpty { null },
-                    )
+                scope.launch {
+                    // Argon2id — на IO, а итог — на главном: он уводит с экрана, а
+                    // навигацию из фонового потока трогать нельзя (инвариант 4).
+                    val ok = withContext(Dispatchers.IO) {
+                        VaultKeyManager.changeLevel(
+                            dir,
+                            target,
+                            oldPassword.ifEmpty { null },
+                            newPassword.ifEmpty { null },
+                        )
+                    }
                     busy = false
                     if (ok) onDone() else failed = true
                 }

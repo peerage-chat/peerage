@@ -56,7 +56,7 @@
     <string name="share_preview_back">превью · тыловая</string>
     <string name="share_preview_screen">превью · экран устройства</string>
     <string name="share_fps_value">%1$d fps</string>
-    <string name="share_bitrate_value">%1$d Мбит/с</string>
+    <string name="share_bitrate_value">%1$s Мбит/с</string>
     <string name="audio_settings_title">Настройки звука</string>
     <string name="audio_mic_level">уровень микрофона</string>
     <string name="audio_input">Микрофон</string>
@@ -104,7 +104,12 @@
     <string name="menu_storage">Хранилище</string>
     <!-- Экран хранилища (пока сознательно простой) -->
     <string name="storage_attachments">Вложения</string>
-    <string name="storage_files">%1$d файлов</string>
+    <plurals name="storage_files">
+        <item quantity="one">%d файл</item>
+        <item quantity="few">%d файла</item>
+        <item quantity="many">%d файлов</item>
+        <item quantity="other">%d файла</item>
+    </plurals>
     <string name="storage_attachments_hint">Фото, файлы и голосовые, которые вы отправили или получили. Очистка не удаляет сообщения — файлы можно скачать у отправителя заново.</string>
     <string name="storage_clear_attachments">Очистить вложения</string>
     <string name="storage_clear_confirm">Удалить скачанные вложения? Сообщения останутся; файлы можно будет скачать заново, пока они есть у отправителя.</string>
@@ -142,7 +147,12 @@
     <string name="contacts_empty_hint">Добавьте собеседника по ключу или QR — кнопкой вверху</string>
     <string name="channels_soon">Каналы — скоро</string>
     <!-- Предупреждение о разросшейся очереди (ничего не удаляется, это только уведомление) -->
-    <string name="outbox_warn">%1$d сообщений ещё ждут доставки. Они сохранены — получатели получат их, когда выйдут в сеть.</string>
+    <plurals name="outbox_warn">
+        <item quantity="one">%d сообщение ещё ждёт доставки. Всё сохранено — уйдёт, когда получатель появится в сети.</item>
+        <item quantity="few">%d сообщения ещё ждут доставки. Всё сохранено — уйдёт, когда получатели появятся в сети.</item>
+        <item quantity="many">%d сообщений ещё ждут доставки. Всё сохранено — уйдёт, когда получатели появятся в сети.</item>
+        <item quantity="other">%d сообщения ещё ждут доставки. Всё сохранено — уйдёт, когда получатели появятся в сети.</item>
+    </plurals>
     <string name="settings_outbox_warn">Предупреждать о росте очереди</string>
     <string name="settings_outbox_warn_hint">Сообщения не удаляются — это только уведомление</string>
     <!-- Запросы в контакты (гейт вместо TOFU-автодобавления) -->
@@ -231,7 +241,6 @@
     <string name="saved_empty_hint">Сообщения, которые вы сохраните, появятся здесь</string>
 
     <!-- ── Экран «Сеть» ────────────────────────────────────────────────── -->
-    <string name="net_connected_to">Подключено к </string>
     <string name="net_metric_peers">Пиры</string>
     <string name="net_metric_ping">Пинг</string>
     <string name="net_unit_ms">мс</string>
@@ -243,10 +252,12 @@
     <string name="net_my_qr">Мой QR</string>
     <string name="net_share">Поделиться</string>
     <string name="net_mode">Режим участия</string>
+    <string name="net_connected">Подключено к мешу</string>
+    <string name="net_peer_connecting">подключается…</string>
+    <string name="net_peer_inbound">Входящее</string>
+    <string name="net_peer_outbound">Исходящее</string>
     <string name="net_node_mode">Узел сети</string>
-    <string name="net_node_mode_desc">Ретранслирую трафик других — помогаю сети</string>
-    <string name="net_benefit_priority">Приоритет доставки твоих сообщений</string>
-    <string name="net_benefit_queue">Дольше хранится офлайн-очередь</string>
+    <string name="net_node_mode_desc">Пока приложение в сети, телефон пересылает чужой трафик — на этом меш и держится</string>
     <string name="net_benefit_cost">Цена: выше расход батареи и трафика</string>
     <string name="net_peers_label">Пиры · %1$d</string>
     <string name="net_no_peers">Нет прямых пиров</string>
@@ -364,7 +375,12 @@
     <string name="attach_gallery_denied">Доступ к галерее не выдан</string>
     <string name="outbox_empty_title">Всё доставлено</string>
     <string name="outbox_empty_hint">Сообщения, отправленные пока собеседник был офлайн, ждут здесь и уходят сами.</string>
-    <string name="outbox_total">%1$d сообщений ждут</string>
+    <plurals name="outbox_total">
+        <item quantity="one">%d сообщение ждёт</item>
+        <item quantity="few">%d сообщения ждут</item>
+        <item quantity="many">%d сообщений ждут</item>
+        <item quantity="other">%d сообщения ждут</item>
+    </plurals>
     <string name="outbox_lead_hint">Они уйдут, как только получатель появится в сети. Сервера, который подержит их за нас, нет — поэтому очередь не чистится ни по сроку, ни по объёму.</string>
     <string name="outbox_warn_title">Очередь разрослась</string>
     <string name="outbox_warn_hint">Больше тысячи неотправленных — обычно так бывает, если собеседник давно не появлялся. Место они занимают на этом устройстве.</string>
@@ -386,15 +402,41 @@
     <string name="outbox_clear_all">Очистить всё</string>
     <string name="outbox_clear_all_hint">Удаляются ВАШИ сообщения, которые ещё не дошли ни до кого. Отменить нельзя.</string>
     <string name="outbox_clear_all_title">Очистить всю очередь?</string>
-    <string name="outbox_clear_all_body">Ждут доставки %1$d получателей. Всё, что они не успели получить, пропадёт безвозвратно.</string>
-    <string name="outbox_clear_all_final">%1$d сообщений будут потеряны</string>
+    <plurals name="outbox_clear_all_body">
+        <item quantity="one">Доставки ждёт %d получатель. Всё недоставленное пропадёт безвозвратно.</item>
+        <item quantity="few">Доставки ждут %d получателя. Всё недоставленное пропадёт безвозвратно.</item>
+        <item quantity="many">Доставки ждут %d получателей. Всё недоставленное пропадёт безвозвратно.</item>
+        <item quantity="other">Доставки ждут %d получателя. Всё недоставленное пропадёт безвозвратно.</item>
+    </plurals>
+    <string name="outbox_more">и ещё %1$d</string>
+    <plurals name="outbox_clear_all_final">
+        <item quantity="one">%d сообщение будет потеряно</item>
+        <item quantity="few">%d сообщения будут потеряны</item>
+        <item quantity="many">%d сообщений будут потеряны</item>
+        <item quantity="other">%d сообщения будут потеряны</item>
+    </plurals>
     <string name="outbox_hold_hint">Отмены не будет. Удерживайте кнопку, чтобы подтвердить.</string>
     <string name="common_hold">Удерживайте…</string>
     <string name="common_next">Далее</string>
-    <string name="ago_days">%1$d дней</string>
-    <string name="ago_hours">%1$d часов</string>
+    <plurals name="ago_days">
+        <item quantity="one">%d день</item>
+        <item quantity="few">%d дня</item>
+        <item quantity="many">%d дней</item>
+        <item quantity="other">%d дня</item>
+    </plurals>
+    <plurals name="ago_hours">
+        <item quantity="one">%d час</item>
+        <item quantity="few">%d часа</item>
+        <item quantity="many">%d часов</item>
+        <item quantity="other">%d часа</item>
+    </plurals>
     <string name="ago_minutes">%1$d мин</string>
-    <string name="storage_total_sub">занято вложениями · %1$d файлов</string>
+    <plurals name="storage_total_sub">
+        <item quantity="one">занято вложениями · %d файл</item>
+        <item quantity="few">занято вложениями · %d файла</item>
+        <item quantity="many">занято вложениями · %d файлов</item>
+        <item quantity="other">занято вложениями · %d файла</item>
+    </plurals>
     <string name="storage_by_chat">По чатам</string>
     <string name="storage_free_up">Освободить место</string>
     <string name="storage_backup">Резервная копия данных</string>
@@ -437,7 +479,12 @@
     <string name="folder_pick_chats">Или выберите конкретные чаты:</string>
     <string name="folder_exclude">Исключить</string>
     <string name="folder_exclude_read">Прочитанные</string>
-    <string name="folder_counter">В папку попадает %1$d чатов</string>
+    <plurals name="folder_counter">
+        <item quantity="one">В папку попадает %d чат</item>
+        <item quantity="few">В папку попадают %d чата</item>
+        <item quantity="many">В папку попадает %d чатов</item>
+        <item quantity="other">В папку попадает %d чата</item>
+    </plurals>
     <string name="folder_delete">Удалить папку</string>
     <string name="folder_delete_confirm">Чаты останутся на месте — исчезнет только вид.</string>
     <string name="folder_delete_ok">Удалить</string>
@@ -491,12 +538,22 @@
 
     <!-- Поток трафика и смена адреса (ADR-007) -->
     <string name="flood_title">Вас заваливают трафиком</string>
-    <string name="flood_card_body">Идёт поток с %1$d адресов; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</string>
+    <plurals name="flood_card_body">
+        <item quantity="one">Идёт поток с %d адреса; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</item>
+        <item quantity="few">Идёт поток с %d адресов; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</item>
+        <item quantity="many">Идёт поток с %d адресов; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</item>
+        <item quantity="other">Идёт поток с %d адреса; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</item>
+    </plurals>
     <string name="flood_screen_title">Поток трафика</string>
     <string name="flood_explain">Приложение отбрасывает эти пакеты до расшифровки — процессор, батарея и память не тратятся, содержимое не показывается. Но байты уже дошли до радио, и трафик за них списан. Так устроена любая открытая сеть: кто знает адрес, тот может слать.</string>
     <string name="flood_sources">Источники</string>
     <string name="flood_blocked_tag">заблокирован</string>
-    <string name="flood_src_dropped">отброшено %1$d пакетов</string>
+    <plurals name="flood_src_dropped">
+        <item quantity="one">отброшен %d пакет</item>
+        <item quantity="few">отброшено %d пакета</item>
+        <item quantity="many">отброшено %d пакетов</item>
+        <item quantity="other">отброшено %d пакета</item>
+    </plurals>
     <string name="flood_src_stranger">не в контактах · отброшено %1$d</string>
     <string name="flood_pps">пкт/с</string>
     <string name="flood_what_to_do">Что можно сделать</string>
@@ -517,7 +574,12 @@
     <string name="rotate_selected">Выбрано %1$d из %2$d</string>
     <string name="rotate_will_lose">Останутся со старым адресом: %1$s</string>
     <string name="rotate_how">Как это произойдёт</string>
-    <string name="rotate_step_offline">Уйдём в офлайн ровно на %1$d секунд — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</string>
+    <plurals name="rotate_step_offline">
+        <item quantity="one">Уйдём в офлайн ровно на %d секунду — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</item>
+        <item quantity="few">Уйдём в офлайн ровно на %d секунды — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</item>
+        <item quantity="many">Уйдём в офлайн ровно на %d секунд — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</item>
+        <item quantity="other">Уйдём в офлайн ровно на %d секунды — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</item>
+    </plurals>
     <string name="rotate_step_up">Поднимемся под новым адресом.</string>
     <string name="rotate_step_tell">Выбранным контактам уйдёт подписанное уведомление — вручную ничего пересылать не нужно.</string>
     <string name="rotate_btn">Сменить адрес</string>
@@ -527,7 +589,12 @@
     <string name="rotate_p_stopped">Старый адрес погашен</string>
     <string name="rotate_p_pause">Пауза — осталось %1$d с</string>
     <string name="rotate_p_up">Подъём под новым адресом</string>
-    <string name="rotate_p_told">Уведомление %1$d контактам</string>
+    <plurals name="rotate_p_told">
+        <item quantity="one">Уведомление %d контакту</item>
+        <item quantity="few">Уведомление %d контактам</item>
+        <item quantity="many">Уведомление %d контактам</item>
+        <item quantity="other">Уведомление %d контакта</item>
+    </plurals>
     <string name="rotate_failed">Сменить адрес не удалось — вы снова на прежнем</string>
     <string name="rotate_failed_offline">Сменить адрес не удалось. Вы офлайн — нажмите «Вернуться в сеть»</string>
     <string name="rotate_done">Адрес сменён</string>
@@ -599,11 +666,31 @@
     <string name="backup_part_calls">Журнал звонков</string>
     <string name="backup_part_attachments">Вложения</string>
     <string name="backup_n_contacts">%1$d · с аватарами</string>
-    <string name="backup_n_messages">%1$d сообщений</string>
+    <plurals name="backup_n_messages">
+        <item quantity="one">%d сообщение</item>
+        <item quantity="few">%d сообщения</item>
+        <item quantity="many">%d сообщений</item>
+        <item quantity="other">%d сообщения</item>
+    </plurals>
     <string name="backup_n_notes">%1$d</string>
-    <string name="backup_n_calls">%1$d записей · никуда не уходит с устройства</string>
-    <string name="backup_n_attachments">%1$d файлов</string>
-    <string name="backup_n_attachments_skipped">%1$d файлов · %2$d крупных не войдут</string>
+    <plurals name="backup_n_calls">
+        <item quantity="one">%d запись · никуда не уходит с устройства</item>
+        <item quantity="few">%d записи · никуда не уходит с устройства</item>
+        <item quantity="many">%d записей · никуда не уходит с устройства</item>
+        <item quantity="other">%d записи · никуда не уходит с устройства</item>
+    </plurals>
+    <plurals name="backup_n_attachments">
+        <item quantity="one">%d файл</item>
+        <item quantity="few">%d файла</item>
+        <item quantity="many">%d файлов</item>
+        <item quantity="other">%d файла</item>
+    </plurals>
+    <plurals name="backup_n_attachments_skipped">
+        <item quantity="one">%1$d файл · крупных не войдёт: %2$d</item>
+        <item quantity="few">%1$d файла · крупных не войдёт: %2$d</item>
+        <item quantity="many">%1$d файлов · крупных не войдёт: %2$d</item>
+        <item quantity="other">%1$d файла · крупных не войдёт: %2$d</item>
+    </plurals>
     <string name="backup_big_hint">Крупные файлы в копию не помещаются, но их можно скачать у собеседника заново — они адресуются по содержимому.</string>
     <string name="backup_groups_title">Членство в группах не входит</string>
     <string name="backup_groups_text">Переписка групп в копию входит, а ключи — нет: копия возвращает то, что читать, а не то, чем расшифровывать. Восстановленное состояние группы устарело бы и сломало её для всех, поэтому группа откроется на чтение, а писать в неё можно будет после нового приглашения.</string>
@@ -625,6 +712,7 @@
     <string name="backup_merge_text">Ничего не удаляется: то, что пришло после копии, останется на месте. Повторное восстановление того же файла ничего не задвоит.</string>
     <string name="backup_restore_go">Восстановить</string>
     <string name="backup_read_failed">Не удалось прочитать файл</string>
+    <string name="backup_write_failed">Не удалось записать файл туда, куда вы выбрали. Попробуйте другое место.</string>
     <string name="backup_failed">Не получилось</string>
     <string name="backup_done_export">Копия готова</string>
     <string name="backup_done_restore">Восстановлено</string>
@@ -639,7 +727,6 @@
     <string name="backup_verify_again">Верификация контактов не переносится: файл могли подсунуть, а «сверено» означает, что отпечаток сверили вживую. После восстановления сверьте заново.</string>
 
     <string name="chat_copy">Копировать</string>
-    <string name="chat_copied">Скопировано</string>
     <string name="chat_reply">Ответить</string>
     <string name="chat_delete">Удалить</string>
     <string name="chat_delete_title">Удалить сообщений: %1$d</string>
@@ -654,7 +741,12 @@
 
     <string name="group_invite_waiting">Вы согласились — ждём ответа пригласившего. Он придёт, как только тот появится в сети.</string>
     <string name="backup_part_groups">Групповые чаты</string>
-    <string name="backup_n_group_messages">%1$d сообщений</string>
+    <plurals name="backup_n_group_messages">
+        <item quantity="one">%d сообщение</item>
+        <item quantity="few">%d сообщения</item>
+        <item quantity="many">%d сообщений</item>
+        <item quantity="other">%d сообщения</item>
+    </plurals>
     <string name="group_archived">Архив из копии · вы не состоите в этой группе</string>
     <string name="forward_action">Переслать</string>
     <string name="forward_title">Переслать (%1$d) в чат</string>
@@ -688,7 +780,12 @@
     <string name="me_title">Профиль</string>
     <string name="me_qr_card">Мой код для обмена</string>
     <string name="me_qr_hint">Покажите его собеседнику — он добавит вас без сервера</string>
-    <string name="peers_online">%1$d пиров в сети</string>
+    <plurals name="peers_online">
+        <item quantity="one">%d пир в сети</item>
+        <item quantity="few">%d пира в сети</item>
+        <item quantity="many">%d пиров в сети</item>
+        <item quantity="other">%d пира в сети</item>
+    </plurals>
     <string name="settings_title_sections">Разделы</string>
     <string name="settings_title_profile_data">Профиль и данные</string>
     <!-- ── Настройки: категории ─────────────────────────────────────────── -->

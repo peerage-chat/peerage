@@ -158,7 +158,7 @@ fun ShareVideoScreen(model: AppModel) {
             ) {
                 model.shareBitrateOptions().forEachIndexed { i, bps ->
                     Chip(
-                        stringResource(R.string.share_bitrate_value, bps / 1_000_000),
+                        stringResource(R.string.share_bitrate_value, chat.peerage.ui.fmtMbps(bps)),
                         !model.shareBitrateAuto && model.shareBitrateIdx == i,
                     ) { model.pickBitrateIdx(i) }
                 }
