@@ -241,11 +241,11 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
 
     Box(Modifier.fillMaxSize().background(Tokens.Colors.callBg)) {
         Column(
-            Modifier.fillMaxSize().padding(bottom = 56.dp),
+            Modifier.fillMaxSize().padding(bottom = Tokens.Space.hero + Tokens.Space.s),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Spacer(Modifier.height(96.dp))
+            Spacer(Modifier.height(Tokens.Space.hero * 2))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
                     Modifier.size(Tokens.Size.avatarBig).clip(RoundedCornerShape(Tokens.Radius.avatar)).background(HoloAccent),

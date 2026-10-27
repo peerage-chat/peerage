@@ -57,29 +57,29 @@ fun AudioSettingsScreen(model: AppModel) {
     val ins = model.availableAudioIns()
     Column(
         Modifier.fillMaxSize().background(Tokens.Colors.callBg).statusBarsPadding().navigationBarsPadding()
-            .verticalScroll(rememberScrollState()).padding(horizontal = 18.dp),
+            .verticalScroll(rememberScrollState()).padding(horizontal = Tokens.Space.l),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            Modifier.fillMaxWidth().padding(vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.clip(CircleShape).clickable { model.closeAudioSettings() }.padding(6.dp)) {
+            Box(Modifier.clip(CircleShape).clickable { model.closeAudioSettings() }.padding(Tokens.Space.s)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Color.White, modifier = Modifier.size(Tokens.Size.iconL))
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Tokens.Space.s))
             Text(stringResource(R.string.audio_settings_title), color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
         }
 
         // Живой уровень микрофона (20 сегментов).
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile).padding(15.dp)) {
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile).padding(Tokens.Space.l)) {
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                     Icon(Icons.Filled.Mic, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconS))
                     Text(stringResource(R.string.audio_mic_level), color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
                 }
-                Spacer(Modifier.height(11.dp))
+                Spacer(Modifier.height(Tokens.Space.m))
                 val lit = (model.micLevel * 20).roundToInt().coerceIn(0, 20)
-                Row(Modifier.fillMaxWidth().height(22.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth().height(22.dp), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                     repeat(20) { i ->
                         Box(
                             Modifier.weight(1f).fillMaxHeight()
@@ -91,23 +91,23 @@ fun AudioSettingsScreen(model: AppModel) {
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(Tokens.Space.l))
         SectionLabel(stringResource(R.string.audio_input), stringResource(R.string.share_available_on_device))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             if ("builtin" in ins) DevChip(Icons.Filled.Smartphone, stringResource(R.string.audio_dev_builtin), model.audioIn == "builtin") { model.pickAudioIn("builtin") }
             if ("headset" in ins) DevChip(Icons.Filled.Headset, stringResource(R.string.audio_dev_headset), model.audioIn == "headset") { model.pickAudioIn("headset") }
             if ("bluetooth" in ins) DevChip(Icons.Filled.Bluetooth, stringResource(R.string.audio_dev_bluetooth), model.audioIn == "bluetooth") { model.pickAudioIn("bluetooth") }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(Tokens.Space.l))
         SectionLabel(stringResource(R.string.audio_output))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             if ("builtin" in outs) DevChip(Icons.Filled.Smartphone, stringResource(R.string.audio_dev_builtin), model.audioOut == "builtin") { model.pickAudioOut("builtin") }
             if ("speaker" in outs) DevChip(Icons.Filled.VolumeUp, stringResource(R.string.audio_dev_speaker), model.audioOut == "speaker") { model.pickAudioOut("speaker") }
             if ("bluetooth" in outs) DevChip(Icons.Filled.Bluetooth, stringResource(R.string.audio_dev_bluetooth), model.audioOut == "bluetooth") { model.pickAudioOut("bluetooth") }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(Tokens.Space.l))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.audio_quality), color = Tokens.Colors.secondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             val auto = model.audioQualityAuto
@@ -116,15 +116,15 @@ fun AudioSettingsScreen(model: AppModel) {
                     .background(if (auto) Tokens.Colors.accentMuted else Tokens.Colors.tile)
                     .then(if (auto) Modifier.border(1.5.dp, Tokens.Colors.accent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
                     .clickable { model.setAudioQuality(!auto) }
-                    .padding(horizontal = 11.dp, vertical = 5.dp),
+                    .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
             ) {
                 Icon(Icons.Filled.Bolt, null, tint = if (auto) Tokens.Colors.accent else Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconXs))
                 Text(stringResource(R.string.audio_quality_auto), color = if (auto) Tokens.Colors.accent else Color.White, fontSize = Tokens.Font.caption)
             }
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(Tokens.Space.xs))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(stringResource(R.string.audio_quality_voice), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
             Text(stringResource(R.string.audio_quality_audio), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
@@ -154,19 +154,19 @@ fun AudioSettingsScreen(model: AppModel) {
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(Tokens.Space.l))
         SectionLabel(stringResource(R.string.audio_processing))
         FxToggle(stringResource(R.string.audio_ns), model.audioFx.ns) { model.setAudioFx(ns = it) }
         FxToggle(stringResource(R.string.audio_aec), model.audioFx.aec) { model.setAudioFx(aec = it) }
         FxToggle(stringResource(R.string.audio_agc), model.audioFx.agc) { model.setAudioFx(agc = it) }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(Tokens.Space.xl))
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.accent)
-                .clickable { model.applyAudioSettings() }.padding(vertical = 15.dp),
+                .clickable { model.applyAudioSettings() }.padding(vertical = Tokens.Space.l),
             contentAlignment = Alignment.Center,
         ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = Tokens.Font.label, fontWeight = FontWeight.Bold) }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(Tokens.Space.xl))
     }
 }
 
@@ -175,9 +175,9 @@ private fun DevChip(icon: ImageVector, label: String, selected: Boolean, onClick
     Row(
         Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
             .then(if (selected) Modifier.border(1.5.dp, Tokens.Colors.accent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
-            .clickable { onClick() }.padding(horizontal = 13.dp, vertical = 9.dp),
+            .clickable { onClick() }.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
     ) {
         Icon(icon, null, tint = if (selected) Tokens.Colors.accent else Color.White, modifier = Modifier.size(Tokens.Size.iconXs))
         Text(label, color = if (selected) Tokens.Colors.accent else Color.White, fontSize = Tokens.Font.body)
@@ -188,7 +188,7 @@ private fun DevChip(icon: ImageVector, label: String, selected: Boolean, onClick
 private fun FxToggle(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.tile)
-            .clickable { onChange(!on) }.padding(horizontal = 14.dp, vertical = 10.dp),
+            .clickable { onChange(!on) }.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
@@ -208,9 +208,9 @@ private fun FxToggle(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
 @Composable
 private fun SectionLabel(text: String, badge: String? = null) {
     Row(
-        Modifier.padding(bottom = 8.dp),
+        Modifier.padding(bottom = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
     ) {
         Text(text, color = Tokens.Colors.secondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium)
         if (badge != null) {

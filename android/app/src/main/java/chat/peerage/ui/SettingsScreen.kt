@@ -558,7 +558,7 @@ private fun SettingRow(
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = Tokens.Font.label)
             if (value != null) {
-                Text(value, color = valueColor, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
+                Text(value, color = valueColor, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = Tokens.Space.xxs))
             }
         }
         if (onClick != null) {
@@ -590,7 +590,7 @@ private fun SettingSwitchRow(
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = Tokens.Font.label)
             if (value != null) {
-                Text(value, color = valueColor, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
+                Text(value, color = valueColor, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = Tokens.Space.xxs))
             }
         }
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
@@ -608,7 +608,7 @@ private fun SeedPhraseSheet(model: AppModel, onClose: () -> Unit) {
     SecureFlag()
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         Text(
             stringResource(R.string.onb_phrase_title),
@@ -676,16 +676,16 @@ internal fun LockScreen(onUnlock: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(Icons.Filled.Lock, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconHero))
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(Tokens.Space.xl))
         Text(
             stringResource(R.string.lock_title),
             color = Color.White,
             fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Tokens.Space.s))
         Text(stringResource(R.string.lock_subtitle), color = HoloSecondary, fontSize = Tokens.Font.body)
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(Tokens.Space.xxl))
         AccentButton(stringResource(R.string.lock_unlock), onClick = onUnlock)
     }
 }
@@ -708,20 +708,20 @@ internal fun VaultUnlockScreen(onSubmit: (String, (Boolean) -> Unit) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(Icons.Filled.Shield, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconHero))
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(Tokens.Space.l))
         Text(
             stringResource(R.string.vault_unlock_title),
             color = Color.White,
             fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Tokens.Space.s))
         Text(
             stringResource(R.string.vault_unlock_sub),
             color = HoloSecondary,
             fontSize = Tokens.Font.body,
         )
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(Tokens.Space.xl))
         TextField(
             password,
             {
@@ -736,14 +736,14 @@ internal fun VaultUnlockScreen(onSubmit: (String, (Boolean) -> Unit) -> Unit) {
             keyboardOptions = PasswordKeyboard,
         )
         if (wrong) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Tokens.Space.s))
             Text(stringResource(R.string.vault_wrong), color = HoloError, fontSize = Tokens.Font.body)
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(Tokens.Space.l))
         if (busy) {
             // Argon2id считается ~секунду: без индикатора это выглядит зависанием.
             CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Tokens.Space.s))
             Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = Tokens.Font.small)
         } else {
             AccentButton(stringResource(R.string.vault_unlock_btn), enabled = password.isNotEmpty()) {
@@ -778,7 +778,7 @@ internal fun VaultLevelScreen(model: AppModel, dataDir: String, onDone: () -> Un
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         LevelOption(
             VaultLevel.KEYSTORE,
@@ -893,10 +893,10 @@ private fun LevelOption(
                 onClick = { onPick(value) },
                 colors = RadioButtonDefaults.colors(selectedColor = HoloAccent, unselectedColor = HoloSecondary),
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Tokens.Space.s))
             Column {
                 Text(title, color = Color.White, fontSize = Tokens.Font.label)
-                Text(desc, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
+                Text(desc, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = Tokens.Space.xxs))
             }
         }
     }

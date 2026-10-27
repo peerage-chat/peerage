@@ -134,7 +134,7 @@ private fun ImportKeyStep(model: AppModel, onBack: () -> Unit) {
 private fun ColumnScope.PhraseInput(phrase: String, error: Boolean, onChange: (String) -> Unit) {
     Box(
         Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
-            .border(1.dp, if (error) HoloError else HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
+            .border(1.dp, if (error) HoloError else HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(Tokens.Space.m),
     ) {
         if (phrase.isEmpty()) Text(stringResource(R.string.onb_phrase_placeholder), color = HoloSecondary, fontSize = Tokens.Font.label)
         BasicTextField(
@@ -231,10 +231,10 @@ internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
             onSecondary = { step = 2 },
         ) {
             Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(Tokens.Size.iconXl))
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(Tokens.Space.l))
             val reason = if (why == Recovery.KEY_LOST) R.string.recovery_reason_key_lost else R.string.recovery_reason_mismatch
             Text(stringResource(reason), color = Color.White, fontSize = Tokens.Font.label, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(Tokens.Space.m))
             Text(stringResource(R.string.recovery_body), color = HoloSecondary, fontSize = Tokens.Font.body, textAlign = TextAlign.Center)
         }
     }
@@ -263,7 +263,7 @@ private fun OnbScaffold(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
-        Modifier.fillMaxSize().background(HoloBg).padding(horizontal = 24.dp).padding(top = 24.dp, bottom = 22.dp),
+        Modifier.fillMaxSize().background(HoloBg).padding(horizontal = Tokens.Space.xxl).padding(top = Tokens.Space.xxl, bottom = Tokens.Space.xl),
     ) {
         Box(Modifier.fillMaxWidth().height(56.dp), Alignment.Center) {
             Text(title, color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
@@ -272,7 +272,7 @@ private fun OnbScaffold(
             Text(desc, color = HoloSecondary, fontSize = Tokens.Font.body, textAlign = TextAlign.Center)
         }
         Column(
-            Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp),
+            Modifier.fillMaxWidth().weight(1f).padding(vertical = Tokens.Space.s),
             verticalArrangement = contentArrangement,
             horizontalAlignment = Alignment.CenterHorizontally,
             content = content,
@@ -280,15 +280,15 @@ private fun OnbScaffold(
         Row(Modifier.fillMaxWidth().height(20.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             caption?.invoke(this)
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(Tokens.Space.m))
         OnbButton(primary, filled = true, onClick = onPrimary)
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(Tokens.Space.m))
         // Слот secondary держим всегда (пустой резерв на последнем шаге) — чтобы primary
         // не прыгал по вертикали между шагами.
         if (secondary != null) {
             OnbButton(secondary, filled = false, onClick = onSecondary ?: {})
         } else {
-            Spacer(Modifier.height(48.dp))
+            Spacer(Modifier.height(Tokens.Space.hero))
         }
     }
 }
@@ -313,9 +313,9 @@ private fun OnbButton(text: String, filled: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun Bullet(icon: ImageVector, text: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.s), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconL))
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Tokens.Space.m))
         Text(text, color = Color.White, fontSize = Tokens.Font.label)
     }
 }
@@ -335,7 +335,7 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
             Modifier.size(62.dp).clip(RoundedCornerShape(Tokens.Radius.pill)).background(HoloAccentDark),
             contentAlignment = Alignment.Center,
         ) { Icon(TablerIcons.ShieldLock, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconXl)) }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Tokens.Space.s))
         Bullet(TablerIcons.PhoneOff, stringResource(R.string.onb_bullet_nophone))
         Bullet(TablerIcons.AddressBookOff, stringResource(R.string.onb_bullet_nocontacts))
         Bullet(TablerIcons.MapPinOff, stringResource(R.string.onb_bullet_nolocation))
@@ -386,13 +386,13 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
                 contentAlignment = Alignment.Center,
             ) { Icon(TablerIcons.Camera, null, tint = HoloAccentDark, modifier = Modifier.size(Tokens.Size.iconS)) }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(Tokens.Space.m))
         Row(
-            Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile).padding(horizontal = 14.dp),
+            Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile).padding(horizontal = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(TablerIcons.User, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             val hint = stringResource(R.string.onb_name)
             BasicTextField(
                 value = name,
@@ -431,7 +431,7 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
             },
             caption = {
                 Icon(TablerIcons.ShieldCheck, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconXs))
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(Tokens.Space.s))
                 Text(stringResource(R.string.onb_screen_secure), color = HoloOnline, fontSize = Tokens.Font.caption)
             },
         ) { PhraseGrid(model.revealedPhrase) }
@@ -453,11 +453,11 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
     ) {
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(WarnBg)
-                .border(1.dp, WarnBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
+                .border(1.dp, WarnBorder, RoundedCornerShape(Tokens.Radius.button)).padding(Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(Tokens.Size.iconM))
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             Text(
                 stringResource(R.string.onb_key_warn),
                 color = WarnText,
@@ -480,8 +480,8 @@ internal fun ColumnScope.PhraseGrid(phrase: String?) {
     }
     Row(
         Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
-            .border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(Tokens.Space.m),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         for (col in 0 until 2) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.SpaceEvenly) {
@@ -530,7 +530,7 @@ private fun PermissionsStep(onDone: () -> Unit) {
         onPrimary = onDone,
         // Две карточки делят зону поровну; одна — не растягивается на весь экран,
         // а стоит по центру (иначе внутри карточки зияет пустота).
-        contentArrangement = if (showNotif) Arrangement.spacedBy(12.dp) else Arrangement.Center,
+        contentArrangement = if (showNotif) Arrangement.spacedBy(Tokens.Space.m) else Arrangement.Center,
     ) {
         if (showNotif) {
             PermCard(
@@ -590,27 +590,27 @@ private fun ColumnScope.PermCard(
     Column(
         Modifier.fillMaxWidth().then(if (fill) Modifier.weight(1f) else Modifier)
             .clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
-            .border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
+            .border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(Tokens.Space.m),
         verticalArrangement = Arrangement.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             Text(title, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
         }
-        Spacer(Modifier.height(9.dp))
+        Spacer(Modifier.height(Tokens.Space.s))
         Text(desc, color = HoloSecondary, fontSize = Tokens.Font.small)
-        Spacer(Modifier.height(11.dp))
+        Spacer(Modifier.height(Tokens.Space.m))
         // Высота зоны кнопок постоянна (38.dp) — карточки не «прыгают» после гранта.
         Box(Modifier.fillMaxWidth().height(38.dp), contentAlignment = Alignment.CenterStart) {
             when {
                 granted -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(TablerIcons.Check, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconS))
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(Tokens.Space.s))
                     Text(stringResource(R.string.onb_granted), color = HoloOnline, fontSize = Tokens.Font.body)
                 }
                 dismissed -> Text(stringResource(R.string.onb_later_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
-                else -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                else -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                     Box(
                         Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloAccent)
                             .clickable(onClick = onGrant),

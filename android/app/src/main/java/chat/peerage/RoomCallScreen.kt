@@ -348,9 +348,9 @@ private fun ParticipantTile(
         }
         if (chrome) {
             Row(
-                Modifier.align(Alignment.BottomStart).padding(7.dp)
+                Modifier.align(Alignment.BottomStart).padding(Tokens.Space.s)
                     .clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.tileScrim)
-                    .padding(horizontal = 7.dp, vertical = Tokens.Space.xxs),
+                    .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xxs),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
             ) {
@@ -367,9 +367,9 @@ private fun ParticipantTile(
                 // Ниже строки chrome-кнопок (шестерёнка/смена камеры в TopEnd), чтобы
                 // не перекрываться. Настроено под текущий 1:1 (тайл = экран); при
                 // мультипати-сетке (#24) вернуться к per-tile-раскладке.
-                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 52.dp, end = 7.dp)
+                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = Tokens.Space.m + Tokens.Size.chromeChip + Tokens.Space.s, end = Tokens.Space.s)
                     .clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.chipScrim)
-                    .padding(horizontal = 7.dp, vertical = Tokens.Space.xs),
+                    .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {

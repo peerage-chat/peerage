@@ -578,7 +578,7 @@ private fun CompactShell(model: AppModel) {
             if (screen == Screen.Contacts && model.dmCallPeer == null && model.incomingCall == null) {
                 FloatingActionButton(
                     onClick = { screen = Screen.NewChat },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(Tokens.Space.xl),
                     containerColor = HoloAccent,
                     contentColor = HoloAccentDark,
                 ) { Icon(TablerIcons.Pencil, stringResource(R.string.cd_new_chat), modifier = Modifier.size(Tokens.Size.iconM)) }

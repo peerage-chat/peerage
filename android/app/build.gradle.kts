@@ -97,9 +97,9 @@ dependencies {
     testImplementation("org.json:json:20240303")
 }
 
-// Хардкод стиля, который уже вычищен, не должен вернуться: размер шрифта и цвет в экранах —
-// только из Tokens (docs/design/tokens.md). Проверка до сборки, чтобы ловилось сразу, а не
-// на ревью. Отступы (`N.dp`) добавятся сюда, когда их тоже переведут на токены.
+// Хардкод стиля, который уже вычищен, не должен вернуться: размер шрифта, цвет, отступы и
+// размеры иконок в экранах — только из Tokens (docs/design/tokens.md). Проверка до сборки,
+// чтобы ловилось сразу, а не на ревью.
 val checkTokens by tasks.registering {
     val src = fileTree("src/main/java") {
         include("**/*.kt")
@@ -107,15 +107,33 @@ val checkTokens by tasks.registering {
     }
     inputs.files(src)
     doLast {
+        // Литерал N.dp — хардкод, если это ОТСТУП (padding/Spacer/spacedBy) или РАЗМЕР
+        // ИКОНКИ. 1.dp разрешён: хайрлайн бейджа, а не шаг сетки. Размеры компонентов
+        // (аватар 52, круг 72) не ловим — у них своя геометрия, а не шкала.
+        val dpN = """([2-9]|[1-9]\d+)(\.\d+)?\.dp"""
         val rules = listOf(
             Regex("""(?<![\w.])\d+(\.\d+)?\.sp\b""") to "размер шрифта — Tokens.Font",
             Regex("""Color\(0x""") to "цвет — Tokens.Colors",
+            Regex("""padding\([^)]*\b$dpN""") to "отступ — Tokens.Space",
+            Regex("""Spacer\(Modifier\.(width|height)\($dpN\)""") to "отступ — Tokens.Space",
+            Regex("""spacedBy\($dpN\)""") to "отступ — Tokens.Space",
+            Regex("""^\s*(horizontal|vertical|start|end|top|bottom) = $dpN""") to "отступ — Tokens.Space",
+            Regex("""Icon\(.*Modifier\.size\($dpN\)""") to "размер иконки — Tokens.Size.icon*",
         )
+        // Иконка, разнесённая по строкам: размер ищем в пределах её вызова.
+        val iconSize = Regex("""Modifier\.size\($dpN\)""")
         val hits = src.files.flatMap { f ->
-            f.readLines().withIndex().flatMap { (i, line) ->
+            val lines = f.readLines()
+            val single = lines.withIndex().flatMap { (i, line) ->
                 rules.filter { it.first.containsMatchIn(line) }
                     .map { "${f.relativeTo(projectDir)}:${i + 1}: ${it.second}: ${line.trim()}" }
             }
+            val multi = lines.withIndex().filter { (_, l) -> l.trimEnd().endsWith("Icon(") }.flatMap { (i, _) ->
+                lines.subList(i, minOf(i + 6, lines.size)).withIndex()
+                    .filter { (_, l) -> iconSize.containsMatchIn(l) }
+                    .map { (k, l) -> "${f.relativeTo(projectDir)}:${i + k + 1}: размер иконки — Tokens.Size.icon*: ${l.trim()}" }
+            }
+            single + multi
         }
         if (hits.isNotEmpty()) throw GradleException("Хардкод вместо токенов:\n" + hits.joinToString("\n"))
     }

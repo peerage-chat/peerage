@@ -59,21 +59,21 @@ fun ShareVideoScreen(model: AppModel) {
 
     Column(
         Modifier.fillMaxSize().background(Tokens.Colors.callBg).statusBarsPadding().navigationBarsPadding()
-            .verticalScroll(rememberScrollState()).padding(horizontal = 18.dp),
+            .verticalScroll(rememberScrollState()).padding(horizontal = Tokens.Space.l),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            Modifier.fillMaxWidth().padding(vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.clip(CircleShape).clickable { model.closeVideoShare() }.padding(6.dp),
+                Modifier.clip(CircleShape).clickable { model.closeVideoShare() }.padding(Tokens.Space.s),
             ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Color.White, modifier = Modifier.size(Tokens.Size.iconL)) }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Tokens.Space.s))
             Text(stringResource(R.string.share_title), color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
         }
 
         // Источник: камера / экран.
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
             SegButton(Icons.Filled.Videocam, stringResource(R.string.share_source_camera), !model.shareScreenMode, Modifier.weight(1f)) {
                 model.pickSource(false)
             }
@@ -82,7 +82,7 @@ fun ShareVideoScreen(model: AppModel) {
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(Tokens.Space.l))
 
         // Превью — плейсхолдер (живое превью не нужно; переключатель фронт/тыл для камеры).
         Box(
@@ -101,7 +101,7 @@ fun ShareVideoScreen(model: AppModel) {
                         tint = Tokens.Colors.iconMuted,
                         modifier = Modifier.size(Tokens.Size.iconHero),
                     )
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(Tokens.Space.m))
                     Text(
                         when {
                             model.shareScreenMode -> stringResource(R.string.share_preview_screen)
@@ -115,7 +115,7 @@ fun ShareVideoScreen(model: AppModel) {
             }
             if (!model.shareScreenMode) {
                 Box(
-                    Modifier.align(Alignment.TopEnd).padding(10.dp).clip(RoundedCornerShape(Tokens.Radius.chip))
+                    Modifier.align(Alignment.TopEnd).padding(Tokens.Space.m).clip(RoundedCornerShape(Tokens.Radius.chip))
                         .background(Tokens.Colors.scrimStrong).size(34.dp).clickable { model.pickFacing(!model.shareFront) },
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera), tint = Color.White, modifier = Modifier.size(Tokens.Size.iconS)) }
@@ -125,36 +125,36 @@ fun ShareVideoScreen(model: AppModel) {
         // Параметры — только для камеры (у экрана свой путь, MediaProjection — позже).
         if (!model.shareScreenMode) {
             SectionLabel(stringResource(R.string.share_resolution), stringResource(R.string.share_available_on_device))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                 resolutions.forEach { r ->
                     Chip(r.label, model.shareResW == r.width && model.shareResH == r.height) { model.pickRes(r.width, r.height) }
                 }
             }
 
             SectionLabel(stringResource(R.string.share_fps))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                 Chip(stringResource(R.string.share_fps_value, 30), model.shareFps == 30) { model.pickFps(30) }
                 if (has60) Chip(stringResource(R.string.share_fps_value, 60), model.shareFps == 60) { model.pickFps(60) }
             }
 
-            Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(top = Tokens.Space.l), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.share_bitrate), color = HoloSecondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 val auto = model.shareBitrateAuto
                 Row(
                     Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(if (auto) Tokens.Colors.accentMuted else Tokens.Colors.tile)
                         .then(if (auto) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
-                        .clickable { model.pickBitrateAuto() }.padding(horizontal = 11.dp, vertical = 5.dp),
+                        .clickable { model.pickBitrateAuto() }.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
                 ) {
                     Icon(Icons.Filled.Bolt, null, tint = if (auto) HoloAccent else HoloSecondary, modifier = Modifier.size(Tokens.Size.iconXs))
                     Text(stringResource(R.string.share_auto), color = if (auto) HoloAccent else Color.White, fontSize = Tokens.Font.caption)
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Tokens.Space.s))
             Row(
                 Modifier.alpha(if (model.shareBitrateAuto) 0.45f else 1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
             ) {
                 model.shareBitrateOptions().forEachIndexed { i, bps ->
                     Chip(
@@ -165,13 +165,13 @@ fun ShareVideoScreen(model: AppModel) {
             }
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(Tokens.Space.xl))
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloAccent)
-                .clickable { model.applyVideoShare() }.padding(vertical = 15.dp),
+                .clickable { model.applyVideoShare() }.padding(vertical = Tokens.Space.l),
             contentAlignment = Alignment.Center,
         ) { Text(stringResource(R.string.audio_apply), color = Tokens.Colors.accentDark, fontSize = Tokens.Font.label, fontWeight = FontWeight.Bold) }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(Tokens.Space.xl))
     }
 }
 
@@ -180,8 +180,8 @@ private fun SegButton(icon: ImageVector, label: String, selected: Boolean, modif
     Row(
         modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
             .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
-            .clickable { onClick() }.padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            .clickable { onClick() }.padding(vertical = Tokens.Space.m),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = if (selected) HoloAccent else HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
@@ -194,7 +194,7 @@ private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(if (selected) Tokens.Colors.accentMuted else Tokens.Colors.tile)
             .then(if (selected) Modifier.border(1.5.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
-            .clickable { onClick() }.padding(horizontal = 16.dp, vertical = 10.dp),
+            .clickable { onClick() }.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m),
         contentAlignment = Alignment.Center,
     ) { Text(text, color = if (selected) HoloAccent else Color.White, fontSize = Tokens.Font.body) }
 }
@@ -202,9 +202,9 @@ private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun SectionLabel(text: String, badge: String? = null) {
     Row(
-        Modifier.padding(top = 18.dp, bottom = 8.dp),
+        Modifier.padding(top = Tokens.Space.l, bottom = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
     ) {
         Text(text, color = HoloSecondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium)
         if (badge != null) {

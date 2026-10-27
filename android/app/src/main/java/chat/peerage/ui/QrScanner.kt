@@ -115,7 +115,7 @@ private fun ScannerContent(onResult: (String) -> Unit) {
             stringResource(R.string.qr_scan_hint),
             color = Color.White,
             fontSize = Tokens.Font.label,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 56.dp),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Tokens.Space.hero + Tokens.Space.s),
         )
     }
 }

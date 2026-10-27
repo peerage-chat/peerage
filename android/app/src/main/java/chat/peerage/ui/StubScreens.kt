@@ -19,7 +19,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import chat.peerage.HoloBg
 import chat.peerage.HoloBorder
 import chat.peerage.HoloSecondary
@@ -31,12 +30,12 @@ internal fun EmptyState(icon: ImageVector, title: String, hint: String) {
     Box(Modifier.fillMaxSize().background(HoloBg), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(32.dp),
+            modifier = Modifier.padding(Tokens.Space.xxxl),
         ) {
             Icon(icon, null, tint = HoloBorder, modifier = Modifier.size(Tokens.Size.iconHero))
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(Tokens.Space.m))
             Text(title, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(Tokens.Space.s))
             Text(hint, color = HoloSecondary, fontSize = Tokens.Font.body, textAlign = TextAlign.Center)
         }
     }

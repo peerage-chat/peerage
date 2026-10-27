@@ -283,7 +283,7 @@ internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
                 color = Color.White,
                 fontSize = Tokens.Font.huge,
                 fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(top = 28.dp),
+                modifier = Modifier.padding(top = Tokens.Space.xxl),
             )
             Text(
                 stringResource(R.string.rotate_wait_body),

@@ -177,7 +177,7 @@ private fun PickParts(
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         InfoCard(
             Icons.Filled.Archive,
@@ -281,7 +281,7 @@ private fun PasswordStep(
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         InfoCard(
             Icons.Filled.Lock,
@@ -329,16 +329,16 @@ private fun WorkingStep(restoring: Boolean) {
         Modifier.fillMaxSize().padding(ScreenPad),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(80.dp))
+        Spacer(Modifier.height(Tokens.Space.hero + Tokens.Space.xxxl))
         Text(
             stringResource(if (restoring) R.string.backup_working_restore else R.string.backup_working),
             color = Color.White,
             fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
         )
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(Tokens.Space.xl))
         LinearProgressIndicator(color = HoloAccent, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(Tokens.Space.xl))
         // Про секунду сказано намеренно: без этого пауза читается как «подвисло».
         Text(stringResource(R.string.backup_working_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
     }
@@ -355,12 +355,12 @@ private fun RestoreStep(
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         SurfaceCard(onClick = onPickFile) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Archive, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(Tokens.Space.m))
                 Column {
                     Text(
                         fileName ?: stringResource(R.string.backup_pick_file),
@@ -371,7 +371,7 @@ private fun RestoreStep(
                         stringResource(R.string.backup_pick_hint),
                         color = HoloSecondary,
                         fontSize = Tokens.Font.small,
-                        modifier = Modifier.padding(top = 2.dp),
+                        modifier = Modifier.padding(top = Tokens.Space.xxs),
                     )
                 }
             }
@@ -418,9 +418,9 @@ private fun DoneStep(stats: BackupStatsDto?, restoring: Boolean, onDone: () -> U
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
-        Spacer(Modifier.height(50.dp))
+        Spacer(Modifier.height(Tokens.Space.hero))
         val err = stats?.error.orEmpty()
         if (err.isNotEmpty()) {
             Text(stringResource(R.string.backup_failed), color = HoloError, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
@@ -494,12 +494,12 @@ private fun PartRow(
                     Icon(Icons.Filled.Check, null, tint = HoloAccentDark, modifier = Modifier.size(Tokens.Size.iconXs))
                 }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             Column(Modifier.weight(1f)) {
                 Text(title, color = Color.White, fontSize = Tokens.Font.label)
-                Text(sub, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = 2.dp))
+                Text(sub, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = Tokens.Space.xxs))
             }
             if (size != null) {
                 Text(size, color = HoloSecondary, fontSize = Tokens.Font.body)
@@ -527,7 +527,7 @@ private fun InfoCard(icon: ImageVector, title: String, text: String, warn: Boole
                 text,
                 color = HoloSecondary,
                 fontSize = Tokens.Font.body,
-                modifier = Modifier.padding(top = 6.dp),
+                modifier = Modifier.padding(top = Tokens.Space.s),
             )
         }
     }
