@@ -126,7 +126,12 @@ internal fun MediaViewer(
     // Смещение «оттягивания» вниз. Фон гаснет вместе с ним — жест виден до того,
     // как отпустишь палец, и понятно, что произойдёт.
     var dragY by remember { mutableFloatStateOf(0f) }
-    val dim = (1f - (abs(dragY) / 900f)).coerceIn(0.35f, 1f)
+    // Пороги — в dp, а не в пикселях: в пикселях жест на плотном экране требовал
+    // протянуть вдвое дальше, чем на простом.
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val closeAt = with(density) { CloseDrag.toPx() }
+    val fadeOver = with(density) { CloseFade.toPx() }
+    val dim = (1f - (abs(dragY) / fadeOver)).coerceIn(0.35f, 1f)
 
     // Хром уходит сам: пока он на экране, он закрывает часть кадра. Отсчёт
     // перезапускается на каждое переключение и на смену страницы; открытое меню
@@ -154,7 +159,7 @@ internal fun MediaViewer(
                     onChrome = { chrome = !chrome },
                     onDrag = { dy ->
                         dragY += dy
-                        if (dragY > 220f) onClose()
+                        if (dragY > closeAt) onClose()
                     },
                     onDragEnd = { dragY = 0f },
                 )
@@ -170,7 +175,7 @@ internal fun MediaViewer(
             ) {
                 Row(
                     Modifier.fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.55f))
+                        .background(Tokens.Colors.mediaScrim)
                         .statusBarsPadding()
                         .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
                     verticalAlignment = Alignment.CenterVertically,
@@ -267,6 +272,12 @@ internal fun MediaViewer(
         )
     }
 }
+
+/** Протяжка вниз, после которой просмотрщик закрывается. */
+private val CloseDrag = 80.dp
+
+/** На какой длине протяжки фон гаснет до предела. */
+private val CloseFade = 320.dp
 
 /** До Android 10 запись в галерею требует разрешения; начиная с неё MediaStore
  *  кладёт файл в свою папку и без него. */
@@ -476,14 +487,20 @@ private fun VideoSurface(model: AppModel, item: ViewerItem, muted: Boolean, chro
     LaunchedEffect(item.blobId) {
         model.exportBlob(item.blobId, "viewer", "${item.blobId.take(16)}-${item.name}") { file = it }
     }
+    var mine by remember(item.blobId) { mutableStateOf<android.widget.VideoView?>(null) }
     DisposableEffect(file) {
         // Захватить файл ЭТОГО эффекта: при смене null→файл onDispose старого эффекта
         // читал бы уже новый и удалял его до того, как плеер успеет открыть.
         val own = file
         onDispose {
-            Player.view?.stopPlayback()
-            Player.view = null
-            Player.media = null
+            // Останавливаем СВОЙ плеер, а общий слот чистим, только если он ещё наш:
+            // при листании между видео уходящая страница освобождается позже, чем
+            // встаёт новая, и раньше гасила уже чужое воспроизведение.
+            mine?.stopPlayback()
+            if (Player.view === mine) {
+                Player.view = null
+                Player.media = null
+            }
             own?.delete()
         }
     }
@@ -505,12 +522,13 @@ private fun VideoSurface(model: AppModel, item: ViewerItem, muted: Boolean, chro
                             // жать «заново» после каждого прохода — работа на
                             // пустом месте.
                             mp.isLooping = true
-                            Player.media = mp
+                            if (Player.view === this) Player.media = mp
                             val v = if (muted) 0f else 1f
                             mp.setVolume(v, v)
                         }
                         start()
                         Player.view = this
+                        mine = this
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
@@ -520,7 +538,7 @@ private fun VideoSurface(model: AppModel, item: ViewerItem, muted: Boolean, chro
         // экране состояние и так видно по его кнопке.
         if (!chrome && Player.view?.isPlaying == false) {
             Box(
-                Modifier.size(72.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                Modifier.size(72.dp).clip(CircleShape).background(Tokens.Colors.playScrim),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(44.dp))
@@ -557,7 +575,7 @@ private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
     }
     Row(
         Modifier.fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.55f))
+            .background(Tokens.Colors.mediaScrim)
             .navigationBarsPadding()
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
@@ -587,7 +605,7 @@ private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
                 },
             contentAlignment = Alignment.CenterStart,
         ) {
-            Box(Modifier.fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.25f)))
+            Box(Modifier.fillMaxWidth().height(3.dp).background(Tokens.Colors.trackOnMedia))
             if (duration > 0) {
                 val done = (position.toFloat() / duration).coerceIn(0f, 1f)
                 Box(Modifier.fillMaxWidth(done).height(3.dp).background(HoloAccent))
@@ -600,7 +618,7 @@ private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
             } else {
                 fmtDuration(position)
             },
-            color = Color.White.copy(alpha = 0.75f),
+            color = Tokens.Colors.quoteTextOnBubble,
             fontSize = Tokens.Font.caption,
             maxLines = 1,
         )
@@ -675,7 +693,8 @@ private fun shareFile(ctx: Context, content: Content, mime: String, name: String
             is Content.OnDisk -> content.file
             is Content.Bytes -> {
                 val dir = java.io.File(ctx.cacheDir, "shared").apply { mkdirs() }
-                java.io.File(dir, name.ifBlank { defaultName(mime.startsWith("video/")) })
+                // Имя прислал собеседник: «../» вывело бы запись из кэша.
+                java.io.File(dir, java.io.File(name).name.ifBlank { defaultName(mime.startsWith("video/")) })
                     .apply { writeBytes(content.bytes) }
             }
         }

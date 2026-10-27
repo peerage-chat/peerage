@@ -1145,15 +1145,19 @@ internal fun MessageBubble(
             items,
             start.coerceAtLeast(0),
             onClose = { viewer = false },
-            onForward = {
+            // Действия — над тем, что СЕЙЧАС на экране, а не над сообщением, с которого
+            // просмотрщик открыли: пролистав к другому фото и нажав «Удалить», человек
+            // удалял первое.
+            //
+            // Пересылка идёт через выделение — тот же путь, что из панели чата, чтобы
+            // «переслать» везде означало ровно одно.
+            onForward = { shown ->
                 viewer = false
-                // Пересылка идёт через выделение — тот же путь, что из панели
-                // чата, чтобы «переслать» везде означало ровно одно.
-                model.toggleSelect(m)
+                model.selection = setOf(MsgRef(shown.id, shown.sender))
                 model.beginForward(chat, group)
             },
-            onDelete = {
-                model.toggleSelect(m)
+            onDelete = { shown ->
+                model.selection = setOf(MsgRef(shown.id, shown.sender))
                 model.deleteSelected(chat, group)
             },
             onShowInChat = { target ->

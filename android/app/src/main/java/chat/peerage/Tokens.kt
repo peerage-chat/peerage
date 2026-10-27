@@ -74,6 +74,7 @@ object Tokens {
         val mediaScrim = Color(0x8C000000) // плашка поверх кадра: длительность, время (чёрный @55%)
         val playScrim = Color(0x73000000) // круг «play» поверх кадра (чёрный @45%)
         val thumbScrim = Color(0x40000000) // квадрат превью в карточке вложения (чёрный @25%)
+        val trackOnMedia = Color(0x40FFFFFF) // дорожка таймлайна поверх кадра (белый @25%)
 
         // Упоминание на исходящем пузыре: чистый акцент на bubbleOut почти сливается.
         val mentionOnOut = Color(0xFFB5E6F7)
