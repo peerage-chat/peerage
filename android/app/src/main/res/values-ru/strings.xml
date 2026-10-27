@@ -22,6 +22,7 @@
     <string name="call_invite_subtitle">приглашает в комнату</string>
     <string name="call_invite_btn_decline">Отклонить</string>
     <string name="call_invite_btn_join">Войти</string>
+    <string name="call_invite_will_leave">Текущий звонок завершится</string>
     <string name="call_invite_traffic_caption">суммарный входящий трафик</string>
     <plurals name="call_others_in_room">
         <item quantity="one">и ещё %d в комнате</item>
@@ -526,6 +527,7 @@
     <string name="verify_mismatch">Ключи НЕ совпали. Возможно, между вами кто-то есть — не доверяйте переписке, пока не сверитесь заново.</string>
     <string name="calls_all">Все</string>
     <string name="calls_missed">Пропущенные</string>
+    <string name="calls_room_gone">Удалённая группа</string>
     <string name="calls_join">Войти</string>
     <string name="calls_in_room">Звонок в комнате · %1$s</string>
     <string name="calls_missed_one">Пропущенный</string>

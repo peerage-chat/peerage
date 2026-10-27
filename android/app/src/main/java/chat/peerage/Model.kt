@@ -67,6 +67,10 @@ class AppModel private constructor() {
         const val AUDIO_BITRATE_MAX = 48_000
 
         /** Шаг вариантов битрейта видео: 0,5 Мбит/с — мельче разница не видна. */
+        /** Оценка входящего трафика звонка на участника, МБ/мин (call-ui.md): видео
+         *  ≈30, голос ≈2. Одна пара чисел для входящего экрана и чипа звонка. */
+        const val TRAFFIC_VIDEO_MB_MIN = 30
+        const val TRAFFIC_AUDIO_MB_MIN = 2
         const val VIDEO_BITRATE_STEP = 500_000
 
         /** Сколько недавних эмодзи помним (ряд на 8 + запас на вытеснение). */
@@ -728,6 +732,10 @@ class AppModel private constructor() {
     var showAudioSettings by mutableStateOf(false)
         private set
 
+    /** Лист «Позвать в звонок» (групповая комната). В модели, а не в экране: кнопка
+     *  живёт в шапке группового чата, а лист рисуется поверх всего приложения. */
+    var showRingSheet by mutableStateOf(false)
+
     /** Вывод звонка: "builtin" (встроенный/разговорный), "speaker" (громкая), "bluetooth". */
     var audioOut by mutableStateOf("builtin")
         private set
@@ -893,10 +901,15 @@ class AppModel private constructor() {
     private val callGen = java.util.concurrent.atomic.AtomicInteger()
     private val callLock = Any()
 
-    /** Выполнить старт звонка в [ops], если звонок за это время не завершили. */
-    private fun startCall(block: () -> Unit) {
+    /** Выполнить старт звонка в [ops], если звонок за это время не завершили.
+     *  [after] — разбор ПРЕДЫДУЩЕГО звонка (переключение): ждём его до замка, иначе
+     *  старт мог занять замок первым, а разбор потом погасил бы уже новое аудио. */
+    private fun startCall(after: Thread? = null, block: () -> Unit) {
         val gen = callGen.get()
-        ops.execute { synchronized(callLock) { if (callGen.get() == gen) block() } }
+        ops.execute {
+            after?.join()
+            synchronized(callLock) { if (callGen.get() == gen) block() }
+        }
     }
 
     @Volatile private var videoSender: VideoSender? = null
@@ -2000,10 +2013,13 @@ class AppModel private constructor() {
 
     /** Позвонить пиру: создать DM-комнату, отправить приглашение, начать медиа. */
     fun callDm(peer: String, audio: Boolean = true, video: Boolean = false) {
-        if (currentRoom != null) return
+        if (dmCallPeer == peer) return // уже говорим (или дозваниваемся) с ним
         val ctx = appContext ?: return
+        // Уже в другом звонке — переключаемся: старый закрываем. Раньше кнопка
+        // молча ничего не делала, пока человек сидел в какой-нибудь комнате.
+        val leaving = endCurrentCall()
         val name = contacts.firstOrNull { it.key == peer }?.displayName ?: ""
-        startCall {
+        startCall(leaving) {
             val roomId = Native.roomInviteDm(sessionPtr, peer, audio, video)
             if (roomId.isEmpty()) return@startCall
             currentRoom = roomId
@@ -2022,14 +2038,18 @@ class AppModel private constructor() {
         incomingCall = null
         val ctx = appContext ?: return
         IncomingCallReceiver.cancel(ctx)
+        if (currentRoom == ic.roomId) return // уже в этой комнате
+        // Принять, сидя в другом звонке, — значит переключиться. Без этого новый
+        // звонок вставал поверх старого: два захвата микрофона, а старая комната
+        // так и не получала «вышел».
+        val leaving = endCurrentCall()
+        muted = !audio // мик-пресет → стартовое состояние мьюта
         if (isGroupRoom(ic.roomId)) {
-            muted = !audio
-            joinRoom(ic.roomId, audio, video)
+            enterRoom(ic.roomId, audio, video, leaving)
             return
         }
         val name = contacts.firstOrNull { it.key == ic.peer }?.displayName ?: ""
-        muted = !audio // мик-пресет → стартовое состояние мьюта
-        startCall {
+        startCall(leaving) {
             val roomId = Native.roomJoinDm(sessionPtr, ic.peer, audio, video)
             if (roomId.isEmpty()) return@startCall
             currentRoom = roomId
@@ -2094,7 +2114,7 @@ class AppModel private constructor() {
         )
         val sr = params?.sampleRate?.takeIf { it > 0 } ?: 48_000
         val ch = params?.channels?.takeIf { it > 0 } ?: 1
-        roomAudio = CallAudio(
+        val audio = CallAudio(
             ctx,
             { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
             { out -> Native.roomPullAudio(sessionPtr, out) },
@@ -2102,10 +2122,19 @@ class AppModel private constructor() {
             fx = audioFx,
             inputDevice = selectedInputDevice(),
             onLevel = { lvl -> if (showAudioSettings) micLevel = lvl }, // только когда экран открыт
-        ).also {
-            it.start(sr, ch)
-            it.setMuted(muted)
-        } // mic-пресет применяем сразу
+        )
+        // Микрофон могут отобрать (разрешение снято в настройках, его держит другое
+        // приложение) — тогда AudioRecord бросает. Исключение в потоке ops роняет
+        // весь процесс; звонок без своего звука лучше, чем падение посреди входа.
+        roomAudio = try {
+            audio.start(sr, ch)
+            audio.setMuted(muted) // mic-пресет применяем сразу
+            audio
+        } catch (e: Exception) {
+            android.util.Log.w("call", "audio start failed: ${e.javaClass.simpleName}")
+            runCatching { audio.stop() }
+            null
+        }
         applyOutputDevice() // применить выбранный вывод (встроенный/динамик/bt) к свежей сессии
     }
 
@@ -2190,17 +2219,30 @@ class AppModel private constructor() {
             videoQuality.height >= 720 -> 14
             else -> 9
         }
-        Native.roomSetVideoCap(sessionPtr, cap)
+        // Сюда приходят с главного потока (колбэк surface превью) — нативный вызов
+        // уводим в ops (инвариант 4).
+        ops.execute { Native.roomSetVideoCap(sessionPtr, cap) }
         // Стартуем с текущей стороны камеры (cameraFront): дефолт — фронталка, но
         // экран шаринга мог выбрать тыловую (applyVideoShare ставит cameraFront).
-        videoSender = VideoSender(
+        val vs = VideoSender(
             ctx,
             videoQuality.width,
             videoQuality.height,
             videoQuality.fps,
             videoQuality.bitrate,
             startFront = cameraFront,
-        ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }.also { it.start(preview) }
+        ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }
+        // Кодер может не принять разрешение/битрейт (configure бросает) — на главном
+        // потоке это падение всего приложения. Не вышло — гасим видео, звонок живёт.
+        videoSender = try {
+            vs.start(preview)
+            vs
+        } catch (e: Exception) {
+            android.util.Log.w("call", "video start failed: ${e.javaClass.simpleName}")
+            runCatching { vs.stop() }
+            videoActive = false
+            null
+        }
     }
 
     private fun stopVideoSender() {
@@ -2231,12 +2273,19 @@ class AppModel private constructor() {
     /** Войти в комнату группы: маячок присутствия + мультипати аудио (микрофон
      *  всем участникам, приём от каждого с миксом). */
     fun joinRoom(gid: String, audio: Boolean = true, video: Boolean = false) {
+        if (currentRoom == gid) return
+        // Из другого звонка — сначала выйти: иначе старый звонок оставался жить
+        // (его аудио никто не останавливал, комната не получала «вышел»).
+        enterRoom(gid, audio, video, endCurrentCall())
+    }
+
+    private fun enterRoom(gid: String, audio: Boolean, video: Boolean, after: Thread?) {
         currentRoom = gid
         dmCallPeer = null
         roomMembers.clear()
         val ctx = appContext ?: return
         val name = groups.firstOrNull { it.gid == gid }?.name ?: ""
-        startCall {
+        startCall(after) {
             Native.roomJoin(sessionPtr, gid, audio, video)
             CallService.start(ctx, name)
             startRoomMedia(ctx, gid, video)
@@ -2245,7 +2294,13 @@ class AppModel private constructor() {
 
     /** Выйти из комнаты: стоп медиа + маячок «вышел». */
     fun leaveRoom() {
-        val gid = currentRoom ?: return
+        endCurrentCall()
+    }
+
+    /** Разобрать текущий звонок. Возвращает поток разбора (или null, если звонка
+     *  не было) — старт следующего звонка его дожидается, см. [startCall]. */
+    private fun endCurrentCall(): Thread? {
+        val gid = currentRoom ?: return null
         // Запомнить ДО очистки. peerPresent: активный звонок (пир в комнате) vs
         // ещё дозваниваемся (пира в комнате нет) — от этого зависит, слать ли decline.
         val peer = dmCallPeer
@@ -2253,6 +2308,7 @@ class AppModel private constructor() {
         currentRoom = null
         dmCallPeer = null
         videoActive = false
+        showRingSheet = false
         roomMembers.clear()
         muted = false
         micLevel = 0f // вывод (audioOut) теперь персистится как настройка — не сбрасываем
@@ -2261,7 +2317,7 @@ class AppModel private constructor() {
         videoReceivers.clear()
         val ctx = appContext
         // Мимо ops — см. [callGen]. Сначала гасим отправку и захват, потом остальное.
-        Thread {
+        return Thread {
             synchronized(callLock) {
                 Native.roomAudioStop(sessionPtr)
                 val a = roomAudio
@@ -2279,7 +2335,7 @@ class AppModel private constructor() {
                 if (ctx != null) CallService.stop(ctx)
             }
             vrs.forEach { runCatching { it.stop() } }
-        }.apply { isDaemon = true }.start()
+        }.apply { isDaemon = true }.also { it.start() }
     }
 
     // ── Группы ──────────────────────────────────────────────────────────────

@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Videocam
@@ -70,14 +69,14 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
     val remotes = model.roomMembers
     var chrome by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
-    var showRing by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf<String?>(null) }
 
     // тайлы: удалённые участники + ты (последним)
     val tiles = remotes.map { Tile(it.peer, false, it.audio, it.video) } +
         Tile("me", true, !model.muted, model.videoActive)
-    // Фуллскрин-фокус снимаем, если участник исчез.
-    LaunchedEffect(remotes.size) {
+    // Фуллскрин-фокус снимаем, если участник исчез. Ключ — состав, а не размер:
+    // ушёл один и пришёл другой — размер тот же, а фокус висел на ушедшем.
+    LaunchedEffect(remotes.map { it.peer }) {
         if (focused != null && focused != "me" && remotes.none { it.peer == focused }) focused = null
     }
     // Оверлей НЕ прячется сам (по просьбе) — скрыть/показать только тапом по тайлу.
@@ -114,35 +113,33 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
             if (foc != null) {
                 // фуллскрин: [имя-пилюля · чип трафика] слева-сверху, «свернуть» справа-сверху
                 Row(
-                    Modifier.align(Alignment.TopStart).statusBarsPadding().padding(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.align(Alignment.TopStart).statusBarsPadding().padding(Tokens.Space.m),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     NamePill(tileName(model, foc))
-                    if (!foc.me) TrafficChip(if (foc.video) 30 else 2)
+                    if (!foc.me) TrafficChip(if (foc.video) AppModel.TRAFFIC_VIDEO_MB_MIN else AppModel.TRAFFIC_AUDIO_MB_MIN)
                 }
-                Box(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(10.dp)) {
+                Box(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(Tokens.Space.m)) {
                     ChromeChip(Icons.Filled.CloseFullscreen, stringResource(R.string.call_minimize)) { focused = null }
                 }
             } else {
                 // сетка: чип трафика слева-сверху, смена камеры + настройки справа-сверху
-                val incoming = remotes.map {
-                    if (it.video) {
-                        30
-                    } else if (it.audio) {
-                        2
-                    } else {
-                        0
+                val incoming = remotes.sumOf {
+                    when {
+                        it.video -> AppModel.TRAFFIC_VIDEO_MB_MIN
+                        it.audio -> AppModel.TRAFFIC_AUDIO_MB_MIN
+                        else -> 0
                     }
-                }.sum()
+                }
                 if (incoming > 0) {
-                    Box(Modifier.align(Alignment.TopStart).statusBarsPadding().padding(10.dp)) {
+                    Box(Modifier.align(Alignment.TopStart).statusBarsPadding().padding(Tokens.Space.m)) {
                         TrafficChip(incoming)
                     }
                 }
                 Row(
-                    Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(Tokens.Space.m),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                 ) {
                     if (model.videoActive) {
                         ChromeChip(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera)) {
@@ -153,23 +150,21 @@ fun RoomCallScreen(model: AppModel, peerKey: String) {
                 }
             }
             // низ: панель управления (выше системной навигации)
-            Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 18.dp)) {
-                ControlBar(model, onInvite = { showRing = true })
+            Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = Tokens.Space.l)) {
+                ControlBar(model)
             }
         }
         if (showSettings) CallSettings(model) { showSettings = false }
-        if (showRing) RingSheet(model) { showRing = false }
         if (model.showVideoShare) ShareVideoScreen(model)
         if (model.showAudioSettings) AudioSettingsScreen(model)
         // «Назад» закрывает верхний слой (в порядке отрисовки — сверху вниз). Сам
         // звонок системная «назад» не трогает: это делает оболочка.
         BackHandler(
-            enabled = model.showAudioSettings || model.showVideoShare || showRing || showSettings || focused != null,
+            enabled = model.showAudioSettings || model.showVideoShare || showSettings || focused != null,
         ) {
             when {
                 model.showAudioSettings -> model.closeAudioSettings()
                 model.showVideoShare -> model.closeVideoShare()
-                showRing -> showRing = false
                 showSettings -> showSettings = false
                 else -> focused = null
             }
@@ -195,10 +190,10 @@ private fun tileName(model: AppModel, t: Tile): String =
 private fun CallSettings(model: AppModel, onClose: () -> Unit) {
     Column(
         Modifier.fillMaxSize().background(Tokens.Colors.overlay).clickable(enabled = false) {}
-            .statusBarsPadding().navigationBarsPadding().padding(horizontal = 18.dp),
+            .statusBarsPadding().navigationBarsPadding().padding(horizontal = Tokens.Space.l),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 14.dp),
+            Modifier.fillMaxWidth().padding(vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -215,10 +210,10 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
         }
 
         Text(stringResource(R.string.call_audio_output), color = HoloSecondary, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Tokens.Space.s))
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { model.toggleSpeaker() }
-                .background(Tokens.Colors.tile).padding(horizontal = 14.dp, vertical = 14.dp),
+                .background(Tokens.Colors.tile).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -227,7 +222,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                 tint = if (model.speakerOn) HoloAccent else HoloSecondary,
                 modifier = Modifier.size(22.dp),
             )
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             Text(stringResource(R.string.call_speaker), color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
             Switch(
                 checked = model.speakerOn,
@@ -241,10 +236,10 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
             )
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(Tokens.Space.m))
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { model.toggleTechInfo() }
-                .background(Tokens.Colors.tile).padding(horizontal = 14.dp, vertical = 14.dp),
+                .background(Tokens.Colors.tile).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(stringResource(R.string.call_tech_info), color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
@@ -263,7 +258,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
         // Видео — на полноценный экран «Показать видео» (разрешения из камеры, fps,
         // битрейт): здесь раньше был жёсткий список пресетов, предлагавший и то, что
         // камера не умеет.
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(Tokens.Space.m))
         val vq = model.videoQuality
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip))
@@ -271,11 +266,11 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                     onClose()
                     model.openVideoShare()
                 }
-                .background(Tokens.Colors.tile).padding(horizontal = 14.dp, vertical = 14.dp),
+                .background(Tokens.Colors.tile).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.call_video_settings), color = Color.White, fontSize = Tokens.Font.label)
                 Text(
@@ -302,16 +297,16 @@ private fun ParticipantGrid(
     // Раскладка: 1-2 → стопкой (без горизонтального сплита); 3+ → по 2 в ряд,
     // одиночный последний занимает всю ширину. Оверфлоу >6 — на потом.
     val rows = if (tiles.size <= 2) tiles.map { listOf(it) } else tiles.chunked(2)
-    Column(Modifier.fillMaxSize().padding(2.dp)) {
+    Column(Modifier.fillMaxSize().padding(Tokens.Space.xxs)) {
         rows.forEach { row ->
-            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
                 row.forEach { t ->
                     key(t.id) {
                         ParticipantTile(
                             model,
                             t,
                             chrome,
-                            Modifier.weight(1f).fillMaxHeight().padding(2.dp),
+                            Modifier.weight(1f).fillMaxHeight().padding(Tokens.Space.xxs),
                             onTap = onTap,
                             onFocus = { onFocus(t.id) },
                         )
@@ -355,9 +350,9 @@ private fun ParticipantTile(
             Row(
                 Modifier.align(Alignment.BottomStart).padding(7.dp)
                     .clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.tileScrim)
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                    .padding(horizontal = 7.dp, vertical = Tokens.Space.xxs),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
             ) {
                 if (!t.audio) Icon(Icons.Filled.MicOff, null, tint = Tokens.Colors.iconDangerMuted, modifier = Modifier.size(13.dp))
                 Text(name, color = Color.White, fontSize = Tokens.Font.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -374,7 +369,7 @@ private fun ParticipantTile(
                 // мультипати-сетке (#24) вернуться к per-tile-раскладке.
                 Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 52.dp, end = 7.dp)
                     .clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.chipScrim)
-                    .padding(horizontal = 7.dp, vertical = 5.dp),
+                    .padding(horizontal = 7.dp, vertical = Tokens.Space.xs),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
@@ -396,7 +391,7 @@ private fun TechLine(text: String) {
 /** Строка трафика: иконка направления (↑ исходящий своё · ↓ входящий чужое) + kbps. */
 @Composable
 private fun TechRate(up: Boolean, kbps: Int) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
         Icon(
             if (up) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
             null,
@@ -423,7 +418,7 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
             Column(
                 Modifier.align(Alignment.Center).offset(y = 78.dp)
                     .clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.barScrim)
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                    .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
@@ -436,7 +431,7 @@ private fun AloneTile(model: AppModel, peerKey: String, chrome: Boolean) {
                     stringResource(R.string.call_alone_subtitle),
                     color = HoloSecondary,
                     fontSize = Tokens.Font.body,
-                    modifier = Modifier.padding(top = 5.dp),
+                    modifier = Modifier.padding(top = Tokens.Space.xs),
                 )
             }
         }
@@ -544,17 +539,17 @@ internal fun applyTextureTransform(view: TextureView, bufW: Int, bufH: Int, rota
 /** «Позвать в звонок»: участники группы, которых нет в комнате, с отметками. Оверлей
  *  в стиле настроек звонка; тап по фону не закрывает (только крестик). */
 @Composable
-private fun RingSheet(model: AppModel, onClose: () -> Unit) {
+internal fun RingSheet(model: AppModel, onClose: () -> Unit) {
     // Ростер мог ещё не прийти в кэш модели — подтянуть при открытии.
     LaunchedEffect(Unit) { model.currentRoom?.let { model.loadGroupMembers(it) } }
     val candidates = model.ringCandidates()
     var picked by remember { mutableStateOf(emptySet<String>()) }
     Column(
         Modifier.fillMaxSize().background(Tokens.Colors.overlay).clickable(enabled = false) {}
-            .statusBarsPadding().navigationBarsPadding().padding(horizontal = 18.dp),
+            .statusBarsPadding().navigationBarsPadding().padding(horizontal = Tokens.Space.l),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 14.dp),
+            Modifier.fillMaxWidth().padding(vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -574,7 +569,7 @@ private fun RingSheet(model: AppModel, onClose: () -> Unit) {
                 stringResource(R.string.call_ring_empty),
                 color = HoloSecondary,
                 fontSize = Tokens.Font.label,
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = Tokens.Space.s),
             )
             return@Column
         }
@@ -586,9 +581,9 @@ private fun RingSheet(model: AppModel, onClose: () -> Unit) {
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip))
                         .clickable { picked = if (on) picked - peer else picked + peer }
                         .background(if (on) Tokens.Colors.accentMuted else Tokens.Colors.tile)
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                        .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
                 ) {
                     Avatar(name, 36, model.peerAvatar(peer))
                     Text(
@@ -605,17 +600,17 @@ private fun RingSheet(model: AppModel, onClose: () -> Unit) {
                         colors = CheckboxDefaults.colors(checkedColor = HoloAccent, uncheckedColor = HoloSecondary),
                     )
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Tokens.Space.s))
             }
         }
         Box(
-            Modifier.fillMaxWidth().padding(vertical = 14.dp).clip(RoundedCornerShape(Tokens.Radius.button))
+            Modifier.fillMaxWidth().padding(vertical = Tokens.Space.m).clip(RoundedCornerShape(Tokens.Radius.button))
                 .background(if (picked.isEmpty()) Tokens.Colors.tile else HoloAccent)
                 .clickable(enabled = picked.isNotEmpty()) {
                     model.ringIntoRoom(picked.toList())
                     onClose()
                 }
-                .padding(vertical = 14.dp),
+                .padding(vertical = Tokens.Space.m),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -629,20 +624,15 @@ private fun RingSheet(model: AppModel, onClose: () -> Unit) {
 }
 
 @Composable
-private fun ControlBar(model: AppModel, onInvite: () -> Unit) {
+private fun ControlBar(model: AppModel) {
     Row(
         Modifier.clip(RoundedCornerShape(Tokens.Radius.pill)).background(Tokens.Colors.barScrim)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Камера нужна только при ВКЛЮЧЕНИИ видео; выключение разрешения не требует.
         val runWithPerm = rememberPermissionRunner()
-        // Звать можно только в групповой звонок: у личного нет ростера, а превращение
-        // его в групповой — отдельная механика.
-        if (model.dmCallPeer == null) {
-            CtlButton(Icons.Filled.PersonAdd, stringResource(R.string.call_btn_invite), Tokens.Colors.btnNeutral) { onInvite() }
-        }
         CtlButton(
             if (model.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
             stringResource(R.string.call_btn_mic),
@@ -680,7 +670,7 @@ private fun CtlButton(
     onClick: () -> Unit,
 ) {
     Box(
-        Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(bg).size(width = 60.dp, height = 48.dp)
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(bg).size(width = Tokens.Size.ctlButtonW, height = Tokens.Size.ctlButtonH)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(25.dp)) }
@@ -689,7 +679,7 @@ private fun CtlButton(
 @Composable
 private fun ChromeChip(icon: ImageVector, desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim).size(34.dp)
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim).size(Tokens.Size.chromeChip)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = Tokens.Colors.iconChrome, modifier = Modifier.size(18.dp)) }
@@ -699,8 +689,8 @@ private fun ChromeChip(icon: ImageVector, desc: String, onClick: () -> Unit) {
 @Composable
 private fun NamePill(name: String) {
     Box(
-        Modifier.height(34.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim)
-            .padding(horizontal = 12.dp),
+        Modifier.height(Tokens.Size.chromeChip).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim)
+            .padding(horizontal = Tokens.Space.m),
         contentAlignment = Alignment.Center,
     ) {
         Text(name, color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -711,10 +701,10 @@ private fun NamePill(name: String) {
 @Composable
 private fun TrafficChip(mbMin: Int) {
     Row(
-        Modifier.height(34.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim)
-            .padding(horizontal = 12.dp),
+        Modifier.height(Tokens.Size.chromeChip).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim)
+            .padding(horizontal = Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
     ) {
         Icon(Icons.Filled.ArrowDownward, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
         Text(stringResource(R.string.call_traffic_rate, mbMin), color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)

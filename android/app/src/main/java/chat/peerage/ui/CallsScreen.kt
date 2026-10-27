@@ -35,6 +35,15 @@ import chat.peerage.R
 @Composable
 internal fun CallsScreen(model: AppModel, onCallPeer: (String) -> Unit, onJoinRoom: (String) -> Unit) {
     var missedOnly by remember { mutableStateOf(false) }
+    // Без разрешения на микрофон звонок стартовал немым: собеседник слышал тишину,
+    // а мы не знали почему. Как в профиле и чате — сначала спросить.
+    val runWithPerm = rememberPermissionRunner()
+    val callPeer: (String) -> Unit = { peer ->
+        runWithPerm(arrayOf(android.Manifest.permission.RECORD_AUDIO), R.string.perm_denied_mic) { onCallPeer(peer) }
+    }
+    val joinRoom: (String) -> Unit = { gid ->
+        runWithPerm(arrayOf(android.Manifest.permission.RECORD_AUDIO), R.string.perm_denied_mic) { onJoinRoom(gid) }
+    }
     LaunchedEffect(Unit) { model.refreshCallLog() }
 
     val rows = if (missedOnly) model.callLog.filter { it.outcome == "missed" } else model.callLog.toList()
@@ -64,7 +73,7 @@ internal fun CallsScreen(model: AppModel, onCallPeer: (String) -> Unit, onJoinRo
         LazyColumn(Modifier.fillMaxSize()) {
             itemsIndexed(rows, key = { _, e -> "${e.started}_${e.peer}_${e.gid}" }) { i, e ->
                 CardBlock(first = i == 0, last = i == rows.lastIndex) {
-                    CallRow(model, e, onCallPeer, onJoinRoom, divider = i > 0)
+                    CallRow(model, e, callPeer, joinRoom, divider = i > 0)
                 }
             }
             item { Spacer(Modifier.height(Tokens.Space.l)) }
@@ -80,13 +89,19 @@ private fun CallRow(
     onJoinRoom: (String) -> Unit,
     divider: Boolean = false,
 ) {
-    val isRoom = e.gid.isNotEmpty() && model.groups.any { it.gid == e.gid }
+    // Комната — по самой записи, а не по тому, жива ли группа: запись о комнате
+    // удалённой группы иначе становилась «звонком человеку» с пустым именем, и
+    // кнопка звонила по пустому ключу.
+    val isRoom = e.gid.isNotEmpty()
     val group = model.groups.firstOrNull { it.gid == e.gid }
     val contact = model.contacts.firstOrNull { it.key == e.peer }
-    val name = if (isRoom) group?.name.orEmpty() else contact?.displayName ?: e.peer.take(12)
+    val name = when {
+        isRoom -> group?.name ?: stringResource(R.string.calls_room_gone)
+        else -> contact?.displayName ?: shortHex(e.peer)
+    }
     val missed = e.outcome == "missed"
 
-    CardRow(divider = divider, inset = 70.dp) {
+    CardRow(divider = divider, inset = Tokens.Space.m + Tokens.Size.avatarRow + Tokens.Space.m) {
         if (isRoom) {
             // Комната — сущность: скруглённый квадрат. Человек — круг.
             SquareAvatar(name, size = Tokens.Size.avatarRow, bg = Tokens.Colors.groupAvatar) {
@@ -121,13 +136,15 @@ private fun CallRow(
                     tint = tint,
                     modifier = Modifier.size(15.dp),
                 )
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(Tokens.Space.xs))
                 Text(outcomeLabel(e, isRoom), color = tint, fontSize = Tokens.Font.body)
             }
         }
-        Text(fmtCallTime(e.started), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.small)
+        Text(fmtListTime(e.started), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.small)
         Spacer(Modifier.width(Tokens.Space.m))
-        if (isRoom) {
+        // Группы больше нет — войти некуда; не-контакту звонок не дойдёт (гейт
+        // запросов). В обоих случаях кнопки нет, время встаёт к краю.
+        if (isRoom && group != null) {
             // Комната может звучать прямо сейчас — предлагаем войти, а не перезвонить.
             Row(
                 Modifier.clip(RoundedCornerShape(Tokens.Radius.tile))
@@ -137,12 +154,12 @@ private fun CallRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.AutoMirrored.Filled.Login, null, tint = HoloOnline, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(Tokens.Space.xs))
                 Text(stringResource(R.string.calls_join), color = HoloOnline, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
             }
-        } else {
+        } else if (!isRoom && contact != null) {
             Box(
-                Modifier.size(38.dp).clip(RoundedCornerShape(Tokens.Radius.button))
+                Modifier.size(Tokens.Size.barButton).clip(RoundedCornerShape(Tokens.Radius.button))
                     .background(Tokens.Colors.surfaceHi)
                     .clickable { onCallPeer(e.peer) },
                 contentAlignment = Alignment.Center,
@@ -173,16 +190,12 @@ private fun FilterChip(label: String, on: Boolean, onClick: () -> Unit) {
         Modifier.clip(RoundedCornerShape(Tokens.Radius.pill))
             .background(if (on) Tokens.Colors.accentBadge else HoloSurface)
             .clickable { onClick() }
-            .padding(horizontal = Tokens.Space.m, vertical = 6.dp),
+            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
     ) {
         Text(label, color = if (on) HoloAccent else HoloSecondary, fontSize = Tokens.Font.body)
     }
 }
 
-private fun fmtCallDuration(sec: Long): String = "%d:%02d".format(sec / 60, sec % 60)
-
-private fun fmtCallTime(ts: Long): String {
-    val now = System.currentTimeMillis() / 1000
-    val fmt = if (dayKey(ts) == dayKey(now)) "HH:mm" else "d MMM"
-    return java.text.SimpleDateFormat(fmt, java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
-}
+/** «4:07» / «1:02:15» — час с лишним в комнате не должен читаться как «62:15». */
+private fun fmtCallDuration(sec: Long): String =
+    if (sec >= 3600) "%d:%02d:%02d".format(sec / 3600, sec % 3600 / 60, sec % 60) else "%d:%02d".format(sec / 60, sec % 60)

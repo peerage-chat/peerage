@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
         // Разрешения НЕ просим здесь: во время онбординга системный диалог не нужен.
         // Запрашиваются в App() после гейта (onboarded) — см. requestCorePermissions.
         val dataDir = filesDir.absolutePath
+        handleCallIntent(intent)
         setContent {
             // ADR-005: класс ширины окна читается ЗДЕСЬ (единственная точка), дальше по
             // приложению ходит наш enum WidthClass — experimental-API не течёт в UI-код.
@@ -69,6 +70,26 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleCallIntent(intent)
+    }
+
+    /**
+     * «Принять» из уведомления входящего. Без микрофона не принимаем: звонок вышел бы
+     * немым, а Android 14 вдобавок не пускает сервис звонка на передний план. Тогда
+     * остаётся экран входящего — его «Принять» само спросит разрешение.
+     */
+    private fun handleCallIntent(i: android.content.Intent?) {
+        if (i?.action != IncomingCallReceiver.ACTION_ACCEPT) return
+        i.action = null // пересоздание активити не должно принять звонок второй раз
+        // Активити экспортирована: ACTION_ACCEPT может прислать кто угодно. Верим
+        // только интенту с токеном из нашего уведомления.
+        if (!IncomingCallReceiver.consumeToken(i.getStringExtra(IncomingCallReceiver.EXTRA_TOKEN))) return
+        IncomingCallReceiver.cancel(this)
+        if (hasPermission(Manifest.permission.RECORD_AUDIO)) model.acceptDmCall()
     }
 
     /** Запрос системного подтверждения личности (биометрия/PIN устройства). */
@@ -561,6 +582,10 @@ private fun CompactShell(model: AppModel) {
                     containerColor = HoloAccent,
                     contentColor = HoloAccentDark,
                 ) { Icon(TablerIcons.Pencil, stringResource(R.string.cd_new_chat), modifier = Modifier.size(22.dp)) }
+            }
+            if (model.showRingSheet && model.currentRoom != null) {
+                RingSheet(model) { model.showRingSheet = false }
+                BackHandler { model.showRingSheet = false }
             }
             model.incomingCall?.let { IncomingCallOverlay(model, it) }
             // Активный DM-звонок (аудио или видео) — полноэкранная комната-сетка.

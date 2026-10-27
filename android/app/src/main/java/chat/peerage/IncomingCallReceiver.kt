@@ -23,17 +23,7 @@ class IncomingCallReceiver : BroadcastReceiver() {
 
     override fun onReceive(ctx: Context, intent: Intent) {
         cancel(ctx)
-        when (intent.action) {
-            ACTION_ACCEPT -> {
-                AppModel.instance.acceptDmCall()
-                ctx.startActivity(
-                    Intent(ctx, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    },
-                )
-            }
-            ACTION_DECLINE -> AppModel.instance.declineDmCall()
-        }
+        if (intent.action == ACTION_DECLINE) AppModel.instance.declineDmCall()
     }
 
     companion object {
@@ -41,6 +31,23 @@ class IncomingCallReceiver : BroadcastReceiver() {
         const val NOTIF_ID = 3
         const val ACTION_ACCEPT = "chat.peerage.ACCEPT_CALL"
         const val ACTION_DECLINE = "chat.peerage.DECLINE_CALL"
+        const val EXTRA_TOKEN = "accept_token"
+
+        /**
+         * Одноразовый токен «Принять». MainActivity экспортирована (её открывает
+         * лаунчер), и без проверки любое приложение на телефоне могло бы прислать ей
+         * ACTION_ACCEPT и принять звонок за человека — то есть включить его микрофон.
+         * Токен знает только наш PendingIntent; новый на каждый входящий.
+         */
+        @Volatile var acceptToken: String = ""
+            private set
+
+        /** Токен из интента совпал с выданным — и сгорает. */
+        fun consumeToken(t: String?): Boolean {
+            val ok = !t.isNullOrEmpty() && t == acceptToken
+            if (ok) acceptToken = ""
+            return ok
+        }
 
         fun show(ctx: Context, callerName: String) {
             ensureChannel(ctx)
@@ -54,10 +61,19 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            val acceptPi = PendingIntent.getBroadcast(
+            // «Принять» ведёт прямо в активити, а не через receiver: открыть активити
+            // из receiver кнопки уведомления («трамплин») Android 12+ не даёт, и
+            // звонок принимался при закрытом приложении. Активити и примет, и
+            // проверит микрофон.
+            val acceptPi = PendingIntent.getActivity(
                 ctx,
                 11,
-                Intent(ACTION_ACCEPT).apply { setPackage(ctx.packageName) },
+                Intent(ctx, MainActivity::class.java).apply {
+                    action = ACTION_ACCEPT
+                    acceptToken = java.util.UUID.randomUUID().toString()
+                    putExtra(EXTRA_TOKEN, acceptToken)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             val declinePi = PendingIntent.getBroadcast(

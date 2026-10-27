@@ -44,22 +44,24 @@ internal fun RoomGrid(
     val members = if (inRoom) model.roomMembers else presenceMembers
     val total = if (inRoom) members.size + 1 else members.size
     Surface(color = HoloSurface, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
+        Column(Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m)) {
             Text(
                 stringResource(if (inRoom) R.string.call_in_room_caps else R.string.call_in_room_presence_caps, total),
                 color = HoloSecondary,
                 fontSize = Tokens.Font.caption,
-                modifier = Modifier.padding(start = 2.dp, bottom = 8.dp),
+                modifier = Modifier.padding(start = Tokens.Space.xxs, bottom = Tokens.Space.s),
             )
             val all = if (inRoom) {
-                listOf(Triple("me", true, false)) + members.map { Triple(it.peer, it.audio, it.video) }
+                // Своё состояние — из модели: раньше плитка «Вы» всегда показывала
+                // включённый микрофон, даже когда человек себя заглушил.
+                listOf(Triple("me", !model.muted, model.videoActive)) + members.map { Triple(it.peer, it.audio, it.video) }
             } else {
                 members.map { Triple(it.peer, it.audio, it.video) }
             }
             all.chunked(2).forEach { row ->
                 Row(
-                    Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                 ) {
                     row.forEach { (key, audio, video) ->
                         val isMe = key == "me"
@@ -96,7 +98,7 @@ internal fun GridTile(
             .aspectRatio(1f),
     ) {
         Column(
-            Modifier.fillMaxSize().padding(12.dp),
+            Modifier.fillMaxSize().padding(Tokens.Space.m),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -114,7 +116,7 @@ internal fun GridTile(
                     )
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(Tokens.Space.m))
             Text(
                 name,
                 color = if (me) HoloAccent else Color.White,
@@ -128,10 +130,10 @@ internal fun GridTile(
         // Статус микрофона/видео — правый верхний угол
         if (!audio || video) {
             Row(
-                Modifier.align(Alignment.TopEnd).padding(6.dp)
+                Modifier.align(Alignment.TopEnd).padding(Tokens.Space.s)
                     .clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.tileScrim)
-                    .padding(horizontal = 5.dp, vertical = 3.dp),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    .padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.xxs),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (!audio) Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(13.dp))
@@ -153,7 +155,7 @@ internal fun ParticipantFullscreen(
     Box(Modifier.fillMaxSize().background(Tokens.Colors.overlay).clickable { onDismiss() }) {
         // Кнопка закрытия — правый верхний угол
         Box(
-            Modifier.align(Alignment.TopEnd).padding(16.dp).size(36.dp)
+            Modifier.align(Alignment.TopEnd).padding(Tokens.Space.l).size(36.dp)
                 .clip(CircleShape).background(Tokens.Colors.glass).clickable { onDismiss() },
             contentAlignment = Alignment.Center,
         ) {
@@ -191,19 +193,19 @@ internal fun ParticipantFullscreen(
                     )
                 }
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(Tokens.Space.xl))
             Text(name, color = Color.White, fontSize = Tokens.Font.big, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(Tokens.Space.m))
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (!audio) {
                     Row(
                         Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.glassDanger)
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
                     ) {
                         Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(14.dp))
                         Text(stringResource(R.string.call_mic_off), color = WarnColor, fontSize = Tokens.Font.small)
@@ -212,9 +214,9 @@ internal fun ParticipantFullscreen(
                 if (video) {
                     Row(
                         Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.glassDim)
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
                     ) {
                         Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
                         Text(stringResource(R.string.call_btn_video), color = HoloSecondary, fontSize = Tokens.Font.small)
@@ -234,7 +236,8 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
     // Кто уже в комнате помимо звонящего (групповой room-invite); в 1:1 пусто.
     val others = model.groupPresence[ic.roomId] ?: emptyList()
     // Оценка суммарного входящего «~»: видео-поток ≈30, аудио ≈2 МБ/мин (per call-ui.md).
-    val trafficMb = (if (ic.video) 30 else 2) + others.map { if (it.video) 30 else 2 }.sum()
+    val trafficMb = (listOf(ic.video) + others.map { it.video })
+        .sumOf { if (it) AppModel.TRAFFIC_VIDEO_MB_MIN else AppModel.TRAFFIC_AUDIO_MB_MIN }
 
     Box(Modifier.fillMaxSize().background(Tokens.Colors.callBg)) {
         Column(
@@ -245,14 +248,14 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
             Spacer(Modifier.height(96.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
-                    Modifier.size(88.dp).clip(RoundedCornerShape(Tokens.Radius.avatar)).background(HoloAccent),
+                    Modifier.size(Tokens.Size.avatarBig).clip(RoundedCornerShape(Tokens.Radius.avatar)).background(HoloAccent),
                     contentAlignment = Alignment.Center,
                 ) {
-                    PhotoOr(model.peerAvatar(ic.peer), 88.dp) {
-                        Text(initialOf(name), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = Tokens.Font.initial(88.dp))
+                    PhotoOr(model.peerAvatar(ic.peer), Tokens.Size.avatarBig) {
+                        Text(initialOf(name), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = Tokens.Font.initial(Tokens.Size.avatarBig))
                     }
                 }
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(Tokens.Space.xl))
                 Text(name, color = Color.White, fontSize = Tokens.Font.big, fontWeight = FontWeight.Medium)
                 val groupName = model.groups.firstOrNull { it.gid == ic.roomId }?.name
                 Text(
@@ -263,16 +266,15 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                     },
                     color = HoloSecondary,
                     fontSize = Tokens.Font.label,
-                    modifier = Modifier.padding(top = 8.dp),
+                    modifier = Modifier.padding(top = Tokens.Space.s),
                 )
                 // Кто уже в комнате: «Боря [и ещё N] в комнате» (мини-аватар). 1:1 — нет.
                 if (others.isNotEmpty()) {
-                    val firstName = model.contacts.firstOrNull { it.key == others.first().peer }?.displayName
-                        ?: (others.first().peer.take(6) + "…")
+                    val firstName = model.peerName(others.first().peer)
                     val more = others.size - 1
                     Row(
-                        Modifier.padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        Modifier.padding(top = Tokens.Space.m),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.size(22.dp).clip(RoundedCornerShape(Tokens.Radius.badge)).background(HoloOnline), contentAlignment = Alignment.Center) {
@@ -289,14 +291,24 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                         )
                     }
                 }
+                // Принять, уже сидя в звонке, — значит выйти из него: говорим заранее,
+                // а не после того, как старый звонок молча оборвался.
+                if (model.currentRoom != null) {
+                    Text(
+                        stringResource(R.string.call_invite_will_leave),
+                        color = WarnColor,
+                        fontSize = Tokens.Font.body,
+                        modifier = Modifier.padding(top = Tokens.Space.m),
+                    )
+                }
                 // Ожидаемый суммарный входящий трафик.
-                Spacer(Modifier.height(22.dp))
+                Spacer(Modifier.height(Tokens.Space.xxl))
                 Text(stringResource(R.string.call_traffic_rate, trafficMb), color = Color.White, fontSize = Tokens.Font.huge, fontWeight = FontWeight.Bold)
                 Text(
                     stringResource(R.string.call_invite_traffic_caption),
                     color = HoloSecondary,
                     fontSize = Tokens.Font.small,
-                    modifier = Modifier.padding(top = 2.dp),
+                    modifier = Modifier.padding(top = Tokens.Space.xxs),
                 )
             }
             // Низ: Отклонить(✕) · Микрофон(пресет) · Видео(пресет) · Принять(дверь).
@@ -305,7 +317,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
             // потока и выглядит как зависший звонок).
             val runWithPerm = rememberPermissionRunner()
             Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.l),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CallButton(Icons.Filled.Close, stringResource(R.string.call_invite_btn_decline), HoloError) { model.declineDmCall() }
@@ -329,7 +341,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
 private fun PresetButton(icon: ImageVector, on: Boolean, desc: String, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(if (on) Tokens.Colors.btnNeutral else Tokens.Colors.btnDangerMuted)
-            .size(56.dp).clickable { onClick() },
+            .size(Tokens.Size.callButton).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = if (on) Color.White else Tokens.Colors.iconDangerMuted, modifier = Modifier.size(24.dp)) }
 }
@@ -338,7 +350,7 @@ private fun PresetButton(icon: ImageVector, on: Boolean, desc: String, onClick: 
 @Composable
 internal fun CallButton(icon: ImageVector, desc: String, color: Color, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(color).size(56.dp).clickable { onClick() },
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(color).size(Tokens.Size.callButton).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(26.dp)) }
 }

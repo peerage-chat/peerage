@@ -59,11 +59,17 @@ class CallService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        peerName = intent?.getStringExtra(EXTRA_PEER_NAME) ?: ""
-        startMs = intent?.getLongExtra(EXTRA_START_MS, System.currentTimeMillis())
-            ?: System.currentTimeMillis()
+        // Перезапуск системой после убийства процесса приходит без intent — звонка к
+        // этому моменту уже нет (медиа жило в убитом процессе). Раньше START_STICKY
+        // поднимал сервис заново, и висело вечное «Голосовой чат» без звонка.
+        if (intent == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        peerName = intent.getStringExtra(EXTRA_PEER_NAME) ?: ""
+        startMs = intent.getLongExtra(EXTRA_START_MS, System.currentTimeMillis())
         startForegroundCompat()
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -78,6 +84,14 @@ class CallService : Service() {
     private fun startForegroundCompat() {
         ensureChannel()
         val notif = buildNotification()
+        // Android 14 бросает SecurityException, если тип «микрофон» заявлен без
+        // выданного разрешения, а 12+ — если старт пришёлся на фон. Исключение из
+        // сервиса роняет весь процесс; без переднего плана звонок проживёт меньше,
+        // но это лучше, чем упасть посреди него.
+        runCatching { startForegroundTyped(notif) }.onFailure { stopSelf() }
+    }
+
+    private fun startForegroundTyped(notif: Notification) {
         when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
                 startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)

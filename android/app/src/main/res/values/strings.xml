@@ -32,6 +32,7 @@
     <string name="call_invite_subtitle">invites you to the room</string>
     <string name="call_invite_btn_decline">Decline</string>
     <string name="call_invite_btn_join">Join</string>
+    <string name="call_invite_will_leave">Your current call will end</string>
     <string name="call_invite_traffic_caption">total incoming traffic</string>
     <plurals name="call_others_in_room">
         <item quantity="one">and %d more in the room</item>
@@ -514,6 +515,7 @@
     <string name="verify_mismatch">Keys DO NOT match. Someone may be in between — do not trust this conversation until you check again.</string>
     <string name="calls_all">All</string>
     <string name="calls_missed">Missed</string>
+    <string name="calls_room_gone">Deleted group</string>
     <string name="calls_join">Join</string>
     <string name="calls_in_room">Room call · %1$s</string>
     <string name="calls_missed_one">Missed</string>

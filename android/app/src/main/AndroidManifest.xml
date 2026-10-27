@@ -95,7 +95,6 @@
             android:name=".IncomingCallReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="chat.peerage.ACCEPT_CALL" />
                 <action android:name="chat.peerage.DECLINE_CALL" />
             </intent-filter>
         </receiver>

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -243,8 +244,8 @@ private fun GroupChatContent(model: AppModel) {
             } else {
                 model.peerName(key)
             }
-            val audio = if (isMe) true else model.roomMembers.firstOrNull { it.peer == key }?.audio ?: true
-            val video = if (isMe) false else model.roomMembers.firstOrNull { it.peer == key }?.video ?: false
+            val audio = if (isMe) !model.muted else model.roomMembers.firstOrNull { it.peer == key }?.audio ?: true
+            val video = if (isMe) model.videoActive else model.roomMembers.firstOrNull { it.peer == key }?.video ?: false
             val photo = if (isMe) model.selfAvatar else model.peerAvatar(key)
             ParticipantFullscreen(name, audio, video, isMe, photo) { focusedParticipant = null }
             BackHandler { focusedParticipant = null }
@@ -296,6 +297,9 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
         }
         if (gid != null) {
             if (model.currentRoom == gid) {
+                // «Позвать» жил только на экране ЛИЧНОГО звонка за условием «звонок не
+                // личный» — то есть не показывался никогда. Его место — здесь.
+                BarIcon(Icons.Filled.PersonAdd, stringResource(R.string.call_btn_invite)) { model.showRingSheet = true }
                 BarIcon(Icons.Filled.CallEnd, stringResource(R.string.cd_leave_call)) { model.leaveRoom() }
             } else {
                 val join = rememberRoomJoin(model)
