@@ -548,14 +548,19 @@ class AppModel private constructor() {
      *  прямо из композиции (инвариант 4). */
     private val fingerprints = mutableStateMapOf<String, String>()
 
+    /** Ключи, чей отпечаток уже считается. НЕ снапшот-состояние: функцию зовёт
+     *  композиция, а писать в состояние из композиции, пока его же пишет фоновый
+     *  поток, — «Unsupported concurrent change during composition» и падение. */
+    private val fingerprintsRequested = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     /** Отпечаток для сверки глазами. Пустой ключ — свой. Считает движок (одна
      *  реализация на все клиенты), UI только рисует. Пока не посчитан — "". */
     fun visualFingerprint(key: String = ""): String {
         fingerprints[key]?.let { return it }
-        if (sessionPtr != 0L) {
-            fingerprints[key] = "" // запрос в пути — второй не ставим
+        if (sessionPtr != 0L && fingerprintsRequested.add(key)) {
             ops.execute {
-                fingerprints[key] = runCatching { Native.visualFingerprint(sessionPtr, key) }.getOrDefault("")
+                val fp = runCatching { Native.visualFingerprint(sessionPtr, key) }.getOrDefault("")
+                onMain { fingerprints[key] = fp }
             }
         }
         return ""
