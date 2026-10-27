@@ -693,8 +693,8 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
     val me = model.me ?: return
     // В QR — код обмена, а не голый ключ: после смены адреса по одной лишь
     // личности до нас не достучаться (ADR-007).
-    // Самоназвание едет в коде — сменили имя, код другой.
-    val code = remember(me.pubkey, model.selfName) { model.myContactCode() }
+    // Код живёт в модели и обновляется при смене имени и адреса.
+    val code = model.contactCode
     val qr = remember(code) { generateQrBitmap(code) }
     val ctx = LocalContext.current
     Column(

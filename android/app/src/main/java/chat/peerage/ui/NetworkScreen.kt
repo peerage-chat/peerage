@@ -134,7 +134,7 @@ internal fun NetworkScreen(
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
         ) {
             OutlineAction(stringResource(R.string.net_my_qr), Icons.Filled.QrCode2, Modifier.weight(1f), onMyQr)
-            OutlineAction(stringResource(R.string.net_share), Icons.Filled.Share, Modifier.weight(1f)) { shareText(ctx, model.myContactCode()) }
+            OutlineAction(stringResource(R.string.net_share), Icons.Filled.Share, Modifier.weight(1f)) { shareText(ctx, model.contactCode) }
         }
         // Смена адреса живёт рядом с самим адресом — тут её и ищут.
         SurfaceCard(onClick = onRotate) {

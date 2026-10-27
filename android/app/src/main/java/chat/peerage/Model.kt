@@ -177,6 +177,7 @@ class AppModel private constructor() {
     fun updateSelfName(name: String) = ops.execute {
         Native.setSelfName(sessionPtr, name.trim())
         selfName = Native.selfName(sessionPtr)
+        contactCode = Native.myContactCode(sessionPtr) // имя едет в коде
     }
 
     /** Байты аватаров контактов по hex-хэшу (M2). Заполняется при обновлении контактов;
@@ -542,13 +543,22 @@ class AppModel private constructor() {
     /** Журнал звонков (свежие первыми). */
     val callLog = mutableStateListOf<CallEntry>()
 
-    /** Визуальные отпечатки ключей (hex) — кэш, чтобы не дёргать JNI на рекомпозицию. */
-    private val fpCache = mutableMapOf<String, String>()
+    /** Визуальные отпечатки ключей (hex). Снапшот-состояние: первый запрос из UI
+     *  ставит расчёт в [ops], сетка дорисуется, когда он придёт. Раньше JNI звался
+     *  прямо из композиции (инвариант 4). */
+    private val fingerprints = mutableStateMapOf<String, String>()
 
     /** Отпечаток для сверки глазами. Пустой ключ — свой. Считает движок (одна
-     *  реализация на все клиенты), UI только рисует. */
-    fun visualFingerprint(key: String = ""): String = fpCache.getOrPut(key) {
-        if (sessionPtr == 0L) "" else runCatching { Native.visualFingerprint(sessionPtr, key) }.getOrDefault("")
+     *  реализация на все клиенты), UI только рисует. Пока не посчитан — "". */
+    fun visualFingerprint(key: String = ""): String {
+        fingerprints[key]?.let { return it }
+        if (sessionPtr != 0L) {
+            fingerprints[key] = "" // запрос в пути — второй не ставим
+            ops.execute {
+                fingerprints[key] = runCatching { Native.visualFingerprint(sessionPtr, key) }.getOrDefault("")
+            }
+        }
+        return ""
     }
 
     // ── Пользовательские папки ──────────────────────────────────────────────
@@ -1006,6 +1016,7 @@ class AppModel private constructor() {
         loadFolders()
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
+        contactCode = Native.myContactCode(sessionPtr)
         // Расшифрованные копии вложений, оставшиеся от прошлого запуска (просмотр,
         // «открыть», «поделиться»): держать их дольше нужного незачем.
         appContext?.cacheDir?.let { c -> listOf("viewer", "shared").forEach { File(c, it).deleteRecursively() } }
@@ -1273,14 +1284,11 @@ class AppModel private constructor() {
     /**
      * Догрузить страницу истории ВЫШЕ показанной. Открытие чата отдаёт только хвост
      * (движок не поднимает переписку целиком), остальное приезжает по мере прокрутки.
+     * Вид чата — параметр: страницы приходят из разных вызовов движка, но условия
+     * («уже в начале», «загрузка идёт») и место вставки общие.
      *
      * [done] получает, сколько сообщений добавлено — вызывающему это нужно, чтобы
      * удержать позицию списка: вставка сверху иначе выглядит как прыжок.
-     */
-    /**
-     * Догрузить страницу истории выше текущей. Вид чата — параметр: страницы
-     * приходят из разных вызовов движка, но условия («уже в начале», «загрузка
-     * идёт») и место вставки общие.
      */
     fun loadOlder(key: String, done: (Int) -> Unit, group: Boolean = false) {
         if (group) {
@@ -1739,8 +1747,12 @@ class AppModel private constructor() {
     }
 
     /** Код для своего QR (ADR-007): личность + подписанный текущий адрес, если он
-     *  менялся. Читается с движка, а не собирается в UI: формат — контракт движка. */
-    fun myContactCode(): String = Native.myContactCode(sessionPtr)
+     *  менялся, + самоназвание. Читается с движка: формат — контракт движка.
+     *  Состояние, а не вызов из UI: профиль держал код в `remember(ключ, имя)` и
+     *  после смены адреса показывал СТАРЫЙ — по нему до нас уже не достучаться.
+     *  Обновляется на старте, при смене имени и адреса. */
+    var contactCode by mutableStateOf("")
+        private set
 
     fun addContact(key: String, name: String) = ops.execute {
         val r = Native.addContact(sessionPtr, key, name)
@@ -1760,7 +1772,14 @@ class AppModel private constructor() {
     }
 
     /** Удалить контакт вместе с перепиской (движок стирает и историю). */
-    fun remove(key: String) = ops.execute {
+    fun remove(key: String) {
+        // Разговор с удаляемым — завершаем: звонок с тем, кого уже нет в контактах,
+        // повис бы без кнопки и без имени.
+        if (dmCallPeer == key) leaveRoom()
+        ops.execute { removeNow(key) }
+    }
+
+    private fun removeNow(key: String) {
         Native.removeContact(sessionPtr, key)
         if (currentChat == key) currentChat = null
         forgetChatLocally(key)
@@ -1931,6 +1950,7 @@ class AppModel private constructor() {
                 offline = false
                 rotation = rotation?.copy(secondsLeft = 0, newAddress = ev.address)
                 me = me?.copy(address = ev.address)
+                contactCode = Native.myContactCode(sessionPtr) // в коде — подписанный адрес
             }
             // Новый узел не поднялся: карточку хода закрываем и говорим, что вышло.
             // Адрес прежний; если и на него вернуться не удалось — мы офлайн, и
@@ -2460,6 +2480,9 @@ class AppModel private constructor() {
     /** Выйти из группы (ADR-004). Локально забываем сразу; движок просит админа отозвать. */
     fun leaveGroup(gid: String) {
         if (currentGroup == gid) currentGroup = null
+        // Сидим в звонке этой группы — выходим и из него: иначе маячок продолжал бы
+        // объявлять нас в комнате группы, из которой мы ушли.
+        if (currentRoom == gid) leaveRoom()
         ops.execute { Native.groupLeave(sessionPtr, gid) }
     }
 
