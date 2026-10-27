@@ -83,8 +83,8 @@ fn fixture() -> &'static Fixture {
         }
         let data = a.send(&pb, &text(), true, t, &mut rng).remove(0);
         stages.push(Stage { a: a.clone(), b: b.clone(), template: data, to_b: true });
-        let mut frame = vec![0u8; peerage_core::media::MEDIA_HEADER_LEN + 5];
-        peerage_core::media::write_media_header(&mut frame, peerage_core::media::TRACK_AUDIO, 1, 0);
+        let mut frame = vec![0u8; litertc::MEDIA_HEADER_LEN + 5];
+        litertc::write_media_header(&mut frame, litertc::TRACK_AUDIO, 1, 0);
         let media = a.seal_media(&pb, &frame, t).unwrap();
         stages.push(Stage { a, b, template: media, to_b: true });
         Fixture { pa, pb, t, stages }
@@ -115,7 +115,7 @@ fuzz_target!(|data: &[u8]| {
     let (rx, tx) = if st.to_b { (&mut b, &mut a) } else { (&mut a, &mut b) };
     // Любой пакет пробуем и как медиа: путь разбора у медиа свой.
     if let Some((_, frame)) = rx.open_media(&pkt, f.t) {
-        let _ = peerage_core::media::parse_media(&frame);
+        let _ = litertc::parse_media(&frame);
     }
     let back = match rx.receive(&pkt, f.t, &mut rng) {
         Received::Reply(m) => vec![m],

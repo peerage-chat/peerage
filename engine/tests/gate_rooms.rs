@@ -175,7 +175,7 @@ fn hangup_stops_our_audio_at_once_under_peer_flood() {
             let junk = vec![0u8; 1000];
             let mut seq = 0u16;
             while !stop.load(Ordering::Relaxed) {
-                let _ = m.send_media(&a_key, peerage_core::media::TRACK_VIDEO, seq, 0, &junk);
+                let _ = m.send_media(&a_key, litertc::TRACK_VIDEO, seq, 0, &junk);
                 if seq % 64 == 0 {
                     let _ = m.send_room_presence(&a_key, &room, 0b01);
                 }
@@ -195,7 +195,7 @@ fn hangup_stops_our_audio_at_once_under_peer_flood() {
             }
         })
     };
-    let is_audio = |p: &peerage_messenger::MediaPacket| p.src == a_key && p.track == peerage_core::media::TRACK_AUDIO;
+    let is_audio = |p: &peerage_messenger::MediaPacket| p.src == a_key && p.track == litertc::TRACK_AUDIO;
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut got = false;
     while !got && Instant::now() < deadline {

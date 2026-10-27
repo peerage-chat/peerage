@@ -48,7 +48,14 @@ impl JitterBuffer {
         let depth = depth.max(1);
         // gap_tol=2: терпим 1-кадровый реордеринг без ложной потери, но объявляем
         // настоящую потерю уже через 40мс (2 кадра), а не ждём depth кадров.
-        JitterBuffer { depth, gap_tol: 2, max: depth + BURST_HEADROOM, next: None, buf: BTreeMap::new(), dropped: 0 }
+        JitterBuffer {
+            depth,
+            gap_tol: 2,
+            max: depth + BURST_HEADROOM,
+            next: None,
+            buf: BTreeMap::new(),
+            dropped: 0,
+        }
     }
 
     /// Изменить целевую глубину префетча на лету.
@@ -172,8 +179,12 @@ mod tests {
         // gap_tol=2: нужно 2 кадра после пропуска чтобы объявить потерю.
         // Это защищает от ложных срабатываний при 1-кадровом реордеринге.
         let mut j = JitterBuffer::new(4);
-        for s in 0..4u16 { j.push(s, f(s as u8)); }
-        for _ in 0..4 { assert!(matches!(j.pop(), Some(JitterOut::Frame(_)))); }
+        for s in 0..4u16 {
+            j.push(s, f(s as u8));
+        }
+        for _ in 0..4 {
+            assert!(matches!(j.pop(), Some(JitterOut::Frame(_))));
+        }
         // seq 4 потерян; приходит seq 5 (только 1 кадр < gap_tol=2 → ждём)
         j.push(5, f(5));
         assert_eq!(j.pop(), None);
@@ -202,7 +213,7 @@ mod tests {
         let mut j = JitterBuffer::new(1); // depth=1 → max=1+BURST_HEADROOM
         j.push(0, f(0));
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(0)))); // playout начат, next=1
-        // Отправитель обогнал воспроизведение ДАЛЕКО за потолок (настоящий дрейф).
+                                                           // Отправитель обогнал воспроизведение ДАЛЕКО за потолок (настоящий дрейф).
         for s in 1..=60u16 {
             j.push(s, vec![s as u8]);
         }
@@ -219,7 +230,9 @@ mod tests {
         // Сетевая пачка: 15 кадров приходят разом. Их НЕ должно выбросить —
         // BURST_HEADROOM=20 поглощает пачку, кадры воспроизводятся по порядку.
         let mut j = JitterBuffer::new(3);
-        for s in 0..15u16 { j.push(s, f(s as u8)); }
+        for s in 0..15u16 {
+            j.push(s, f(s as u8));
+        }
         assert_eq!(j.take_dropped(), 0, "пачка из 15 не должна дропаться");
         // И все 15 извлекаются по порядку.
         for s in 0..15u16 {

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "core",
+    "litertc",
     "transport",
     "messenger",
     "media",
@@ -17,7 +18,7 @@ members = [
 # transport линкует Go-библиотеку libygg.so и собирается только под Linux (WSL).
 # Дефолтная сборка (cargo build/test без -p) ограничена кросс-платформенными
 # крейтами, чтобы не ломать Windows. transport собираем явно: cargo build -p peerage-ygg.
-default-members = ["core"]
+default-members = ["core", "litertc"]
 
 # Профиль release для всего воркспейса (в т.ч. android cdylib libpeerage_android.so).
 # Цель — меньше размер .so без риска для отзывчивости и корректности:

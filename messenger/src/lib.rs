@@ -18,9 +18,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use peerage_core::media::{
-    parse_media, write_media_header, CHAN_CHAT, CHAN_MEDIA, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN,
-};
+use litertc::{parse_media, write_media_header, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN};
+use peerage_core::media::{CHAN_CHAT, CHAN_MEDIA};
 use peerage_core::protocol::{Payload, ProtocolError};
 use peerage_core::session::{Received, Sessions};
 use rand_core::OsRng;

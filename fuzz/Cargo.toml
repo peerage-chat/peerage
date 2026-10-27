@@ -13,6 +13,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
 peerage-core = { path = "../core" }
+litertc = { path = "../litertc" }
 peerage-blob = { path = "../blob" }
 rand_core = "0.6"
 

@@ -3901,6 +3901,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
+name = "litertc"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5216,6 +5223,7 @@ version = "0.1.0"
 dependencies = [
  "cpal",
  "image",
+ "litertc",
  "nokhwa",
  "peerage-core",
  "peerage-media",
@@ -5277,6 +5285,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "libc",
+ "litertc",
  "log",
  "peerage-blob",
  "peerage-core",
@@ -5319,6 +5328,7 @@ dependencies = [
 name = "peerage-media"
 version = "0.1.0"
 dependencies = [
+ "litertc",
  "openh264",
  "opus",
  "peerage-core",
@@ -5332,6 +5342,7 @@ name = "peerage-messenger"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "litertc",
  "log",
  "peerage-core",
  "peerage-ygg",

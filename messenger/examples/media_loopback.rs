@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use peerage_core::media::TRACK_AUDIO;
+use litertc::TRACK_AUDIO;
 use peerage_core::Identity;
 use peerage_messenger::{Event, MediaPacket, Messenger};
 use peerage_ygg::Node;

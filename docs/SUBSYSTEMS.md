@@ -12,7 +12,7 @@ This map is the common spine of three planes:
 - **Interface** — UI surfaces grow out of subsystems, not the other way round.
 
 Code principle: feature logic is platform-independent and lives in Rust crates (`core`,
-`messenger`, `media`, `group`, `groupchat`, `blob`, `engine`). `androidjni` and the
+`messenger`, `litertc`, `media`, `group`, `groupchat`, `blob`, `engine`). `androidjni` and the
 Compose UI are thin adapters.
 
 ---
@@ -67,8 +67,9 @@ Compose UI are thin adapters.
 ### S3. Media engine ✅ (polish ongoing)
 - **What:** Opus (audio), H.264 (video), adaptive jitter buffer, frame fragmentation and
   reassembly, call orchestration.
-- **Where:** `media` (`codec.rs`, `jitter.rs`, `video.rs`), `core/media.rs`
-  (fragmentation), `engine/room_call.rs`; on Android the capture and codecs are
+- **Where:** `litertc` — the media plane per [ADR-014](adr/ADR-014-litertc.md) (packet
+  format, frame reassembly, audio jitter buffer, network simulator); `media` (codecs:
+  `codec.rs`, `video.rs`), `engine/room_call.rs`; on Android the capture and codecs are
   platform APIs (`CallAudio`, `VideoSender`, `VideoReceiver`).
 - **Debt:** the desktop has its own call engine (`call`); unifying it with the engine is
   part of the desktop work.

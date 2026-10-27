@@ -10,6 +10,7 @@ name = "peerage_messenger"
 
 [dependencies]
 log = "0.4"
+litertc = { path = "../litertc" }
 peerage-core = { path = "../core" }
 peerage-ygg = { path = "../transport" }
 rand_core.workspace = true

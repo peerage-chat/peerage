@@ -236,7 +236,7 @@ parses comes from such a member, so:
 ## Order of work — calls keep working after every step
 
 1. **This ADR.**
-2. **Move without changes.** Create `litertc`; move the fragmentation/reassembly from
+2. ✅ (2026-10-28) **Move without changes.** Create `litertc`; move the fragmentation/reassembly from
    `core/media.rs` and the jitter buffer from `media/`; the format on the wire stays
    byte-identical. Add the simulator and tests that pin today's behaviour.
 3. **Sans-IO `Session`.** `room_call.rs` drives it (it keeps its threads, mixing and

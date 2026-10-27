@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, Stream, StreamConfig};
 
-use peerage_core::media::{fragment_video, parse_video_frag, VideoReassembler, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO};
+use litertc::{fragment_video, parse_video_frag, JitterBuffer, JitterOut, VideoReassembler, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO};
 use peerage_core::settings::{AudioSettings, VideoSettings};
 use peerage_media::{
-    AudioDecoder, AudioEncoder, DecodedFrame, JitterBuffer, JitterOut, VideoDecoder, VideoEncoder,
+    AudioDecoder, AudioEncoder, DecodedFrame, VideoDecoder, VideoEncoder,
     VideoSource,
 };
 use peerage_messenger::Messenger;

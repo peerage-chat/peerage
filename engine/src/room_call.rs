@@ -17,12 +17,12 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use peerage_core::media::{
-    fragment_video, parse_video_frag, CompleteFrame, VideoReassembler,
+use litertc::{
+    fragment_video, parse_video_frag, CompleteFrame, JitterBuffer, JitterOut, VideoReassembler,
     TRACK_AUDIO, TRACK_VIDEO,
 };
 use peerage_core::settings::AudioSettings;
-use peerage_media::{AudioDecoder, AudioEncoder, JitterBuffer, JitterOut};
+use peerage_media::{AudioDecoder, AudioEncoder};
 use peerage_messenger::Messenger;
 
 use crate::LockRecover;

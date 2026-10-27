@@ -36,5 +36,5 @@ Android Jetpack Compose. GPL-3.0. Цель — v1.0 (на гранты не по
 - Rust-тесты: `scripts/test-all.sh` из WSL (сам ставит `--test-threads=1`,
   `LD_LIBRARY_PATH` и исключает несобираемый desktop).
 - `./gradlew ktlintFormat` перед коммитом Kotlin. Rust-части Android — через WSL
-  (`scripts/rebuild-peerage-android.sh <ABI>`; при изменении ygg.go FFI — `build-android-libs.sh`).
+  (`scripts/rebuild-android.sh <ABI>`; при изменении ygg.go FFI — `build-android-libs.sh`).
 - Коммиты — по-русски, с `Co-Authored-By`. Коммитить/пушить только по просьбе.

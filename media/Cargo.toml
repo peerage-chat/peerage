@@ -16,4 +16,5 @@ peerage-core = { path = "../core" }
 peerage-messenger = { path = "../messenger" }
 
 [dev-dependencies]
+litertc = { path = "../litertc" }
 peerage-ygg = { path = "../transport" }

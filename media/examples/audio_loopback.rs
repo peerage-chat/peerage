@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use peerage_core::media::TRACK_AUDIO;
+use litertc::{JitterBuffer, JitterOut, TRACK_AUDIO};
 use peerage_core::Identity;
-use peerage_media::{AudioDecoder, AudioEncoder, AudioSettings, JitterBuffer, JitterOut};
+use peerage_media::{AudioDecoder, AudioEncoder, AudioSettings};
 use peerage_messenger::{MediaPacket, Messenger};
 use peerage_ygg::Node;
 
