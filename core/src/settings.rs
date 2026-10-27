@@ -41,7 +41,7 @@ pub struct AudioSettings {
 
 impl Default for AudioSettings {
     fn default() -> Self {
-        // Voip-режим: оптимизирован под речь, DTX (тишина не шлётся), FEC.
+        // Voip-режим: оптимизирован под речь, FEC. DTX выключен осознанно (ADR-014 §8).
         // 64кбит/с достаточно для чёткой речи; экономим канал для видео.
         AudioSettings {
             sample_rate: 48_000,

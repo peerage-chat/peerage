@@ -1,6 +1,8 @@
 # ADR-014: LiteRTC — the call media plane as one internal, sans-IO crate
 
-**Status:** Proposed (2026-10-28), awaiting the owner.
+**Status:** Accepted (2026-10-28). Scope checked feature by feature against WebRTC in
+[litertc-vs-webrtc.md](../architecture/litertc-vs-webrtc.md) (in Russian); its P1 list is
+this ADR's scope, P2/P3 come later.
 **Date:** 2026-10-28
 **Decided by:** the owner set the direction (our own minimal analogue of WebRTC, no
 libwebrtc, security first, not published separately until the messenger ships); the
@@ -146,8 +148,11 @@ Encryption is unchanged: the messenger seals whatever `poll_transmit` returns, a
 byte of today's inner header becomes a **version + packet-type byte**, so the format can
 evolve. Two packet types:
 
-- **Media:** track, `seq` (per track), `ts` = **capture time** in the codec clock (48 kHz
-  audio, 90 kHz video), and for video: frame id, fragment index/count, flags (keyframe,
+- **Media:** track, a random **stream id** chosen each time a track starts sending (a
+  restarted sender is recognised as a new stream instead of guessing from `seq` jumps),
+  `seq` (per track), a **transport-wide seq** (one counter across all tracks to a
+  receiver, for the delay-based estimate), `ts` = **capture time** in the codec clock
+  (48 kHz audio, 90 kHz video), and for video: frame id, fragment index/count, flags (keyframe,
   carries metadata). **Rotation and fps move into the protocol** as metadata on keyframes
   and on change, so the 2-byte side header disappears.
 - **Feedback** (receiver → sender, sent periodically and on loss): NACK ranges for video
@@ -172,8 +177,11 @@ don't have to.
   sends a keyframe request and **skips** P-frames until the next keyframe instead of
   feeding the decoder a broken reference. Once that works, the periodic keyframe moves
   from 1 s to on-demand plus a long safety interval (about 10 s), which frees bandwidth.
-- **Audio:** no retransmission (it would arrive too late). Opus in-band FEC turns on with
-  the loss fraction from receiver reports; concealment (PLC) stays as it is.
+- **Audio:** no retransmission (it would arrive too late). Opus in-band FEC is already
+  encoded but never decoded (`AudioDecoder::decode` always passes `fec = false`): the
+  jitter buffer reports "packet N lost, N+1 is here", and the decoder recovers N from the
+  FEC data in N+1. The FEC share then follows the loss fraction from receiver reports;
+  concealment (PLC) stays as it is.
 
 ### 6. Bandwidth: estimate, adapt, pace
 
@@ -184,7 +192,8 @@ don't have to.
 - **Adapt**: `TargetBitrate` goes to the encoders. Kotlin maps the video target to an
   encoder bitrate and a resolution step; the audio target goes to Opus.
 - **Pace**: fragments of a large frame go out spread over a few milliseconds instead of
-  one burst, which is where queue drops come from today.
+  one burst, which is where queue drops come from today. The pacer has priorities:
+  audio, then retransmissions, then video, so a keyframe never delays speech.
 - **Mesh**: a group call sends a separate copy to each member (each is sealed with that
   member's key). With one encoder, the target is the minimum across receivers. Simulcast
   or a relay would lift that; both are out of scope, but the API (per-recipient
@@ -215,6 +224,12 @@ parses comes from such a member, so:
   keyframe requests are honoured at most about once per second per peer. Otherwise one
   member could make us flood everyone, or keep the encoder producing only keyframes.
 - **No panics on input**; parsing lives in one module and is fuzzed.
+- **Audio packet size must not leak speech.** With variable bitrate, an Opus packet's size
+  follows the sound, and encrypted VBR voice is known to leak phrases through packet
+  sizes alone (Wright et al., IEEE S&P 2008); WebRTC does not hide this. We send audio at
+  a constant packet size (Opus CBR, or padding to a fixed size). DTX stays **off** on
+  purpose: skipping silent frames would reveal the rhythm of speech. The cost is a little
+  bandwidth and ~50 packets/s during silence.
 - **LiteRTC does not authenticate.** It trusts `from` because the messenger has already
   proven it (SEC-4). That boundary is written into the crate docs.
 
@@ -226,13 +241,13 @@ parses comes from such a member, so:
    byte-identical. Add the simulator and tests that pin today's behaviour.
 3. **Sans-IO `Session`.** `room_call.rs` drives it (it keeps its threads, mixing and
    halt); the JNI surface does not change. Write the wire spec.
-4. **Wire v2.** Version byte, capture timestamps, rotation/fps in the protocol; Kotlin
-   drops the side header. Media between old and new builds breaks here (pre-beta policy).
+4. **Wire v2.** Version byte, stream id, transport-wide seq, capture timestamps,
+   rotation/fps in the protocol; Kotlin drops the side header. Media between old and new builds breaks here (pre-beta policy).
 5. **Feedback and stats:** receiver reports, RTT, per-peer stats (they also replace the
    ad-hoc traffic counters).
-6. **Video recovery:** NACK, retransmission, keyframe request, skip-to-keyframe; then the
-   longer keyframe interval.
-7. **Bandwidth:** estimator, pacing, `TargetBitrate` → MediaCodec bitrate and resolution
+6. **Recovery:** NACK, retransmission, keyframe request, skip-to-keyframe; then the
+   longer keyframe interval. Audio: decode Opus FEC, constant packet size, DTX off.
+7. **Bandwidth:** estimator, prioritised pacing, `TargetBitrate` → MediaCodec bitrate and resolution
    steps, Opus FEC. Revisit the 600 packets/s media ingress budget against real bitrates.
 8. **Playout and A/V sync:** the video jitter buffer moves from `VideoReceiver` into
    LiteRTC (`play_at`); Kotlin only decodes and renders.
@@ -245,7 +260,9 @@ comes from.
 ## What this decision does NOT cover
 
 - A relay/SFU, simulcast or SVC — mesh stays; groups are small.
-- New codecs (VP9, AV1) or FEC for video.
+- New codecs (VP9, AV1), FEC for video, RED for audio, bandwidth probing, time-stretching
+  in the audio jitter buffer, a capability exchange in signalling — P2/P3 of the review,
+  each needs its own decision.
 - Any change to media encryption: SEC-4 keys stay in the 1:1 sessions.
 - Screen-sharing UX (the track already exists).
 - A public release of the crate (owner's decision: not before the messenger ships).
