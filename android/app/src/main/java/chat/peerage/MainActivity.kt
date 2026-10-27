@@ -194,7 +194,6 @@ internal enum class Screen {
     Add,
     Me,
     Info,
-    Groups,
     GroupChat,
     CreateGroup,
     AddMember,
@@ -291,10 +290,7 @@ private fun CompactShell(model: AppModel) {
         if (model.incomingCall == null && model.dmCallPeer == null) goBack()
     }
 
-    val navigate: (Screen) -> Unit = { dest ->
-        if (dest == Screen.Groups) model.refreshGroups()
-        screen = dest
-    }
+    val navigate: (Screen) -> Unit = { dest -> screen = dest }
 
     // Выдвижной панели больше нет: разделы и профиль живут на своём экране «Я»
     // (Screen.Me), который открывается аватаром в шапке. Панель делала две работы
@@ -346,9 +342,6 @@ private fun CompactShell(model: AppModel) {
                         Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = goBack)
                         Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = goBack)
                         Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = goBack)
-                        Screen.Groups -> TopBar(stringResource(R.string.title_groups), onBack = goBack) {
-                            BarIcon(Icons.Filled.Add, stringResource(R.string.cd_new_group)) { screen = Screen.CreateGroup }
-                        }
                         Screen.GroupChat -> GroupChatTopBar(
                             model,
                             onBack = goBack,
@@ -456,10 +449,6 @@ private fun CompactShell(model: AppModel) {
                                 },
                                 onDeleted = { screen = Screen.Contacts },
                             )
-                            Screen.Groups -> GroupsScreen(model) {
-                                model.openGroup(it)
-                                screen = Screen.GroupChat
-                            }
                             Screen.GroupChat -> GroupChatScreen(model) { key ->
                                 // «@я» — свой профиль; контакт — его карточка; с
                                 // незнакомцем из группы открывать нечего.

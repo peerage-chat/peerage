@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -40,32 +41,6 @@ import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-
-@Composable
-internal fun GroupsScreen(model: AppModel, onOpen: (String) -> Unit) {
-    if (model.groups.isEmpty()) {
-        CenterMessage(stringResource(R.string.groups_empty))
-    } else {
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(model.groups, key = { it.gid }) { g ->
-                ListRow(onClick = { onOpen(g.gid) }) {
-                    Icon(Icons.Filled.Group, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(g.name, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
-                    Text(
-                        if (g.archived) {
-                            stringResource(R.string.group_archived)
-                        } else {
-                            stringResource(R.string.members_count, g.members)
-                        },
-                        color = HoloSecondary,
-                        fontSize = Tokens.Font.small,
-                    )
-                }
-            }
-        }
-    }
-}
 
 /** Лента группы. `onOpenPeer` — тап по «@имени»: открыть того, кого упомянули. */
 @Composable
@@ -163,14 +138,15 @@ private fun GroupChatContent(model: AppModel) {
             if (inRoom) {
                 RoomGrid(model, true, emptyList(), onFocus = { focusedParticipant = it })
             } else if (presenceMembers.isNotEmpty()) {
-                RoomBanner(model, presenceMembers) { model.joinRoom(gid) }
+                val join = rememberRoomJoin(model)
+                RoomBanner(model, presenceMembers) { join(gid) }
             }
 
             PinnedBar(model, gid, group = true, canUnpin = isAdmin)
             LazyColumn(
                 state = listState,
                 reverseLayout = true,
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = Tokens.Space.m),
             ) {
                 // От свежего к старому; i — индекс в хронологии (см. ChatScreen).
                 // Ключ — пара «автор + id»: состояние пузыря (просмотрщик, голосовое) и
@@ -215,6 +191,7 @@ private fun GroupChatContent(model: AppModel) {
                             EditStrip(t.text) {
                                 model.editTarget = null
                                 input = ""
+                                picked = emptyMap()
                             }
                         } ?: model.replyTarget?.let { ReplyStrip(model, it) }
                     },
@@ -304,7 +281,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
             SquareAvatar(name, size = Tokens.Size.avatarHead, bg = Tokens.Colors.groupAvatar) {
                 Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             Column(Modifier.weight(1f)) {
                 Text(
                     name,
@@ -321,11 +298,20 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
             if (model.currentRoom == gid) {
                 BarIcon(Icons.Filled.CallEnd, stringResource(R.string.cd_leave_call)) { model.leaveRoom() }
             } else {
-                BarIcon(Icons.Filled.Call, stringResource(R.string.cd_join_call)) { model.joinRoom(gid) }
+                val join = rememberRoomJoin(model)
+                BarIcon(Icons.Filled.Call, stringResource(R.string.cd_join_call)) { join(gid) }
             }
         }
         BarIcon(Icons.Filled.MoreVert, stringResource(R.string.common_more), tint = Color.White, onClick = onInfo)
     }
+}
+
+/** Вход в комнату с запросом микрофона — как звонок из личного чата. Без него
+ *  человек входил немым и не понимал, почему его не слышат. */
+@Composable
+internal fun rememberRoomJoin(model: AppModel): (String) -> Unit {
+    val runWithPerm = rememberPermissionRunner()
+    return { gid -> runWithPerm(arrayOf(Manifest.permission.RECORD_AUDIO), R.string.perm_denied_mic) { model.joinRoom(gid) } }
 }
 
 /** Зелёный баннер активной комнаты: «N в звонке · имена» + Войти. */
@@ -335,11 +321,11 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         model.peerName(rm.peer)
     }
     Row(
-        Modifier.fillMaxWidth().background(Tokens.Colors.roomBanner).padding(horizontal = 14.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().background(Tokens.Colors.roomBanner).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Tokens.Space.m))
         Column(Modifier.weight(1f)) {
             Text(stringResource(R.string.room_in_call, members.size), color = HoloOnline, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
             if (names.isNotEmpty()) {
@@ -352,10 +338,10 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
                 )
             }
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Tokens.Space.m))
         Box(
             Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloOnline)
-                .clickable { onJoin() }.padding(horizontal = 18.dp, vertical = 8.dp),
+                .clickable { onJoin() }.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         ) { Text(stringResource(R.string.room_join), color = Tokens.Colors.onOnline, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium) }
     }
 }
@@ -370,8 +356,10 @@ internal fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
     Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
         FieldLabel(stringResource(R.string.create_label_name))
         TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-        AccentButton(stringResource(R.string.create_btn)) {
-            model.createGroup(name)
+        // Без имени группа в списке и в приглашении была бы безымянной строкой —
+        // кнопка ждёт хотя бы одну букву.
+        AccentButton(stringResource(R.string.create_btn), enabled = name.isNotBlank()) {
+            model.createGroup(name.trim())
             onDone()
         }
         Text(
@@ -382,76 +370,128 @@ internal fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
     }
 }
 
-/** Управление группой: текущие участники (с отзывом для админа, ADR-004) + добавление. */
+/**
+ * Управление группой: участники (с отзывом для админа, ADR-004), приглашение и выход.
+ *
+ * Отзыв и выход — с подтверждением: оба необратимы (вернуть можно только новым
+ * приглашением), а строки стоят вплотную к безобидным. Себя админ отозвать не может —
+ * для этого есть «Выйти». В приглашение не попадают те, кто уже в группе.
+ */
 @Composable
 internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
     val gid = model.currentGroup ?: return
     val isAdmin = model.isGroupAdmin(gid)
+    val me = model.me?.pubkey
     val memberKeys = model.groupMemberKeys[gid] ?: emptyList()
+    val invitable = model.contacts.filter { it.key !in memberKeys }
+    var confirmRemove by remember { mutableStateOf<String?>(null) }
+    var confirmLeave by remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize()) {
         if (memberKeys.isNotEmpty()) {
-            item { SectionHeader(stringResource(R.string.group_members_header)) }
-            items(memberKeys, key = { "m_$it" }) { key ->
-                ListRow(onClick = {}) {
-                    StatusDot(model.online[key] == true)
-                    Spacer(Modifier.width(12.dp))
-                    Text(model.peerName(key), color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
-                    if (isAdmin) {
-                        TextButton(onClick = { model.removeGroupMember(gid, key) }) {
-                            Text(
-                                stringResource(R.string.group_remove_member),
-                                color = Tokens.Colors.destructive,
-                                fontSize = Tokens.Font.body,
-                            )
+            item { SectionTitle(stringResource(R.string.group_members_header)) }
+            itemsIndexed(memberKeys, key = { _, k -> "m_$k" }) { i, key ->
+                CardBlock(first = i == 0, last = i == memberKeys.lastIndex) {
+                    CardRow(divider = i > 0, inset = MemberRowInset) {
+                        MemberAvatar(model, key)
+                        Spacer(Modifier.width(Tokens.Space.m))
+                        Text(
+                            groupSenderName(model, key),
+                            color = Color.White,
+                            fontSize = Tokens.Font.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (isAdmin && key != me) {
+                            TextButton(onClick = { confirmRemove = key }) {
+                                Text(stringResource(R.string.group_remove_member), color = Tokens.Colors.destructive)
+                            }
                         }
                     }
                 }
             }
         }
-        item { SectionHeader(stringResource(R.string.group_add_header)) }
-        if (model.contacts.isEmpty()) {
+        item { SectionTitle(stringResource(R.string.group_add_header)) }
+        if (invitable.isEmpty()) {
             item {
                 Text(
                     stringResource(R.string.addmember_empty),
                     color = HoloSecondary,
                     fontSize = Tokens.Font.body,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
                 )
             }
         } else {
-            items(model.contacts, key = { "c_${it.key}" }) { c ->
-                ListRow(onClick = {
-                    model.inviteToGroup(gid, c.key)
-                    onDone()
-                }) {
-                    StatusDot(model.online[c.key] == true)
-                    Spacer(Modifier.width(12.dp))
-                    Text(c.displayName, color = Color.White, fontSize = Tokens.Font.label)
+            itemsIndexed(invitable, key = { _, c -> "c_${c.key}" }) { i, c ->
+                CardBlock(first = i == 0, last = i == invitable.lastIndex) {
+                    CardRow(
+                        onClick = {
+                            model.inviteToGroup(gid, c.key)
+                            onDone()
+                        },
+                        divider = i > 0,
+                        inset = MemberRowInset,
+                    ) {
+                        MemberAvatar(model, c.key)
+                        Spacer(Modifier.width(Tokens.Space.m))
+                        Text(
+                            c.displayName,
+                            color = Color.White,
+                            fontSize = Tokens.Font.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(TablerIcons.Plus, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconS))
+                    }
                 }
             }
         }
         item {
-            // Выход из группы (ADR-004): currentGroup=null → MainActivity уводит на список.
-            ListRow(onClick = { model.leaveGroup(gid) }) {
-                Text(
-                    stringResource(R.string.group_leave),
-                    color = Tokens.Colors.destructive,
-                    fontSize = Tokens.Font.label,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+            // Выход — своей карточкой и с разрывом: он не должен стоять вплотную к
+            // списку, где каждый тап — приглашение.
+            Spacer(Modifier.height(Tokens.Space.l))
+            CardSection {
+                CardRow(onClick = { confirmLeave = true }, divider = false) {
+                    Text(stringResource(R.string.group_leave), color = Tokens.Colors.destructive, fontSize = Tokens.Font.label)
+                }
             }
+            Spacer(Modifier.height(Tokens.Space.l))
         }
+    }
+
+    confirmRemove?.let { key ->
+        ConfirmDialog(
+            title = stringResource(R.string.group_remove_title),
+            text = stringResource(R.string.group_remove_confirm, model.peerName(key)),
+            ok = stringResource(R.string.group_remove_member),
+            onOk = { model.removeGroupMember(gid, key) },
+            onClose = { confirmRemove = null },
+        )
+    }
+    if (confirmLeave) {
+        ConfirmDialog(
+            title = stringResource(R.string.group_leave),
+            text = stringResource(R.string.group_leave_confirm),
+            ok = stringResource(R.string.group_leave_ok),
+            onOk = { model.leaveGroup(gid) },
+            onClose = { confirmLeave = false },
+        )
     }
 }
 
+/** Отступ разделителя у строки участника: поле карточки + аватар + зазор. */
+private val MemberRowInset = Tokens.Space.m + Tokens.Size.avatarSeries + Tokens.Space.m
+
+/** Аватар участника с точкой присутствия — тот же круг, что у человека везде. */
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text,
-        color = HoloSecondary,
-        fontSize = Tokens.Font.small,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+private fun MemberAvatar(model: AppModel, key: String) {
+    SquareAvatar(
+        groupSenderName(model, key),
+        size = Tokens.Size.avatarSeries,
+        online = model.online[key] == true,
+        avatarBytes = model.peerAvatar(key),
+        circle = true,
     )
 }
 

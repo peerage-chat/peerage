@@ -52,7 +52,6 @@
     <string name="share_bitrate">Битрейт</string>
     <string name="share_available_on_device">доступно на устройстве</string>
     <string name="share_auto">авто</string>
-    <string name="share_btn_show">Показать</string>
     <string name="share_preview_front">превью · фронтальная</string>
     <string name="share_preview_back">превью · тыловая</string>
     <string name="share_preview_screen">превью · экран устройства</string>
@@ -107,22 +106,14 @@
     <string name="storage_attachments">Вложения</string>
     <string name="storage_files">%1$d файлов</string>
     <string name="storage_attachments_hint">Фото, файлы и голосовые, которые вы отправили или получили. Очистка не удаляет сообщения — файлы можно скачать у отправителя заново.</string>
-    <string name="storage_queue">Очередь недоставленного</string>
-    <string name="storage_queue_pending">%1$d сообщений ждут доставки</string>
-    <string name="storage_queue_hint">Хранятся до доставки — ничего не удаляется автоматически.</string>
     <string name="storage_clear_attachments">Очистить вложения</string>
     <string name="storage_clear_confirm">Удалить скачанные вложения? Сообщения останутся; файлы можно будет скачать заново, пока они есть у отправителя.</string>
     <string name="storage_clear_ok">Очистить</string>
     <string name="common_cancel">Отмена</string>
-    <string name="size_b">%1$d Б</string>
-    <string name="size_kb">%1$s КБ</string>
-    <string name="size_mb">%1$s МБ</string>
     <string name="menu_settings">Настройки</string>
 
     <!-- ── Шапки экранов ───────────────────────────────────────────────── -->
     <string name="title_add_contact">Добавить контакт</string>
-    <string name="title_my_key">Мой ключ</string>
-    <string name="title_groups">Группы</string>
     <string name="title_new_group">Новая группа</string>
     <string name="title_add_member">Добавить участника</string>
     <string name="title_scan_qr">Сканировать QR</string>
@@ -132,7 +123,6 @@
     <string name="newchat_contacts_header">Контакты</string>
     <string name="badge_soon">скоро</string>
     <string name="cd_search">Поиск</string>
-    <string name="cd_new_group">Новая группа</string>
     <string name="cd_add_contact">Добавить контакт</string>
     <string name="cd_refresh">Обновить</string>
     <string name="cd_new_chat">Новый чат</string>
@@ -141,10 +131,7 @@
     <string name="status_online">онлайн</string>
     <string name="status_offline">не в сети</string>
     <string name="status_in_network">в сети</string>
-    <string name="members_count">%1$d уч.</string>
     <string name="group_presence">%1$d уч. · %2$d в сети</string>
-    <string name="presence_in_room">%1$d в комнате</string>
-    <string name="presence_on_air">В эфире</string>
     <string name="room_in_call">%1$d в звонке</string>
     <string name="room_join">Войти</string>
 
@@ -156,7 +143,6 @@
     <string name="channels_soon">Каналы — скоро</string>
     <!-- Предупреждение о разросшейся очереди (ничего не удаляется, это только уведомление) -->
     <string name="outbox_warn">%1$d сообщений ещё ждут доставки. Они сохранены — получатели получат их, когда выйдут в сеть.</string>
-    <string name="settings_notifications">Уведомления</string>
     <string name="settings_outbox_warn">Предупреждать о росте очереди</string>
     <string name="settings_outbox_warn_hint">Сообщения не удаляются — это только уведомление</string>
     <!-- Запросы в контакты (гейт вместо TOFU-автодобавления) -->
@@ -176,13 +162,11 @@
     <string name="me_address_label">Адрес Yggdrasil</string>
     <string name="me_pubkey_label">Публичный ключ</string>
     <string name="me_copy_key">Скопировать код</string>
-    <string name="info_verify_hint">Сверьте слова с собеседником по другому каналу — защита от подмены ключа.</string>
     <string name="info_verified">Проверен</string>
     <string name="info_not_verified">Не проверен</string>
     <string name="info_unmark">Снять</string>
     <string name="info_mark">Пометить</string>
     <string name="info_delete">Удалить контакт</string>
-    <string name="info_self_name">Называет себя: %1$s</string>
 
     <!-- ── Чат ─────────────────────────────────────────────────────────── -->
     <string name="chat_default_title">Чат</string>
@@ -193,7 +177,6 @@
     <string name="chat_recording">Запись…</string>
     <string name="chat_download">Скачать</string>
     <string name="chat_downloading">Загрузка…</string>
-    <string name="attach_photo">Фото</string>
     <string name="attach_file">Файл</string>
     <string name="cd_attach">Прикрепить</string>
     <string name="cd_emoji">Эмодзи</string>
@@ -209,17 +192,19 @@
     <string name="date_yesterday">Вчера</string>
 
     <!-- ── Группы ──────────────────────────────────────────────────────── -->
-    <string name="groups_empty">Нет групп. Создайте новую.</string>
     <string name="group_default_name">Группа</string>
     <string name="group_member_fallback">Участник</string>
     <string name="group_members_header">Участники</string>
     <string name="group_add_header">Добавить контакт</string>
     <string name="group_remove_member">Удалить</string>
-    <string name="cd_remove_member">Удалить из группы</string>
     <string name="group_you_removed">Вас удалили из группы</string>
     <string name="download_no_space">Не хватает места на телефоне, чтобы скачать файл</string>
     <string name="download_too_large">Файл слишком большой — больше 2 ГБ</string>
     <string name="group_leave">Выйти из группы</string>
+    <string name="group_remove_title">Удалить из группы?</string>
+    <string name="group_remove_confirm">%1$s потеряет доступ к новым сообщениям. Вернуть можно только новым приглашением.</string>
+    <string name="group_leave_confirm">Сообщения группы перестанут приходить. Вернуться можно только по новому приглашению.</string>
+    <string name="group_leave_ok">Выйти</string>
     <!-- Приглашения в группы карточками -->
     <string name="group_invites_header">Приглашения · %1$d</string>
     <string name="group_invite_from">Пригласил %1$s</string>
@@ -458,8 +443,6 @@
     <string name="folder_delete_ok">Удалить</string>
     <string name="common_save">Сохранить</string>
     <string name="folder_edit_title">Папка</string>
-    <string name="fp_label">ОТПЕЧАТОК (сверить лично)</string>
-    <string name="fp_hint">Если набор совпадает с тем, что видит %1$s на своём экране, — связь идёт напрямую, без посредника.</string>
     <string name="fp_self_hint">Покажите собеседнику, чтобы он сравнил с тем, что видит у себя.</string>
     <string name="profile_message">Сообщение</string>
     <string name="profile_call">Звонок</string>
@@ -566,17 +549,13 @@
     <string name="settings_privacy_none">Метаданные не раскрываем</string>
     <string name="settings_privacy_none_desc">Отчёты о прочтении и индикатор набора не отправляются вовсе — здесь нечего выключать.</string>
     <string name="settings_privacy_presence">Статус «в сети» контакты видят: он следует из keepalive, которым держится доставка.</string>
-    <string name="settings_security">Безопасность</string>
     <string name="settings_key_backup">Резервная копия ключа</string>
     <string name="settings_key_backup_done">Сделана</string>
     <string name="settings_key_backup_todo">Не сделана — личность держится на 24 словах</string>
     <string name="settings_at_rest">Шифрование данных</string>
-    <string name="settings_at_rest_keystore">Ключ в Android Keystore (аппаратный, где есть)</string>
     <string name="settings_verified">Проверенные контакты</string>
     <string name="settings_verified_count">%1$d из %2$d сверены лично</string>
-    <string name="settings_media_net">Медиа и сеть</string>
     <string name="settings_net_battery">Сеть и батарея</string>
-    <string name="settings_no_name">Без имени</string>
     <string name="settings_tap_avatar">Нажмите на аватар, чтобы сменить</string>
     <string name="settings_your_name">Ваше имя</string>
     <string name="settings_name_hint">Так вас увидят контакты. Имя уходит только им.</string>
@@ -669,7 +648,6 @@
     <string name="chat_delete_for_me">Удалить у себя</string>
     <string name="chat_delete_for_all">Удалить у всех</string>
     <string name="chat_reply_you">Вы</string>
-    <string name="chat_reply_to_them">Ответ на сообщение</string>
     <string name="chat_reply_gone">сообщение удалено</string>
 
     <string name="saved_delete_note">Заметки только у вас — удаление ни у кого больше ничего не меняет.</string>

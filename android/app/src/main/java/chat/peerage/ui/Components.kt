@@ -400,9 +400,10 @@ internal fun OptionChip(
 }
 
 @Composable
-internal fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun AccentButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         // Высота как у поля ввода: на material-умолчании (~33dp) радиус 14 съедает
         // почти всю сторону, и кнопка читается капсулой, а не нашей плашкой.
         modifier = modifier.heightIn(min = Tokens.Size.inputField),
@@ -411,6 +412,28 @@ internal fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: 
     ) {
         Text(text, color = HoloAccentDark, fontWeight = FontWeight.Medium)
     }
+}
+
+/**
+ * Подтверждение необратимого действия: заголовок, пояснение, красная кнопка и отмена.
+ * Диалогов такого вида в экранах десяток — новые собираются из этого.
+ */
+@Composable
+internal fun ConfirmDialog(title: String, text: String, ok: String, onOk: () -> Unit, onClose: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = {
+            TextButton(onClick = {
+                onOk()
+                onClose()
+            }) { Text(ok, color = HoloError) }
+        },
+        dismissButton = {
+            TextButton(onClick = onClose) { Text(stringResource(R.string.common_cancel), color = HoloSecondary) }
+        },
+    )
 }
 
 /**

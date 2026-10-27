@@ -58,7 +58,6 @@
     <string name="share_bitrate">Bitrate</string>
     <string name="share_available_on_device">available on device</string>
     <string name="share_auto">auto</string>
-    <string name="share_btn_show">Show</string>
     <string name="share_preview_front">preview · front camera</string>
     <string name="share_preview_back">preview · back camera</string>
     <string name="share_preview_screen">preview · device screen</string>
@@ -113,22 +112,14 @@
     <string name="storage_attachments">Attachments</string>
     <string name="storage_files">%1$d files</string>
     <string name="storage_attachments_hint">Photos, files and voice messages you sent or received. Clearing them does not delete messages — the files can be downloaded from the sender again.</string>
-    <string name="storage_queue">Undelivered queue</string>
-    <string name="storage_queue_pending">%1$d messages waiting</string>
-    <string name="storage_queue_hint">Kept until delivered — nothing is removed automatically.</string>
     <string name="storage_clear_attachments">Clear attachments</string>
     <string name="storage_clear_confirm">Delete downloaded attachments? Messages stay; files can be downloaded again while the sender still has them.</string>
     <string name="storage_clear_ok">Clear</string>
     <string name="common_cancel">Cancel</string>
-    <string name="size_b">%1$d B</string>
-    <string name="size_kb">%1$s KB</string>
-    <string name="size_mb">%1$s MB</string>
     <string name="menu_settings">Settings</string>
 
     <!-- ── Top bars ────────────────────────────────────────────────────── -->
     <string name="title_add_contact">Add contact</string>
-    <string name="title_my_key">My key</string>
-    <string name="title_groups">Groups</string>
     <string name="title_new_group">New group</string>
     <string name="title_add_member">Add member</string>
     <string name="title_scan_qr">Scan QR</string>
@@ -138,7 +129,6 @@
     <string name="newchat_contacts_header">Contacts</string>
     <string name="badge_soon">soon</string>
     <string name="cd_search">Search</string>
-    <string name="cd_new_group">New group</string>
     <string name="cd_add_contact">Add contact</string>
     <string name="cd_refresh">Refresh</string>
     <string name="cd_new_chat">New chat</string>
@@ -147,10 +137,7 @@
     <string name="status_online">online</string>
     <string name="status_offline">offline</string>
     <string name="status_in_network">online</string>
-    <string name="members_count">%1$d members</string>
     <string name="group_presence">%1$d members · %2$d online</string>
-    <string name="presence_in_room">%1$d in room</string>
-    <string name="presence_on_air">On air</string>
     <string name="room_in_call">%1$d in call</string>
     <string name="room_join">Join</string>
 
@@ -162,7 +149,6 @@
     <string name="channels_soon">Channels — soon</string>
     <!-- Offline queue growth warning (nothing is ever deleted, this is just a notice) -->
     <string name="outbox_warn">%1$d messages are still waiting to be delivered. They are kept — recipients will get them once online.</string>
-    <string name="settings_notifications">Notifications</string>
     <string name="settings_outbox_warn">Warn about a growing outbox</string>
     <string name="settings_outbox_warn_hint">Messages are never deleted — this only shows a notice</string>
     <!-- Contact requests (gate instead of TOFU auto-add) -->
@@ -182,13 +168,11 @@
     <string name="me_address_label">Yggdrasil address</string>
     <string name="me_pubkey_label">Public key</string>
     <string name="me_copy_key">Copy code</string>
-    <string name="info_verify_hint">Verify the words with your peer over another channel — protects against key substitution.</string>
     <string name="info_verified">Verified</string>
     <string name="info_not_verified">Not verified</string>
     <string name="info_unmark">Unmark</string>
     <string name="info_mark">Mark</string>
     <string name="info_delete">Delete contact</string>
-    <string name="info_self_name">Calls themselves: %1$s</string>
 
     <!-- ── Chat ────────────────────────────────────────────────────────── -->
     <string name="chat_default_title">Chat</string>
@@ -199,7 +183,6 @@
     <string name="chat_recording">Recording…</string>
     <string name="chat_download">Download</string>
     <string name="chat_downloading">Downloading…</string>
-    <string name="attach_photo">Photo</string>
     <string name="attach_file">File</string>
     <string name="cd_attach">Attach</string>
     <string name="cd_emoji">Emoji</string>
@@ -215,17 +198,19 @@
     <string name="date_yesterday">Yesterday</string>
 
     <!-- ── Groups ──────────────────────────────────────────────────────── -->
-    <string name="groups_empty">No groups. Create one.</string>
     <string name="group_default_name">Group</string>
     <string name="group_member_fallback">Member</string>
     <string name="group_members_header">Members</string>
     <string name="group_add_header">Add contact</string>
     <string name="group_remove_member">Remove</string>
-    <string name="cd_remove_member">Remove from group</string>
     <string name="group_you_removed">You were removed from the group</string>
     <string name="download_no_space">Not enough free space on the phone to download the file</string>
     <string name="download_too_large">The file is too large — over 2 GB</string>
     <string name="group_leave">Leave group</string>
+    <string name="group_remove_title">Remove from group?</string>
+    <string name="group_remove_confirm">%1$s will lose access to new messages. To bring them back, invite them again.</string>
+    <string name="group_leave_confirm">Messages from this group will stop arriving. To return, someone has to invite you again.</string>
+    <string name="group_leave_ok">Leave</string>
     <!-- Group invites as cards -->
     <string name="group_invites_header">Group invites · %1$d</string>
     <string name="group_invite_from">Invited by %1$s</string>
@@ -464,8 +449,6 @@
     <string name="folder_delete_ok">Delete</string>
     <string name="common_save">Save</string>
     <string name="folder_edit_title">Folder</string>
-    <string name="fp_label">FINGERPRINT (verify in person)</string>
-    <string name="fp_hint">If this set matches what %1$s sees on their screen, the connection is direct — nobody in between.</string>
     <string name="fp_self_hint">Show this to your contact so they can compare it with what they see for you.</string>
     <string name="profile_message">Message</string>
     <string name="profile_call">Call</string>
@@ -572,17 +555,13 @@
     <string name="settings_privacy_none">No metadata is revealed</string>
     <string name="settings_privacy_none_desc">Read receipts and typing indicators are never sent — there is nothing here to switch off.</string>
     <string name="settings_privacy_presence">Contacts do see your online status: it follows from the keepalive that delivery relies on.</string>
-    <string name="settings_security">Security</string>
     <string name="settings_key_backup">Key backup</string>
     <string name="settings_key_backup_done">Done</string>
     <string name="settings_key_backup_todo">Not done — your identity rests on 24 words</string>
     <string name="settings_at_rest">Data encryption</string>
-    <string name="settings_at_rest_keystore">Key in Android Keystore (hardware-backed where available)</string>
     <string name="settings_verified">Verified contacts</string>
     <string name="settings_verified_count">%1$d of %2$d verified in person</string>
-    <string name="settings_media_net">Media and network</string>
     <string name="settings_net_battery">Network and battery</string>
-    <string name="settings_no_name">No name</string>
     <string name="settings_tap_avatar">Tap the avatar to change it</string>
     <string name="settings_your_name">Your name</string>
     <string name="settings_name_hint">This is what contacts see. The name goes to them only.</string>
@@ -675,7 +654,6 @@
     <string name="chat_delete_for_me">Delete for me</string>
     <string name="chat_delete_for_all">Delete for everyone</string>
     <string name="chat_reply_you">You</string>
-    <string name="chat_reply_to_them">Replying to</string>
     <string name="chat_reply_gone">message deleted</string>
 
     <string name="saved_delete_note">Notes live only on your device — deleting them changes nothing for anyone else.</string>
