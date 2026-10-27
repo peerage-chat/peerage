@@ -64,7 +64,7 @@ fun AudioSettingsScreen(model: AppModel) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.clip(CircleShape).clickable { model.closeAudioSettings() }.padding(6.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Color.White, modifier = Modifier.size(24.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Color.White, modifier = Modifier.size(Tokens.Size.iconL))
             }
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.audio_settings_title), color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
@@ -74,7 +74,7 @@ fun AudioSettingsScreen(model: AppModel) {
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile).padding(15.dp)) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Filled.Mic, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(17.dp))
+                    Icon(Icons.Filled.Mic, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconS))
                     Text(stringResource(R.string.audio_mic_level), color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
                 }
                 Spacer(Modifier.height(11.dp))
@@ -120,7 +120,7 @@ fun AudioSettingsScreen(model: AppModel) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                Icon(Icons.Filled.Bolt, null, tint = if (auto) Tokens.Colors.accent else Tokens.Colors.secondary, modifier = Modifier.size(13.dp))
+                Icon(Icons.Filled.Bolt, null, tint = if (auto) Tokens.Colors.accent else Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconXs))
                 Text(stringResource(R.string.audio_quality_auto), color = if (auto) Tokens.Colors.accent else Color.White, fontSize = Tokens.Font.caption)
             }
         }
@@ -179,7 +179,7 @@ private fun DevChip(icon: ImageVector, label: String, selected: Boolean, onClick
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(icon, null, tint = if (selected) Tokens.Colors.accent else Color.White, modifier = Modifier.size(15.dp))
+        Icon(icon, null, tint = if (selected) Tokens.Colors.accent else Color.White, modifier = Modifier.size(Tokens.Size.iconXs))
         Text(label, color = if (selected) Tokens.Colors.accent else Color.White, fontSize = Tokens.Font.body)
     }
 }

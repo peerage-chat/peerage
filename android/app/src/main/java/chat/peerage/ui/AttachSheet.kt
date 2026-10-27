@@ -221,7 +221,7 @@ private fun SourceTile(icon: ImageVector, labelRes: Int, modifier: Modifier, onC
             .clickable { onClick() }.padding(vertical = Tokens.Space.s),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(23.dp))
+        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.height(Tokens.Space.xs))
         Text(stringResource(labelRes), color = Color.White, fontSize = Tokens.Font.caption)
     }
@@ -235,7 +235,7 @@ private fun CameraTile(onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Filled.PhotoCamera, null, tint = HoloAccent, modifier = Modifier.size(26.dp))
+            Icon(Icons.Filled.PhotoCamera, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconL))
             Spacer(Modifier.height(Tokens.Space.xs))
             Text(stringResource(R.string.attach_camera), color = HoloAccent, fontSize = Tokens.Font.caption)
         }

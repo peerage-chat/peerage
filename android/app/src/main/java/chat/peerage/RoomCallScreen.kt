@@ -206,7 +206,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
             Box(
                 Modifier.clip(CircleShape).background(Tokens.Colors.glass).size(36.dp).clickable { onClose() },
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Close, stringResource(R.string.call_close), tint = Color.White, modifier = Modifier.size(18.dp)) }
+            ) { Icon(Icons.Filled.Close, stringResource(R.string.call_close), tint = Color.White, modifier = Modifier.size(Tokens.Size.iconS)) }
         }
 
         Text(stringResource(R.string.call_audio_output), color = HoloSecondary, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Medium)
@@ -220,7 +220,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                 if (model.speakerOn) Icons.Filled.VolumeUp else Icons.Filled.PhoneInTalk,
                 null,
                 tint = if (model.speakerOn) HoloAccent else HoloSecondary,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(Tokens.Size.iconM),
             )
             Spacer(Modifier.width(Tokens.Space.m))
             Text(stringResource(R.string.call_speaker), color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
@@ -269,7 +269,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                 .background(Tokens.Colors.tile).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+            Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
             Spacer(Modifier.width(Tokens.Space.m))
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.call_video_settings), color = Color.White, fontSize = Tokens.Font.label)
@@ -279,7 +279,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
                     fontSize = Tokens.Font.small,
                 )
             }
-            Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(20.dp))
+            Icon(Icons.Filled.ChevronRight, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
         }
     }
 }
@@ -354,7 +354,7 @@ private fun ParticipantTile(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
             ) {
-                if (!t.audio) Icon(Icons.Filled.MicOff, null, tint = Tokens.Colors.iconDangerMuted, modifier = Modifier.size(13.dp))
+                if (!t.audio) Icon(Icons.Filled.MicOff, null, tint = Tokens.Colors.iconDangerMuted, modifier = Modifier.size(Tokens.Size.iconXs))
                 Text(name, color = Color.White, fontSize = Tokens.Font.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -396,7 +396,7 @@ private fun TechRate(up: Boolean, kbps: Int) {
             if (up) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
             null,
             tint = Tokens.Colors.iconChrome,
-            modifier = Modifier.size(11.dp),
+            modifier = Modifier.size(Tokens.Size.iconXs),
         )
         Text("$kbps kbps", color = Tokens.Colors.iconChrome, fontSize = Tokens.Font.caption, maxLines = 1)
     }
@@ -562,7 +562,7 @@ internal fun RingSheet(model: AppModel, onClose: () -> Unit) {
             Box(
                 Modifier.clip(CircleShape).background(Tokens.Colors.glass).size(36.dp).clickable { onClose() },
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Close, stringResource(R.string.call_close), tint = Color.White, modifier = Modifier.size(18.dp)) }
+            ) { Icon(Icons.Filled.Close, stringResource(R.string.call_close), tint = Color.White, modifier = Modifier.size(Tokens.Size.iconS)) }
         }
         if (candidates.isEmpty()) {
             Text(
@@ -673,7 +673,7 @@ private fun CtlButton(
         Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(bg).size(width = Tokens.Size.ctlButtonW, height = Tokens.Size.ctlButtonH)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(25.dp)) }
+    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconL)) }
 }
 
 @Composable
@@ -682,7 +682,7 @@ private fun ChromeChip(icon: ImageVector, desc: String, onClick: () -> Unit) {
         Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.chipScrim).size(Tokens.Size.chromeChip)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = Tokens.Colors.iconChrome, modifier = Modifier.size(18.dp)) }
+    ) { Icon(icon, desc, tint = Tokens.Colors.iconChrome, modifier = Modifier.size(Tokens.Size.iconS)) }
 }
 
 /** Пилюля имени (фуллскрин) — высота как у верхних чипов (34dp). */
@@ -706,7 +706,7 @@ private fun TrafficChip(mbMin: Int) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
     ) {
-        Icon(Icons.Filled.ArrowDownward, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
+        Icon(Icons.Filled.ArrowDownward, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconXs))
         Text(stringResource(R.string.call_traffic_rate, mbMin), color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
     }
 }

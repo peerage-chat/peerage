@@ -541,7 +541,7 @@ private fun VideoSurface(model: AppModel, item: ViewerItem, muted: Boolean, chro
                 Modifier.size(72.dp).clip(CircleShape).background(Tokens.Colors.playScrim),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(44.dp))
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(Tokens.Size.iconHero))
             }
         }
     }
@@ -584,7 +584,7 @@ private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
             if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
             stringResource(if (playing) R.string.viewer_pause else R.string.viewer_play),
             tint = Color.White,
-            modifier = Modifier.size(26.dp).pointerInput(Unit) {
+            modifier = Modifier.size(Tokens.Size.iconL).pointerInput(Unit) {
                 detectTapGestures {
                     val v = Player.view ?: return@detectTapGestures
                     if (v.isPlaying) v.pause() else v.start()
@@ -627,7 +627,7 @@ private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
             if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
             stringResource(if (muted) R.string.viewer_unmute else R.string.viewer_mute),
             tint = Color.White,
-            modifier = Modifier.size(22.dp).pointerInput(Unit) {
+            modifier = Modifier.size(Tokens.Size.iconM).pointerInput(Unit) {
                 detectTapGestures { onMute(!muted) }
             },
         )

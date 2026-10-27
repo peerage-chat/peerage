@@ -64,7 +64,7 @@ internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Color
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(20.dp))
+        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
     }
 }
 
@@ -183,7 +183,7 @@ internal fun PeerIndicator(peers: Int, onTap: () -> Unit = {}, onLongPress: () -
             painterResource(R.drawable.ic_glyph),
             stringResource(R.string.menu_network),
             tint = if (peers > 0) HoloOnline else HoloSecondary,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(Tokens.Size.iconS),
         )
         Text("$peers", color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
     }
@@ -498,7 +498,7 @@ internal fun SendButton(onClick: () -> Unit) {
         Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloAccent)
             .size(Tokens.Size.inputField).clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.common_send), tint = HoloAccentDark, modifier = Modifier.size(20.dp)) }
+    ) { Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.common_send), tint = HoloAccentDark, modifier = Modifier.size(Tokens.Size.iconM)) }
 }
 
 // ── Экраны ──────────────────────────────────────────────────────────────────

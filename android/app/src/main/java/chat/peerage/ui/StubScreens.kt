@@ -33,7 +33,7 @@ internal fun EmptyState(icon: ImageVector, title: String, hint: String) {
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(32.dp),
         ) {
-            Icon(icon, null, tint = HoloBorder, modifier = Modifier.size(56.dp))
+            Icon(icon, null, tint = HoloBorder, modifier = Modifier.size(Tokens.Size.iconHero))
             Spacer(Modifier.height(14.dp))
             Text(title, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(6.dp))

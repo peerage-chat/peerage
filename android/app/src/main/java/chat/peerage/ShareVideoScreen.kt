@@ -67,7 +67,7 @@ fun ShareVideoScreen(model: AppModel) {
         ) {
             Box(
                 Modifier.clip(CircleShape).clickable { model.closeVideoShare() }.padding(6.dp),
-            ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Color.White, modifier = Modifier.size(24.dp)) }
+            ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Color.White, modifier = Modifier.size(Tokens.Size.iconL)) }
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.share_title), color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
         }
@@ -99,7 +99,7 @@ fun ShareVideoScreen(model: AppModel) {
                         if (model.shareScreenMode) Icons.Filled.DesktopWindows else Icons.Filled.Videocam,
                         null,
                         tint = Tokens.Colors.iconMuted,
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(Tokens.Size.iconHero),
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
@@ -118,7 +118,7 @@ fun ShareVideoScreen(model: AppModel) {
                     Modifier.align(Alignment.TopEnd).padding(10.dp).clip(RoundedCornerShape(Tokens.Radius.chip))
                         .background(Tokens.Colors.scrimStrong).size(34.dp).clickable { model.pickFacing(!model.shareFront) },
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera), tint = Color.White, modifier = Modifier.size(18.dp)) }
+                ) { Icon(Icons.Filled.Cameraswitch, stringResource(R.string.call_btn_switch_camera), tint = Color.White, modifier = Modifier.size(Tokens.Size.iconS)) }
             }
         }
 
@@ -147,7 +147,7 @@ fun ShareVideoScreen(model: AppModel) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Icon(Icons.Filled.Bolt, null, tint = if (auto) HoloAccent else HoloSecondary, modifier = Modifier.size(13.dp))
+                    Icon(Icons.Filled.Bolt, null, tint = if (auto) HoloAccent else HoloSecondary, modifier = Modifier.size(Tokens.Size.iconXs))
                     Text(stringResource(R.string.share_auto), color = if (auto) HoloAccent else Color.White, fontSize = Tokens.Font.caption)
                 }
             }
@@ -184,7 +184,7 @@ private fun SegButton(icon: ImageVector, label: String, selected: Boolean, modif
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = if (selected) HoloAccent else HoloSecondary, modifier = Modifier.size(18.dp))
+        Icon(icon, null, tint = if (selected) HoloAccent else HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
         Text(label, color = if (selected) HoloAccent else Color.White, fontSize = Tokens.Font.body)
     }
 }

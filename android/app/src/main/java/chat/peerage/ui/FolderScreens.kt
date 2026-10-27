@@ -95,7 +95,7 @@ internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
                                 .background(FolderSelected),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(folderIcon(f.icon), null, tint = HoloAccent, modifier = Modifier.size(19.dp))
+                            Icon(folderIcon(f.icon), null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconS))
                         }
                         Spacer(Modifier.width(Tokens.Space.m))
                         Text(f.name, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
@@ -151,7 +151,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
                 Modifier.size(48.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(FolderSelected),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(folderIcon(icon), null, tint = HoloAccent, modifier = Modifier.size(24.dp))
+                Icon(folderIcon(icon), null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconL))
             }
             Spacer(Modifier.width(Tokens.Space.m))
             Box(
@@ -188,7 +188,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
                         .clickable { icon = key },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(iv, null, tint = if (on) HoloAccent else HoloSecondary, modifier = Modifier.size(19.dp))
+                    Icon(iv, null, tint = if (on) HoloAccent else HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
                 }
             }
         }
@@ -269,7 +269,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
                     .padding(horizontal = ScreenPad, vertical = RowPadV),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.Delete, null, tint = HoloError, modifier = Modifier.size(21.dp))
+                Icon(Icons.Filled.Delete, null, tint = HoloError, modifier = Modifier.size(Tokens.Size.iconM))
                 Spacer(Modifier.width(Tokens.Space.m))
                 Text(stringResource(R.string.folder_delete), color = HoloError, fontSize = Tokens.Font.label)
             }
@@ -309,7 +309,7 @@ private fun RowScope.TypeChip(icon: ImageVector, labelRes: Int, on: Boolean, onC
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = if (on) HoloAccent else HoloSecondary, modifier = Modifier.size(16.dp))
+        Icon(icon, null, tint = if (on) HoloAccent else HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
         Spacer(Modifier.width(Tokens.Space.s))
         Text(
             stringResource(labelRes),
@@ -335,7 +335,7 @@ private fun PickRow(name: String, checked: Boolean, avatar: ByteArray?, onToggle
             contentAlignment = Alignment.Center,
         ) {
             if (checked) {
-                Icon(TablerIcons.Check, null, tint = HoloAccentDark, modifier = Modifier.size(14.dp))
+                Icon(TablerIcons.Check, null, tint = HoloAccentDark, modifier = Modifier.size(Tokens.Size.iconXs))
             } else {
                 Box(
                     Modifier.size(22.dp).clip(CircleShape)

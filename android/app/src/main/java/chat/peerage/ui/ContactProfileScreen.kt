@@ -100,7 +100,7 @@ internal fun ContactProfileScreen(
                 Text(c.displayName, color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
                 if (c.verified) {
                     Spacer(Modifier.width(Tokens.Space.s))
-                    Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(19.dp))
+                    Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(Tokens.Size.iconS))
                 }
             }
             Text(
@@ -166,7 +166,7 @@ internal fun ContactProfileScreen(
                     if (c.verified) Icons.Filled.Verified else Icons.Filled.GppMaybe,
                     null,
                     tint = if (c.verified) HoloVerified else WarnColor,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(Tokens.Size.iconM),
                 )
                 Spacer(Modifier.width(Tokens.Space.s))
                 Column(Modifier.weight(1f)) {
@@ -413,7 +413,7 @@ private fun ActionTile(icon: ImageVector, labelRes: Int, modifier: Modifier, onC
             .clickable { onClick() }.padding(vertical = Tokens.Space.m),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.height(Tokens.Space.xs))
         Text(stringResource(labelRes), color = HoloAccent, fontSize = Tokens.Font.small)
     }

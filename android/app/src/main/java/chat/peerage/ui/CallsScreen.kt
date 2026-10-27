@@ -20,7 +20,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -105,7 +104,7 @@ private fun CallRow(
         if (isRoom) {
             // Комната — сущность: скруглённый квадрат. Человек — круг.
             SquareAvatar(name, size = Tokens.Size.avatarRow, bg = Tokens.Colors.groupAvatar) {
-                Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
+                Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
             }
         } else {
             SquareAvatar(
@@ -134,7 +133,7 @@ private fun CallRow(
                     if (e.incoming) Icons.AutoMirrored.Filled.CallReceived else Icons.AutoMirrored.Filled.CallMade,
                     null,
                     tint = tint,
-                    modifier = Modifier.size(15.dp),
+                    modifier = Modifier.size(Tokens.Size.iconXs),
                 )
                 Spacer(Modifier.width(Tokens.Space.xs))
                 Text(outcomeLabel(e, isRoom), color = tint, fontSize = Tokens.Font.body)
@@ -153,7 +152,7 @@ private fun CallRow(
                     .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.AutoMirrored.Filled.Login, null, tint = HoloOnline, modifier = Modifier.size(17.dp))
+                Icon(Icons.AutoMirrored.Filled.Login, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconS))
                 Spacer(Modifier.width(Tokens.Space.xs))
                 Text(stringResource(R.string.calls_join), color = HoloOnline, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
             }
@@ -164,7 +163,7 @@ private fun CallRow(
                     .clickable { onCallPeer(e.peer) },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Call, stringResource(R.string.profile_call), tint = HoloAccent, modifier = Modifier.size(19.dp))
+                Icon(Icons.Filled.Call, stringResource(R.string.profile_call), tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconS))
             }
         }
     }

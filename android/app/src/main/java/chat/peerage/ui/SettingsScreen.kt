@@ -675,7 +675,7 @@ internal fun LockScreen(onUnlock: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(Icons.Filled.Lock, null, tint = HoloAccent, modifier = Modifier.size(56.dp))
+        Icon(Icons.Filled.Lock, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconHero))
         Spacer(Modifier.height(20.dp))
         Text(
             stringResource(R.string.lock_title),
@@ -707,7 +707,7 @@ internal fun VaultUnlockScreen(onSubmit: (String, (Boolean) -> Unit) -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(Icons.Filled.Shield, null, tint = HoloAccent, modifier = Modifier.size(48.dp))
+        Icon(Icons.Filled.Shield, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconHero))
         Spacer(Modifier.height(18.dp))
         Text(
             stringResource(R.string.vault_unlock_title),

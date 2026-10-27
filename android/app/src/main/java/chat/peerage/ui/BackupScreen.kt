@@ -359,7 +359,7 @@ private fun RestoreStep(
     ) {
         SurfaceCard(onClick = onPickFile) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Archive, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+                Icon(Icons.Filled.Archive, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(
@@ -426,7 +426,7 @@ private fun DoneStep(stats: BackupStatsDto?, restoring: Boolean, onDone: () -> U
             Text(stringResource(R.string.backup_failed), color = HoloError, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
             Text(err, color = HoloSecondary, fontSize = Tokens.Font.body)
         } else {
-            Icon(Icons.Filled.CheckCircle, null, tint = HoloOnline, modifier = Modifier.size(46.dp))
+            Icon(Icons.Filled.CheckCircle, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconHero))
             Text(
                 stringResource(if (restoring) R.string.backup_done_restore else R.string.backup_done_export),
                 color = Color.White,
@@ -491,11 +491,11 @@ private fun PartRow(
                 contentAlignment = Alignment.Center,
             ) {
                 if (checked) {
-                    Icon(Icons.Filled.Check, null, tint = HoloAccentDark, modifier = Modifier.size(15.dp))
+                    Icon(Icons.Filled.Check, null, tint = HoloAccentDark, modifier = Modifier.size(Tokens.Size.iconXs))
                 }
             }
             Spacer(Modifier.width(12.dp))
-            Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(21.dp))
+            Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, color = Color.White, fontSize = Tokens.Font.label)
@@ -519,7 +519,7 @@ private fun InfoCard(icon: ImageVector, title: String, text: String, warn: Boole
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+                Icon(icon, null, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
                 Spacer(Modifier.width(Tokens.Space.s))
                 Text(title, color = tint, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
             }

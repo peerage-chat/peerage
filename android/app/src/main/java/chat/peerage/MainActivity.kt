@@ -581,7 +581,7 @@ private fun CompactShell(model: AppModel) {
                     modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
                     containerColor = HoloAccent,
                     contentColor = HoloAccentDark,
-                ) { Icon(TablerIcons.Pencil, stringResource(R.string.cd_new_chat), modifier = Modifier.size(22.dp)) }
+                ) { Icon(TablerIcons.Pencil, stringResource(R.string.cd_new_chat), modifier = Modifier.size(Tokens.Size.iconM)) }
             }
             if (model.showRingSheet && model.currentRoom != null) {
                 RingSheet(model) { model.showRingSheet = false }

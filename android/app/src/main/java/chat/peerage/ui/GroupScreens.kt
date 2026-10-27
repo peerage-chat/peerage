@@ -37,7 +37,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
@@ -280,7 +279,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             SquareAvatar(name, size = Tokens.Size.avatarHead, bg = Tokens.Colors.groupAvatar) {
-                Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
+                Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
             }
             Spacer(Modifier.width(Tokens.Space.m))
             Column(Modifier.weight(1f)) {
@@ -328,7 +327,7 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
         Modifier.fillMaxWidth().background(Tokens.Colors.roomBanner).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
+        Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
         Column(Modifier.weight(1f)) {
             Text(stringResource(R.string.room_in_call, members.size), color = HoloOnline, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)

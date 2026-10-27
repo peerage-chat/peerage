@@ -123,7 +123,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                     )
                     if (c?.verified == true) {
                         Spacer(Modifier.width(Tokens.Space.xs))
-                        Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(Tokens.Size.iconXs))
                     }
                 }
                 Text(
@@ -438,7 +438,7 @@ internal fun E2EBanner() {
                 .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Lock, null, tint = HoloSecondary, modifier = Modifier.size(12.dp))
+            Icon(Icons.Filled.Lock, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconXs))
             Spacer(Modifier.width(Tokens.Space.xs))
             Text(stringResource(R.string.chat_e2e_banner), color = HoloSecondary, fontSize = Tokens.Font.caption)
         }
@@ -814,7 +814,7 @@ internal fun MessageInput(
                         if (s) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
                         stringResource(if (s) R.string.common_send else R.string.chat_voice),
                         tint = if (recording) Color.White else HoloAccentDark,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(Tokens.Size.iconM),
                     )
                 }
                 // Счётчик того, сколько файлов уйдёт этим нажатием.
@@ -848,7 +848,7 @@ internal fun PillIcon(icon: ImageVector, desc: String, tint: Color = HoloSeconda
     Box(
         Modifier.size(Tokens.Size.touch).clip(CircleShape).clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(22.dp)) }
+    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconM)) }
 }
 
 /**
@@ -1249,7 +1249,7 @@ internal fun VideoAttachment(
                 Modifier.size(52.dp).clip(CircleShape).background(Tokens.Colors.playScrim),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(32.dp))
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(Tokens.Size.iconXl))
             }
         }
         if (durationMs > 0) {
@@ -1292,7 +1292,7 @@ internal fun FileAttachment(
         if (!ready) {
             CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
         } else {
-            Icon(Icons.Filled.AttachFile, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+            Icon(Icons.Filled.AttachFile, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
         }
         Spacer(Modifier.width(Tokens.Space.s))
         Column {
@@ -1387,12 +1387,12 @@ internal fun VoiceAttachment(bytes: ByteArray?, blobId: String, knownDurationMs:
                     if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     null,
                     tint = HoloAccentDark,
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(Tokens.Size.iconM),
                 )
             }
         }
         Spacer(Modifier.width(Tokens.Space.m))
-        Icon(Icons.Filled.Mic, null, tint = HoloSecondary, modifier = Modifier.size(16.dp))
+        Icon(Icons.Filled.Mic, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
         Spacer(Modifier.width(Tokens.Space.s))
         Text(
             if (durationMs > 0) fmtDuration(durationMs) else stringResource(R.string.chat_voice),
@@ -1448,7 +1448,7 @@ internal fun PendingAttachmentCard(
             if (bmp != null) {
                 Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
-                Icon(kindIcon(kind), null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+                Icon(kindIcon(kind), null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
             }
         }
         Spacer(Modifier.width(Tokens.Space.m))
@@ -1563,9 +1563,9 @@ internal fun MetaOnPhoto(content: @Composable () -> Unit) {
 internal fun StatusTick(status: String) {
     val tint = Tokens.Colors.quoteTextOnBubble
     when (status) {
-        "delivered" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_delivered), tint = tint, modifier = Modifier.size(13.dp))
-        "sent" -> Icon(Icons.Filled.Done, stringResource(R.string.status_sent), tint = tint, modifier = Modifier.size(13.dp))
-        "pending" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_sending), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+        "delivered" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_delivered), tint = tint, modifier = Modifier.size(Tokens.Size.iconXs))
+        "sent" -> Icon(Icons.Filled.Done, stringResource(R.string.status_sent), tint = tint, modifier = Modifier.size(Tokens.Size.iconXs))
+        "pending" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_sending), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(Tokens.Size.iconXs))
         // Только значок, без слова: мета живёт в углу пузыря и должна оставаться
         // узкой — слово растянуло бы её на половину строки. Расшифровка статуса —
         // в описании для screen reader и на экране очереди отправки.
@@ -1573,7 +1573,7 @@ internal fun StatusTick(status: String) {
             Icons.Filled.CloudQueue,
             stringResource(R.string.status_queued),
             tint = tint.copy(alpha = 0.7f),
-            modifier = Modifier.size(12.dp),
+            modifier = Modifier.size(Tokens.Size.iconXs),
         )
         "failed" -> Text("!", color = HoloError, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Bold)
     }

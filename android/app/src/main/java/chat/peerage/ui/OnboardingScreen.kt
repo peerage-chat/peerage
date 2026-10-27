@@ -230,7 +230,7 @@ internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
             secondary = stringResource(R.string.recovery_start_over),
             onSecondary = { step = 2 },
         ) {
-            Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(32.dp))
+            Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(Tokens.Size.iconXl))
             Spacer(Modifier.height(16.dp))
             val reason = if (why == Recovery.KEY_LOST) R.string.recovery_reason_key_lost else R.string.recovery_reason_mismatch
             Text(stringResource(reason), color = Color.White, fontSize = Tokens.Font.label, textAlign = TextAlign.Center)
@@ -314,7 +314,7 @@ private fun OnbButton(text: String, filled: Boolean, onClick: () -> Unit) {
 @Composable
 private fun Bullet(icon: ImageVector, text: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(24.dp))
+        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconL))
         Spacer(Modifier.width(12.dp))
         Text(text, color = Color.White, fontSize = Tokens.Font.label)
     }
@@ -334,7 +334,7 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
         Box(
             Modifier.size(62.dp).clip(RoundedCornerShape(Tokens.Radius.pill)).background(HoloAccentDark),
             contentAlignment = Alignment.Center,
-        ) { Icon(TablerIcons.ShieldLock, null, tint = HoloAccent, modifier = Modifier.size(32.dp)) }
+        ) { Icon(TablerIcons.ShieldLock, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconXl)) }
         Spacer(Modifier.height(8.dp))
         Bullet(TablerIcons.PhoneOff, stringResource(R.string.onb_bullet_nophone))
         Bullet(TablerIcons.AddressBookOff, stringResource(R.string.onb_bullet_nocontacts))
@@ -378,20 +378,20 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
                 if (bmp != null) {
                     Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 } else {
-                    Icon(TablerIcons.User, null, tint = Tokens.Colors.iconPlaceholder, modifier = Modifier.size(40.dp))
+                    Icon(TablerIcons.User, null, tint = Tokens.Colors.iconPlaceholder, modifier = Modifier.size(Tokens.Size.iconHero))
                 }
             }
             Box(
                 Modifier.size(34.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloAccent).border(3.dp, HoloBg, RoundedCornerShape(Tokens.Radius.button)),
                 contentAlignment = Alignment.Center,
-            ) { Icon(TablerIcons.Camera, null, tint = HoloAccentDark, modifier = Modifier.size(17.dp)) }
+            ) { Icon(TablerIcons.Camera, null, tint = HoloAccentDark, modifier = Modifier.size(Tokens.Size.iconS)) }
         }
         Spacer(Modifier.height(14.dp))
         Row(
             Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(TablerIcons.User, null, tint = HoloSecondary, modifier = Modifier.size(20.dp))
+            Icon(TablerIcons.User, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
             Spacer(Modifier.width(10.dp))
             val hint = stringResource(R.string.onb_name)
             BasicTextField(
@@ -430,7 +430,7 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
                 revealed = false
             },
             caption = {
-                Icon(TablerIcons.ShieldCheck, null, tint = HoloOnline, modifier = Modifier.size(13.dp))
+                Icon(TablerIcons.ShieldCheck, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconXs))
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.onb_screen_secure), color = HoloOnline, fontSize = Tokens.Font.caption)
             },
@@ -456,7 +456,7 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
                 .border(1.dp, WarnBorder, RoundedCornerShape(Tokens.Radius.button)).padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(22.dp))
+            Icon(TablerIcons.AlertTriangle, null, tint = WarnColor, modifier = Modifier.size(Tokens.Size.iconM))
             Spacer(Modifier.width(12.dp))
             Text(
                 stringResource(R.string.onb_key_warn),
@@ -594,7 +594,7 @@ private fun ColumnScope.PermCard(
         verticalArrangement = Arrangement.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+            Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
             Spacer(Modifier.width(10.dp))
             Text(title, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
         }
@@ -605,7 +605,7 @@ private fun ColumnScope.PermCard(
         Box(Modifier.fillMaxWidth().height(38.dp), contentAlignment = Alignment.CenterStart) {
             when {
                 granted -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(TablerIcons.Check, null, tint = HoloOnline, modifier = Modifier.size(18.dp))
+                    Icon(TablerIcons.Check, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconS))
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.onb_granted), color = HoloOnline, fontSize = Tokens.Font.body)
                 }

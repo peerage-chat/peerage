@@ -211,7 +211,7 @@ internal fun EmojiPanel(
                         c.icon,
                         stringResource(c.labelRes),
                         tint = if (on) HoloAccent else HoloSecondary,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(Tokens.Size.iconM),
                     )
                 }
             }
@@ -224,7 +224,7 @@ internal fun EmojiPanel(
                     Icons.AutoMirrored.Filled.Backspace,
                     stringResource(R.string.emoji_backspace),
                     tint = HoloSecondary,
-                    modifier = Modifier.size(21.dp),
+                    modifier = Modifier.size(Tokens.Size.iconM),
                 )
             }
         }

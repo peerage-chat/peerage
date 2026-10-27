@@ -136,8 +136,8 @@ internal fun GridTile(
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (!audio) Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(13.dp))
-                if (video) Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(13.dp))
+                if (!audio) Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(Tokens.Size.iconXs))
+                if (video) Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconXs))
             }
         }
     }
@@ -163,7 +163,7 @@ internal fun ParticipantFullscreen(
                 Icons.AutoMirrored.Filled.ArrowBack,
                 stringResource(R.string.call_close),
                 tint = Color.White,
-                modifier = Modifier.size(18.dp).then(
+                modifier = Modifier.size(Tokens.Size.iconS).then(
                     Modifier.graphicsLayer { rotationZ = 90f },
                 ),
             )
@@ -207,7 +207,7 @@ internal fun ParticipantFullscreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
                     ) {
-                        Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Filled.MicOff, null, tint = WarnColor, modifier = Modifier.size(Tokens.Size.iconXs))
                         Text(stringResource(R.string.call_mic_off), color = WarnColor, fontSize = Tokens.Font.small)
                     }
                 }
@@ -218,7 +218,7 @@ internal fun ParticipantFullscreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
                     ) {
-                        Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Filled.Videocam, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconXs))
                         Text(stringResource(R.string.call_btn_video), color = HoloSecondary, fontSize = Tokens.Font.small)
                     }
                 }
@@ -343,7 +343,7 @@ private fun PresetButton(icon: ImageVector, on: Boolean, desc: String, onClick: 
         Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(if (on) Tokens.Colors.btnNeutral else Tokens.Colors.btnDangerMuted)
             .size(Tokens.Size.callButton).clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = if (on) Color.White else Tokens.Colors.iconDangerMuted, modifier = Modifier.size(24.dp)) }
+    ) { Icon(icon, desc, tint = if (on) Color.White else Tokens.Colors.iconDangerMuted, modifier = Modifier.size(Tokens.Size.iconL)) }
 }
 
 /** Цветная кнопка-сквиркул звонка (отклонить/принять). */
@@ -352,5 +352,5 @@ internal fun CallButton(icon: ImageVector, desc: String, color: Color, onClick: 
     Box(
         Modifier.clip(RoundedCornerShape(Tokens.Radius.button)).background(color).size(Tokens.Size.callButton).clickable { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(26.dp)) }
+    ) { Icon(icon, desc, tint = Color.White, modifier = Modifier.size(Tokens.Size.iconL)) }
 }

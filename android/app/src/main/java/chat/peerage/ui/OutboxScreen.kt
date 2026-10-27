@@ -239,7 +239,7 @@ private fun OutboxRow(model: AppModel, r: OutboxPeer, onTap: () -> Unit, onLongP
                     if (online) Icons.Filled.Send else Icons.Filled.Schedule,
                     null,
                     tint = if (online) HoloOnline else HoloSecondary,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(Tokens.Size.iconXs),
                 )
                 Spacer(Modifier.width(Tokens.Space.xs))
                 // Причина, а не только факт: разросшаяся очередь к человеку, которого

@@ -75,7 +75,7 @@ internal fun EditableAvatar(name: String, avatar: ByteArray?, onPick: () -> Unit
                 TablerIcons.Camera,
                 stringResource(R.string.settings_tap_avatar),
                 tint = HoloAccentDark,
-                modifier = Modifier.size(17.dp),
+                modifier = Modifier.size(Tokens.Size.iconS),
             )
         }
     }

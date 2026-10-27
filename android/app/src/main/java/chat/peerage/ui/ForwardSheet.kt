@@ -113,7 +113,7 @@ internal fun ForwardSheet(model: AppModel) {
 @Composable
 private fun TargetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, onClick: () -> Unit) {
     ListRow(onClick = onClick) {
-        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
         Text(title, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
@@ -157,7 +157,7 @@ internal fun ForwardMark(model: AppModel, fwdFrom: String, anon: Boolean = false
             Icons.AutoMirrored.Filled.ArrowForward,
             null,
             tint = tint,
-            modifier = Modifier.size(12.dp),
+            modifier = Modifier.size(Tokens.Size.iconXs),
         )
         Spacer(Modifier.width(Tokens.Space.xs))
         Text(label, color = tint, fontSize = Tokens.Font.small, maxLines = 1, overflow = TextOverflow.Ellipsis)

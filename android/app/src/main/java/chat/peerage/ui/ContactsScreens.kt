@@ -320,7 +320,7 @@ private fun ChatListRow(
                                 Icons.Filled.Verified,
                                 null,
                                 tint = HoloVerified,
-                                modifier = Modifier.size(13.dp),
+                                modifier = Modifier.size(Tokens.Size.iconXs),
                             )
                         }
                         if (row.muted) {
@@ -329,7 +329,7 @@ private fun ChatListRow(
                                 TablerIcons.BellOff,
                                 null,
                                 tint = Tokens.Colors.tertiary,
-                                modifier = Modifier.size(13.dp),
+                                modifier = Modifier.size(Tokens.Size.iconXs),
                             )
                         }
                     }
@@ -395,19 +395,19 @@ private fun ChatRowBadge(row: ChatRowUi) {
                 Icons.Filled.DoneAll,
                 stringResource(R.string.status_delivered),
                 tint = HoloAccent,
-                modifier = Modifier.size(15.dp),
+                modifier = Modifier.size(Tokens.Size.iconXs),
             )
             "sent" -> Icon(
                 Icons.Filled.Done,
                 stringResource(R.string.status_sent),
                 tint = Tokens.Colors.tertiary,
-                modifier = Modifier.size(15.dp),
+                modifier = Modifier.size(Tokens.Size.iconXs),
             )
             "pending", "queued" -> Icon(
                 Icons.Filled.Schedule,
                 stringResource(R.string.status_sending),
                 tint = Tokens.Colors.tertiary,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(Tokens.Size.iconXs),
             )
             else -> Unit
         }
@@ -415,7 +415,7 @@ private fun ChatRowBadge(row: ChatRowUi) {
             Icons.Filled.Headset,
             null,
             tint = HoloOnline,
-            modifier = Modifier.size(14.dp),
+            modifier = Modifier.size(Tokens.Size.iconXs),
         )
     }
 }
@@ -633,7 +633,7 @@ internal fun LazyItemScope.ContactCardRow(model: AppModel, c: Contact, first: Bo
                     )
                     if (c.verified) {
                         Spacer(Modifier.width(Tokens.Space.xs))
-                        Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(13.dp))
+                        Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(Tokens.Size.iconXs))
                     }
                 }
                 Text(

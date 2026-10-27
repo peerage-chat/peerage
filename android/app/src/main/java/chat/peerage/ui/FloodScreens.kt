@@ -52,7 +52,7 @@ internal fun FloodCard(model: AppModel, onDetails: () -> Unit) {
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Warning, null, tint = HoloWarn, modifier = Modifier.size(20.dp))
+                Icon(Icons.Filled.Warning, null, tint = HoloWarn, modifier = Modifier.size(Tokens.Size.iconM))
                 Spacer(Modifier.width(Tokens.Space.s))
                 Text(
                     stringResource(R.string.flood_title),
@@ -159,7 +159,7 @@ internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
 private fun ActionExplain(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, desc: String) {
     SurfaceCard(outer = 0.dp) {
         Row {
-            Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
+            Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
             Spacer(Modifier.width(Tokens.Space.m))
             Column {
                 Text(title, color = Color.White, fontSize = Tokens.Font.label)
@@ -257,7 +257,7 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
 @Composable
 private fun StepRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
     Row(Modifier.padding(vertical = Tokens.Space.xxs)) {
-        Icon(icon, null, tint = HoloIconMuted, modifier = Modifier.size(18.dp))
+        Icon(icon, null, tint = HoloIconMuted, modifier = Modifier.size(Tokens.Size.iconS))
         Spacer(Modifier.width(Tokens.Space.m))
         Text(text, color = HoloSecondary, fontSize = Tokens.Font.body)
     }
@@ -301,7 +301,7 @@ internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
             SurfaceCard(outer = 0.dp) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.CheckCircle, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.CheckCircle, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
                         Spacer(Modifier.width(Tokens.Space.s))
                         Text(stringResource(R.string.rotate_done), color = HoloOnline, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
                     }
@@ -332,7 +332,7 @@ private fun ProgressStep(done: Boolean, text: String) {
             if (done) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
             null,
             tint = if (done) HoloOnline else HoloIconMuted,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(Tokens.Size.iconS),
         )
         Spacer(Modifier.width(Tokens.Space.m))
         Text(text, color = if (done) Color.White else HoloSecondary, fontSize = Tokens.Font.body)
