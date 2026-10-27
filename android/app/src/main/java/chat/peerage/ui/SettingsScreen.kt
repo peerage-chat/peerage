@@ -529,7 +529,7 @@ internal fun SettingsAboutScreen() {
         CardSection {
             SettingInfoRow(
                 stringResource(R.string.settings_version_label),
-                stringResource(R.string.settings_version_value),
+                appVersion(),
                 divider = false,
             )
             SettingInfoRow(

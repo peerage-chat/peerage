@@ -1479,6 +1479,7 @@ class AppModel private constructor() {
         selection = emptySet()
         replyTarget = null
         editTarget = null
+        jumpTo = 0L // недостигнутая цель прошлого чата не должна сработать в новом
     }
 
     fun clearSelection() {

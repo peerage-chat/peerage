@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -125,6 +126,19 @@ internal fun CountBadge(text: String, muted: Boolean = false) {
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
         )
+    }
+}
+
+/** Тег-пометка у строки: «скоро», «рекомендуется», «по умолчанию». Тише счётчика —
+ *  он сообщает, а не зовёт; три копии с разными полями сведены сюда. */
+@Composable
+internal fun TagBadge(text: String) {
+    Box(
+        Modifier.clip(RoundedCornerShape(Tokens.Radius.badge))
+            .background(Tokens.Colors.accentBadge)
+            .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xxs),
+    ) {
+        Text(text, color = HoloAccent, fontSize = Tokens.Font.caption, maxLines = 1)
     }
 }
 
@@ -459,6 +473,16 @@ internal fun SendButton(onClick: () -> Unit) {
 
 // ── Экраны ──────────────────────────────────────────────────────────────────
 
+/** Версия приложения — из пакета, то есть из `versionName` в Gradle. Строкой в
+ *  ресурсах она жила отдельно, в двух языках, и уже разошлась (в меню стояло «v0.3»). */
+@Composable
+internal fun appVersion(): String {
+    val ctx = LocalContext.current
+    return remember {
+        runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull().orEmpty()
+    }
+}
+
 /** Время сообщения «ЧЧ:ММ» (time — unix-секунды). */
 internal fun fmtMsgTime(ts: Long): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
@@ -742,6 +766,28 @@ internal fun FollowNewest(listState: LazyListState, msgs: List<Message>) {
     LaunchedEffect(last?.sender, last?.id) {
         if (last != null && (last.mine || listState.firstVisibleItemIndex <= 1)) {
             listState.animateScrollToItem(0)
+        }
+    }
+}
+
+/**
+ * Довести ленту до сообщения [AppModel.jumpTo] — из поиска или «Показать в чате».
+ *
+ * Ждёт, пока сообщение окажется в ленте: из поиска чат открывается пустым, история
+ * приезжает следом, и проверка в первом кадре сбрасывала цель, так ничего и не найдя.
+ * Цель гасится, только когда до неё дошли (или при уходе из чата).
+ */
+@Composable
+internal fun JumpToMessage(model: AppModel, listState: LazyListState, msgs: List<Message>) {
+    val target = model.jumpTo
+    LaunchedEffect(target, msgs.size) {
+        if (target == 0L) return@LaunchedEffect
+        val i = msgs.indexOfFirst { it.id == target }
+        if (i >= 0) {
+            // Сначала доехать, потом гасить: смена цели перезапускает эффект и
+            // оборвала бы прокрутку на полпути.
+            listState.animateScrollToItem(msgs.size - 1 - i) // лента перевёрнута: индекс от конца
+            model.jumpTo = 0L
         }
     }
 }

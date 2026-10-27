@@ -181,7 +181,7 @@ private fun PickParts(
             stringResource(R.string.backup_what_text),
         )
 
-        ScreenSectionLabel(stringResource(R.string.backup_contents))
+        SectionTitle(stringResource(R.string.backup_contents))
 
         PartRow(
             Icons.Filled.People,

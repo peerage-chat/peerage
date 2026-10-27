@@ -13,7 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Message
-import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -27,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.AppModel
 import chat.peerage.CenterMessage
@@ -80,10 +79,10 @@ internal fun SearchScreen(
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(groups, key = { "g_${it.gid}" }) { g ->
                     ListRow(onClick = { onOpenGroup(g.gid) }) {
-                        SquareAvatar(g.name, size = 44.dp, bg = Tokens.Colors.groupAvatar) {
-                            Icon(Icons.Filled.Headset, null, tint = HoloOnline, modifier = Modifier.size(22.dp))
+                        SquareAvatar(g.name, size = Tokens.Size.avatarRow, bg = Tokens.Colors.groupAvatar) {
+                            Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
                         }
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(Tokens.Space.m))
                         Column(Modifier.weight(1f)) {
                             Text(g.name, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(stringResource(R.string.search_group_subtitle, g.members), color = HoloSecondary, fontSize = Tokens.Font.caption)
@@ -99,14 +98,19 @@ internal fun SearchScreen(
                         model.contacts.firstOrNull { it.key == hit.chat }?.displayName
                             ?: hit.chat.take(8)
                     }
-                    ListRow(onClick = { if (hit.group) onOpenGroup(hit.chat) else onOpenDm(hit.chat) }) {
+                    // Находка ведёт к САМОМУ сообщению, а не в конец чата: иначе поиск
+                    // говорил только «где-то тут было».
+                    ListRow(onClick = {
+                        if (hit.group) onOpenGroup(hit.chat) else onOpenDm(hit.chat)
+                        model.jumpTo = hit.id // после открытия: открытие сбрасывает цель
+                    }) {
                         Icon(
                             Icons.AutoMirrored.Filled.Message,
                             null,
                             tint = HoloSecondary,
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(Tokens.Size.iconM),
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(Tokens.Space.m))
                         Column(Modifier.weight(1f)) {
                             Text(
                                 hit.text,
@@ -122,8 +126,15 @@ internal fun SearchScreen(
                 items(contacts, key = { "c_${it.key}" }) { c ->
                     val online = model.online[c.key] == true
                     ListRow(onClick = { onOpenDm(c.key) }) {
-                        SquareAvatar(c.displayName, size = 44.dp, online = online, avatarBytes = model.contactAvatars[c.avatarId])
-                        Spacer(Modifier.width(12.dp))
+                        SquareAvatar(
+                            c.displayName,
+                            size = Tokens.Size.avatarRow,
+                            online = online,
+                            avatarBytes = model.contactAvatars[c.avatarId],
+                            circle = true, // человек — круг, как в списке чатов
+                            ring = HoloBg,
+                        )
+                        Spacer(Modifier.width(Tokens.Space.m))
                         Column(Modifier.weight(1f)) {
                             Text(c.displayName, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(

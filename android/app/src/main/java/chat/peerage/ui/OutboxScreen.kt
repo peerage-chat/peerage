@@ -95,7 +95,7 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
             }
         }
 
-        ScreenSectionLabel(stringResource(R.string.outbox_by_peer))
+        SectionTitle(stringResource(R.string.outbox_by_peer))
         rows.forEach { r -> OutboxRow(model, r) { menuFor = r } }
         Text(
             stringResource(R.string.outbox_longpress_hint),
@@ -104,7 +104,7 @@ internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
             modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
         )
 
-        ScreenSectionLabel(stringResource(R.string.outbox_manage))
+        SectionTitle(stringResource(R.string.outbox_manage))
         Row(
             Modifier.fillMaxWidth().clickable { confirmAll = 1 }
                 .padding(horizontal = ScreenPad, vertical = RowPadV),
@@ -320,13 +320,6 @@ private fun SumRow(label: String, value: String) {
         Text(label, color = HoloSecondary, fontSize = Tokens.Font.body, modifier = Modifier.weight(1f))
         Text(value, color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
     }
-}
-
-@Composable
-internal fun ScreenSectionLabel(text: String) {
-    // Без uppercase и теми же метриками, что SectionTitle: заголовки секций во всём
-    // приложении обязаны выглядеть одинаково, а КАПС остался от старого набора.
-    SectionTitle(text)
 }
 
 /** Карточка-пояснение с иконкой. */

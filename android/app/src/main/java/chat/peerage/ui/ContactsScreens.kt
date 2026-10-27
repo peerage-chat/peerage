@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
@@ -20,17 +21,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Headset
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -155,14 +158,14 @@ internal fun ContactsScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = ScreenPad, vertical = 6.dp)
-                    .clip(RoundedCornerShape(Tokens.Radius.chip))
+                    .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs)
+                    .clip(RoundedCornerShape(Tokens.Radius.card))
                     .background(Tokens.Colors.noticeBg)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("⚠", color = Tokens.Colors.noticeText, fontSize = Tokens.Font.label)
-                Spacer(Modifier.width(10.dp))
+                Icon(Icons.Filled.Warning, null, tint = Tokens.Colors.noticeText, modifier = Modifier.size(Tokens.Size.iconS))
+                Spacer(Modifier.width(Tokens.Space.m))
                 Text(
                     stringResource(R.string.outbox_warn, model.outboxPending),
                     color = Tokens.Colors.noticeText,
@@ -178,7 +181,7 @@ internal fun ContactsScreen(
                 stringResource(R.string.bench_recv_rate, "%.1f".format(model.benchRecvMbps)),
                 color = HoloAccent,
                 fontSize = Tokens.Font.caption,
-                modifier = Modifier.padding(horizontal = ScreenPad, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
             )
         }
         when {
@@ -190,13 +193,7 @@ internal fun ContactsScreen(
                 // Гейт: входящие запросы от незнакомцев — карточками наверху (фильтр DM/all).
                 if (showDm && model.contactRequests.isNotEmpty()) {
                     item(key = "req_header") {
-                        Text(
-                            stringResource(R.string.requests_header, model.contactRequests.size),
-                            color = HoloAccent,
-                            fontSize = Tokens.Font.small,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(start = ScreenPad, end = ScreenPad, top = 10.dp, bottom = 4.dp),
-                        )
+                        SectionTitle(stringResource(R.string.requests_header, model.contactRequests.size))
                     }
                     items(model.contactRequests, key = { "req_${it.key}" }) { r ->
                         ContactRequestCard(model, r)
@@ -205,13 +202,7 @@ internal fun ContactsScreen(
                 // Приглашения в группы — карточками (фильтр Комнаты/all).
                 if (showRoom && model.groupInvites.isNotEmpty()) {
                     item(key = "ginv_header") {
-                        Text(
-                            stringResource(R.string.group_invites_header, model.groupInvites.size),
-                            color = HoloAccent,
-                            fontSize = Tokens.Font.small,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(start = ScreenPad, end = ScreenPad, top = 10.dp, bottom = 4.dp),
-                        )
+                        SectionTitle(stringResource(R.string.group_invites_header, model.groupInvites.size))
                     }
                     items(model.groupInvites, key = { "ginv_${it.gid}" }) { inv ->
                         GroupInviteCard(model, inv)
@@ -233,7 +224,16 @@ internal fun ContactsScreen(
                         onClick = { if (r.group) onOpenGroup(r.id) else onOpenDm(r.id) },
                     )
                 }
-                item(key = "tail") { Spacer(Modifier.height(88.dp)) } // место под FAB
+                // Папка, в которую ничего не попало, — словами, а не пустым экраном:
+                // пустота читается как «список не загрузился».
+                if (rows.isEmpty()) {
+                    item(key = "empty") {
+                        Box(Modifier.fillParentMaxHeight(0.6f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Text(stringResource(R.string.folder_empty), color = HoloSecondary, fontSize = Tokens.Font.body)
+                        }
+                    }
+                }
+                item(key = "tail") { Spacer(Modifier.height(Tokens.Size.fabClearance)) } // место под FAB
             }
         }
     }
@@ -257,15 +257,8 @@ private fun ChatListRow(
     onClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    val r = Tokens.Radius.card
-    val shape = RoundedCornerShape(
-        topStart = if (first) r else 0.dp,
-        topEnd = if (first) r else 0.dp,
-        bottomStart = if (last) r else 0.dp,
-        bottomEnd = if (last) r else 0.dp,
-    )
     val bg = if (row.pinned) Tokens.Colors.rowPinned else Tokens.Colors.surface
-    Column(Modifier.padding(horizontal = Tokens.Space.s).clip(shape).background(bg)) {
+    CardBlock(first, last, bg) {
         if (!first) {
             HorizontalDivider(
                 thickness = 1.dp,
@@ -275,7 +268,7 @@ private fun ChatListRow(
                 } else {
                     // Обычный разделитель начинается за аватаром: он отделяет строки,
                     // а не рассекает список.
-                    Modifier.padding(start = Tokens.Size.avatarRow + Tokens.Space.m + Tokens.Space.m)
+                    Modifier.padding(start = AvatarRowInset)
                 },
             )
         }
@@ -309,7 +302,7 @@ private fun ChatListRow(
                 Spacer(Modifier.width(Tokens.Space.m))
                 Column(Modifier.weight(1f)) {
                     Row(
-                        Modifier.height(20.dp),
+                        Modifier.height(Tokens.Size.chatRowLine1),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
@@ -341,7 +334,7 @@ private fun ChatListRow(
                         }
                     }
                     Spacer(Modifier.height(Tokens.Space.xxs))
-                    Row(Modifier.height(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.height(Tokens.Size.chatRowLine2), verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             chatPreview(model, row),
                             color = Tokens.Colors.secondary,
@@ -359,7 +352,7 @@ private fun ChatListRow(
                     Modifier.widthIn(min = Tokens.Size.metaSlot),
                     horizontalAlignment = Alignment.End,
                 ) {
-                    Box(Modifier.height(20.dp), contentAlignment = Alignment.CenterEnd) {
+                    Box(Modifier.height(Tokens.Size.chatRowLine1), contentAlignment = Alignment.CenterEnd) {
                         Text(
                             fmtListTime(row.time),
                             color = Tokens.Colors.tertiary,
@@ -371,7 +364,7 @@ private fun ChatListRow(
                     Spacer(Modifier.height(Tokens.Space.xxs))
                     // Нижний слот занимает место ВСЕГДА, даже пустой: иначе время
                     // прыгало бы по вертикали в зависимости от наличия счётчика.
-                    Box(Modifier.height(18.dp), contentAlignment = Alignment.CenterEnd) {
+                    Box(Modifier.height(Tokens.Size.chatRowLine2), contentAlignment = Alignment.CenterEnd) {
                         ChatRowBadge(row)
                     }
                 }
@@ -480,56 +473,76 @@ private fun chatPreview(model: AppModel, row: ChatRowUi): String {
     return if (who.isEmpty()) body else "$who $body"
 }
 
-/** Карточка входящего запроса в контакты (гейт вместо TOFU): аватар-буква, короткий
- *  ключ, превью первого сообщения и кнопки Принять / Отклонить / Заблокировать. */
+/**
+ * Карточка-решение над списком: входящий запрос в контакты или приглашение в группу.
+ * Одна раскладка на обе — раньше это были две копии с одинаковыми отступами, и
+ * поправить одну значило забыть про вторую.
+ */
 @Composable
-private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
+private fun DecisionCard(
+    avatar: @Composable () -> Unit,
+    title: @Composable () -> Unit,
+    subtitle: String,
+    subtitleLines: Int = 1,
+    actions: @Composable RowScope.() -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = ScreenPad, vertical = 4.dp)
-            .clip(RoundedCornerShape(Tokens.Radius.button))
+            .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs)
+            .clip(RoundedCornerShape(Tokens.Radius.card))
             .background(HoloSurface)
-            .padding(12.dp),
+            .padding(Tokens.Space.m),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SquareAvatar(r.shortKey, size = 40.dp)
-            Spacer(Modifier.width(12.dp))
+            avatar()
+            Spacer(Modifier.width(Tokens.Space.m))
             Column(Modifier.weight(1f)) {
-                Text(
-                    r.shortKey + "…",
-                    color = Color.White,
-                    fontSize = Tokens.Font.label,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (r.preview.isNotBlank()) {
+                title()
+                if (subtitle.isNotBlank()) {
                     Text(
-                        r.preview,
+                        subtitle,
                         color = HoloSecondary,
                         fontSize = Tokens.Font.body,
-                        maxLines = 2,
+                        maxLines = subtitleLines,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(
-                onClick = { model.acceptRequest(r.key) },
-                colors = ButtonDefaults.buttonColors(containerColor = HoloAccent, contentColor = HoloAccentDark),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-            ) { Text(stringResource(R.string.req_accept), fontSize = Tokens.Font.body) }
-            Spacer(Modifier.width(8.dp))
-            TextButton(onClick = { model.declineRequest(r.key) }) {
-                Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = Tokens.Font.body)
-            }
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { model.blockRequest(r.key) }) {
-                Text(stringResource(R.string.req_block), color = HoloError, fontSize = Tokens.Font.body)
-            }
+        Spacer(Modifier.height(Tokens.Space.m))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            content = actions,
+        )
+    }
+}
+
+/** Карточка входящего запроса в контакты (гейт вместо TOFU): аватар-буква, короткий
+ *  ключ, превью первого сообщения и кнопки Принять / Отклонить / Заблокировать. */
+@Composable
+private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
+    DecisionCard(
+        avatar = { SquareAvatar(r.key, size = Tokens.Size.avatarRow, circle = true) },
+        title = {
+            Text(
+                r.shortKey + "…",
+                color = Color.White,
+                fontSize = Tokens.Font.label,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        subtitle = r.preview,
+        subtitleLines = 2,
+    ) {
+        AccentButton(stringResource(R.string.req_accept)) { model.acceptRequest(r.key) }
+        OutlineButton(stringResource(R.string.req_decline), tint = HoloSecondary) { model.declineRequest(r.key) }
+        Spacer(Modifier.weight(1f))
+        TextButton(onClick = { model.blockRequest(r.key) }) {
+            Text(stringResource(R.string.req_block), color = HoloError)
         }
     }
 }
@@ -538,61 +551,38 @@ private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
  *  имя группы, кто пригласил, кнопки Принять / Отклонить. */
 @Composable
 private fun GroupInviteCard(model: AppModel, inv: GroupInvite) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = ScreenPad, vertical = 4.dp)
-            .clip(RoundedCornerShape(Tokens.Radius.button))
-            .background(HoloSurface)
-            .padding(12.dp),
+    DecisionCard(
+        avatar = {
+            SquareAvatar(inv.name.ifBlank { "#" }, size = Tokens.Size.avatarRow, bg = Tokens.Colors.groupAvatar) {
+                Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
+            }
+        },
+        title = {
+            Text(
+                inv.name.ifBlank { stringResource(R.string.group_default_name) },
+                color = Color.White,
+                fontSize = Tokens.Font.label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        subtitle = stringResource(R.string.group_invite_from, model.peerName(inv.inviter)),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            SquareAvatar(inv.name.ifBlank { "#" }, size = 40.dp, bg = Tokens.Colors.groupAvatar) {
-                Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(20.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    inv.name.ifBlank { stringResource(R.string.group_default_name) },
-                    color = Color.White,
-                    fontSize = Tokens.Font.label,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    stringResource(R.string.group_invite_from, model.peerName(inv.inviter)),
-                    color = HoloSecondary,
-                    fontSize = Tokens.Font.body,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Spacer(Modifier.height(10.dp))
         if (inv.waiting) {
             // Согласие уже дано, но пригласивший офлайн: карточка остаётся и честно
             // говорит, чего ждём. Раньше она просто исчезала, и вступление молча
             // терялось — повторить было нечем.
-            Text(
-                stringResource(R.string.group_invite_waiting),
-                color = HoloSecondary,
-                fontSize = Tokens.Font.body,
-            )
+            Text(stringResource(R.string.group_invite_waiting), color = HoloSecondary, fontSize = Tokens.Font.body)
         } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Button(
-                    onClick = { model.acceptGroupInvite(inv.gid) },
-                    colors = ButtonDefaults.buttonColors(containerColor = HoloAccent, contentColor = HoloAccentDark),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                ) { Text(stringResource(R.string.group_invite_join), fontSize = Tokens.Font.body) }
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { model.declineGroupInvite(inv.gid) }) {
-                    Text(stringResource(R.string.req_decline), color = HoloSecondary, fontSize = Tokens.Font.body)
-                }
-            }
+            AccentButton(stringResource(R.string.group_invite_join)) { model.acceptGroupInvite(inv.gid) }
+            OutlineButton(stringResource(R.string.req_decline), tint = HoloSecondary) { model.declineGroupInvite(inv.gid) }
         }
     }
 }
+
+/** Отступ разделителя у строки с аватаром: поле карточки + аватар + зазор до текста.
+ *  Разделитель начинается под текстом — он отделяет строки, а не рассекает список. */
+private val AvatarRowInset = Tokens.Space.m + Tokens.Size.avatarRow + Tokens.Space.m
 
 /** Полный список контактов (раздел меню «Контакты»). Тап → личный чат.
  *  Добавление — через кнопку в шапке (Root). */
@@ -606,57 +596,53 @@ internal fun ContactListScreen(model: AppModel, onOpen: (String) -> Unit) {
     // перечень людей, и выглядеть он обязан так же.
     LazyColumn(Modifier.fillMaxSize().padding(top = Tokens.Space.s)) {
         itemsIndexed(model.contacts, key = { _, c -> c.key }) { i, c ->
-            val online = model.online[c.key] == true
-            val first = i == 0
-            val last = i == model.contacts.lastIndex
-            Column(
-                Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s)
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = if (first) Tokens.Radius.card else 0.dp,
-                            topEnd = if (first) Tokens.Radius.card else 0.dp,
-                            bottomStart = if (last) Tokens.Radius.card else 0.dp,
-                            bottomEnd = if (last) Tokens.Radius.card else 0.dp,
-                        ),
-                    )
-                    .background(Tokens.Colors.surface),
-            ) {
-                CardRow(onClick = { onOpen(c.key) }, divider = !first, inset = 70.dp) {
-                    SquareAvatar(
-                        c.displayName,
-                        size = Tokens.Size.avatarRow,
-                        online = online,
-                        avatarBytes = model.contactAvatars[c.avatarId],
-                        circle = true,
-                        ring = Tokens.Colors.surface,
-                    )
-                    Spacer(Modifier.width(Tokens.Space.m))
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                c.displayName,
-                                color = Color.White,
-                                fontSize = Tokens.Font.label,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                            if (c.verified) {
-                                Spacer(Modifier.width(Tokens.Space.xs))
-                                Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(13.dp))
-                            }
-                        }
-                        Text(
-                            stringResource(if (online) R.string.status_online else R.string.status_offline),
-                            color = if (online) HoloOnline else Tokens.Colors.tertiary,
-                            fontSize = Tokens.Font.small,
-                        )
-                    }
-                }
-            }
+            ContactCardRow(model, c, first = i == 0, last = i == model.contacts.lastIndex) { onOpen(c.key) }
         }
         item { Spacer(Modifier.height(Tokens.Space.l)) }
+    }
+}
+
+/**
+ * Строка контакта в карточке-списке: аватар, имя с отметкой проверки, статус. Одна
+ * на «Контакты» и «Новый чат» — там была её копия, уже без отметки проверки.
+ */
+@Composable
+internal fun LazyItemScope.ContactCardRow(model: AppModel, c: Contact, first: Boolean, last: Boolean, onClick: () -> Unit) {
+    val online = model.online[c.key] == true
+    CardBlock(first, last) {
+        CardRow(onClick = onClick, divider = !first, inset = AvatarRowInset) {
+            SquareAvatar(
+                c.displayName,
+                size = Tokens.Size.avatarRow,
+                online = online,
+                avatarBytes = model.contactAvatars[c.avatarId],
+                circle = true,
+                ring = Tokens.Colors.surface,
+            )
+            Spacer(Modifier.width(Tokens.Space.m))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        c.displayName,
+                        color = Color.White,
+                        fontSize = Tokens.Font.label,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (c.verified) {
+                        Spacer(Modifier.width(Tokens.Space.xs))
+                        Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(13.dp))
+                    }
+                }
+                Text(
+                    stringResource(if (online) R.string.status_online else R.string.status_offline),
+                    color = if (online) HoloOnline else Tokens.Colors.tertiary,
+                    fontSize = Tokens.Font.small,
+                )
+            }
+        }
     }
 }
 
@@ -751,7 +737,7 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                     Image(
                         bitmap = qr.asImageBitmap(),
                         contentDescription = stringResource(R.string.qr_cd),
-                        modifier = Modifier.size(220.dp).clip(RoundedCornerShape(Tokens.Radius.tile)),
+                        modifier = Modifier.size(Tokens.Size.qr).clip(RoundedCornerShape(Tokens.Radius.tile)),
                     )
                     Spacer(Modifier.height(Tokens.Space.m))
                 }
@@ -761,6 +747,22 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                     fontSize = Tokens.Font.small,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
+            }
+            // Копирование — своей строкой под QR: это то же действие «отдать код»,
+            // только текстом. Иконка в строке адреса копировала не адрес, а код.
+            // Копируется ТОТ ЖЕ код, что в QR: голый ключ после смены адреса уже не
+            // ведёт к нам (ADR-007), а «Добавить» принимает и то, и другое.
+            CardRow(onClick = {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("exchange code", code))
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                    android.widget.Toast.makeText(ctx, ctx.getString(R.string.common_copied), android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }, inset = 0.dp) {
+                Icon(Icons.Filled.ContentCopy, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
+                Spacer(Modifier.width(Tokens.Space.m))
+                Text(stringResource(R.string.me_copy_key), color = Color.White, fontSize = Tokens.Font.label)
             }
             CardRow(inset = 0.dp) {
                 Column(Modifier.weight(1f)) {
@@ -773,15 +775,6 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-                Spacer(Modifier.width(Tokens.Space.s))
-                BarIcon(TablerIcons.Check, stringResource(R.string.me_copy_key)) {
-                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                        as android.content.ClipboardManager
-                    cm.setPrimaryClip(android.content.ClipData.newPlainText("public key", me.pubkey))
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                        android.widget.Toast.makeText(ctx, ctx.getString(R.string.common_copied), android.widget.Toast.LENGTH_SHORT).show()
-                    }
                 }
             }
         }
@@ -815,7 +808,9 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
                 Triple(Icons.Filled.Group, stringResource(R.string.menu_contacts), Screen.ContactList),
                 Triple(Icons.Filled.Call, stringResource(R.string.menu_calls), Screen.Calls),
                 Triple(Icons.Filled.Share, stringResource(R.string.menu_network), Screen.Network),
-                Triple(Icons.Filled.Lock, stringResource(R.string.menu_saved), Screen.Saved),
+                // Та же закладка, что у «Сохранённого» в пересылке: замок обещал
+                // шифрование, которого у раздела нет отдельно от остального.
+                Triple(Icons.Filled.Bookmark, stringResource(R.string.menu_saved), Screen.Saved),
                 Triple(Icons.Filled.Storage, stringResource(R.string.menu_storage), Screen.Storage),
                 Triple(Icons.Filled.Settings, stringResource(R.string.menu_settings), Screen.Settings),
             )
@@ -836,7 +831,7 @@ internal fun MeScreen(model: AppModel, navigate: (Screen) -> Unit = {}) {
         // Версия — из того же ресурса, что и в «О приложении»: подпись «v0.3» здесь
         // жила отдельной строкой в коде и уже разошлась с настройками.
         Text(
-            stringResource(R.string.app_name) + " · " + stringResource(R.string.settings_version_value),
+            stringResource(R.string.app_name) + " · " + appVersion(),
             color = Tokens.Colors.tertiary,
             fontSize = Tokens.Font.caption,
             modifier = Modifier.padding(Tokens.Space.l),

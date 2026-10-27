@@ -59,7 +59,7 @@ internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
             modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.m),
         )
 
-        ScreenSectionLabel(stringResource(R.string.folders_builtin))
+        SectionTitle(stringResource(R.string.folders_builtin))
         CardSection {
             Folders.forEachIndexed { i, (key, icon, labelRes) ->
                 val count = when (key) {
@@ -82,7 +82,7 @@ internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
             }
         }
 
-        ScreenSectionLabel(stringResource(R.string.folders_mine))
+        SectionTitle(stringResource(R.string.folders_mine))
         CardSection {
             model.folders.forEachIndexed { i, f ->
                 CardRow(onClick = { onEdit(f.id) }, divider = i > 0, inset = 62.dp) {
@@ -137,7 +137,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
         model.groups.count { model.folderHasGroup(preview, it.gid) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        ScreenSectionLabel(stringResource(R.string.folder_name_and_icon))
+        SectionTitle(stringResource(R.string.folder_name_and_icon))
         Row(
             Modifier.fillMaxWidth().padding(horizontal = ScreenPad),
             verticalAlignment = Alignment.CenterVertically,
@@ -188,7 +188,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
             }
         }
 
-        ScreenSectionLabel(stringResource(R.string.folder_include))
+        SectionTitle(stringResource(R.string.folder_include))
         Row(
             Modifier.fillMaxWidth().padding(horizontal = ScreenPad),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
@@ -218,7 +218,7 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
             }
         }
 
-        ScreenSectionLabel(stringResource(R.string.folder_exclude))
+        SectionTitle(stringResource(R.string.folder_exclude))
         Row(Modifier.fillMaxWidth().padding(horizontal = ScreenPad)) {
             TypeChip(Icons.Filled.MarkEmailRead, R.string.folder_exclude_read, excludeRead) {
                 excludeRead = !excludeRead

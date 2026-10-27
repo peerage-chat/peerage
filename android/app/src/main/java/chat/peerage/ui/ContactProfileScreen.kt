@@ -1,5 +1,6 @@
 package chat.peerage.ui
 
+import android.Manifest
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.GppMaybe
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -67,9 +69,12 @@ internal fun ContactProfileScreen(
 
     // Сколько вложений от этого чата лежит на диске — цифра уже посчитана движком
     // для «Хранилища», второй раз считать незачем.
+    // Составы групп грузятся, только когда группу открывают, — без подгрузки здесь
+    // «общих групп» было 0 у любого, с кем не заходили в общий чат в этой сессии.
     LaunchedEffect(key) {
         model.refreshStorage()
         model.refreshChatSummaries()
+        model.groups.forEach { model.loadGroupMembers(it.gid) }
     }
     val files = model.storageChats.firstOrNull { it.first == key }?.second ?: 0L
     val commonGroups = model.groupMemberKeys.count { (_, members) -> key in members }
@@ -94,7 +99,7 @@ internal fun ContactProfileScreen(
             ) {
                 Text(c.displayName, color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
                 if (c.verified) {
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(Tokens.Space.s))
                     Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(19.dp))
                 }
             }
@@ -138,8 +143,11 @@ internal fun ContactProfileScreen(
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
         ) {
             ActionTile(Icons.Filled.Message, R.string.profile_message, Modifier.weight(1f), onMessage)
+            // Микрофон спрашиваем так же, как кнопка звонка в шапке чата: без него
+            // звонок уходил немым, и человек не понимал почему.
+            val runWithPerm = rememberPermissionRunner()
             ActionTile(Icons.Filled.Call, R.string.profile_call, Modifier.weight(1f)) {
-                model.callDm(key)
+                runWithPerm(arrayOf(Manifest.permission.RECORD_AUDIO), R.string.perm_denied_mic) { model.callDm(key) }
             }
         }
 
@@ -153,7 +161,9 @@ internal fun ContactProfileScreen(
         CardSection {
             CardRow(onClick = { verifyOpen = !verifyOpen }, divider = false, inset = 0.dp) {
                 Icon(
-                    if (c.verified) Icons.Filled.Verified else Icons.Filled.Block,
+                    // Не сверен — знак вопроса, а не «запрет»: тот же значок стоит у
+                    // «Заблокировать» ниже, и непроверенный читался заблокированным.
+                    if (c.verified) Icons.Filled.Verified else Icons.Filled.GppMaybe,
                     null,
                     tint = if (c.verified) HoloVerified else WarnColor,
                     modifier = Modifier.size(20.dp),
@@ -172,7 +182,7 @@ internal fun ContactProfileScreen(
                         ),
                         color = HoloSecondary,
                         fontSize = Tokens.Font.small,
-                        modifier = Modifier.padding(top = 2.dp),
+                        modifier = Modifier.padding(top = Tokens.Space.xxs),
                     )
                 }
                 Icon(
@@ -223,14 +233,14 @@ internal fun ContactProfileScreen(
         }
 
         // ── Общее ────────────────────────────────────────────────────────────
-        ScreenSectionLabel(stringResource(R.string.profile_common))
+        SectionTitle(stringResource(R.string.profile_common))
         CardSection {
             InfoRow(TablerIcons.Users, stringResource(R.string.profile_common_groups), "$commonGroups", divider = false)
             InfoRow(Icons.Filled.Photo, stringResource(R.string.profile_attachments), "$files")
         }
 
         // ── Опасное — внизу и с подтверждением ───────────────────────────────
-        ScreenSectionLabel(stringResource(R.string.profile_manage))
+        SectionTitle(stringResource(R.string.profile_manage))
         CardSection {
             DangerRow(TablerIcons.Pencil, stringResource(R.string.profile_rename), HoloAccent, divider = false) {
                 renaming = true
@@ -404,7 +414,7 @@ private fun ActionTile(icon: ImageVector, labelRes: Int, modifier: Modifier, onC
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(Tokens.Space.xs))
         Text(stringResource(labelRes), color = HoloAccent, fontSize = Tokens.Font.small)
     }
 }

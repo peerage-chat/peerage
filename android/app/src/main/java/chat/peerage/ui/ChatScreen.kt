@@ -156,16 +156,7 @@ internal fun ChatScreen(model: AppModel) {
     // Лента привязана к низу (reverseLayout): элемент 0 — самое свежее, чат с первого
     // кадра открыт на конце.
     FollowNewest(listState, msgs)
-    // «Показать в чате» из просмотрщика: доводим ленту до сообщения, если оно в
-    // уже загруженной странице истории. Индекс в ленте — от конца.
-    LaunchedEffect(model.jumpTo) {
-        val target = model.jumpTo
-        if (target != 0L) {
-            val i = msgs.indexOfFirst { it.id == target }
-            if (i >= 0) listState.animateScrollToItem(msgs.size - 1 - i)
-            model.jumpTo = 0L
-        }
-    }
+    JumpToMessage(model, listState, msgs)
     PagingOlder(listState, key) { model.loadOlder(key, {}) }
     // Правка начинается с ТЕКУЩЕГО текста: человек исправляет, а не набирает заново.
     LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }

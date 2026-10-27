@@ -110,14 +110,7 @@ private fun GroupChatContent(model: AppModel) {
     val scope = rememberCoroutineScope()
     // Лента привязана к низу, как в ChatScreen.
     FollowNewest(listState, msgs)
-    LaunchedEffect(model.jumpTo) {
-        val target = model.jumpTo
-        if (target != 0L) {
-            val i = msgs.indexOfFirst { it.id == target }
-            if (i >= 0) listState.animateScrollToItem(msgs.size - 1 - i)
-            model.jumpTo = 0L
-        }
-    }
+    JumpToMessage(model, listState, msgs)
     PagingOlder(listState, gid) { model.loadOlder(gid, {}, group = true) }
 
     // Вложения в группе — тот же лист, что в DM (движок пушит блоб всем участникам).

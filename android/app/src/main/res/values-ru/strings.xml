@@ -98,17 +98,16 @@
     <string name="folder_rooms">Комнаты</string>
     <string name="folder_channels">Каналы</string>
     <string name="folder_create">Создать папку</string>
-    <string name="menu_my_key_qr">Мой ключ и QR</string>
     <string name="menu_contacts">Контакты</string>
     <string name="menu_calls">Звонки</string>
     <string name="menu_network">Сеть</string>
     <string name="menu_saved">Сохранённое</string>
     <string name="menu_storage">Хранилище</string>
     <!-- Экран хранилища (пока сознательно простой) -->
-    <string name="storage_attachments">ВЛОЖЕНИЯ</string>
+    <string name="storage_attachments">Вложения</string>
     <string name="storage_files">%1$d файлов</string>
     <string name="storage_attachments_hint">Фото, файлы и голосовые, которые вы отправили или получили. Очистка не удаляет сообщения — файлы можно скачать у отправителя заново.</string>
-    <string name="storage_queue">ОЧЕРЕДЬ НЕДОСТАВЛЕННОГО</string>
+    <string name="storage_queue">Очередь недоставленного</string>
     <string name="storage_queue_pending">%1$d сообщений ждут доставки</string>
     <string name="storage_queue_hint">Хранятся до доставки — ничего не удаляется автоматически.</string>
     <string name="storage_clear_attachments">Очистить вложения</string>
@@ -150,7 +149,8 @@
     <string name="room_join">Войти</string>
 
     <!-- ── Контакты / добавление / профиль ─────────────────────────────── -->
-    <string name="contacts_empty">Нет контактов. Добавьте по ключу.</string>
+    <string name="folder_empty">В этой папке пока ничего нет.</string>
+    <string name="contacts_empty">Контактов пока нет. Добавьте по коду обмена.</string>
     <string name="contacts_empty_title">Нет контактов</string>
     <string name="contacts_empty_hint">Добавьте собеседника по ключу или QR — кнопкой вверху</string>
     <string name="channels_soon">Каналы — скоро</string>
@@ -165,17 +165,17 @@
     <string name="req_decline">Отклонить</string>
     <string name="req_block">Заблокировать</string>
     <string name="bench_recv_rate">⏱ приём: %1$s Мбит/с</string>
-    <string name="add_label_pubkey">ПУБЛИЧНЫЙ КЛЮЧ (hex)</string>
-    <string name="add_hint_hex">64 hex-символа</string>
+    <string name="add_label_pubkey">Код обмена или ключ</string>
+    <string name="add_hint_hex">Вставьте код или отсканируйте QR</string>
     <string name="add_btn">Добавить</string>
     <string name="add_known">Контакт уже есть</string>
     <string name="add_error">Неверный ключ</string>
-    <string name="label_name">ИМЯ</string>
+    <string name="label_name">Имя</string>
     <string name="qr_cd">QR код публичного ключа</string>
-    <string name="me_fingerprint_label">FINGERPRINT (сверьте при встрече)</string>
-    <string name="me_address_label">АДРЕС YGGDRASIL</string>
-    <string name="me_pubkey_label">ПУБЛИЧНЫЙ КЛЮЧ</string>
-    <string name="me_copy_key">Скопировать ключ</string>
+    <string name="me_fingerprint_label">Отпечаток (сверьте при встрече)</string>
+    <string name="me_address_label">Адрес Yggdrasil</string>
+    <string name="me_pubkey_label">Публичный ключ</string>
+    <string name="me_copy_key">Скопировать код</string>
     <string name="info_verify_hint">Сверьте слова с собеседником по другому каналу — защита от подмены ключа.</string>
     <string name="info_verified">Проверен</string>
     <string name="info_not_verified">Не проверен</string>
@@ -212,8 +212,8 @@
     <string name="groups_empty">Нет групп. Создайте новую.</string>
     <string name="group_default_name">Группа</string>
     <string name="group_member_fallback">Участник</string>
-    <string name="group_members_header">УЧАСТНИКИ</string>
-    <string name="group_add_header">ДОБАВИТЬ КОНТАКТ</string>
+    <string name="group_members_header">Участники</string>
+    <string name="group_add_header">Добавить контакт</string>
     <string name="group_remove_member">Удалить</string>
     <string name="cd_remove_member">Удалить из группы</string>
     <string name="group_you_removed">Вас удалили из группы</string>
@@ -228,7 +228,7 @@
     <string name="cd_leave_call">Выйти из звонка</string>
     <string name="group_system_membership">%1$s обновил(а) состав группы</string>
     <string name="group_system_event">%1$s %2$s</string>
-    <string name="create_label_name">НАЗВАНИЕ</string>
+    <string name="create_label_name">Название</string>
     <string name="create_btn">Создать</string>
     <string name="create_hint">Вы станете администратором. Добавляйте участников из контактов внутри группы.</string>
     <string name="addmember_empty">Нет контактов для приглашения.</string>
@@ -276,7 +276,6 @@
     <!-- ── Настройки ───────────────────────────────────────────────────── -->
     <string name="settings_about">О приложении</string>
     <string name="settings_version_label">Версия</string>
-    <string name="settings_version_value">0.1.0 (dev)</string>
     <string name="settings_transport_label">Транспорт</string>
     <string name="settings_transport_value">Yggdrasil mesh (serverless)</string>
     <string name="settings_encryption_label">Шифрование</string>
@@ -512,12 +511,12 @@
     <string name="flood_card_body">Идёт поток с %1$d адресов; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</string>
     <string name="flood_screen_title">Поток трафика</string>
     <string name="flood_explain">Приложение отбрасывает эти пакеты до расшифровки — процессор, батарея и память не тратятся, содержимое не показывается. Но байты уже дошли до радио, и трафик за них списан. Так устроена любая открытая сеть: кто знает адрес, тот может слать.</string>
-    <string name="flood_sources">ИСТОЧНИКИ</string>
+    <string name="flood_sources">Источники</string>
     <string name="flood_blocked_tag">заблокирован</string>
     <string name="flood_src_dropped">отброшено %1$d пакетов</string>
     <string name="flood_src_stranger">не в контактах · отброшено %1$d</string>
     <string name="flood_pps">пкт/с</string>
-    <string name="flood_what_to_do">ЧТО МОЖНО СДЕЛАТЬ</string>
+    <string name="flood_what_to_do">Что можно сделать</string>
     <string name="flood_go_offline">Уйти в офлайн</string>
     <string name="flood_go_offline_desc">Разорвать соединения — трафик перестанет тратиться сразу. Сообщения не будут приходить, пока не вернётесь.</string>
     <string name="flood_rotate">Сменить адрес</string>
@@ -529,12 +528,12 @@
 
     <string name="rotate_title">Сменить адрес</string>
     <string name="rotate_explain">Ваша личность не меняется: имя, отпечаток, история и группы останутся прежними. Меняется только адрес, по которому вас находят в сети. Кому вы его не сообщите — потеряет с вами связь.</string>
-    <string name="rotate_tell_whom">СООБЩИТЬ НОВЫЙ АДРЕС</string>
+    <string name="rotate_tell_whom">Сообщить новый адрес</string>
     <string name="rotate_hint_flooder">Источник потока — снят по умолчанию</string>
     <string name="rotate_hint_offline">Узнает, когда появится в сети</string>
     <string name="rotate_selected">Выбрано %1$d из %2$d</string>
     <string name="rotate_will_lose">Останутся со старым адресом: %1$s</string>
-    <string name="rotate_how">КАК ЭТО ПРОИЗОЙДЁТ</string>
+    <string name="rotate_how">Как это произойдёт</string>
     <string name="rotate_step_offline">Уйдём в офлайн ровно на %1$d секунд — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</string>
     <string name="rotate_step_up">Поднимемся под новым адресом.</string>
     <string name="rotate_step_tell">Выбранным контактам уйдёт подписанное уведомление — вручную ничего пересылать не нужно.</string>
@@ -563,7 +562,7 @@
     <string name="notif_action_rotate">Сменить адрес</string>
 
     <!-- Настройки (M4) -->
-    <string name="settings_privacy">КОНФИДЕНЦИАЛЬНОСТЬ</string>
+    <string name="settings_privacy">Конфиденциальность</string>
     <string name="settings_privacy_none">Метаданные не раскрываем</string>
     <string name="settings_privacy_none_desc">Отчёты о прочтении и индикатор набора не отправляются вовсе — здесь нечего выключать.</string>
     <string name="settings_privacy_presence">Статус «в сети» контакты видят: он следует из keepalive, которым держится доставка.</string>
@@ -575,11 +574,11 @@
     <string name="settings_at_rest_keystore">Ключ в Android Keystore (аппаратный, где есть)</string>
     <string name="settings_verified">Проверенные контакты</string>
     <string name="settings_verified_count">%1$d из %2$d сверены лично</string>
-    <string name="settings_media_net">МЕДИА И СЕТЬ</string>
+    <string name="settings_media_net">Медиа и сеть</string>
     <string name="settings_net_battery">Сеть и батарея</string>
     <string name="settings_no_name">Без имени</string>
     <string name="settings_tap_avatar">Нажмите на аватар, чтобы сменить</string>
-    <string name="settings_your_name">ВАШЕ ИМЯ</string>
+    <string name="settings_your_name">Ваше имя</string>
     <string name="settings_name_hint">Так вас увидят контакты. Имя уходит только им.</string>
     <string name="settings_edit_profile">Профиль</string>
 
@@ -601,8 +600,8 @@
     <string name="vault_lvl_password_desc">Спрашивается при запуске. Данные закрыты, даже если телефон разблокирован и попал в чужие руки.</string>
     <string name="vault_lvl_both">Ключ устройства и пароль</string>
     <string name="vault_lvl_both_desc">Нужно и это устройство, и пароль. Копия данных, снятая с телефона, бесполезна без пароля.</string>
-    <string name="vault_current_password">ТЕКУЩИЙ ПАРОЛЬ</string>
-    <string name="vault_new_password">НОВЫЙ ПАРОЛЬ (ДВАЖДЫ)</string>
+    <string name="vault_current_password">Текущий пароль</string>
+    <string name="vault_new_password">Новый пароль (дважды)</string>
     <string name="vault_no_recovery">Забытый пароль восстановить нельзя — переписка будет потеряна. Так и задумано: лазейка для вас была бы лазейкой для любого.</string>
     <string name="vault_apply">Применить</string>
     <string name="vault_change_failed">Не удалось сменить уровень: проверьте текущий пароль</string>
@@ -633,8 +632,8 @@
     <string name="backup_restore">Восстановить из копии</string>
     <string name="backup_pw_title">Отдельный пароль</string>
     <string name="backup_pw_text">Файл уедет с телефона — в облако, на карту, на чужой компьютер. Ключ этого устройства там недоступен, поэтому копия закрывается паролем и открывается где угодно.</string>
-    <string name="backup_pw_label">ПАРОЛЬ КОПИИ</string>
-    <string name="backup_pw_repeat">ЕЩЁ РАЗ</string>
+    <string name="backup_pw_label">Пароль копии</string>
+    <string name="backup_pw_repeat">Ещё раз</string>
     <string name="backup_pw_no_recovery">Забытый пароль не восстанавливается: копия станет мёртвым файлом. Так и задумано — лазейка для вас была бы лазейкой для любого, кто найдёт файл.</string>
     <string name="backup_create">Создать копию</string>
     <string name="backup_where_hint">Дальше система спросит, куда сохранить файл.</string>

@@ -104,17 +104,16 @@
     <string name="folder_rooms">Rooms</string>
     <string name="folder_channels">Channels</string>
     <string name="folder_create">Create folder</string>
-    <string name="menu_my_key_qr">My key and QR</string>
     <string name="menu_contacts">Contacts</string>
     <string name="menu_calls">Calls</string>
     <string name="menu_network">Network</string>
     <string name="menu_saved">Saved</string>
     <string name="menu_storage">Storage</string>
     <!-- Storage screen (deliberately simple for now) -->
-    <string name="storage_attachments">ATTACHMENTS</string>
+    <string name="storage_attachments">Attachments</string>
     <string name="storage_files">%1$d files</string>
     <string name="storage_attachments_hint">Photos, files and voice messages you sent or received. Clearing them does not delete messages — the files can be downloaded from the sender again.</string>
-    <string name="storage_queue">UNDELIVERED QUEUE</string>
+    <string name="storage_queue">Undelivered queue</string>
     <string name="storage_queue_pending">%1$d messages waiting</string>
     <string name="storage_queue_hint">Kept until delivered — nothing is removed automatically.</string>
     <string name="storage_clear_attachments">Clear attachments</string>
@@ -156,7 +155,8 @@
     <string name="room_join">Join</string>
 
     <!-- ── Contacts / add / info ───────────────────────────────────────── -->
-    <string name="contacts_empty">No contacts. Add by key.</string>
+    <string name="folder_empty">Nothing in this folder yet.</string>
+    <string name="contacts_empty">No contacts yet. Add one with their exchange code.</string>
     <string name="contacts_empty_title">No contacts</string>
     <string name="contacts_empty_hint">Add a peer by key or QR — using the button above</string>
     <string name="channels_soon">Channels — soon</string>
@@ -171,17 +171,17 @@
     <string name="req_decline">Decline</string>
     <string name="req_block">Block</string>
     <string name="bench_recv_rate">⏱ receiving: %1$s Mbps</string>
-    <string name="add_label_pubkey">PUBLIC KEY (hex)</string>
-    <string name="add_hint_hex">64 hex characters</string>
+    <string name="add_label_pubkey">Exchange code or key</string>
+    <string name="add_hint_hex">Paste the code or scan the QR</string>
     <string name="add_btn">Add</string>
     <string name="add_known">Contact already exists</string>
     <string name="add_error">Invalid key</string>
-    <string name="label_name">NAME</string>
+    <string name="label_name">Name</string>
     <string name="qr_cd">Public key QR code</string>
-    <string name="me_fingerprint_label">FINGERPRINT (verify in person)</string>
-    <string name="me_address_label">YGGDRASIL ADDRESS</string>
-    <string name="me_pubkey_label">PUBLIC KEY</string>
-    <string name="me_copy_key">Copy key</string>
+    <string name="me_fingerprint_label">Fingerprint (verify in person)</string>
+    <string name="me_address_label">Yggdrasil address</string>
+    <string name="me_pubkey_label">Public key</string>
+    <string name="me_copy_key">Copy code</string>
     <string name="info_verify_hint">Verify the words with your peer over another channel — protects against key substitution.</string>
     <string name="info_verified">Verified</string>
     <string name="info_not_verified">Not verified</string>
@@ -218,8 +218,8 @@
     <string name="groups_empty">No groups. Create one.</string>
     <string name="group_default_name">Group</string>
     <string name="group_member_fallback">Member</string>
-    <string name="group_members_header">MEMBERS</string>
-    <string name="group_add_header">ADD CONTACT</string>
+    <string name="group_members_header">Members</string>
+    <string name="group_add_header">Add contact</string>
     <string name="group_remove_member">Remove</string>
     <string name="cd_remove_member">Remove from group</string>
     <string name="group_you_removed">You were removed from the group</string>
@@ -234,7 +234,7 @@
     <string name="cd_leave_call">Leave call</string>
     <string name="group_system_membership">%1$s updated the group</string>
     <string name="group_system_event">%1$s %2$s</string>
-    <string name="create_label_name">NAME</string>
+    <string name="create_label_name">Name</string>
     <string name="create_btn">Create</string>
     <string name="create_hint">You\'ll become the admin. Add members from contacts inside the group.</string>
     <string name="addmember_empty">No contacts to invite.</string>
@@ -282,7 +282,6 @@
     <!-- ── Settings ────────────────────────────────────────────────────── -->
     <string name="settings_about">About</string>
     <string name="settings_version_label">Version</string>
-    <string name="settings_version_value">0.1.0 (dev)</string>
     <string name="settings_transport_label">Transport</string>
     <string name="settings_transport_value">Yggdrasil mesh (serverless)</string>
     <string name="settings_encryption_label">Encryption</string>
@@ -518,12 +517,12 @@
     <string name="flood_card_body">A stream is coming from %1$d addresses; the app drops it. The content never reaches you, but the mobile data is already spent: foreign packets cannot be stopped on the device.</string>
     <string name="flood_screen_title">Traffic flood</string>
     <string name="flood_explain">The app drops these packets before decryption — no CPU, battery or storage is spent, and nothing is shown. But the bytes already reached the radio, and you paid for them. That is how any open network works: whoever knows the address can send.</string>
-    <string name="flood_sources">SOURCES</string>
+    <string name="flood_sources">Sources</string>
     <string name="flood_blocked_tag">blocked</string>
     <string name="flood_src_dropped">%1$d packets dropped</string>
     <string name="flood_src_stranger">not a contact · %1$d dropped</string>
     <string name="flood_pps">pkt/s</string>
-    <string name="flood_what_to_do">WHAT YOU CAN DO</string>
+    <string name="flood_what_to_do">What you can do</string>
     <string name="flood_go_offline">Go offline</string>
     <string name="flood_go_offline_desc">Drop the connections — data stops being spent at once. Messages will not arrive until you return.</string>
     <string name="flood_rotate">Change address</string>
@@ -535,12 +534,12 @@
 
     <string name="rotate_title">Change address</string>
     <string name="rotate_explain">Your identity does not change: name, fingerprint, history and groups stay the same. Only the address you are found by changes. Anyone you do not tell will lose contact with you.</string>
-    <string name="rotate_tell_whom">TELL THE NEW ADDRESS TO</string>
+    <string name="rotate_tell_whom">Tell the new address to</string>
     <string name="rotate_hint_flooder">Source of the flood — unchecked by default</string>
     <string name="rotate_hint_offline">Will be told when they come online</string>
     <string name="rotate_selected">Selected %1$d of %2$d</string>
     <string name="rotate_will_lose">Will keep the old address: %1$s</string>
-    <string name="rotate_how">HOW IT WILL GO</string>
+    <string name="rotate_how">How it will go</string>
     <string name="rotate_step_offline">We go offline for exactly %1$d seconds — that is how long the old address takes to disappear from the network. Without the pause the stream keeps coming.</string>
     <string name="rotate_step_up">We come back up under the new address.</string>
     <string name="rotate_step_tell">Selected contacts receive a signed notice — nothing to forward by hand.</string>
@@ -569,7 +568,7 @@
     <string name="notif_action_rotate">Change address</string>
 
     <!-- Settings (M4) -->
-    <string name="settings_privacy">PRIVACY</string>
+    <string name="settings_privacy">Privacy</string>
     <string name="settings_privacy_none">No metadata is revealed</string>
     <string name="settings_privacy_none_desc">Read receipts and typing indicators are never sent — there is nothing here to switch off.</string>
     <string name="settings_privacy_presence">Contacts do see your online status: it follows from the keepalive that delivery relies on.</string>
@@ -581,11 +580,11 @@
     <string name="settings_at_rest_keystore">Key in Android Keystore (hardware-backed where available)</string>
     <string name="settings_verified">Verified contacts</string>
     <string name="settings_verified_count">%1$d of %2$d verified in person</string>
-    <string name="settings_media_net">MEDIA AND NETWORK</string>
+    <string name="settings_media_net">Media and network</string>
     <string name="settings_net_battery">Network and battery</string>
     <string name="settings_no_name">No name</string>
     <string name="settings_tap_avatar">Tap the avatar to change it</string>
-    <string name="settings_your_name">YOUR NAME</string>
+    <string name="settings_your_name">Your name</string>
     <string name="settings_name_hint">This is what contacts see. The name goes to them only.</string>
     <string name="settings_edit_profile">Profile</string>
 
@@ -607,8 +606,8 @@
     <string name="vault_lvl_password_desc">Asked at startup. Data stays closed even if the phone is unlocked and in someone else\'s hands.</string>
     <string name="vault_lvl_both">Device key and password</string>
     <string name="vault_lvl_both_desc">Both this device and the password are required. A copy taken off the phone is useless without the password.</string>
-    <string name="vault_current_password">CURRENT PASSWORD</string>
-    <string name="vault_new_password">NEW PASSWORD (TWICE)</string>
+    <string name="vault_current_password">Current password</string>
+    <string name="vault_new_password">New password (twice)</string>
     <string name="vault_no_recovery">A forgotten password cannot be recovered — the messages will be lost. That is by design: a way in for you is a way in for anyone.</string>
     <string name="vault_apply">Apply</string>
     <string name="vault_change_failed">Could not change the level: check the current password</string>
@@ -639,8 +638,8 @@
     <string name="backup_restore">Restore from a backup</string>
     <string name="backup_pw_title">A separate password</string>
     <string name="backup_pw_text">The file will leave the phone — to a cloud, a card, another computer. This device\'s key is not available there, so the archive is locked with a password and opens anywhere.</string>
-    <string name="backup_pw_label">BACKUP PASSWORD</string>
-    <string name="backup_pw_repeat">AGAIN</string>
+    <string name="backup_pw_label">Backup password</string>
+    <string name="backup_pw_repeat">Again</string>
     <string name="backup_pw_no_recovery">A forgotten password cannot be recovered: the archive becomes a dead file. That is by design — a way in for you is a way in for anyone who finds the file.</string>
     <string name="backup_create">Create backup</string>
     <string name="backup_where_hint">The system will ask where to save the file.</string>

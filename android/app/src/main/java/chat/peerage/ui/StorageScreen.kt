@@ -68,7 +68,7 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
             KindLegend(kinds)
         }
 
-        ScreenSectionLabel(stringResource(R.string.storage_by_chat))
+        SectionTitle(stringResource(R.string.storage_by_chat))
         if (model.storageChats.isEmpty()) {
             Text(
                 stringResource(R.string.storage_empty),
@@ -103,7 +103,7 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
             }
         }
 
-        ScreenSectionLabel(stringResource(R.string.storage_free_up))
+        SectionTitle(stringResource(R.string.storage_free_up))
         CardSection {
             CardRow(onClick = if (model.storageBlobs > 0) ({ confirm = true }) else null, divider = false) {
                 Icon(
@@ -137,7 +137,7 @@ internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
         // единственный оставшийся вопрос «насколько она свежая».
         val hasBackup = model.dataBackupAt > 0
         val accentColor = if (hasBackup) HoloOnline else WarnColor
-        ScreenSectionLabel(stringResource(R.string.storage_backup))
+        SectionTitle(stringResource(R.string.storage_backup))
         Row(
             Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = Tokens.Space.s)
                 .clip(RoundedCornerShape(Tokens.Radius.tile))

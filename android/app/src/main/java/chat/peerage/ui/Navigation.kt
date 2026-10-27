@@ -10,25 +10,14 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.QrCode2
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -86,7 +75,7 @@ internal fun FolderTabs(
             FolderTab(f.name, f.id == activeFilter, 0) { onFilter(f.id) }
         }
         Box(
-            Modifier.size(34.dp)
+            Modifier.size(Tokens.Size.tab)
                 .clip(RoundedCornerShape(Tokens.Radius.chip))
                 .background(Tokens.Colors.surface)
                 .clickable { onManage() },
@@ -135,68 +124,5 @@ private fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () 
     ) {
         Text(label, color = fg, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium, maxLines = 1)
         if (badge > 0) CountBadge(badgeCount(badge))
-    }
-}
-
-/** Левое меню (Telegram-style): шапка-профиль «Вы» (тап → ключ/QR) + пункты
- *  Контакты·Звонки·Сеть·Сохранённое·Настройки + версия. */
-@Composable
-internal fun AppDrawer(model: AppModel, navigate: (Screen) -> Unit) {
-    val me = model.me
-    // Своё имя из движка (M2); иначе «Вы».
-    val savedName = model.selfName.takeIf { it.isNotBlank() }
-    ModalDrawerSheet(
-        drawerContainerColor = HoloSurface,
-        modifier = Modifier.widthIn(max = 300.dp),
-    ) {
-        // Шапка-профиль: квадратный аватар + «Вы»; тап → мой ключ/QR/профиль.
-        Row(
-            Modifier.fillMaxWidth().background(HoloAccentDark).clickable { navigate(Screen.Me) }
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SquareAvatar(me?.pubkey ?: "?", size = 52.dp, avatarBytes = model.selfAvatar)
-            Spacer(Modifier.width(14.dp))
-            Text(
-                savedName ?: stringResource(R.string.common_you),
-                color = Color.White,
-                fontSize = Tokens.Font.title,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(Icons.Filled.QrCode2, stringResource(R.string.menu_my_key_qr), tint = HoloAccent, modifier = Modifier.size(22.dp))
-        }
-        Spacer(Modifier.height(8.dp))
-        // Основные разделы.
-        listOf(
-            Triple(Icons.Filled.Group, stringResource(R.string.menu_contacts), Screen.ContactList),
-            Triple(Icons.Filled.Call, stringResource(R.string.menu_calls), Screen.Calls),
-            Triple(Icons.Filled.Share, stringResource(R.string.menu_network), Screen.Network),
-            Triple(Icons.Filled.Lock, stringResource(R.string.menu_saved), Screen.Saved),
-            Triple(Icons.Filled.Storage, stringResource(R.string.menu_storage), Screen.Storage),
-        ).forEach { (icon, label, dest) -> DrawerItem(icon, label) { navigate(dest) } }
-        HorizontalDivider(color = HoloBorder, modifier = Modifier.padding(vertical = 4.dp))
-        DrawerItem(Icons.Filled.Settings, stringResource(R.string.menu_settings)) { navigate(Screen.Settings) }
-        Spacer(Modifier.weight(1f))
-        HorizontalDivider(color = HoloBorder)
-        Text(
-            "Peerage · v0.3",
-            color = HoloSecondary,
-            fontSize = Tokens.Font.caption,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-        )
-    }
-}
-
-/** Ровный ряд левого меню (иконка + подпись, без инлайн-метрик). */
-@Composable
-internal fun DrawerItem(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(18.dp))
-        Text(label, color = Color.White, fontSize = Tokens.Font.label)
     }
 }

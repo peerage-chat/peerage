@@ -208,9 +208,7 @@ private fun SectionLabel(text: String, badge: String? = null) {
     ) {
         Text(text, color = HoloSecondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium)
         if (badge != null) {
-            Box(
-                Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.accentBadge).padding(horizontal = 7.dp, vertical = 2.dp),
-            ) { Text(badge, color = HoloAccent, fontSize = Tokens.Font.caption) }
+            chat.peerage.ui.TagBadge(badge)
         }
     }
 }
