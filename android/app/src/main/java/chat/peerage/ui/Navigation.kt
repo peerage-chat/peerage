@@ -125,7 +125,7 @@ private fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () 
         label = "tabBg",
     )
     Row(
-        Modifier.height(34.dp)
+        Modifier.height(Tokens.Size.tab)
             .clip(RoundedCornerShape(Tokens.Radius.chip))
             .background(bg)
             .clickable { onClick() }
@@ -134,19 +134,7 @@ private fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () 
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
     ) {
         Text(label, color = fg, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium, maxLines = 1)
-        if (badge > 0) {
-            Box(
-                Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(HoloAccent)
-                    .padding(horizontal = 5.dp, vertical = 1.dp),
-            ) {
-                Text(
-                    if (badge > 99) "99+" else "$badge",
-                    color = HoloAccentDark,
-                    fontSize = Tokens.Font.caption,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
+        if (badge > 0) CountBadge(badgeCount(badge))
     }
 }
 

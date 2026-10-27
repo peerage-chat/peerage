@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import chat.peerage.ui.PhotoOr
+import chat.peerage.ui.initialOf
 import chat.peerage.ui.rememberPermissionRunner
 
 /**
@@ -728,7 +729,7 @@ private fun Avatar(name: String, size: Int, photo: ByteArray?) {
     ) {
         PhotoOr(photo, size.dp) {
             Text(
-                name.take(1).uppercase(),
+                initialOf(name),
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
                 fontSize = Tokens.Font.initial(size.dp),

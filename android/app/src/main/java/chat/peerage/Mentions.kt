@@ -120,6 +120,27 @@ object Mentions {
     }
 
     /**
+     * Тот же текст строкой: участки — «@» + имя от `nameOf`. Для всего, что показывает
+     * сообщение без пузыря — копирование, превью в списке, цитата, полоска ответа. Иначе
+     * там всплывает метка, которой человека записал АВТОР, а не имя из ленты.
+     * Пересылку то же самое делает движок (`mention::plain`).
+     */
+    fun plain(text: String, mentions: List<Mention>, nameOf: (String) -> String): String {
+        val spans = ranges(text, mentions)
+        if (spans.isEmpty()) return text
+        return buildString {
+            var pos = 0
+            for ((r, key) in spans) {
+                if (r.first < pos) continue
+                append(text, pos, r.first)
+                append('@').append(nameOf(key))
+                pos = r.last + 1
+            }
+            append(text, pos, text.length)
+        }
+    }
+
+    /**
      * Текст пузыря с упоминаниями: участок рисуется как «@» + имя, которое знает ЭТО
      * устройство (`nameOf`), а не как текст отправителя. Упоминание меня выделено
      * фоном — его видно при пролистывании ленты.

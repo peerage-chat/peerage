@@ -390,18 +390,11 @@ private fun ChatRowBadge(row: ChatRowUi) {
         // Упоминание меня — отдельный значок «@» перед счётчиком, и всегда акцентный,
         // даже в чате без звука: ради этого человека и звали.
         row.unread > 0 && row.mentioned -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloAccent)
-                    .defaultMinSize(minWidth = 19.dp)
-                    .padding(horizontal = 5.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("@", color = HoloAccentDark, fontSize = Tokens.Font.caption, fontWeight = FontWeight.SemiBold)
-            }
+            CountBadge("@")
             Spacer(Modifier.width(Tokens.Space.xs))
-            UnreadCount(row)
+            CountBadge(badgeCount(row.unread), muted = row.muted)
         }
-        row.unread > 0 -> UnreadCount(row)
+        row.unread > 0 -> CountBadge(badgeCount(row.unread), muted = row.muted)
         // Те же значки, что в пузыре чата: часы → одна галочка → две. Один и тот же
         // факт не должен выглядеть в списке иначе, чем внутри переписки.
         s != null && s.lastMine && !s.lastSystem -> when (s.lastStatus) {
@@ -430,25 +423,6 @@ private fun ChatRowBadge(row: ChatRowUi) {
             null,
             tint = HoloOnline,
             modifier = Modifier.size(14.dp),
-        )
-    }
-}
-
-/** Счётчик непрочитанного: приглушённый в чате без звука. */
-@Composable
-private fun UnreadCount(row: ChatRowUi) {
-    Box(
-        Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
-            .background(if (row.muted) Tokens.Colors.unreadMuted else HoloAccent)
-            .defaultMinSize(minWidth = 19.dp)
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            if (row.unread > 99) "99+" else "${row.unread}",
-            color = if (row.muted) Tokens.Colors.unreadMutedText else HoloAccentDark,
-            fontSize = Tokens.Font.caption,
-            fontWeight = FontWeight.SemiBold,
         )
     }
 }
@@ -488,7 +462,7 @@ private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose:
 private fun chatPreview(model: AppModel, row: ChatRowUi): String {
     val s = row.summary ?: return stringResource(R.string.chats_preview_empty)
     val body = when {
-        s.lastText.isNotBlank() -> s.lastText
+        s.lastText.isNotBlank() -> Mentions.plain(s.lastText, s.lastMentions, model::mentionName)
         s.lastKind == "image" -> stringResource(R.string.chats_preview_photo)
         s.lastKind == "video" -> stringResource(R.string.chats_preview_video)
         s.lastKind == "voice" -> stringResource(R.string.chats_preview_voice)

@@ -76,7 +76,7 @@ internal fun ForwardSheet(model: AppModel) {
                 onCheckedChange = { model.forwardHideAuthor = it },
                 colors = CheckboxDefaults.colors(checkedColor = HoloAccent),
             )
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(Tokens.Space.xs))
             Column {
                 Text(stringResource(R.string.forward_hide_author), color = Color.White, fontSize = Tokens.Font.label)
                 Text(
@@ -114,8 +114,8 @@ internal fun ForwardSheet(model: AppModel) {
 private fun TargetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, onClick: () -> Unit) {
     ListRow(onClick = onClick) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(12.dp))
-        Text(title, color = Color.White, fontSize = Tokens.Font.label)
+        Spacer(Modifier.width(Tokens.Space.m))
+        Text(title, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -143,7 +143,7 @@ internal fun ForwardMark(model: AppModel, fwdFrom: String, anon: Boolean = false
     // пересланное сообщение превращалось в плиту с дырой перед временем. Ширину
     // пузыря должно задавать содержимое, а не служебная пометка.
     Row(
-        Modifier.padding(bottom = 3.dp),
+        Modifier.padding(bottom = Tokens.Space.xxs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Иконка-стрелка: подпись читается как пометка о пересылке даже боковым
@@ -152,14 +152,14 @@ internal fun ForwardMark(model: AppModel, fwdFrom: String, anon: Boolean = false
         // Цвет — белый с прозрачностью, а НЕ серый `HoloSecondary`: на цветном пузыре
         // серый читается как пятно чужого слоя, а полупрозрачный белый остаётся в
         // цветовой семье пузыря и одинаково работает на входящем и исходящем.
-        val tint = Color.White.copy(alpha = 0.55f)
+        val tint = Tokens.Colors.metaOnBubble
         Icon(
             Icons.AutoMirrored.Filled.ArrowForward,
             null,
             tint = tint,
             modifier = Modifier.size(12.dp),
         )
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(Tokens.Space.xs))
         Text(label, color = tint, fontSize = Tokens.Font.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

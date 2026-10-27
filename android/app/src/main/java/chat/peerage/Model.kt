@@ -1338,6 +1338,10 @@ class AppModel private constructor() {
     fun mentionName(key: String): String =
         if (key == me?.pubkey) selfName.ifBlank { appContext?.getString(R.string.common_you).orEmpty() } else peerName(key)
 
+    /** Текст сообщения строкой, как его видно в ленте: «@» с моими именами, а не с
+     *  метками автора. Всё, что показывает сообщение вне пузыря, берёт текст отсюда. */
+    fun plainText(m: Message): String = Mentions.plain(m.text, m.mentions, ::mentionName)
+
     /** Группы, где меня упомянули в непрочитанном. Как и счётчик, живёт в памяти. */
     val groupMentioned = mutableStateMapOf<String, Boolean>()
 
@@ -1496,7 +1500,7 @@ class AppModel private constructor() {
         val sel = selection
         return chat(id, group)
             .filter { MsgRef(it.id, it.sender) in sel }
-            .joinToString("\n") { if (it.text.isNotEmpty()) it.text else it.name }
+            .joinToString("\n") { if (it.text.isNotEmpty()) plainText(it) else it.name }
     }
 
     fun selectedText(key: String): String = selectedTextOf(key)
@@ -2307,6 +2311,7 @@ class AppModel private constructor() {
                 pinnedAt = s.pinnedAt,
                 muted = s.muted,
                 lastText = last?.text.orEmpty(),
+                lastMentions = last?.mentions.orEmpty(),
                 lastTime = last?.time ?: 0,
                 lastMine = last?.mine ?: false,
                 lastSender = last?.sender.orEmpty(),

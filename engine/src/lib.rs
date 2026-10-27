@@ -687,6 +687,11 @@ impl Engine {
             // Скрыли автора — ключ не уходит ВООБЩЕ: иначе «скрыл» значило бы
             // «спрятал в интерфейсе, но отдал по проводу».
             let origin = if hide_author { String::new() } else { origin };
+            // Ссылки упоминаний в новый чат не едут (упомянутый там не обязан
+            // состоять), поэтому участки становятся текстом — с теми именами, которые
+            // видел пересылающий, а не с метками автора.
+            let mut m = m;
+            m.text = peerage_core::mention::plain(&m.text, &m.mentions, |k| self.mention_name(k));
             let ok = if m.blob_id.is_empty() {
                 self.forward_text(&dst, &m.text, &origin, hide_author)
             } else {
@@ -697,6 +702,27 @@ impl Engine {
             }
         }
         sent
+    }
+
+    /// Имя для «@» в тексте, который уходит без ссылки: своё — моё самоназвание,
+    /// контакт — по тому же приоритету, что и в клиенте (локальное → самоназвание →
+    /// короткий hex). Незнакомый ключ — короткий hex: другого имени у нас нет.
+    fn mention_name(&self, key_hex: &str) -> String {
+        if key_hex.eq_ignore_ascii_case(&self.me_hex()) {
+            let own = self.self_name();
+            if !own.is_empty() {
+                return own;
+            }
+        }
+        let short = || key_hex.chars().take(8).collect::<String>();
+        let Some(key) = hex::decode(key_hex).ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok()) else {
+            return short();
+        };
+        match self.contacts.lock_safe().get(&key) {
+            Some(c) if !c.name.is_empty() => c.name.clone(),
+            Some(c) if !c.profile_name.is_empty() => c.profile_name.clone(),
+            _ => short(),
+        }
     }
 
     fn forward_text(&self, dst: &ChatKey, text: &str, origin: &str, anon: bool) -> bool {

@@ -87,7 +87,7 @@ internal fun SavedScreen(model: AppModel) {
                     val selected = MsgRef(n.id, n.sender) in selection
                     Row(
                         Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s)
-                            .background(if (selected) HoloAccent.copy(alpha = 0.16f) else Color.Transparent),
+                            .background(if (selected) Tokens.Colors.selectedRow else Color.Transparent),
                         horizontalArrangement = Arrangement.End,
                     ) {
                         Box(

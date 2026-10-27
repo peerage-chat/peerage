@@ -19,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -58,7 +57,7 @@ import kotlin.math.abs
 internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Colors.iconBar, onClick: () -> Unit) {
     Box(
         Modifier.padding(horizontal = Tokens.Space.xs)
-            .size(38.dp)
+            .size(Tokens.Size.barButton)
             .clip(RoundedCornerShape(Tokens.Radius.button))
             .background(Tokens.Colors.surface)
             .clickable { onClick() },
@@ -80,14 +79,14 @@ internal fun TopBar(
     // Шапка на фоне экрана, а не на акцентной плашке: цветная полоса сверху делила
     // экран пополам и спорила с карточками за внимание.
     Row(
-        Modifier.fillMaxWidth().background(HoloBg).height(56.dp).padding(horizontal = Tokens.Space.s),
+        Modifier.fillMaxWidth().background(HoloBg).height(Tokens.Size.topBar).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when {
             leading != null -> leading()
             onMenu != null -> BarIcon(TablerIcons.Menu2, stringResource(R.string.common_menu), onClick = onMenu)
             onBack != null -> BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
-            else -> Spacer(Modifier.width(12.dp))
+            else -> Spacer(Modifier.width(Tokens.Space.m))
         }
         Text(
             title,
@@ -101,6 +100,36 @@ internal fun TopBar(
         actions()
     }
 }
+
+/**
+ * Бейдж-счётчик: непрочитанное в строке чата, на вкладке, значок «@». Один на все
+ * места — раньше их было три копии с разными отступами и скруглением, и цифра в
+ * каждой сидела по-своему.
+ *
+ * Высота фиксирована, ширина не меньше высоты: одна цифра — кружок, «99+» — капсула.
+ * Текст центрируется по высоте самой строкой (`Tokens.Text.base`), а не отступами.
+ */
+@Composable
+internal fun CountBadge(text: String, muted: Boolean = false) {
+    Box(
+        Modifier.height(Tokens.Size.badge).widthIn(min = Tokens.Size.badge)
+            .clip(RoundedCornerShape(percent = 50))
+            .background(if (muted) Tokens.Colors.unreadMuted else HoloAccent)
+            .padding(horizontal = Tokens.Space.xs + Tokens.Space.xxs),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text,
+            style = Tokens.Text.meta,
+            color = if (muted) Tokens.Colors.unreadMutedText else HoloAccentDark,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+/** Число для бейджа: больше 99 — «99+», точное число в узком бейдже не читается. */
+internal fun badgeCount(n: Int): String = if (n > 99) "99+" else "$n"
 
 /** Индикатор присутствия: маленький кружок (онлайн/офлайн). */
 @Composable
@@ -116,7 +145,7 @@ internal fun PeerIndicator(peers: Int, onTap: () -> Unit = {}, onLongPress: () -
     // как остальные кнопки шапки.
     Row(
         Modifier.padding(horizontal = Tokens.Space.xs)
-            .height(38.dp)
+            .height(Tokens.Size.barButton)
             .clip(RoundedCornerShape(Tokens.Radius.button))
             .background(Tokens.Colors.surface)
             .pointerInput(Unit) {
@@ -125,9 +154,9 @@ internal fun PeerIndicator(peers: Int, onTap: () -> Unit = {}, onLongPress: () -
                     onLongPress = { onLongPress() },
                 )
             }
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
     ) {
         Icon(
             painterResource(R.drawable.ic_glyph),
@@ -178,7 +207,7 @@ internal fun SquareAvatar(
                 bmp != null -> Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 content != null -> content()
                 else -> Text(
-                    name.take(1).uppercase(),
+                    initialOf(name),
                     color = Color.White,
                     fontSize = Tokens.Font.initial(size),
                     fontWeight = FontWeight.Medium,
@@ -193,6 +222,17 @@ internal fun SquareAvatar(
             )
         }
     }
+}
+
+/** Буква-заглушка аватара: первая ГРАФЕМА, а не первый char. Имя, начатое с эмодзи,
+ *  давало половину суррогатной пары — квадратик с крестом вместо буквы. */
+internal fun initialOf(name: String): String {
+    val t = name.trim()
+    if (t.isEmpty()) return ""
+    val it = java.text.BreakIterator.getCharacterInstance()
+    it.setText(t)
+    val end = it.next().takeIf { e -> e != java.text.BreakIterator.DONE } ?: t.length
+    return t.substring(0, end).uppercase()
 }
 
 @Composable
@@ -284,7 +324,7 @@ internal fun CardBlock(
 internal fun CardRow(
     onClick: (() -> Unit)? = null,
     divider: Boolean = true,
-    inset: Dp = 52.dp,
+    inset: Dp = Tokens.Size.cardRow,
     content: @Composable RowScope.() -> Unit,
 ) {
     if (divider) {
@@ -297,7 +337,7 @@ internal fun CardRow(
     Row(
         Modifier.fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .heightIn(min = 52.dp)
+            .heightIn(min = Tokens.Size.cardRow)
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
         content = content,
@@ -327,11 +367,11 @@ internal fun OptionChip(
             .then(if (selected) Modifier.border(1.5.dp, Tokens.Colors.accent, shape) else Modifier)
             .clickable { onClick() }
             .padding(
-                horizontal = if (compact) 11.dp else 14.dp,
-                vertical = if (compact) 5.dp else 10.dp,
+                horizontal = if (compact) Tokens.Space.m else Tokens.Space.l,
+                vertical = if (compact) Tokens.Space.xs else Tokens.Space.m,
             ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s, Alignment.CenterHorizontally),
     ) {
         if (icon != null) {
             Icon(
@@ -398,7 +438,7 @@ internal fun RowScope.QuoteThumb(model: AppModel, blobId: String, thumbId: Strin
         bmp,
         null,
         Modifier.align(Alignment.CenterVertically)
-            .padding(start = 6.dp, end = Tokens.Space.s)
+            .padding(start = Tokens.Space.s, end = Tokens.Space.s)
             .size(34.dp)
             .clip(RoundedCornerShape(Tokens.Radius.badge)),
         contentScale = ContentScale.Crop,
@@ -438,7 +478,9 @@ internal fun fmtListTime(ts: Long): String {
         dayKey(ts) == dayKey(nowSec) -> fmtMsgTime(ts)
         dayKey(ts) == dayKey(nowSec - 86_400) -> stringResource(R.string.chats_time_yesterday)
         nowSec - ts < 6 * 86_400 -> java.text.SimpleDateFormat("EEE", loc).format(date)
-        else -> java.text.SimpleDateFormat("dd.MM", loc).format(date)
+        // Прошлый год — с годом: «05.03» без него выглядит как этой весной.
+        yearOf(ts) == yearOf(nowSec) -> java.text.SimpleDateFormat("dd.MM", loc).format(date)
+        else -> java.text.SimpleDateFormat("dd.MM.yy", loc).format(date)
     }
 }
 
@@ -448,6 +490,8 @@ internal fun dayKey(ts: Long): Long {
     val c = java.util.Calendar.getInstance().apply { timeInMillis = ts * 1000 }
     return c.get(java.util.Calendar.YEAR) * 1000L + c.get(java.util.Calendar.DAY_OF_YEAR)
 }
+
+private fun yearOf(ts: Long): Long = dayKey(ts) / 1000
 
 // ── Автор сообщения ─────────────────────────────────────────────────────────
 // Живёт здесь, а не в экране группы: имя и цвет автора нужны и ленте, и цитате,
@@ -561,7 +605,7 @@ internal fun BubbleText(
         val metaP = subcompose("meta", meta).map { it.measure(Constraints()) }
         val metaW = metaP.maxOfOrNull { it.width } ?: 0
         val metaH = metaP.maxOfOrNull { it.height } ?: 0
-        val gap = 8.dp.roundToPx() // зазор между текстом и метой
+        val gap = Tokens.Space.s.roundToPx() // зазор между текстом и метой
 
         // Стиль ОДИН на измерение и на показ: разойдись они хоть на межбуквенный
         // интервал — расчёт «влезает ли мета» пойдёт по одной ширине строки, а
@@ -623,7 +667,10 @@ internal fun dayLabel(ts: Long): String {
     return when (dayKey(ts)) {
         dayKey(nowSec) -> stringResource(R.string.date_today)
         dayKey(nowSec - 86_400) -> stringResource(R.string.date_yesterday)
-        else -> java.text.SimpleDateFormat("d MMMM", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
+        else -> java.text.SimpleDateFormat(
+            if (yearOf(ts) == yearOf(nowSec)) "d MMMM" else "d MMMM yyyy",
+            java.util.Locale.getDefault(),
+        ).format(java.util.Date(ts * 1000))
     }
 }
 
@@ -681,6 +728,25 @@ internal fun PagingOlder(listState: LazyListState, key: Any?, load: () -> Unit) 
 }
 
 /**
+ * Довести ленту до низа на НОВОЕ сообщение — если человек и так внизу или написал
+ * сам. Читающего историю чужое входящее не утаскивает вниз: раньше любое сообщение
+ * в группе выдёргивало из середины переписки.
+ *
+ * Ориентир — пара «автор + id» последнего, а не размер списка: догрузка старых тоже
+ * меняет размер. «Внизу» — первые два элемента: новое вставляется под видимым, и на
+ * момент проверки лента уже сдвинута на один.
+ */
+@Composable
+internal fun FollowNewest(listState: LazyListState, msgs: List<Message>) {
+    val last = msgs.lastOrNull()
+    LaunchedEffect(last?.sender, last?.id) {
+        if (last != null && (last.mine || listState.firstVisibleItemIndex <= 1)) {
+            listState.animateScrollToItem(0)
+        }
+    }
+}
+
+/**
  * Плашка закреплённого сообщения над лентой. Показывает ВЕРХНЕЕ (самое свежее) и
  * счётчик остальных: закреп — свойство чата, поэтому одинаков у всех участников.
  *
@@ -698,11 +764,8 @@ internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: 
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier.width(2.5.dp).height(30.dp)
-                .clip(RoundedCornerShape(2.dp)).background(HoloAccent),
-        )
-        Spacer(Modifier.width(10.dp))
+        AccentRule()
+        Spacer(Modifier.width(Tokens.Space.s))
         Column(Modifier.weight(1f)) {
             Text(
                 if (list.size > 1) {
@@ -714,7 +777,7 @@ internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: 
                 fontSize = Tokens.Font.caption,
             )
             Text(
-                top.text.ifEmpty { stringResource(R.string.pin_attachment) },
+                model.plainText(top).ifEmpty { stringResource(R.string.pin_attachment) },
                 color = Color.White,
                 fontSize = Tokens.Font.body,
                 maxLines = 1,
@@ -729,34 +792,45 @@ internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: 
     }
 }
 
+/** Акцентная риска слева от цитаты, закрепа, полоски ответа: «это ссылка на другое
+ *  сообщение». Одна на все места, чтобы толщина и высота не разъезжались. */
+@Composable
+internal fun AccentRule(modifier: Modifier = Modifier.height(Tokens.Size.rule)) {
+    Box(
+        modifier.width(Tokens.Size.ruleWidth)
+            .clip(RoundedCornerShape(Tokens.Size.ruleWidth / 2)).background(HoloAccent),
+    )
+}
+
 /**
- * Полоска «Редактирование» над полем ввода: показывает, что уходит правка, а не
- * новое сообщение, и даёт из неё выйти. Занимает то же место, что цитата ответа —
- * два режима ввода одновременно не бывают.
+ * Полоска над полем ввода: «Ответ …» или «Редактирование …». Один режим ввода за раз,
+ * поэтому и полоска одна — раньше у ответа была карточка с крестиком 20dp, у правки
+ * — голая строка с кнопкой 38dp, и одно и то же место выглядело двумя разными.
  */
 @Composable
-internal fun EditStrip(text: String, onCancel: () -> Unit) {
+internal fun InputStrip(title: String, body: String, onCancel: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(bottom = 4.dp),
+        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs)
+            .clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface)
+            .padding(start = Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.Edit, null, tint = HoloAccent, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
+        AccentRule()
+        Column(Modifier.weight(1f).padding(horizontal = Tokens.Space.s)) {
+            Text(title, color = HoloAccent, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium, maxLines = 1)
             Text(
-                stringResource(R.string.chat_editing),
-                color = HoloAccent,
-                fontSize = Tokens.Font.small,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text,
+                body,
                 color = HoloSecondary,
                 fontSize = Tokens.Font.small,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel), onClick = onCancel)
+        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel), tint = HoloSecondary, onClick = onCancel)
     }
 }
+
+/** Полоска «Редактирование»: уходит правка, а не новое сообщение. */
+@Composable
+internal fun EditStrip(text: String, onCancel: () -> Unit) =
+    InputStrip(stringResource(R.string.chat_editing), text, onCancel)

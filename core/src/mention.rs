@@ -62,6 +62,30 @@ fn span(text: &str, at: u32, len: u32, end_prev: usize) -> Option<usize> {
     ok.then_some(end)
 }
 
+/// Текст, где каждый участок упоминания заменён на «@» + имя от `name_of(key)`.
+///
+/// Нужен там, где ссылка дальше не едет и остаётся только строка: пересылка в
+/// другой чат, копирование, превью. Иначе наружу уходит текст ОТПРАВИТЕЛЯ — метка,
+/// которой он сам записал человека, — а не то имя, что видел пересылающий.
+/// Участки проходят [`clean`], поэтому кривой список не роняет срез строки.
+pub fn plain(text: &str, mentions: &[Mention], name_of: impl Fn(&str) -> String) -> String {
+    let spans = clean(text, mentions.to_vec());
+    if spans.is_empty() {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut pos = 0usize;
+    for m in &spans {
+        let (at, end) = (m.at as usize, (m.at + m.len) as usize);
+        out.push_str(&text[pos..at]);
+        out.push('@');
+        out.push_str(&name_of(&m.key));
+        pos = end;
+    }
+    out.push_str(&text[pos..]);
+    out
+}
+
 /// Упомянут ли `key_hex` в списке (регистр hex не важен).
 pub fn mentions_key(mentions: &[Mention], key_hex: &str) -> bool {
     mentions.iter().any(|m| m.key.eq_ignore_ascii_case(key_hex))
@@ -141,5 +165,18 @@ mod tests {
         let got = clean(&text, vec![upper]);
         assert_eq!(got[0].key, "ab".repeat(32));
         assert!(mentions_key(&got, &"AB".repeat(32)));
+    }
+
+    #[test]
+    fn plain_swaps_spans_for_local_names() {
+        // Отправитель записал человека как «Мама», у пересылающего он «Ольга».
+        let text = "@Мама, глянь 👋 @Мама";
+        let at2 = "@Мама, глянь 👋 ".len() as u32;
+        let len = "@Мама".len() as u32;
+        let got = plain(text, &[m(at2, len), m(0, len)], |_| "Ольга".into());
+        assert_eq!(got, "@Ольга, глянь 👋 @Ольга");
+        // Без упоминаний и с кривым участком текст не трогается.
+        assert_eq!(plain(text, &[], |_| "x".into()), text);
+        assert_eq!(plain(text, &[m(0, 2)], |_| "x".into()), text);
     }
 }

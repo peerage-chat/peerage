@@ -153,6 +153,8 @@ data class ChatSummary(
     val muted: Boolean = false,
     /** Превью последнего сообщения (текст или подпись вложения); пусто — чат пуст. */
     val lastText: String = "",
+    /** Упоминания в [lastText]: превью рисует их моими именами, как лента. */
+    val lastMentions: List<Mention> = emptyList(),
     val lastTime: Long = 0,
     val lastMine: Boolean = false,
     /** hex автора последнего сообщения — в группе показываем его имя перед текстом. */

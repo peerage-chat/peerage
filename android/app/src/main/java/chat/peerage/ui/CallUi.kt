@@ -107,7 +107,7 @@ internal fun GridTile(
             ) {
                 PhotoOr(photo, 64.dp) {
                     Text(
-                        name.take(1).uppercase(),
+                        initialOf(name),
                         color = if (me) HoloAccentDark else Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = Tokens.Font.initial(64.dp),
@@ -184,7 +184,7 @@ internal fun ParticipantFullscreen(
             ) {
                 PhotoOr(photo, 128.dp) {
                     Text(
-                        name.take(1).uppercase(),
+                        initialOf(name),
                         color = if (me) HoloAccentDark else Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = Tokens.Font.initial(128.dp),
@@ -249,7 +249,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                     contentAlignment = Alignment.Center,
                 ) {
                     PhotoOr(model.peerAvatar(ic.peer), 88.dp) {
-                        Text(name.take(1).uppercase(), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = Tokens.Font.initial(88.dp))
+                        Text(initialOf(name), color = HoloAccentDark, fontWeight = FontWeight.Bold, fontSize = Tokens.Font.initial(88.dp))
                     }
                 }
                 Spacer(Modifier.height(20.dp))
@@ -276,7 +276,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.size(22.dp).clip(RoundedCornerShape(Tokens.Radius.badge)).background(HoloOnline), contentAlignment = Alignment.Center) {
-                            Text(firstName.take(1).uppercase(), color = Tokens.Colors.onOnline, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Bold)
+                            Text(initialOf(firstName), color = Tokens.Colors.onOnline, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Bold)
                         }
                         Text(
                             if (more > 0) {

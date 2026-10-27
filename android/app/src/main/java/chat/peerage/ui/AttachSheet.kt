@@ -202,8 +202,8 @@ internal fun AttachSheet(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier.fillMaxWidth().height(300.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs),
+                verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs),
             ) {
                 item { CameraTile(onCamera) }
                 items(items) { g ->
@@ -222,7 +222,7 @@ private fun SourceTile(icon: ImageVector, labelRes: Int, modifier: Modifier, onC
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(23.dp))
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(Tokens.Space.xs))
         Text(stringResource(labelRes), color = Color.White, fontSize = Tokens.Font.caption)
     }
 }
@@ -236,7 +236,7 @@ private fun CameraTile(onClick: () -> Unit) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.PhotoCamera, null, tint = HoloAccent, modifier = Modifier.size(26.dp))
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(Tokens.Space.xs))
             Text(stringResource(R.string.attach_camera), color = HoloAccent, fontSize = Tokens.Font.caption)
         }
     }
@@ -260,7 +260,7 @@ private fun GalleryTile(g: GalleryItem, pickedAt: Int, onClick: () -> Unit) {
         // обязательна: без неё кружок теряется на светлом кадре и выглядит
         // чёрной кляксой на тёмном.
         Box(
-            Modifier.align(Alignment.TopEnd).padding(5.dp).size(22.dp)
+            Modifier.align(Alignment.TopEnd).padding(Tokens.Space.xs).size(22.dp)
                 .clip(CircleShape)
                 .background(if (pickedAt >= 0) HoloAccent else Tokens.Colors.tileScrim)
                 .border(
@@ -287,8 +287,8 @@ private fun GalleryTile(g: GalleryItem, pickedAt: Int, onClick: () -> Unit) {
 @Composable
 private fun BoxScope.TileChip(text: String, align: Alignment, big: Boolean = false) {
     Box(
-        Modifier.align(align).padding(4.dp).clip(RoundedCornerShape(Tokens.Radius.badge))
-            .background(Tokens.Colors.tileScrim).padding(horizontal = 5.dp, vertical = 1.dp),
+        Modifier.align(align).padding(Tokens.Space.xs).clip(RoundedCornerShape(Tokens.Radius.badge))
+            .background(Tokens.Colors.tileScrim).padding(horizontal = Tokens.Space.xs, vertical = 1.dp),
     ) {
         Text(text, color = if (big) WarnColor else Color.White, fontSize = Tokens.Font.caption)
     }

@@ -76,6 +76,7 @@ import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit) {
@@ -91,7 +92,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
     val online = key?.let { model.online[it] == true } ?: false
     val avatar = c?.avatarId?.let { model.contactAvatars[it] }
     Row(
-        Modifier.fillMaxWidth().background(HoloBg).height(56.dp).padding(horizontal = Tokens.Space.s),
+        Modifier.fillMaxWidth().background(HoloBg).height(Tokens.Size.topBar).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
@@ -108,7 +109,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                 circle = true, // собеседник — человек
                 ring = HoloBg,
             )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(Tokens.Space.m))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -121,7 +122,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     if (c?.verified == true) {
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(Tokens.Space.xs))
                         Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(14.dp))
                     }
                 }
@@ -153,10 +154,8 @@ internal fun ChatScreen(model: AppModel) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     // Лента привязана к низу (reverseLayout): элемент 0 — самое свежее, чат с первого
-    // кадра открыт на конце. На НОВОЕ сообщение доводим до низа. Ориентир — id
-    // последнего, а не размер списка: догрузка старых тоже меняет размер.
-    val lastId = msgs.lastOrNull()?.id
-    LaunchedEffect(lastId) { if (msgs.isNotEmpty()) listState.animateScrollToItem(0) }
+    // кадра открыт на конце.
+    FollowNewest(listState, msgs)
     // «Показать в чате» из просмотрщика: доводим ленту до сообщения, если оно в
     // уже загруженной странице истории. Индекс в ленте — от конца.
     LaunchedEffect(model.jumpTo) {
@@ -197,6 +196,7 @@ internal fun ChatScreen(model: AppModel) {
 
     // Голосовые (M2): held-to-record. RECORD_AUDIO спрашиваем при первой попытке.
     val recorder = remember { VoiceRecorder(ctx) }
+    DisposableEffect(recorder) { onDispose { recorder.cancel() } }
     var recording by remember { mutableStateOf(false) }
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     val startVoice = {
@@ -220,7 +220,7 @@ internal fun ChatScreen(model: AppModel) {
         LazyColumn(
             state = listState,
             reverseLayout = true,
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = Tokens.Space.m),
         ) {
             // Порядок элементов — от свежего к старому; i — индекс в хронологии.
             // Ключ — пара «автор + id»: состояние пузыря (просмотрщик, голосовое) и
@@ -338,7 +338,10 @@ internal fun sendUriAttachment(
 internal fun cacheFromUri(ctx: android.content.Context, uri: android.net.Uri, name: String): java.io.File? =
     runCatching {
         val dir = java.io.File(ctx.cacheDir, "outgoing").apply { mkdirs() }
-        val f = java.io.File(dir, "${System.currentTimeMillis()}-$name")
+        // Имя прислал чужой провайдер: «../» в нём вывело бы запись из кэша в файлы
+        // приложения. Берём только последний сегмент.
+        val safe = name.substringAfterLast('/').substringAfterLast('\\').ifBlank { "file" }
+        val f = java.io.File(dir, "${System.currentTimeMillis()}-$safe")
         ctx.contentResolver.openInputStream(uri)?.use { input ->
             f.outputStream().use { out -> input.copyTo(out, 64 * 1024) }
         } ?: return null
@@ -377,26 +380,33 @@ internal fun QuoteBlock(
     // полупрозрачный белый: серый (`HoloSecondary`) на синем читается пятном чужого
     // слоя, а 6% белого на нём почти не видно — плашка казалась случайной рамкой.
     Row(
-        modifier.padding(bottom = 4.dp).height(IntrinsicSize.Min).heightIn(min = 30.dp)
+        modifier.padding(bottom = Tokens.Space.xs).height(IntrinsicSize.Min).heightIn(min = Tokens.Size.rule)
             .clip(RoundedCornerShape(Tokens.Radius.chip))
-            .background(Color.White.copy(alpha = 0.10f)),
+            .background(Tokens.Colors.quoteOnBubble),
     ) {
-        Box(Modifier.width(2.5.dp).fillMaxHeight().background(HoloAccent))
+        AccentRule(Modifier.fillMaxHeight())
         // Миниатюра слева от подписи — если она у нас есть.
         val hasThumb = src != null && src.kind != "text" &&
             QuoteThumb(model, src.blobId, src.thumbId, src.kind)
-        Column(Modifier.padding(horizontal = 9.dp, vertical = 4.dp)) {
-            Text(who, color = HoloAccent, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium)
+        Column(Modifier.padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs)) {
+            Text(
+                who,
+                color = HoloAccent,
+                fontSize = Tokens.Font.small,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 src?.let {
                     when {
-                        it.text.isNotEmpty() -> it.text
+                        it.text.isNotEmpty() -> model.plainText(it)
                         // С миниатюрой имя файла лишнее — картинка уже сказала, что это.
                         hasThumb -> quoteKind(it.kind)
                         else -> it.name.ifEmpty { quoteKind(it.kind) }
                     }
                 } ?: stringResource(R.string.chat_reply_gone),
-                color = Color.White.copy(alpha = 0.7f),
+                color = Tokens.Colors.quoteTextOnBubble,
                 fontSize = Tokens.Font.small,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -419,50 +429,26 @@ internal fun quoteKind(kind: String): String = stringResource(
 /** Полоска «отвечаем на …» над полем ввода. */
 @Composable
 internal fun ReplyStrip(model: AppModel, m: Message) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface).padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.width(2.dp).height(30.dp).background(HoloAccent))
-        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-            // Кому отвечаем: своё — «Вы», чужое — имя автора по его ключу. В личном
-            // чате это собеседник, в группе — конкретный участник; отдельная полоска
-            // для группы отличалась ровно этой строкой.
-            Text(
-                if (m.mine) stringResource(R.string.chat_reply_you) else groupSenderName(model, m.sender),
-                color = HoloAccent,
-                fontSize = Tokens.Font.small,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                if (m.text.isNotEmpty()) m.text else m.name.ifEmpty { quoteKind(m.kind) },
-                color = HoloSecondary,
-                fontSize = Tokens.Font.small,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Icon(
-            Icons.Filled.Close,
-            stringResource(R.string.common_cancel),
-            tint = HoloSecondary,
-            modifier = Modifier.size(20.dp).clickable { model.cancelReply() },
-        )
-    }
+    // Кому отвечаем: своё — «Вы», чужое — имя автора по его ключу. В личном чате это
+    // собеседник, в группе — конкретный участник.
+    InputStrip(
+        if (m.mine) stringResource(R.string.chat_reply_you) else groupSenderName(model, m.sender),
+        if (m.text.isNotEmpty()) model.plainText(m) else m.name.ifEmpty { quoteKind(m.kind) },
+        onCancel = model::cancelReply,
+    )
 }
 
 /** Системная строка «E2E» в начале переписки. */
 @Composable
 internal fun E2EBanner() {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
+    Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.s), horizontalArrangement = Arrangement.Center) {
         Row(
             Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface)
-                .padding(horizontal = 10.dp, vertical = 5.dp),
+                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Filled.Lock, null, tint = HoloSecondary, modifier = Modifier.size(12.dp))
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(Tokens.Space.xs))
             Text(stringResource(R.string.chat_e2e_banner), color = HoloSecondary, fontSize = Tokens.Font.caption)
         }
     }
@@ -484,7 +470,7 @@ internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
     BackHandler { model.clearSelection() }
 
     Row(
-        Modifier.fillMaxWidth().background(HoloAccentDark).height(56.dp).padding(horizontal = 4.dp),
+        Modifier.fillMaxWidth().background(HoloAccentDark).height(Tokens.Size.topBar).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel)) { model.clearSelection() }
@@ -493,7 +479,7 @@ internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
             color = Color.White,
             fontSize = Tokens.Font.title,
             fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f).padding(start = 8.dp),
+            modifier = Modifier.weight(1f).padding(start = Tokens.Space.s),
         )
         if (sel.size == 1) {
             BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
@@ -579,10 +565,10 @@ internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
 internal fun DateChip(label: String) {
     // Тот же ярлык, что у системных событий («Артём добавил Веру»): и то и другое
     // стоит вне диалога и комментирует ленту — значит и выглядеть должно одинаково.
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
+    Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.s), horizontalArrangement = Arrangement.Center) {
         Box(
             Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.labelScrim)
-                .padding(horizontal = 11.dp, vertical = 3.dp),
+                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xxs),
         ) { Text(label, color = HoloSecondary, fontSize = Tokens.Font.caption) }
     }
 }
@@ -751,7 +737,7 @@ internal fun MessageInput(
             )
         }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Поле ввода: скрепка и эмодзи ВНУТРИ. Скругление такое же, как у кнопок
@@ -773,7 +759,7 @@ internal fun MessageInput(
                 BasicTextField(
                     value = field,
                     onValueChange = setField,
-                    modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                    modifier = Modifier.weight(1f).padding(vertical = Tokens.Space.m),
                     textStyle = Tokens.Text.base.copy(color = Color.White),
                     cursorBrush = SolidColor(HoloAccent),
                     maxLines = 4,
@@ -801,7 +787,7 @@ internal fun MessageInput(
                     if (emojiOpen) attachOpen = false
                 }
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Tokens.Space.s))
             // Отправка (есть текст) / голосовое удержанием (поле пустое).
             val hasText = value.isNotBlank()
             val hasPicked = picked.isNotEmpty()
@@ -851,7 +837,7 @@ internal fun MessageInput(
                         color = HoloAccentDark,
                         fontSize = Tokens.Font.caption,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 5.dp),
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = Tokens.Space.xxs, end = Tokens.Space.xs),
                     )
                 }
             }
@@ -873,7 +859,7 @@ internal fun graphemeStart(text: String, end: Int): Int {
 @Composable
 internal fun PillIcon(icon: ImageVector, desc: String, tint: Color = HoloSecondary, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).clickable { onClick() },
+        Modifier.size(Tokens.Size.touch).clip(CircleShape).clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(22.dp)) }
 }
@@ -903,11 +889,11 @@ internal fun MessageRow(
             }
             // Ярлык того же вида, что разделитель даты: оба комментируют ленту
             // со стороны, а не участвуют в разговоре.
-            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
+            Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.s), horizontalArrangement = Arrangement.Center) {
                 Box(
                     Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
                         .background(Tokens.Colors.labelScrim)
-                        .padding(horizontal = 11.dp, vertical = 3.dp),
+                        .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xxs),
                 ) {
                     Text(text, color = HoloSecondary, fontSize = Tokens.Font.caption)
                 }
@@ -934,7 +920,7 @@ internal fun MessageRow(
             } else {
                 Spacer(Modifier.width(Tokens.Size.avatarSeries))
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Tokens.Space.s))
             MessageBubble(
                 m,
                 model,
@@ -997,7 +983,7 @@ internal fun MessageBubble(
             }
             // Подсветка на ВСЮ строку, а не на пузырь: так видно, что выбрано
             // сообщение целиком, включая вложение и подпись.
-            .background(if (selected) HoloAccent.copy(alpha = 0.16f) else Color.Transparent),
+            .background(if (selected) Tokens.Colors.selectedRow else Color.Transparent),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
         // Карточка «скачать» превращается в готовое вложение — это подмена
@@ -1014,7 +1000,7 @@ internal fun MessageBubble(
         val photoHeader = photoBubble &&
             (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
         Box(
-            Modifier.widthIn(max = 290.dp).clip(bubbleShape(m.mine, pos))
+            Modifier.widthIn(max = Tokens.Size.bubbleMax).clip(bubbleShape(m.mine, pos))
                 .then(
                     if (photoBubble) Modifier else Modifier.background(if (m.mine) BubbleOut else BubbleIn),
                 )
@@ -1032,7 +1018,7 @@ internal fun MessageBubble(
                     onClick = { if (selecting) model.toggleSelect(m) },
                 )
                 .then(
-                    if (photoBubble) Modifier else Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    if (photoBubble) Modifier else Modifier.padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
                 ),
         ) {
             Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
@@ -1075,7 +1061,7 @@ internal fun MessageBubble(
                         Column(
                             Modifier.width(PhotoBubbleSize)
                                 .background(if (m.mine) BubbleOut else BubbleIn)
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
                         ) { head() }
                     } else if (!photoBubble) {
                         head()
@@ -1117,7 +1103,7 @@ internal fun MessageBubble(
                                 onLongClick = { model.toggleSelect(m) },
                                 cacheKey = m.thumbId,
                             )
-                            "voice" -> VoiceAttachment(blobBytes)
+                            "voice" -> VoiceAttachment(blobBytes, m.blobId, m.durationMs)
                             "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready) { model.toggleSelect(m) }
                             // Текст обтекает мету: она едет в конец последней строки
                             // и переносится сама, если та её не вмещает.
@@ -1127,7 +1113,7 @@ internal fun MessageBubble(
                     // Подпись к вложению — в том же пузыре, под содержимым. Она пришла
                     // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
                     if (m.kind != "text" && m.text.isNotEmpty()) {
-                        BubbleText(m.text, modifier = Modifier.padding(top = 6.dp)) { meta() }
+                        BubbleText(m.text, modifier = Modifier.padding(top = Tokens.Space.s)) { meta() }
                     }
                 }
             }
@@ -1189,7 +1175,7 @@ internal fun MessageBubble(
 
 /** Сторона снимка, который сам себе пузырь. Шапка над ним (цитата, «Переслано»)
  *  берёт ту же ширину — иначе она торчала бы за край картинки. */
-internal val PhotoBubbleSize = 240.dp
+internal val PhotoBubbleSize = Tokens.Size.photoBubble
 
 /** Картинка-вложение в пузыре: миниатюра (тап → полный экран) или плейсхолдер, пока
  *  байты докачиваются. */
@@ -1203,7 +1189,7 @@ internal fun ImageAttachment(
 ) {
     // Снимок декодируется под сторону пузыря, а не в оригинале: в ленте он всё
     // равно не крупнее 240dp, а полноразмерный битмап стоит десятки мегабайт.
-    val side = if (bare) PhotoBubbleSize else 220.dp
+    val side = if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble
     val bmp = rememberBitmap(bytes, cacheKey, side)
     // [bare] — картинка САМА является пузырём: своё скругление и фон ей не нужны,
     // их даёт пузырь. Иначе внутри пузыря получалась бы вторая скруглённая рамка.
@@ -1212,7 +1198,7 @@ internal fun ImageAttachment(
     // `clickable` на картинке съедал жест целиком, и выделить сообщение-фото было
     // нельзя — палец всегда попадал в картинку, а не в поля пузыря.
     Box(
-        Modifier.size(if (bare) PhotoBubbleSize else 220.dp)
+        Modifier.size(if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble)
             .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface))
             .combinedClickable(
                 enabled = bmp != null,
@@ -1247,10 +1233,10 @@ internal fun VideoAttachment(
 ) {
     // Кадр — миниатюра, приехавшая с сообщением. Сам файл ради картинки не
     // читаем: раньше видео целиком шло в память и расшифрованной копией на диск.
-    val side = if (bare) PhotoBubbleSize else 220.dp
+    val side = if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble
     val frame = rememberBitmap(thumb, cacheKey, side)
     Box(
-        Modifier.size(if (bare) PhotoBubbleSize else 220.dp)
+        Modifier.size(if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble)
             .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)))
             .background(Color.Black)
             .combinedClickable(
@@ -1269,7 +1255,7 @@ internal fun VideoAttachment(
             // Кнопка «play» — на затемнении: кадр бывает светлым, и белый значок
             // на нём иначе теряется.
             Box(
-                Modifier.size(52.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                Modifier.size(52.dp).clip(CircleShape).background(Tokens.Colors.playScrim),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(32.dp))
@@ -1281,10 +1267,10 @@ internal fun VideoAttachment(
                 color = Color.White,
                 fontSize = Tokens.Font.caption,
                 modifier = Modifier.align(Alignment.BottomStart)
-                    .padding(6.dp)
+                    .padding(Tokens.Space.s)
                     .clip(RoundedCornerShape(Tokens.Radius.badge))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                    .background(Tokens.Colors.mediaScrim)
+                    .padding(horizontal = Tokens.Space.xs, vertical = 1.dp),
             )
         }
     }
@@ -1305,7 +1291,7 @@ internal fun FileAttachment(
     Row(
         // Долгое нажатие пробрасывается наружу — иначе своим `clickable` карточка
         // забирала бы жест и выделить сообщение-файл было бы нельзя.
-        Modifier.padding(end = 44.dp).widthIn(min = 160.dp).combinedClickable(
+        Modifier.padding(end = Tokens.Size.metaReserve).widthIn(min = 160.dp).combinedClickable(
             enabled = ready,
             onClick = { model.exportBlob(blobId, "shared", name) { f -> f?.let { openWithSystem(ctx, it) } } },
             onLongClick = onLongClick,
@@ -1317,7 +1303,7 @@ internal fun FileAttachment(
         } else {
             Icon(Icons.Filled.AttachFile, null, tint = HoloAccent, modifier = Modifier.size(22.dp))
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(Tokens.Space.s))
         Column {
             Text(name.ifBlank { stringResource(R.string.chat_file) }, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
@@ -1329,12 +1315,19 @@ internal fun FileAttachment(
     }
 }
 
-/** Голосовое-вложение: play/pause + длительность (M2). Плеер на байтах блоба. */
+/**
+ * Голосовое-вложение: play/pause + длительность (M2). Плеер на байтах блоба.
+ *
+ * Длительность берётся из сообщения: до первого проигрывания иначе стояло слово
+ * «Голосовое». Байты присылает собеседник, поэтому плеер собирается под
+ * `runCatching`: битый файл — это молчащая кнопка, а не падение приложения.
+ */
 @Composable
-internal fun VoiceAttachment(bytes: ByteArray?) {
+internal fun VoiceAttachment(bytes: ByteArray?, blobId: String, knownDurationMs: Int) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var playing by remember { mutableStateOf(false) }
-    var durationMs by remember(bytes) { mutableStateOf(0) }
+    var durationMs by remember(bytes) { mutableStateOf(knownDurationMs) }
     val player = remember { mutableStateOf<android.media.MediaPlayer?>(null) }
     DisposableEffect(bytes) {
         onDispose {
@@ -1343,7 +1336,7 @@ internal fun VoiceAttachment(bytes: ByteArray?) {
         }
     }
     Row(
-        Modifier.padding(end = 44.dp).widthIn(min = 150.dp),
+        Modifier.padding(end = Tokens.Size.metaReserve).widthIn(min = 150.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -1357,21 +1350,41 @@ internal fun VoiceAttachment(bytes: ByteArray?) {
                         mp.start()
                         playing = true
                     } else if (bytes != null) {
-                        // В `viewer/`: расшифрованные копии оттуда убираются на старте.
-                        val dir = java.io.File(ctx.cacheDir, "viewer").apply { mkdirs() }
-                        val f = java.io.File(dir, "play_${bytes.size}.m4a").apply { writeBytes(bytes) }
-                        val np = android.media.MediaPlayer().apply {
-                            setDataSource(f.absolutePath)
-                            prepare()
-                            durationMs = duration
-                            setOnCompletionListener {
-                                playing = false
-                                seekTo(0)
+                        // Файл и подготовка плеера — не на главном потоке. Имя — по
+                        // блобу: по размеру два разных голосовых одной длины писали в
+                        // один файл, и второе подменяло играющее первое.
+                        scope.launch(Dispatchers.IO) {
+                            val np = runCatching {
+                                // В `viewer/`: расшифрованные копии оттуда убираются на старте.
+                                val dir = java.io.File(ctx.cacheDir, "viewer").apply { mkdirs() }
+                                val f = java.io.File(dir, "voice_$blobId.m4a").apply { writeBytes(bytes) }
+                                android.media.MediaPlayer().apply {
+                                    setDataSource(f.absolutePath)
+                                    prepare()
+                                }
+                            }.getOrNull() ?: return@launch
+                            // Пузырь ушёл с экрана, пока плеер готовился, — отпускаем
+                            // его здесь: onDispose про него ещё не знает.
+                            try {
+                                withContext(Dispatchers.Main) {
+                                    if (player.value != null) {
+                                        np.release() // второй тап, пока готовился первый
+                                        return@withContext
+                                    }
+                                    durationMs = np.duration
+                                    np.setOnCompletionListener {
+                                        playing = false
+                                        it.seekTo(0)
+                                    }
+                                    np.start()
+                                    player.value = np
+                                    playing = true
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                np.release()
+                                throw e
                             }
-                            start()
                         }
-                        player.value = np
-                        playing = true
                     }
                 },
             contentAlignment = Alignment.Center,
@@ -1387,14 +1400,14 @@ internal fun VoiceAttachment(bytes: ByteArray?) {
                 )
             }
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(Tokens.Space.m))
         Icon(Icons.Filled.Mic, null, tint = HoloSecondary, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(Tokens.Space.s))
         Text(
             if (durationMs > 0) fmtDuration(durationMs) else stringResource(R.string.chat_voice),
             color = Color.White,
             fontSize = Tokens.Font.body,
-            modifier = Modifier.padding(end = 8.dp),
+            modifier = Modifier.padding(end = Tokens.Space.s),
         )
     }
 }
@@ -1433,11 +1446,11 @@ internal fun PendingAttachmentCard(
     // продолжается сам при появлении пира и переживает перезапуск. Отсюда — только показ.
     val progress = model.downloads[blobId]
     Row(
-        Modifier.padding(end = 44.dp).widthIn(min = 180.dp),
+        Modifier.padding(end = Tokens.Size.metaReserve).widthIn(min = 180.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(48.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Color.Black.copy(alpha = 0.25f)),
+            Modifier.size(48.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.thumbScrim),
             contentAlignment = Alignment.Center,
         ) {
             val bmp = rememberBitmap(thumb, thumbId, 48.dp)
@@ -1447,7 +1460,7 @@ internal fun PendingAttachmentCard(
                 Icon(kindIcon(kind), null, tint = HoloSecondary, modifier = Modifier.size(22.dp))
             }
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(Tokens.Space.m))
         Column(Modifier.weight(1f, fill = false)) {
             Text(
                 name.ifBlank { stringResource(R.string.chat_file) },
@@ -1465,7 +1478,7 @@ internal fun PendingAttachmentCard(
                 fontSize = Tokens.Font.caption,
             )
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(Tokens.Space.s))
         // Кнопка → крутилка → кружок прогресса: три состояния одного действия,
         // поэтому подменяются затуханием, а не морганием.
         Crossfade(progress, animationSpec = tween(Tokens.Anim.fast), label = "dl") { progress ->
@@ -1495,18 +1508,11 @@ private fun kindIcon(kind: String) = when (kind) {
     else -> Icons.Filled.AttachFile
 }
 
-internal fun fmtSizeLong(bytes: Long): String = when {
-    bytes >= 1_048_576L * 1024 -> "%.1f GB".format(bytes / (1_048_576.0 * 1024))
-    bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
-    bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
-    else -> "$bytes B"
-}
-
-private fun fmtSize(bytes: Int): String = when {
-    bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
-    bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
-    else -> "$bytes B"
-}
+/** Размер файла словами системы: «4,2 МБ» по-русски, «4.2 MB» по-английски. Свои
+ *  «MB/KB» были зашиты латиницей и с точкой при любом языке. */
+@Composable
+internal fun fmtSizeLong(bytes: Long): String =
+    android.text.format.Formatter.formatShortFileSize(LocalContext.current, bytes)
 
 internal fun fmtDuration(ms: Int): String {
     val s = ms / 1000
@@ -1529,7 +1535,7 @@ internal fun MsgMeta(time: Long, mine: Boolean, edited: Boolean, status: String 
     // 11sp вместо 10 и прозрачность 0.6 вместо 0.5: на 10sp в полупрозрачном белом
     // время буквально пропадало. 11 — нижняя граница читаемого в интерфейсе, ниже
     // опускаться уже нечему.
-    val fg = Color.White.copy(alpha = 0.6f)
+    val fg = Tokens.Colors.metaOnBubble
     // Стиль задан ЯВНО у обоих текстов: без него «изм.» брал высоту строки из темы
     // (24sp) и мета у отредактированного пузыря вырастала, оставляя пустоту снизу.
     // Моноширинные цифры: время у каждого сообщения своё, а колонка меты общая —
@@ -1540,11 +1546,11 @@ internal fun MsgMeta(time: Long, mine: Boolean, edited: Boolean, status: String 
             // Текст подменился — молчать об этом нельзя, иначе «исправил»
             // неотличимо от «так и было написано».
             Text(stringResource(R.string.chat_edited), style = style)
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(Tokens.Space.xs))
         }
         Text(fmtMsgTime(time), style = style)
         if (mine) {
-            Spacer(Modifier.width(3.dp))
+            Spacer(Modifier.width(Tokens.Space.xxs))
             StatusTick(status)
         }
     }
@@ -1555,16 +1561,16 @@ internal fun MsgMeta(time: Long, mine: Boolean, edited: Boolean, status: String 
 @Composable
 internal fun MetaOnPhoto(content: @Composable () -> Unit) {
     Box(
-        Modifier.padding(6.dp)
+        Modifier.padding(Tokens.Space.s)
             .clip(RoundedCornerShape(Tokens.Radius.badge))
-            .background(Color.Black.copy(alpha = 0.45f))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .background(Tokens.Colors.mediaScrim)
+            .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xxs),
     ) { content() }
 }
 
 @Composable
 internal fun StatusTick(status: String) {
-    val tint = Color.White.copy(alpha = 0.7f)
+    val tint = Tokens.Colors.quoteTextOnBubble
     when (status) {
         "delivered" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_delivered), tint = tint, modifier = Modifier.size(13.dp))
         "sent" -> Icon(Icons.Filled.Done, stringResource(R.string.status_sent), tint = tint, modifier = Modifier.size(13.dp))

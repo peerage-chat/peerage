@@ -54,4 +54,11 @@ class VoiceRecorder(private val ctx: Context) {
         f?.delete()
         return bytes?.takeIf { it.isNotEmpty() }
     }
+
+    /** Бросить запись без отправки: экран ушёл, пока палец держал кнопку. Жест при
+     *  этом отменяется, и [stop] не позовёт никто — без этого микрофон оставался
+     *  занят до убийства процесса. */
+    fun cancel() {
+        stop()
+    }
 }

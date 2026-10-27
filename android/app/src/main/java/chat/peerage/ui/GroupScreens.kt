@@ -108,9 +108,8 @@ private fun GroupChatContent(model: AppModel) {
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Лента привязана к низу, как в ChatScreen: вниз — только на НОВОЕ сообщение.
-    val lastKey = msgs.lastOrNull()?.let { it.sender to it.id }
-    LaunchedEffect(lastKey) { if (msgs.isNotEmpty()) listState.animateScrollToItem(0) }
+    // Лента привязана к низу, как в ChatScreen.
+    FollowNewest(listState, msgs)
     LaunchedEffect(model.jumpTo) {
         val target = model.jumpTo
         if (target != 0L) {
@@ -141,6 +140,7 @@ private fun GroupChatContent(model: AppModel) {
     }
     // Голосовые в группе: held-to-record.
     val recorder = remember { VoiceRecorder(ctx) }
+    DisposableEffect(recorder) { onDispose { recorder.cancel() } }
     var recording by remember { mutableStateOf(false) }
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     val startVoice = {
@@ -299,7 +299,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
     val total = roster?.total ?: g?.members ?: 1
     val onlineN = roster?.online ?: 1
     Row(
-        Modifier.fillMaxWidth().background(HoloBg).height(56.dp).padding(horizontal = Tokens.Space.s),
+        Modifier.fillMaxWidth().background(HoloBg).height(Tokens.Size.topBar).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
