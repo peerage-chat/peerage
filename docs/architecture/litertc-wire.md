@@ -73,7 +73,8 @@ unsafe.
   dropped; incomplete frames older than a delivered one are dropped. A frame further
   behind is a restarted sender (it rejoined the room) or a wrapped counter, and is
   accepted as a new stream.
-- **Audio.** Packets are reordered by `seq` in a jitter buffer. A packet older than the
-  next one to play is dropped. A missing packet is declared lost (the decoder conceals
+- **Audio.** Packets are reordered by `seq` in a jitter buffer. A packet up to 64 behind
+  the next one to play is late and dropped; further behind is a restarted sender and
+  resets the buffer. A missing packet is declared lost (the decoder conceals
   it) once two later packets are waiting.
 - **Members only.** Packets from someone who is not a current call member are dropped.
