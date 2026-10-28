@@ -7,6 +7,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
+import android.media.AudioTimestamp
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
@@ -20,8 +21,10 @@ data class AudioFx(val ns: Boolean = true, val aec: Boolean = true, val agc: Boo
 
 class CallAudio(
     private val context: Context,
-    private val push: (ShortArray, Int) -> Unit,
-    private val pull: (ShortArray) -> Int,
+    /** (PCM, сэмплов, сколько назад записан последний, мкс; 0 — неизвестно). */
+    private val push: (ShortArray, Int, Int) -> Unit,
+    /** (куда, через сколько записанное сюда будет слышно, мкс) → сэмплов. */
+    private val pull: (ShortArray, Int) -> Int,
     private val mute: (Boolean) -> Unit,
     private val fx: AudioFx = AudioFx(),
     private val inputDevice: AudioDeviceInfo? = null,
@@ -74,17 +77,21 @@ class CallAudio(
         rec.startRecording()
         trk.play()
 
-        val chunk = sampleRate / 50 * (if (channels >= 2) 2 else 1) // 20ms frame
+        val ch = if (channels >= 2) 2 else 1
+        val chunk = sampleRate / 50 * ch // 20ms frame
 
         threads += thread(name = "call-capture") {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = ShortArray(chunk)
             var levelTick = 0
+            val stamp = AudioTimestamp()
+            var framesRead = 0L
             while (running) {
                 val n = rec.read(buf, 0, buf.size) // blocking: ровный 20мс ритм захвата
                 when {
                     n > 0 -> {
-                        push(buf, n)
+                        framesRead += n / ch
+                        push(buf, n, captureAgeUs(rec, stamp, framesRead, sampleRate))
                         // Уровень мика (RMS) для индикатора — раз в ~3 кадра (60мс), не каждый.
                         if (++levelTick >= 3) {
                             levelTick = 0
@@ -115,12 +122,18 @@ class CallAudio(
             val buf = ShortArray(chunk)
             var starvations = 0
             var lastLogMs = System.currentTimeMillis()
+            val stamp = AudioTimestamp()
+            var framesWritten = 0L
+            // Пока у AudioTrack нет метки — считаем, что буфер полон (write блокирует).
+            val fullBufferUs = (trk.bufferSizeInFrames * 1_000_000L / sampleRate).toInt()
             while (running) {
-                if (pull(buf) == 0) {
+                val delayUs = outputDelayUs(trk, stamp, framesWritten, sampleRate) ?: fullBufferUs
+                if (pull(buf, delayUs) == 0) {
                     starvations++
                     buf.fill(0)
                 }
                 trk.write(buf, 0, buf.size) // blocking: железо задаёт ритм
+                framesWritten += buf.size / ch
                 val nowMs = System.currentTimeMillis()
                 if (nowMs - lastLogMs >= 5000) {
                     android.util.Log.i("CallAudio", "playback: $starvations starv/5s")
@@ -129,6 +142,24 @@ class CallAudio(
                 }
             }
         }
+    }
+
+    /** Сколько назад записан последний прочитанный сэмпл, мкс (0 — неизвестно): по
+     *  метке AudioRecord «кадр № такой-то записан тогда-то». */
+    private fun captureAgeUs(rec: AudioRecord, stamp: AudioTimestamp, framesRead: Long, rate: Int): Int {
+        if (rec.getTimestamp(stamp, AudioTimestamp.TIMEBASE_MONOTONIC) != AudioRecord.SUCCESS) return 0
+        val lastNs = stamp.nanoTime + (framesRead - 1 - stamp.framePosition) * 1_000_000_000L / rate
+        val ageUs = (System.nanoTime() - lastNs) / 1000
+        return if (ageUs in 0..MAX_DELAY_US) ageUs.toInt() else 0
+    }
+
+    /** Через сколько будет слышен следующий записанный в [trk] сэмпл, мкс: всё, что
+     *  записано и ещё не проиграно (по метке AudioTrack). `null` — метки ещё нет. */
+    private fun outputDelayUs(trk: AudioTrack, stamp: AudioTimestamp, framesWritten: Long, rate: Int): Int? {
+        if (!trk.getTimestamp(stamp)) return null
+        val playedNow = stamp.framePosition + (System.nanoTime() - stamp.nanoTime) * rate / 1_000_000_000L
+        val us = (framesWritten - playedNow) * 1_000_000L / rate
+        return if (us in 0..MAX_DELAY_US) us.toInt() else null
     }
 
     fun setMuted(muted: Boolean) = mute(muted)
@@ -167,5 +198,10 @@ class CallAudio(
             val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             if (am.mode != AudioManager.MODE_NORMAL) am.mode = AudioManager.MODE_NORMAL
         }
+    }
+
+    private companion object {
+        /** Задержка захвата или вывода больше этой — сбой замера, не верим. */
+        const val MAX_DELAY_US = 1_000_000L
     }
 }

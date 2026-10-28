@@ -46,13 +46,13 @@ proptest! {
                 *b = [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, *b][kind as usize];
             }
             if i % 5 == 0 {
-                s.send_video(now, &d, VideoInfo { keyframe: i % 10 == 0, ..Default::default() });
+                s.send_video(now, now, &d, VideoInfo { keyframe: i % 10 == 0, ..Default::default() });
             }
             s.handle_datagram(now, 1, &d);
             s.handle_timeout(now);
             while s.poll_transmit().is_some() {}
             while s.pull_video(now, &1).is_some() {}
-            let _ = s.pull_audio(&1);
+            let _ = s.pull_audio(now, &1);
             s.request_keyframe(now, &1);
         }
     }

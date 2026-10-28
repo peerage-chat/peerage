@@ -457,20 +457,35 @@ object Native {
     /** Остановить мультипати аудио комнаты. */
     external fun roomAudioStop(sessionPtr: Long)
 
-    /** Захваченный PCM с микрофона → мультикаст всем в комнате. */
-    external fun roomPushAudio(sessionPtr: Long, data: ShortArray, n: Int)
+    /** Захваченный PCM с микрофона → мультикаст всем в комнате; последний сэмпл
+     *  записан [captureAgeUs] назад (0 — неизвестно): по моменту захвата собеседник
+     *  сводит звук с видео. */
+    external fun roomPushAudio(sessionPtr: Long, data: ShortArray, n: Int, captureAgeUs: Int)
 
-    /** Смешанный PCM комнаты для воспроизведения. Возвращает число сэмплов. */
-    external fun roomPullAudio(sessionPtr: Long, out: ShortArray): Int
+    /** Смешанный PCM комнаты для воспроизведения; от него до динамика звук идёт
+     *  [outputDelayUs] (буфер AudioTrack). Возвращает число сэмплов. */
+    external fun roomPullAudio(sessionPtr: Long, out: ShortArray, outputDelayUs: Int): Int
     external fun roomSetMuted(sessionPtr: Long, muted: Boolean)
 
     /**
      * Закодированный H264 access-unit → фрагментация + мультикаст всем в комнате.
      * [rotation] — угол сенсора / 90 (приёмник доворачивает), [fps] — темп вывода у
-     * приёмника; оба едут в протоколе LiteRTC. `true` — участник просит ключевой
+     * приёмника; оба едут в протоколе LiteRTC. [captureAgeUs] — сколько назад кадр
+     * снят (камера и кодер; 0 — неизвестно). `true` — участник просит ключевой
      * кадр, кодеру выдать его следующим.
      */
-    external fun roomPushVideo(sessionPtr: Long, data: ByteArray, keyframe: Boolean, rotation: Int, fps: Int): Boolean
+    external fun roomPushVideo(
+        sessionPtr: Long,
+        data: ByteArray,
+        keyframe: Boolean,
+        rotation: Int,
+        fps: Int,
+        captureAgeUs: Int,
+    ): Boolean
+
+    /** Сколько кадр участника идёт через наш видео-декодер (срок → экран), мкс: звук
+     *  ждёт видео с учётом этого. */
+    external fun roomSetVideoDelay(sessionPtr: Long, peerHex: String, delayUs: Int)
 
     /** Потолок битрейта видео из настроек качества: выше оценка полосы не идёт. */
     external fun roomSetVideoBitrate(sessionPtr: Long, bps: Int)

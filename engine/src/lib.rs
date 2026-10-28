@@ -2643,14 +2643,18 @@ impl Engine {
         }
     }
 
-    pub fn room_push_audio(&self, samples: &[i16]) {
+    /// PCM с микрофона; последний сэмпл записан `age` назад.
+    pub fn room_push_audio(&self, samples: &[i16], age: std::time::Duration) {
         if let Some(engine) = self.room_engine() {
-            engine.push_audio(samples);
+            engine.push_audio(samples, age);
         }
     }
 
-    pub fn room_pull_audio(&self, out: &mut [i16]) -> usize {
-        self.room_engine().map(|e| e.pull_audio(out)).unwrap_or(0)
+    /// Смешанный PCM; от `out` до динамика звук идёт `output`.
+    pub fn room_pull_audio(&self, out: &mut [i16], output: std::time::Duration) -> usize {
+        self.room_engine()
+            .map(|e| e.pull_audio(out, output))
+            .unwrap_or(0)
     }
 
     /// Hex-ключи говорящих сейчас участников (active-speaker). "[]" вне звонка.
@@ -2680,10 +2684,22 @@ impl Engine {
         }
     }
 
-    /// `true` — участник просит ключевой кадр.
-    pub fn room_push_video(&self, frame: &[u8], info: litertc::VideoInfo) -> bool {
+    /// H264 access-unit, снятый `age` назад. `true` — участник просит ключевой кадр.
+    pub fn room_push_video(
+        &self,
+        frame: &[u8],
+        info: litertc::VideoInfo,
+        age: std::time::Duration,
+    ) -> bool {
         self.room_engine()
-            .is_some_and(|e| e.push_video(frame, info))
+            .is_some_and(|e| e.push_video(frame, info, age))
+    }
+
+    /// Задержка нашего видео-декодера для участника (срок кадра → экран).
+    pub fn room_set_video_render_delay(&self, peer: &[u8; 32], delay: std::time::Duration) {
+        if let Some(engine) = self.room_engine() {
+            engine.set_video_render_delay(peer, delay);
+        }
     }
 
     /// Потолок битрейта видео из настроек качества.

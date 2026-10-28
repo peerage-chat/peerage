@@ -14,6 +14,9 @@
 //! видео идёт на 5 % быстрее, глазу это незаметно. После затора, когда лишнего
 //! больше четверти секунды, — вдвое быстрее: отставание на секунды в разговоре
 //! хуже заметного ускорения.
+//!
+//! Сверх смещения — задержка ради губ ([`Playout::set_sync_delay`], модуль
+//! `avsync`), когда звук участника доходит позже видео.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -47,9 +50,16 @@ pub(crate) struct Playout {
     offset: Option<f64>,
     updated_at: f64,
     last_play: Option<Instant>,
+    /// Задержка ради синхронизации со звуком, мс.
+    sync_ms: f64,
 }
 
 impl Playout {
+    /// Задержать показ ещё на `d`, чтобы видео не обгоняло звук.
+    pub fn set_sync_delay(&mut self, d: Duration) {
+        self.sync_ms = d.as_secs_f64() * 1000.0;
+    }
+
     /// Кадр с меткой `ts` готов к декодированию в `now`: когда его показать.
     /// Время показа не убывает от кадра к кадру.
     pub fn schedule(&mut self, now: Instant, ts: u32) -> Instant {
@@ -85,7 +95,7 @@ impl Playout {
         self.offset = Some(offset);
         self.updated_at = t;
 
-        let play_ms = ts_ms + offset;
+        let play_ms = ts_ms + offset + self.sync_ms;
         let mut play = if play_ms >= 0.0 {
             epoch + Duration::from_secs_f64(play_ms / 1000.0)
         } else {
@@ -93,12 +103,13 @@ impl Playout {
         };
         // Не раньше, чем кадр готов (редкий опоздавший — за пределом перцентиля —
         // показывается сразу), не раньше прошлого кадра (смещение убывает) и не
-        // позже, чем через секунду: дальше задержка хуже опоздания.
+        // позже, чем через секунду сверх задержки ради губ: дальше задержка хуже
+        // опоздания.
         play = play.max(now);
         if let Some(last) = self.last_play {
             play = play.max(last);
         }
-        let cap = now + Duration::from_secs_f64(MAX_EXTRA_DELAY_MS / 1000.0);
+        let cap = now + Duration::from_secs_f64((MAX_EXTRA_DELAY_MS + self.sync_ms) / 1000.0);
         play = play.min(cap);
         self.last_play = Some(play);
         play
@@ -223,6 +234,23 @@ mod tests {
                 assert!(delay < ms(20), "кадр {i}: ждёт {delay:?}");
             }
         }
+    }
+
+    /// Задержка ради губ сдвигает показ целиком, темп прежний.
+    #[test]
+    fn sync_delay_shifts_playback() {
+        let t0 = Instant::now();
+        let mut p = Playout::default();
+        let mut plays = Vec::new();
+        for i in 0..100u64 {
+            if i == 50 {
+                p.set_sync_delay(ms(120));
+            }
+            plays.push(p.schedule(t0 + ms(i * 33 + 50), ts(i * 33)));
+        }
+        step_is(plays[48], plays[49], ms(33));
+        step_is(plays[49], plays[50], ms(33 + 120));
+        step_is(plays[50], plays[51], ms(33));
     }
 
     /// Метка проходит через оборот u32 (13 часов при 90 кГц) — показ не прыгает.

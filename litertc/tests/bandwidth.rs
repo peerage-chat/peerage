@@ -72,7 +72,7 @@ fn run(secs: u64, link: impl Fn(u64) -> LinkConfig) -> Vec<Second> {
             to_b.set_config(link(step / 1000));
         }
         if step % 20 == 0 {
-            a.send_audio(now, &[0; 160]);
+            a.send_audio(now, now, &[0; 160]);
         }
         if step % FRAME_MS == 0 {
             let id = sent_at.len() as u32;
@@ -88,7 +88,7 @@ fn run(secs: u64, link: impl Fn(u64) -> LinkConfig) -> Vec<Second> {
                 keyframe,
                 ..Default::default()
             };
-            a.send_video(now, &frame, info);
+            a.send_video(now, now, &frame, info);
             sent_at.push(step);
         }
         for s in [&mut a, &mut b] {
@@ -114,7 +114,7 @@ fn run(secs: u64, link: impl Fn(u64) -> LinkConfig) -> Vec<Second> {
             s.worst_latency = s.worst_latency.max(step - sent_at[id as usize]);
             s.frames += 1;
         }
-        while b.pull_audio(&A).is_some() {}
+        while b.pull_audio(now, &A).is_some() {}
         out[sec].target = a.target_bitrate();
     }
     out

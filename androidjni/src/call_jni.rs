@@ -232,7 +232,15 @@ pub extern "system" fn Java_chat_peerage_Native_roomAudioStop<'local>(
     });
 }
 
-/// Захваченный PCM с микрофона → мультикаст-движку комнаты.
+/// Задержка из Kotlin (мкс) в пределах `0..=max`: замер, которому нельзя верить
+/// (отрицательный, огромный), — ноль.
+fn delay_us(us: jint, max: std::time::Duration) -> std::time::Duration {
+    let d = std::time::Duration::from_micros(us.max(0) as u64);
+    if d > max { std::time::Duration::ZERO } else { d }
+}
+
+/// Захваченный PCM с микрофона → мультикаст-движку комнаты; последний сэмпл записан
+/// `capture_age_us` назад (0 — неизвестно).
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_roomPushAudio<'local>(
     env: JNIEnv<'local>,
@@ -240,6 +248,7 @@ pub extern "system" fn Java_chat_peerage_Native_roomPushAudio<'local>(
     session_ptr: jlong,
     data: JShortArray<'local>,
     n: jint,
+    capture_age_us: jint,
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
@@ -250,24 +259,27 @@ pub extern "system" fn Java_chat_peerage_Native_roomPushAudio<'local>(
         if n == 0 { return; }
         let mut buf = vec![0i16; n];
         if env.get_short_array_region(&data, 0, &mut buf).is_err() { return; }
-        e.room_push_audio(&buf);
+        e.room_push_audio(&buf, delay_us(capture_age_us, std::time::Duration::from_secs(1)));
     });
 }
 
-/// Заполнить массив смешанным PCM комнаты. Возвращает число реальных сэмплов.
+/// Заполнить массив смешанным PCM комнаты; от него до динамика звук идёт
+/// `output_delay_us` (буфер AudioTrack). Возвращает число реальных сэмплов.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_roomPullAudio<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
     out: JShortArray<'local>,
+    output_delay_us: jint,
 ) -> jint {
     jni_safe!(0, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
         let len = env.get_array_length(&out).unwrap_or(0).max(0) as usize;
         if len == 0 { return 0; }
         let mut buf = vec![0i16; len];
-        let n = e.room_pull_audio(&mut buf);
+        let output = delay_us(output_delay_us, std::time::Duration::from_secs(1));
+        let n = e.room_pull_audio(&mut buf, output);
         let _ = env.set_short_array_region(&out, 0, &buf);
         n as jint
     })
@@ -287,7 +299,8 @@ pub extern "system" fn Java_chat_peerage_Native_roomSetMuted<'local>(
 
 /// Закодированный H264 access-unit → фрагментация + мультикаст всем участникам.
 /// `rotation` — угол сенсора / 90 (приёмник доворачивает), `fps` — темп вывода у
-/// приёмника; оба едут в протоколе LiteRTC. Возвращает `true`, если участник просит
+/// приёмника; оба едут в протоколе LiteRTC. `capture_age_us` — сколько назад кадр
+/// снят (камера и кодер; 0 — неизвестно). Возвращает `true`, если участник просит
 /// ключевой кадр — кодеру выдать его следующим.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_roomPushVideo<'local>(
@@ -298,6 +311,7 @@ pub extern "system" fn Java_chat_peerage_Native_roomPushVideo<'local>(
     keyframe: jboolean,
     rotation: jint,
     fps: jint,
+    capture_age_us: jint,
 ) -> jboolean {
     jni_safe!(JNI_FALSE, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
@@ -308,7 +322,8 @@ pub extern "system" fn Java_chat_peerage_Native_roomPushVideo<'local>(
             rotation: rotation.rem_euclid(4) as u8,
             fps: fps.clamp(0, 255) as u8,
         };
-        if e.room_push_video(&bytes, info) { JNI_TRUE } else { JNI_FALSE }
+        let age = delay_us(capture_age_us, std::time::Duration::from_secs(1));
+        if e.room_push_video(&bytes, info, age) { JNI_TRUE } else { JNI_FALSE }
     })
 }
 
@@ -325,6 +340,23 @@ pub extern "system" fn Java_chat_peerage_Native_roomRequestKeyframe<'local>(
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
         let Some(key) = parse_key(&jstr(&mut env, &peer_hex)) else { return };
         e.room_request_keyframe(&key);
+    });
+}
+
+/// Сколько кадр участника идёт через наш видео-декодер (срок → экран), мкс: звук
+/// ждёт видео с учётом этого.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_roomSetVideoDelay<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    peer_hex: JString<'local>,
+    delay_us_: jint,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Some(key) = parse_key(&jstr(&mut env, &peer_hex)) else { return };
+        e.room_set_video_render_delay(&key, delay_us(delay_us_, std::time::Duration::from_secs(2)));
     });
 }
 

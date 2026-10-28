@@ -320,6 +320,21 @@ parses comes from such a member, so:
    smoothness: their `c2.goldfish.h264.decoder` has no low-latency mode, holds 5–15
    frames and decodes slower than real time on the loaded host, so the stall rule is
    what bounds their delay.
+   8b ✅ (2026-10-29): lip sync (`avsync.rs`). Audio and video `ts` now count from one
+   sender origin and mean capture time: audio from `AudioRecord` timestamps (the
+   engine dates each 20 ms frame back from the end of its microphone ring), video from
+   the camera's sensor timestamp carried through the encoder — before, video `ts` was
+   the encoder output time, 50–150 ms late, and audio `ts` a sample counter on no
+   clock at all. The receiver measures, per member, capture → heard (the caller passes
+   the `AudioTrack` buffer delay to `pull_audio`) and capture → seen (`play_at` plus
+   the decoder delay `VideoReceiver` reports); once a second the track that is ahead
+   waits up to 40 ms more, after first taking back the other track's wait. Video waits
+   in `Playout`, audio by `JitterOut::Hold` (one PLC frame, at most one per 100 ms) or
+   by dropping a frame; audio waits at most 500 ms. Without fresh video the waits wind
+   down. Simulated (`tests/avsync.rs`, 40 ms ± 20 ms link, 1 % loss): a 250 ms decoder
+   and a 350 ms Bluetooth-like output both end within 15 ms of sync. Capture and output
+   delays come from Android timestamps; when a device gives none, the push time stands
+   in for capture and the full `AudioTrack` buffer for output.
 9. **Desktop:** when the desktop client comes back, it drives `litertc::Session`; the
    `call` crate is deleted.
 

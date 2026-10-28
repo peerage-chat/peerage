@@ -12,6 +12,12 @@
 //! захвата ([`VideoFrame::play_at`], модуль `playout`): потребитель только декодирует
 //! и показывает в срок.
 //!
+//! Метки звука и видео — моменты захвата на одних часах отправителя, поэтому губы
+//! сводятся со звуком (модуль `avsync`): потребитель сообщает, когда кадр будет
+//! слышен ([`Session::pull_audio`]) и сколько идёт через свой видео-декодер
+//! ([`Session::set_video_render_delay`]), а `Session` задерживает тот трек, что
+//! спешит.
+//!
 //! Таймеры (отчёты получателя, повторы NACK, ожидание недостающего кадра, запрос
 //! ключевого): вызывающий зовёт [`Session::handle_timeout`] не позже
 //! [`Session::poll_timeout`].
@@ -25,6 +31,7 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 
+use crate::avsync::AvSync;
 use crate::bwe::{ArrivalLog, Bwe};
 use crate::jitter::{JitterBuffer, JitterOut};
 use crate::nack::{NackList, TxHistory};
@@ -109,6 +116,13 @@ const VIDEO_STALL: Duration = Duration::from_millis(500);
 /// отправитель слал бы ключевые кадры раз в секунду впустую).
 const CONSUMER_ACTIVE: Duration = Duration::from_secs(1);
 
+/// Звук подстраивается под видео по кадру (вставка маскировки или пропуск) не чаще
+/// раза в столько кадров: рывки по 20 мс вразбивку не слышны как дрожь.
+const AUDIO_ADJUST_EVERY: u32 = 5;
+
+/// Задержка видео-декодера больше этой — сбой замера, не верим.
+const MAX_RENDER_DELAY: Duration = Duration::from_secs(2);
+
 /// Параметры звонка.
 #[derive(Clone, Copy, Debug)]
 pub struct Config {
@@ -136,6 +150,8 @@ pub struct Transmit<P> {
 pub struct VideoFrame {
     pub data: Vec<u8>,
     pub info: VideoInfo,
+    /// Метка захвата на часах отправителя, 90 кГц.
+    pub ts: u32,
     /// Срок кадра (наши часы): по метке захвата, ровно в темпе камеры отправителя,
     /// с запасом на разброс сети. Это время показа при мгновенном декодере: в срок
     /// кадр подают декодеру, а показывают позже на задержку своего декодера (она у
@@ -172,6 +188,10 @@ struct AudioRx {
     last_ts: Option<u32>,
     last_arrival: Option<Instant>,
     jitter_estimate_ms: f64,
+    /// Кадров задержки, добавленных ради губ (вставки минус пропуски).
+    held: usize,
+    /// Кадров с последней вставки или пропуска.
+    since_adjust: u32,
 }
 
 impl AudioRx {
@@ -182,6 +202,8 @@ impl AudioRx {
             last_ts: None,
             last_arrival: None,
             jitter_estimate_ms: 30.0,
+            held: 0,
+            since_adjust: 0,
         }
     }
 
@@ -203,7 +225,7 @@ impl AudioRx {
         }
         self.last_ts = Some(ts);
         self.last_arrival = Some(now);
-        self.jitter.push(seq, payload);
+        self.jitter.push(seq, ts, payload);
     }
 }
 
@@ -230,6 +252,7 @@ impl VideoRx {
         q.push_back(VideoFrame {
             data: frame.data,
             info: frame.info,
+            ts: frame.ts,
             play_at,
         });
         // Потребитель не успевает — ПРЫГАЕМ к свежему ключевому кадру (декодер
@@ -266,6 +289,10 @@ struct PeerState {
     /// `None` — звука от участника ещё не было.
     audio: Option<AudioRx>,
     video: VideoRx,
+    /// Сведение губ со звуком.
+    sync: AvSync,
+    /// Сколько кадр идёт через видео-декодер потребителя (срок → экран).
+    render_delay: Duration,
     stats: PeerStats,
     /// Счётчики приёма по трекам — для отчётов ему.
     rx: [Option<RxStats>; TRACKS],
@@ -291,6 +318,8 @@ impl PeerState {
         PeerState {
             audio: None,
             video: VideoRx::default(),
+            sync: AvSync::default(),
+            render_delay: Duration::ZERO,
             stats: PeerStats::default(),
             rx: Default::default(),
             tw_seq: 0,
@@ -331,12 +360,12 @@ pub struct Session<P> {
     min_bitrate: u32,
     max_bitrate: u32,
     audio_seq: u16,
-    audio_ts: u32,
     video_seq: u16,
     /// Номер кадра на проводе — u32: 16 бит оборачивались за 36 минут при 30 fps.
     video_frame_id: u32,
-    /// Начало отсчёта времени захвата видео (первый отправленный кадр).
-    video_epoch: Option<Instant>,
+    /// Начало отсчёта меток времени — общее у звука и видео (первый захват): метки
+    /// обоих треков — моменты на одних часах, по ним приёмник сводит губы со звуком.
+    media_epoch: Option<Instant>,
     /// Отправленное видео — для повторов по NACK.
     video_history: TxHistory,
     /// Кто-то из участников попросил ключевой кадр, а кодер его ещё не выдал.
@@ -358,10 +387,9 @@ impl<P: Copy + Eq + Hash> Session<P> {
             min_bitrate: DEFAULT_MIN_BITRATE,
             max_bitrate: DEFAULT_MAX_BITRATE,
             audio_seq: 0,
-            audio_ts: 0,
             video_seq: 0,
             video_frame_id: 0,
-            video_epoch: None,
+            media_epoch: None,
             video_history: TxHistory::default(),
             keyframe_wanted: false,
             tx_bytes: 0,
@@ -427,31 +455,32 @@ impl<P: Copy + Eq + Hash> Session<P> {
         &self.peers
     }
 
-    /// Закодированный кадр звука → пакет каждому участнику.
-    pub fn send_audio(&mut self, now: Instant, payload: &[u8]) {
+    /// Метка времени момента захвата `captured` в единицах `clock_hz`: от общего для
+    /// звука и видео начала отсчёта, по кругу u32 (при 90 кГц — 13 часов).
+    fn media_ts(&mut self, captured: Instant, clock_hz: u32) -> u32 {
+        let epoch = *self.media_epoch.get_or_insert(captured);
+        let micros = captured.saturating_duration_since(epoch).as_micros();
+        (micros * clock_hz as u128 / 1_000_000) as u32
+    }
+
+    /// Закодированный кадр звука → пакет каждому участнику. `captured` — когда
+    /// записан его первый сэмпл. Номер считает только отправленные пакеты, а метка —
+    /// время: выключенный микрофон приёмник не примет за потери (и в отчётах, и в
+    /// джиттер-буфере после включения — первые ~0,4 с речи терялись).
+    pub fn send_audio(&mut self, now: Instant, captured: Instant, payload: &[u8]) {
         self.tick(now);
-        let (seq, ts) = (self.audio_seq, self.audio_ts);
+        let seq = self.audio_seq;
+        let ts = self.media_ts(captured, self.cfg.audio_clock_hz);
         self.broadcast(TRACK_AUDIO, seq, ts, payload);
         self.audio_seq = self.audio_seq.wrapping_add(1);
-        self.audio_ts = self.audio_ts.wrapping_add(self.cfg.audio_frame_samples);
     }
 
-    /// Кадр звука не отправлен (микрофон выключен, кодер не справился): время идёт
-    /// дальше, номер — нет. Номер считает отправленные пакеты, иначе приёмник принял
-    /// бы выключенный микрофон за потери (и в отчётах, и в джиттер-буфере после
-    /// включения — первые ~0,4 с речи терялись).
-    pub fn skip_audio(&mut self) {
-        self.audio_ts = self.audio_ts.wrapping_add(self.cfg.audio_frame_samples);
-    }
-
-    /// Закодированный видео-кадр → фрагменты каждому участнику. `now` — момент
-    /// захвата (точнее, выхода из кодера: его задержка почти постоянна).
-    pub fn send_video(&mut self, now: Instant, frame: &[u8], info: VideoInfo) {
+    /// Закодированный видео-кадр → фрагменты каждому участнику. `captured` — момент
+    /// съёмки кадра (камера и кодер добавляют к нему десятки мс, и без этой поправки
+    /// губы отставали бы от звука).
+    pub fn send_video(&mut self, now: Instant, captured: Instant, frame: &[u8], info: VideoInfo) {
         self.tick(now);
-        let epoch = *self.video_epoch.get_or_insert(now);
-        let micros = now.saturating_duration_since(epoch).as_micros();
-        // Метка времени идёт по кругу u32 (13 часов при 90 кГц), как и у звука.
-        let ts = (micros * VIDEO_CLOCK_HZ as u128 / 1_000_000) as u32;
+        let ts = self.media_ts(captured, VIDEO_CLOCK_HZ);
         let frame_id = self.video_frame_id;
         self.video_frame_id = self.video_frame_id.wrapping_add(1);
         if info.keyframe {
@@ -678,6 +707,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let rtt = st.rtt();
         let wait = max_frame_wait(rtt);
         let v = &mut st.video;
+        v.playout.set_sync_delay(st.sync.video_delay());
         while let Some(frame) = v.asm.pop(now, wait) {
             v.push(now, frame);
         }
@@ -778,22 +808,60 @@ impl<P: Copy + Eq + Hash> Session<P> {
         }
     }
 
-    /// Следующий кадр звука участника для воспроизведения: `None` — буфер набирается
+    /// Следующий кадр звука участника; он будет слышен в `heard_at` (сейчас плюс
+    /// задержка вывода — по ней звук сводится с видео). `None` — буфер набирается
     /// или пуст (участник молчит), [`JitterOut::Lost`] — кадр потерян: восстановить из
-    /// FEC следующего пакета, если он уже есть, иначе маскировать (PLC).
-    pub fn pull_audio(&mut self, peer: &P) -> Option<JitterOut> {
-        self.state.get_mut(peer)?.audio.as_mut()?.jitter.pop()
+    /// FEC следующего пакета, если он уже есть, иначе маскировать (PLC);
+    /// [`JitterOut::Hold`] — звук ждёт отстающее видео: маскировать.
+    pub fn pull_audio(&mut self, heard_at: Instant, peer: &P) -> Option<JitterOut> {
+        let clock = self.cfg.audio_clock_hz;
+        let frame_s = self.cfg.audio_frame_samples as f64 / clock as f64;
+        let st = self.state.get_mut(peer)?;
+        let a = st.audio.as_mut()?;
+        let want = (st.sync.audio_delay().as_secs_f64() / frame_s).round() as usize;
+        a.jitter.set_extra(want);
+        a.since_adjust = a.since_adjust.saturating_add(1);
+        let adjust = a.since_adjust >= AUDIO_ADJUST_EVERY && a.jitter.is_playing();
+        if adjust && a.held < want {
+            // Кадр маскировки вместо следующего: всё дальше слышно на кадр позже.
+            a.held += 1;
+            a.since_adjust = 0;
+            return Some(JitterOut::Hold);
+        }
+        if adjust && a.held > want && a.jitter.len() >= 2 {
+            // Кадр выброшен: всё дальше слышно на кадр раньше.
+            a.held -= 1;
+            a.since_adjust = 0;
+            a.jitter.pop();
+        }
+        let out = a.jitter.pop();
+        if let (Some(JitterOut::Frame(_)), Some(ts)) = (&out, a.jitter.played_ts()) {
+            st.sync.observe_audio(heard_at, ts, clock);
+        }
+        out
     }
 
     /// Следующий видео-кадр участника, если его срок ([`VideoFrame::play_at`]) не
     /// позже `due` (обычно — сейчас).
     pub fn pull_video(&mut self, due: Instant, peer: &P) -> Option<VideoFrame> {
-        let v = &mut self.state.get_mut(peer)?.video;
+        let st = self.state.get_mut(peer)?;
+        let v = &mut st.video;
         if v.queue.front()?.play_at > due {
             return None;
         }
         v.last_pull = Some(due);
-        v.queue.pop_front()
+        let f = v.queue.pop_front()?;
+        st.sync.observe_video(f.play_at + st.render_delay, f.ts);
+        Some(f)
+    }
+
+    /// Сколько кадр участника идёт через видео-декодер потребителя: от срока
+    /// ([`VideoFrame::play_at`]) до экрана. Видео на столько позже своего срока, и
+    /// звук ждёт его с учётом этого.
+    pub fn set_video_render_delay(&mut self, peer: &P, delay: Duration) {
+        if let Some(st) = self.state.get_mut(peer) {
+            st.render_delay = delay.min(MAX_RENDER_DELAY);
+        }
     }
 
     /// Декодер видео участника начат заново (тайл появился на экране, декодер
@@ -873,11 +941,12 @@ mod tests {
         let t0 = Instant::now();
         let mut s = Session::new(CFG);
         s.set_peers(&[7]);
-        s.send_audio(t0, &[0xAA]);
-        s.skip_audio();
-        s.send_audio(t0, &[0xBB]);
-        s.send_video(t0, &[0xCC], key());
+        s.send_audio(t0, t0, &[0xAA]);
+        // Кадр в 20 мс не отправлен (микрофон выключен).
+        s.send_audio(t0, t0 + Duration::from_millis(40), &[0xBB]);
+        s.send_video(t0, t0, &[0xCC], key());
         s.send_video(
+            t0,
             t0 + Duration::from_millis(100),
             &[0xDD],
             VideoInfo::default(),
@@ -917,9 +986,9 @@ mod tests {
         let now = Instant::now();
         let mut s = Session::new(CFG);
         s.set_peers(&[1]);
-        s.send_audio(now, &[1]);
+        s.send_audio(now, now, &[1]);
         s.set_peers(&[1, 2]);
-        s.send_audio(now, &[2]);
+        s.send_audio(now, now, &[2]);
         let tw: Vec<(u8, u16)> = drain(&mut s)
             .iter()
             .map(|t| (t.to, parse_media(&t.data).unwrap().header.tw_seq))
@@ -932,16 +1001,16 @@ mod tests {
         let now = Instant::now();
         let mut s = Session::new(CFG);
         s.set_peers(&[1, 2]);
-        s.send_audio(now, &[5]);
+        s.send_audio(now, now, &[5]);
         let to: Vec<u8> = drain(&mut s).iter().map(|t| t.to).collect();
         assert_eq!(to, [1, 2]);
 
         let pkt = audio_pkt(1, 0, 0);
         s.handle_datagram(now, 3, &pkt); // не участник
-        assert_eq!(s.pull_audio(&3), None);
+        assert_eq!(s.pull_audio(now, &3), None);
         assert_eq!(s.stats(&3), None);
         s.handle_datagram(now, 1, &pkt);
-        assert_eq!(s.pull_audio(&1), Some(JitterOut::Frame(vec![0])));
+        assert_eq!(s.pull_audio(now, &1), Some(JitterOut::Frame(vec![0])));
         assert_eq!(s.stats(&1).map(|st| st.rx_bytes), Some(1));
     }
 
@@ -952,7 +1021,7 @@ mod tests {
         let now = Instant::now();
         let mut s = Session::new(CFG);
         s.set_peers(&[1, 2]);
-        s.send_audio(now, &[5]);
+        s.send_audio(now, now, &[5]);
         s.handle_datagram(now, 2, &audio_pkt(1, 0, 0));
         s.set_peers(&[1]);
         assert!(drain(&mut s).iter().all(|t| t.to == 1));
@@ -974,10 +1043,10 @@ mod tests {
         s.set_peers(&[1]);
         for seq in 0..30_000u16 {
             s.handle_datagram(now, 1, &audio_pkt(100, seq, 1));
-            assert!(s.pull_audio(&1).is_some());
+            assert!(s.pull_audio(now, &1).is_some());
         }
         s.handle_datagram(now, 1, &audio_pkt(200, 0, 2));
-        assert_eq!(s.pull_audio(&1), Some(JitterOut::Frame(vec![2])));
+        assert_eq!(s.pull_audio(now, &1), Some(JitterOut::Frame(vec![2])));
     }
 
     /// То же для видео: новый поток с нулевого кадра принимается сразу.
@@ -992,13 +1061,13 @@ mod tests {
         });
         old.set_peers(&[9]);
         old.video_frame_id = 50_000;
-        old.send_video(now, &[1; 10], key());
+        old.send_video(now, now, &[1; 10], key());
         let mut new = Session::new(Config {
             stream_id: 2,
             ..CFG
         });
         new.set_peers(&[9]);
-        new.send_video(now, &[2; 10], key());
+        new.send_video(now, now, &[2; 10], key());
         for t in drain(&mut old).into_iter().chain(drain(&mut new)) {
             rx.handle_datagram(now, 1, &t.data);
         }
@@ -1025,7 +1094,7 @@ mod tests {
                 keyframe: i == 0 || i == 3,
                 ..key()
             };
-            tx.send_video(now, &[i; 10], info);
+            tx.send_video(now, now, &[i; 10], info);
             for t in drain(&mut tx) {
                 rx.handle_datagram(now, 1, &t.data);
             }
@@ -1056,7 +1125,7 @@ mod tests {
                     keyframe: i == 0,
                     ..key()
                 };
-                tx.send_video(now, &[i as u8; 10], info);
+                tx.send_video(now, now, &[i as u8; 10], info);
                 for t in drain(&mut tx) {
                     rx.handle_datagram(now, 1, &t.data);
                 }
@@ -1082,10 +1151,10 @@ mod tests {
         rx.set_peers(&[1]);
         // Оба кадра пришли разом (первый задержался): второй показывать через 33 мс
         // после первого, по меткам захвата.
-        tx.send_video(t0, &[0; 10], key());
+        tx.send_video(t0, t0, &[0; 10], key());
         let first = drain(&mut tx);
         let t1 = t0 + Duration::from_millis(33);
-        tx.send_video(t1, &[1; 10], VideoInfo::default());
+        tx.send_video(t1, t1, &[1; 10], VideoInfo::default());
         let second = drain(&mut tx);
         let at = t0 + Duration::from_millis(300);
         for t in first.iter().chain(&second) {
@@ -1111,7 +1180,7 @@ mod tests {
         let mut rx = Session::new(CFG);
         rx.set_peers(&[1]);
         let frame = vec![0x5A; MAX_VIDEO_CHUNK * 3 + 1];
-        tx.send_video(now, &frame, key());
+        tx.send_video(now, now, &frame, key());
         let out = drain(&mut tx);
         assert_eq!(out.len(), 4);
         for t in out.iter().rev() {
@@ -1122,6 +1191,7 @@ mod tests {
             Some(VideoFrame {
                 data: frame,
                 info: key(),
+                ts: 0,
                 play_at: now,
             })
         );

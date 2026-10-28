@@ -37,9 +37,9 @@ class VideoSender(
     /** Битрейт по оценке полосы до собеседников (0 — неизвестен). Зовётся из потока
      *  кодера, не из Compose. */
     private val targetBitrate: () -> Int = { 0 },
-    /** (access-unit, ключевой, угол сенсора / 90, fps) → `true`, если собеседник
-     *  просит ключевой кадр. */
-    private val sendVideo: (ByteArray, Boolean, Int, Int) -> Boolean,
+    /** (access-unit, ключевой, угол сенсора / 90, fps, сколько назад снят — мкс)
+     *  → `true`, если собеседник просит ключевой кадр. */
+    private val sendVideo: (ByteArray, Boolean, Int, Int, Int) -> Boolean,
 ) {
     @Volatile private var encoder: MediaCodec? = null
     private var inputSurface: Surface? = null
@@ -260,6 +260,20 @@ class VideoSender(
         }
     }
 
+    /** Сколько назад снят кадр с меткой [ptsUs], мкс (камера и кодер; 0 —
+     *  неизвестно). Метку ставит камера — по монотонным часам или по часам с учётом
+     *  сна, смотря по устройству: верна та, что даёт правдоподобный возраст. Без
+     *  этой поправки губы у собеседника отставали бы от звука. */
+    private fun captureAgeUs(ptsUs: Long): Int {
+        val mono = System.nanoTime() / 1000 - ptsUs
+        val boot = android.os.SystemClock.elapsedRealtimeNanos() / 1000 - ptsUs
+        return when {
+            mono in 0..MAX_CAPTURE_AGE_US -> mono
+            boot in 0..MAX_CAPTURE_AGE_US -> boot
+            else -> 0
+        }.toInt()
+    }
+
     private fun drain(enc: MediaCodec) {
         val info = MediaCodec.BufferInfo()
         var config: ByteArray? = null // SPS+PPS
@@ -304,7 +318,8 @@ class VideoSender(
                         android.util.Log.i("VideoSender", "Encoded and sent 30 frames, last size = ${au.size} bytes (key=$key)")
                         adaptBitrate()
                     }
-                    if (sendVideo(au, key, (sensorOrientation / 90) % 4, fps)) requestKeyframe()
+                    val age = captureAgeUs(info.presentationTimeUs)
+                    if (sendVideo(au, key, (sensorOrientation / 90) % 4, fps, age)) requestKeyframe()
                 }
             }
             runCatching { enc.releaseOutputBuffer(idx, false) }
@@ -397,5 +412,10 @@ class VideoSender(
             if (facing == want) return id
         }
         return fallback
+    }
+
+    private companion object {
+        /** Кадр старше этого — метка не по нашим часам, возраст неизвестен. */
+        const val MAX_CAPTURE_AGE_US = 1_000_000L
     }
 }

@@ -14,6 +14,7 @@
 
 #![forbid(unsafe_code)]
 
+mod avsync;
 mod bwe;
 pub mod jitter;
 mod nack;

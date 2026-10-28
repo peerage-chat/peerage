@@ -63,9 +63,9 @@ fn bench_during_a_call_does_not_mute_it() {
     let mut out = vec![0i16; frame];
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline && !heard {
-        a.room_push_audio(&tone);
+        a.room_push_audio(&tone, Duration::ZERO);
         std::thread::sleep(Duration::from_millis(20));
-        let n = b.room_pull_audio(&mut out);
+        let n = b.room_pull_audio(&mut out, Duration::ZERO);
         heard = out[..n].iter().any(|s| s.unsigned_abs() > 500);
     }
     a.room_audio_stop();

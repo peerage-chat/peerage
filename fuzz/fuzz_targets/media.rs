@@ -42,7 +42,7 @@ fuzz_target!(|data: &[u8]| {
         }
         // Своя отправка — чтобы NACK было что повторять.
         if i % 4 == 0 {
-            s.send_video(now, pkt, VideoInfo::default());
+            s.send_video(now, now, pkt, VideoInfo::default());
         }
         s.handle_datagram(now, 1, pkt);
         s.handle_timeout(now);

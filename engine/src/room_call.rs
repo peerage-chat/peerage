@@ -32,7 +32,16 @@ use rand_core::{OsRng, RngCore};
 use crate::LockRecover;
 
 type PeerKey = [u8; 32];
-type Ring = Arc<Mutex<VecDeque<i16>>>;
+type Ring = Arc<Mutex<Mic>>;
+
+/// Захваченный PCM, ещё не отправленный.
+#[derive(Default)]
+struct Mic {
+    pcm: VecDeque<i16>,
+    /// Когда записан последний сэмпл: от него считается момент захвата каждого
+    /// кадра — метка времени, по которой собеседник сводит звук с видео.
+    end: Option<Instant>,
+}
 
 /// Подряд идущих PLC-кадров на источник; дальше — тишина (Opus PLC иначе шумит).
 const MAX_PLC: u32 = 4;
@@ -142,7 +151,8 @@ impl Decoder {
                 self.plc_run = 0;
                 self.dec.decode_fec(&next).ok()
             }
-            JitterOut::Lost { next: None } => {
+            // Звук ждёт отстающее видео (ADR-014 §8b): маскировка, как при потере.
+            JitterOut::Lost { next: None } | JitterOut::Hold => {
                 if self.plc_run < MAX_PLC {
                     self.plc_run += 1;
                     self.dec.decode(None).ok()
@@ -208,7 +218,9 @@ impl RoomCallEngine {
     ) -> Arc<RoomCallEngine> {
         let running = Arc::new(AtomicBool::new(true));
         let muted = Arc::new(AtomicBool::new(false));
-        let in_ring: Ring = Arc::new(Mutex::new(VecDeque::new()));
+        let in_ring: Ring = Arc::new(Mutex::new(Mic::default()));
+        // Сэмплов (всех каналов) в секунду — для момента захвата кадра.
+        let pcm_rate = audio.sample_rate as f64 * audio.channels.max(1) as f64;
         let in_cap = audio.interleaved_len() * 50;
         let frame_len = audio.interleaved_len();
         let session = Arc::new(Mutex::new(Session::new(litertc::Config {
@@ -305,21 +317,26 @@ impl RoomCallEngine {
                 let mut frame = vec![0i16; frame_len];
                 let mut frames_since_loss_check = 0u32;
                 while running.load(Ordering::Relaxed) {
-                    let ready = {
-                        let mut q = in_ring.lock_safe();
+                    let captured = {
+                        let mut mic = in_ring.lock_safe();
+                        let end = mic.end;
+                        let q = &mut mic.pcm;
                         if q.len() >= frame_len {
+                            // Первый сэмпл кадра записан раньше последнего на всё,
+                            // что от него до конца кольца.
+                            let behind = Duration::from_secs_f64(q.len() as f64 / pcm_rate);
                             for s in frame.iter_mut() {
                                 *s = q.pop_front().unwrap_or(0);
                             }
-                            true
+                            end.map(|e| e.checked_sub(behind).unwrap_or(e))
                         } else {
-                            false
+                            None
                         }
                     };
-                    if !ready {
+                    let Some(captured) = captured else {
                         thread::sleep(Duration::from_millis(2));
                         continue;
-                    }
+                    };
                     frames_since_loss_check += 1;
                     if frames_since_loss_check >= LOSS_CHECK_FRAMES {
                         frames_since_loss_check = 0;
@@ -339,18 +356,17 @@ impl RoomCallEngine {
                     } else {
                         enc.encode(&frame).ok()
                     };
-                    match pkt {
-                        Some(pkt) => {
-                            if !running.load(Ordering::Relaxed) {
-                                break;
-                            }
-                            let out = with_session(&session, &members, |s| {
-                                s.send_audio(Instant::now(), &pkt)
-                            });
-                            send_all(&msgr, out);
-                            kick(&k);
+                    // Не отправленный кадр (микрофон выключен) номер не тратит, а
+                    // метка следующего — по времени его захвата.
+                    if let Some(pkt) = pkt {
+                        if !running.load(Ordering::Relaxed) {
+                            break;
                         }
-                        None => session.lock_safe().skip_audio(),
+                        let out = with_session(&session, &members, |s| {
+                            s.send_audio(Instant::now(), captured, &pkt)
+                        });
+                        send_all(&msgr, out);
+                        kick(&k);
                     }
                 }
             }));
@@ -394,12 +410,14 @@ impl RoomCallEngine {
         (total.saturating_sub(audio) / 100 * 95).max(MIN_BITRATE / 2)
     }
 
-    /// Закодированный H264 access-unit → всем участникам. `true` — кто-то из них
-    /// просит ключевой кадр: пусть кодер выдаст его следующим.
-    pub fn push_video(&self, frame: &[u8], info: VideoInfo) -> bool {
+    /// Закодированный H264 access-unit → всем участникам; кадр снят `age` назад
+    /// (камера и кодер). `true` — кто-то из участников просит ключевой кадр: пусть
+    /// кодер выдаст его следующим.
+    pub fn push_video(&self, frame: &[u8], info: VideoInfo, age: Duration) -> bool {
         let mut wanted = false;
         let out = with_session(&self.session, &self.members, |s| {
-            s.send_video(Instant::now(), frame, info);
+            let now = Instant::now();
+            s.send_video(now, now.checked_sub(age).unwrap_or(now), frame, info);
             wanted = s.take_keyframe_request();
         });
         send_all(&self.messenger, out);
@@ -414,6 +432,12 @@ impl RoomCallEngine {
         self.session.lock_safe().pull_video(Instant::now(), peer)
     }
 
+    /// Сколько кадр участника идёт через наш видео-декодер (срок → экран): звук
+    /// ждёт видео с учётом этого.
+    pub fn set_video_render_delay(&self, peer: &PeerKey, delay: Duration) {
+        self.session.lock_safe().set_video_render_delay(peer, delay);
+    }
+
     /// Декодер видео участника начат заново — ему нужен ключевой кадр.
     pub fn request_keyframe(&self, peer: &PeerKey) {
         let out = with_session(&self.session, &self.members, |s| {
@@ -423,9 +447,13 @@ impl RoomCallEngine {
         kick(&self.kick);
     }
 
-    /// Захваченный PCM с микрофона → в очередь отправки.
-    pub fn push_audio(&self, samples: &[i16]) {
-        let mut q = self.in_ring.lock_safe();
+    /// Захваченный PCM с микрофона → в очередь отправки; последний сэмпл записан
+    /// `age` назад.
+    pub fn push_audio(&self, samples: &[i16], age: Duration) {
+        let mut mic = self.in_ring.lock_safe();
+        let now = Instant::now();
+        mic.end = Some(now.checked_sub(age).unwrap_or(now));
+        let q = &mut mic.pcm;
         q.extend(samples.iter().copied());
         while q.len() > self.in_cap {
             q.pop_front();
@@ -433,29 +461,35 @@ impl RoomCallEngine {
     }
 
     /// По кадру звука от каждого участника на один тик микса (без декодирования:
-    /// замок сессии держим коротко) и текущий список участников.
-    fn pull_frames(&self) -> (Vec<PeerKey>, Vec<(PeerKey, JitterOut)>) {
+    /// замок сессии держим коротко) и текущий список участников. Кадр будет
+    /// слышен в `heard_at`.
+    fn pull_frames(&self, heard_at: Instant) -> (Vec<PeerKey>, Vec<(PeerKey, JitterOut)>) {
         let mut s = self.session.lock_safe();
         let peers = s.peers().to_vec();
         let frames = peers
             .iter()
-            .filter_map(|p| s.pull_audio(p).map(|o| (*p, o)))
+            .filter_map(|p| s.pull_audio(heard_at, p).map(|o| (*p, o)))
             .collect();
         (peers, frames)
     }
 
     /// Смешать все источники в `out` ровным темпом потребителя. На каждый
-    /// микс-кадр берём по одному кадру с каждого источника и суммируем.
-    pub fn pull_audio(&self, out: &mut [i16]) -> usize {
+    /// микс-кадр берём по одному кадру с каждого источника и суммируем. `output` —
+    /// сколько звук идёт от `out` до динамика (буфер вывода): по нему звук
+    /// сводится с видео.
+    pub fn pull_audio(&self, out: &mut [i16], output: Duration) -> usize {
         let mut carry = self.mix_carry.lock_safe();
         let mut produced = 0usize;
         let mut starved = false;
-        for o in out.iter_mut() {
+        let now = Instant::now();
+        let pcm_rate = self.audio.sample_rate as f64 * self.audio.channels.max(1) as f64;
+        for (i, o) in out.iter_mut().enumerate() {
             if carry.is_empty() && !starved {
                 let mut mix = vec![0i32; self.frame_len];
                 let mut any = false;
                 {
-                    let (peers, frames) = self.pull_frames();
+                    let heard_at = now + output + Duration::from_secs_f64(i as f64 / pcm_rate);
+                    let (peers, frames) = self.pull_frames(heard_at);
                     let mut decs = self.decoders.lock_safe();
                     decs.retain(|k, _| peers.contains(k));
                     let mut lv = self.levels.lock_safe();
@@ -558,7 +592,7 @@ impl RoomCallEngine {
     pub fn halt(&self) {
         self.running.store(false, Ordering::Relaxed);
         self.members.lock_safe().clear();
-        self.in_ring.lock_safe().clear();
+        self.in_ring.lock_safe().pcm.clear();
         // Неотправленное тоже никому: сессия без участников выбрасывает свою очередь.
         self.session.lock_safe().set_peers(&[]);
         kick(&self.kick);

@@ -228,7 +228,7 @@ fn hangup_stops_our_audio_at_once_under_peer_flood() {
                 .map(|i| if i % 2 == 0 { 8000 } else { -8000 })
                 .collect();
             while on.load(Ordering::Relaxed) {
-                a.room_push_audio(&tone);
+                a.room_push_audio(&tone, std::time::Duration::ZERO);
                 std::thread::sleep(Duration::from_millis(20));
             }
         })

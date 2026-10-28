@@ -74,7 +74,7 @@ fn run(ab: LinkConfig, ba: LinkConfig, secs: u64, join_at: u32, restart_at: Opti
                 keyframe,
                 ..Default::default()
             };
-            a.send_video(now, &frame(id), info);
+            a.send_video(now, now, &frame(id), info);
             while let Some(t) = a.poll_transmit() {
                 if joined {
                     to_b.send(now, t.data);
@@ -241,7 +241,7 @@ fn hostile_feedback_stays_within_budget() {
                 keyframe,
                 ..Default::default()
             };
-            a.send_video(now, &frame(id), info);
+            a.send_video(now, now, &frame(id), info);
         }
         // Каждую миллисекунду — NACK на 128 × 17 последних номеров и запрос ключевого.
         let seqs: Vec<u16> = (0..2176u16)

@@ -57,7 +57,7 @@ fn run(capture: &[u64], link: LinkConfig) -> (Instant, Vec<Shown>) {
                 keyframe: next == 0 || a.take_keyframe_request(),
                 ..Default::default()
             };
-            a.send_video(now, &frame, info);
+            a.send_video(now, now, &frame, info);
             next += 1;
         }
         for s in [&mut a, &mut b] {

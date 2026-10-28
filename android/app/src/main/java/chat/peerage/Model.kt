@@ -2179,8 +2179,8 @@ class AppModel private constructor() {
         val ch = params?.channels?.takeIf { it > 0 } ?: 1
         val audio = CallAudio(
             ctx,
-            { data, n -> Native.roomPushAudio(sessionPtr, data, n) },
-            { out -> Native.roomPullAudio(sessionPtr, out) },
+            { data, n, ageUs -> Native.roomPushAudio(sessionPtr, data, n, ageUs) },
+            { out, delayUs -> Native.roomPullAudio(sessionPtr, out, delayUs) },
             { m -> Native.roomSetMuted(sessionPtr, m) },
             fx = audioFx,
             inputDevice = selectedInputDevice(),
@@ -2232,6 +2232,7 @@ class AppModel private constructor() {
             videoQuality.height,
             onRotation = { rot -> roomMemberRotation[peerHex] = rot },
             requestKeyframe = { Native.roomRequestKeyframe(sessionPtr, peerHex) },
+            reportDelay = { us -> Native.roomSetVideoDelay(sessionPtr, peerHex, us) },
         ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
     }
 
@@ -2290,7 +2291,7 @@ class AppModel private constructor() {
             videoQuality.bitrate,
             startFront = cameraFront,
             targetBitrate = { Native.roomVideoTargetBitrate(sessionPtr) },
-        ) { data, key, rotation, fps -> Native.roomPushVideo(sessionPtr, data, key, rotation, fps) }
+        ) { data, key, rotation, fps, ageUs -> Native.roomPushVideo(sessionPtr, data, key, rotation, fps, ageUs) }
         // Кодер может не принять разрешение/битрейт (configure бросает) — на главном
         // потоке это падение всего приложения. Не вышло — гасим видео, звонок живёт.
         videoSender = try {

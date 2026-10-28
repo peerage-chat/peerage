@@ -37,12 +37,8 @@ fn call(
     let (mut to_b, mut to_a) = (Link::new(ab, 1), Link::new(ba, 2));
     for step in 0..secs * 1000 {
         let now = t0 + ms(step);
-        if step % 20 == 0 {
-            if muted(step / 20) {
-                a.skip_audio();
-            } else {
-                a.send_audio(now, &[0; 80]);
-            }
+        if step % 20 == 0 && !muted(step / 20) {
+            a.send_audio(now, now, &[0; 80]);
         }
         for s in [&mut a, &mut b] {
             if s.poll_timeout().is_some_and(|t| t <= now) {
@@ -63,7 +59,7 @@ fn call(
         }
         // Звук B проигрывает, иначе буфер копится — как потребитель в движке.
         if step % 20 == 0 {
-            b.pull_audio(&A);
+            b.pull_audio(now, &A);
         }
     }
     (a.stats(&B).unwrap(), b.stats(&A).unwrap())

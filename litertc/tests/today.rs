@@ -168,12 +168,12 @@ fn run_audio(cfg: LinkConfig, depth: usize) -> (u32, u32) {
         let now = t0 + ms(20 * tick);
         while let Some(p) = link.poll(now) {
             let m = parse_media(&p).expect("медиа-пакет");
-            jb.push(m.header.seq, m.payload.to_vec());
+            jb.push(m.header.seq, m.header.ts, m.payload.to_vec());
         }
         match jb.pop() {
             Some(JitterOut::Frame(_)) => played += 1,
             Some(JitterOut::Lost { .. }) => lost += 1,
-            None => {}
+            Some(JitterOut::Hold) | None => {}
         }
     }
     (played, lost)

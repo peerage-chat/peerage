@@ -32,15 +32,18 @@ All integers are big-endian.
 | 2 | 4 | stream_id | Random, chosen by the sender for each call. A new value means the sender started over. |
 | 6 | 2 | seq | Per-track packet counter, wraps at 2¹⁶. |
 | 8 | 2 | tw_seq | Transport-wide counter: one per recipient, across all tracks, in the order packets leave the sender (after pacing), wraps at 2¹⁶. |
-| 10 | 4 | ts | Capture time. Audio: 48 kHz sample counter (+960 per 20 ms frame). Video: 90 kHz clock from the sender's first video frame. Wraps. |
+| 10 | 4 | ts | Capture time on the sender's clock, counted from one origin for both tracks (the sender's first capture): audio in 48 kHz units (the frame's first sample), video in 90 kHz units (when the camera took the frame). Wraps. |
 | 14 | … | payload | Audio: one Opus frame. Video: one fragment (below). |
 
 A packet shorter than 14 bytes is dropped. The whole packet is at most 14 + 60 000 bytes.
 
 **Sender rules.**
-- `seq` counts packets actually sent. Audio `ts` advances by 960 for every 20 ms frame,
-  including frames not sent (muted microphone, encoder failure): silence is a jump in
-  `ts` with no gap in `seq`, so receivers don't count it as loss.
+- `seq` counts packets actually sent; `ts` is time, so frames not sent (muted
+  microphone, encoder failure) are a jump in `ts` with no gap in `seq`, and receivers
+  don't count them as loss. Consecutive audio frames are about 960 apart, not exactly:
+  `ts` is measured, not counted.
+- Audio `ts / 48 000` and video `ts / 90 000` are seconds on the same clock: receivers
+  line lips up with speech by them (below).
 - One media packet goes to each call member. `stream_id`, `seq` and `ts` are the same for
   every member; `tw_seq` is that member's own counter.
 - `stream_id` must be drawn from a cryptographic RNG for every call, so a rejoin is never
@@ -257,6 +260,16 @@ unsafe.
   under the usual retry limit. A queue nobody drains
   is thrown away at 150 frames or 32 MiB, and the receiver then quietly waits for the
   next keyframe.
+- **Lip sync.** For each member the receiver tracks how far behind capture it hears
+  the audio (frame `ts` → the moment it leaves the speaker, output buffer included) and
+  sees the video (frame `ts` → on screen, its own decoder included). The difference is
+  the lip-sync error; the clock offset between the phones is the same in both and
+  cancels. Once a second, if the error is over 30 ms, the track that is ahead waits
+  up to 40 ms more — after first taking back any wait the other track has. Video waits
+  by moving its playout times; audio by playing one concealment frame instead of the
+  next one, at most one per 100 ms. Audio never waits more than 500 ms for video; a
+  wait taken back from audio drops one frame. Without video (camera off, tile off
+  screen) the waits wind down.
 - **Audio.** Packets are reordered by `seq` in a jitter buffer. A packet older than the
   next one to play (serial arithmetic on 2¹⁶) is dropped. A missing packet is declared
   lost once two later packets are waiting; the decoder then recovers it from the in-band

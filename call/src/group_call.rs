@@ -91,11 +91,11 @@ impl GroupCall {
                             let entry = a_src.entry(p.src).or_insert_with(|| {
                                 (JitterBuffer::new(cfg.jitter_depth), AudioDecoder::new(cfg).unwrap())
                             });
-                            entry.0.push(f.header.seq, f.payload.to_vec());
+                            entry.0.push(f.header.seq, f.header.ts, f.payload.to_vec());
                             while let Some(out) = entry.0.pop() {
                                 let pcm = match out {
                                     JitterOut::Frame(pkt) => entry.1.decode(Some(&pkt)),
-                                    JitterOut::Lost { .. } => entry.1.decode(None),
+                                    JitterOut::Lost { .. } | JitterOut::Hold => entry.1.decode(None),
                                 };
                                 if let Ok(pcm) = pcm {
                                     mix_into(mix, &pcm, cap);

@@ -32,6 +32,9 @@ class VideoReceiver(
     /** Новому декодеру нужен ключевой кадр: попросить его у отправителя. Зовётся из
      *  потока декодера (не из Compose), при каждом создании декодера. */
     private val requestKeyframe: () -> Unit = {},
+    /** Задержка своего декодера изменилась ([decoderDelayNs], мкс) — звук ждёт видео с
+     *  её учётом. Зовётся из потока декодера, раз в секунду. */
+    private val reportDelay: (Int) -> Unit = {},
     private val pullVideoPacket: () -> ByteArray,
 ) {
     private var decoder: MediaCodec? = null
@@ -150,6 +153,7 @@ class VideoReceiver(
                     renderedCount++
                     restartStreak = 0
                     if (renderedCount % 30 == 0) {
+                        reportDelay((decoderDelayNs / 1000).coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
                         android.util.Log.i(
                             "VideoReceiver",
                             "Rendered 30 (in decoder ${fedCount - outCount}, decoder ${decoderDelayNs / 1_000_000}ms, worst " +

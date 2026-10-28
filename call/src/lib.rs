@@ -111,11 +111,11 @@ impl Call {
                             if let (Some(j), Some(dec), Some(ring)) =
                                 (jitter.as_mut(), audio_dec.as_mut(), out_ring.as_ref())
                             {
-                                j.push(f.header.seq, f.payload.to_vec());
+                                j.push(f.header.seq, f.header.ts, f.payload.to_vec());
                                 while let Some(out) = j.pop() {
                                     let pcm = match out {
                                         JitterOut::Frame(pkt) => dec.decode(Some(&pkt)),
-                                        JitterOut::Lost { .. } => dec.decode(None),
+                                        JitterOut::Lost { .. } | JitterOut::Hold => dec.decode(None),
                                     };
                                     if let Ok(pcm) = pcm {
                                         push_capped(ring, &pcm, cap);
