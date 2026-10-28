@@ -13,6 +13,13 @@ use std::collections::BTreeMap;
 /// 20 кадров ≈ 400мс — потолок, который буфер достигает лишь при дрейфе часов.
 const BURST_HEADROOM: usize = 20;
 
+/// Пакет позади ожидаемого дальше этого окна — не опоздавший, а новый поток:
+/// отправитель перезашёл в комнату и начал нумерацию с нуля. Окно — 64 кадра (1,3 с):
+/// буфер держит не больше `depth + BURST_HEADROOM` (≤ 28) кадров, так далеко
+/// переупорядочивание не уводит. Без этого перезашедшего не было слышно, пока его
+/// новая нумерация не догонит старую, — до 11 минут (R-108).
+const RESTART_WINDOW: u16 = 64;
+
 /// Результат [`JitterBuffer::pop`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum JitterOut {
@@ -81,7 +88,13 @@ impl JitterBuffer {
     pub fn push(&mut self, seq: u16, data: Vec<u8>) {
         if let Some(next) = self.next {
             if seq_lt(seq, next) {
-                return; // опоздал
+                if next.wrapping_sub(seq) <= RESTART_WINDOW {
+                    return; // опоздал
+                }
+                // Новый поток: старое уже не доиграть, начинаем с префетча.
+                self.dropped += self.buf.len() as u32;
+                self.buf.clear();
+                self.next = None;
             }
         }
         self.buf.insert(seq, data);
@@ -240,6 +253,16 @@ mod tests {
         }
     }
 
+    /// Сильно опоздавший, но в пределах окна пакет по-прежнему выбрасывается.
+    #[test]
+    fn late_within_window_is_still_dropped() {
+        let mut j = JitterBuffer::new(1);
+        j.push(100, f(1));
+        assert!(j.pop().is_some()); // next=101
+        j.push(101 - RESTART_WINDOW, f(2));
+        assert!(j.is_empty());
+    }
+
     #[test]
     fn drops_late_packets() {
         let mut j = JitterBuffer::new(1);
@@ -247,5 +270,20 @@ mod tests {
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(5)))); // next=6
         j.push(3, f(3)); // опоздал — отброшен
         assert!(j.is_empty());
+    }
+
+    /// Собеседник перезашёл в комнату и начал нумерацию с нуля, пока его поток у нас
+    /// ещё не сброшен (вернулся раньше, чем истёк его маячок присутствия).
+    #[test]
+    fn sender_restart_from_zero_is_heard() {
+        let mut j = JitterBuffer::new(1);
+        for s in 0..30_000u16 {
+            j.push(s, f(1));
+            assert!(j.pop().is_some());
+        }
+        j.push(0, f(2));
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(2))), "новый поток с нуля слышен сразу");
+        j.push(1, f(3));
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(3))));
     }
 }
