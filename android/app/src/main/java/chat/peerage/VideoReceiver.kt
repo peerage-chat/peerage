@@ -1,6 +1,7 @@
 package chat.peerage
 
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.view.Surface
 import kotlin.concurrent.thread
@@ -75,12 +76,20 @@ class VideoReceiver(
             try {
                 if (dec == null) {
                     android.util.Log.i("VideoReceiver", "Initializing MediaCodec H.264 decoder")
+                    val codec = MediaCodec.createDecoderByType("video/avc")
                     val fmt = MediaFormat.createVideoFormat("video/avc", width, height).apply {
                         if (android.os.Build.VERSION.SDK_INT >= 30) {
                             setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
                         }
+                        // Отправитель меняет разрешение по полосе (ступени, ADR-014 §7b):
+                        // с запасом под 1080p декодер переходит на новый размер по SPS
+                        // ключевого кадра, без пересоздания.
+                        adaptiveMax(codec)?.let { (mw, mh) ->
+                            setInteger(MediaFormat.KEY_MAX_WIDTH, mw)
+                            setInteger(MediaFormat.KEY_MAX_HEIGHT, mh)
+                        }
                     }
-                    dec = MediaCodec.createDecoderByType("video/avc").apply {
+                    dec = codec.apply {
                         configure(fmt, surface, null, 0)
                         start()
                     }
@@ -228,4 +237,15 @@ class VideoReceiver(
         runCatching { dec?.stop() }
         runCatching { dec?.release() }
     }
+
+    /** Предел размера для смены разрешения без пересоздания декодера: не меньше
+     *  своего, до 1080p, в пределах того, что декодер умеет. `null` — декодер без
+     *  adaptive playback: новый размер он примет только как сбой и перезапуск. */
+    private fun adaptiveMax(codec: MediaCodec): Pair<Int, Int>? = runCatching {
+        val caps = codec.codecInfo.getCapabilitiesForType("video/avc")
+        if (!caps.isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_AdaptivePlayback)) return null
+        val v = caps.videoCapabilities
+        maxOf(width, 1920).coerceAtMost(v.supportedWidths.upper) to
+            maxOf(height, 1080).coerceAtMost(v.supportedHeights.upper)
+    }.getOrNull()
 }

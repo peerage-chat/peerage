@@ -22,6 +22,10 @@ import kotlin.concurrent.thread
  * access-unit'ы уходят в Rust ([Native.callSendVideo]) для фрагментации/отправки.
  * SPS/PPS (CODEC_CONFIG) добавляются к каждому keyframe — чтобы приёмник мог
  * инициализировать декодер «с середины» потока.
+ *
+ * [width]×[height] и [bitrate] — потолок из настроек. По оценке полосы кодер
+ * получает битрейт, а при нехватке — меньшее разрешение ([ResolutionLadder]):
+ * камера остаётся открытой, меняется только кодер и сессия камеры под его размер.
  */
 class VideoSender(
     private val context: Context,
@@ -37,7 +41,7 @@ class VideoSender(
      *  просит ключевой кадр. */
     private val sendVideo: (ByteArray, Boolean, Int, Int) -> Boolean,
 ) {
-    private var encoder: MediaCodec? = null
+    @Volatile private var encoder: MediaCodec? = null
     private var inputSurface: Surface? = null
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
@@ -66,9 +70,24 @@ class VideoSender(
     fun start(preview: Surface? = null) {
         android.util.Log.i("VideoSender", "start(): ${width}x$height@$fps, preview=${preview != null}")
         previewSurface = preview
-        val fmt = MediaFormat.createVideoFormat("video/avc", width, height).apply {
+        val top = ResolutionLadder.Size(width, height)
+        ladder = ResolutionLadder(
+            ResolutionLadder.stepsFrom(top, CameraCaps.encoderSizes(context)),
+            fps,
+            bitrate,
+        ).also { l -> android.util.Log.i("VideoSender", "steps: ${l.steps.joinToString { "${it.width}x${it.height}" }}") }
+        val (enc, surf) = createEncoder(top, bitrate)
+        encoder = enc
+        inputSurface = surf
+        running = true
+        drainThread = thread(name = "venc-drain") { drain(enc) }
+        openCamera(surf)
+    }
+
+    private fun createEncoder(size: ResolutionLadder.Size, bps: Int): Pair<MediaCodec, Surface> {
+        val fmt = MediaFormat.createVideoFormat("video/avc", size.width, size.height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+            setInteger(MediaFormat.KEY_BIT_RATE, bps)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             // Ключевой кадр — по запросу приёмника (потеря, новый декодер), а раз в
             // 10 с — страховка. Раньше был раз в секунду: дорого по полосе, а
@@ -76,14 +95,53 @@ class VideoSender(
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 10)
         }
         val enc = MediaCodec.createEncoderByType("video/avc")
-        enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        val surf = enc.createInputSurface()
-        enc.start()
-        encoder = enc
+        try {
+            enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            val surf = enc.createInputSurface()
+            enc.start()
+            return enc to surf
+        } catch (e: Exception) {
+            enc.release()
+            throw e
+        }
+    }
+
+    /** Ступени разрешения; задаются в [start]. */
+    private var ladder: ResolutionLadder? = null
+
+    /** Ступень, под которую сейчас настроен кодер. */
+    private var appliedStep = 0
+
+    /** Прежний кодер после смены разрешения: камера ещё может писать в его surface,
+     *  пока новая сессия не собрана, — освобождаем в [retireOldEncoder]. */
+    private var retiring: Triple<MediaCodec, Surface, Thread?>? = null
+
+    /** Перейти на размер [size]: новый кодер, сессия камеры под него. Поток камеры. */
+    private fun resize(size: ResolutionLadder.Size) {
+        if (!running) return
+        val (enc, surf) = try {
+            createEncoder(size, currentBitrate)
+        } catch (e: Exception) {
+            android.util.Log.w("VideoSender", "encoder ${size.width}x${size.height} failed: ${e.javaClass.simpleName}")
+            return
+        }
+        retireOldEncoder() // прошлая смена не успела собраться — её кодер больше не нужен
+        val old = encoder
+        val oldSurf = inputSurface
+        if (old != null && oldSurf != null) retiring = Triple(old, oldSurf, drainThread)
+        encoder = enc // дренаж прежнего кодера видит подмену и выходит
         inputSurface = surf
-        running = true
         drainThread = thread(name = "venc-drain") { drain(enc) }
-        openCamera(surf)
+        device?.let { configureSession(it) } // нет устройства — откроется уже с новым surface
+    }
+
+    private fun retireOldEncoder() {
+        val (enc, surf, drain) = retiring ?: return
+        retiring = null
+        runCatching { drain?.join(500) }
+        runCatching { enc.stop() }
+        runCatching { enc.release() }
+        runCatching { surf.release() }
     }
 
     /** Переключить фронт/тыл по ходу звонка. Энкодер остаётся (тот же Surface) —
@@ -123,6 +181,12 @@ class VideoSender(
                 cid,
                 object : CameraDevice.StateCallback() {
                     override fun onOpened(cam: CameraDevice) {
+                        if (!running) {
+                            // Отправителя остановили, пока камера открывалась (двойной
+                            // старт превью): держать её — значит не дать открыть новому.
+                            cam.close()
+                            return
+                        }
                         android.util.Log.i("VideoSender", "Camera $cid opened successfully")
                         device = cam
                         configureSession(cam)
@@ -161,26 +225,39 @@ class VideoSender(
         val mgr = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val targets = listOfNotNull(enc, previewSurface)
         runCatching { session?.close() }
-        cam.createCaptureSession(
-            targets,
-            object : CameraCaptureSession.StateCallback() {
-                override fun onConfigured(s: CameraCaptureSession) {
-                    android.util.Log.i("VideoSender", "Session configured (targets=${targets.size})")
-                    session = s
-                    val req = cam.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                        targets.forEach { addTarget(it) }
-                        val range = pickFpsRange(mgr, cid)
-                        range?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+        // Камера и surface'ы могут умереть в любой момент (отдали другому, остановили
+        // отправителя, сменили кодер) — исключение здесь, в потоке камеры, роняет весь
+        // процесс. Не вышло — переоткрываем камеру, как при её ошибке.
+        try {
+            cam.createCaptureSession(
+                targets,
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(s: CameraCaptureSession) {
+                        android.util.Log.i("VideoSender", "Session configured (targets=${targets.size})")
+                        session = s
+                        retireOldEncoder() // старая сессия закрыта — её surface больше не нужен
+                        runCatching {
+                            val req = cam.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                                targets.forEach { addTarget(it) }
+                                val range = pickFpsRange(mgr, cid)
+                                range?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+                            }
+                            s.setRepeatingRequest(req.build(), null, camHandler)
+                        }
+                        requestKeyframe()
                     }
-                    runCatching { s.setRepeatingRequest(req.build(), null, camHandler) }
-                    requestKeyframe()
-                }
-                override fun onConfigureFailed(s: CameraCaptureSession) {
-                    android.util.Log.e("VideoSender", "Camera capture session configuration failed")
-                }
-            },
-            camHandler,
-        )
+                    override fun onConfigureFailed(s: CameraCaptureSession) {
+                        android.util.Log.e("VideoSender", "Camera capture session configuration failed")
+                    }
+                },
+                camHandler,
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("VideoSender", "createCaptureSession failed: ${e.javaClass.simpleName}")
+            runCatching { cam.close() }
+            if (device === cam) device = null
+            camHandler?.postDelayed({ if (running) inputSurface?.let { openCamera(it) } }, 500)
+        }
     }
 
     private fun drain(enc: MediaCodec) {
@@ -189,7 +266,8 @@ class VideoSender(
         var encodedCount = 0
         var errStreak = 0
         android.util.Log.i("VideoSender", "venc-drain thread started")
-        while (running) {
+        // После смены разрешения [encoder] — уже другой кодер: этот дренаж закончен.
+        while (running && encoder === enc) {
             val idx = try {
                 enc.dequeueOutputBuffer(info, 10000)
             } catch (e: Exception) {
@@ -234,14 +312,24 @@ class VideoSender(
     }
 
     /** Битрейт, выставленный кодеру сейчас. */
-    private var currentBitrate = bitrate
+    @Volatile private var currentBitrate = bitrate
 
-    /** Подстроить битрейт кодера под оценку полосы (раз в ~секунду). Мелкие
-     *  колебания не трогаем: каждый setParameters — лишняя работа кодеку. */
+    /** Подстроить кодер под оценку полосы (раз в ~секунду): ступень разрешения и
+     *  битрейт. Мелкие колебания битрейта не трогаем: каждый setParameters — лишняя
+     *  работа кодеку. */
     private fun adaptBitrate() {
         val enc = encoder ?: return
         val target = targetBitrate().coerceAtMost(bitrate)
         if (target <= 0) return
+        ladder?.let { l ->
+            val step = l.update(target, android.os.SystemClock.elapsedRealtime())
+            if (step != appliedStep) {
+                appliedStep = step
+                val size = l.steps[step]
+                android.util.Log.i("VideoSender", "resolution → ${size.width}x${size.height} (target $target)")
+                camHandler?.post { resize(size) }
+            }
+        }
         if (kotlin.math.abs(target - currentBitrate) * 10 < currentBitrate) return
         val p = android.os.Bundle()
         p.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, target)
@@ -267,6 +355,7 @@ class VideoSender(
         runCatching { drainThread?.join(500) }
         runCatching { session?.close() }
         runCatching { device?.close() }
+        retireOldEncoder()
         runCatching { encoder?.stop() }
         runCatching { encoder?.release() }
         runCatching { inputSurface?.release() }

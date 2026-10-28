@@ -81,6 +81,23 @@ object CameraCaps {
 
     private fun fallback(): List<Res> = buckets.take(2)
 
+    /** Все размеры, которые камеры отдают в кодер, — для ступеней разрешения
+     *  ([ResolutionLadder]). Общие для фронтальной и тыловой: смена камеры посреди
+     *  звонка не должна упереться в размер, которого у другой нет. */
+    fun encoderSizes(ctx: Context): List<ResolutionLadder.Size> {
+        fun sizes(front: Boolean) = characteristics(ctx, front)
+            ?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputSizes(SurfaceTexture::class.java)
+            ?.map { ResolutionLadder.Size(it.width, it.height) }
+            ?.toSet()
+        val front = sizes(true)
+        val back = sizes(false)
+        return when {
+            front != null && back != null -> front intersect back
+            else -> front ?: back ?: emptySet()
+        }.toList()
+    }
+
     /** Тянет ли камера ≥60 fps (по AE target-fps-диапазонам). */
     fun supports60(ctx: Context, front: Boolean): Boolean {
         val ch = characteristics(ctx, front) ?: return false

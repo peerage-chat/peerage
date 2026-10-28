@@ -288,7 +288,20 @@ parses comes from such a member, so:
    above the link's inherent level). `PeerStats::bandwidth_cuts` counts cuts by cause.
    The 600 packets/s ingress budget stays: with 8 KB fragments it is ≈ 38 Mbit/s of video,
    pacing does not change packet counts, and feedback adds 10 packets/s per member.
-   Resolution steps are 7b.
+   7b ✅ (2026-10-29): resolution steps in Kotlin (`ResolutionLadder`). Steps are the
+   camera's encoder sizes (common to both lenses) with the chosen aspect, each ≤ 60 %
+   of the area above it, down to 144 lines; the chosen resolution is the top. A step
+   fits from WebRTC's start bitrates by pixel count (270p 300k · 360p 500k · 540p 800k ·
+   720p 1.5M, 1080p 2.5M), scaled for fps and capped at 90 % of the configured bitrate
+   so a low setting can still reach its own resolution. Down after 2 s below 60 % of
+   the current step's threshold, straight to a step that fits; up one step after 8 s
+   above the next one's; at most one switch per 5 s. A switch keeps the camera open:
+   a new encoder at the new size, the capture session rebuilt on its surface, the old
+   encoder released once the new session is up (≈ 0.5 s, no black). Receivers declare
+   `KEY_MAX_WIDTH/HEIGHT` (1080p) where adaptive playback exists, so a new size arrives
+   as a keyframe with a new SPS and the decoder follows without being recreated.
+   Verified live on the emulators with the aspect check relaxed (their camera has no
+   small 16:9 size): 720p → 144p → 240p → 144p, decoders kept, no crash.
 8. **Playout and A/V sync:** the video jitter buffer moves from `VideoReceiver` into
    LiteRTC (`play_at`); Kotlin only decodes and renders.
 9. **Desktop:** when the desktop client comes back, it drives `litertc::Session`; the
