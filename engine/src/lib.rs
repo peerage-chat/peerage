@@ -25,7 +25,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use peerage_core::budget::Tier;
 pub use peerage_core::mention::Mention;
 use peerage_core::settings::AudioSettings;
-use peerage_core::store::{Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage};
+use peerage_core::store::{
+    Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage,
+};
 use peerage_core::{vault, Identity};
 /// Реэкспорт: медиа-вложение группового сообщения — часть контракта движка
 /// (клиенты и тесты собирают его, чтобы отправить вложение в группу).
@@ -52,12 +54,21 @@ impl<T> LockRecover<T> for Mutex<T> {
 /// Команда группового актора (исполняется в потоке event_pump, т.к. GroupChat !Send).
 /// Все команды — fire-and-forget. Read-данные UI читает из кэша [`Engine::group_cache`].
 pub(crate) enum GroupCmd {
-    Create { name: String },
-    Invite { gid: Vec<u8>, peer: [u8; 32] },
+    Create {
+        name: String,
+    },
+    Invite {
+        gid: Vec<u8>,
+        peer: [u8; 32],
+    },
     /// Принять входящее приглашение в группу (карточка).
-    AcceptInvite { gid: Vec<u8> },
+    AcceptInvite {
+        gid: Vec<u8>,
+    },
     /// Отклонить входящее приглашение.
-    DeclineInvite { gid: Vec<u8> },
+    DeclineInvite {
+        gid: Vec<u8>,
+    },
     SendText {
         gid: Vec<u8>,
         text: String,
@@ -71,21 +82,46 @@ pub(crate) enum GroupCmd {
         mentions: Vec<Mention>,
     },
     /// Отозвать свои сообщения у участников («удалить у всех»).
-    Retract { gid: Vec<u8>, ids: Vec<u64> },
+    Retract {
+        gid: Vec<u8>,
+        ids: Vec<u64>,
+    },
     /// Исправить своё сообщение в группе.
-    Edit { gid: Vec<u8>, id: u64, text: String, mentions: Vec<Mention> },
+    Edit {
+        gid: Vec<u8>,
+        id: u64,
+        text: String,
+        mentions: Vec<Mention>,
+    },
     /// Закрепить/открепить сообщение в группе (только админ).
-    Pin { gid: Vec<u8>, id: u64, sender: String, on: bool },
+    Pin {
+        gid: Vec<u8>,
+        id: u64,
+        sender: String,
+        on: bool,
+    },
     /// Удалить сообщения только у себя: пары `(id, автор-hex)`.
-    DeleteLocal { gid: Vec<u8>, refs: Vec<(u64, String)> },
+    DeleteLocal {
+        gid: Vec<u8>,
+        refs: Vec<(u64, String)>,
+    },
     /// Пир появился в сети — проверить незавершённые вступления в группы.
-    PeerOnline { peer: [u8; 32] },
+    PeerOnline {
+        peer: [u8; 32],
+    },
     /// Отозвать участника (ADR-004, только админ).
-    RemoveMember { gid: Vec<u8>, peer: [u8; 32] },
+    RemoveMember {
+        gid: Vec<u8>,
+        peer: [u8; 32],
+    },
     /// Ротация ключа группы (PCS, ADR-004).
-    Rekey { gid: Vec<u8> },
+    Rekey {
+        gid: Vec<u8>,
+    },
     /// Выйти из группы (ADR-004).
-    Leave { gid: Vec<u8> },
+    Leave {
+        gid: Vec<u8>,
+    },
 }
 
 /// Работа для потока event_pump: событие мессенджера, групповая команда либо
@@ -98,9 +134,18 @@ pub(crate) enum Job {
     Leave(Vec<u8>),
     /// Отправить вложение в группу: подготовка (см. [`Engine::store_media`]) идёт в
     /// своём потоке, готовое возвращается сюда как `GroupMediaRef`.
-    GroupMedia { gid: Vec<u8>, source: MediaSource, mime: String, name: String, info: MediaInfo },
+    GroupMedia {
+        gid: Vec<u8>,
+        source: MediaSource,
+        mime: String,
+        name: String,
+        info: MediaInfo,
+    },
     /// Ссылка на блоб, который уже у нас (пересылка): байты не трогаем.
-    GroupMediaRef { gid: Vec<u8>, media: MediaBody },
+    GroupMediaRef {
+        gid: Vec<u8>,
+        media: MediaBody,
+    },
     /// Бросить идущие докачки (очистка вложений); ответ — когда брошены.
     CancelDownloads(Sender<()>),
 }
@@ -166,7 +211,10 @@ impl ChatKey {
     /// Разобрать пару «hex + это группа?» из клиента.
     pub fn parse(id_hex: &str, group: bool) -> Option<ChatKey> {
         if group {
-            hex::decode(id_hex.trim()).ok().filter(|v| !v.is_empty()).map(ChatKey::Group)
+            hex::decode(id_hex.trim())
+                .ok()
+                .filter(|v| !v.is_empty())
+                .map(ChatKey::Group)
         } else {
             parse_key(id_hex).map(ChatKey::Dm)
         }
@@ -251,7 +299,12 @@ pub(crate) struct RoomState {
 impl RoomState {
     /// Живые участники `gid` (маячок не старше `ttl` относительно `now`).
     /// Чистая логика презенса — тестируется без устройства (инъекция времени).
-    pub(crate) fn live_with_flags(&self, gid: &[u8], now: Instant, ttl: Duration) -> Vec<([u8; 32], u8)> {
+    pub(crate) fn live_with_flags(
+        &self,
+        gid: &[u8],
+        now: Instant,
+        ttl: Duration,
+    ) -> Vec<([u8; 32], u8)> {
         self.remote
             .get(gid)
             .map(|m| {
@@ -389,7 +442,10 @@ pub struct StartOk {
 }
 
 pub fn now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// hex(32 байта) → ключ. Кодек-хелпер (строка↔ключ); экспортируется для androidjni.
@@ -480,22 +536,32 @@ impl Engine {
         fwd_from: &str,
         fwd_anon: bool,
     ) -> Option<i64> {
-        match self.messenger.send_text_reply(key, text, reply_to, reply_mine, fwd_from, fwd_anon) {
+        match self
+            .messenger
+            .send_text_reply(key, text, reply_to, reply_mine, fwd_from, fwd_anon)
+        {
             Ok(id) => {
                 let t = now();
-                let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
-                    id, text: text.to_string(), mine: true, time: t, status: "sent".into(),
-                    sender: self.me_hex(),
-                    reply_to,
-                    reply_sender: self.reply_author(key, reply_to, reply_mine),
-                    fwd_from: fwd_from.to_string(),
-                    fwd_anon,
-                    // kind заполняем ЯВНО: пустая строка — не «текст», а «неизвестно»,
-                    // и UI рисовал такое сообщение дважды (как содержимое и как
-                    // подпись к вложению).
-                    kind: "text".into(),
-                    ..Default::default()
-                });
+                let _ = self.messages.lock_safe().append(
+                    Chat::Dm(key),
+                    &StoredMessage {
+                        id,
+                        text: text.to_string(),
+                        mine: true,
+                        time: t,
+                        status: "sent".into(),
+                        sender: self.me_hex(),
+                        reply_to,
+                        reply_sender: self.reply_author(key, reply_to, reply_mine),
+                        fwd_from: fwd_from.to_string(),
+                        fwd_anon,
+                        // kind заполняем ЯВНО: пустая строка — не «текст», а «неизвестно»,
+                        // и UI рисовал такое сообщение дважды (как содержимое и как
+                        // подпись к вложению).
+                        kind: "text".into(),
+                        ..Default::default()
+                    },
+                );
                 // В офлайн-очередь сообщение положил сам мессенджер — целиком, с
                 // цитатой и пометкой пересылки.
                 Some(id as i64)
@@ -515,7 +581,13 @@ impl Engine {
 
     /// То же с упоминаниями. Они бывают только в группе: в личном чате упоминать
     /// некого, и там список молча отбрасывается.
-    pub fn edit_message_with(&self, chat: ChatKey, id: u64, text: &str, mentions: &[Mention]) -> bool {
+    pub fn edit_message_with(
+        &self,
+        chat: ChatKey,
+        id: u64,
+        text: &str,
+        mentions: &[Mention],
+    ) -> bool {
         let me = self.me_hex();
         match &chat {
             ChatKey::Dm(peer) => {
@@ -527,14 +599,20 @@ impl Engine {
                 if self.messenger.send_edit(peer, id, text).is_err() {
                     return false;
                 }
-                let _ = self.messages.lock_safe().edit_text(chat.as_chat(), &me, id, text, &[], now());
-                push_event(self, dto::UiEvent::MessageEdited {
-                    chat: hex::encode(chat.id_bytes()),
-                    id,
-                    sender: me,
-                    text: text.to_string(),
-                    mentions: Vec::new(),
-                });
+                let _ =
+                    self.messages
+                        .lock_safe()
+                        .edit_text(chat.as_chat(), &me, id, text, &[], now());
+                push_event(
+                    self,
+                    dto::UiEvent::MessageEdited {
+                        chat: hex::encode(chat.id_bytes()),
+                        id,
+                        sender: me,
+                        text: text.to_string(),
+                        mentions: Vec::new(),
+                    },
+                );
                 true
             }
             ChatKey::Group(gid) => self
@@ -563,7 +641,12 @@ impl Engine {
                     return false;
                 }
                 self.apply_pin(chat.as_chat(), id, sender, on, &self.me_hex());
-                push_event(self, dto::UiEvent::PinsChanged { chat: hex::encode(chat.id_bytes()) });
+                push_event(
+                    self,
+                    dto::UiEvent::PinsChanged {
+                        chat: hex::encode(chat.id_bytes()),
+                    },
+                );
                 true
             }
             ChatKey::Group(gid) => self
@@ -585,7 +668,11 @@ impl Engine {
         let found = store.search(query, chat.as_ref().map(|c| c.as_chat()), limit);
         let hits: Vec<SearchHit> = found
             .into_iter()
-            .map(|(chat, scope, msg)| SearchHit { chat: hex::encode(chat), group: scope == 1, msg })
+            .map(|(chat, scope, msg)| SearchHit {
+                chat: hex::encode(chat),
+                group: scope == 1,
+                msg,
+            })
             .collect();
         serde_json::to_string(&hits).unwrap_or_else(|_| "[]".into())
     }
@@ -680,7 +767,11 @@ impl Engine {
         let mut sent = 0;
         for m in items {
             // Пересылка пересланного сохраняет ПЕРВОГО автора, а не посредника.
-            let origin = if m.fwd_from.is_empty() { m.sender.clone() } else { m.fwd_from.clone() };
+            let origin = if m.fwd_from.is_empty() {
+                m.sender.clone()
+            } else {
+                m.fwd_from.clone()
+            };
             if m.system {
                 continue; // системные строки — не сообщения
             }
@@ -715,7 +806,10 @@ impl Engine {
             }
         }
         let short = || key_hex.chars().take(8).collect::<String>();
-        let Some(key) = hex::decode(key_hex).ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok()) else {
+        let Some(key) = hex::decode(key_hex)
+            .ok()
+            .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
+        else {
             return short();
         };
         match self.contacts.lock_safe().get(&key) {
@@ -727,7 +821,9 @@ impl Engine {
 
     fn forward_text(&self, dst: &ChatKey, text: &str, origin: &str, anon: bool) -> bool {
         match dst {
-            ChatKey::Dm(peer) => self.send_text_full(peer, text, 0, false, origin, anon).is_some(),
+            ChatKey::Dm(peer) => self
+                .send_text_full(peer, text, 0, false, origin, anon)
+                .is_some(),
             ChatKey::Group(gid) => {
                 self.jobs
                     .send(Job::Cmd(GroupCmd::SendText {
@@ -753,8 +849,14 @@ impl Engine {
         if !self.blob_exists(&m.blob_id) {
             return false;
         }
-        let as_hash = |h: &str| hex::decode(h).ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());
-        let Some(hash) = as_hash(&m.blob_id) else { return false };
+        let as_hash = |h: &str| {
+            hex::decode(h)
+                .ok()
+                .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
+        };
+        let Some(hash) = as_hash(&m.blob_id) else {
+            return false;
+        };
         let thumb = as_hash(&m.thumb_id).filter(|_| self.blob_exists(&m.thumb_id));
         match dst {
             ChatKey::Dm(peer) => {
@@ -771,7 +873,8 @@ impl Engine {
                     reply_to: 0,
                     reply_sender: String::new(),
                 };
-                self.send_media_ref(peer, hash, m.size, &m.mime, &m.name, thumb, &info).is_some()
+                self.send_media_ref(peer, hash, m.size, &m.mime, &m.name, thumb, &info)
+                    .is_some()
             }
             ChatKey::Group(gid) => {
                 let media = MediaBody {
@@ -791,7 +894,12 @@ impl Engine {
                     height: m.height,
                     thumb: thumb.map(hex::encode).unwrap_or_default(),
                 };
-                self.jobs.send(Job::GroupMediaRef { gid: gid.clone(), media }).is_ok()
+                self.jobs
+                    .send(Job::GroupMediaRef {
+                        gid: gid.clone(),
+                        media,
+                    })
+                    .is_ok()
             }
         }
     }
@@ -800,19 +908,32 @@ impl Engine {
     /// именно пара, потому что id посеян временем отправителя и у обеих сторон свой.
     /// Возвращает, сколько строк удалено.
     pub fn delete_messages(&self, key: &[u8; 32], refs: &[(u64, bool)]) -> usize {
-        let refs: Vec<(u64, String)> =
-            refs.iter().map(|(id, mine)| (*id, self.author_hex(key, *mine))).collect();
-        self.messages.lock_safe().delete_many(Chat::Dm(key), &refs).unwrap_or(0)
+        let refs: Vec<(u64, String)> = refs
+            .iter()
+            .map(|(id, mine)| (*id, self.author_hex(key, *mine)))
+            .collect();
+        self.messages
+            .lock_safe()
+            .delete_many(Chat::Dm(key), &refs)
+            .unwrap_or(0)
     }
 
     /// hex автора сообщения в личном чате: своё — мы, чужое — собеседник.
     fn author_hex(&self, peer: &[u8; 32], mine: bool) -> String {
-        if mine { self.me_hex() } else { hex::encode(peer) }
+        if mine {
+            self.me_hex()
+        } else {
+            hex::encode(peer)
+        }
     }
 
     /// hex автора ЦИТИРУЕМОГО сообщения; пусто, если это не ответ.
     fn reply_author(&self, peer: &[u8; 32], reply_to: u64, reply_mine: bool) -> String {
-        if reply_to == 0 { String::new() } else { self.author_hex(peer, reply_mine) }
+        if reply_to == 0 {
+            String::new()
+        } else {
+            self.author_hex(peer, reply_mine)
+        }
     }
 
     /// hex своего ключа — автор всех наших сообщений.
@@ -858,7 +979,13 @@ impl Engine {
     /// Отправить медиа-вложение (M2): scrub (для картинок) → блоб пиру (push) →
     /// медиа-сообщение со ссылкой на блоб по хэшу (тот же надёжный путь, что текст).
     /// Возвращает id сообщения или None. `name` — исходное имя файла (для не-картинок).
-    pub fn send_media(&self, key: &[u8; 32], content: Vec<u8>, mime: &str, name: &str) -> Option<i64> {
+    pub fn send_media(
+        &self,
+        key: &[u8; 32],
+        content: Vec<u8>,
+        mime: &str,
+        name: &str,
+    ) -> Option<i64> {
         self.send_media_with(key, content, mime, name, MediaInfo::default())
     }
 
@@ -914,7 +1041,11 @@ impl Engine {
     fn store_media(&self, source: MediaSource, mime: &str) -> Option<(peerage_blob::Hash, u64)> {
         match source {
             MediaSource::Bytes(content) => {
-                let bytes = if mime.starts_with("image/") { peerage_blob::scrub::scrub(mime, &content) } else { content };
+                let bytes = if mime.starts_with("image/") {
+                    peerage_blob::scrub::scrub(mime, &content)
+                } else {
+                    content
+                };
                 let hash = peerage_blob::blob_id(&bytes);
                 self.store_blob(hash, &bytes);
                 Some((hash, bytes.len() as u64))
@@ -969,24 +1100,40 @@ impl Engine {
             // сообщение для получателя — ответ на наше.
             reply_mine: info.reply_sender == self.me_hex(),
         };
-        let id = self.messenger.send_media_message(key, &hash, mime, name, meta.clone()).ok()?;
-        let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
-            // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
-            // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
-            id, mine: true, time: now(), status: "sent".into(), sender: self.me_hex(),
-            fwd_from: info.fwd_from.clone(),
-            fwd_anon: info.fwd_anon,
-            // Подпись живёт в `text`: у медиа-сообщения это поле свободно,
-            // и тогда поиск и история работают с ней как с обычным текстом.
-            text: info.caption.clone(),
-            kind: Self::media_kind(mime).into(), blob_id: hex::encode(hash), mime: mime.into(), name: name.into(),
-            size, duration_ms: info.duration_ms, width: info.width, height: info.height,
-            thumb_id: hex::encode(&meta.thumb),
-            downloaded: true, // своё вложение уже у нас
-            reply_to: info.reply_to,
-            reply_sender: info.reply_sender.clone(),
-            ..Default::default()
-        });
+        let id = self
+            .messenger
+            .send_media_message(key, &hash, mime, name, meta.clone())
+            .ok()?;
+        let _ = self.messages.lock_safe().append(
+            Chat::Dm(key),
+            &StoredMessage {
+                // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
+                // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
+                id,
+                mine: true,
+                time: now(),
+                status: "sent".into(),
+                sender: self.me_hex(),
+                fwd_from: info.fwd_from.clone(),
+                fwd_anon: info.fwd_anon,
+                // Подпись живёт в `text`: у медиа-сообщения это поле свободно,
+                // и тогда поиск и история работают с ней как с обычным текстом.
+                text: info.caption.clone(),
+                kind: Self::media_kind(mime).into(),
+                blob_id: hex::encode(hash),
+                mime: mime.into(),
+                name: name.into(),
+                size,
+                duration_ms: info.duration_ms,
+                width: info.width,
+                height: info.height,
+                thumb_id: hex::encode(&meta.thumb),
+                downloaded: true, // своё вложение уже у нас
+                reply_to: info.reply_to,
+                reply_sender: info.reply_sender.clone(),
+                ..Default::default()
+            },
+        );
         Some(id as i64)
     }
 
@@ -1001,8 +1148,11 @@ impl Engine {
         let dst = self.blob_dir.join(hex::encode(manifest.id));
         let mut asm = peerage_blob::disk::DiskAssembler::create(manifest.clone(), &dst)?;
         for i in 0..manifest.chunks.len() {
-            let chunk = peerage_blob::read_file_chunk(src, i).map_err(|_| peerage_blob::BlobError::Io)?;
-            asm.add(i, &chunk, |i, b| vault::seal(&vault::chunk_purpose(&manifest.id, i), b))?;
+            let chunk =
+                peerage_blob::read_file_chunk(src, i).map_err(|_| peerage_blob::BlobError::Io)?;
+            asm.add(i, &chunk, |i, b| {
+                vault::seal(&vault::chunk_purpose(&manifest.id, i), b)
+            })?;
         }
         asm.finish()?;
         Ok(())
@@ -1015,7 +1165,9 @@ impl Engine {
         if self.blob_exists(blob_id_hex) {
             return true; // уже скачано
         }
-        let Ok(hash) = hex::decode(blob_id_hex.trim()) else { return false };
+        let Ok(hash) = hex::decode(blob_id_hex.trim()) else {
+            return false;
+        };
         // Намерение ПЕРСИСТЕНТНО: пир может быть офлайн или уйти посреди докачки —
         // продолжим сами, когда он вернётся, и переживём перезапуск. Пользователь не
         // должен сторожить, когда собеседник появится в сети.
@@ -1032,14 +1184,26 @@ impl Engine {
     /// UI по ним рисует прогресс вместо кнопки «Скачать» — в том числе после
     /// перезапуска приложения.
     pub fn wanted_json(&self) -> String {
-        let ids: Vec<String> = self.wanted.lock_safe().all().into_iter().map(|w| w.blob_id).collect();
+        let ids: Vec<String> = self
+            .wanted
+            .lock_safe()
+            .all()
+            .into_iter()
+            .map(|w| w.blob_id)
+            .collect();
         serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into())
     }
 
     /// Продолжить всё, что пользователь просил скачать у этого пира (он в сети).
     /// То же на старте процесса: намерение «скачать» переживает перезапуск.
     fn resume_all_wanted(&self) {
-        let mut peers: Vec<[u8; 32]> = self.wanted.lock_safe().all().into_iter().map(|w| w.peer).collect();
+        let mut peers: Vec<[u8; 32]> = self
+            .wanted
+            .lock_safe()
+            .all()
+            .into_iter()
+            .map(|w| w.peer)
+            .collect();
         peers.sort();
         peers.dedup();
         for p in peers {
@@ -1063,14 +1227,20 @@ impl Engine {
     /// Попросить у пира манифест блоба и запомнить, что ждём его именно от него.
     /// Единственный путь, которым в нас попадает чужой блоб.
     pub(crate) fn request_blob(&self, peer: &[u8; 32], hash: &[u8]) {
-        let Ok(id) = <[u8; 32]>::try_from(hash) else { return };
-        self.blob_expect.lock_safe().insert(id, (*peer, Instant::now()));
+        let Ok(id) = <[u8; 32]>::try_from(hash) else {
+            return;
+        };
+        self.blob_expect
+            .lock_safe()
+            .insert(id, (*peer, Instant::now()));
         let _ = self.messenger.request_blob_manifest(peer, hash);
     }
 
     /// Ждём ли блоб `id` от `peer`.
     fn blob_expected(&self, peer: &[u8; 32], id: &[u8]) -> bool {
-        let Ok(id) = <[u8; 32]>::try_from(id) else { return false };
+        let Ok(id) = <[u8; 32]>::try_from(id) else {
+            return false;
+        };
         let mut ex = self.blob_expect.lock_safe();
         ex.retain(|_, (_, at)| at.elapsed() < BLOB_EXPECT_TTL);
         ex.get(&id).is_some_and(|(p, _)| p == peer)
@@ -1106,7 +1276,13 @@ impl Engine {
         } else {
             let tk = self.identity.transport_public(epoch);
             let sig = self.identity.sign_transport_rotate(epoch, &tk);
-            format!("{}:{}:{}:{}", hex::encode(self.me_pub), epoch, hex::encode(tk), hex::encode(sig))
+            format!(
+                "{}:{}:{}:{}",
+                hex::encode(self.me_pub),
+                epoch,
+                hex::encode(tk),
+                hex::encode(sig)
+            )
         };
         let name = self.self_name();
         if !name.trim().is_empty() {
@@ -1126,7 +1302,9 @@ impl Engine {
             None => (code.trim(), None),
         };
         let parts: Vec<&str> = code.split(':').collect();
-        let Some(ik) = parse_key(parts[0]) else { return "error" };
+        let Some(ik) = parse_key(parts[0]) else {
+            return "error";
+        };
         let outcome = self.add_contact(&ik, name);
         // Самоназвание из кода — только новому контакту: у знакомого оно уже пришло
         // профилем, а тот достовернее (пришёл от самого пира, не через третьи руки).
@@ -1136,7 +1314,9 @@ impl Engine {
         if parts.len() == 4 {
             let epoch = parts[1].parse::<u32>().unwrap_or(0);
             let tk = parse_key(parts[2]);
-            let sig = hex::decode(parts[3]).ok().and_then(|s| <[u8; 64]>::try_from(s.as_slice()).ok());
+            let sig = hex::decode(parts[3])
+                .ok()
+                .and_then(|s| <[u8; 64]>::try_from(s.as_slice()).ok());
             if let (Some(tk), Some(sig)) = (tk, sig) {
                 let applied = self
                     .contacts
@@ -1222,7 +1402,9 @@ impl Engine {
             // Новый узел не поднялся. Молча остаться офлайн значило бы потерять сеть
             // до перезапуска, а клиент так и показывал бы ход смены адреса (R-032).
             // Возвращаемся на прежний адрес — уйти от флуда не вышло, но связь есть.
-            log::error!("смена адреса: не удалось поднять узел эпохи {epoch}, возвращаюсь на прежний");
+            log::error!(
+                "смена адреса: не удалось поднять узел эпохи {epoch}, возвращаюсь на прежний"
+            );
             let online = self.go_online();
             push_event(self, dto::UiEvent::TransportRotateFailed { online });
             return;
@@ -1230,8 +1412,8 @@ impl Engine {
         let address = node.address();
         self.messenger.swap_transport(node);
         self.messenger.reset_probes(); // новый адрес — пусть контакты увидят нас сразу
-        // Эпоху фиксируем ТОЛЬКО после успешного подъёма: иначе перезапуск после
-        // сбоя искал бы нас по адресу, на котором никто не слушает.
+                                       // Эпоху фиксируем ТОЛЬКО после успешного подъёма: иначе перезапуск после
+                                       // сбоя искал бы нас по адресу, на котором никто не слушает.
         save_transport_epoch(&self.data_dir, epoch);
 
         // 4. Рассылаем объявление. Оно надёжное (retry-until-Ack), а тех, кто сейчас
@@ -1246,7 +1428,10 @@ impl Engine {
         for peer in &recipients {
             let _ = self.messenger.send_transport_rotate(peer, epoch, &tk, &sig);
         }
-        log::info!("смена адреса завершена: {address} (оповещено {})", recipients.len());
+        log::info!(
+            "смена адреса завершена: {address} (оповещено {})",
+            recipients.len()
+        );
         push_event(self, dto::UiEvent::TransportRotated { address, epoch });
     }
 
@@ -1318,7 +1503,11 @@ impl Engine {
         }
         let tk = self.identity.transport_public(epoch);
         let sig = self.identity.sign_transport_rotate(epoch, &tk);
-        if self.messenger.send_transport_rotate(peer, epoch, &tk, &sig).is_ok() {
+        if self
+            .messenger
+            .send_transport_rotate(peer, epoch, &tk, &sig)
+            .is_ok()
+        {
             // Ушло в надёжную отправку — из списка убираем: повторы дальше ведёт
             // сам мессенджер (retry-until-Ack).
             let rest: Vec<[u8; 32]> = {
@@ -1335,7 +1524,8 @@ impl Engine {
         *self.rotate_pending.lock_safe() = peers.iter().copied().collect();
         let hexes: Vec<String> = peers.iter().map(hex::encode).collect();
         if let Ok(v) = serde_json::to_vec(&hexes) {
-            let _ = peerage_core::fsutil::write_atomic(&self.data_dir.join("rotate_pending.json"), v);
+            let _ =
+                peerage_core::fsutil::write_atomic(&self.data_dir.join("rotate_pending.json"), v);
         }
     }
 
@@ -1345,8 +1535,7 @@ impl Engine {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-        *self.rotate_pending.lock_safe() =
-            list.iter().filter_map(|h| parse_key(h)).collect();
+        *self.rotate_pending.lock_safe() = list.iter().filter_map(|h| parse_key(h)).collect();
     }
 
     /// Переслать транспорту актуальную карту адресов контактов (ADR-007):
@@ -1383,7 +1572,15 @@ impl Engine {
             .iter()
             .filter_map(|c| {
                 parse_key(&c.key).map(|k| {
-                    (k, if c.verified { Tier::Verified } else { Tier::Contact }, c.helpful)
+                    (
+                        k,
+                        if c.verified {
+                            Tier::Verified
+                        } else {
+                            Tier::Contact
+                        },
+                        c.helpful,
+                    )
                 })
             })
             .collect();
@@ -1407,10 +1604,20 @@ impl Engine {
     /// заблокированных и без себя. Зовётся на любую смену контактов, блок-листа и
     /// состава групп — выпавшему из набора больше не уходят ни пробы, ни Pong.
     fn refresh_targets(&self) {
-        let blocked: std::collections::HashSet<[u8; 32]> =
-            self.gate.lock_safe().list_blocked().iter().filter_map(|h| parse_key(h)).collect();
-        let mut targets: std::collections::HashSet<[u8; 32]> =
-            self.contacts.lock_safe().list().iter().filter_map(|c| parse_key(&c.key)).collect();
+        let blocked: std::collections::HashSet<[u8; 32]> = self
+            .gate
+            .lock_safe()
+            .list_blocked()
+            .iter()
+            .filter_map(|h| parse_key(h))
+            .collect();
+        let mut targets: std::collections::HashSet<[u8; 32]> = self
+            .contacts
+            .lock_safe()
+            .list()
+            .iter()
+            .filter_map(|c| parse_key(&c.key))
+            .collect();
         for roster in self.group_cache.lock_safe().members.values() {
             let keys = serde_json::from_str::<Vec<String>>(roster).unwrap_or_default();
             targets.extend(keys.iter().filter_map(|h| parse_key(h)));
@@ -1437,7 +1644,10 @@ impl Engine {
 
     /// Общий путь для личных чатов, «Сохранённого» и групп — хранилище у них одно.
     pub(crate) fn chat_history_json(&self, chat: Chat, before: Option<(i64, i64)>) -> String {
-        let page = self.messages.lock_safe().history(chat, before, HISTORY_PAGE);
+        let page = self
+            .messages
+            .lock_safe()
+            .history(chat, before, HISTORY_PAGE);
         serde_json::to_string(&page).unwrap_or_else(|_| "[]".into())
     }
 
@@ -1462,7 +1672,8 @@ impl Engine {
     // — Гейт контактов (замена TOFU-автодобавления) —
     /// Входящие запросы от незнакомцев как JSON-массив (ключ, fingerprint, превью, время).
     pub fn contact_requests_json(&self) -> String {
-        serde_json::to_string(&self.gate.lock_safe().list_requests()).unwrap_or_else(|_| "[]".into())
+        serde_json::to_string(&self.gate.lock_safe().list_requests())
+            .unwrap_or_else(|_| "[]".into())
     }
 
     /// Одобрить запрос: незнакомец становится контактом, снимаем запрос, шлём ему свой
@@ -1475,16 +1686,19 @@ impl Engine {
         // Пустое локальное имя → покажется самоназвание пира или hex (см. Contact.displayName).
         let _ = self.contacts.lock_safe().add(key, "", now());
         if let Some(m) = req.first {
-            let _ = self.messages.lock_safe().append(Chat::Dm(key), &StoredMessage {
-                id: m.id,
-                text: m.text,
-                mine: false,
-                time: m.time,
-                status: String::new(),
-                sender: hex::encode(key),
-                kind: "text".into(),
-                ..Default::default()
-            });
+            let _ = self.messages.lock_safe().append(
+                Chat::Dm(key),
+                &StoredMessage {
+                    id: m.id,
+                    text: m.text,
+                    mine: false,
+                    time: m.time,
+                    status: String::new(),
+                    sender: hex::encode(key),
+                    kind: "text".into(),
+                    ..Default::default()
+                },
+            );
         }
         self.refresh_budgets();
         self.messenger.poke(key);
@@ -1621,7 +1835,9 @@ impl Engine {
             let (blob_id, kind) = (a.blob_id, a.kind);
             let peer = <[u8; 32]>::try_from(a.chat.as_slice()).unwrap_or([0u8; 32]);
             let path = self.blob_dir.join(&blob_id);
-            let Ok(meta) = std::fs::metadata(&path) else { continue };
+            let Ok(meta) = std::fs::metadata(&path) else {
+                continue;
+            };
             let len = meta.len();
             if counted.insert(blob_id.clone()) {
                 *by_kind.entry(kind).or_insert(0) += len;
@@ -1632,7 +1848,11 @@ impl Engine {
         }
         let mut chats: Vec<dto::ChatStorage> = by_peer
             .into_iter()
-            .map(|(p, (files, bytes))| dto::ChatStorage { peer: hex::encode(p), files, bytes })
+            .map(|(p, (files, bytes))| dto::ChatStorage {
+                peer: hex::encode(p),
+                files,
+                bytes,
+            })
             .collect();
         // Самый тяжёлый чат первым — с него и начнут чистить.
         chats.sort_by_key(|c| std::cmp::Reverse(c.bytes));
@@ -1665,9 +1885,17 @@ impl Engine {
         }
         self.blob_expect.lock_safe().clear();
 
-        let mut keep: std::collections::HashSet<String> = self.messages.lock_safe().thumb_ids().into_iter().collect();
+        let mut keep: std::collections::HashSet<String> =
+            self.messages.lock_safe().thumb_ids().into_iter().collect();
         keep.extend(self.self_avatar_id());
-        keep.extend(self.contacts.lock_safe().list().iter().map(|c| c.avatar_id.clone()).filter(|a| !a.is_empty()));
+        keep.extend(
+            self.contacts
+                .lock_safe()
+                .list()
+                .iter()
+                .map(|c| c.avatar_id.clone())
+                .filter(|a| !a.is_empty()),
+        );
 
         let mut freed = 0u64;
         if let Ok(rd) = std::fs::read_dir(&self.blob_dir) {
@@ -1717,7 +1945,11 @@ impl Engine {
     // — Группы (MLS) — мутации fire-and-forget через актора, чтение из кэша —
     /// Создать группу. Возвращает true, если команда принята актором.
     pub fn group_create(&self, name: &str) -> bool {
-        self.jobs.send(Job::Cmd(GroupCmd::Create { name: name.to_string() })).is_ok()
+        self.jobs
+            .send(Job::Cmd(GroupCmd::Create {
+                name: name.to_string(),
+            }))
+            .is_ok()
     }
 
     pub fn group_invite(&self, gid: Vec<u8>, peer: [u8; 32]) {
@@ -1727,7 +1959,11 @@ impl Engine {
     /// Входящие приглашения в группы как JSON [{gid, name, inviter}] (из кэша).
     pub fn group_invites_json(&self) -> String {
         let s = self.group_cache.lock_safe().invites.clone();
-        if s.is_empty() { "[]".into() } else { s }
+        if s.is_empty() {
+            "[]".into()
+        } else {
+            s
+        }
     }
 
     /// Принять приглашение в группу (карточка). Fire-and-forget через актора.
@@ -1780,7 +2016,9 @@ impl Engine {
 
     /// Удалить групповые сообщения только у себя.
     pub fn group_delete_local(&self, gid: Vec<u8>, refs: Vec<(u64, String)>) {
-        let _ = self.jobs.send(Job::Cmd(GroupCmd::DeleteLocal { gid, refs }));
+        let _ = self
+            .jobs
+            .send(Job::Cmd(GroupCmd::DeleteLocal { gid, refs }));
     }
 
     pub fn group_send_media(
@@ -1791,7 +2029,13 @@ impl Engine {
         name: String,
         info: MediaInfo,
     ) {
-        let _ = self.jobs.send(Job::GroupMedia { gid, source: MediaSource::Bytes(content), mime, name, info });
+        let _ = self.jobs.send(Job::GroupMedia {
+            gid,
+            source: MediaSource::Bytes(content),
+            mime,
+            name,
+            info,
+        });
     }
 
     /// Отправить в группу вложение, лежащее ФАЙЛОМ, не поднимая его в память.
@@ -1804,12 +2048,20 @@ impl Engine {
         name: String,
         info: MediaInfo,
     ) {
-        let _ = self.jobs.send(Job::GroupMedia { gid, source: MediaSource::File(path), mime, name, info });
+        let _ = self.jobs.send(Job::GroupMedia {
+            gid,
+            source: MediaSource::File(path),
+            mime,
+            name,
+            info,
+        });
     }
 
     /// Отозвать участника из группы (ADR-004, только админ). Fire-and-forget.
     pub fn group_remove_member(&self, gid: Vec<u8>, peer: [u8; 32]) {
-        let _ = self.jobs.send(Job::Cmd(GroupCmd::RemoveMember { gid, peer }));
+        let _ = self
+            .jobs
+            .send(Job::Cmd(GroupCmd::RemoveMember { gid, peer }));
     }
 
     /// Ротация ключа группы (PCS, ADR-004). Fire-and-forget.
@@ -1839,7 +2091,9 @@ impl Engine {
     /// и переименование — читатель не увидит недописанный файл.
     pub fn blob_export(&self, id_hex: &str, dst: &Path) -> bool {
         use std::io::Write;
-        let Ok(raw) = hex::decode(id_hex.trim()) else { return false };
+        let Ok(raw) = hex::decode(id_hex.trim()) else {
+            return false;
+        };
         let src = self.blob_dir.join(hex::encode(&raw));
         let part = dst.with_extension("part");
         let ok = (|| -> Option<()> {
@@ -1855,7 +2109,8 @@ impl Engine {
                 }
                 // Мелкий блоб лежит одним запечатанным буфером — он и так невелик.
                 None => {
-                    let bytes = vault::open(&vault::blob_purpose(&raw), &std::fs::read(&src).ok()?).ok()?;
+                    let bytes =
+                        vault::open(&vault::blob_purpose(&raw), &std::fs::read(&src).ok()?).ok()?;
                     out.write_all(&bytes).ok()?
                 }
             }
@@ -1873,7 +2128,9 @@ impl Engine {
     /// вложение» нельзя выяснять чтением: у крупного это гигабайт в память ради
     /// одного булева.
     pub fn blob_exists(&self, id_hex: &str) -> bool {
-        let Ok(raw) = hex::decode(id_hex.trim()) else { return false };
+        let Ok(raw) = hex::decode(id_hex.trim()) else {
+            return false;
+        };
         self.blob_dir.join(hex::encode(raw)).exists()
     }
 
@@ -1884,7 +2141,10 @@ impl Engine {
     }
 
     fn profile_meta_path(&self) -> PathBuf {
-        self.blob_dir.parent().unwrap_or(&self.blob_dir).join("profile_meta.json")
+        self.blob_dir
+            .parent()
+            .unwrap_or(&self.blob_dir)
+            .join("profile_meta.json")
     }
 
     fn load_profile_meta(&self) -> ProfileMeta {
@@ -1943,13 +2203,20 @@ impl Engine {
     fn send_profile_to(&self, peer: &[u8; 32], ask_back: bool) {
         let m = self.load_profile_meta();
         let hash = hex::decode(&m.avatar_id).unwrap_or_default();
-        let _ = self.messenger.send_profile_update(peer, &m.name, &hash, ask_back);
+        let _ = self
+            .messenger
+            .send_profile_update(peer, &m.name, &hash, ask_back);
     }
 
     /// Разослать свой профиль (имя + хэш аватара) всем контактам (M2). Fire-and-forget.
     pub fn broadcast_profile(&self) {
-        let keys: Vec<[u8; 32]> =
-            self.contacts.lock_safe().list().iter().filter_map(|c| parse_key(&c.key)).collect();
+        let keys: Vec<[u8; 32]> = self
+            .contacts
+            .lock_safe()
+            .list()
+            .iter()
+            .filter_map(|c| parse_key(&c.key))
+            .collect();
         for k in keys {
             self.send_profile_to(&k, false);
         }
@@ -1966,7 +2233,13 @@ impl Engine {
         for (gid, name) in self.messages.lock_safe().chat_titles(1) {
             let hex = hex::encode(&gid);
             if !live.contains(&hex) {
-                rows.push(GroupRowJson { gid: hex, name, members: 0, admin: false, archived: true });
+                rows.push(GroupRowJson {
+                    gid: hex,
+                    name,
+                    members: 0,
+                    admin: false,
+                    archived: true,
+                });
             }
         }
         serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
@@ -1984,7 +2257,12 @@ impl Engine {
     }
 
     pub fn group_members_json(&self, gid: &[u8]) -> String {
-        self.group_cache.lock_safe().members.get(gid).cloned().unwrap_or_else(|| "[]".into())
+        self.group_cache
+            .lock_safe()
+            .members
+            .get(gid)
+            .cloned()
+            .unwrap_or_else(|| "[]".into())
     }
 
     /// Снапшот присутствия группы «N уч · M в сети» (ростер ∩ online). Презенс
@@ -2002,12 +2280,19 @@ impl Engine {
 
     // — Комнаты-звонки (присутствие, Discord-style) —
     pub(crate) fn room_engine(&self) -> Option<Arc<RoomCallEngine>> {
-        self.room_call.lock_safe().as_ref().map(|r| r.engine.clone())
+        self.room_call
+            .lock_safe()
+            .as_ref()
+            .map(|r| r.engine.clone())
     }
 
     pub(crate) fn live_participants(&self, gid: &[u8]) -> Vec<[u8; 32]> {
-        self.rooms.lock_safe().live_with_flags(gid, Instant::now(), PRESENCE_TTL)
-            .into_iter().map(|(p, _)| p).collect()
+        self.rooms
+            .lock_safe()
+            .live_with_flags(gid, Instant::now(), PRESENCE_TTL)
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect()
     }
 
     fn sync_room_members(&self) {
@@ -2047,8 +2332,15 @@ impl Engine {
         // собеседник появится в комнате. Иначе оборванная попытка не попала бы в
         // журнал вовсе — а именно её чаще всего и ищут.
         self.begin_call(&peer, &room_id, false, "unanswered");
-        if let Ok(id) = self.messenger.send_room_invite(&peer, &room_id, audio, video) {
-            self.rings.lock_safe().entry(room_id.clone()).or_default().push(id);
+        if let Ok(id) = self
+            .messenger
+            .send_room_invite(&peer, &room_id, audio, video)
+        {
+            self.rings
+                .lock_safe()
+                .entry(room_id.clone())
+                .or_default()
+                .push(id);
         }
         let flags = av_flags(audio, video);
         {
@@ -2105,7 +2397,13 @@ impl Engine {
             .iter()
             .filter(|p| roster.contains(*p))
             .filter_map(|p| self.messenger.send_room_invite(p, gid, audio, video).ok())
-            .map(|id| self.rings.lock_safe().entry(gid.to_vec()).or_default().push(id))
+            .map(|id| {
+                self.rings
+                    .lock_safe()
+                    .entry(gid.to_vec())
+                    .or_default()
+                    .push(id)
+            })
             .count()
     }
 
@@ -2133,7 +2431,10 @@ impl Engine {
     pub fn room_join(&self, gid: Vec<u8>, audio: bool, video: bool) {
         // Вход по приглашению: запись заведена на RoomInvite как пропущенная.
         self.answer_call(&gid);
-        self.rooms.lock_safe().joined.insert(gid, av_flags(audio, video));
+        self.rooms
+            .lock_safe()
+            .joined
+            .insert(gid, av_flags(audio, video));
         let _ = self.jobs.send(Job::Beacon);
     }
 
@@ -2155,17 +2456,27 @@ impl Engine {
 
     /// Начать запись о звонке (одна активная за раз — звонков параллельно не бывает).
     fn begin_call(&self, peer: &[u8; 32], gid: &[u8], incoming: bool, outcome: &str) {
-        let id = self.calls.lock_safe().start(peer, gid, incoming, outcome, now());
+        let id = self
+            .calls
+            .lock_safe()
+            .start(peer, gid, incoming, outcome, now());
         if id >= 0 {
-            *self.active_call.lock_safe() =
-                Some(ActiveCall { id, since: Instant::now(), incoming, room: gid.to_vec() });
+            *self.active_call.lock_safe() = Some(ActiveCall {
+                id,
+                since: Instant::now(),
+                incoming,
+                room: gid.to_vec(),
+            });
         }
     }
 
     /// Пропущенный входящий, пока идёт другой разговор: отдельная строка журнала,
     /// активная запись не трогается.
     fn record_missed(&self, peer: &[u8; 32], gid: &[u8]) {
-        let id = self.calls.lock_safe().start(peer, gid, true, "missed", now());
+        let id = self
+            .calls
+            .lock_safe()
+            .start(peer, gid, true, "missed", now());
         if id >= 0 {
             self.missed_calls.lock_safe().insert(gid.to_vec(), id);
         }
@@ -2182,20 +2493,31 @@ impl Engine {
             self.calls.lock_safe().set_outcome(c.id, "answered");
             return true;
         }
-        let Some(id) = self.missed_calls.lock_safe().remove(room) else { return false };
+        let Some(id) = self.missed_calls.lock_safe().remove(room) else {
+            return false;
+        };
         let calls = self.calls.lock_safe();
         if let Some(prev) = ac.take() {
             calls.finish(prev.id, prev.since.elapsed().as_secs() as i64);
         }
         calls.set_outcome(id, "answered");
-        *ac = Some(ActiveCall { id, since: Instant::now(), incoming: true, room: room.to_vec() });
+        *ac = Some(ActiveCall {
+            id,
+            since: Instant::now(),
+            incoming: true,
+            room: room.to_vec(),
+        });
         true
     }
 
     /// Закрыть активную запись: проставить длительность.
     fn end_call(&self) {
-        let Some(c) = self.active_call.lock_safe().take() else { return };
-        self.calls.lock_safe().finish(c.id, c.since.elapsed().as_secs() as i64);
+        let Some(c) = self.active_call.lock_safe().take() else {
+            return;
+        };
+        self.calls
+            .lock_safe()
+            .finish(c.id, c.since.elapsed().as_secs() as i64);
     }
 
     /// Заметка себе («Сохранённое»). Хранится как обычное сообщение в чате с самим
@@ -2207,7 +2529,10 @@ impl Engine {
         let mut note = StoredMessage {
             // id — миллисекунды: в секундах вторая заметка за ту же секунду
             // получала id первой (R-040). Совпало и так — берём следующий.
-            id: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
+            id: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
             sender: self.me_hex(),
             text: text.to_string(),
             mine: true,
@@ -2234,7 +2559,10 @@ impl Engine {
     /// Удалить заметку по её id.
     pub fn delete_note(&self, id: u64) {
         let me = self.me_pub;
-        let _ = self.messages.lock_safe().delete_one(Chat::Dm(&me), &self.me_hex(), id);
+        let _ = self
+            .messages
+            .lock_safe()
+            .delete_one(Chat::Dm(&me), &self.me_hex(), id);
     }
 
     /// Журнал звонков для UI: `[{peer, gid, incoming, outcome, started, duration}]`.
@@ -2263,7 +2591,10 @@ impl Engine {
 
     /// Живые участники любой комнаты по маячкам: JSON [{peer,audio,video}].
     pub fn room_presence_peers_json(&self, gid: &[u8]) -> String {
-        let live = self.rooms.lock_safe().live_with_flags(gid, Instant::now(), PRESENCE_TTL);
+        let live = self
+            .rooms
+            .lock_safe()
+            .live_with_flags(gid, Instant::now(), PRESENCE_TTL);
         room_members_json(live)
     }
 
@@ -2289,7 +2620,11 @@ impl Engine {
         // тем же правилам, что и дальше по ходу звонка (DM-собеседник / ростер).
         let members = Arc::new(Mutex::new(Vec::new()));
         let engine = RoomCallEngine::start(self.messenger.clone(), audio, members.clone());
-        let old = self.room_call.lock_safe().replace(RoomCall { gid, engine, members });
+        let old = self.room_call.lock_safe().replace(RoomCall {
+            gid,
+            engine,
+            members,
+        });
         if let Some(old) = old {
             old.engine.halt();
             std::thread::spawn(move || old.engine.stop());
@@ -2320,7 +2655,9 @@ impl Engine {
 
     /// Hex-ключи говорящих сейчас участников (active-speaker). "[]" вне звонка.
     pub fn room_speaking_json(&self) -> String {
-        self.room_engine().map(|e| e.speaking_json()).unwrap_or_else(|| "[]".into())
+        self.room_engine()
+            .map(|e| e.speaking_json())
+            .unwrap_or_else(|| "[]".into())
     }
 
     /// Сменить Opus-битрейт текущей аудио-сессии на лету (настройки звука без перезвона).
@@ -2332,7 +2669,9 @@ impl Engine {
 
     /// Накопленные байты трафика по участникам {hex: rx, "self": tx}. "{}" вне звонка.
     pub fn room_traffic_json(&self) -> String {
-        self.room_engine().map(|e| e.traffic_json()).unwrap_or_else(|| "{}".into())
+        self.room_engine()
+            .map(|e| e.traffic_json())
+            .unwrap_or_else(|| "{}".into())
     }
 
     pub fn room_set_muted(&self, muted: bool) {
@@ -2343,7 +2682,20 @@ impl Engine {
 
     /// `true` — участник просит ключевой кадр.
     pub fn room_push_video(&self, frame: &[u8], info: litertc::VideoInfo) -> bool {
-        self.room_engine().is_some_and(|e| e.push_video(frame, info))
+        self.room_engine()
+            .is_some_and(|e| e.push_video(frame, info))
+    }
+
+    /// Потолок битрейта видео из настроек качества.
+    pub fn room_set_video_max_bitrate(&self, bps: u32) {
+        if let Some(engine) = self.room_engine() {
+            engine.set_video_max_bitrate(bps);
+        }
+    }
+
+    /// Сколько сейчас отдать видео-кодеру, бит/с (0 — звонка нет).
+    pub fn room_video_target_bitrate(&self) -> u32 {
+        self.room_engine().map_or(0, |e| e.video_target_bitrate())
     }
 
     /// Декодер видео участника начат заново — попросить у него ключевой кадр.
@@ -2373,15 +2725,20 @@ impl Engine {
         }
         let rx = self.messenger.media_channel(8192);
         let st = Arc::new(BenchRecv {
-            bytes: AtomicU64::new(0), pkts: AtomicU64::new(0),
-            running: AtomicBool::new(true), start: Instant::now(),
+            bytes: AtomicU64::new(0),
+            pkts: AtomicU64::new(0),
+            running: AtomicBool::new(true),
+            start: Instant::now(),
         });
         *self.bench.lock_safe() = Some(st.clone());
         std::thread::spawn(move || {
             while st.running.load(Ordering::Relaxed) {
                 match rx.recv_timeout(Duration::from_millis(200)) {
                     Ok(p) if p.frame().is_some_and(|f| f.header.track == BENCH_TRACK) => {
-                        st.bytes.fetch_add((p.data.len() - litertc::MEDIA_HEADER_LEN) as u64, Ordering::Relaxed);
+                        st.bytes.fetch_add(
+                            (p.data.len() - litertc::MEDIA_HEADER_LEN) as u64,
+                            Ordering::Relaxed,
+                        );
                         st.pkts.fetch_add(1, Ordering::Relaxed);
                     }
                     Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
@@ -2418,7 +2775,11 @@ impl Engine {
         let mut seq = 0u16;
         let t0 = Instant::now();
         while sent_bytes < target && t0.elapsed() < Duration::from_secs(10) {
-            if self.messenger.send_media(peer, BENCH_TRACK, seq, 0, &payload).is_ok() {
+            if self
+                .messenger
+                .send_media(peer, BENCH_TRACK, seq, 0, &payload)
+                .is_ok()
+            {
                 sent_bytes += payload.len() as u64;
                 sent_pkts += 1;
                 seq = seq.wrapping_add(1);
@@ -2439,8 +2800,12 @@ impl Engine {
 
 fn av_flags(audio: bool, video: bool) -> u8 {
     let mut f = 0u8;
-    if audio { f |= 0b01; }
-    if video { f |= 0b10; }
+    if audio {
+        f |= 0b01;
+    }
+    if video {
+        f |= 0b10;
+    }
     f
 }
 
@@ -2527,10 +2892,25 @@ fn gate_of(engine: &Engine, peer: &[u8; 32]) -> Gate {
 /// Записать входящий запрос от незнакомца и (если новый) уведомить UI. Превью —
 /// короткая выжимка первого сообщения для осознанного решения. Повторные до
 /// одобрения не копим (анти-DoS).
-fn record_request(engine: &Arc<Engine>, peer: [u8; 32], preview: &str, first: Option<FirstMessage>) {
+fn record_request(
+    engine: &Arc<Engine>,
+    peer: [u8; 32],
+    preview: &str,
+    first: Option<FirstMessage>,
+) {
     let preview: String = preview.chars().take(200).collect();
-    let is_new = engine.gate.lock_safe().upsert_request(&peer, &preview, first, now()).unwrap_or(false);
-    push_event(engine, dto::UiEvent::ContactRequest { peer: hex::encode(peer), new: is_new });
+    let is_new = engine
+        .gate
+        .lock_safe()
+        .upsert_request(&peer, &preview, first, now())
+        .unwrap_or(false);
+    push_event(
+        engine,
+        dto::UiEvent::ContactRequest {
+            peer: hex::encode(peer),
+            new: is_new,
+        },
+    );
 }
 
 /// Положить событие в очередь для клиента. Принимает ТИП, а не свободный JSON:
@@ -2543,7 +2923,14 @@ fn push_event(engine: &Engine, ev: dto::UiEvent) {
 fn push_dm_message(engine: &Engine, peer: &[u8; 32], mut msg: StoredMessage) {
     if let Ok(row) = engine.messages.lock_safe().append(Chat::Dm(peer), &msg) {
         msg.row = row;
-        push_event(engine, dto::UiEvent::Message { chat: hex::encode(peer), group: false, msg });
+        push_event(
+            engine,
+            dto::UiEvent::Message {
+                chat: hex::encode(peer),
+                group: false,
+                msg,
+            },
+        );
     }
 }
 
@@ -2554,7 +2941,14 @@ fn push_group_messages(engine: &Engine, groups: &mut GroupManager) {
         if !msg.downloaded && !msg.blob_id.is_empty() && engine.blob_exists(&msg.blob_id) {
             msg.downloaded = true;
         }
-        push_event(engine, dto::UiEvent::Message { chat: hex::encode(&gid), group: true, msg });
+        push_event(
+            engine,
+            dto::UiEvent::Message {
+                chat: hex::encode(&gid),
+                group: true,
+                msg,
+            },
+        );
     }
 }
 
@@ -2569,8 +2963,15 @@ fn event_pump(
     group_meta: peerage_core::store::GroupStore,
 ) {
     let blob_dir = data_dir.join("blobs");
-    let mut groups = GroupManager::new(identity, messenger.clone(), data_dir, engine.messages.clone(), group_meta);
-    let mut blobs = blobs::BlobManager::new(messenger.clone(), peerage_blob::Limits::default(), blob_dir);
+    let mut groups = GroupManager::new(
+        identity,
+        messenger.clone(),
+        data_dir,
+        engine.messages.clone(),
+        group_meta,
+    );
+    let mut blobs =
+        blobs::BlobManager::new(messenger.clone(), peerage_blob::Limits::default(), blob_dir);
     engine.resume_all_wanted(); // докачки, начатые до перезапуска
     refresh_group_cache(&engine, &groups); // прайм кэша
     push_event(&engine, dto::UiEvent::GroupsChanged);
@@ -2582,7 +2983,9 @@ fn event_pump(
         let engine = engine.clone();
         std::thread::spawn(move || {
             while let Ok(job) = prep_rx.recv() {
-                let Some((gid, media)) = prepare_group_media(&engine, job) else { continue };
+                let Some((gid, media)) = prepare_group_media(&engine, job) else {
+                    continue;
+                };
                 if engine.jobs.send(Job::GroupMediaRef { gid, media }).is_err() {
                     break;
                 }
@@ -2620,7 +3023,9 @@ fn event_pump(
                         let _ = messenger.send_room_presence(&peer, &gid, PRESENCE_LEFT);
                     } else {
                         for m in groups.members(&gid) {
-                            if m == engine.me_pub { continue; }
+                            if m == engine.me_pub {
+                                continue;
+                            }
                             let _ = messenger.send_room_presence(&m, &gid, PRESENCE_LEFT);
                         }
                     }
@@ -2635,13 +3040,16 @@ fn event_pump(
         }
         push_group_messages(&engine, &mut groups);
         blobs.tick(); // переспросить потерянные чанки докачки (M2)
-        // Прогресс докачки наверх: UI рисует кружок вместо бесконечного спиннера.
+                      // Прогресс докачки наверх: UI рисует кружок вместо бесконечного спиннера.
         for (id, done, total) in blobs.take_progress() {
-            push_event(&engine, dto::UiEvent::BlobProgress {
-                id: hex::encode(id),
-                done,
-                total,
-            });
+            push_event(
+                &engine,
+                dto::UiEvent::BlobProgress {
+                    id: hex::encode(id),
+                    done,
+                    total,
+                },
+            );
         }
         // Не началась (велик, нет места) — снимаем заказ, чтобы он не крутился
         // вечно, и говорим человеку почему.
@@ -2649,7 +3057,13 @@ fn event_pump(
             let id_hex = hex::encode(id);
             let _ = engine.wanted.lock_safe().remove(&id_hex);
             engine.blob_expect.lock_safe().remove(&id);
-            push_event(&engine, dto::UiEvent::BlobFailed { id: id_hex, reason: why.as_str().into() });
+            push_event(
+                &engine,
+                dto::UiEvent::BlobFailed {
+                    id: id_hex,
+                    reason: why.as_str().into(),
+                },
+            );
         }
     }
 }
@@ -2663,7 +3077,9 @@ fn read_blob_at(dir: &Path, id_hex: &str) -> Option<Vec<u8>> {
     // Крупные блобы лежат в чанкованном формате (собраны потоково на диск), мелкие —
     // одним запечатанным буфером. Различаем по магии в заголовке.
     if peerage_blob::disk::read_header(&path).is_some() {
-        return peerage_blob::disk::read_all(&path, |i, b| vault::open(&vault::chunk_purpose(&id, i), b).ok());
+        return peerage_blob::disk::read_all(&path, |i, b| {
+            vault::open(&vault::chunk_purpose(&id, i), b).ok()
+        });
     }
     let raw = std::fs::read(path).ok()?;
     vault::open(&vault::blob_purpose(&id), &raw).ok()
@@ -2683,16 +3099,31 @@ fn save_blob(engine: &Arc<Engine>, id: peerage_blob::Hash, content: &[u8]) {
 /// переименовываются (`peerage_blob::disk`).
 fn write_blob_file(dir: &Path, id: peerage_blob::Hash, content: &[u8]) {
     let _ = std::fs::create_dir_all(dir);
-    let _ = peerage_core::fsutil::write_atomic(&dir.join(hex::encode(id)), &vault::seal(&vault::blob_purpose(&id), content));
+    let _ = peerage_core::fsutil::write_atomic(
+        &dir.join(hex::encode(id)),
+        &vault::seal(&vault::blob_purpose(&id), content),
+    );
 }
 
 /// Подготовить вложение для группы (см. [`Engine::store_media`]) и собрать
 /// MLS-ссылку на него. Байты участники запросят сами — мелкое сразу, крупное по
 /// кнопке. Работает в потоке подготовки, не в акторе.
 fn prepare_group_media(engine: &Arc<Engine>, job: Job) -> Option<(Vec<u8>, MediaBody)> {
-    let Job::GroupMedia { gid, source, mime, name, info } = job else { return None };
+    let Job::GroupMedia {
+        gid,
+        source,
+        mime,
+        name,
+        info,
+    } = job
+    else {
+        return None;
+    };
     let (hash, size) = engine.store_media(source, &mime)?;
-    let thumb = engine.store_thumb(info.thumb.as_deref()).map(hex::encode).unwrap_or_default();
+    let thumb = engine
+        .store_thumb(info.thumb.as_deref())
+        .map(hex::encode)
+        .unwrap_or_default();
     let media = MediaBody {
         // id проставит слой групп при отправке (он же кладёт его в историю).
         id: 0,
@@ -2744,11 +3175,14 @@ fn save_and_notify_blob(
     groups.mark_downloaded(&id_hex);
     let _ = engine.wanted.lock_safe().remove(&id_hex); // намерение исполнено
     engine.blob_expect.lock_safe().remove(&done.id);
-    push_event(engine, dto::UiEvent::BlobReceived {
-        id: id_hex,
-        mime: done.manifest.mime,
-        size: done.manifest.size,
-    });
+    push_event(
+        engine,
+        dto::UiEvent::BlobReceived {
+            id: id_hex,
+            mime: done.manifest.mime,
+            size: done.manifest.size,
+        },
+    );
 }
 
 /// Разослать маячок присутствия членам всех наших комнат и подчистить протухших.
@@ -2767,7 +3201,9 @@ fn beacon_tick(engine: &Arc<Engine>, groups: &mut GroupManager, messenger: &Mess
             let _ = messenger.send_room_presence(&peer, &gid, flags);
         } else {
             for m in groups.members(&gid) {
-                if m == engine.me_pub { continue; }
+                if m == engine.me_pub {
+                    continue;
+                }
                 let _ = messenger.send_room_presence(&m, &gid, flags);
             }
         }
@@ -2777,7 +3213,12 @@ fn beacon_tick(engine: &Arc<Engine>, groups: &mut GroupManager, messenger: &Mess
 }
 
 /// Обработать одно событие мессенджера: персист + JSON в очередь + маршрутизация групп.
-fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blobs::BlobManager, ev: Event) {
+fn handle_event(
+    engine: &Arc<Engine>,
+    groups: &mut GroupManager,
+    blobs: &mut blobs::BlobManager,
+    ev: Event,
+) {
     match ev {
         Event::Presence { peer, online } => {
             if online {
@@ -2796,21 +3237,39 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // пригласивший был офлайн. Он вернулся — повторяем KeyPackage.
                 let _ = engine.jobs.send(Job::Cmd(GroupCmd::PeerOnline { peer }));
             }
-            push_event(engine, dto::UiEvent::Presence { peer: hex::encode(peer), online });
+            push_event(
+                engine,
+                dto::UiEvent::Presence {
+                    peer: hex::encode(peer),
+                    online,
+                },
+            );
             // ADR-007: контакт вернулся, а объявление о смене нашего адреса до него
             // не доехало — досылаем сейчас.
             if online {
                 engine.announce_rotation_to(&peer);
             }
         }
-        Event::Text { peer, id, text, reply_to, reply_mine, fwd_from, fwd_anon } => {
+        Event::Text {
+            peer,
+            id,
+            text,
+            reply_to,
+            reply_mine,
+            fwd_from,
+            fwd_anon,
+        } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
                     // Откладываем сам текст. Ответ незнакомцу ссылаться не на что, а
                     // пометку «переслано» первого сообщения не храним — не стоит
                     // отдельной схемы.
-                    let first = FirstMessage { id, text: text.clone(), time: now() };
+                    let first = FirstMessage {
+                        id,
+                        text: text.clone(),
+                        time: now(),
+                    };
                     record_request(engine, peer, &text, Some(first));
                     return;
                 }
@@ -2818,12 +3277,19 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             }
             // Дедуп повторной доставки: офлайн-досылка со стабильным id приходит дважды.
             let peer_hex = hex::encode(peer);
-            let dup = engine.messages.lock_safe().contains(Chat::Dm(&peer), &peer_hex, id);
+            let dup = engine
+                .messages
+                .lock_safe()
+                .contains(Chat::Dm(&peer), &peer_hex, id);
             if !dup {
                 // reply_mine прислан С ТОЧКИ ЗРЕНИЯ ОТПРАВИТЕЛЯ и уже перевёрнут выше,
                 // поэтому «моё» здесь — действительно наше сообщение.
                 let msg = StoredMessage {
-                    id, text, mine: false, time: now(), status: String::new(),
+                    id,
+                    text,
+                    mine: false,
+                    time: now(),
+                    status: String::new(),
                     sender: peer_hex,
                     reply_to,
                     reply_sender: engine.reply_author(&peer, reply_to, reply_mine),
@@ -2844,21 +3310,34 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 .edit_text(Chat::Dm(&peer), &author, target, &text, &[], now())
                 .unwrap_or(false);
             if changed {
-                push_event(engine, dto::UiEvent::MessageEdited {
-                    chat: author.clone(),
-                    id: target,
-                    sender: author,
-                    text,
-                    mentions: Vec::new(),
-                });
+                push_event(
+                    engine,
+                    dto::UiEvent::MessageEdited {
+                        chat: author.clone(),
+                        id: target,
+                        sender: author,
+                        text,
+                        mentions: Vec::new(),
+                    },
+                );
             }
         }
-        Event::Pin { peer, target, target_mine, on } => {
+        Event::Pin {
+            peer,
+            target,
+            target_mine,
+            on,
+        } => {
             // Ссылка на сообщение — «автор + id»: чьё именно, решает перевёрнутый
             // флаг (его перевернул мессенджер на приёме).
             let author = engine.author_hex(&peer, target_mine);
             engine.apply_pin(Chat::Dm(&peer), target, &author, on, &hex::encode(peer));
-            push_event(engine, dto::UiEvent::PinsChanged { chat: hex::encode(peer) });
+            push_event(
+                engine,
+                dto::UiEvent::PinsChanged {
+                    chat: hex::encode(peer),
+                },
+            );
         }
         Event::Retract { peer, target } => {
             // Удаляем ЕГО сообщение (mine=false): отозвать наше собственное он не может.
@@ -2868,22 +3347,49 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 .delete_many(Chat::Dm(&peer), &[(target, hex::encode(peer))])
                 .unwrap_or(0);
             if n > 0 {
-                push_event(engine, dto::UiEvent::Retracted { peer: hex::encode(peer), id: target });
+                push_event(
+                    engine,
+                    dto::UiEvent::Retracted {
+                        peer: hex::encode(peer),
+                        id: target,
+                    },
+                );
             }
         }
         Event::Media {
-            peer, id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
-            fwd_anon, reply_to, reply_mine,
+            peer,
+            id,
+            hash,
+            mime,
+            name,
+            size,
+            duration_ms,
+            width,
+            height,
+            caption,
+            thumb,
+            fwd_from,
+            fwd_anon,
+            reply_to,
+            reply_mine,
         } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
                 Gate::Stranger => {
-                    record_request(engine, peer, &format!("[{}]", Engine::media_kind(&mime)), None);
+                    record_request(
+                        engine,
+                        peer,
+                        &format!("[{}]", Engine::media_kind(&mime)),
+                        None,
+                    );
                     return;
                 }
                 Gate::Contact => {}
             }
-            let dup = engine.messages.lock_safe().contains(Chat::Dm(&peer), &hex::encode(peer), id);
+            let dup = engine
+                .messages
+                .lock_safe()
+                .contains(Chat::Dm(&peer), &hex::encode(peer), id);
             if !dup {
                 let t = now();
                 let id_hex = hex::encode(&hash);
@@ -2894,13 +3400,23 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // байты качаем по кнопке — иначе чужое видео на 800 МБ приедет само.
                 let auto = have || size < AUTO_DOWNLOAD_LIMIT;
                 let msg = StoredMessage {
-                    id, mine: false, time: t, status: String::new(),
+                    id,
+                    mine: false,
+                    time: t,
+                    status: String::new(),
                     sender: hex::encode(peer),
                     fwd_from: fwd_from.clone(),
                     fwd_anon,
                     text: caption.clone(),
-                    kind: kind.into(), blob_id: id_hex.clone(), mime: mime.clone(), name: name.clone(),
-                    size, duration_ms, width, height, thumb_id: thumb_hex.clone(),
+                    kind: kind.into(),
+                    blob_id: id_hex.clone(),
+                    mime: mime.clone(),
+                    name: name.clone(),
+                    size,
+                    duration_ms,
+                    width,
+                    height,
+                    thumb_id: thumb_hex.clone(),
                     downloaded: have,
                     reply_to,
                     // Флаг с провода уже перевёрнут мессенджером: «моё» здесь —
@@ -2925,18 +3441,41 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             }
         }
         Event::Ack { peer, id } => {
-            let _ = engine.messages.lock_safe().set_status(Chat::Dm(&peer), id, "delivered");
-            push_event(engine, dto::UiEvent::Ack { peer: hex::encode(peer), id });
+            let _ = engine
+                .messages
+                .lock_safe()
+                .set_status(Chat::Dm(&peer), id, "delivered");
+            push_event(
+                engine,
+                dto::UiEvent::Ack {
+                    peer: hex::encode(peer),
+                    id,
+                },
+            );
         }
         Event::Undelivered { peer, id } => {
             // "queued", а НЕ "failed": ретраи в памяти кончились, но сообщение лежит в
             // персистентной офлайн-очереди и уйдёт, когда получатель появится. Раньше
             // в БД писалось "failed" (в UI при этом рисовался часами "queued"), и после
             // перезапуска ждущее доставки сообщение показывалось красным «!».
-            let _ = engine.messages.lock_safe().set_status(Chat::Dm(&peer), id, "queued");
-            push_event(engine, dto::UiEvent::Undelivered { peer: hex::encode(peer), id });
+            let _ = engine
+                .messages
+                .lock_safe()
+                .set_status(Chat::Dm(&peer), id, "queued");
+            push_event(
+                engine,
+                dto::UiEvent::Undelivered {
+                    peer: hex::encode(peer),
+                    id,
+                },
+            );
         }
-        Event::RoomInvite { peer, room_id, audio, video } => {
+        Event::RoomInvite {
+            peer,
+            room_id,
+            audio,
+            video,
+        } => {
             // Звать можно либо в нашу общую DM-комнату (только контакт: незнакомец
             // идёт через запрос в контакты, а не через звонок), либо в комнату группы,
             // где звонящий состоит.
@@ -2956,17 +3495,23 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // поднимется в room_join(_dm), если откажется — в room_decline_*.
                 engine.begin_call(&peer, &room_id, true, "missed");
             }
-            push_event(engine, dto::UiEvent::RoomInvite {
+            push_event(
+                engine,
+                dto::UiEvent::RoomInvite {
+                    peer: hex::encode(peer),
+                    room_id: hex::encode(&room_id),
+                    audio,
+                    video,
+                },
+            );
+        }
+        Event::RoomDecline { peer, room_id } => push_event(
+            engine,
+            dto::UiEvent::RoomDecline {
                 peer: hex::encode(peer),
                 room_id: hex::encode(&room_id),
-                audio,
-                video,
-            });
-        }
-        Event::RoomDecline { peer, room_id } => push_event(engine, dto::UiEvent::RoomDecline {
-            peer: hex::encode(peer),
-            room_id: hex::encode(&room_id),
-        }),
+            },
+        ),
         Event::Group { peer, data } => {
             let out = groups.on_group(peer, &data);
             // Саму строку клиенту отдаст push_group_messages. Здесь — только докачка:
@@ -2994,24 +3539,37 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // Строка исчезла из истории — UI обязан перечитать её целиком, иначе
                 // отозванное останется на экране до перезахода в чат.
                 if let Some(gid) = &out.gid {
-                    push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(gid) });
+                    push_event(
+                        engine,
+                        dto::UiEvent::GroupRetracted {
+                            gid: hex::encode(gid),
+                        },
+                    );
                 }
             }
             if let Some((sender, id, text, mentions)) = out.edited.clone() {
                 if let Some(gid) = &out.gid {
-                    push_event(engine, dto::UiEvent::MessageEdited {
-                        chat: hex::encode(gid),
-                        id,
-                        sender,
-                        text,
-                        mentions,
-                    });
+                    push_event(
+                        engine,
+                        dto::UiEvent::MessageEdited {
+                            chat: hex::encode(gid),
+                            id,
+                            sender,
+                            text,
+                            mentions,
+                        },
+                    );
                 }
             }
             if out.pinned {
                 // Шапка чата живёт отдельно от ленты — событие своё.
                 if let Some(gid) = &out.gid {
-                    push_event(engine, dto::UiEvent::PinsChanged { chat: hex::encode(gid) });
+                    push_event(
+                        engine,
+                        dto::UiEvent::PinsChanged {
+                            chat: hex::encode(gid),
+                        },
+                    );
                 }
             }
             if out.joined {
@@ -3032,7 +3590,12 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 // событием (чтобы показать «вы удалены» и закрыть экран группы).
                 refresh_group_cache(engine, groups);
                 if let Some(gid) = &out.gid {
-                    push_event(engine, dto::UiEvent::GroupRemoved { gid: hex::encode(gid) });
+                    push_event(
+                        engine,
+                        dto::UiEvent::GroupRemoved {
+                            gid: hex::encode(gid),
+                        },
+                    );
                 }
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
@@ -3062,7 +3625,9 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         // Манифест принимаем только на свой запрос и только от того, у кого просили:
         // иначе любой залил бы нам файл без спроса, в обход гейта и кнопки.
         Event::BlobManifest { peer, manifest } => {
-            let Ok(m) = peerage_blob::Manifest::from_json(&manifest) else { return };
+            let Ok(m) = peerage_blob::Manifest::from_json(&manifest) else {
+                return;
+            };
             if !engine.blob_expected(&peer, &m.id) {
                 return;
             }
@@ -3070,31 +3635,55 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 save_and_notify_blob(engine, groups, peer, done);
             }
         }
-        Event::BlobManifestPart { peer, id, mime, size, part, total, hashes } => {
+        Event::BlobManifestPart {
+            peer,
+            id,
+            mime,
+            size,
+            part,
+            total,
+            hashes,
+        } => {
             if !engine.blob_expected(&peer, &id) {
                 return;
             }
-            if let Some(done) =
-                blobs.on_manifest_part(peer, &id, &mime, size, part, total, &hashes)
+            if let Some(done) = blobs.on_manifest_part(peer, &id, &mime, size, part, total, &hashes)
             {
                 save_and_notify_blob(engine, groups, peer, done);
             }
         }
         Event::BlobRequest { peer, id, index } => blobs.on_request(&id, index, peer),
-        Event::BlobChunk { peer, id, index, data } => {
+        Event::BlobChunk {
+            peer,
+            id,
+            index,
+            data,
+        } => {
             if let Some(done) = blobs.on_chunk(peer, &id, index, &data) {
                 save_and_notify_blob(engine, groups, peer, done);
             }
         }
         // M2 профиль: контакт прислал самоназвание + хэш аватара.
-        Event::ProfileUpdate { peer, name, avatar_hash, ask_back } => {
+        Event::ProfileUpdate {
+            peer,
+            name,
+            avatar_hash,
+            ask_back,
+        } => {
             // Только от контактов (профиль не принимаем от посторонних). ВАЖНО: гард лока
             // в условии `if` живёт до конца тела → повторный лок внутри = дедлок; поэтому
             // читаем `contains` в переменную (гард снимается на `;`).
             let is_contact = engine.contacts.lock_safe().contains(&peer);
             if is_contact {
-                let avatar_id = if avatar_hash.is_empty() { String::new() } else { hex::encode(&avatar_hash) };
-                let _ = engine.contacts.lock_safe().set_profile(&peer, &name, &avatar_id);
+                let avatar_id = if avatar_hash.is_empty() {
+                    String::new()
+                } else {
+                    hex::encode(&avatar_hash)
+                };
+                let _ = engine
+                    .contacts
+                    .lock_safe()
+                    .set_profile(&peer, &name, &avatar_id);
                 // Аватар тянем по хэшу ТОЛЬКО если новый и блоба ещё нет (контент-адрес → дедуп).
                 if !avatar_id.is_empty() && !engine.blob_exists(&avatar_id) {
                     engine.request_blob(&peer, &avatar_hash);
@@ -3111,7 +3700,12 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
         // проверка подписи ключом личности, и монотонность эпохи. Приняли —
         // немедленно обновляем карту адресов, иначе следующее сообщение уйдёт на
         // покинутый ключ.
-        Event::TransportRotate { peer, epoch, transport_pub, sig } => {
+        Event::TransportRotate {
+            peer,
+            epoch,
+            transport_pub,
+            sig,
+        } => {
             let (Ok(tp), Ok(sg)) = (
                 <[u8; 32]>::try_from(transport_pub.as_slice()),
                 <[u8; 64]>::try_from(sig.as_slice()),
@@ -3130,22 +3724,24 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 .apply_transport_rotate(&peer, epoch, &tp, &sg)
                 .unwrap_or(false);
             if applied {
-                log::info!(
-                    "контакт {:02x?}… сменил адрес (эпоха {epoch})",
-                    &peer[..4],
-                );
+                log::info!("контакт {:02x?}… сменил адрес (эпоха {epoch})", &peer[..4],);
                 engine.refresh_transports();
                 push_event(engine, dto::UiEvent::ContactsChanged);
             }
         }
         // Пир просит манифест нашего блоба (аватар, вложение чата или группы).
         Event::BlobManifestRequest { peer, id } => {
-            let Ok(hash) = <[u8; 32]>::try_from(id.as_slice()) else { return };
+            let Ok(hash) = <[u8; 32]>::try_from(id.as_slice()) else {
+                return;
+            };
             // Отдаём только своим: контакту или участнику общей группы. Хэш — не
             // секрет (он ходит в пересылках и группах, у публичного файла его считает
             // кто угодно), и без этой проверки любой узнавал бы, есть ли у нас файл.
             let ours = matches!(gate_of(engine, &peer), Gate::Contact)
-                || groups.group_ids().iter().any(|g| groups.members(g).contains(&peer));
+                || groups
+                    .group_ids()
+                    .iter()
+                    .any(|g| groups.members(g).contains(&peer));
             if !ours {
                 return;
             }
@@ -3157,11 +3753,16 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
             let path = engine.blob_dir.join(&id_hex);
             // Mime для аватара точный; у вложения его знает клиент из ссылки.
             let meta = engine.load_profile_meta();
-            let mime = if meta.avatar_id == id_hex { meta.avatar_mime } else { "application/octet-stream".into() };
+            let mime = if meta.avatar_id == id_hex {
+                meta.avatar_mime
+            } else {
+                "application/octet-stream".into()
+            };
             if peerage_blob::disk::read_header(&path).is_some() {
                 // Крупный блоб не поднимаем в память: манифест считаем потоково,
                 // чанки отдаём с диска по одному.
-                let open = |i: usize, b: &[u8]| vault::open(&vault::chunk_purpose(&hash, i), b).ok();
+                let open =
+                    |i: usize, b: &[u8]| vault::open(&vault::chunk_purpose(&hash, i), b).ok();
                 if let Some(m) = peerage_blob::disk::manifest_of_stored(&path, mime, open) {
                     if m.id == hash {
                         blobs.offer_stored(peer, m, path);
@@ -3171,7 +3772,11 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                 blobs.offer(peer, &bytes, &mime);
             }
         }
-        Event::GroupKeyReply { peer, gid, key_package } => {
+        Event::GroupKeyReply {
+            peer,
+            gid,
+            key_package,
+        } => {
             if groups.on_key_reply(peer, &gid, &key_package) {
                 refresh_group_cache(engine, groups);
                 push_event(engine, dto::UiEvent::GroupsChanged);
@@ -3191,23 +3796,34 @@ fn handle_event(engine: &Arc<Engine>, groups: &mut GroupManager, blobs: &mut blo
                         m.remove(&peer);
                     }
                 } else {
-                    rs.remote.entry(gid.clone()).or_default().insert(peer, (Instant::now(), flags));
+                    rs.remote
+                        .entry(gid.clone())
+                        .or_default()
+                        .insert(peer, (Instant::now(), flags));
                 }
             }
             // Собеседник появился в комнате — значит наш исходящий звонок
             // состоялся. Без этого «позвонил и поговорил» осталось бы в журнале
             // как «не дозвонился».
             if !left {
-                if let Some(c) = engine.active_call.lock_safe().as_ref().filter(|c| c.room == gid) {
+                if let Some(c) = engine
+                    .active_call
+                    .lock_safe()
+                    .as_ref()
+                    .filter(|c| c.room == gid)
+                {
                     engine.calls.lock_safe().set_outcome(c.id, "answered");
                 }
             }
-            push_event(engine, dto::UiEvent::RoomPresence {
-                gid: hex::encode(&gid),
-                peer: hex::encode(peer),
-                flags,
-                left,
-            });
+            push_event(
+                engine,
+                dto::UiEvent::RoomPresence {
+                    gid: hex::encode(&gid),
+                    peer: hex::encode(peer),
+                    flags,
+                    left,
+                },
+            );
             engine.sync_room_members();
         }
     }
@@ -3221,10 +3837,14 @@ fn refresh_group_cache(engine: &Arc<Engine>, groups: &GroupManager) {
         cache.invites = groups.invites_json();
         // Пересобираем целиком: вышедшая группа не должна оставлять ростер в кэше
         // (а с ним — участников в наборе связи).
-        cache.members = groups.group_ids().into_iter().map(|g| {
-            let m = groups.members_json(&g);
-            (g, m)
-        }).collect();
+        cache.members = groups
+            .group_ids()
+            .into_iter()
+            .map(|g| {
+                let m = groups.members_json(&g);
+                (g, m)
+            })
+            .collect();
     }
     engine.refresh_targets(); // состав групп мог смениться
 }
@@ -3253,42 +3873,84 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                 push_event(engine, dto::UiEvent::GroupInvitesChanged);
             }
         }
-        GroupCmd::SendText { gid, text, reply_to, reply_sender, fwd_from, fwd_anon, mentions } => {
+        GroupCmd::SendText {
+            gid,
+            text,
+            reply_to,
+            reply_sender,
+            fwd_from,
+            fwd_anon,
+            mentions,
+        } => {
             // Своё сообщение уйдёт в UI событием `message` (take_fresh) — с id,
             // который присвоил слой групп: на него сразу можно ответить и отозвать.
             let sent = groups.send_text_full(
-                &gid, &text, reply_to, &reply_sender, &fwd_from, fwd_anon, mentions,
+                &gid,
+                &text,
+                reply_to,
+                &reply_sender,
+                &fwd_from,
+                fwd_anon,
+                mentions,
             );
             if sent {
                 refresh_group_cache(engine, groups);
             }
         }
-        GroupCmd::Edit { gid, id, text, mentions } => {
+        GroupCmd::Edit {
+            gid,
+            id,
+            text,
+            mentions,
+        } => {
             if let Some((sender, text, mentions)) = groups.edit(&gid, id, &text, &mentions) {
-                push_event(engine, dto::UiEvent::MessageEdited {
-                    chat: hex::encode(&gid),
-                    id,
-                    sender,
-                    text,
-                    mentions,
-                });
+                push_event(
+                    engine,
+                    dto::UiEvent::MessageEdited {
+                        chat: hex::encode(&gid),
+                        id,
+                        sender,
+                        text,
+                        mentions,
+                    },
+                );
             }
         }
-        GroupCmd::Pin { gid, id, sender, on } => {
+        GroupCmd::Pin {
+            gid,
+            id,
+            sender,
+            on,
+        } => {
             if groups.pin(&gid, id, &sender, on) {
-                push_event(engine, dto::UiEvent::PinsChanged { chat: hex::encode(&gid) });
+                push_event(
+                    engine,
+                    dto::UiEvent::PinsChanged {
+                        chat: hex::encode(&gid),
+                    },
+                );
             }
         }
         GroupCmd::Retract { gid, ids } => {
             if groups.retract(&gid, &ids) > 0 {
                 refresh_group_cache(engine, groups);
-                push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(&gid) });
+                push_event(
+                    engine,
+                    dto::UiEvent::GroupRetracted {
+                        gid: hex::encode(&gid),
+                    },
+                );
             }
         }
         GroupCmd::DeleteLocal { gid, refs } => {
             if groups.delete_local(&gid, &refs) > 0 {
                 refresh_group_cache(engine, groups);
-                push_event(engine, dto::UiEvent::GroupRetracted { gid: hex::encode(&gid) });
+                push_event(
+                    engine,
+                    dto::UiEvent::GroupRetracted {
+                        gid: hex::encode(&gid),
+                    },
+                );
             }
         }
         GroupCmd::PeerOnline { peer } => {
@@ -3339,7 +4001,9 @@ pub fn load_identity(dir: &Path) -> Result<Identity, String> {
     match Profile::load_or_create(&dir.join("profile.json")) {
         Ok(p) => Ok(p.identity),
         Err(peerage_core::store::StoreError::Vault(peerage_core::vault::VaultError::Decrypt)) => {
-            log::warn!("профиль не расшифровывается этим ключом хранилища — нужен выбор пользователя");
+            log::warn!(
+                "профиль не расшифровывается этим ключом хранилища — нужен выбор пользователя"
+            );
             Err(START_VAULT_MISMATCH.into())
         }
         Err(e) => Err(e.to_string()),
@@ -3350,7 +4014,10 @@ pub fn load_identity(dir: &Path) -> Result<Identity, String> {
 /// [`QUARANTINE_KEEP`], переезжает в `quarantine/<время>/`. Не удаление — если
 /// старый ключ найдётся, данные можно вернуть руками. Возвращает путь карантина.
 pub fn quarantine_user_data(dir: &Path) -> std::io::Result<PathBuf> {
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let root = dir.join(QUARANTINE_DIR);
     let mut dst = root.join(secs.to_string());
     let mut n = 1;
@@ -3394,7 +4061,13 @@ impl Engine {
         for uri in public_peer_uris() {
             let _ = node.add_peer(uri);
         }
-        Self::start_inner(dir, identity, Arc::new(node), address, peerage_messenger::Config::default())
+        Self::start_inner(
+            dir,
+            identity,
+            Arc::new(node),
+            address,
+            peerage_messenger::Config::default(),
+        )
     }
 
     /// Поднять движок поверх ПРОИЗВОЛЬНОГО транспорта (loopback в интеграционных
@@ -3405,7 +4078,12 @@ impl Engine {
         identity: Identity,
         transport: Arc<dyn peerage_messenger::Transport>,
     ) -> Result<StartOk, String> {
-        Self::start_with_transport_cfg(dir, identity, transport, peerage_messenger::Config::default())
+        Self::start_with_transport_cfg(
+            dir,
+            identity,
+            transport,
+            peerage_messenger::Config::default(),
+        )
     }
 
     /// То же, но с явным [`peerage_messenger::Config`] — нужен тестам, которые проверяют
@@ -3444,8 +4122,7 @@ impl Engine {
         let messages = MessageStore::open(db.clone());
         let identity_for_groups = identity.clone();
         let identity_for_engine = identity.clone();
-        let (messenger, rx) =
-            Messenger::start_with_transport(identity, transport, cfg);
+        let (messenger, rx) = Messenger::start_with_transport(identity, transport, cfg);
         let messenger = Arc::new(messenger);
         // Тиры и набор связи зальём ниже, после создания Engine (refresh_budgets).
 
@@ -3523,17 +4200,33 @@ impl Engine {
         // Офлайн-очередь: сперва выбросить просроченное по тиру (тиры уже залиты),
         // потом отдать её мессенджеру — он и дошлёт оставшееся.
         let dropped = engine.outbox.lock_safe().prune_expired(now());
-        log::info!("outbox: выброшено просроченных {dropped}, ждёт {}", engine.outbox.lock_safe().pending_count());
-        engine.messenger.set_outbox(peerage_core::outbox::OutboxStore::new(db.clone()));
+        log::info!(
+            "outbox: выброшено просроченных {dropped}, ждёт {}",
+            engine.outbox.lock_safe().pending_count()
+        );
+        engine
+            .messenger
+            .set_outbox(peerage_core::outbox::OutboxStore::new(db.clone()));
 
         let pump_engine = engine.clone();
         let groups_dir = dir.clone();
         let group_meta = peerage_core::store::GroupStore::new(db.clone());
         std::thread::spawn(move || {
-            event_pump(pump_engine, job_rx, identity_for_groups, messenger, groups_dir, group_meta)
+            event_pump(
+                pump_engine,
+                job_rx,
+                identity_for_groups,
+                messenger,
+                groups_dir,
+                group_meta,
+            )
         });
 
-        Ok(StartOk { engine, pubkey: me_pub, address })
+        Ok(StartOk {
+            engine,
+            pubkey: me_pub,
+            address,
+        })
     }
 }
 
@@ -3541,7 +4234,9 @@ impl Engine {
 mod presence_tests {
     use super::*;
 
-    fn k(b: u8) -> [u8; 32] { [b; 32] }
+    fn k(b: u8) -> [u8; 32] {
+        [b; 32]
+    }
 
     #[test]
     fn live_filters_stale_beacons() {
@@ -3575,6 +4270,8 @@ mod presence_tests {
     #[test]
     fn empty_room_has_no_participants() {
         let rs = RoomState::default();
-        assert!(rs.live_with_flags(&[7u8], Instant::now(), Duration::from_secs(12)).is_empty());
+        assert!(rs
+            .live_with_flags(&[7u8], Instant::now(), Duration::from_secs(12))
+            .is_empty());
     }
 }

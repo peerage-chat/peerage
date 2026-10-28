@@ -31,7 +31,7 @@ All integers are big-endian.
 | 1 | 1 | track | `0` audio, `1` camera video, `2` screen. Unknown: drop. |
 | 2 | 4 | stream_id | Random, chosen by the sender for each call. A new value means the sender started over. |
 | 6 | 2 | seq | Per-track packet counter, wraps at 2¹⁶. |
-| 8 | 2 | tw_seq | Transport-wide counter: one per recipient, across all tracks, wraps at 2¹⁶. |
+| 8 | 2 | tw_seq | Transport-wide counter: one per recipient, across all tracks, in the order packets leave the sender (after pacing), wraps at 2¹⁶. |
 | 10 | 4 | ts | Capture time. Audio: 48 kHz sample counter (+960 per 20 ms frame). Video: 90 kHz clock from the sender's first video frame. Wraps. |
 | 14 | … | payload | Audio: one Opus frame. Video: one fragment (below). |
 
@@ -50,8 +50,9 @@ A packet shorter than 14 bytes is dropped. The whole packet is at most 14 + 60 0
   recognised from sizes alone. Discontinuous transmission (no packets in silence) stays
   off for the same reason.
 
-`tw_seq` is not used by receivers yet: it is there for the delay-based bandwidth estimate
-(ADR-014 step 7), so that adding the estimate does not need another format change.
+`tw_seq` numbers what actually left for this recipient, retransmissions included; the
+recipient reports when each one arrived (transport feedback, below), and the sender's
+bandwidth estimate compares that with when it left.
 
 **Retransmitted media** (`0x24`) is a video packet sent again because the receiver asked
 for it (NACK, below). Everything after byte 0 is the original packet's, except `tw_seq`,
@@ -112,6 +113,60 @@ Report block — how the reporter receives one stream of the addressee:
 A hostile member can lie in its reports. Until bandwidth estimation (ADR-014 step 7),
 reports only feed statistics; after it, a lie can lower only what we send to everyone,
 which a member can already cause by dropping our packets.
+
+## Transport feedback
+
+Every member tells every other member, every 100 ms while packets are coming, when each
+of that member's packets arrived. The sender knows when it sent each one; growing gaps
+between arrival and departure mean a queue is building somewhere on the path.
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| 0 | 1 | version/type | `0x25`: version 2, type 5 = transport feedback. |
+| 1 | 2 | base_seq | `tw_seq` of the first packet covered. |
+| 3 | 2 | count | Packets covered: `base_seq … base_seq + count − 1`, `1 ≤ count ≤ 1024`. |
+| 5 | 4 | ref_time | Arrival of the earliest received packet among them, in 250 µs units on the reporter's clock (arbitrary start, wraps). |
+| 9 | 2·count | deltas | Per packet: arrival after `ref_time` in 250 µs units (capped at `0xFFFE`, 16 s); `0xFFFF` = not received. |
+
+A feedback whose length is not exactly `9 + 2·count`, or with `count = 0` or
+`count > 1024`, is dropped.
+
+**Reporter.** Each feedback covers, without gaps, from the first `tw_seq` not yet
+reported to the newest received; a packet arriving after its range was reported is
+not reported again. A range longer than 1024 keeps its newest 1024.
+
+**Sender — bandwidth estimate** (per member, after GCC, draft-ietf-rmcat-gcc-02):
+
+- *Delay.* Packets sent within 5 ms of each other form a group. For consecutive groups,
+  `(arrival gap − departure gap)` is accumulated, smoothed (0.9), and the slope over
+  the last 20 groups (least squares) is compared with an adaptive threshold (starts at
+  12.5, follows |trend| up slowly and down fast, 6…600). Above it for more than 10 ms
+  and still rising: overuse. Below its negative: underuse.
+- *Delay-based rate.* Overuse: down to 85 % of the bitrate that actually arrived in the
+  last 0.5 s, at most once per RTT + 100 ms. Underuse: hold. Otherwise grow by 8 % a
+  second, or by one 1200-byte packet per RTT + 100 ms near the bitrate of the last
+  overuse.
+- *Loss-based rate.* Loss is counted over windows of at least a second, minus the
+  link's inherent loss: a level that drops at once to any lower measurement and rises
+  by a tenth of the difference per window (≈ 10 s), capped at 10 %. Constant loss that
+  does not depend on our rate (radio, a starved CPU on a node) thus fades into the
+  background, while a burst from congestion counts in full. Above 10 % the rate drops
+  by half that excess (from the current estimate); below 2 % it grows by 8 % a second;
+  in between it holds.
+- *Estimate* = the lower of the two. They are kept apart (as in WebRTC) so that
+  delay-triggered cuts cannot ratchet the estimate down while moderate loss forbids
+  growth. Both start at the upper bound (set by the caller from the codec settings)
+  and stay between the bounds.
+
+The encoders get the lowest estimate across members (one encoder serves everyone). A
+member who lies in its feedback can lower only what we send, which it could already
+cause by dropping our packets.
+
+**Sender — pacing.** Video and retransmissions leave at 2.5 × the estimate × the number
+of members, with at most 5 ms of unused rate saved up, so a keyframe spreads over
+milliseconds instead of overflowing a queue on the path; no video packet waits longer
+than 0.5 s (the pace rises instead). Control packets (reports, feedback, NACK, keyframe
+requests) and audio are never delayed; retransmissions go before new video.
 
 ## NACK
 

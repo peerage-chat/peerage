@@ -30,6 +30,9 @@ class VideoSender(
     private val fps: Int,
     private val bitrate: Int,
     startFront: Boolean = true,
+    /** Битрейт по оценке полосы до собеседников (0 — неизвестен). Зовётся из потока
+     *  кодера, не из Compose. */
+    private val targetBitrate: () -> Int = { 0 },
     /** (access-unit, ключевой, угол сенсора / 90, fps) → `true`, если собеседник
      *  просит ключевой кадр. */
     private val sendVideo: (ByteArray, Boolean, Int, Int) -> Boolean,
@@ -221,11 +224,30 @@ class VideoSender(
                     encodedCount++
                     if (encodedCount % 30 == 0) {
                         android.util.Log.i("VideoSender", "Encoded and sent 30 frames, last size = ${au.size} bytes (key=$key)")
+                        adaptBitrate()
                     }
                     if (sendVideo(au, key, (sensorOrientation / 90) % 4, fps)) requestKeyframe()
                 }
             }
             runCatching { enc.releaseOutputBuffer(idx, false) }
+        }
+    }
+
+    /** Битрейт, выставленный кодеру сейчас. */
+    private var currentBitrate = bitrate
+
+    /** Подстроить битрейт кодера под оценку полосы (раз в ~секунду). Мелкие
+     *  колебания не трогаем: каждый setParameters — лишняя работа кодеку. */
+    private fun adaptBitrate() {
+        val enc = encoder ?: return
+        val target = targetBitrate().coerceAtMost(bitrate)
+        if (target <= 0) return
+        if (kotlin.math.abs(target - currentBitrate) * 10 < currentBitrate) return
+        val p = android.os.Bundle()
+        p.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, target)
+        if (runCatching { enc.setParameters(p) }.isSuccess) {
+            android.util.Log.i("VideoSender", "bitrate $currentBitrate → $target")
+            currentBitrate = target
         }
     }
 

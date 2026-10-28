@@ -5,8 +5,9 @@
 use std::time::{Duration, Instant};
 
 use litertc::{
-    parse_keyframe_request, parse_media, parse_nack, parse_report, parse_video_frag, write_nack,
-    write_report, Config, Session, VideoInfo, VideoReassembler,
+    parse_keyframe_request, parse_media, parse_nack, parse_report, parse_transport_feedback,
+    parse_video_frag, write_nack, write_report, write_transport_feedback, Config, Session,
+    VideoInfo, VideoReassembler,
 };
 use proptest::prelude::*;
 
@@ -34,7 +35,7 @@ proptest! {
     /// разбор NACK, запросов и повторов).
     #[test]
     fn session_never_panics(
-        dgs in proptest::collection::vec((0u8..6, proptest::collection::vec(any::<u8>(), 0..96)), 0..64)
+        dgs in proptest::collection::vec((0u8..7, proptest::collection::vec(any::<u8>(), 0..96)), 0..64)
     ) {
         let t0 = Instant::now();
         let mut s = Session::new(Config { audio_clock_hz: 48_000, audio_frame_samples: 960, jitter_depth: 2, stream_id: 7 });
@@ -42,7 +43,7 @@ proptest! {
         for (i, (kind, mut d)) in dgs.into_iter().enumerate() {
             let now = t0 + Duration::from_millis(i as u64 * 7);
             if let Some(b) = d.first_mut() {
-                *b = [0x20, 0x21, 0x22, 0x23, 0x24, *b][kind as usize];
+                *b = [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, *b][kind as usize];
             }
             if i % 5 == 0 {
                 s.send_video(now, &d, VideoInfo { keyframe: i % 10 == 0, ..Default::default() });
@@ -53,6 +54,14 @@ proptest! {
             while s.pull_video(&1).is_some() {}
             let _ = s.pull_audio(&1);
             s.request_keyframe(now, &1);
+        }
+    }
+
+    /// Транспортная обратная связь: не паникует, разобранная переживает запись.
+    #[test]
+    fn parse_transport_feedback_never_panics_and_roundtrips(data in proptest::collection::vec(any::<u8>(), 0..300)) {
+        if let Some(f) = parse_transport_feedback(&data) {
+            prop_assert_eq!(write_transport_feedback(&f).and_then(|b| parse_transport_feedback(&b)), Some(f));
         }
     }
 

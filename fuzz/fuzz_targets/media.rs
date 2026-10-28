@@ -15,6 +15,7 @@ fuzz_target!(|data: &[u8]| {
     let _ = parse_report(data);
     let _ = parse_nack(data);
     let _ = parse_keyframe_request(data);
+    let _ = litertc::parse_transport_feedback(data);
     let t0 = Instant::now();
     let mut asm = VideoReassembler::new();
     let mut s = Session::new(Config {

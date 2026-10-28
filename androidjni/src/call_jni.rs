@@ -328,6 +328,32 @@ pub extern "system" fn Java_chat_peerage_Native_roomRequestKeyframe<'local>(
     });
 }
 
+/// Потолок битрейта видео из настроек качества (бит/с): выше оценка полосы не идёт.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_roomSetVideoBitrate<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    bps: jint,
+) {
+    jni_safe!((), {
+        if let Some(e) = unsafe { engine(session_ptr) } { e.room_set_video_max_bitrate(bps.max(0) as u32); }
+    });
+}
+
+/// Сколько сейчас отдать видео-кодеру, бит/с, по оценке полосы (0 — звонка нет).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_roomVideoTargetBitrate<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jint {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        e.room_video_target_bitrate().min(i32::MAX as u32) as jint
+    })
+}
+
 /// Задать кап входящей видео-очереди (кадров) — политику бюджета считает Kotlin.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_roomSetVideoCap<'local>(

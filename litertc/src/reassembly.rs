@@ -312,7 +312,9 @@ mod tests {
     }
 
     fn drain(r: &mut VideoReassembler, now: Instant) -> Vec<u32> {
-        std::iter::from_fn(|| r.pop(now, WAIT)).map(|f| f.frame_id).collect()
+        std::iter::from_fn(|| r.pop(now, WAIT))
+            .map(|f| f.frame_id)
+            .collect()
     }
 
     fn frame(id: u32, info: VideoInfo) -> Vec<Vec<u8>> {
@@ -348,7 +350,10 @@ mod tests {
     fn video_reassemble_out_of_order() {
         let frame = make_frame(MAX_VIDEO_CHUNK * 2, 7);
         let mut frags: Vec<Vec<u8>> = fragment_video(&frame, 10, key());
-        assert!(frags.len() > 1, "кадр должен быть многофрагментным для теста");
+        assert!(
+            frags.len() > 1,
+            "кадр должен быть многофрагментным для теста"
+        );
         frags.reverse(); // обратный порядок прихода
 
         let mut r = VideoReassembler::new();
@@ -380,7 +385,10 @@ mod tests {
         assert_eq!(feed(&mut r, &frame(1, key()), &[], t0), [1]);
         let f2 = frame(2, plain());
         assert!(feed(&mut r, &f2, &[1], t0).is_empty());
-        assert!(feed(&mut r, &frame(3, plain()), &[], t0).is_empty(), "3 ждёт 2");
+        assert!(
+            feed(&mut r, &frame(3, plain()), &[], t0).is_empty(),
+            "3 ждёт 2"
+        );
         assert_eq!(r.deadline(WAIT), Some(t0 + WAIT));
         // Повтор пришёл до срока.
         let later = t0 + WAIT / 2;
@@ -510,7 +518,11 @@ mod tests {
                 r.push(parse_video_frag(&raw_frag(id, idx, MAX_VIDEO_FRAGS)).unwrap());
             }
         }
-        assert!(r.pending <= MAX_PENDING_BYTES, "несобранного {} байт", r.pending);
+        assert!(
+            r.pending <= MAX_PENDING_BYTES,
+            "несобранного {} байт",
+            r.pending
+        );
         // И много мелких: число кадров тоже ограничено.
         for id in 100..1000u32 {
             r.push(parse_video_frag(&raw_frag(id, 0, 2)).unwrap());

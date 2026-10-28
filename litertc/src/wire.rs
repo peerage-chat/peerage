@@ -74,6 +74,13 @@ pub fn write_media_header(out: &mut [u8], h: &MediaHeader) {
     out[10..14].copy_from_slice(&h.ts.to_be_bytes());
 }
 
+/// Вписать сквозной номер в готовый медиа-пакет: он назначается в момент выпуска в
+/// сеть, а не постановки в очередь, — по нему отправитель знает время отправки.
+#[inline]
+pub fn set_tw_seq(packet: &mut [u8], tw_seq: u16) {
+    packet[8..10].copy_from_slice(&tw_seq.to_be_bytes());
+}
+
 /// Разобрать медиа-пакет (первичный или повторный). `None` — не v2-медиа или короче
 /// заголовка.
 #[inline]
@@ -410,6 +417,84 @@ pub fn parse_keyframe_request(dg: &[u8]) -> Option<(u8, u32)> {
     Some((dg[1], be32(&dg[2..])))
 }
 
+// ---- Транспортная обратная связь: когда пришёл каждый пакет (как transport-cc) ----
+//
+// По ней отправитель оценивает полосу по задержке: растущая разница между временем
+// прихода и отправки — очередь копится, пора сбавлять. Охватывает подряд идущие
+// сквозные номера (`tw_seq`) от `base_seq`.
+// ```text
+// байт 0      : 0x25 — v2, тип 5
+// байты 1..3  : base_seq (u16) — сквозной номер первого пакета
+// байты 3..5  : count (u16, 1..=1024)
+// байты 5..9  : ref_time (u32) — приход самого раннего из полученных, единицы 250 мкс,
+//               по часам получателя
+// байты 9..   : count × u16 — приход позже ref_time в единицах 250 мкс; 0xFFFF — не пришёл
+// ```
+
+/// Байт 0 транспортной обратной связи.
+pub const TRANSPORT_FEEDBACK_V2: u8 = 0x25;
+/// Длина её заголовка.
+pub const TRANSPORT_FEEDBACK_HEADER_LEN: usize = 9;
+/// Больше пакетов в одной не бывает.
+pub const MAX_FEEDBACK_PACKETS: usize = 1024;
+/// Единица времени прихода, мкс.
+pub const FEEDBACK_TICK_US: u64 = 250;
+/// «Пакет не пришёл».
+const NOT_RECEIVED: u16 = 0xFFFF;
+
+/// Когда пришли пакеты `base_seq`, `base_seq + 1`, … .
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TransportFeedback {
+    pub base_seq: u16,
+    /// Время прихода самого раннего из полученных, в [`FEEDBACK_TICK_US`].
+    pub ref_time: u32,
+    /// По пакету: на сколько единиц позже `ref_time` пришёл; `None` — не пришёл.
+    pub arrivals: Vec<Option<u16>>,
+}
+
+/// Собрать обратную связь. Пакетов сверх [`MAX_FEEDBACK_PACKETS`] не пишет; задержки
+/// больше 16 с обрезаются до предельной. `None` — пакетов нет.
+pub fn write_transport_feedback(f: &TransportFeedback) -> Option<Vec<u8>> {
+    let arrivals = &f.arrivals[..f.arrivals.len().min(MAX_FEEDBACK_PACKETS)];
+    if arrivals.is_empty() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(TRANSPORT_FEEDBACK_HEADER_LEN + 2 * arrivals.len());
+    out.push(TRANSPORT_FEEDBACK_V2);
+    out.extend_from_slice(&f.base_seq.to_be_bytes());
+    out.extend_from_slice(&(arrivals.len() as u16).to_be_bytes());
+    out.extend_from_slice(&f.ref_time.to_be_bytes());
+    for a in arrivals {
+        let d = a.map_or(NOT_RECEIVED, |d| d.min(NOT_RECEIVED - 1));
+        out.extend_from_slice(&d.to_be_bytes());
+    }
+    Some(out)
+}
+
+/// Разобрать обратную связь. `None` — не она, длина не сходится, пакетов 0 или больше
+/// предела.
+pub fn parse_transport_feedback(dg: &[u8]) -> Option<TransportFeedback> {
+    if dg.len() < TRANSPORT_FEEDBACK_HEADER_LEN || dg[0] != TRANSPORT_FEEDBACK_V2 {
+        return None;
+    }
+    let count = u16::from_be_bytes([dg[3], dg[4]]) as usize;
+    if count == 0
+        || count > MAX_FEEDBACK_PACKETS
+        || dg.len() != TRANSPORT_FEEDBACK_HEADER_LEN + 2 * count
+    {
+        return None;
+    }
+    let arrivals = dg[TRANSPORT_FEEDBACK_HEADER_LEN..]
+        .chunks_exact(2)
+        .map(|d| Some(u16::from_be_bytes([d[0], d[1]])).filter(|&d| d != NOT_RECEIVED))
+        .collect();
+    Some(TransportFeedback {
+        base_seq: u16::from_be_bytes([dg[1], dg[2]]),
+        ref_time: be32(&dg[5..]),
+        arrivals,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -610,18 +695,51 @@ mod tests {
     fn golden_keyframe_request() {
         let bytes = write_keyframe_request(TRACK_VIDEO, 0x0A0B_0C0D);
         assert_eq!(bytes, [0x23, 0x01, 0x0A, 0x0B, 0x0C, 0x0D]);
-        assert_eq!(parse_keyframe_request(&bytes), Some((TRACK_VIDEO, 0x0A0B_0C0D)));
+        assert_eq!(
+            parse_keyframe_request(&bytes),
+            Some((TRACK_VIDEO, 0x0A0B_0C0D))
+        );
         assert_eq!(parse_keyframe_request(&bytes[..5]), None);
     }
 
     #[test]
     fn retransmit_type_parses_as_media() {
         let mut pkt = vec![0u8; MEDIA_HEADER_LEN + 2];
-        write_media_header(&mut pkt, &MediaHeader { track: TRACK_VIDEO, seq: 7, ..Default::default() });
+        write_media_header(
+            &mut pkt,
+            &MediaHeader {
+                track: TRACK_VIDEO,
+                seq: 7,
+                ..Default::default()
+            },
+        );
         assert!(!parse_media(&pkt).unwrap().retransmit);
         pkt[0] = MEDIA_RTX_V2;
         let m = parse_media(&pkt).unwrap();
         assert!(m.retransmit);
         assert_eq!(m.header.seq, 7);
+    }
+
+    #[test]
+    fn golden_transport_feedback() {
+        let f = TransportFeedback {
+            base_seq: 0xFFFE,
+            ref_time: 0x0102_0304,
+            arrivals: vec![Some(0), None, Some(0x0A0B)],
+        };
+        let bytes = write_transport_feedback(&f).unwrap();
+        assert_eq!(
+            bytes,
+            [0x25, 0xFF, 0xFE, 0, 3, 1, 2, 3, 4, 0, 0, 0xFF, 0xFF, 0x0A, 0x0B]
+        );
+        assert_eq!(parse_transport_feedback(&bytes), Some(f));
+        assert_eq!(parse_transport_feedback(&bytes[..bytes.len() - 1]), None);
+        assert_eq!(
+            write_transport_feedback(&TransportFeedback::default()),
+            None
+        );
+        let mut empty = bytes[..TRANSPORT_FEEDBACK_HEADER_LEN].to_vec();
+        empty[3..5].copy_from_slice(&[0, 0]);
+        assert_eq!(parse_transport_feedback(&empty), None);
     }
 }

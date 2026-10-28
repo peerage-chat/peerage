@@ -2285,7 +2285,10 @@ class AppModel private constructor() {
         }
         // Сюда приходят с главного потока (колбэк surface превью) — нативный вызов
         // уводим в ops (инвариант 4).
-        ops.execute { Native.roomSetVideoCap(sessionPtr, cap) }
+        ops.execute {
+            Native.roomSetVideoCap(sessionPtr, cap)
+            Native.roomSetVideoBitrate(sessionPtr, videoQuality.bitrate)
+        }
         // Стартуем с текущей стороны камеры (cameraFront): дефолт — фронталка, но
         // экран шаринга мог выбрать тыловую (applyVideoShare ставит cameraFront).
         val vs = VideoSender(
@@ -2295,6 +2298,7 @@ class AppModel private constructor() {
             videoQuality.fps,
             videoQuality.bitrate,
             startFront = cameraFront,
+            targetBitrate = { Native.roomVideoTargetBitrate(sessionPtr) },
         ) { data, key, rotation, fps -> Native.roomPushVideo(sessionPtr, data, key, rotation, fps) }
         // Кодер может не принять разрешение/битрейт (configure бросает) — на главном
         // потоке это падение всего приложения. Не вышло — гасим видео, звонок живёт.

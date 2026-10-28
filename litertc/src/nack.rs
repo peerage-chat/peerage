@@ -36,7 +36,8 @@ struct Missing {
 impl Missing {
     /// Когда просить: первый раз — переждав перестановку, дальше — через `retry`.
     fn due(&self, retry: Duration) -> Instant {
-        self.last_sent.map_or(self.since + REORDER_GRACE, |t| t + retry)
+        self.last_sent
+            .map_or(self.since + REORDER_GRACE, |t| t + retry)
     }
 }
 
@@ -188,7 +189,11 @@ mod tests {
         n.on_packet(t1, 12); // повтор пришёл
         assert_eq!(n.due(t1 + RETRY, RETRY, AGE), [13]);
         assert_eq!(n.due(t1 + RETRY * 2, RETRY, AGE), [13]);
-        assert_eq!(n.due(t1 + RETRY * 3, RETRY, AGE), [] as [u16; 0], "попытки кончились");
+        assert_eq!(
+            n.due(t1 + RETRY * 3, RETRY, AGE),
+            [] as [u16; 0],
+            "попытки кончились"
+        );
         assert_eq!(n.next_due(RETRY), None);
     }
 
@@ -213,7 +218,10 @@ mod tests {
         let t1 = t0 + REORDER_GRACE;
         assert_eq!(n.due(t1, RETRY, AGE), [65_535, 0]);
         n.on_packet(t1, 1 + MAX_MISSING as u16 + 5);
-        assert!(n.due(t1 + REORDER_GRACE, RETRY, AGE).is_empty(), "широкую дыру не чиним повтором");
+        assert!(
+            n.due(t1 + REORDER_GRACE, RETRY, AGE).is_empty(),
+            "широкую дыру не чиним повтором"
+        );
     }
 
     #[test]

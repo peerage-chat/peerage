@@ -472,6 +472,12 @@ object Native {
      */
     external fun roomPushVideo(sessionPtr: Long, data: ByteArray, keyframe: Boolean, rotation: Int, fps: Int): Boolean
 
+    /** Потолок битрейта видео из настроек качества: выше оценка полосы не идёт. */
+    external fun roomSetVideoBitrate(sessionPtr: Long, bps: Int)
+
+    /** Сколько сейчас отдать видео-кодеру, бит/с, по оценке полосы (0 — звонка нет). */
+    external fun roomVideoTargetBitrate(sessionPtr: Long): Int
+
     /** Декодер видео [peerHex] начат заново — попросить у него ключевой кадр. */
     external fun roomRequestKeyframe(sessionPtr: Long, peerHex: String)
 

@@ -23,15 +23,19 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 
+use crate::bwe::{ArrivalLog, Bwe};
 use crate::jitter::{JitterBuffer, JitterOut};
 use crate::nack::{NackList, TxHistory};
+use crate::pacer::{Class, Pacer};
 use crate::reassembly::{CompleteFrame, VideoReassembler};
 use crate::stats::{RxStats, TrackStats};
 use crate::wire::{
     fragment_video, parse_keyframe_request, parse_media, parse_nack, parse_report,
-    parse_video_frag, write_keyframe_request, write_media_header, write_nack, write_report,
-    MediaHeader, Nack, Report, VideoInfo, KEYFRAME_REQUEST_V2, MEDIA_HEADER_LEN, MEDIA_RTX_V2,
-    NACK_V2, REPORT_V2, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO, VIDEO_CLOCK_HZ,
+    parse_transport_feedback, parse_video_frag, set_tw_seq, write_keyframe_request,
+    write_media_header, write_nack, write_report, write_transport_feedback, MediaHeader, Nack,
+    Report, VideoInfo, FEEDBACK_TICK_US, KEYFRAME_REQUEST_V2, MEDIA_HEADER_LEN, MEDIA_RTX_V2,
+    MEDIA_V2, NACK_V2, REPORT_V2, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO, TRANSPORT_FEEDBACK_V2,
+    VIDEO_CLOCK_HZ,
 };
 
 /// Как часто каждый участник получает наш отчёт о приёме.
@@ -45,6 +49,14 @@ const TRACKS: usize = TRACK_SCREEN as usize + 1;
 
 /// RTT, пока отчётов ещё не было.
 const DEFAULT_RTT: Duration = Duration::from_millis(200);
+
+/// Как часто сообщать участнику, когда пришли его пакеты (для его оценки полосы).
+const FEEDBACK_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Пределы оценки полосы по умолчанию, бит/с, пока вызывающий не задаст свои
+/// ([`Session::set_bitrate_bounds`]).
+const DEFAULT_MIN_BITRATE: u32 = 100_000;
+const DEFAULT_MAX_BITRATE: u32 = 10_000_000;
 
 /// Повторы участнику — не больше этой доли того, что ему отправлено впервые
 /// (ADR-014 §8: иначе один участник NACK-ами заставил бы нас заливать канал)...
@@ -132,6 +144,10 @@ pub struct PeerStats {
     pub retransmitted: u64,
     /// Ключевых кадров попросили у него.
     pub keyframe_requests: u64,
+    /// Оценка полосы до него, бит/с.
+    pub bandwidth: u32,
+    /// Сколько раз оценку сбавляли: из-за роста задержки и из-за потерь.
+    pub bandwidth_cuts: (u64, u64),
 }
 
 /// Приём звука от участника: джиттер-буфер и оценка джиттера для его глубины.
@@ -230,10 +246,15 @@ struct PeerState {
     rtx_budget: f64,
     /// Когда последний раз выполнили его запрос ключевого кадра.
     keyframe_honoured: Option<Instant>,
+    /// Оценка полосы до него — по его обратной связи о наших пакетах.
+    bwe: Bwe,
+    /// Когда пришли его пакеты — для обратной связи ему.
+    arrivals: ArrivalLog,
+    next_feedback: Option<Instant>,
 }
 
 impl PeerState {
-    fn new() -> Self {
+    fn new(min_bps: u32, max_bps: u32) -> Self {
         PeerState {
             audio: None,
             video: VideoRx::default(),
@@ -245,6 +266,9 @@ impl PeerState {
             // Полный с начала: первые потери звонка тоже чинятся повтором.
             rtx_budget: RTX_BURST,
             keyframe_honoured: None,
+            bwe: Bwe::new(min_bps as f64, max_bps as f64),
+            arrivals: ArrivalLog::default(),
+            next_feedback: None,
         }
     }
 
@@ -270,7 +294,9 @@ pub struct Session<P> {
     /// Текущие участники в порядке, заданном вызывающим (порядок рассылки).
     peers: Vec<P>,
     state: HashMap<P, PeerState>,
-    out: VecDeque<Transmit<P>>,
+    pacer: Pacer<P>,
+    min_bitrate: u32,
+    max_bitrate: u32,
     audio_seq: u16,
     audio_ts: u32,
     video_seq: u16,
@@ -296,7 +322,9 @@ impl<P: Copy + Eq + Hash> Session<P> {
             cfg,
             peers: Vec::new(),
             state: HashMap::new(),
-            out: VecDeque::new(),
+            pacer: Pacer::new(DEFAULT_MAX_BITRATE as f64),
+            min_bitrate: DEFAULT_MIN_BITRATE,
+            max_bitrate: DEFAULT_MAX_BITRATE,
             audio_seq: 0,
             audio_ts: 0,
             video_seq: 0,
@@ -326,10 +354,42 @@ impl<P: Copy + Eq + Hash> Session<P> {
         }
         self.peers = peers.to_vec();
         self.state.retain(|p, _| peers.contains(p));
-        self.out.retain(|t| peers.contains(&t.to));
+        self.pacer.retain(|t| peers.contains(&t.to));
+        let (min, max) = (self.min_bitrate, self.max_bitrate);
         for p in peers {
-            self.state.entry(*p).or_insert_with(PeerState::new);
+            self.state
+                .entry(*p)
+                .or_insert_with(|| PeerState::new(min, max));
         }
+        self.update_pacing();
+    }
+
+    /// Пределы оценки полосы до каждого участника, бит/с: снизу — без чего звонок
+    /// бессмыслен, сверху — больше кодеры всё равно не выдадут.
+    pub fn set_bitrate_bounds(&mut self, min: u32, max: u32) {
+        let max = max.max(min);
+        (self.min_bitrate, self.max_bitrate) = (min, max);
+        for st in self.state.values_mut() {
+            st.bwe.set_bounds(min as f64, max as f64);
+        }
+        self.update_pacing();
+    }
+
+    /// Сколько можно слать каждому участнику, бит/с, — всё наше медиа вместе. Кодер
+    /// один на всех, поэтому это худшая из оценок до участников (ADR-014 §6).
+    pub fn target_bitrate(&self) -> u32 {
+        self.peers
+            .iter()
+            .filter_map(|p| self.state.get(p))
+            .map(|st| st.bwe.rate() as u32)
+            .min()
+            .unwrap_or(self.max_bitrate)
+    }
+
+    /// Темп выпуска: каждому участнику — его копия, поэтому цель на их число.
+    fn update_pacing(&mut self) {
+        let total = self.target_bitrate() as f64 * self.peers.len().max(1) as f64;
+        self.pacer.set_rate(total);
     }
 
     pub fn peers(&self) -> &[P] {
@@ -381,23 +441,27 @@ impl<P: Copy + Eq + Hash> Session<P> {
     }
 
     fn broadcast(&mut self, track: u8, seq: u16, ts: u32, payload: &[u8]) {
+        let Some(now) = self.last_now else { return };
+        let class = if track == TRACK_AUDIO {
+            Class::Audio
+        } else {
+            Class::Video
+        };
         for p in &self.peers {
             let Some(st) = self.state.get_mut(p) else {
                 continue;
             };
+            // Сквозной номер — при выпуске (poll_transmit).
             let header = MediaHeader {
                 track,
                 stream_id: self.cfg.stream_id,
                 seq,
-                tw_seq: st.tw_seq,
+                tw_seq: 0,
                 ts,
             };
-            st.tw_seq = st.tw_seq.wrapping_add(1);
             st.rtx_budget = (st.rtx_budget + payload.len() as f64 * RTX_SHARE).min(RTX_BURST);
-            self.out.push_back(Transmit {
-                to: *p,
-                data: media_packet(&header, payload, false),
-            });
+            let data = media_packet(&header, payload, false);
+            self.pacer.push(class, now, Transmit { to: *p, data });
         }
         self.tx_bytes += (payload.len() * self.peers.len()) as u64;
     }
@@ -407,6 +471,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
         if nack.track != TRACK_VIDEO || nack.stream_id != self.cfg.stream_id {
             return;
         }
+        let Some(now) = self.last_now else { return };
         let Some(st) = self.state.get_mut(&to) else {
             return;
         };
@@ -422,22 +487,32 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 track: TRACK_VIDEO,
                 stream_id: self.cfg.stream_id,
                 seq,
-                tw_seq: st.tw_seq,
+                tw_seq: 0,
                 ts,
             };
-            st.tw_seq = st.tw_seq.wrapping_add(1);
             st.stats.retransmitted += 1;
             self.tx_bytes += payload.len() as u64;
-            self.out.push_back(Transmit {
-                to,
-                data: media_packet(&header, payload, true),
-            });
+            let data = media_packet(&header, payload, true);
+            self.pacer
+                .push(Class::Retransmit, now, Transmit { to, data });
         }
     }
 
-    /// Следующий пакет к отправке.
+    /// Следующий пакет, который пора отправить. Видео выходит ровным темпом по оценке
+    /// полосы, поэтому после `None` очередь может быть не пуста: когда звать снова,
+    /// говорит [`Session::poll_timeout`].
     pub fn poll_transmit(&mut self) -> Option<Transmit<P>> {
-        self.out.pop_front()
+        let now = self.last_now?;
+        let mut t = self.pacer.pop(now)?;
+        let media = matches!(t.data.first(), Some(&MEDIA_V2 | &MEDIA_RTX_V2));
+        if let (true, Some(st), Some(epoch)) = (media, self.state.get_mut(&t.to), self.epoch) {
+            let seq = st.tw_seq;
+            st.tw_seq = st.tw_seq.wrapping_add(1);
+            set_tw_seq(&mut t.data, seq);
+            let at_ms = now.saturating_duration_since(epoch).as_secs_f64() * 1000.0;
+            st.bwe.on_sent(seq, at_ms, t.data.len() as u32);
+        }
+        Some(t)
     }
 
     /// Пакет от участника (уже расшифрован, отправитель доказан вызывающим).
@@ -460,6 +535,15 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 }
                 return;
             }
+            Some(&TRANSPORT_FEEDBACK_V2) => {
+                if let Some(fb) = parse_transport_feedback(data) {
+                    let now_ms = since_epoch.as_secs_f64() * 1000.0;
+                    let rtt_ms = st.rtt().as_secs_f64() * 1000.0;
+                    st.bwe.on_feedback(now_ms, &fb, rtt_ms);
+                    self.update_pacing();
+                }
+                return;
+            }
             Some(&KEYFRAME_REQUEST_V2) => {
                 let ours = (TRACK_VIDEO, self.cfg.stream_id);
                 let due = st.keyframe_honoured.is_none_or(|t| {
@@ -476,6 +560,8 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let Some(m) = parse_media(data) else { return };
         let h = m.header;
         st.stats.rx_bytes += m.payload.len() as u64;
+        st.arrivals
+            .on_packet(h.tw_seq, since_epoch.as_micros() as u64 / FEEDBACK_TICK_US);
         // Повторы в статистику приёма не идут: потери в отчётах — потери первой
         // отправки, по ним судят о канале.
         if let Some(slot) = st.rx.get_mut(h.track as usize).filter(|_| !m.retransmit) {
@@ -570,7 +656,8 @@ impl<P: Copy + Eq + Hash> Session<P> {
             seqs: v.nack.due(now, nack_retry(rtt), wait),
         };
         if let Some(data) = write_nack(&nack) {
-            self.out.push_back(Transmit { to: peer, data });
+            self.pacer
+                .push(Class::Control, now, Transmit { to: peer, data });
         }
         let ask = v.asm.wants_keyframe()
             && v.keyframe_requested
@@ -578,10 +665,9 @@ impl<P: Copy + Eq + Hash> Session<P> {
         if ask {
             v.keyframe_requested = Some(now);
             st.stats.keyframe_requests += 1;
-            self.out.push_back(Transmit {
-                to: peer,
-                data: write_keyframe_request(TRACK_VIDEO, stream_id),
-            });
+            let data = write_keyframe_request(TRACK_VIDEO, stream_id);
+            self.pacer
+                .push(Class::Control, now, Transmit { to: peer, data });
         }
     }
 
@@ -597,14 +683,19 @@ impl<P: Copy + Eq + Hash> Session<P> {
                     .keyframe_requested
                     .filter(|_| v.asm.wants_keyframe())
                     .map(|t| t + KEYFRAME_REQUEST_RETRY);
+                let feedback = (!st.arrivals.is_empty())
+                    .then(|| st.next_feedback.or(self.last_now))
+                    .flatten();
                 [
                     st.next_report.or(self.last_now),
                     v.asm.deadline(max_frame_wait(rtt)),
                     v.nack.next_due(nack_retry(rtt)),
                     keyframe,
+                    feedback,
                 ]
             })
             .flatten()
+            .chain(self.last_now.and_then(|now| self.pacer.next_release(now)))
             .min()
     }
 
@@ -616,6 +707,18 @@ impl<P: Copy + Eq + Hash> Session<P> {
             let Some(st) = self.state.get_mut(p) else {
                 continue;
             };
+            if !st.arrivals.is_empty() && st.next_feedback.is_none_or(|t| t <= now) {
+                st.next_feedback = Some(now + FEEDBACK_INTERVAL);
+                if let Some(data) = st
+                    .arrivals
+                    .take()
+                    .as_ref()
+                    .and_then(write_transport_feedback)
+                {
+                    self.pacer
+                        .push(Class::Control, now, Transmit { to: *p, data });
+                }
+            }
             if st.next_report.is_some_and(|t| t > now) {
                 continue;
             }
@@ -635,7 +738,8 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 echo,
                 blocks,
             });
-            self.out.push_back(Transmit { to: *p, data });
+            self.pacer
+                .push(Class::Control, now, Transmit { to: *p, data });
         }
         for p in self.peers.clone() {
             self.service_video(now, p);
@@ -680,7 +784,11 @@ impl<P: Copy + Eq + Hash> Session<P> {
     }
 
     pub fn stats(&self, peer: &P) -> Option<PeerStats> {
-        self.state.get(peer).map(|s| s.stats)
+        self.state.get(peer).map(|s| PeerStats {
+            bandwidth: s.bwe.rate() as u32,
+            bandwidth_cuts: (s.bwe.cuts_delay, s.bwe.cuts_loss),
+            ..s.stats
+        })
     }
 
     /// Отправлено полезной нагрузки (без заголовка) всем участникам вместе, байт.
@@ -820,7 +928,7 @@ mod tests {
         assert_eq!(s.stats(&2), None);
         s.set_peers(&[1, 2]);
         assert_eq!(
-            s.stats(&2),
+            s.stats(&2).map(|st| PeerStats { bandwidth: 0, ..st }),
             Some(PeerStats::default()),
             "вернулся — с чистого листа"
         );
@@ -902,6 +1010,8 @@ mod tests {
         let now = Instant::now();
         let mut tx = Session::new(CFG);
         tx.set_peers(&[9]);
+        // Без ровного темпа: кадр нужен целиком в один момент.
+        tx.set_bitrate_bounds(100_000, 1_000_000_000);
         let mut rx = Session::new(CFG);
         rx.set_peers(&[1]);
         let frame = vec![0x5A; MAX_VIDEO_CHUNK * 3 + 1];

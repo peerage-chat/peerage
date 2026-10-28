@@ -59,6 +59,9 @@ fn run(ab: LinkConfig, ba: LinkConfig, secs: u64, join_at: u32, restart_at: Opti
     };
     for step in 0..secs * 1000 {
         let now = t0 + ms(step);
+        // До захода пакеты к B не доходят (с ровным темпом хвост кадра уходит позже
+        // самого кадра — поэтому по времени, а не по кадру).
+        let joined = step >= join_at as u64 * FRAME_MS;
         if step % FRAME_MS == 0 {
             let id = (step / FRAME_MS) as u32;
             let keyframe = id == 0 || a.take_keyframe_request();
@@ -71,7 +74,7 @@ fn run(ab: LinkConfig, ba: LinkConfig, secs: u64, join_at: u32, restart_at: Opti
             };
             a.send_video(now, &frame(id), info);
             while let Some(t) = a.poll_transmit() {
-                if id >= join_at {
+                if joined {
                     to_b.send(now, t.data);
                 }
             }
@@ -86,7 +89,9 @@ fn run(ab: LinkConfig, ba: LinkConfig, secs: u64, join_at: u32, restart_at: Opti
             }
         }
         while let Some(t) = a.poll_transmit() {
-            to_b.send(now, t.data);
+            if joined {
+                to_b.send(now, t.data);
+            }
         }
         while let Some(t) = b.poll_transmit() {
             to_a.send(now, t.data);
@@ -98,7 +103,9 @@ fn run(ab: LinkConfig, ba: LinkConfig, secs: u64, join_at: u32, restart_at: Opti
             a.handle_datagram(now, B, &p);
         }
         while let Some(f) = b.pull_video(&A) {
-            r.delivered.push(u32::from_be_bytes([f.data[0], f.data[1], f.data[2], f.data[3]]));
+            r.delivered.push(u32::from_be_bytes([
+                f.data[0], f.data[1], f.data[2], f.data[3],
+            ]));
         }
     }
     r.a = a;
@@ -108,7 +115,12 @@ fn run(ab: LinkConfig, ba: LinkConfig, secs: u64, join_at: u32, restart_at: Opti
 
 /// Каждый отданный кадр декодируем: ключевой или сразу за отданным предыдущим.
 fn assert_decodable(r: &Run) {
-    for (i, &id) in r.delivered.iter().enumerate().filter(|(_, &id)| id != u32::MAX) {
+    for (i, &id) in r
+        .delivered
+        .iter()
+        .enumerate()
+        .filter(|(_, &id)| id != u32::MAX)
+    {
         let follows = i > 0 && r.delivered[i - 1].wrapping_add(1) == id;
         assert!(
             r.keyframes.contains(&id) || follows,
@@ -180,8 +192,14 @@ fn restarted_decoder_gets_a_keyframe() {
     assert_decodable(&r);
     let mark = r.delivered.iter().position(|&id| id == u32::MAX).unwrap();
     let after = r.delivered[mark + 1];
-    assert!(r.keyframes.contains(&after), "после перезапуска первым идёт ключевой");
-    assert!(after <= 1500 / FRAME_MS as u32 + 200 / FRAME_MS as u32, "кадр {after}");
+    assert!(
+        r.keyframes.contains(&after),
+        "после перезапуска первым идёт ключевой"
+    );
+    assert!(
+        after <= 1500 / FRAME_MS as u32 + 200 / FRAME_MS as u32,
+        "кадр {after}"
+    );
     assert_eq!(r.keyframes.len(), 2);
 }
 
@@ -224,7 +242,10 @@ fn hostile_feedback_stays_within_budget() {
             a.send_video(now, &frame(id), info);
         }
         // Каждую миллисекунду — NACK на 128 × 17 последних номеров и запрос ключевого.
-        let seqs: Vec<u16> = (0..2176u16).rev().map(|i| last_seq.wrapping_sub(i)).collect();
+        let seqs: Vec<u16> = (0..2176u16)
+            .rev()
+            .map(|i| last_seq.wrapping_sub(i))
+            .collect();
         let nack = Nack {
             track: TRACK_VIDEO,
             stream_id: 0xA,

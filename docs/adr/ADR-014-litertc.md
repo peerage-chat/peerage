@@ -270,6 +270,25 @@ parses comes from such a member, so:
    follows the worst reported audio loss (5–30 %).
 7. **Bandwidth:** estimator, prioritised pacing, `TargetBitrate` → MediaCodec bitrate and resolution
    steps, Opus FEC. Revisit the 600 packets/s media ingress budget against real bitrates.
+   7a ✅ (2026-10-28): transport feedback (`0x25`) every 100 ms; per-member GCC-style
+   estimate (delay trend + loss, AIMD) starting at the codec ceiling; the pacer releases
+   video at 2.5 × the estimate with control and audio first, `tw_seq` assigned at release
+   so departure times are true. The engine got a timer thread that releases the paced
+   queue (woken by whoever enqueues). Kotlin polls the video target once a second and
+   sets the MediaCodec bitrate; Opus gets min(setting, a quarter of the channel). The
+   Live run on the two emulators: the chain works (the estimate drives the MediaCodec
+   bitrate, video plays, retransmissions repair loss), but the estimate sits near the
+   floor because with video on the host CPU is at ≈ 96 % (software codecs), RTT goes
+   from 170 ms (audio only, 0 % loss, no cuts) to 270–330 ms and 5–20 % loss — real
+   delay and loss, not our rate. The emulators cannot judge the estimator; the
+   simulated links can (`tests/bandwidth.rs`: a drop, a recovery, random loss with
+   jitter). They caught two flaws fixed before commit: the send log forgot packets
+   before their feedback came back through a bloated queue (now 10 s), and a combined
+   AIMD ratcheted down under constant 5 % loss (now separate delay/loss rates, loss
+   above the link's inherent level). `PeerStats::bandwidth_cuts` counts cuts by cause.
+   The 600 packets/s ingress budget stays: with 8 KB fragments it is ≈ 38 Mbit/s of video,
+   pacing does not change packet counts, and feedback adds 10 packets/s per member.
+   Resolution steps are 7b.
 8. **Playout and A/V sync:** the video jitter buffer moves from `VideoReceiver` into
    LiteRTC (`play_at`); Kotlin only decodes and renders.
 9. **Desktop:** when the desktop client comes back, it drives `litertc::Session`; the

@@ -4,9 +4,14 @@
 //! [`RoomCallEngine::pull_audio`], видео-декодер через
 //! [`RoomCallEngine::pull_video_for`]).
 //!
-//! Доставку — формат пакетов, нумерацию, джиттер-буфер, сборку видео-кадров —
-//! делает `litertc::Session` (ADR-014). Здесь остаются потоки, кодек звука, микс,
-//! уровни речи и остановка звонка.
+//! Доставку — формат пакетов, нумерацию, джиттер-буфер, сборку видео-кадров, оценку
+//! полосы и ровный темп отправки — делает `litertc::Session` (ADR-014). Здесь
+//! остаются потоки, кодек звука, микс, уровни речи и остановка звонка.
+//!
+//! Потоки: приём (датаграммы → сессия), отправка звука (PCM → Opus → сессия) и
+//! таймеры. Сессия выпускает видео ровным темпом, поэтому после отправки кадра в её
+//! очереди остаются пакеты — их выпускает поток таймеров, когда приходит их время;
+//! кто ставит пакеты в очередь, будит его ([`Kick`]).
 //!
 //! Список участников (`members`) динамический: его обновляет presence-слой
 //! (lib.rs) по мере входа/выхода. Движок `Send` — живёт в `Arc`, зовётся из JNI.
@@ -14,15 +19,15 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use litertc::{JitterOut, Session, Transmit, VideoFrame, VideoInfo};
-use rand_core::{OsRng, RngCore};
 use peerage_core::settings::AudioSettings;
 use peerage_media::{AudioDecoder, AudioEncoder};
 use peerage_messenger::Messenger;
+use rand_core::{OsRng, RngCore};
 
 use crate::LockRecover;
 
@@ -32,8 +37,42 @@ type Ring = Arc<Mutex<VecDeque<i16>>>;
 /// Подряд идущих PLC-кадров на источник; дальше — тишина (Opus PLC иначе шумит).
 const MAX_PLC: u32 = 4;
 
-/// Дольше этого поток приёма не спит: проверяет флаг остановки и таймеры.
+/// Дольше этого потоки приёма и таймеров не спят: проверяют флаг остановки.
 const RX_WAIT: Duration = Duration::from_millis(200);
+
+/// Нижняя граница оценки полосы: меньше звонок со звуком не живёт.
+const MIN_BITRATE: u32 = 100_000;
+
+/// Звуку — не меньше этого, даже на очень узком канале (Opus ещё разборчив).
+const MIN_AUDIO_BITRATE: i32 = 16_000;
+
+/// Битрейт звука при общей цели `total` (бит/с): настройка пользователя, пока канал
+/// широкий; на узком — четверть канала, остальное видео.
+fn audio_bitrate(total: u32, user: i32) -> i32 {
+    user.min((total / 4) as i32)
+        .max(MIN_AUDIO_BITRATE.min(user))
+}
+
+/// Будильник потока таймеров: кто поставил пакеты в очередь сессии, будит его, чтобы
+/// он выпустил их в свой срок, а не через [`RX_WAIT`].
+type Kick = Arc<(Mutex<bool>, Condvar)>;
+
+fn kick(k: &Kick) {
+    *k.0.lock_safe() = true;
+    k.1.notify_one();
+}
+
+/// Спать до `dur` или до пинка.
+fn wait_kick(k: &Kick, dur: Duration) {
+    let mut kicked = k.0.lock_safe();
+    if !*kicked {
+        kicked =
+            k.1.wait_timeout(kicked, dur)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+    }
+    *kicked = false;
+}
 
 /// Как часто писать в лог статистику звонка (потери, джиттер, RTT по участникам).
 const STATS_LOG_EVERY: Duration = Duration::from_secs(5);
@@ -55,14 +94,18 @@ fn worst_audio_loss(s: &Session<PeerKey>) -> i32 {
 
 /// Строка статистики по участникам — для разбора звонков по логу.
 fn log_stats(s: &Session<PeerKey>) {
-    let pct = |t: Option<litertc::TrackStats>| t.map_or("-".to_string(), |t| format!("{:.1}%", t.fraction_lost * 100.0));
+    let pct = |t: Option<litertc::TrackStats>| {
+        t.map_or("-".to_string(), |t| {
+            format!("{:.1}%", t.fraction_lost * 100.0)
+        })
+    };
     for p in s.peers() {
         let Some(st) = s.stats(p) else { continue };
         let a = litertc::TRACK_AUDIO as usize;
         let v = litertc::TRACK_VIDEO as usize;
         let jitter = st.inbound[a].map_or("-".to_string(), |t| format!("{:.0}ms", t.jitter_ms));
         log::info!(
-            "room-call {}: rtt={} in: audio {} jitter {} video {} | out: audio {} video {} | rtx {} keyreq {}",
+            "room-call {}: rtt={} in: audio {} jitter {} video {} | out: audio {} video {} | rtx {} keyreq {} | bw {}k (cuts: delay {} loss {})",
             hex::encode(&p[..4]),
             st.rtt.map_or("-".to_string(), |r| format!("{}ms", r.as_millis())),
             pct(st.inbound[a]),
@@ -72,6 +115,9 @@ fn log_stats(s: &Session<PeerKey>) {
             pct(st.outbound[v]),
             st.retransmitted,
             st.keyframe_requests,
+            st.bandwidth / 1000,
+            st.bandwidth_cuts.0,
+            st.bandwidth_cuts.1,
         );
     }
 }
@@ -146,9 +192,11 @@ pub struct RoomCallEngine {
     /// Уровень речи на участника (0..1, сглажен): attack мгновенный, decay плавный.
     /// Считается в [`pull_audio`] по RMS кадра источника. Для active-speaker рамки.
     levels: Mutex<HashMap<PeerKey, f32>>,
-    /// Целевой битрейт Opus (бит/с): меняется на лету из настроек звука, send-тред
-    /// применяет к энкодеру без пересоздания сессии (чтобы не было дыры в звуке).
+    /// Битрейт Opus из настроек звука (бит/с): меняется на лету, send-тред применяет
+    /// к энкодеру без пересоздания сессии (чтобы не было дыры в звуке). На узком
+    /// канале звук получает меньше ([`audio_bitrate`]).
     target_bitrate: Arc<AtomicI32>,
+    kick: Kick,
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -174,40 +222,63 @@ impl RoomCallEngine {
         let mut threads = Vec::new();
 
         let media_rx = messenger.media_channel(2048);
+        let kick_: Kick = Arc::new((Mutex::new(false), Condvar::new()));
 
-        // --- Приём и таймеры сессии: всё в сессию; участников сверяет она же ---
+        // --- Приём: датаграммы в сессию; участников сверяет она же ---
         {
             let running = running.clone();
             let session = session.clone();
             let members = members.clone();
             let msgr = messenger.clone();
+            let k = kick_.clone();
             threads.push(thread::spawn(move || {
-                let mut next_log = Instant::now() + STATS_LOG_EVERY;
                 while running.load(Ordering::Relaxed) {
-                    // Пакета ждём не дольше, чем до ближайшего таймера (отчёты получателя).
-                    let wait = session
-                        .lock_safe()
-                        .poll_timeout()
-                        .map_or(RX_WAIT, |t| t.saturating_duration_since(Instant::now()))
-                        .min(RX_WAIT);
-                    let out = match media_rx.recv_timeout(wait) {
-                        Ok(p) => with_session(&session, &members, |s| {
-                            s.handle_datagram(Instant::now(), p.src, &p.data)
-                        }),
-                        Err(RecvTimeoutError::Timeout) => Vec::new(),
+                    match media_rx.recv_timeout(RX_WAIT) {
+                        Ok(p) => {
+                            let out = with_session(&session, &members, |s| {
+                                s.handle_datagram(Instant::now(), p.src, &p.data)
+                            });
+                            send_all(&msgr, out);
+                            kick(&k);
+                        }
+                        Err(RecvTimeoutError::Timeout) => {}
                         // Канал отобрали (новый media_channel) — приёма больше не будет,
                         // а крутиться на мгновенно возвращающемся recv значит 100 % CPU.
                         Err(RecvTimeoutError::Disconnected) => break,
-                    };
-                    send_all(&msgr, out);
-                    let now = Instant::now();
-                    if session.lock_safe().poll_timeout().is_none_or(|t| t <= now) {
-                        send_all(&msgr, with_session(&session, &members, |s| s.handle_timeout(now)));
                     }
+                }
+            }));
+        }
+
+        // --- Таймеры сессии и выпуск отложенного (видео ровным темпом) ---
+        {
+            let running = running.clone();
+            let session = session.clone();
+            let members = members.clone();
+            let msgr = messenger.clone();
+            let k = kick_.clone();
+            threads.push(thread::spawn(move || {
+                let mut next_log = Instant::now() + STATS_LOG_EVERY;
+                while running.load(Ordering::Relaxed) {
+                    let now = Instant::now();
+                    let out = with_session(&session, &members, |s| {
+                        if s.poll_timeout().is_some_and(|t| t <= now) {
+                            s.handle_timeout(now);
+                        }
+                    });
+                    send_all(&msgr, out);
                     if now >= next_log {
                         next_log = now + STATS_LOG_EVERY;
                         log_stats(&session.lock_safe());
                     }
+                    // Не меньше миллисекунды: точнее выпуск не нужен, а нулевой сон —
+                    // это кручение, если таймер почему-то не снялся.
+                    let wait = session
+                        .lock_safe()
+                        .poll_timeout()
+                        .map_or(RX_WAIT, |t| t.saturating_duration_since(Instant::now()))
+                        .clamp(Duration::from_millis(1), RX_WAIT);
+                    wait_kick(&k, wait);
                 }
             }));
         }
@@ -223,12 +294,14 @@ impl RoomCallEngine {
             let members = members.clone();
             let msgr = messenger.clone();
             let target_bitrate = target_bitrate.clone();
+            let k = kick_.clone();
             threads.push(thread::spawn(move || {
                 let mut enc = match AudioEncoder::new(audio) {
                     Ok(e) => e,
                     Err(_) => return,
                 };
                 let mut cur_bitrate = audio.bitrate;
+                let mut channel_bitrate = audio.bitrate;
                 let mut frame = vec![0i16; frame_len];
                 let mut frames_since_loss_check = 0u32;
                 while running.load(Ordering::Relaxed) {
@@ -247,26 +320,35 @@ impl RoomCallEngine {
                         thread::sleep(Duration::from_millis(2));
                         continue;
                     }
-                    // Битрейт сменили в настройках звука → применяем на лету.
-                    let want = target_bitrate.load(Ordering::Relaxed);
+                    frames_since_loss_check += 1;
+                    if frames_since_loss_check >= LOSS_CHECK_FRAMES {
+                        frames_since_loss_check = 0;
+                        let s = session.lock_safe();
+                        enc.set_expected_loss(worst_audio_loss(&s));
+                        channel_bitrate = audio_bitrate(s.target_bitrate(), i32::MAX);
+                    }
+                    // Битрейт — из настроек звука (меняются на лету), но не больше, чем
+                    // позволяет канал.
+                    let want = target_bitrate.load(Ordering::Relaxed).min(channel_bitrate);
                     if want != cur_bitrate {
                         enc.set_bitrate(want);
                         cur_bitrate = want;
                     }
-                    frames_since_loss_check += 1;
-                    if frames_since_loss_check >= LOSS_CHECK_FRAMES {
-                        frames_since_loss_check = 0;
-                        enc.set_expected_loss(worst_audio_loss(&session.lock_safe()));
-                    }
-                    let pkt = if muted.load(Ordering::Relaxed) { None } else { enc.encode(&frame).ok() };
+                    let pkt = if muted.load(Ordering::Relaxed) {
+                        None
+                    } else {
+                        enc.encode(&frame).ok()
+                    };
                     match pkt {
                         Some(pkt) => {
                             if !running.load(Ordering::Relaxed) {
                                 break;
                             }
-                            let out =
-                                with_session(&session, &members, |s| s.send_audio(Instant::now(), &pkt));
+                            let out = with_session(&session, &members, |s| {
+                                s.send_audio(Instant::now(), &pkt)
+                            });
                             send_all(&msgr, out);
+                            kick(&k);
                         }
                         None => session.lock_safe().skip_audio(),
                     }
@@ -288,8 +370,28 @@ impl RoomCallEngine {
             members,
             levels: Mutex::new(HashMap::new()),
             target_bitrate,
+            kick: kick_,
             threads: Mutex::new(threads),
         })
+    }
+
+    /// Потолок битрейта видео из настроек качества: оценка полосы до участников не
+    /// поднимается выше него вместе со звуком.
+    pub fn set_video_max_bitrate(&self, bps: u32) {
+        let audio = self.target_bitrate.load(Ordering::Relaxed).max(0) as u32;
+        self.session
+            .lock_safe()
+            .set_bitrate_bounds(MIN_BITRATE, bps.saturating_add(audio));
+    }
+
+    /// Сколько сейчас отдать видео-кодеру, бит/с: оценка полосы до самого слабого
+    /// участника за вычетом звука и заголовков его пакетов.
+    pub fn video_target_bitrate(&self) -> u32 {
+        let total = self.session.lock_safe().target_bitrate();
+        let user = self.target_bitrate.load(Ordering::Relaxed);
+        // ~50 пакетов звука в секунду по 14 байт заголовка LiteRTC — около 6 кбит/с.
+        let audio = audio_bitrate(total, user).max(0) as u32 + 6_000;
+        (total.saturating_sub(audio) / 100 * 95).max(MIN_BITRATE / 2)
     }
 
     /// Задать кап входящей видео-очереди (в кадрах). Политику считает Kotlin: он
@@ -308,6 +410,8 @@ impl RoomCallEngine {
             wanted = s.take_keyframe_request();
         });
         send_all(&self.messenger, out);
+        // Остаток кадра выйдет ровным темпом — его выпустит поток таймеров.
+        kick(&self.kick);
         wanted
     }
 
@@ -322,6 +426,7 @@ impl RoomCallEngine {
             s.request_keyframe(Instant::now(), peer)
         });
         send_all(&self.messenger, out);
+        kick(&self.kick);
     }
 
     /// Захваченный PCM с микрофона → в очередь отправки.
@@ -338,7 +443,10 @@ impl RoomCallEngine {
     fn pull_frames(&self) -> (Vec<PeerKey>, Vec<(PeerKey, JitterOut)>) {
         let mut s = self.session.lock_safe();
         let peers = s.peers().to_vec();
-        let frames = peers.iter().filter_map(|p| s.pull_audio(p).map(|o| (*p, o))).collect();
+        let frames = peers
+            .iter()
+            .filter_map(|p| s.pull_audio(p).map(|o| (*p, o)))
+            .collect();
         (peers, frames)
     }
 
@@ -366,10 +474,12 @@ impl RoomCallEngine {
                             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                             // Декодер не создался — этого собеседника не слышно, но
                             // паника отравила бы мьютексы и убила звук всего звонка.
-                            std::collections::hash_map::Entry::Vacant(v) => match AudioDecoder::new(self.audio) {
-                                Ok(dec) => v.insert(Decoder { dec, plc_run: 0 }),
-                                Err(_) => continue,
-                            },
+                            std::collections::hash_map::Entry::Vacant(v) => {
+                                match AudioDecoder::new(self.audio) {
+                                    Ok(dec) => v.insert(Decoder { dec, plc_run: 0 }),
+                                    Err(_) => continue,
+                                }
+                            }
                         };
                         if let Some(pcm) = dec.decode(frame) {
                             let mut sum = 0f64;
@@ -413,8 +523,11 @@ impl RoomCallEngine {
     /// active-speaker рамки. Уровень считается в [`pull_audio`] по RMS кадра.
     pub fn speaking_json(&self) -> String {
         let lv = self.levels.lock_safe();
-        let arr: Vec<String> =
-            lv.iter().filter(|(_, v)| **v > 0.03).map(|(k, _)| hex::encode(k)).collect();
+        let arr: Vec<String> = lv
+            .iter()
+            .filter(|(_, v)| **v > 0.03)
+            .map(|(k, _)| hex::encode(k))
+            .collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
@@ -454,6 +567,7 @@ impl RoomCallEngine {
         self.in_ring.lock_safe().clear();
         // Неотправленное тоже никому: сессия без участников выбрасывает свою очередь.
         self.session.lock_safe().set_peers(&[]);
+        kick(&self.kick);
     }
 
     pub fn stop(&self) {
