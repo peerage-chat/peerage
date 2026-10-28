@@ -18,6 +18,7 @@ mod bwe;
 pub mod jitter;
 mod nack;
 mod pacer;
+mod playout;
 pub mod reassembly;
 pub mod session;
 pub mod sim;

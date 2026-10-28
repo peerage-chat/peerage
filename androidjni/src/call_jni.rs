@@ -354,21 +354,9 @@ pub extern "system" fn Java_chat_peerage_Native_roomVideoTargetBitrate<'local>(
     })
 }
 
-/// Задать кап входящей видео-очереди (кадров) — политику бюджета считает Kotlin.
-#[no_mangle]
-pub extern "system" fn Java_chat_peerage_Native_roomSetVideoCap<'local>(
-    _env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-    cap: jint,
-) {
-    jni_safe!((), {
-        if let Some(e) = unsafe { engine(session_ptr) } { e.room_set_video_cap(cap.max(1) as usize); }
-    });
-}
-
-/// Следующий входящий H264-кадр от peer. Пустой массив если очередь пуста. Раскладка
-/// (только для JNI, не протокол): `[поворот (четверти оборота)][fps][access-unit…]`.
+/// Следующий входящий H264-кадр от peer, если его пора декодировать; пустой массив —
+/// пока нечего. Раскладка (только для JNI, не протокол): `[поворот (четверти
+/// оборота)][срок кадра от «сейчас», мкс: i32 BE, ≤ 0][access-unit…]`.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_roomPullVideoPacket<'local>(
     mut env: JNIEnv<'local>,
@@ -382,9 +370,15 @@ pub extern "system" fn Java_chat_peerage_Native_roomPullVideoPacket<'local>(
         let Some(key) = parse_key(&jstr(&mut env, &peer_hex)) else { return empty };
         match e.room_pull_video(&key) {
             Some(f) => {
-                let mut out = Vec::with_capacity(2 + f.data.len());
+                let now = std::time::Instant::now();
+                let play_in_us = match f.play_at.checked_duration_since(now) {
+                    Some(d) => d.as_micros() as i64,
+                    None => -(now.duration_since(f.play_at).as_micros() as i64),
+                }
+                .clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+                let mut out = Vec::with_capacity(5 + f.data.len());
                 out.push(f.info.rotation);
-                out.push(f.info.fps);
+                out.extend_from_slice(&play_in_us.to_be_bytes());
                 out.extend_from_slice(&f.data);
                 env.byte_array_from_slice(&out).unwrap_or(empty)
             }

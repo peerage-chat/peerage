@@ -394,13 +394,6 @@ impl RoomCallEngine {
         (total.saturating_sub(audio) / 100 * 95).max(MIN_BITRATE / 2)
     }
 
-    /// Задать кап входящей видео-очереди (в кадрах). Политику считает Kotlin: он
-    /// знает разрешение/fps и даёт тяжёлым режимам (1080p) больший запас на пачки,
-    /// а лёгким — низкую задержку.
-    pub fn set_video_cap(&self, frames: usize) {
-        self.session.lock_safe().set_video_queue_cap(frames);
-    }
-
     /// Закодированный H264 access-unit → всем участникам. `true` — кто-то из них
     /// просит ключевой кадр: пусть кодер выдаст его следующим.
     pub fn push_video(&self, frame: &[u8], info: VideoInfo) -> bool {
@@ -415,9 +408,10 @@ impl RoomCallEngine {
         wanted
     }
 
-    /// Следующий входящий H264-кадр от peer, или None если очередь пуста.
+    /// Следующий входящий H264-кадр от peer, если его пора декодировать: LiteRTC
+    /// расписывает сроки по меткам захвата (`VideoFrame::play_at`).
     pub fn pull_video_for(&self, peer: &PeerKey) -> Option<VideoFrame> {
-        self.session.lock_safe().pull_video(peer)
+        self.session.lock_safe().pull_video(Instant::now(), peer)
     }
 
     /// Декодер видео участника начат заново — ему нужен ключевой кадр.

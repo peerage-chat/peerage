@@ -8,15 +8,24 @@ import kotlin.concurrent.thread
 
 /**
  * Видео-приёмник: тянет собранные H.264 access-unit'ы из Rust
- * ([Native.callPullVideoPacket]), скармливает аппаратному декодеру (MediaCodec)
+ * ([Native.roomPullVideoPacket]), скармливает аппаратному декодеру (MediaCodec)
  * и рендерит прямо в [surface] (zero-copy на экран). SPS/PPS приходят in-band
  * (добавлены к keyframe отправителем) — декодер инициализируется из потока.
+ *
+ * Сроки кадров расписывает LiteRTC (ADR-014, шаг 8): по метке времени захвата, в
+ * темпе камеры отправителя, с запасом на разброс сети. Кадр забирается в свой срок и
+ * сразу идёт в декодер, готовый — сразу на экран: темп задаёт подача, а задержка
+ * декодера у устройства постоянна и лишь сдвигает всё целиком (так и в WebRTC).
+ * Держать готовые кадры до «срока плюс задержка» нельзя: выходных буферов у
+ * декодера несколько, он встаёт, подача отстаёт, задержка растёт по кругу.
+ *
+ * Если декодер не успевает за потоком, кадры копятся в очереди LiteRTC; там она и
+ * ограничена (перескок к ключевому кадру).
  */
 class VideoReceiver(
     private val surface: Surface,
     private val width: Int,
     private val height: Int,
-    private val fps: Int = 30,
     /** Вызывается при изменении ориентации потока (угол сенсора отправителя, 0/90/
      *  180/270) — UI доворачивает тайл. Идёт 1-м байтом каждого access-unit'а. */
     private val onRotation: (Int) -> Unit = {},
@@ -30,6 +39,11 @@ class VideoReceiver(
 
     @Volatile private var running = false
 
+    /** Задержка своего декодера: срок кадра → кадр на экране (сглаженная). На столько
+     *  видео отстаёт от сроков LiteRTC — для синхронизации со звуком. */
+    @Volatile var decoderDelayNs = 0L
+        private set
+
     fun start() {
         android.util.Log.i("VideoReceiver", "start() called: width=$width, height=$height")
         running = true
@@ -39,38 +53,18 @@ class VideoReceiver(
     private fun loop() {
         android.util.Log.i("VideoReceiver", "loop() started")
         var dec: MediaCodec? = null
-        // Темп берём ИЗ ПОТОКА (заголовок кадра), а не из локальной настройки: иначе
-        // при разном fps у устройств приёмник пейсит не на той скорости (был баг:
-        // локально 60, поток 30 → видео 2× → слив буфера → фриз, и так по кругу).
-        var streamFps = fps
-        var frameUs = 1_000_000L / streamFps
-        var frameNs = 1_000_000_000L / streamFps
         val info = MediaCodec.BufferInfo()
-
-        // ── Jitter-buffer (M1, идея WebRTC) ───────────────────────────────────
-        // Очередь СЖАТЫХ access-unit'ов в приложении (а не в кодеке: его выходные
-        // буферы — ~8, туда глубокий буфер не положить). Кормим декодер «точно в
-        // срок» (за feedLead до показа) → пайплайн кодека мелкий, а вся глубина —
-        // в этой очереди. Глубина = задержка, адаптивная: растёт при underrun.
-        val queue = ArrayDeque<ByteArray>()
-        val maxQueue = 90 // жёсткий потолок (≈3с), защита от флуда
-        var feedLeadNs = 3 * frameNs // насколько раньше показа кормить декодер (зависит от темпа)
-        val minTarget = 3
-        val maxTarget = 30
-        var targetFrames = 8 // старт ~266мс; растёт при underrun
-        var playing = false // прошли ли пребуфер
-        // Якорь часов показа: кадр с pts=clockAnchorPtsUs показывается в clockAnchorNs;
-        // остальные — линейно от него. Ребейзится при возобновлении после underrun,
-        // чтобы НЕ догонять пачкой (для реалтайма гэп пропускаем, не ускоряемся).
-        var clockAnchorNs = 0L
-        var clockAnchorPtsUs = 0L
-        var feedIdx = 0 // МОНОТОННЫЙ счётчик поданных (pts=feedIdx*frameUs); не сбрасывать при underrun
+        // Кадр уже взят из LiteRTC, но входные буферы декодера заняты — подаём позже.
+        var pending: ByteArray? = null
+        var pendingDueUs = 0L
         var lastRotation = -1
-        var pulledCount = 0
         var renderedCount = 0
-        var underrunCount = 0
         var restartStreak = 0
-        var sinceUnderrun = 0 // кадров без underrun (для усадки задержки)
+        // Для лога: насколько позже срока кадр подан и показан (худшее за 30 кадров).
+        var worstFeedLateUs = 0L
+        var worstShownLateUs = 0L
+        var fedCount = 0L
+        var outCount = 0L
 
         while (running) {
             try {
@@ -94,110 +88,75 @@ class VideoReceiver(
                         start()
                     }
                     decoder = dec
-                    playing = false
-                    feedIdx = 0
-                    queue.clear() // новый декодер — свежий pts-таймлайн
+                    pending = null
                     // Опоры у нового декодера нет; ключевой по расписанию — раз в 10 с.
                     requestKeyframe()
-                    android.util.Log.i("VideoReceiver", "Decoder started successfully")
+                    android.util.Log.i(
+                        "VideoReceiver",
+                        "Decoder started: ${codec.name}, lowLatency=" +
+                            runCatching {
+                                codec.codecInfo.getCapabilitiesForType("video/avc")
+                                    .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)
+                            }.getOrNull(),
+                    )
                 }
                 val currentDec = dec!!
-                val nowNs = System.nanoTime()
 
-                // 1. Слить из JNI в jitter-buffer. Первые 2 байта (раскладка JNI, в
-                //    протоколе это поля кадра): [0]=ориентация (угол/90), [1]=fps
-                //    отправителя (для пейсинга). Остаток — access-unit.
-                while (queue.size < maxQueue) {
-                    val raw = pullVideoPacket()
-                    if (raw.size < 2) {
-                        if (raw.isEmpty()) break else continue
-                    }
-                    val rot = ((raw[0].toInt() and 0xFF) % 4) * 90
-                    if (rot != lastRotation) {
-                        lastRotation = rot
-                        onRotation(rot)
-                    }
-                    val sfps = raw[1].toInt() and 0xFF
-                    if (sfps in 1..120 && sfps != streamFps) {
-                        streamFps = sfps
-                        frameUs = 1_000_000L / sfps
-                        frameNs = 1_000_000_000L / sfps
-                        feedLeadNs = 3 * frameNs
-                        playing = false // ре-пребуфер на новом темпе (ребейз якоря)
-                        android.util.Log.i("VideoReceiver", "stream fps=$sfps")
-                    }
-                    queue.addLast(raw.copyOfRange(2, raw.size))
-                    pulledCount++
-                }
-
-                // 2. Пребуфер: не начинаем показ, пока не накопили target кадров.
-                // Задержку даёт сама ПОДУШКА из target накопленных кадров (мы их
-                // показываем по cadence, пока новые догоняют), а не доп. сдвиг базы.
-                // База = сейчас + feedLead (кадр 0 кормим сейчас, показ когда декоднётся).
-                if (!playing && queue.size >= targetFrames) {
-                    // Возобновление: РЕБЕЙЗ якоря — следующий кадр покажем «сейчас»,
-                    // без догоняющей пачки. feedIdx НЕ трогаем (pts монотонен).
-                    playing = true
-                    clockAnchorPtsUs = feedIdx.toLong() * frameUs
-                    clockAnchorNs = nowNs + feedLeadNs
-                }
-
-                // 3. Подача «точно в срок»: кормим кадр feedIdx за feedLead до показа.
-                if (playing) {
-                    val ptsUs = feedIdx.toLong() * frameUs
-                    val playoutNs = clockAnchorNs + (ptsUs - clockAnchorPtsUs) * 1_000L
-                    if (nowNs >= playoutNs - feedLeadNs) {
-                        val au = queue.removeFirstOrNull()
-                        if (au == null) {
-                            // Underrun: пора кормить, а буфер пуст → растим задержку.
-                            playing = false
-                            targetFrames = (targetFrames + 2).coerceAtMost(maxTarget)
-                            underrunCount++
-                            sinceUnderrun = 0
-                            android.util.Log.w("VideoReceiver", "underrun → target=$targetFrames (n=$underrunCount)")
-                        } else {
-                            val inIdx = currentDec.dequeueInputBuffer(0)
-                            if (inIdx < 0) {
-                                queue.addFirst(au) // вход кодека занят — вернём, попробуем позже
-                            } else {
-                                val ib = currentDec.getInputBuffer(inIdx)
-                                if (ib != null && ib.capacity() >= au.size) {
-                                    ib.clear()
-                                    ib.put(au)
-                                    currentDec.queueInputBuffer(inIdx, 0, au.size, ptsUs, 0)
-                                } else {
-                                    currentDec.queueInputBuffer(inIdx, 0, 0, ptsUs, 0)
-                                }
-                                feedIdx++
-                            }
+                // 1. Подать декодеру всё, чей срок пришёл. Раскладка JNI (не протокол):
+                //    [0] поворот (угол/90), [1..5) срок кадра от «сейчас», мкс (i32 BE,
+                //    ≤ 0), дальше access-unit. Срок едет в pts.
+                while (true) {
+                    if (pending == null) {
+                        val raw = pullVideoPacket()
+                        if (raw.size < PULL_HEADER) break
+                        val rot = ((raw[0].toInt() and 0xFF) % 4) * 90
+                        if (rot != lastRotation) {
+                            lastRotation = rot
+                            onRotation(rot)
                         }
+                        val dueInUs = java.nio.ByteBuffer.wrap(raw, 1, 4).int
+                        pendingDueUs = System.nanoTime() / 1_000L + dueInUs
+                        pending = raw.copyOfRange(PULL_HEADER, raw.size)
                     }
+                    val au = pending ?: break
+                    val inIdx = currentDec.dequeueInputBuffer(0)
+                    if (inIdx < 0) break // вход занят — этот кадр подождёт
+                    val ib = currentDec.getInputBuffer(inIdx)
+                    if (ib != null && ib.capacity() >= au.size) {
+                        ib.clear()
+                        ib.put(au)
+                        currentDec.queueInputBuffer(inIdx, 0, au.size, pendingDueUs, 0)
+                        fedCount++
+                    } else {
+                        currentDec.queueInputBuffer(inIdx, 0, 0, pendingDueUs, 0)
+                    }
+                    worstFeedLateUs = maxOf(worstFeedLateUs, System.nanoTime() / 1_000L - pendingDueUs)
+                    pending = null
                 }
 
-                // 4. Показ output'ов с ЯВНЫМ пейсингом сном (эмулятор/часть устройств
-                // НЕ чтят present-timestamp в releaseOutputBuffer → метку игнорируют и
-                // кадры летят пачкой). Спим до момента показа, затем рендерим сразу.
+                // 2. Готовый кадр — сразу на экран. Ждём выхода не дольше 4 мс: пора
+                //    снова подавать.
                 val outIdx = try {
-                    currentDec.dequeueOutputBuffer(info, 4_000)
+                    currentDec.dequeueOutputBuffer(info, POLL_US)
                 } catch (e: Exception) {
                     -1
                 }
                 if (outIdx >= 0) {
-                    val presentNs = clockAnchorNs + (info.presentationTimeUs - clockAnchorPtsUs) * 1_000L
-                    val waitNs = presentNs - System.nanoTime()
-                    if (waitNs in 1..200_000_000L) { // ждём (кадр в будущем), кап 200мс
-                        Thread.sleep(waitNs / 1_000_000L, (waitNs % 1_000_000L).toInt())
-                    }
-                    runCatching { currentDec.releaseOutputBuffer(outIdx, true) } // рендер немедленно
+                    val lateNs = System.nanoTime() - info.presentationTimeUs * 1_000L
+                    outCount++
+                    runCatching { currentDec.releaseOutputBuffer(outIdx, true) }
+                    decoderDelayNs += ((lateNs - decoderDelayNs) * DELAY_SMOOTHING).toLong()
+                    worstShownLateUs = maxOf(worstShownLateUs, lateNs / 1_000L)
                     renderedCount++
                     restartStreak = 0
-                    // Усадка задержки: долго без underrun и буфер с запасом → -1 кадр.
-                    if (++sinceUnderrun >= 300 && targetFrames > minTarget && queue.size > targetFrames) {
-                        targetFrames--
-                        sinceUnderrun = 0
-                    }
                     if (renderedCount % 30 == 0) {
-                        android.util.Log.i("VideoReceiver", "Rendered 30 (buf=${queue.size} target=$targetFrames underruns=$underrunCount)")
+                        android.util.Log.i(
+                            "VideoReceiver",
+                            "Rendered 30 (in decoder ${fedCount - outCount}, decoder ${decoderDelayNs / 1_000_000}ms, worst " +
+                                "after due: fed +${worstFeedLateUs / 1000}ms, shown +${worstShownLateUs / 1000}ms)",
+                        )
+                        worstFeedLateUs = 0
+                        worstShownLateUs = 0
                     }
                 }
                 // INFO_OUTPUT_FORMAT_CHANGED (-2) / INFO_OUTPUT_BUFFERS_CHANGED (-3) игнорируем
@@ -207,9 +166,7 @@ class VideoReceiver(
                     runCatching { dec?.release() }
                     dec = null
                     decoder = null
-                    queue.clear()
-                    playing = false
-                    feedIdx = 0
+                    pending = null
                     // НЕ сдаёмся насмерть (иначе серое навсегда до toggle тайла): после
                     // порога длинный backoff (≤ раз/2с — createDecoder это новый OMX-узел,
                     // частая тёрка вешает кодек-сервис). restartStreak сбрасывается при
@@ -248,4 +205,15 @@ class VideoReceiver(
         maxOf(width, 1920).coerceAtMost(v.supportedWidths.upper) to
             maxOf(height, 1080).coerceAtMost(v.supportedHeights.upper)
     }.getOrNull()
+
+    private companion object {
+        /** Поворот + срок кадра перед access-unit'ом. */
+        const val PULL_HEADER = 5
+
+        /** Дольше не ждём выхода декодера: пора снова подавать. */
+        const val POLL_US = 4_000L
+
+        /** Сглаживание задержки декодера (доля нового замера). */
+        const val DELAY_SMOOTHING = 0.05
+    }
 }

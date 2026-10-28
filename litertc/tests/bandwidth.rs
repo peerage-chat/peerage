@@ -11,6 +11,9 @@ const A: u8 = 1;
 const B: u8 = 2;
 const FRAME_MS: u64 = 33;
 const AUDIO_BPS: u32 = 64_000;
+/// Кадры забираем сразу, как собраны: здесь важна очередь в сети, а не время показа
+/// (его проверяет tests/playout.rs).
+const ASAP: Duration = Duration::from_secs(3600);
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
@@ -105,7 +108,7 @@ fn run(secs: u64, link: impl Fn(u64) -> LinkConfig) -> Vec<Second> {
         while let Some(p) = to_a.poll(now) {
             a.handle_datagram(now, B, &p);
         }
-        while let Some(f) = b.pull_video(&A) {
+        while let Some(f) = b.pull_video(now + ASAP, &A) {
             let id = u32::from_be_bytes([f.data[0], f.data[1], f.data[2], f.data[3]]);
             let s = &mut out[sec];
             s.worst_latency = s.worst_latency.max(step - sent_at[id as usize]);

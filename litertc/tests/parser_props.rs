@@ -51,7 +51,7 @@ proptest! {
             s.handle_datagram(now, 1, &d);
             s.handle_timeout(now);
             while s.poll_transmit().is_some() {}
-            while s.pull_video(&1).is_some() {}
+            while s.pull_video(now, &1).is_some() {}
             let _ = s.pull_audio(&1);
             s.request_keyframe(now, &1);
         }
@@ -87,7 +87,7 @@ proptest! {
         let mut r = VideoReassembler::new();
         for (i, f) in frags.iter().enumerate() {
             if let Some(frag) = parse_video_frag(f) {
-                r.push(frag);
+                r.push(frag, 0);
             }
             let now = t0 + Duration::from_millis(i as u64 * 50);
             while r.pop(now, Duration::from_millis(100)).is_some() {}

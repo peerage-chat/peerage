@@ -107,7 +107,7 @@ impl GroupCall {
                                 .entry(p.src)
                                 .or_insert_with(|| (VideoReassembler::new(), VideoDecoder::new().unwrap()));
                             if let Some(frag) = parse_video_frag(f.payload) {
-                                entry.0.push(frag);
+                                entry.0.push(frag, f.header.ts);
                                 while let Some(cf) = entry.0.pop(Instant::now(), Duration::from_millis(300)) {
                                     if let Ok(Some(f)) = entry.1.decode(&cf.data) {
                                         let _ = frame_tx.try_send((p.src, f));

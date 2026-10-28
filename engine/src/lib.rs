@@ -2705,12 +2705,7 @@ impl Engine {
         }
     }
 
-    pub fn room_set_video_cap(&self, cap: usize) {
-        if let Some(engine) = self.room_engine() {
-            engine.set_video_cap(cap);
-        }
-    }
-
+    /// Следующий видео-кадр участника, если его пора декодировать (`play_at` — срок).
     pub fn room_pull_video(&self, peer: &[u8; 32]) -> Option<litertc::VideoFrame> {
         self.room_engine().and_then(|e| e.pull_video_for(peer))
     }

@@ -34,12 +34,15 @@ fn before(a: u32, b: u32) -> bool {
 /// Собранный целый видео-кадр.
 pub struct CompleteFrame {
     pub frame_id: u32,
+    /// Метка времени захвата (из медиа-заголовка фрагментов).
+    pub ts: u32,
     pub info: VideoInfo,
     pub data: Vec<u8>,
 }
 
 struct FrameAcc {
     count: u16,
+    ts: u32,
     info: VideoInfo,
     parts: Vec<Option<Vec<u8>>>,
     received: u16,
@@ -91,7 +94,8 @@ impl VideoReassembler {
     }
 
     /// Принять фрагмент. Кадры забираются [`Self::pop`].
-    pub fn push(&mut self, frag: VideoFrag<'_>) {
+    /// Фрагмент кадра; `ts` — метка времени из его медиа-заголовка.
+    pub fn push(&mut self, frag: VideoFrag<'_>, ts: u32) {
         // Кадр уже отдан или пропущен — опоздал.
         if self.next.is_some_and(|next| before(frag.frame_id, next)) {
             return;
@@ -107,6 +111,7 @@ impl VideoReassembler {
             .entry(frag.frame_id)
             .or_insert_with(|| FrameAcc {
                 count: frag.frag_count,
+                ts,
                 info: frag.info,
                 parts: vec![None; frag.frag_count as usize],
                 received: 0,
@@ -266,6 +271,7 @@ impl VideoReassembler {
         }
         Some(CompleteFrame {
             frame_id: id,
+            ts: acc.ts,
             info: acc.info,
             data,
         })
@@ -305,7 +311,7 @@ mod tests {
     fn feed(r: &mut VideoReassembler, frags: &[Vec<u8>], skip: &[usize], now: Instant) -> Vec<u32> {
         for (i, f) in frags.iter().enumerate() {
             if !skip.contains(&i) {
-                r.push(parse_video_frag(f).unwrap());
+                r.push(parse_video_frag(f).unwrap(), 0);
             }
         }
         drain(r, now)
@@ -329,7 +335,7 @@ mod tests {
 
         let mut r = VideoReassembler::new();
         for f in &frags {
-            r.push(parse_video_frag(f).unwrap());
+            r.push(parse_video_frag(f).unwrap(), 0);
         }
         let cf = r.pop(Instant::now(), WAIT).expect("кадр должен собраться");
         assert_eq!(cf.data, frame);
@@ -358,7 +364,7 @@ mod tests {
 
         let mut r = VideoReassembler::new();
         for f in &frags {
-            r.push(parse_video_frag(f).unwrap());
+            r.push(parse_video_frag(f).unwrap(), 0);
         }
         assert_eq!(r.pop(Instant::now(), WAIT).unwrap().data, frame);
     }
@@ -392,7 +398,7 @@ mod tests {
         assert_eq!(r.deadline(WAIT), Some(t0 + WAIT));
         // Повтор пришёл до срока.
         let later = t0 + WAIT / 2;
-        r.push(parse_video_frag(&f2[1]).unwrap());
+        r.push(parse_video_frag(&f2[1]).unwrap(), 0);
         assert_eq!(drain(&mut r, later), [2, 3]);
         assert!(!r.wants_keyframe());
         assert_eq!(r.deadline(WAIT), None);
@@ -408,7 +414,7 @@ mod tests {
         assert!(feed(&mut r, &k, &[0], t0).is_empty());
         assert!(feed(&mut r, &frame(2, plain()), &[], t0).is_empty());
         assert!(!r.wants_keyframe());
-        r.push(parse_video_frag(&k[0]).unwrap());
+        r.push(parse_video_frag(&k[0]).unwrap(), 0);
         assert_eq!(drain(&mut r, t0 + WAIT / 2), [1, 2]);
     }
 
@@ -449,7 +455,7 @@ mod tests {
         feed(&mut r, &frame(2, plain()), &[0], t0);
         assert_eq!(feed(&mut r, &frame(3, key()), &[], t0), [3]);
         // Запоздавший фрагмент кадра 2 уже не нужен.
-        r.push(parse_video_frag(&frame(2, plain())[0]).unwrap());
+        r.push(parse_video_frag(&frame(2, plain())[0]).unwrap(), 0);
         assert!(drain(&mut r, t0).is_empty());
     }
 
@@ -509,13 +515,16 @@ mod tests {
     #[test]
     fn reassembler_memory_is_bounded() {
         let mut r = VideoReassembler::new();
-        r.push(parse_video_frag(&raw_frag(1, 0, u16::MAX)).unwrap());
+        r.push(parse_video_frag(&raw_frag(1, 0, u16::MAX)).unwrap(), 0);
         assert_eq!(r.pending, 0, "кадр сверх MAX_VIDEO_FRAGS не копится");
 
         // Много больших кадров, ни один не собирается.
         for id in 0..16u32 {
             for idx in 0..MAX_VIDEO_FRAGS - 1 {
-                r.push(parse_video_frag(&raw_frag(id, idx, MAX_VIDEO_FRAGS)).unwrap());
+                r.push(
+                    parse_video_frag(&raw_frag(id, idx, MAX_VIDEO_FRAGS)).unwrap(),
+                    0,
+                );
             }
         }
         assert!(
@@ -525,7 +534,7 @@ mod tests {
         );
         // И много мелких: число кадров тоже ограничено.
         for id in 100..1000u32 {
-            r.push(parse_video_frag(&raw_frag(id, 0, 2)).unwrap());
+            r.push(parse_video_frag(&raw_frag(id, 0, 2)).unwrap(), 0);
         }
         assert!(r.frames.len() <= MAX_FRAMES);
         let real: usize = r

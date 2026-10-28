@@ -481,12 +481,10 @@ object Native {
     /** Декодер видео [peerHex] начат заново — попросить у него ключевой кадр. */
     external fun roomRequestKeyframe(sessionPtr: Long, peerHex: String)
 
-    /** Задать кап входящей видео-очереди (кадров). Политику бюджета считает Kotlin. */
-    external fun roomSetVideoCap(sessionPtr: Long, cap: Int)
-
     /**
-     * Следующий входящий H264-кадр от peer: `[поворот (угол/90)][fps][access-unit…]`.
-     * Пустой массив если очередь пуста.
+     * Следующий входящий H264-кадр от peer, если его пора декодировать:
+     * `[поворот (угол/90)][срок кадра от «сейчас», мкс: i32 BE, ≤ 0][access-unit…]`.
+     * Пустой массив — пока нечего (сроки расписывает LiteRTC по меткам захвата).
      */
     external fun roomPullVideoPacket(sessionPtr: Long, peerHex: String): ByteArray
 

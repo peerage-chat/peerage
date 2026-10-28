@@ -35,7 +35,7 @@ fuzz_target!(|data: &[u8]| {
         i += 1;
         let now = t0 + Duration::from_millis(i * 7);
         if let Some(f) = parse_video_frag(pkt) {
-            asm.push(f);
+            asm.push(f, 0);
         }
         while let Some(frame) = asm.pop(now, Duration::from_millis(100)) {
             assert!(frame.data.len() <= 1024 * 8_000, "кадр больше допустимого");
@@ -47,6 +47,6 @@ fuzz_target!(|data: &[u8]| {
         s.handle_datagram(now, 1, pkt);
         s.handle_timeout(now);
         while s.poll_transmit().is_some() {}
-        while s.pull_video(&1).is_some() {}
+        while s.pull_video(now, &1).is_some() {}
     }
 });

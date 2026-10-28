@@ -72,7 +72,7 @@ into chunks of at most 8 000 bytes. Each chunk travels in its own media packet:
 | 6 | 2 | frag_count | Chunks in the frame, `1 ≤ frag_count ≤ 1024`. |
 | 8 | 1 | flags | Bit 0: keyframe. Other bits: zero, ignored. |
 | 9 | 1 | rotation | Quarter turns clockwise the receiver applies (the camera captures in sensor orientation). Taken modulo 4. |
-| 10 | 1 | fps | The sender's frame rate; the receiver paces output by it. `0` = unknown. |
+| 10 | 1 | fps | The frame rate the sender's encoder was configured for, informational: receivers play frames by their capture timestamps, since a camera often delivers fewer (darkness, emulators). `0` = unknown. |
 | 11 | … | data | The chunk. An empty frame is one fragment with empty data. |
 
 Every fragment of a frame carries the same flags, rotation and fps. Video `seq` counts
@@ -239,10 +239,24 @@ unsafe.
   requested. Frames after a keyframe that is still being completed are kept for it.
 - **Late frames.** Frame ids compare in serial-number arithmetic (half the circle ahead
   is newer). A frame older than the next one expected is dropped.
-- **Decoder queue.** Above the queue limit set by the caller, the queue jumps to its
-  newest keyframe; P-frames are never dropped one by one. A queue nobody drains (the
-  member's tile is off screen) is thrown away at 64 frames or 32 MiB, and the receiver
-  then quietly waits for the next keyframe.
+- **Playout.** Each frame gets a time to show it: its capture timestamp plus an offset
+  that covers 99 % of the recent frames (arrival − timestamp over the last 10 s), so
+  frames are shown at the sender camera's pace whatever its real frame rate, and the
+  clock offset and drift between the two phones are absorbed by the window. The offset
+  rises at once and falls by at most 50 ms per second (100 ms per second while it is
+  more than 250 ms above what is needed): playback runs at most 5–10 % fast. A frame
+  is never scheduled before it is ready nor before the previous one, and never more
+  than a second out. The frame goes to the decoder at that time and is shown as soon as
+  it is decoded: the device's decoder delay is constant and only shifts the whole
+  stream.
+- **Decoder queue.** When the oldest queued frame was due more than 0.5 s ago — nobody
+  is decoding (the member's tile is off screen, the decoder stalled) — the queue jumps
+  to its newest keyframe; P-frames are never dropped one by one. If there is no
+  keyframe to jump to and the consumer is still taking frames (it pulled one within the
+  last second — a slow decoder, not a hidden tile), a keyframe request (`0x23`) is sent,
+  under the usual retry limit. A queue nobody drains
+  is thrown away at 150 frames or 32 MiB, and the receiver then quietly waits for the
+  next keyframe.
 - **Audio.** Packets are reordered by `seq` in a jitter buffer. A packet older than the
   next one to play (serial arithmetic on 2¹⁶) is dropped. A missing packet is declared
   lost once two later packets are waiting; the decoder then recovers it from the in-band

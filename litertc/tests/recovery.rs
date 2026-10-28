@@ -12,6 +12,8 @@ use litertc::{
 const A: u8 = 1;
 const B: u8 = 2;
 const FRAME_MS: u64 = 33;
+/// Кадры забираем сразу, как собраны: здесь важно, что дошло, а не когда показать.
+const ASAP: Duration = Duration::from_secs(3600);
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
@@ -102,7 +104,7 @@ fn run(ab: LinkConfig, ba: LinkConfig, secs: u64, join_at: u32, restart_at: Opti
         while let Some(p) = to_a.poll(now) {
             a.handle_datagram(now, B, &p);
         }
-        while let Some(f) = b.pull_video(&A) {
+        while let Some(f) = b.pull_video(now + ASAP, &A) {
             r.delivered.push(u32::from_be_bytes([
                 f.data[0], f.data[1], f.data[2], f.data[3],
             ]));

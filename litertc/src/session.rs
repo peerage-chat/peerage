@@ -8,7 +8,9 @@
 //!
 //! Воспроизведение тянет потребитель в своём темпе ([`Session::pull_audio`] по таймеру
 //! кадра, [`Session::pull_video`] — декодер), поэтому медиа отдаётся по запросу, а не
-//! событиями.
+//! событиями. Когда показывать видео-кадр, решает `Session` — по метке времени
+//! захвата ([`VideoFrame::play_at`], модуль `playout`): потребитель только декодирует
+//! и показывает в срок.
 //!
 //! Таймеры (отчёты получателя, повторы NACK, ожидание недостающего кадра, запрос
 //! ключевого): вызывающий зовёт [`Session::handle_timeout`] не позже
@@ -27,6 +29,7 @@ use crate::bwe::{ArrivalLog, Bwe};
 use crate::jitter::{JitterBuffer, JitterOut};
 use crate::nack::{NackList, TxHistory};
 use crate::pacer::{Class, Pacer};
+use crate::playout::Playout;
 use crate::reassembly::{CompleteFrame, VideoReassembler};
 use crate::stats::{RxStats, TrackStats};
 use crate::wire::{
@@ -89,16 +92,22 @@ fn nack_retry(rtt: Duration) -> Duration {
 /// кадрах: кадр бывает до 8 МБ (`MAX_VIDEO_FRAGS`), и 60 таких — полгигабайта.
 const VIDEO_QUEUE_BYTES: usize = 32 << 20;
 
-/// Предел очереди видео-кадров по умолчанию (≈300 мс при 30 fps), пока вызывающий не
-/// уточнит его под разрешение и fps ([`Session::set_video_queue_cap`]). Декодер
-/// выводит кадры по своим часам, поэтому бэклог в очереди = постоянная задержка.
-const VIDEO_QUEUE_DEFAULT: usize = 9;
-
 /// Жёсткий предел очереди в кадрах: сверх мягкого кадры не выбрасываются, пока нет
 /// ключевого, к которому можно перескочить (выброшенный P-кадр сломал бы все
 /// следующие). Столько набегает, только если кадры никто не забирает (тайл
-/// участника не на экране) — тогда очередь выбрасывается целиком.
-const VIDEO_QUEUE_HARD: usize = 64;
+/// участника не на экране) — тогда очередь выбрасывается целиком. С запасом на
+/// секунду задержки показа при 120 fps.
+const VIDEO_QUEUE_HARD: usize = 150;
+
+/// Кадр, который пора было показать столько назад, а его не забрали, — потребитель
+/// не успевает (декодер встал, тайл не на экране). Задержка копилась бы без конца:
+/// очередь перескакивает к свежему ключевому кадру.
+const VIDEO_STALL: Duration = Duration::from_millis(500);
+
+/// Потребитель видео считается живым, если забирал кадры не дольше этого назад. Живой,
+/// но отстающий получает ключевой кадр для перескока; тайл вне экрана — нет (иначе
+/// отправитель слал бы ключевые кадры раз в секунду впустую).
+const CONSUMER_ACTIVE: Duration = Duration::from_secs(1);
 
 /// Параметры звонка.
 #[derive(Clone, Copy, Debug)]
@@ -127,6 +136,11 @@ pub struct Transmit<P> {
 pub struct VideoFrame {
     pub data: Vec<u8>,
     pub info: VideoInfo,
+    /// Срок кадра (наши часы): по метке захвата, ровно в темпе камеры отправителя,
+    /// с запасом на разброс сети. Это время показа при мгновенном декодере: в срок
+    /// кадр подают декодеру, а показывают позже на задержку своего декодера (она у
+    /// устройства постоянна — темп не меняется). Опоздавший кадр подают сразу.
+    pub play_at: Instant,
 }
 
 /// Статистика по участнику.
@@ -201,22 +215,29 @@ struct VideoRx {
     stream: Option<u32>,
     nack: NackList,
     asm: VideoReassembler,
+    playout: Playout,
     queue: VecDeque<VideoFrame>,
+    /// Когда потребитель последний раз забрал кадр.
+    last_pull: Option<Instant>,
     /// Когда последний раз просили у него ключевой кадр.
     keyframe_requested: Option<Instant>,
 }
 
 impl VideoRx {
-    fn push(&mut self, frame: CompleteFrame, cap: usize) {
+    fn push(&mut self, now: Instant, frame: CompleteFrame) {
+        let play_at = self.playout.schedule(now, frame.ts);
         let q = &mut self.queue;
         q.push_back(VideoFrame {
             data: frame.data,
             info: frame.info,
+            play_at,
         });
-        // Анти-латентность: при переполнении ПРЫГАЕМ к свежему ключевому кадру (декодер
+        // Потребитель не успевает — ПРЫГАЕМ к свежему ключевому кадру (декодер
         // ресинхронизируется чисто). Выбросить P-кадры по одному нельзя: следующие
         // опираются на них.
-        if q.len() > cap.max(4) {
+        if q.front()
+            .is_some_and(|f| now.saturating_duration_since(f.play_at) > VIDEO_STALL)
+        {
             if let Some(kf) = q.iter().rposition(|f| f.info.keyframe) {
                 q.drain(0..kf);
             }
@@ -226,6 +247,18 @@ impl VideoRx {
             q.clear();
             self.asm.skip_to_keyframe(false);
         }
+    }
+
+    /// Потребитель живой, но не успевает (слабый декодер): старший кадр давно пора
+    /// было отдать, а перескочить не к чему — нужен ключевой кадр.
+    fn consumer_behind(&self, now: Instant) -> bool {
+        self.last_pull
+            .is_some_and(|t| now.saturating_duration_since(t) < CONSUMER_ACTIVE)
+            && self
+                .queue
+                .front()
+                .is_some_and(|f| now.saturating_duration_since(f.play_at) > VIDEO_STALL)
+            && !self.queue.iter().any(|f| f.info.keyframe)
     }
 }
 
@@ -308,7 +341,6 @@ pub struct Session<P> {
     video_history: TxHistory,
     /// Кто-то из участников попросил ключевой кадр, а кодер его ещё не выдал.
     keyframe_wanted: bool,
-    video_queue_cap: usize,
     tx_bytes: u64,
     /// Начало наших часов для отчётов и времени прихода (первый увиденный `now`).
     epoch: Option<Instant>,
@@ -332,7 +364,6 @@ impl<P: Copy + Eq + Hash> Session<P> {
             video_epoch: None,
             video_history: TxHistory::default(),
             keyframe_wanted: false,
-            video_queue_cap: VIDEO_QUEUE_DEFAULT,
             tx_bytes: 0,
             epoch: None,
             last_now: None,
@@ -588,9 +619,10 @@ impl<P: Copy + Eq + Hash> Session<P> {
                     st.video.stream = Some(h.stream_id);
                     st.video.nack = NackList::default();
                     st.video.asm = VideoReassembler::new();
+                    st.video.playout = Playout::default();
                 }
                 st.video.nack.on_packet(now, h.seq);
-                st.video.asm.push(frag);
+                st.video.asm.push(frag, h.ts);
                 self.service_video(now, from);
             }
             TRACK_AUDIO => {
@@ -647,7 +679,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let wait = max_frame_wait(rtt);
         let v = &mut st.video;
         while let Some(frame) = v.asm.pop(now, wait) {
-            v.push(frame, self.video_queue_cap);
+            v.push(now, frame);
         }
         let Some(stream_id) = v.stream else { return };
         let nack = Nack {
@@ -659,7 +691,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
             self.pacer
                 .push(Class::Control, now, Transmit { to: peer, data });
         }
-        let ask = v.asm.wants_keyframe()
+        let ask = (v.asm.wants_keyframe() || v.consumer_behind(now))
             && v.keyframe_requested
                 .is_none_or(|t| now.saturating_duration_since(t) >= KEYFRAME_REQUEST_RETRY);
         if ask {
@@ -753,9 +785,15 @@ impl<P: Copy + Eq + Hash> Session<P> {
         self.state.get_mut(peer)?.audio.as_mut()?.jitter.pop()
     }
 
-    /// Следующий собранный видео-кадр участника для декодера.
-    pub fn pull_video(&mut self, peer: &P) -> Option<VideoFrame> {
-        self.state.get_mut(peer)?.video.queue.pop_front()
+    /// Следующий видео-кадр участника, если его срок ([`VideoFrame::play_at`]) не
+    /// позже `due` (обычно — сейчас).
+    pub fn pull_video(&mut self, due: Instant, peer: &P) -> Option<VideoFrame> {
+        let v = &mut self.state.get_mut(peer)?.video;
+        if v.queue.front()?.play_at > due {
+            return None;
+        }
+        v.last_pull = Some(due);
+        v.queue.pop_front()
     }
 
     /// Декодер видео участника начат заново (тайл появился на экране, декодер
@@ -774,13 +812,6 @@ impl<P: Copy + Eq + Hash> Session<P> {
         v.queue.clear();
         v.asm.skip_to_keyframe(true);
         self.service_video(now, *peer);
-    }
-
-    /// Предел очереди видео-кадров на участника. Политику задаёт вызывающий: он
-    /// знает разрешение и fps и даёт тяжёлым режимам больший запас на пачки, а
-    /// лёгким — низкую задержку.
-    pub fn set_video_queue_cap(&mut self, frames: usize) {
-        self.video_queue_cap = frames.clamp(4, 60);
     }
 
     pub fn stats(&self, peer: &P) -> Option<PeerStats> {
@@ -971,38 +1002,103 @@ mod tests {
         for t in drain(&mut old).into_iter().chain(drain(&mut new)) {
             rx.handle_datagram(now, 1, &t.data);
         }
-        let got: Vec<u8> = std::iter::from_fn(|| rx.pull_video(&1))
+        let got: Vec<u8> = std::iter::from_fn(|| rx.pull_video(now, &1))
             .map(|f| f.data[0])
             .collect();
         assert_eq!(got, [1, 2]);
     }
 
-    /// Очередь видео сверх предела прыгает к свежему ключевому кадру.
+    /// Кадры давно пора показать, а их не забирают — очередь прыгает к свежему
+    /// ключевому кадру, а не копит задержку.
     #[test]
-    fn video_queue_jumps_to_keyframe() {
-        let now = Instant::now();
+    fn stalled_video_queue_jumps_to_keyframe() {
+        let t0 = Instant::now();
         let mut tx = Session::new(CFG);
         tx.set_peers(&[9]);
+        tx.set_bitrate_bounds(100_000, 1_000_000_000);
         let mut rx = Session::new(CFG);
         rx.set_peers(&[1]);
-        rx.set_video_queue_cap(4);
+        let mut now = t0;
         for i in 0..6u8 {
-            tx.send_video(
-                now,
-                &[i; 10],
-                VideoInfo {
-                    keyframe: i == 0 || i == 3,
-                    ..key()
-                },
-            );
+            now = t0 + Duration::from_millis(i as u64 * 200);
+            let info = VideoInfo {
+                keyframe: i == 0 || i == 3,
+                ..key()
+            };
+            tx.send_video(now, &[i; 10], info);
+            for t in drain(&mut tx) {
+                rx.handle_datagram(now, 1, &t.data);
+            }
         }
-        for t in drain(&mut tx) {
-            rx.handle_datagram(now, 1, &t.data);
-        }
-        let got: Vec<u8> = std::iter::from_fn(|| rx.pull_video(&1))
+        // Ключевой кадр 3 пришёл, когда кадр 0 ждал показа уже 600 мс: перескок к 3.
+        let got: Vec<u8> = std::iter::from_fn(|| rx.pull_video(now, &1))
             .map(|f| f.data[0])
             .collect();
         assert_eq!(got, [3, 4, 5]);
+    }
+
+    /// Потребитель забирает кадры вдвое медленнее, чем они идут: очередь отстаёт, и
+    /// у отправителя просят ключевой кадр, к которому можно перескочить. Тайл, который
+    /// кадров не забирает вовсе, ключевых кадров не просит.
+    #[test]
+    fn slow_consumer_gets_a_keyframe_but_an_idle_one_does_not() {
+        for consume in [true, false] {
+            let t0 = Instant::now();
+            let mut tx = Session::new(CFG);
+            tx.set_peers(&[9]);
+            tx.set_bitrate_bounds(100_000, 1_000_000_000);
+            let mut rx = Session::new(CFG);
+            rx.set_peers(&[1]);
+            let mut asked = false;
+            for i in 0..90u64 {
+                let now = t0 + Duration::from_millis(i * 33);
+                let info = VideoInfo {
+                    keyframe: i == 0,
+                    ..key()
+                };
+                tx.send_video(now, &[i as u8; 10], info);
+                for t in drain(&mut tx) {
+                    rx.handle_datagram(now, 1, &t.data);
+                }
+                if consume && i % 2 == 0 {
+                    rx.pull_video(now, &1);
+                }
+                asked |= drain(&mut rx)
+                    .iter()
+                    .any(|t| t.data[0] == crate::wire::KEYFRAME_REQUEST_V2);
+            }
+            assert_eq!(asked, consume, "потребитель забирает кадры: {consume}");
+        }
+    }
+
+    /// Кадр отдаётся не раньше, чем его показ подошёл к `due`.
+    #[test]
+    fn video_is_released_shortly_before_its_time() {
+        let t0 = Instant::now();
+        let mut tx = Session::new(CFG);
+        tx.set_peers(&[9]);
+        tx.set_bitrate_bounds(100_000, 1_000_000_000);
+        let mut rx = Session::new(CFG);
+        rx.set_peers(&[1]);
+        // Оба кадра пришли разом (первый задержался): второй показывать через 33 мс
+        // после первого, по меткам захвата.
+        tx.send_video(t0, &[0; 10], key());
+        let first = drain(&mut tx);
+        let t1 = t0 + Duration::from_millis(33);
+        tx.send_video(t1, &[1; 10], VideoInfo::default());
+        let second = drain(&mut tx);
+        let at = t0 + Duration::from_millis(300);
+        for t in first.iter().chain(&second) {
+            rx.handle_datagram(at, 1, &t.data);
+        }
+        let f0 = rx.pull_video(at, &1).expect("первый — пора");
+        assert_eq!(f0.play_at, at);
+        // Второй показывать через 33 мс после первого: к `at` ещё рано.
+        assert_eq!(rx.pull_video(at, &1), None);
+        let f1 = rx
+            .pull_video(at + Duration::from_millis(33), &1)
+            .expect("второй — к своему показу");
+        assert_eq!(f1.play_at - f0.play_at, Duration::from_millis(33));
     }
 
     #[test]
@@ -1022,10 +1118,11 @@ mod tests {
             rx.handle_datagram(now, 1, &t.data);
         }
         assert_eq!(
-            rx.pull_video(&1),
+            rx.pull_video(now, &1),
             Some(VideoFrame {
                 data: frame,
-                info: key()
+                info: key(),
+                play_at: now,
             })
         );
     }

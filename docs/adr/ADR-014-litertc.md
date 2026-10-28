@@ -304,6 +304,22 @@ parses comes from such a member, so:
    small 16:9 size): 720p → 144p → 240p → 144p, decoders kept, no crash.
 8. **Playout and A/V sync:** the video jitter buffer moves from `VideoReceiver` into
    LiteRTC (`play_at`); Kotlin only decodes and renders.
+   8a ✅ (2026-10-29): playout by capture timestamps (`playout.rs`). The frame's 90 kHz
+   `ts` travels through reassembly; its due time is `ts` + the 99th percentile of
+   (arrival − `ts`) over 10 s, so frames follow the sender camera's real pace (not the
+   advertised fps) and clock offset and drift are absorbed. The offset rises at once and
+   falls 50 ms/s (100 ms/s when > 250 ms too high). `pull_video(due)` hands a frame out
+   at its time; Kotlin feeds the decoder then and renders each output at once, as
+   WebRTC does — holding decoded frames until "due + decoder delay" starves the
+   decoder of output buffers and the delay grows in a loop. `VideoReceiver` measures
+   its decoder delay (smoothed) for 8b. The old count-based queue cap is gone: a front
+   frame 0.5 s overdue jumps to the newest keyframe, and an active consumer with
+   nothing to jump to asks the sender for one. Simulated (`tests/playout.rs`, capture
+   36–50 ms, 30 ms jitter, 2 % loss): 1500/1500 frames shown, the gap between frames
+   off the capture gap in 18 of 1383, delay median 214 ms. The emulators cannot judge
+   smoothness: their `c2.goldfish.h264.decoder` has no low-latency mode, holds 5–15
+   frames and decodes slower than real time on the loaded host, so the stall rule is
+   what bounds their delay.
 9. **Desktop:** when the desktop client comes back, it drives `litertc::Session`; the
    `call` crate is deleted.
 

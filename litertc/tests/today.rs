@@ -76,7 +76,7 @@ fn video_lost_fragment_skips_to_keyframe() {
             let m = parse_media(&p).expect("медиа-пакет");
             let f = parse_video_frag(m.payload).expect("видео-фрагмент");
             arrived[f.frame_id as usize][f.frag_idx as usize] = true;
-            asm.push(f);
+            asm.push(f, m.header.ts);
             while let Some(c) = asm.pop(now, ms(300)) {
                 delivered.push(c.frame_id);
             }

@@ -2230,7 +2230,6 @@ class AppModel private constructor() {
             surface,
             videoQuality.width,
             videoQuality.height,
-            videoQuality.fps,
             onRotation = { rot -> roomMemberRotation[peerHex] = rot },
             requestKeyframe = { Native.roomRequestKeyframe(sessionPtr, peerHex) },
         ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
@@ -2278,17 +2277,9 @@ class AppModel private constructor() {
         val ctx = appContext ?: return
         val preview = selfPreviewSurface
         if (!videoActive || videoSender != null || preview == null) return
-        val cap = when {
-            videoQuality.height >= 1080 -> 24
-            videoQuality.height >= 720 -> 14
-            else -> 9
-        }
         // Сюда приходят с главного потока (колбэк surface превью) — нативный вызов
         // уводим в ops (инвариант 4).
-        ops.execute {
-            Native.roomSetVideoCap(sessionPtr, cap)
-            Native.roomSetVideoBitrate(sessionPtr, videoQuality.bitrate)
-        }
+        ops.execute { Native.roomSetVideoBitrate(sessionPtr, videoQuality.bitrate) }
         // Стартуем с текущей стороны камеры (cameraFront): дефолт — фронталка, но
         // экран шаринга мог выбрать тыловую (applyVideoShare ставит cameraFront).
         val vs = VideoSender(
