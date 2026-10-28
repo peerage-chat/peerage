@@ -2374,8 +2374,8 @@ impl Engine {
         std::thread::spawn(move || {
             while st.running.load(Ordering::Relaxed) {
                 match rx.recv_timeout(Duration::from_millis(200)) {
-                    Ok(p) if p.track == BENCH_TRACK => {
-                        st.bytes.fetch_add(p.payload.len() as u64, Ordering::Relaxed);
+                    Ok(p) if p.frame().is_some_and(|f| f.track == BENCH_TRACK) => {
+                        st.bytes.fetch_add((p.data.len() - litertc::MEDIA_HEADER_LEN) as u64, Ordering::Relaxed);
                         st.pkts.fetch_add(1, Ordering::Relaxed);
                     }
                     Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}

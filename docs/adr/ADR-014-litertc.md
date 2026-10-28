@@ -239,8 +239,15 @@ parses comes from such a member, so:
 2. ✅ (2026-10-28) **Move without changes.** Create `litertc`; move the fragmentation/reassembly from
    `core/media.rs` and the jitter buffer from `media/`; the format on the wire stays
    byte-identical. Add the simulator and tests that pin today's behaviour.
-3. **Sans-IO `Session`.** `room_call.rs` drives it (it keeps its threads, mixing and
-   halt); the JNI surface does not change. Write the wire spec.
+3. ✅ (2026-10-28) **Sans-IO `Session`.** `room_call.rs` drives it (it keeps its threads,
+   mixing and halt); the JNI surface does not change. Write the wire spec
+   ([litertc-wire.md](../architecture/litertc-wire.md)). As built, received media is
+   *pulled* per peer at the consumer's pace (`pull_audio` per 20 ms tick, `pull_video`
+   by the decoder) rather than pushed as events — playout is clocked by the consumer
+   anyway; events stay for control (`KeyframeRequested`, `TargetBitrate`) from step 5.
+   `messenger` now only seals and opens bytes (`send_media_packet`, raw `MediaPacket`);
+   the format is LiteRTC's alone. A peer that leaves the call loses its receive state,
+   so a rejoin starts from an empty buffer.
 4. **Wire v2.** Version byte, stream id, transport-wide seq, capture timestamps,
    rotation/fps in the protocol; Kotlin drops the side header. Media between old and new builds breaks here (pre-beta policy).
 5. **Feedback and stats:** receiver reports, RTT, per-peer stats (they also replace the

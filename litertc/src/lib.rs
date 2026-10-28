@@ -16,11 +16,13 @@
 
 pub mod jitter;
 pub mod reassembly;
+pub mod session;
 pub mod sim;
 pub mod wire;
 
 pub use jitter::{JitterBuffer, JitterOut};
 pub use reassembly::{CompleteFrame, VideoReassembler};
+pub use session::{Config, PeerStats, Session, Transmit};
 pub use wire::{
     fragment_video, parse_media, parse_video_frag, write_media_header, MediaFrame, VideoFrag,
     MAX_MEDIA_PAYLOAD, MAX_VIDEO_CHUNK, MAX_VIDEO_FRAGS, MEDIA_HEADER_LEN, MEDIA_V1, TRACK_AUDIO,

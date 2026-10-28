@@ -84,13 +84,14 @@ impl GroupCall {
                     if !allowed.contains(&p.src) {
                         continue; // источник не из группы — игнорируем
                     }
-                    match p.track {
+                    let Some(f) = p.frame() else { continue };
+                    match f.track {
                         TRACK_AUDIO => {
                             let (Some(cfg), Some(mix)) = (acfg, mix.as_ref()) else { continue };
                             let entry = a_src.entry(p.src).or_insert_with(|| {
                                 (JitterBuffer::new(cfg.jitter_depth), AudioDecoder::new(cfg).unwrap())
                             });
-                            entry.0.push(p.seq, p.payload);
+                            entry.0.push(f.seq, f.payload.to_vec());
                             while let Some(out) = entry.0.pop() {
                                 let pcm = match out {
                                     JitterOut::Frame(pkt) => entry.1.decode(Some(&pkt)),
@@ -105,7 +106,7 @@ impl GroupCall {
                             let entry = v_src
                                 .entry(p.src)
                                 .or_insert_with(|| (VideoReassembler::new(), VideoDecoder::new().unwrap()));
-                            if let Some(frag) = parse_video_frag(&p.payload) {
+                            if let Some(frag) = parse_video_frag(f.payload) {
                                 if let Some(cf) = entry.0.push(frag) {
                                     if let Ok(Some(f)) = entry.1.decode(&cf.data) {
                                         let _ = frame_tx.try_send((p.src, f));

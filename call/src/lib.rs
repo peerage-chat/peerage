@@ -105,12 +105,13 @@ impl Call {
                     if p.src != call_peer {
                         continue; // чужой источник — игнорируем
                     }
-                    match p.track {
+                    let Some(f) = p.frame() else { continue };
+                    match f.track {
                         TRACK_AUDIO => {
                             if let (Some(j), Some(dec), Some(ring)) =
                                 (jitter.as_mut(), audio_dec.as_mut(), out_ring.as_ref())
                             {
-                                j.push(p.seq, p.payload);
+                                j.push(f.seq, f.payload.to_vec());
                                 while let Some(out) = j.pop() {
                                     let pcm = match out {
                                         JitterOut::Frame(pkt) => dec.decode(Some(&pkt)),
@@ -123,7 +124,7 @@ impl Call {
                             }
                         }
                         TRACK_VIDEO | TRACK_SCREEN => {
-                            if let Some(frag) = parse_video_frag(&p.payload) {
+                            if let Some(frag) = parse_video_frag(f.payload) {
                                 if let Some(cf) = reasm.push(frag) {
                                     if let Some(dec) = video_dec.as_mut() {
                                         if let Ok(Some(frame)) = dec.decode(&cf.data) {

@@ -223,14 +223,20 @@ pub(crate) fn truncate_caption(s: &str) -> String {
     s[..end].to_string()
 }
 
-/// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран).
+/// Входящий медиа-пакет (реалтайм-канал: голос/видео/экран), уже расшифрованный.
+/// Формат внутри — забота `litertc`; мессенджер только запечатывает и вскрывает.
 #[derive(Debug, Clone)]
 pub struct MediaPacket {
+    /// Отправитель — личность, доказанная рукопожатием сессии.
     pub src: PeerKey,
-    pub track: u8,
-    pub seq: u16,
-    pub ts: u32,
-    pub payload: Vec<u8>,
+    pub data: Vec<u8>,
+}
+
+impl MediaPacket {
+    /// Разобранный заголовок и полезная нагрузка; `None` — мусор.
+    pub fn frame(&self) -> Option<litertc::MediaFrame<'_>> {
+        parse_media(&self.data)
+    }
 }
 
 /// Параметры надёжности.
@@ -1136,7 +1142,16 @@ impl Messenger {
         let mut frame = vec![0u8; total];
         write_media_header(&mut frame, track, seq, ts);
         frame[MEDIA_HEADER_LEN..total].copy_from_slice(payload);
-        let sealed = self.shared.sessions.lock().unwrap().seal_media(peer, &frame, Instant::now());
+        self.send_media_packet(peer, &frame)
+    }
+
+    /// Отправить готовый медиа-пакет `litertc` (заголовок уже внутри) — так шлёт
+    /// звонок; [`Messenger::send_media`] собирает пакет сам для замеров и тестов.
+    pub fn send_media_packet(&self, peer: &PeerKey, frame: &[u8]) -> Result<(), MessengerError> {
+        if frame.len() > MEDIA_HEADER_LEN + MAX_MEDIA_PAYLOAD {
+            return Err(MessengerError::MediaTooLarge);
+        }
+        let sealed = self.shared.sessions.lock().unwrap().seal_media(peer, frame, Instant::now());
         let Some(sealed) = sealed else {
             self.shared.probe(peer);
             return Ok(());
@@ -1145,7 +1160,7 @@ impl Messenger {
         dg.push(CHAN_MEDIA);
         dg.extend_from_slice(&sealed);
         if let Err(e) = self.shared.node().write(&self.shared.transport_of(peer), &dg) {
-            log::warn!("peerage-media: node.write failed for track={} len={}: {:?}", track, dg.len(), e);
+            log::warn!("peerage-media: node.write failed for track={:?} len={}: {:?}", frame.get(1), dg.len(), e);
             return Err(MessengerError::Transport(e));
         }
         Ok(())
@@ -1462,30 +1477,20 @@ fn receive_loop(shared: Arc<Shared>) {
                 continue;
             };
             let opened = shared.sessions.lock().unwrap().open_media(&buf[1..n], now);
-            let frame = opened.as_ref().and_then(|(peer, pt)| parse_media(pt).map(|f| (*peer, f)));
-            if let Some((peer, f)) = frame {
-                {
-                    // Отправитель — ЛИЧНОСТЬ, доказанная рукопожатием сессии, а не
-                    // адрес: по ней движок решает, чей это голос, и сверяет её с
-                    // участниками комнаты.
-                    let err = tx.try_send(MediaPacket {
-                        src: peer,
-                        track: f.track,
-                        seq: f.seq,
-                        ts: f.ts,
-                        payload: f.payload.to_vec(),
-                    });
-                    if err.is_err() {
-                        media_full = media_full.wrapping_add(1);
-                        if media_full % 512 == 1 {
-                            log::warn!("peerage-media: очередь полна, дроп (track={}, всего {media_full})", f.track);
-                        }
+            if let Some((peer, data)) = opened {
+                // Отправитель — ЛИЧНОСТЬ, доказанная рукопожатием сессии, а не
+                // адрес: по ней движок решает, чей это голос, и сверяет её с
+                // участниками комнаты. Разбор пакета — в litertc.
+                if tx.try_send(MediaPacket { src: peer, data }).is_err() {
+                    media_full = media_full.wrapping_add(1);
+                    if media_full % 512 == 1 {
+                        log::warn!("peerage-media: очередь полна, дроп (всего {media_full})");
                     }
                 }
             } else {
                 media_bad = media_bad.wrapping_add(1);
                 if media_bad % 512 == 1 {
-                    log::warn!("peerage-media: не расшифровать или битый медиа-пакет (n={n}, всего {media_bad})");
+                    log::warn!("peerage-media: не расшифровать медиа-пакет (n={n}, всего {media_bad})");
                 }
             }
             continue;
