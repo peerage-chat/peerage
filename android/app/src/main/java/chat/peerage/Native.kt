@@ -464,13 +464,20 @@ object Native {
     external fun roomPullAudio(sessionPtr: Long, out: ShortArray): Int
     external fun roomSetMuted(sessionPtr: Long, muted: Boolean)
 
-    /** Закодированный H264 access-unit → фрагментация + мультикаст всем в комнате. */
-    external fun roomPushVideo(sessionPtr: Long, data: ByteArray, keyframe: Boolean)
+    /**
+     * Закодированный H264 access-unit → фрагментация + мультикаст всем в комнате.
+     * [rotation] — угол сенсора / 90 (приёмник доворачивает), [fps] — темп вывода у
+     * приёмника; оба едут в протоколе LiteRTC.
+     */
+    external fun roomPushVideo(sessionPtr: Long, data: ByteArray, keyframe: Boolean, rotation: Int, fps: Int)
 
     /** Задать кап входящей видео-очереди (кадров). Политику бюджета считает Kotlin. */
     external fun roomSetVideoCap(sessionPtr: Long, cap: Int)
 
-    /** Следующий входящий H264-пакет от peer. Пустой массив если очередь пуста. */
+    /**
+     * Следующий входящий H264-кадр от peer: `[поворот (угол/90)][fps][access-unit…]`.
+     * Пустой массив если очередь пуста.
+     */
     external fun roomPullVideoPacket(sessionPtr: Long, peerHex: String): ByteArray
 
     // ── Диагностика: тест пропускной способности меша ─────────────────────

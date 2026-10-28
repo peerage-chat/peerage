@@ -286,6 +286,8 @@ pub extern "system" fn Java_chat_peerage_Native_roomSetMuted<'local>(
 }
 
 /// Закодированный H264 access-unit → фрагментация + мультикаст всем участникам.
+/// `rotation` — угол сенсора / 90 (приёмник доворачивает), `fps` — темп вывода у
+/// приёмника; оба едут в протоколе LiteRTC.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_roomPushVideo<'local>(
     env: JNIEnv<'local>,
@@ -293,12 +295,19 @@ pub extern "system" fn Java_chat_peerage_Native_roomPushVideo<'local>(
     session_ptr: jlong,
     data: JByteArray<'local>,
     keyframe: jboolean,
+    rotation: jint,
+    fps: jint,
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
         let bytes = env.convert_byte_array(&data).unwrap_or_default();
         if bytes.is_empty() { return; }
-        e.room_push_video(&bytes, keyframe != JNI_FALSE);
+        let info = litertc::VideoInfo {
+            keyframe: keyframe != JNI_FALSE,
+            rotation: rotation.rem_euclid(4) as u8,
+            fps: fps.clamp(0, 255) as u8,
+        };
+        e.room_push_video(&bytes, info);
     });
 }
 
@@ -315,7 +324,8 @@ pub extern "system" fn Java_chat_peerage_Native_roomSetVideoCap<'local>(
     });
 }
 
-/// Следующий входящий H264-пакет от peer. Пустой массив если очередь пуста.
+/// Следующий входящий H264-кадр от peer. Пустой массив если очередь пуста. Раскладка
+/// (только для JNI, не протокол): `[поворот (четверти оборота)][fps][access-unit…]`.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_roomPullVideoPacket<'local>(
     mut env: JNIEnv<'local>,
@@ -327,8 +337,14 @@ pub extern "system" fn Java_chat_peerage_Native_roomPullVideoPacket<'local>(
         let empty = empty_bytes(&env);
         let Some(e) = (unsafe { engine(session_ptr) }) else { return empty };
         let Some(key) = parse_key(&jstr(&mut env, &peer_hex)) else { return empty };
-        match e.room_pull_video_packet(&key) {
-            Some(f) => env.byte_array_from_slice(&f).unwrap_or(empty),
+        match e.room_pull_video(&key) {
+            Some(f) => {
+                let mut out = Vec::with_capacity(2 + f.data.len());
+                out.push(f.info.rotation);
+                out.push(f.info.fps);
+                out.extend_from_slice(&f.data);
+                env.byte_array_from_slice(&out).unwrap_or(empty)
+            }
             None => empty,
         }
     })

@@ -248,8 +248,10 @@ parses comes from such a member, so:
    `messenger` now only seals and opens bytes (`send_media_packet`, raw `MediaPacket`);
    the format is LiteRTC's alone. A peer that leaves the call loses its receive state,
    so a rejoin starts from an empty buffer.
-4. **Wire v2.** Version byte, stream id, transport-wide seq, capture timestamps,
-   rotation/fps in the protocol; Kotlin drops the side header. Media between old and new builds breaks here (pre-beta policy).
+4. ✅ (2026-10-28) **Wire v2.** Version byte, stream id, transport-wide seq, capture timestamps,
+   rotation/fps in the protocol; Kotlin drops the side header. The stream id replaced
+   both restart heuristics (the video `STALE_WINDOW` and the audio restart window of
+   R-108): frame and packet numbers now compare in plain serial arithmetic. Media between old and new builds breaks here (pre-beta policy).
 5. **Feedback and stats:** receiver reports, RTT, per-peer stats (they also replace the
    ad-hoc traffic counters).
 6. **Recovery:** NACK, retransmission, keyframe request, skip-to-keyframe; then the

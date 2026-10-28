@@ -84,7 +84,7 @@ fn fixture() -> &'static Fixture {
         let data = a.send(&pb, &text(), true, t, &mut rng).remove(0);
         stages.push(Stage { a: a.clone(), b: b.clone(), template: data, to_b: true });
         let mut frame = vec![0u8; litertc::MEDIA_HEADER_LEN + 5];
-        litertc::write_media_header(&mut frame, litertc::TRACK_AUDIO, 1, 0);
+        litertc::write_media_header(&mut frame, &litertc::MediaHeader { track: litertc::TRACK_AUDIO, seq: 1, ..Default::default() });
         let media = a.seal_media(&pb, &frame, t).unwrap();
         stages.push(Stage { a, b, template: media, to_b: true });
         Fixture { pa, pb, t, stages }

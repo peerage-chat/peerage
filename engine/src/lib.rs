@@ -2341,9 +2341,9 @@ impl Engine {
         }
     }
 
-    pub fn room_push_video(&self, frame: &[u8], keyframe: bool) {
+    pub fn room_push_video(&self, frame: &[u8], info: litertc::VideoInfo) {
         if let Some(engine) = self.room_engine() {
-            engine.push_video(frame, keyframe);
+            engine.push_video(frame, info);
         }
     }
 
@@ -2353,7 +2353,7 @@ impl Engine {
         }
     }
 
-    pub fn room_pull_video_packet(&self, peer: &[u8; 32]) -> Option<Vec<u8>> {
+    pub fn room_pull_video(&self, peer: &[u8; 32]) -> Option<litertc::VideoFrame> {
         self.room_engine().and_then(|e| e.pull_video_for(peer))
     }
 
@@ -2374,7 +2374,7 @@ impl Engine {
         std::thread::spawn(move || {
             while st.running.load(Ordering::Relaxed) {
                 match rx.recv_timeout(Duration::from_millis(200)) {
-                    Ok(p) if p.frame().is_some_and(|f| f.track == BENCH_TRACK) => {
+                    Ok(p) if p.frame().is_some_and(|f| f.header.track == BENCH_TRACK) => {
                         st.bytes.fetch_add((p.data.len() - litertc::MEDIA_HEADER_LEN) as u64, Ordering::Relaxed);
                         st.pkts.fetch_add(1, Ordering::Relaxed);
                     }

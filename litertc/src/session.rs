@@ -17,8 +17,8 @@ use std::time::Instant;
 use crate::jitter::{JitterBuffer, JitterOut};
 use crate::reassembly::{CompleteFrame, VideoReassembler};
 use crate::wire::{
-    fragment_video, parse_media, parse_video_frag, write_media_header, MEDIA_HEADER_LEN,
-    TRACK_AUDIO, TRACK_VIDEO,
+    fragment_video, parse_media, parse_video_frag, write_media_header, MediaHeader, VideoInfo,
+    MEDIA_HEADER_LEN, TRACK_AUDIO, TRACK_VIDEO, VIDEO_CLOCK_HZ,
 };
 
 /// Предел очереди собранных видео-кадров участника в байтах — поверх предела в
@@ -39,6 +39,10 @@ pub struct Config {
     pub audio_frame_samples: u32,
     /// Начальная глубина джиттер-буфера в кадрах; дальше подстраивается по джиттеру.
     pub jitter_depth: usize,
+    /// Номер нашего потока — случайный на каждый звонок (его выбирает вызывающий:
+    /// у LiteRTC нет своего источника случайности). По нему собеседник отличает наш
+    /// новый поток после перезахода от опоздавших пакетов старого.
+    pub stream_id: u32,
 }
 
 /// Исходящий пакет: кому и что. Шифрует и отправляет вызывающий.
@@ -46,6 +50,13 @@ pub struct Config {
 pub struct Transmit<P> {
     pub to: P,
     pub data: Vec<u8>,
+}
+
+/// Собранный видео-кадр участника для декодера.
+#[derive(Debug, PartialEq, Eq)]
+pub struct VideoFrame {
+    pub data: Vec<u8>,
+    pub info: VideoInfo,
 }
 
 /// Счётчики участника.
@@ -57,6 +68,8 @@ pub struct PeerStats {
 
 /// Приём звука от участника: джиттер-буфер и оценка джиттера для его глубины.
 struct AudioRx {
+    /// Номер потока, к которому относится буфер.
+    stream: u32,
     jitter: JitterBuffer,
     last_ts: Option<u32>,
     last_arrival: Option<Instant>,
@@ -64,8 +77,9 @@ struct AudioRx {
 }
 
 impl AudioRx {
-    fn new(depth: usize) -> Self {
+    fn new(stream: u32, depth: usize) -> Self {
         AudioRx {
+            stream,
             jitter: JitterBuffer::new(depth),
             last_ts: None,
             last_arrival: None,
@@ -98,20 +112,24 @@ impl AudioRx {
 /// Приём видео от участника: сборка кадров и очередь собранных до декодера.
 #[derive(Default)]
 struct VideoRx {
+    /// Номер потока, к которому относится сборщик.
+    stream: Option<u32>,
     asm: VideoReassembler,
-    /// (данные кадра, ключевой).
-    queue: VecDeque<(Vec<u8>, bool)>,
+    queue: VecDeque<VideoFrame>,
 }
 
 impl VideoRx {
     fn push(&mut self, frame: CompleteFrame, cap: usize) {
         let q = &mut self.queue;
-        q.push_back((frame.data, frame.keyframe));
+        q.push_back(VideoFrame {
+            data: frame.data,
+            info: frame.info,
+        });
         // Анти-латентность: при переполнении ПРЫГАЕМ к свежему ключевому кадру (декодер
         // ресинхронизируется чисто), а не тянем устаревшие кадры по одному.
         let cap = cap.max(4);
         if q.len() > cap {
-            if let Some(kf) = q.iter().rposition(|(_, k)| *k) {
+            if let Some(kf) = q.iter().rposition(|f| f.info.keyframe) {
                 if kf > 0 {
                     q.drain(0..kf);
                 }
@@ -120,16 +138,19 @@ impl VideoRx {
                 q.pop_front();
             }
         }
-        while q.len() > 1 && q.iter().map(|(d, _)| d.len()).sum::<usize>() > VIDEO_QUEUE_BYTES {
+        while q.len() > 1 && q.iter().map(|f| f.data.len()).sum::<usize>() > VIDEO_QUEUE_BYTES {
             q.pop_front();
         }
     }
 }
 
 struct PeerState {
-    audio: AudioRx,
+    /// `None` — звука от участника ещё не было.
+    audio: Option<AudioRx>,
     video: VideoRx,
     stats: PeerStats,
+    /// Сквозной номер следующего пакета этому участнику (по всем трекам).
+    tw_seq: u16,
 }
 
 /// Один звонок с нашей стороны. `P` — идентификатор участника (в Peerage — ключ).
@@ -144,6 +165,8 @@ pub struct Session<P> {
     video_seq: u16,
     /// Номер кадра на проводе — u32: 16 бит оборачивались за 36 минут при 30 fps.
     video_frame_id: u32,
+    /// Начало отсчёта времени захвата видео (первый отправленный кадр).
+    video_epoch: Option<Instant>,
     video_queue_cap: usize,
     tx_bytes: u64,
 }
@@ -159,6 +182,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
             audio_ts: 0,
             video_seq: 0,
             video_frame_id: 0,
+            video_epoch: None,
             video_queue_cap: VIDEO_QUEUE_DEFAULT,
             tx_bytes: 0,
         }
@@ -174,12 +198,12 @@ impl<P: Copy + Eq + Hash> Session<P> {
         self.peers = peers.to_vec();
         self.state.retain(|p, _| peers.contains(p));
         self.out.retain(|t| peers.contains(&t.to));
-        let depth = self.cfg.jitter_depth;
         for p in peers {
             self.state.entry(*p).or_insert_with(|| PeerState {
-                audio: AudioRx::new(depth),
+                audio: None,
                 video: VideoRx::default(),
                 stats: PeerStats::default(),
+                tw_seq: 0,
             });
         }
     }
@@ -202,25 +226,41 @@ impl<P: Copy + Eq + Hash> Session<P> {
         self.audio_ts = self.audio_ts.wrapping_add(self.cfg.audio_frame_samples);
     }
 
-    /// Закодированный видео-кадр → фрагменты каждому участнику.
-    pub fn send_video(&mut self, _now: Instant, frame: &[u8], keyframe: bool) {
+    /// Закодированный видео-кадр → фрагменты каждому участнику. `now` — момент
+    /// захвата (точнее, выхода из кодера: его задержка почти постоянна).
+    pub fn send_video(&mut self, now: Instant, frame: &[u8], info: VideoInfo) {
+        let epoch = *self.video_epoch.get_or_insert(now);
+        let micros = now.saturating_duration_since(epoch).as_micros();
+        // Метка времени идёт по кругу u32 (13 часов при 90 кГц), как и у звука.
+        let ts = (micros * VIDEO_CLOCK_HZ as u128 / 1_000_000) as u32;
         let frame_id = self.video_frame_id;
         self.video_frame_id = self.video_frame_id.wrapping_add(1);
-        for chunk in fragment_video(frame, frame_id, keyframe) {
+        for chunk in fragment_video(frame, frame_id, info) {
             let seq = self.video_seq;
             self.video_seq = self.video_seq.wrapping_add(1);
-            self.broadcast(TRACK_VIDEO, seq, 0, &chunk);
+            self.broadcast(TRACK_VIDEO, seq, ts, &chunk);
         }
     }
 
     fn broadcast(&mut self, track: u8, seq: u16, ts: u32, payload: &[u8]) {
-        let mut packet = vec![0u8; MEDIA_HEADER_LEN + payload.len()];
-        write_media_header(&mut packet, track, seq, ts);
-        packet[MEDIA_HEADER_LEN..].copy_from_slice(payload);
         for p in &self.peers {
+            let Some(st) = self.state.get_mut(p) else {
+                continue;
+            };
+            let header = MediaHeader {
+                track,
+                stream_id: self.cfg.stream_id,
+                seq,
+                tw_seq: st.tw_seq,
+                ts,
+            };
+            st.tw_seq = st.tw_seq.wrapping_add(1);
+            let mut packet = vec![0u8; MEDIA_HEADER_LEN + payload.len()];
+            write_media_header(&mut packet, &header);
+            packet[MEDIA_HEADER_LEN..].copy_from_slice(payload);
             self.out.push_back(Transmit {
                 to: *p,
-                data: packet.clone(),
+                data: packet,
             });
         }
         self.tx_bytes += (payload.len() * self.peers.len()) as u64;
@@ -238,19 +278,31 @@ impl<P: Copy + Eq + Hash> Session<P> {
             return;
         };
         let Some(m) = parse_media(data) else { return };
+        let h = m.header;
         st.stats.rx_bytes += m.payload.len() as u64;
-        match m.track {
+        // Новый номер потока — отправитель начал заново (перезашёл в комнату): старое
+        // состояние приёма этого трека выбрасываем, а не ждём, пока нумерация догонит.
+        match h.track {
             TRACK_VIDEO => {
                 let Some(frag) = parse_video_frag(m.payload) else {
                     return;
                 };
+                if st.video.stream != Some(h.stream_id) {
+                    st.video.stream = Some(h.stream_id);
+                    st.video.asm = VideoReassembler::new();
+                }
                 if let Some(frame) = st.video.asm.push(frag) {
                     st.video.push(frame, self.video_queue_cap);
                 }
             }
             TRACK_AUDIO => {
+                let depth = self.cfg.jitter_depth;
+                let audio = match &mut st.audio {
+                    Some(a) if a.stream == h.stream_id => a,
+                    slot => slot.insert(AudioRx::new(h.stream_id, depth)),
+                };
                 let clock = self.cfg.audio_clock_hz as f64;
-                st.audio.push(now, m.seq, m.ts, m.payload.to_vec(), clock);
+                audio.push(now, h.seq, h.ts, m.payload.to_vec(), clock);
             }
             _ => {}
         }
@@ -259,17 +311,12 @@ impl<P: Copy + Eq + Hash> Session<P> {
     /// Следующий кадр звука участника для воспроизведения: `None` — буфер набирается
     /// или пуст (участник молчит), [`JitterOut::Lost`] — кадр потерян, нужен PLC.
     pub fn pull_audio(&mut self, peer: &P) -> Option<JitterOut> {
-        self.state.get_mut(peer)?.audio.jitter.pop()
+        self.state.get_mut(peer)?.audio.as_mut()?.jitter.pop()
     }
 
     /// Следующий собранный видео-кадр участника для декодера.
-    pub fn pull_video(&mut self, peer: &P) -> Option<Vec<u8>> {
-        self.state
-            .get_mut(peer)?
-            .video
-            .queue
-            .pop_front()
-            .map(|(d, _)| d)
+    pub fn pull_video(&mut self, peer: &P) -> Option<VideoFrame> {
+        self.state.get_mut(peer)?.video.queue.pop_front()
     }
 
     /// Предел очереди видео-кадров на участника. Политику задаёт вызывающий: он
@@ -292,65 +339,100 @@ impl<P: Copy + Eq + Hash> Session<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::{MAX_VIDEO_CHUNK, MEDIA_V1};
+    use crate::wire::{MAX_VIDEO_CHUNK, MEDIA_V2};
+    use std::time::Duration;
 
     const CFG: Config = Config {
         audio_clock_hz: 48_000,
         audio_frame_samples: 960,
         jitter_depth: 1,
+        stream_id: 0x0A0B_0C0D,
     };
 
     fn drain(s: &mut Session<u8>) -> Vec<Transmit<u8>> {
         std::iter::from_fn(|| s.poll_transmit()).collect()
     }
 
-    /// Формат на проводе — тот же, что был у движка до переноса: заголовок v1,
-    /// нумерация звука идёт и в тишине, видео — с нулевой меткой времени.
+    fn key() -> VideoInfo {
+        VideoInfo {
+            keyframe: true,
+            rotation: 1,
+            fps: 30,
+        }
+    }
+
+    fn audio_pkt(stream_id: u32, seq: u16, byte: u8) -> Vec<u8> {
+        let mut pkt = vec![byte; MEDIA_HEADER_LEN + 1];
+        let h = MediaHeader {
+            track: TRACK_AUDIO,
+            stream_id,
+            seq,
+            tw_seq: 0,
+            ts: 0,
+        };
+        write_media_header(&mut pkt, &h);
+        pkt
+    }
+
+    /// Пакеты v2: номер потока, сквозной номер на получателя по всем трекам,
+    /// нумерация звука идёт и в тишине, видео — со временем захвата в 90 кГц.
     #[test]
-    fn packets_match_v1_wire() {
-        let now = Instant::now();
+    fn packets_match_v2_wire() {
+        let t0 = Instant::now();
         let mut s = Session::new(CFG);
         s.set_peers(&[7]);
-        s.send_audio(now, &[0xAA]);
+        s.send_audio(t0, &[0xAA]);
         s.skip_audio();
-        s.send_audio(now, &[0xBB]);
-        s.send_video(now, &[0xCC], true);
+        s.send_audio(t0, &[0xBB]);
+        s.send_video(t0, &[0xCC], key());
+        s.send_video(
+            t0 + Duration::from_millis(100),
+            &[0xDD],
+            VideoInfo::default(),
+        );
         let out = drain(&mut s);
         let data: Vec<&[u8]> = out.iter().map(|t| t.data.as_slice()).collect();
-        assert_eq!(data[0], [MEDIA_V1, TRACK_AUDIO, 0, 0, 0, 0, 0, 0, 0xAA]);
-        // seq 2, ts 1920 = 0x0780
+        let sid = [0x0A, 0x0B, 0x0C, 0x0D];
+        let head = |track: u8| [MEDIA_V2, track, sid[0], sid[1], sid[2], sid[3]];
+        assert_eq!(
+            data[0],
+            [&head(TRACK_AUDIO)[..], &[0, 0, 0, 0, 0, 0, 0, 0, 0xAA]].concat()
+        );
+        // seq 2, tw 1, ts 1920 = 0x0780
         assert_eq!(
             data[1],
-            [MEDIA_V1, TRACK_AUDIO, 0, 2, 0, 0, 0x07, 0x80, 0xBB]
+            [
+                &head(TRACK_AUDIO)[..],
+                &[0, 2, 0, 1, 0, 0, 0x07, 0x80, 0xBB]
+            ]
+            .concat()
         );
+        // видео: seq 0, tw 2, ts 0; фрагмент: кадр 0, 0 из 1, ключевой, поворот 1, 30 fps
+        let frag = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 30, 0xCC];
         assert_eq!(
             data[2],
-            [
-                MEDIA_V1,
-                TRACK_VIDEO,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                1,
-                1,
-                0xCC
-            ]
+            [&head(TRACK_VIDEO)[..], &[0, 0, 0, 2, 0, 0, 0, 0], &frag].concat()
         );
+        // второй кадр через 100 мс: seq 1, tw 3, ts 9000 = 0x2328
+        assert_eq!(data[3][6..14], [0, 1, 0, 3, 0, 0, 0x23, 0x28]);
         assert!(out.iter().all(|t| t.to == 7));
-        assert_eq!(
-            s.tx_bytes(),
-            3 + 9 /* видео-подзаголовок */
-        );
+        assert_eq!(s.tx_bytes(), 2 + 2 * (11 + 1));
+    }
+
+    /// Сквозной номер — свой у каждого получателя.
+    #[test]
+    fn tw_seq_is_per_recipient() {
+        let now = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[1]);
+        s.send_audio(now, &[1]);
+        s.set_peers(&[1, 2]);
+        s.send_audio(now, &[2]);
+        let tw: Vec<(u8, u16)> = drain(&mut s)
+            .iter()
+            .map(|t| (t.to, parse_media(&t.data).unwrap().header.tw_seq))
+            .collect();
+        assert_eq!(tw, [(1, 0), (1, 1), (2, 0)]);
     }
 
     #[test]
@@ -362,8 +444,7 @@ mod tests {
         let to: Vec<u8> = drain(&mut s).iter().map(|t| t.to).collect();
         assert_eq!(to, [1, 2]);
 
-        let mut pkt = vec![0u8; MEDIA_HEADER_LEN + 1];
-        write_media_header(&mut pkt, TRACK_AUDIO, 0, 0);
+        let pkt = audio_pkt(1, 0, 0);
         s.handle_datagram(now, 3, &pkt); // не участник
         assert_eq!(s.pull_audio(&3), None);
         assert_eq!(s.stats(&3), None);
@@ -380,9 +461,7 @@ mod tests {
         let mut s = Session::new(CFG);
         s.set_peers(&[1, 2]);
         s.send_audio(now, &[5]);
-        let mut pkt = vec![0u8; MEDIA_HEADER_LEN + 1];
-        write_media_header(&mut pkt, TRACK_AUDIO, 0, 0);
-        s.handle_datagram(now, 2, &pkt);
+        s.handle_datagram(now, 2, &audio_pkt(1, 0, 0));
         s.set_peers(&[1]);
         assert!(drain(&mut s).iter().all(|t| t.to == 1));
         assert_eq!(s.stats(&2), None);
@@ -392,6 +471,49 @@ mod tests {
             Some(PeerStats::default()),
             "вернулся — с чистого листа"
         );
+    }
+
+    /// Собеседник перезашёл (новый номер потока) и нумерует звук с нуля, пока мы
+    /// его ещё не вычеркнули: новый поток слышен сразу (R-108).
+    #[test]
+    fn audio_restart_with_new_stream_is_heard() {
+        let now = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[1]);
+        for seq in 0..30_000u16 {
+            s.handle_datagram(now, 1, &audio_pkt(100, seq, 1));
+            assert!(s.pull_audio(&1).is_some());
+        }
+        s.handle_datagram(now, 1, &audio_pkt(200, 0, 2));
+        assert_eq!(s.pull_audio(&1), Some(JitterOut::Frame(vec![2])));
+    }
+
+    /// То же для видео: новый поток с нулевого кадра принимается сразу.
+    #[test]
+    fn video_restart_with_new_stream_is_accepted() {
+        let now = Instant::now();
+        let mut rx = Session::new(CFG);
+        rx.set_peers(&[1]);
+        let mut old = Session::new(Config {
+            stream_id: 1,
+            ..CFG
+        });
+        old.set_peers(&[9]);
+        old.video_frame_id = 50_000;
+        old.send_video(now, &[1; 10], key());
+        let mut new = Session::new(Config {
+            stream_id: 2,
+            ..CFG
+        });
+        new.set_peers(&[9]);
+        new.send_video(now, &[2; 10], key());
+        for t in drain(&mut old).into_iter().chain(drain(&mut new)) {
+            rx.handle_datagram(now, 1, &t.data);
+        }
+        let got: Vec<u8> = std::iter::from_fn(|| rx.pull_video(&1))
+            .map(|f| f.data[0])
+            .collect();
+        assert_eq!(got, [1, 2]);
     }
 
     /// Очередь видео сверх предела прыгает к свежему ключевому кадру.
@@ -404,13 +526,20 @@ mod tests {
         rx.set_peers(&[1]);
         rx.set_video_queue_cap(4);
         for i in 0..6u8 {
-            tx.send_video(now, &[i; 10], i == 3);
+            tx.send_video(
+                now,
+                &[i; 10],
+                VideoInfo {
+                    keyframe: i == 3,
+                    ..key()
+                },
+            );
         }
         for t in drain(&mut tx) {
             rx.handle_datagram(now, 1, &t.data);
         }
         let got: Vec<u8> = std::iter::from_fn(|| rx.pull_video(&1))
-            .map(|d| d[0])
+            .map(|f| f.data[0])
             .collect();
         assert_eq!(got, [3, 4, 5]);
     }
@@ -423,12 +552,18 @@ mod tests {
         let mut rx = Session::new(CFG);
         rx.set_peers(&[1]);
         let frame = vec![0x5A; MAX_VIDEO_CHUNK * 3 + 1];
-        tx.send_video(now, &frame, true);
+        tx.send_video(now, &frame, key());
         let out = drain(&mut tx);
         assert_eq!(out.len(), 4);
         for t in out.iter().rev() {
             rx.handle_datagram(now, 1, &t.data);
         }
-        assert_eq!(rx.pull_video(&1), Some(frame));
+        assert_eq!(
+            rx.pull_video(&1),
+            Some(VideoFrame {
+                data: frame,
+                info: key()
+            })
+        );
     }
 }

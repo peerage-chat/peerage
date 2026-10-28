@@ -2294,7 +2294,7 @@ class AppModel private constructor() {
             videoQuality.fps,
             videoQuality.bitrate,
             startFront = cameraFront,
-        ) { data, key -> Native.roomPushVideo(sessionPtr, data, key) }
+        ) { data, key, rotation, fps -> Native.roomPushVideo(sessionPtr, data, key, rotation, fps) }
         // Кодер может не принять разрешение/битрейт (configure бросает) — на главном
         // потоке это падение всего приложения. Не вышло — гасим видео, звонок живёт.
         videoSender = try {

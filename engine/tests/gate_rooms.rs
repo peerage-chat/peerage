@@ -195,7 +195,7 @@ fn hangup_stops_our_audio_at_once_under_peer_flood() {
             }
         })
     };
-    let is_audio = |p: &peerage_messenger::MediaPacket| p.src == a_key && p.frame().is_some_and(|f| f.track == litertc::TRACK_AUDIO);
+    let is_audio = |p: &peerage_messenger::MediaPacket| p.src == a_key && p.frame().is_some_and(|f| f.header.track == litertc::TRACK_AUDIO);
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut got = false;
     while !got && Instant::now() < deadline {

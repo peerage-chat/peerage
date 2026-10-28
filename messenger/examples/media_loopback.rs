@@ -70,9 +70,9 @@ fn main() {
         let deadline = Instant::now() + Duration::from_secs(15);
         while seen.len() < N as usize && Instant::now() < deadline {
             if let Ok(p) = media_rx.recv_timeout(Duration::from_millis(500)) {
-                let ok = p.frame().filter(|f| f.track == TRACK_AUDIO && f.payload == format!("opus#{}", f.seq).as_bytes());
+                let ok = p.frame().filter(|f| f.header.track == TRACK_AUDIO && f.payload == format!("opus#{}", f.header.seq).as_bytes());
                 if let Some(f) = ok {
-                    seen.insert(f.seq);
+                    seen.insert(f.header.seq);
                 } else {
                     corrupt += 1;
                 }

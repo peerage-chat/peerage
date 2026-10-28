@@ -5199,6 +5199,7 @@ dependencies = [
  "android_logger",
  "hex",
  "jni 0.21.1",
+ "litertc",
  "log",
  "peerage-core",
  "peerage-engine",
@@ -5294,6 +5295,7 @@ dependencies = [
  "peerage-media",
  "peerage-messenger",
  "peerage-ygg",
+ "rand_core 0.6.4",
  "serde",
  "serde_json",
 ]

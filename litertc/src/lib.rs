@@ -22,9 +22,9 @@ pub mod wire;
 
 pub use jitter::{JitterBuffer, JitterOut};
 pub use reassembly::{CompleteFrame, VideoReassembler};
-pub use session::{Config, PeerStats, Session, Transmit};
+pub use session::{Config, PeerStats, Session, Transmit, VideoFrame};
 pub use wire::{
-    fragment_video, parse_media, parse_video_frag, write_media_header, MediaFrame, VideoFrag,
-    MAX_MEDIA_PAYLOAD, MAX_VIDEO_CHUNK, MAX_VIDEO_FRAGS, MEDIA_HEADER_LEN, MEDIA_V1, TRACK_AUDIO,
-    TRACK_SCREEN, TRACK_VIDEO, VIDEO_HDR, VIDEO_KEYFRAME,
+    fragment_video, parse_media, parse_video_frag, write_media_header, MediaFrame, MediaHeader,
+    VideoFrag, VideoInfo, MAX_MEDIA_PAYLOAD, MAX_VIDEO_CHUNK, MAX_VIDEO_FRAGS, MEDIA_HEADER_LEN,
+    MEDIA_V2, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO, VIDEO_CLOCK_HZ, VIDEO_HDR, VIDEO_KEYFRAME,
 };

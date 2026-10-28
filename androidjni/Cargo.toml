@@ -17,5 +17,6 @@ log = "0.4"
 android_logger = "0.14"
 serde_json = "1"
 hex.workspace = true
+litertc = { path = "../litertc" }
 peerage-core = { path = "../core", features = ["sqlcipher"] }
 peerage-engine = { path = "../engine" }

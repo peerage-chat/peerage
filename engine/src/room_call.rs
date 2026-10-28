@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use litertc::{JitterOut, Session, Transmit};
+use litertc::{JitterOut, Session, Transmit, VideoFrame, VideoInfo};
+use rand_core::{OsRng, RngCore};
 use peerage_core::settings::AudioSettings;
 use peerage_media::{AudioDecoder, AudioEncoder};
 use peerage_messenger::Messenger;
@@ -116,6 +117,9 @@ impl RoomCallEngine {
             audio_clock_hz: audio.sample_rate,
             audio_frame_samples: audio.frame_samples() as u32,
             jitter_depth: audio.jitter_depth,
+            // Новый на каждый звонок: так собеседник отличит наш перезаход от
+            // опоздавших пакетов прошлого раза.
+            stream_id: OsRng.next_u32(),
         })));
         let mut threads = Vec::new();
 
@@ -224,15 +228,15 @@ impl RoomCallEngine {
     }
 
     /// Закодированный H264 access-unit → всем участникам.
-    pub fn push_video(&self, frame: &[u8], keyframe: bool) {
+    pub fn push_video(&self, frame: &[u8], info: VideoInfo) {
         let out = with_session(&self.session, &self.members, |s| {
-            s.send_video(Instant::now(), frame, keyframe)
+            s.send_video(Instant::now(), frame, info)
         });
         send_all(&self.messenger, out);
     }
 
     /// Следующий входящий H264-кадр от peer, или None если очередь пуста.
-    pub fn pull_video_for(&self, peer: &PeerKey) -> Option<Vec<u8>> {
+    pub fn pull_video_for(&self, peer: &PeerKey) -> Option<VideoFrame> {
         self.session.lock_safe().pull_video(peer)
     }
 

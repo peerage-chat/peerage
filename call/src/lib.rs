@@ -106,12 +106,12 @@ impl Call {
                         continue; // чужой источник — игнорируем
                     }
                     let Some(f) = p.frame() else { continue };
-                    match f.track {
+                    match f.header.track {
                         TRACK_AUDIO => {
                             if let (Some(j), Some(dec), Some(ring)) =
                                 (jitter.as_mut(), audio_dec.as_mut(), out_ring.as_ref())
                             {
-                                j.push(f.seq, f.payload.to_vec());
+                                j.push(f.header.seq, f.payload.to_vec());
                                 while let Some(out) = j.pop() {
                                     let pcm = match out {
                                         JitterOut::Frame(pkt) => dec.decode(Some(&pkt)),
@@ -231,7 +231,7 @@ impl Call {
                     let t0 = Instant::now();
                     if let Some(rgb) = src.next_frame() {
                         if let Ok((bs, key)) = encoder.encode_rgb(&rgb) {
-                            for chunk in fragment_video(&bs, frame_id, key) {
+                            for chunk in fragment_video(&bs, frame_id, litertc::VideoInfo { keyframe: key, ..Default::default() }) {
                                 let _ = msgr.send_media(&peer, TRACK_VIDEO, seq, frame_id, &chunk);
                                 seq = seq.wrapping_add(1);
                             }

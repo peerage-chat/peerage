@@ -30,7 +30,8 @@ class VideoSender(
     private val fps: Int,
     private val bitrate: Int,
     startFront: Boolean = true,
-    private val sendVideo: (ByteArray, Boolean) -> Unit,
+    /** (access-unit, ключевой, угол сенсора / 90, fps). */
+    private val sendVideo: (ByteArray, Boolean, Int, Int) -> Unit,
 ) {
     private var encoder: MediaCodec? = null
     private var inputSurface: Surface? = null
@@ -210,19 +211,14 @@ class VideoSender(
                     val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
                     val cfg = config
                     val au = if (key && cfg != null) cfg + data else data
-                    // 2-байтовый заголовок перед каждым access-unit'ом (Rust релеит
-                    // байты прозрачно): [0]=ориентация (угол сенсора/90) — приёмник
-                    // доворачивает; [1]=fps — приёмник пейсит по НЕМУ, а не по своей
-                    // локальной настройке (иначе разный fps → видео не на той скорости).
-                    val out = ByteArray(au.size + 2)
-                    out[0] = ((sensorOrientation / 90) % 4).toByte()
-                    out[1] = (fps and 0xFF).toByte()
-                    System.arraycopy(au, 0, out, 2, au.size)
+                    // Ориентация (угол сенсора/90) — приёмник доворачивает; fps — приёмник
+                    // пейсит по НЕМУ, а не по своей настройке (иначе разный fps → видео не
+                    // на той скорости). Оба едут в протоколе LiteRTC рядом с кадром.
                     encodedCount++
                     if (encodedCount % 30 == 0) {
-                        android.util.Log.i("VideoSender", "Encoded and sent 30 frames, last size = ${out.size} bytes (key=$key)")
+                        android.util.Log.i("VideoSender", "Encoded and sent 30 frames, last size = ${au.size} bytes (key=$key)")
                     }
-                    sendVideo(out, key)
+                    sendVideo(au, key, (sensorOrientation / 90) % 4, fps)
                 }
             }
             runCatching { enc.releaseOutputBuffer(idx, false) }

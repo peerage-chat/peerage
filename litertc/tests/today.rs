@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use litertc::sim::{BurstLoss, Link, LinkConfig};
 use litertc::{
     fragment_video, parse_media, parse_video_frag, write_media_header, JitterBuffer, JitterOut,
-    VideoReassembler, MAX_VIDEO_CHUNK, MEDIA_HEADER_LEN, TRACK_AUDIO, TRACK_VIDEO,
+    MediaHeader, VideoInfo, VideoReassembler, MAX_VIDEO_CHUNK, MEDIA_HEADER_LEN, TRACK_AUDIO,
+    TRACK_VIDEO,
 };
 
 fn ms(n: u64) -> Duration {
@@ -19,7 +20,16 @@ fn ms(n: u64) -> Duration {
 
 fn packet(track: u8, seq: u16, ts: u32, payload: &[u8]) -> Vec<u8> {
     let mut p = vec![0u8; MEDIA_HEADER_LEN + payload.len()];
-    write_media_header(&mut p, track, seq, ts);
+    write_media_header(
+        &mut p,
+        &MediaHeader {
+            track,
+            stream_id: 1,
+            seq,
+            tw_seq: seq,
+            ts,
+        },
+    );
     p[MEDIA_HEADER_LEN..].copy_from_slice(payload);
     p
 }
@@ -41,7 +51,14 @@ fn video_lost_fragment_loses_the_frame() {
     let mut seq = 0u16;
     for id in 0..frames {
         let frame = vec![id as u8; MAX_VIDEO_CHUNK * 2 + 100];
-        for frag in fragment_video(&frame, id, id % 30 == 0) {
+        for frag in fragment_video(
+            &frame,
+            id,
+            VideoInfo {
+                keyframe: id % 30 == 0,
+                ..Default::default()
+            },
+        ) {
             link.send(t0 + ms(33 * id as u64), packet(TRACK_VIDEO, seq, 0, &frag));
             seq = seq.wrapping_add(1);
         }
@@ -145,7 +162,7 @@ fn run_audio(cfg: LinkConfig, depth: usize) -> (u32, u32) {
         let now = t0 + ms(20 * tick);
         while let Some(p) = link.poll(now) {
             let m = parse_media(&p).expect("медиа-пакет");
-            jb.push(m.seq, m.payload.to_vec());
+            jb.push(m.header.seq, m.payload.to_vec());
         }
         match jb.pop() {
             Some(JitterOut::Frame(_)) => played += 1,

@@ -85,13 +85,13 @@ impl GroupCall {
                         continue; // источник не из группы — игнорируем
                     }
                     let Some(f) = p.frame() else { continue };
-                    match f.track {
+                    match f.header.track {
                         TRACK_AUDIO => {
                             let (Some(cfg), Some(mix)) = (acfg, mix.as_ref()) else { continue };
                             let entry = a_src.entry(p.src).or_insert_with(|| {
                                 (JitterBuffer::new(cfg.jitter_depth), AudioDecoder::new(cfg).unwrap())
                             });
-                            entry.0.push(f.seq, f.payload.to_vec());
+                            entry.0.push(f.header.seq, f.payload.to_vec());
                             while let Some(out) = entry.0.pop() {
                                 let pcm = match out {
                                     JitterOut::Frame(pkt) => entry.1.decode(Some(&pkt)),
@@ -217,7 +217,7 @@ impl GroupCall {
                     let t0 = Instant::now();
                     if let Some(rgb) = src.next_frame() {
                         if let Ok((bs, key)) = enc.encode_rgb(&rgb) {
-                            for chunk in fragment_video(&bs, frame_id, key) {
+                            for chunk in fragment_video(&bs, frame_id, litertc::VideoInfo { keyframe: key, ..Default::default() }) {
                                 for m in &mem {
                                     let _ = msgr.send_media(m, TRACK_VIDEO, seq, frame_id, &chunk);
                                 }

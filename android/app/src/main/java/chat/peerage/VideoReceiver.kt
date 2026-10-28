@@ -90,8 +90,9 @@ class VideoReceiver(
                 val currentDec = dec!!
                 val nowNs = System.nanoTime()
 
-                // 1. Слить из JNI в jitter-buffer. Заголовок 2 байта: [0]=ориентация
-                //    (угол/90), [1]=fps отправителя (для пейсинга). Остаток — access-unit.
+                // 1. Слить из JNI в jitter-buffer. Первые 2 байта (раскладка JNI, в
+                //    протоколе это поля кадра): [0]=ориентация (угол/90), [1]=fps
+                //    отправителя (для пейсинга). Остаток — access-unit.
                 while (queue.size < maxQueue) {
                     val raw = pullVideoPacket()
                     if (raw.size < 2) {

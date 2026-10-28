@@ -4,33 +4,29 @@
 
 use std::collections::HashMap;
 
-use crate::wire::{VideoFrag, MAX_VIDEO_FRAGS};
+use crate::wire::{VideoFrag, VideoInfo, MAX_VIDEO_FRAGS};
 
 /// Сколько байт недособранных кадров держим всего: дальше выбрасываем самые старые.
 const MAX_PENDING_BYTES: usize = 16 << 20;
 
-/// Номер кадра позади последнего доставленного не дальше этого окна — опоздавший
-/// кадр, его выбрасываем. Дальше — отправитель начал счёт заново (перезашёл в
-/// комнату) или счётчик обернулся: это новый поток, его принимаем. Раньше
-/// сравнение было простым `<=`, и после обнуления счётчика у отправителя (65 536
-/// кадров — 36 минут при 30 fps — или перезаход) видео замерзало до конца звонка.
-const STALE_WINDOW: u32 = 1024;
-
 /// Кадр `id` уже доставлен или опоздал относительно последнего доставленного `last`.
+/// Сравнение по кругу u32 (половина круга вперёд — новее): счётчик может обернуться.
+/// Перезапуск отправителя сюда не попадает — это новый поток (новый `stream_id`), и
+/// сессия заводит для него новый сборщик.
 fn is_stale(id: u32, last: u32) -> bool {
-    last.wrapping_sub(id) < STALE_WINDOW
+    (id.wrapping_sub(last) as i32) <= 0
 }
 
 /// Собранный целый видео-кадр.
 pub struct CompleteFrame {
     pub frame_id: u32,
-    pub keyframe: bool,
+    pub info: VideoInfo,
     pub data: Vec<u8>,
 }
 
 struct FrameAcc {
     count: u16,
-    keyframe: bool,
+    info: VideoInfo,
     parts: Vec<Option<Vec<u8>>>,
     received: u16,
 }
@@ -71,7 +67,7 @@ impl VideoReassembler {
             .entry(frag.frame_id)
             .or_insert_with(|| FrameAcc {
                 count: frag.frag_count,
-                keyframe: frag.keyframe,
+                info: frag.info,
                 parts: vec![None; frag.frag_count as usize],
                 received: 0,
             });
@@ -105,7 +101,7 @@ impl VideoReassembler {
             }
             return Some(CompleteFrame {
                 frame_id: frag.frame_id,
-                keyframe: acc.keyframe,
+                info: acc.info,
                 data,
             });
         }
@@ -141,10 +137,21 @@ mod tests {
         vec![fill; n]
     }
 
+    fn key() -> VideoInfo {
+        VideoInfo {
+            keyframe: true,
+            ..Default::default()
+        }
+    }
+
+    fn plain() -> VideoInfo {
+        VideoInfo::default()
+    }
+
     #[test]
     fn video_fragment_reassemble_in_order() {
         let frame = make_frame(MAX_VIDEO_CHUNK * 2 + 100, 0xAB);
-        let frags = fragment_video(&frame, 1, true);
+        let frags = fragment_video(&frame, 1, key());
         assert!(frags.len() > 1, "большой кадр должен разрезаться");
 
         let mut r = VideoReassembler::new();
@@ -154,14 +161,14 @@ mod tests {
         }
         let cf = got.expect("кадр должен собраться");
         assert_eq!(cf.data, frame);
-        assert!(cf.keyframe);
+        assert!(cf.info.keyframe);
         assert_eq!(cf.frame_id, 1);
     }
 
     #[test]
     fn video_reassemble_out_of_order() {
         let frame = make_frame(MAX_VIDEO_CHUNK * 2, 7);
-        let mut frags: Vec<Vec<u8>> = fragment_video(&frame, 10, false);
+        let mut frags: Vec<Vec<u8>> = fragment_video(&frame, 10, plain());
         assert!(
             frags.len() > 1,
             "кадр должен быть многофрагментным для теста"
@@ -180,8 +187,8 @@ mod tests {
 
     #[test]
     fn incomplete_frame_dropped_when_newer_completes() {
-        let f1 = fragment_video(&make_frame(MAX_VIDEO_CHUNK * 2 + 100, 1), 1, false); // потеряем фрагмент
-        let f2 = fragment_video(&make_frame(500, 2), 2, true);
+        let f1 = fragment_video(&make_frame(MAX_VIDEO_CHUNK * 2 + 100, 1), 1, plain()); // потеряем фрагмент
+        let f2 = fragment_video(&make_frame(500, 2), 2, key());
 
         let mut r = VideoReassembler::new();
         // кадр 1 — пропускаем первый фрагмент (потеря) → не соберётся
@@ -206,7 +213,7 @@ mod tests {
     fn frame_counter_wrap_keeps_video_flowing() {
         let mut r = VideoReassembler::new();
         for id in [u32::MAX - 1, u32::MAX, 0, 1] {
-            let f = fragment_video(&make_frame(100, 1), id, false);
+            let f = fragment_video(&make_frame(100, 1), id, plain());
             assert!(
                 r.push(parse_video_frag(&f[0]).unwrap()).is_some(),
                 "кадр {id} принят"
@@ -214,20 +221,13 @@ mod tests {
         }
     }
 
-    /// Собеседник перезашёл в комнату и начал счёт кадров с нуля — это новый
-    /// поток, а не «старые кадры». Раньше видео стояло до номера, где он вышел.
+    /// Опоздавший кадр выбрасывается и сразу за оборотом счётчика.
     #[test]
-    fn sender_restart_from_zero_is_accepted() {
+    fn late_frame_across_wrap_is_dropped() {
         let mut r = VideoReassembler::new();
-        let f = fragment_video(&make_frame(100, 1), 50_000, true);
+        let f = fragment_video(&make_frame(100, 1), 2, key());
         assert!(r.push(parse_video_frag(&f[0]).unwrap()).is_some());
-        let f = fragment_video(&make_frame(100, 2), 0, true);
-        assert!(
-            r.push(parse_video_frag(&f[0]).unwrap()).is_some(),
-            "новый поток с нуля принят"
-        );
-        // А действительно опоздавший кадр по-прежнему выбрасывается.
-        let late = fragment_video(&make_frame(100, 3), u32::MAX - 3, false);
+        let late = fragment_video(&make_frame(100, 3), u32::MAX - 3, plain());
         assert!(r.push(parse_video_frag(&late[0]).unwrap()).is_none());
     }
 
@@ -237,7 +237,7 @@ mod tests {
         out.extend_from_slice(&id.to_be_bytes());
         out.extend_from_slice(&idx.to_be_bytes());
         out.extend_from_slice(&count.to_be_bytes());
-        out.push(0);
+        out.extend_from_slice(&[0, 0, 0]); // флаги, поворот, fps
         out.extend_from_slice(&[0u8; MAX_VIDEO_CHUNK]);
         out
     }

@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use litertc::{parse_media, write_media_header, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN};
+use litertc::{parse_media, write_media_header, MediaHeader, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN};
 use peerage_core::media::{CHAN_CHAT, CHAN_MEDIA};
 use peerage_core::protocol::{Payload, ProtocolError};
 use peerage_core::session::{Received, Sessions};
@@ -1140,7 +1140,7 @@ impl Messenger {
         }
         let total = MEDIA_HEADER_LEN + payload.len();
         let mut frame = vec![0u8; total];
-        write_media_header(&mut frame, track, seq, ts);
+        write_media_header(&mut frame, &MediaHeader { track, seq, ts, ..Default::default() });
         frame[MEDIA_HEADER_LEN..total].copy_from_slice(payload);
         self.send_media_packet(peer, &frame)
     }
