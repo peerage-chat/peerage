@@ -27,7 +27,7 @@ All integers are big-endian.
 
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
-| 0 | 1 | version/type | `0x20`: version 2 (high nibble), type 0 = media (low nibble). Anything else: drop. |
+| 0 | 1 | version/type | `0x20`: version 2 (high nibble), type 0 = media (low nibble). `0x24`: type 4 = media retransmitted after a NACK (below). Anything else: drop. |
 | 1 | 1 | track | `0` audio, `1` camera video, `2` screen. Unknown: drop. |
 | 2 | 4 | stream_id | Random, chosen by the sender for each call. A new value means the sender started over. |
 | 6 | 2 | seq | Per-track packet counter, wraps at 2¹⁶. |
@@ -52,6 +52,12 @@ A packet shorter than 14 bytes is dropped. The whole packet is at most 14 + 60 0
 
 `tw_seq` is not used by receivers yet: it is there for the delay-based bandwidth estimate
 (ADR-014 step 7), so that adding the estimate does not need another format change.
+
+**Retransmitted media** (`0x24`) is a video packet sent again because the receiver asked
+for it (NACK, below). Everything after byte 0 is the original packet's, except `tw_seq`,
+which is the recipient's next one. A separate type keeps retransmissions out of the
+receiver's loss statistics: reports describe loss on first transmission, which is what
+the bandwidth estimate needs. Audio is never retransmitted.
 
 ## Video fragment (payload of a video packet)
 
@@ -96,7 +102,7 @@ Report block — how the reporter receives one stream of the addressee:
 | 1 | 1 | fraction_lost | Share of packets lost since the previous report, × 256 (RFC 3550 §6.4.1). |
 | 2 | 4 | stream_id | The stream the block is about. Blocks about another stream are ignored. |
 | 6 | 4 | highest_seq | Extended highest `seq` received: wraps × 2¹⁶ + `seq`. |
-| 10 | 4 | cumulative_lost | Packets expected minus received since the stream started, never below 0. |
+| 10 | 4 | cumulative_lost | Packets expected minus received since the stream started, never below 0. Retransmissions (`0x24`) don't count as received. |
 | 14 | 4 | jitter | Interarrival jitter (RFC 3550 §6.4.1) in the track's clock units. |
 
 **Round-trip time.** On a report with an echo, the addressee computes
@@ -106,6 +112,54 @@ Report block — how the reporter receives one stream of the addressee:
 A hostile member can lie in its reports. Until bandwidth estimation (ADR-014 step 7),
 reports only feed statistics; after it, a lie can lower only what we send to everyone,
 which a member can already cause by dropping our packets.
+
+## NACK
+
+A receiver that sees a gap in a video track's `seq` asks the sender to repeat the missing
+packets (RFC 4585 Generic NACK semantics).
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| 0 | 1 | version/type | `0x22`: version 2, type 2 = NACK. |
+| 1 | 1 | track | The addressee's track the packets belong to. |
+| 2 | 4 | stream_id | The addressee's stream. A NACK about another stream is ignored. |
+| 6 | 1 | n | Pairs, `1 ≤ n ≤ 128`. |
+| 7 | 4·n | pairs | `pid` (u16): a lost `seq`; `blp` (u16): bit *i* set means `pid + i + 1` is lost too. |
+
+A NACK whose length is not exactly `7 + 4·n`, or with `n = 0` or `n > 128`, is dropped.
+
+**Receiver.** A missing `seq` is first requested 20 ms after the gap is seen (fragments of
+one frame leave together and jitter reorders them; asking at once would repeat packets
+that are merely late), then again every RTT + 30 ms, at most three times, and forgotten
+once the frame is no longer awaited. More than 128 missing at once is not worth repeating:
+the list is dropped and the frame logic below asks for a keyframe instead.
+
+**Sender.** Keeps the video packets of the last 1.5 s (at most 4 MiB) and repeats a
+requested one to the member who asked, as `0x24`, if it is still there. Retransmissions
+to a member take at most a quarter of the bytes first sent to that member, plus a reserve
+of 256 KiB that starts full and refills from that quarter; a request that does not fit
+is dropped. A member who NACKs everything therefore costs at most 25 % more traffic to
+itself and cannot make us flood the others.
+
+## Keyframe request
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| 0 | 1 | version/type | `0x23`: version 2, type 3 = keyframe request (like a PLI). |
+| 1 | 1 | track | The addressee's video track. |
+| 2 | 4 | stream_id | The addressee's stream. A request about another stream is ignored. |
+
+Exactly 6 bytes, otherwise dropped.
+
+**Receiver.** Asks when the decoder has nothing to build on: a complete frame had to be
+thrown away for lack of its reference, a missing frame was not recovered in time, or the
+decoder was restarted (the tile appeared on screen, the decoder failed). It repeats the
+request once a second until a keyframe arrives. A stream that starts with a keyframe
+still on its way asks for nothing.
+
+**Sender.** Honours one request per member at most every 900 ms (so a once-a-second
+retry is never refused for timing noise) by making the next video frame a keyframe.
+Without requests, the sender still sends a keyframe every 10 s as a safety net.
 
 ## Receiver rules
 
@@ -118,11 +172,22 @@ unsafe.
   reassembler starts empty.
 - **Reassembly.** A frame is delivered when all its fragments have arrived, in any order.
   A fragment whose `frag_count` disagrees with an earlier fragment of the same frame is
-  dropped. At most 16 incomplete frames and 16 MiB of incomplete data are kept; beyond
-  that the oldest incomplete frame is dropped.
+  dropped. At most 64 frames and 16 MiB of frame data (incomplete, or complete and
+  waiting for an earlier one) are kept; beyond that the oldest frame is dropped.
+- **Order.** Frames go to the decoder strictly in `frame_id` order, because each P-frame
+  refers to the one before it. When the next frame is missing and newer ones are
+  complete, the receiver waits for it (its fragments come back after the NACK) for
+  2.5 × RTT + 50 ms, between 100 and 800 ms. A complete keyframe newer than the missing
+  frame ends the wait at once: everything before it is dropped.
+- **No reference.** If the wait runs out, or the stream starts with P-frames, the
+  receiver delivers nothing until a keyframe: P-frames are dropped and a keyframe is
+  requested. Frames after a keyframe that is still being completed are kept for it.
 - **Late frames.** Frame ids compare in serial-number arithmetic (half the circle ahead
-  is newer). A frame not newer than the last delivered one is dropped, and so are
-  incomplete frames older than a delivered one.
+  is newer). A frame older than the next one expected is dropped.
+- **Decoder queue.** Above the queue limit set by the caller, the queue jumps to its
+  newest keyframe; P-frames are never dropped one by one. A queue nobody drains (the
+  member's tile is off screen) is thrown away at 64 frames or 32 MiB, and the receiver
+  then quietly waits for the next keyframe.
 - **Audio.** Packets are reordered by `seq` in a jitter buffer. A packet older than the
   next one to play (serial arithmetic on 2¹⁶) is dropped. A missing packet is declared
   lost once two later packets are waiting; the decoder then recovers it from the in-band

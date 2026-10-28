@@ -20,6 +20,11 @@
 /// 0x02 — такой пакет не разбирается, старые и новые сборки друг друга не слышат.
 pub const MEDIA_V2: u8 = 0x20;
 
+/// Байт 0 повторно отправленного медиа-пакета (по NACK): v2, тип 4. Остальное — как у
+/// [`MEDIA_V2`], с исходными `seq` и `ts`. Отдельный тип нужен статистике: потери в
+/// отчётах — потери первой отправки, иначе оценка полосы не увидела бы перегрузку.
+pub const MEDIA_RTX_V2: u8 = 0x24;
+
 /// Длина медиа-заголовка.
 pub const MEDIA_HEADER_LEN: usize = 14;
 
@@ -53,6 +58,8 @@ pub struct MediaHeader {
 #[derive(Debug, PartialEq, Eq)]
 pub struct MediaFrame<'a> {
     pub header: MediaHeader,
+    /// Повторная отправка по NACK ([`MEDIA_RTX_V2`]).
+    pub retransmit: bool,
     pub payload: &'a [u8],
 }
 
@@ -67,10 +74,11 @@ pub fn write_media_header(out: &mut [u8], h: &MediaHeader) {
     out[10..14].copy_from_slice(&h.ts.to_be_bytes());
 }
 
-/// Разобрать медиа-пакет. `None` — не v2-медиа или короче заголовка.
+/// Разобрать медиа-пакет (первичный или повторный). `None` — не v2-медиа или короче
+/// заголовка.
 #[inline]
 pub fn parse_media(dg: &[u8]) -> Option<MediaFrame<'_>> {
-    if dg.len() < MEDIA_HEADER_LEN || dg[0] != MEDIA_V2 {
+    if dg.len() < MEDIA_HEADER_LEN || (dg[0] != MEDIA_V2 && dg[0] != MEDIA_RTX_V2) {
         return None;
     }
     let header = MediaHeader {
@@ -82,6 +90,7 @@ pub fn parse_media(dg: &[u8]) -> Option<MediaFrame<'_>> {
     };
     Some(MediaFrame {
         header,
+        retransmit: dg[0] == MEDIA_RTX_V2,
         payload: &dg[MEDIA_HEADER_LEN..],
     })
 }
@@ -288,6 +297,119 @@ pub fn parse_report(dg: &[u8]) -> Option<Report> {
     })
 }
 
+// ---- NACK: просьба повторить видео-пакеты (как RFC 4585 Generic NACK) ----
+// ```text
+// байт 0      : 0x22 — v2, тип 2
+// байт 1      : track
+// байты 2..6  : stream_id — о каком потоке адресата
+// байт 6      : n — число пар (1..=128)
+// байты 7..   : n пар (pid u16, blp u16): потерян pid, и pid+i+1 — если бит i в blp
+// ```
+
+/// Байт 0 NACK.
+pub const NACK_V2: u8 = 0x22;
+/// Длина заголовка NACK до пар.
+pub const NACK_HEADER_LEN: usize = 7;
+/// Больше пар не бывает: 128 × 17 номеров — с запасом на любую дыру, которую ещё
+/// стоит чинить повтором, а не ключевым кадром.
+pub const MAX_NACK_ITEMS: usize = 128;
+
+/// Просьба повторить пакеты трека.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Nack {
+    pub track: u8,
+    pub stream_id: u32,
+    /// Номера пакетов; в проводе — пары (pid, blp).
+    pub seqs: Vec<u16>,
+}
+
+/// Собрать NACK. Номера упаковываются по порядку, как переданы: каждый следующий в
+/// пределах 16 после начала пары ложится в её маску. Пары сверх [`MAX_NACK_ITEMS`]
+/// отброшены. `None` — номеров нет.
+pub fn write_nack(n: &Nack) -> Option<Vec<u8>> {
+    let mut items: Vec<(u16, u16)> = Vec::new();
+    for &seq in &n.seqs {
+        if let Some((pid, blp)) = items.last_mut() {
+            let d = seq.wrapping_sub(*pid);
+            if (1..=16).contains(&d) {
+                *blp |= 1 << (d - 1);
+                continue;
+            }
+        }
+        if items.len() == MAX_NACK_ITEMS {
+            break;
+        }
+        items.push((seq, 0));
+    }
+    if items.is_empty() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(NACK_HEADER_LEN + 4 * items.len());
+    out.push(NACK_V2);
+    out.push(n.track);
+    out.extend_from_slice(&n.stream_id.to_be_bytes());
+    out.push(items.len() as u8);
+    for (pid, blp) in items {
+        out.extend_from_slice(&pid.to_be_bytes());
+        out.extend_from_slice(&blp.to_be_bytes());
+    }
+    Some(out)
+}
+
+/// Разобрать NACK. `None` — не NACK, длина не сходится, пар 0 или больше предела.
+pub fn parse_nack(dg: &[u8]) -> Option<Nack> {
+    if dg.len() < NACK_HEADER_LEN || dg[0] != NACK_V2 {
+        return None;
+    }
+    let n = dg[6] as usize;
+    if n == 0 || n > MAX_NACK_ITEMS || dg.len() != NACK_HEADER_LEN + 4 * n {
+        return None;
+    }
+    let mut seqs = Vec::new();
+    for item in dg[NACK_HEADER_LEN..].chunks_exact(4) {
+        let pid = u16::from_be_bytes([item[0], item[1]]);
+        let blp = u16::from_be_bytes([item[2], item[3]]);
+        seqs.push(pid);
+        for i in 0..16u16 {
+            if blp & (1 << i) != 0 {
+                seqs.push(pid.wrapping_add(i + 1));
+            }
+        }
+    }
+    Some(Nack {
+        track: dg[1],
+        stream_id: be32(&dg[2..]),
+        seqs,
+    })
+}
+
+// ---- Запрос ключевого кадра (как PLI, RFC 4585) ----
+// ```text
+// байт 0      : 0x23 — v2, тип 3
+// байт 1      : track
+// байты 2..6  : stream_id — о каком потоке адресата
+// ```
+
+/// Байт 0 запроса ключевого кадра.
+pub const KEYFRAME_REQUEST_V2: u8 = 0x23;
+/// Длина запроса ключевого кадра.
+pub const KEYFRAME_REQUEST_LEN: usize = 6;
+
+/// Собрать запрос ключевого кадра.
+pub fn write_keyframe_request(track: u8, stream_id: u32) -> Vec<u8> {
+    let mut out = vec![KEYFRAME_REQUEST_V2, track];
+    out.extend_from_slice(&stream_id.to_be_bytes());
+    out
+}
+
+/// Разобрать запрос ключевого кадра: (track, stream_id).
+pub fn parse_keyframe_request(dg: &[u8]) -> Option<(u8, u32)> {
+    if dg.len() != KEYFRAME_REQUEST_LEN || dg[0] != KEYFRAME_REQUEST_V2 {
+        return None;
+    }
+    Some((dg[1], be32(&dg[2..])))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,5 +556,72 @@ mod tests {
         };
         let frags = fragment_video(&[9; 10], 1, info);
         assert_eq!(parse_video_frag(&frags[0]).unwrap().info, info);
+    }
+
+    #[test]
+    fn golden_nack() {
+        let n = Nack {
+            track: TRACK_VIDEO,
+            stream_id: 0x1122_3344,
+            // 10, 11, 13, 26 — одна пара (26 = 10 + 16); 27 — уже следующая.
+            seqs: vec![10, 11, 13, 26, 27],
+        };
+        let bytes = write_nack(&n).unwrap();
+        assert_eq!(
+            bytes,
+            [0x22, 0x01, 0x11, 0x22, 0x33, 0x44, 2, 0, 10, 0x80, 0x05, 0, 27, 0, 0]
+        );
+        assert_eq!(parse_nack(&bytes), Some(n));
+    }
+
+    #[test]
+    fn nack_wraps_and_rejects_garbage() {
+        let n = Nack {
+            track: TRACK_VIDEO,
+            stream_id: 1,
+            seqs: vec![65_535, 0, 1],
+        };
+        let bytes = write_nack(&n).unwrap();
+        assert_eq!(bytes.len(), NACK_HEADER_LEN + 4, "обёртка не рвёт пару");
+        assert_eq!(parse_nack(&bytes), Some(n));
+        assert_eq!(write_nack(&Nack::default()), None);
+        assert_eq!(parse_nack(&bytes[..bytes.len() - 1]), None);
+        let mut zero = bytes.clone();
+        zero[6] = 0;
+        zero.truncate(NACK_HEADER_LEN);
+        assert_eq!(parse_nack(&zero), None, "пустой NACK");
+    }
+
+    #[test]
+    fn nack_items_are_capped() {
+        // Номера через 17 — каждый в своей паре; лишние пары отброшены.
+        let seqs: Vec<u16> = (0..200u16).map(|i| i * 17).collect();
+        let bytes = write_nack(&Nack {
+            track: TRACK_VIDEO,
+            stream_id: 1,
+            seqs,
+        })
+        .unwrap();
+        assert_eq!(bytes.len(), NACK_HEADER_LEN + 4 * MAX_NACK_ITEMS);
+        assert!(parse_nack(&bytes).is_some());
+    }
+
+    #[test]
+    fn golden_keyframe_request() {
+        let bytes = write_keyframe_request(TRACK_VIDEO, 0x0A0B_0C0D);
+        assert_eq!(bytes, [0x23, 0x01, 0x0A, 0x0B, 0x0C, 0x0D]);
+        assert_eq!(parse_keyframe_request(&bytes), Some((TRACK_VIDEO, 0x0A0B_0C0D)));
+        assert_eq!(parse_keyframe_request(&bytes[..5]), None);
+    }
+
+    #[test]
+    fn retransmit_type_parses_as_media() {
+        let mut pkt = vec![0u8; MEDIA_HEADER_LEN + 2];
+        write_media_header(&mut pkt, &MediaHeader { track: TRACK_VIDEO, seq: 7, ..Default::default() });
+        assert!(!parse_media(&pkt).unwrap().retransmit);
+        pkt[0] = MEDIA_RTX_V2;
+        let m = parse_media(&pkt).unwrap();
+        assert!(m.retransmit);
+        assert_eq!(m.header.seq, 7);
     }
 }

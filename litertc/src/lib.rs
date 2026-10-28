@@ -15,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 pub mod jitter;
+mod nack;
 pub mod reassembly;
 pub mod session;
 pub mod sim;
@@ -26,8 +27,10 @@ pub use reassembly::{CompleteFrame, VideoReassembler};
 pub use session::{Config, PeerStats, Session, Transmit, VideoFrame};
 pub use stats::TrackStats;
 pub use wire::{
-    fragment_video, parse_media, parse_report, parse_video_frag, write_media_header, write_report,
-    MediaFrame, MediaHeader, Report, ReportBlock, VideoFrag, VideoInfo, MAX_MEDIA_PAYLOAD,
-    MAX_VIDEO_CHUNK, MAX_VIDEO_FRAGS, MEDIA_HEADER_LEN, MEDIA_V2, REPORT_V2, TRACK_AUDIO,
-    TRACK_SCREEN, TRACK_VIDEO, VIDEO_CLOCK_HZ, VIDEO_HDR, VIDEO_KEYFRAME,
+    fragment_video, parse_keyframe_request, parse_media, parse_nack, parse_report,
+    parse_video_frag, write_keyframe_request, write_media_header, write_nack, write_report,
+    MediaFrame, MediaHeader, Nack, Report, ReportBlock, VideoFrag, VideoInfo,
+    KEYFRAME_REQUEST_V2, MAX_MEDIA_PAYLOAD, MAX_NACK_ITEMS, MAX_VIDEO_CHUNK, MAX_VIDEO_FRAGS,
+    MEDIA_HEADER_LEN, MEDIA_RTX_V2, MEDIA_V2, NACK_V2, REPORT_V2, TRACK_AUDIO, TRACK_SCREEN,
+    TRACK_VIDEO, VIDEO_CLOCK_HZ, VIDEO_HDR, VIDEO_KEYFRAME,
 };

@@ -10,20 +10,28 @@
 //! кадра, [`Session::pull_video`] — декодер), поэтому медиа отдаётся по запросу, а не
 //! событиями.
 //!
-//! Таймеры (отчёты получателя раз в секунду): вызывающий зовёт
-//! [`Session::handle_timeout`] не позже [`Session::poll_timeout`].
+//! Таймеры (отчёты получателя, повторы NACK, ожидание недостающего кадра, запрос
+//! ключевого): вызывающий зовёт [`Session::handle_timeout`] не позже
+//! [`Session::poll_timeout`].
+//!
+//! Восстановление видео (ADR-014 §5): приёмник просит повторить пропущенные пакеты
+//! (NACK), а если не дождался — ключевой кадр; отправитель повторяет из истории в
+//! пределах бюджета и сообщает вызывающему, что кодеру нужен ключевой кадр
+//! ([`Session::take_keyframe_request`]).
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 
 use crate::jitter::{JitterBuffer, JitterOut};
+use crate::nack::{NackList, TxHistory};
 use crate::reassembly::{CompleteFrame, VideoReassembler};
 use crate::stats::{RxStats, TrackStats};
 use crate::wire::{
-    fragment_video, parse_media, parse_report, parse_video_frag, write_media_header, write_report,
-    MediaHeader, Report, VideoInfo, MEDIA_HEADER_LEN, REPORT_V2, TRACK_AUDIO, TRACK_SCREEN,
-    TRACK_VIDEO, VIDEO_CLOCK_HZ,
+    fragment_video, parse_keyframe_request, parse_media, parse_nack, parse_report,
+    parse_video_frag, write_keyframe_request, write_media_header, write_nack, write_report,
+    MediaHeader, Nack, Report, VideoInfo, KEYFRAME_REQUEST_V2, MEDIA_HEADER_LEN, MEDIA_RTX_V2,
+    NACK_V2, REPORT_V2, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO, VIDEO_CLOCK_HZ,
 };
 
 /// Как часто каждый участник получает наш отчёт о приёме.
@@ -35,6 +43,36 @@ const MAX_RTT_MS: i32 = 60_000;
 /// Треков три: звук, камера, экран — индексы в массивах статистики.
 const TRACKS: usize = TRACK_SCREEN as usize + 1;
 
+/// RTT, пока отчётов ещё не было.
+const DEFAULT_RTT: Duration = Duration::from_millis(200);
+
+/// Повторы участнику — не больше этой доли того, что ему отправлено впервые
+/// (ADR-014 §8: иначе один участник NACK-ами заставил бы нас заливать канал)...
+const RTX_SHARE: f64 = 0.25;
+/// ...с запасом на пачку: потерянный кусок ключевого кадра.
+const RTX_BURST: f64 = 256.0 * 1024.0;
+
+/// Запрос ключевого кадра от участника выполняем не чаще: иначе он заставил бы кодер
+/// выдавать одни ключевые. Чуть меньше секунды, чтобы повтор запроса приёмником раз
+/// в секунду ([`KEYFRAME_REQUEST_RETRY`]) не отклонялся из-за дрожания времени.
+const KEYFRAME_REQUEST_MIN_INTERVAL: Duration = Duration::from_millis(900);
+/// Повтор нашего запроса ключевого кадра, пока он не пришёл.
+const KEYFRAME_REQUEST_RETRY: Duration = Duration::from_secs(1);
+
+/// Сколько ждать недостающий видео-кадр, когда более новые уже собраны: две попытки
+/// NACK — первая сразу, вторая через [`nack_retry`], и каждая возвращается за RTT.
+/// Одной мало: при 5 % потерь в обе стороны каждый десятый повтор не доходит, и это
+/// ключевой кадр. Дольше двух — картинка стоит, дешевле ключевой кадр.
+fn max_frame_wait(rtt: Duration) -> Duration {
+    (rtt * 5 / 2 + Duration::from_millis(50))
+        .clamp(Duration::from_millis(100), Duration::from_millis(800))
+}
+
+/// Через сколько повторять NACK: повтор не пришёл за RTT с запасом на разброс.
+fn nack_retry(rtt: Duration) -> Duration {
+    (rtt + Duration::from_millis(30)).max(Duration::from_millis(50))
+}
+
 /// Предел очереди собранных видео-кадров участника в байтах — поверх предела в
 /// кадрах: кадр бывает до 8 МБ (`MAX_VIDEO_FRAGS`), и 60 таких — полгигабайта.
 const VIDEO_QUEUE_BYTES: usize = 32 << 20;
@@ -43,6 +81,12 @@ const VIDEO_QUEUE_BYTES: usize = 32 << 20;
 /// уточнит его под разрешение и fps ([`Session::set_video_queue_cap`]). Декодер
 /// выводит кадры по своим часам, поэтому бэклог в очереди = постоянная задержка.
 const VIDEO_QUEUE_DEFAULT: usize = 9;
+
+/// Жёсткий предел очереди в кадрах: сверх мягкого кадры не выбрасываются, пока нет
+/// ключевого, к которому можно перескочить (выброшенный P-кадр сломал бы все
+/// следующие). Столько набегает, только если кадры никто не забирает (тайл
+/// участника не на экране) — тогда очередь выбрасывается целиком.
+const VIDEO_QUEUE_HARD: usize = 64;
 
 /// Параметры звонка.
 #[derive(Clone, Copy, Debug)]
@@ -84,6 +128,10 @@ pub struct PeerStats {
     pub inbound: [Option<TrackStats>; TRACKS],
     /// Как он принимает наши потоки — из его отчётов.
     pub outbound: [Option<TrackStats>; TRACKS],
+    /// Пакетов повторили ему по его NACK.
+    pub retransmitted: u64,
+    /// Ключевых кадров попросили у него.
+    pub keyframe_requests: u64,
 }
 
 /// Приём звука от участника: джиттер-буфер и оценка джиттера для его глубины.
@@ -129,13 +177,17 @@ impl AudioRx {
     }
 }
 
-/// Приём видео от участника: сборка кадров и очередь собранных до декодера.
+/// Приём видео от участника: пропущенные пакеты, сборка кадров и очередь собранных
+/// до декодера.
 #[derive(Default)]
 struct VideoRx {
     /// Номер потока, к которому относится сборщик.
     stream: Option<u32>,
+    nack: NackList,
     asm: VideoReassembler,
     queue: VecDeque<VideoFrame>,
+    /// Когда последний раз просили у него ключевой кадр.
+    keyframe_requested: Option<Instant>,
 }
 
 impl VideoRx {
@@ -146,20 +198,17 @@ impl VideoRx {
             info: frame.info,
         });
         // Анти-латентность: при переполнении ПРЫГАЕМ к свежему ключевому кадру (декодер
-        // ресинхронизируется чисто), а не тянем устаревшие кадры по одному.
-        let cap = cap.max(4);
-        if q.len() > cap {
+        // ресинхронизируется чисто). Выбросить P-кадры по одному нельзя: следующие
+        // опираются на них.
+        if q.len() > cap.max(4) {
             if let Some(kf) = q.iter().rposition(|f| f.info.keyframe) {
-                if kf > 0 {
-                    q.drain(0..kf);
-                }
-            }
-            while q.len() > cap {
-                q.pop_front();
+                q.drain(0..kf);
             }
         }
-        while q.len() > 1 && q.iter().map(|f| f.data.len()).sum::<usize>() > VIDEO_QUEUE_BYTES {
-            q.pop_front();
+        let bytes = q.iter().map(|f| f.data.len()).sum::<usize>();
+        if q.len() > VIDEO_QUEUE_HARD || bytes > VIDEO_QUEUE_BYTES {
+            q.clear();
+            self.asm.skip_to_keyframe(false);
         }
     }
 }
@@ -177,6 +226,10 @@ struct PeerState {
     next_report: Option<Instant>,
     /// `ts_ms` последнего его отчёта и когда он пришёл — для эха.
     last_report: Option<(u32, Instant)>,
+    /// Бюджет повторов ему, байт ([`RTX_SHARE`]).
+    rtx_budget: f64,
+    /// Когда последний раз выполнили его запрос ключевого кадра.
+    keyframe_honoured: Option<Instant>,
 }
 
 impl PeerState {
@@ -189,8 +242,26 @@ impl PeerState {
             tw_seq: 0,
             next_report: None,
             last_report: None,
+            // Полный с начала: первые потери звонка тоже чинятся повтором.
+            rtx_budget: RTX_BURST,
+            keyframe_honoured: None,
         }
     }
+
+    fn rtt(&self) -> Duration {
+        self.stats.rtt.unwrap_or(DEFAULT_RTT)
+    }
+}
+
+/// Медиа-пакет: заголовок и payload; `retransmit` — повтор по NACK.
+fn media_packet(header: &MediaHeader, payload: &[u8], retransmit: bool) -> Vec<u8> {
+    let mut packet = vec![0u8; MEDIA_HEADER_LEN + payload.len()];
+    write_media_header(&mut packet, header);
+    if retransmit {
+        packet[0] = MEDIA_RTX_V2;
+    }
+    packet[MEDIA_HEADER_LEN..].copy_from_slice(payload);
+    packet
 }
 
 /// Один звонок с нашей стороны. `P` — идентификатор участника (в Peerage — ключ).
@@ -207,6 +278,10 @@ pub struct Session<P> {
     video_frame_id: u32,
     /// Начало отсчёта времени захвата видео (первый отправленный кадр).
     video_epoch: Option<Instant>,
+    /// Отправленное видео — для повторов по NACK.
+    video_history: TxHistory,
+    /// Кто-то из участников попросил ключевой кадр, а кодер его ещё не выдал.
+    keyframe_wanted: bool,
     video_queue_cap: usize,
     tx_bytes: u64,
     /// Начало наших часов для отчётов и времени прихода (первый увиденный `now`).
@@ -227,6 +302,8 @@ impl<P: Copy + Eq + Hash> Session<P> {
             video_seq: 0,
             video_frame_id: 0,
             video_epoch: None,
+            video_history: TxHistory::default(),
+            keyframe_wanted: false,
             video_queue_cap: VIDEO_QUEUE_DEFAULT,
             tx_bytes: 0,
             epoch: None,
@@ -286,11 +363,21 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let ts = (micros * VIDEO_CLOCK_HZ as u128 / 1_000_000) as u32;
         let frame_id = self.video_frame_id;
         self.video_frame_id = self.video_frame_id.wrapping_add(1);
+        if info.keyframe {
+            self.keyframe_wanted = false;
+        }
         for chunk in fragment_video(frame, frame_id, info) {
             let seq = self.video_seq;
             self.video_seq = self.video_seq.wrapping_add(1);
+            self.video_history.push(now, seq, ts, &chunk);
             self.broadcast(TRACK_VIDEO, seq, ts, &chunk);
         }
+    }
+
+    /// Участник просил ключевой кадр, и кодеру пора его выдать. Сбрасывается этим
+    /// вызовом и любым отправленным ключевым кадром.
+    pub fn take_keyframe_request(&mut self) -> bool {
+        std::mem::take(&mut self.keyframe_wanted)
     }
 
     fn broadcast(&mut self, track: u8, seq: u16, ts: u32, payload: &[u8]) {
@@ -306,15 +393,46 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 ts,
             };
             st.tw_seq = st.tw_seq.wrapping_add(1);
-            let mut packet = vec![0u8; MEDIA_HEADER_LEN + payload.len()];
-            write_media_header(&mut packet, &header);
-            packet[MEDIA_HEADER_LEN..].copy_from_slice(payload);
+            st.rtx_budget = (st.rtx_budget + payload.len() as f64 * RTX_SHARE).min(RTX_BURST);
             self.out.push_back(Transmit {
                 to: *p,
-                data: packet,
+                data: media_packet(&header, payload, false),
             });
         }
         self.tx_bytes += (payload.len() * self.peers.len()) as u64;
+    }
+
+    /// NACK участника: повторить ему то, что ещё есть в истории, пока хватает бюджета.
+    fn retransmit(&mut self, to: P, nack: Nack) {
+        if nack.track != TRACK_VIDEO || nack.stream_id != self.cfg.stream_id {
+            return;
+        }
+        let Some(st) = self.state.get_mut(&to) else {
+            return;
+        };
+        for seq in nack.seqs {
+            let Some((ts, payload)) = self.video_history.get(seq) else {
+                continue;
+            };
+            if st.rtx_budget < payload.len() as f64 {
+                break;
+            }
+            st.rtx_budget -= payload.len() as f64;
+            let header = MediaHeader {
+                track: TRACK_VIDEO,
+                stream_id: self.cfg.stream_id,
+                seq,
+                tw_seq: st.tw_seq,
+                ts,
+            };
+            st.tw_seq = st.tw_seq.wrapping_add(1);
+            st.stats.retransmitted += 1;
+            self.tx_bytes += payload.len() as u64;
+            self.out.push_back(Transmit {
+                to,
+                data: media_packet(&header, payload, true),
+            });
+        }
     }
 
     /// Следующий пакет к отправке.
@@ -329,16 +447,38 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let Some(st) = self.state.get_mut(&from) else {
             return;
         };
-        if data.first() == Some(&REPORT_V2) {
-            if let Some(r) = parse_report(data) {
-                Self::handle_report(&self.cfg, st, now, since_epoch, r);
+        match data.first() {
+            Some(&REPORT_V2) => {
+                if let Some(r) = parse_report(data) {
+                    Self::handle_report(&self.cfg, st, now, since_epoch, r);
+                }
+                return;
             }
-            return;
+            Some(&NACK_V2) => {
+                if let Some(n) = parse_nack(data) {
+                    self.retransmit(from, n);
+                }
+                return;
+            }
+            Some(&KEYFRAME_REQUEST_V2) => {
+                let ours = (TRACK_VIDEO, self.cfg.stream_id);
+                let due = st.keyframe_honoured.is_none_or(|t| {
+                    now.saturating_duration_since(t) >= KEYFRAME_REQUEST_MIN_INTERVAL
+                });
+                if parse_keyframe_request(data) == Some(ours) && due {
+                    st.keyframe_honoured = Some(now);
+                    self.keyframe_wanted = true;
+                }
+                return;
+            }
+            _ => {}
         }
         let Some(m) = parse_media(data) else { return };
         let h = m.header;
         st.stats.rx_bytes += m.payload.len() as u64;
-        if let Some(slot) = st.rx.get_mut(h.track as usize) {
+        // Повторы в статистику приёма не идут: потери в отчётах — потери первой
+        // отправки, по ним судят о канале.
+        if let Some(slot) = st.rx.get_mut(h.track as usize).filter(|_| !m.retransmit) {
             let clock = if h.track == TRACK_AUDIO {
                 self.cfg.audio_clock_hz
             } else {
@@ -360,11 +500,12 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 };
                 if st.video.stream != Some(h.stream_id) {
                     st.video.stream = Some(h.stream_id);
+                    st.video.nack = NackList::default();
                     st.video.asm = VideoReassembler::new();
                 }
-                if let Some(frame) = st.video.asm.push(frag) {
-                    st.video.push(frame, self.video_queue_cap);
-                }
+                st.video.nack.on_packet(now, h.seq);
+                st.video.asm.push(frag);
+                self.service_video(now, from);
             }
             TRACK_AUDIO => {
                 let depth = self.cfg.jitter_depth;
@@ -410,16 +551,65 @@ impl<P: Copy + Eq + Hash> Session<P> {
         }
     }
 
+    /// Видео участника: отдать декодеру готовые кадры, попросить повторить
+    /// пропущенное и, если без ключевого кадра дальше не пойти, попросить его.
+    fn service_video(&mut self, now: Instant, peer: P) {
+        let Some(st) = self.state.get_mut(&peer) else {
+            return;
+        };
+        let rtt = st.rtt();
+        let wait = max_frame_wait(rtt);
+        let v = &mut st.video;
+        while let Some(frame) = v.asm.pop(now, wait) {
+            v.push(frame, self.video_queue_cap);
+        }
+        let Some(stream_id) = v.stream else { return };
+        let nack = Nack {
+            track: TRACK_VIDEO,
+            stream_id,
+            seqs: v.nack.due(now, nack_retry(rtt), wait),
+        };
+        if let Some(data) = write_nack(&nack) {
+            self.out.push_back(Transmit { to: peer, data });
+        }
+        let ask = v.asm.wants_keyframe()
+            && v.keyframe_requested
+                .is_none_or(|t| now.saturating_duration_since(t) >= KEYFRAME_REQUEST_RETRY);
+        if ask {
+            v.keyframe_requested = Some(now);
+            st.stats.keyframe_requests += 1;
+            self.out.push_back(Transmit {
+                to: peer,
+                data: write_keyframe_request(TRACK_VIDEO, stream_id),
+            });
+        }
+    }
+
     /// Когда звать [`Session::handle_timeout`]. `None` — участников нет, таймеров тоже.
     pub fn poll_timeout(&self) -> Option<Instant> {
         self.peers
             .iter()
             .filter_map(|p| self.state.get(p))
-            .filter_map(|st| st.next_report.or(self.last_now))
+            .flat_map(|st| {
+                let rtt = st.rtt();
+                let v = &st.video;
+                let keyframe = v
+                    .keyframe_requested
+                    .filter(|_| v.asm.wants_keyframe())
+                    .map(|t| t + KEYFRAME_REQUEST_RETRY);
+                [
+                    st.next_report.or(self.last_now),
+                    v.asm.deadline(max_frame_wait(rtt)),
+                    v.nack.next_due(nack_retry(rtt)),
+                    keyframe,
+                ]
+            })
+            .flatten()
             .min()
     }
 
-    /// Сработали таймеры: разослать отчёты получателя тем, кому пора.
+    /// Сработали таймеры: разослать отчёты получателя тем, кому пора; повторить
+    /// NACK и запросы ключевого кадра; отдать кадры, которые больше не ждут.
     pub fn handle_timeout(&mut self, now: Instant) {
         let now_ms = self.tick(now).as_millis() as u32;
         for p in &self.peers {
@@ -447,6 +637,9 @@ impl<P: Copy + Eq + Hash> Session<P> {
             });
             self.out.push_back(Transmit { to: *p, data });
         }
+        for p in self.peers.clone() {
+            self.service_video(now, p);
+        }
     }
 
     /// Следующий кадр звука участника для воспроизведения: `None` — буфер набирается
@@ -459,6 +652,24 @@ impl<P: Copy + Eq + Hash> Session<P> {
     /// Следующий собранный видео-кадр участника для декодера.
     pub fn pull_video(&mut self, peer: &P) -> Option<VideoFrame> {
         self.state.get_mut(peer)?.video.queue.pop_front()
+    }
+
+    /// Декодер видео участника начат заново (тайл появился на экране, декодер
+    /// пересоздан после ошибки): ему нужен ключевой кадр. Если очередь с него и
+    /// начинается — ничего не нужно; иначе очередь выбрасывается, а ключевой кадр
+    /// просим у отправителя (не чаще раза в секунду).
+    pub fn request_keyframe(&mut self, now: Instant, peer: &P) {
+        self.tick(now);
+        let Some(st) = self.state.get_mut(peer) else {
+            return;
+        };
+        let v = &mut st.video;
+        if v.queue.front().is_some_and(|f| f.info.keyframe) || v.stream.is_none() {
+            return;
+        }
+        v.queue.clear();
+        v.asm.skip_to_keyframe(true);
+        self.service_video(now, *peer);
     }
 
     /// Предел очереди видео-кадров на участника. Политику задаёт вызывающий: он
@@ -672,7 +883,7 @@ mod tests {
                 now,
                 &[i; 10],
                 VideoInfo {
-                    keyframe: i == 3,
+                    keyframe: i == 0 || i == 3,
                     ..key()
                 },
             );

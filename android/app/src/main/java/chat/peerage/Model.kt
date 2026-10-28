@@ -2232,6 +2232,7 @@ class AppModel private constructor() {
             videoQuality.height,
             videoQuality.fps,
             onRotation = { rot -> roomMemberRotation[peerHex] = rot },
+            requestKeyframe = { Native.roomRequestKeyframe(sessionPtr, peerHex) },
         ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
     }
 

@@ -34,11 +34,12 @@ fn packet(track: u8, seq: u16, ts: u32, payload: &[u8]) -> Vec<u8> {
     p
 }
 
-/// Видео 30 fps, кадр в 3 фрагмента, 5 % потерь, разброс задержки. Сегодня потеря
-/// одного фрагмента = потеря кадра: перепосылки нет, кадр с дырой не доставляется
-/// никогда, а целые кадры доставляются по возрастанию номера.
+/// Видео 30 fps, кадр в 3 фрагмента, 5 % потерь, разброс задержки, сборщик сам по
+/// себе — без повторов (их делает `Session`, см. `recovery.rs`). Кадр с дырой не
+/// доставляется, и P-кадры после него тоже: декодеру не на что опереться, поэтому до
+/// ключевого кадра (раз в 30) отдавать нечего. Каждый отданный кадр декодируем.
 #[test]
-fn video_lost_fragment_loses_the_frame() {
+fn video_lost_fragment_skips_to_keyframe() {
     let t0 = Instant::now();
     let cfg = LinkConfig {
         delay: ms(40),
@@ -75,7 +76,8 @@ fn video_lost_fragment_loses_the_frame() {
             let m = parse_media(&p).expect("медиа-пакет");
             let f = parse_video_frag(m.payload).expect("видео-фрагмент");
             arrived[f.frame_id as usize][f.frag_idx as usize] = true;
-            if let Some(c) = asm.push(f) {
+            asm.push(f);
+            while let Some(c) = asm.pop(now, ms(300)) {
                 delivered.push(c.frame_id);
             }
         }
@@ -96,13 +98,17 @@ fn video_lost_fragment_loses_the_frame() {
         delivered.windows(2).all(|w| w[0] < w[1]),
         "кадры идут по возрастанию"
     );
-    // Целый кадр мог не дойти, только если его обогнал более новый (опоздал).
-    let whole = frames as usize - with_hole;
-    assert!(
-        delivered.len() + 10 >= whole,
-        "доставлено {} из {whole} целых",
-        delivered.len()
-    );
+    for (i, &id) in delivered.iter().enumerate() {
+        assert!(
+            id % 30 == 0 || (i > 0 && delivered[i - 1] == id - 1),
+            "кадр {id} отдан без опоры"
+        );
+    }
+    for id in (0..frames).step_by(30) {
+        if !arrived[id as usize].contains(&false) {
+            assert!(delivered.contains(&id), "целый ключевой кадр {id} не отдан");
+        }
+    }
 }
 
 /// Звук: кадр 20 мс, глубина 4, разброс 30 мс, без потерь — проигрывается всё, без

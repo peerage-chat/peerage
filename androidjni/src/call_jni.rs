@@ -2,7 +2,7 @@
 //! Тонкий слой: декодирует аргументы и зовёт методы [`peerage_engine::Engine`].
 
 use jni::objects::{JByteArray, JClass, JShortArray, JString};
-use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE};
+use jni::sys::{jboolean, jint, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
 use peerage_engine::parse_key;
@@ -287,7 +287,8 @@ pub extern "system" fn Java_chat_peerage_Native_roomSetMuted<'local>(
 
 /// Закодированный H264 access-unit → фрагментация + мультикаст всем участникам.
 /// `rotation` — угол сенсора / 90 (приёмник доворачивает), `fps` — темп вывода у
-/// приёмника; оба едут в протоколе LiteRTC.
+/// приёмника; оба едут в протоколе LiteRTC. Возвращает `true`, если участник просит
+/// ключевой кадр — кодеру выдать его следующим.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_roomPushVideo<'local>(
     env: JNIEnv<'local>,
@@ -297,17 +298,33 @@ pub extern "system" fn Java_chat_peerage_Native_roomPushVideo<'local>(
     keyframe: jboolean,
     rotation: jint,
     fps: jint,
-) {
-    jni_safe!((), {
-        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
         let bytes = env.convert_byte_array(&data).unwrap_or_default();
-        if bytes.is_empty() { return; }
+        if bytes.is_empty() { return JNI_FALSE; }
         let info = litertc::VideoInfo {
             keyframe: keyframe != JNI_FALSE,
             rotation: rotation.rem_euclid(4) as u8,
             fps: fps.clamp(0, 255) as u8,
         };
-        e.room_push_video(&bytes, info);
+        if e.room_push_video(&bytes, info) { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
+/// Декодер видео участника начат заново (тайл появился, декодер пересоздан) —
+/// попросить у него ключевой кадр.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_roomRequestKeyframe<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    peer_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Some(key) = parse_key(&jstr(&mut env, &peer_hex)) else { return };
+        e.room_request_keyframe(&key);
     });
 }
 

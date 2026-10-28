@@ -19,6 +19,9 @@ class VideoReceiver(
     /** Вызывается при изменении ориентации потока (угол сенсора отправителя, 0/90/
      *  180/270) — UI доворачивает тайл. Идёт 1-м байтом каждого access-unit'а. */
     private val onRotation: (Int) -> Unit = {},
+    /** Новому декодеру нужен ключевой кадр: попросить его у отправителя. Зовётся из
+     *  потока декодера (не из Compose), при каждом создании декодера. */
+    private val requestKeyframe: () -> Unit = {},
     private val pullVideoPacket: () -> ByteArray,
 ) {
     private var decoder: MediaCodec? = null
@@ -85,6 +88,8 @@ class VideoReceiver(
                     playing = false
                     feedIdx = 0
                     queue.clear() // новый декодер — свежий pts-таймлайн
+                    // Опоры у нового декодера нет; ключевой по расписанию — раз в 10 с.
+                    requestKeyframe()
                     android.util.Log.i("VideoReceiver", "Decoder started successfully")
                 }
                 val currentDec = dec!!

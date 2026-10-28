@@ -256,8 +256,18 @@ parses comes from such a member, so:
    ad-hoc traffic counters). Reports go out once a second from the engine's receive
    thread (`poll_timeout`/`handle_timeout`); stats are logged every 5 s. Audio `seq` now
    counts sent packets only, so a muted microphone is not loss.
-6. **Recovery:** NACK, retransmission, keyframe request, skip-to-keyframe; then the
+6. ✅ (2026-10-28) **Recovery:** NACK, retransmission, keyframe request, skip-to-keyframe; then the
    longer keyframe interval. Audio: decode Opus FEC, constant packet size, DTX off.
+   As built: retransmissions are their own packet type (`0x24`) so loss statistics stay
+   first-transmission loss; the reassembler delivers frames strictly in order and waits
+   2.5 × RTT for a missing one (two NACK rounds — one round lost a tenth of repairs at
+   5 % loss each way); a NACK waits 20 ms for reordering first (without it, reordered
+   fragments of one frame ate the retransmission budget). A keyframe is requested only
+   when a complete frame had to be dropped, the wait ran out, or the decoder restarted —
+   a new tile no longer needs the periodic keyframe, which is now every 10 s. The decoder
+   queue never drops single P-frames: it jumps to a keyframe or, when nobody drains it,
+   empties and waits for the next keyframe quietly. Opus runs in CBR; its FEC share
+   follows the worst reported audio loss (5–30 %).
 7. **Bandwidth:** estimator, prioritised pacing, `TargetBitrate` → MediaCodec bitrate and resolution
    steps, Opus FEC. Revisit the 600 packets/s media ingress budget against real bitrates.
 8. **Playout and A/V sync:** the video jitter buffer moves from `VideoReceiver` into

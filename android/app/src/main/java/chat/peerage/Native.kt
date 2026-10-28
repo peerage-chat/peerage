@@ -467,9 +467,13 @@ object Native {
     /**
      * Закодированный H264 access-unit → фрагментация + мультикаст всем в комнате.
      * [rotation] — угол сенсора / 90 (приёмник доворачивает), [fps] — темп вывода у
-     * приёмника; оба едут в протоколе LiteRTC.
+     * приёмника; оба едут в протоколе LiteRTC. `true` — участник просит ключевой
+     * кадр, кодеру выдать его следующим.
      */
-    external fun roomPushVideo(sessionPtr: Long, data: ByteArray, keyframe: Boolean, rotation: Int, fps: Int)
+    external fun roomPushVideo(sessionPtr: Long, data: ByteArray, keyframe: Boolean, rotation: Int, fps: Int): Boolean
+
+    /** Декодер видео [peerHex] начат заново — попросить у него ключевой кадр. */
+    external fun roomRequestKeyframe(sessionPtr: Long, peerHex: String)
 
     /** Задать кап входящей видео-очереди (кадров). Политику бюджета считает Kotlin. */
     external fun roomSetVideoCap(sessionPtr: Long, cap: Int)

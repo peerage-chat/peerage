@@ -62,7 +62,7 @@ fn log_stats(s: &Session<PeerKey>) {
         let v = litertc::TRACK_VIDEO as usize;
         let jitter = st.inbound[a].map_or("-".to_string(), |t| format!("{:.0}ms", t.jitter_ms));
         log::info!(
-            "room-call {}: rtt={} in: audio {} jitter {} video {} | out: audio {} video {}",
+            "room-call {}: rtt={} in: audio {} jitter {} video {} | out: audio {} video {} | rtx {} keyreq {}",
             hex::encode(&p[..4]),
             st.rtt.map_or("-".to_string(), |r| format!("{}ms", r.as_millis())),
             pct(st.inbound[a]),
@@ -70,6 +70,8 @@ fn log_stats(s: &Session<PeerKey>) {
             pct(st.inbound[v]),
             pct(st.outbound[a]),
             pct(st.outbound[v]),
+            st.retransmitted,
+            st.keyframe_requests,
         );
     }
 }
@@ -297,17 +299,29 @@ impl RoomCallEngine {
         self.session.lock_safe().set_video_queue_cap(frames);
     }
 
-    /// Закодированный H264 access-unit → всем участникам.
-    pub fn push_video(&self, frame: &[u8], info: VideoInfo) {
+    /// Закодированный H264 access-unit → всем участникам. `true` — кто-то из них
+    /// просит ключевой кадр: пусть кодер выдаст его следующим.
+    pub fn push_video(&self, frame: &[u8], info: VideoInfo) -> bool {
+        let mut wanted = false;
         let out = with_session(&self.session, &self.members, |s| {
-            s.send_video(Instant::now(), frame, info)
+            s.send_video(Instant::now(), frame, info);
+            wanted = s.take_keyframe_request();
         });
         send_all(&self.messenger, out);
+        wanted
     }
 
     /// Следующий входящий H264-кадр от peer, или None если очередь пуста.
     pub fn pull_video_for(&self, peer: &PeerKey) -> Option<VideoFrame> {
         self.session.lock_safe().pull_video(peer)
+    }
+
+    /// Декодер видео участника начат заново — ему нужен ключевой кадр.
+    pub fn request_keyframe(&self, peer: &PeerKey) {
+        let out = with_session(&self.session, &self.members, |s| {
+            s.request_keyframe(Instant::now(), peer)
+        });
+        send_all(&self.messenger, out);
     }
 
     /// Захваченный PCM с микрофона → в очередь отправки.

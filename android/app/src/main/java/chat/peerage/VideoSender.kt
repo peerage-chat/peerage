@@ -30,8 +30,9 @@ class VideoSender(
     private val fps: Int,
     private val bitrate: Int,
     startFront: Boolean = true,
-    /** (access-unit, ключевой, угол сенсора / 90, fps). */
-    private val sendVideo: (ByteArray, Boolean, Int, Int) -> Unit,
+    /** (access-unit, ключевой, угол сенсора / 90, fps) → `true`, если собеседник
+     *  просит ключевой кадр. */
+    private val sendVideo: (ByteArray, Boolean, Int, Int) -> Boolean,
 ) {
     private var encoder: MediaCodec? = null
     private var inputSurface: Surface? = null
@@ -66,7 +67,10 @@ class VideoSender(
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // keyframe ~раз в секунду
+            // Ключевой кадр — по запросу приёмника (потеря, новый декодер), а раз в
+            // 10 с — страховка. Раньше был раз в секунду: дорого по полосе, а
+            // потерю всё равно чинить приходилось до секунды.
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 10)
         }
         val enc = MediaCodec.createEncoderByType("video/avc")
         enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -218,7 +222,7 @@ class VideoSender(
                     if (encodedCount % 30 == 0) {
                         android.util.Log.i("VideoSender", "Encoded and sent 30 frames, last size = ${au.size} bytes (key=$key)")
                     }
-                    sendVideo(au, key, (sensorOrientation / 90) % 4, fps)
+                    if (sendVideo(au, key, (sensorOrientation / 90) % 4, fps)) requestKeyframe()
                 }
             }
             runCatching { enc.releaseOutputBuffer(idx, false) }

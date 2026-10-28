@@ -2341,9 +2341,15 @@ impl Engine {
         }
     }
 
-    pub fn room_push_video(&self, frame: &[u8], info: litertc::VideoInfo) {
+    /// `true` — участник просит ключевой кадр.
+    pub fn room_push_video(&self, frame: &[u8], info: litertc::VideoInfo) -> bool {
+        self.room_engine().is_some_and(|e| e.push_video(frame, info))
+    }
+
+    /// Декодер видео участника начат заново — попросить у него ключевой кадр.
+    pub fn room_request_keyframe(&self, peer: &[u8; 32]) {
         if let Some(engine) = self.room_engine() {
-            engine.push_video(frame, info);
+            engine.request_keyframe(peer);
         }
     }
 

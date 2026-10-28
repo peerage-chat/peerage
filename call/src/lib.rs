@@ -125,7 +125,10 @@ impl Call {
                         }
                         TRACK_VIDEO | TRACK_SCREEN => {
                             if let Some(frag) = parse_video_frag(f.payload) {
-                                if let Some(cf) = reasm.push(frag) {
+                                reasm.push(frag);
+                                // Без NACK и запросов ключевого (их делает только Session):
+                                // после потери ждём очередного ключевого кадра.
+                                while let Some(cf) = reasm.pop(std::time::Instant::now(), Duration::from_millis(300)) {
                                     if let Some(dec) = video_dec.as_mut() {
                                         if let Ok(Some(frame)) = dec.decode(&cf.data) {
                                             let _ = frame_tx.try_send(frame);

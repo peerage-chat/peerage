@@ -1,20 +1,34 @@
-//! Сборка видео-кадров из фрагментов [`crate::wire`]: переупорядочивание,
-//! выброс опоздавших и неполных кадров, жёсткие пределы памяти (вход — от
-//! участника звонка, который может быть враждебен).
+//! Сборка видео-кадров из фрагментов [`crate::wire`] и выдача их декодеру по порядку.
+//!
+//! Декодер H.264 опирается на прошлый кадр: P-кадр без предшественника даёт кашу до
+//! следующего ключевого. Поэтому сборщик отдаёт кадры строго подряд. Если следующего
+//! нет, а более новые уже собраны, он ждёт недостающий (его фрагменты повторяются по
+//! NACK) не дольше `max_wait`; не дождался — декодер потерял опору, и до ключевого
+//! кадра отдавать нечего ([`VideoReassembler::wants_keyframe`]: просим его у
+//! отправителя). Собранный ключевой кадр новее ожидаемого отдаётся сразу: всё, что
+//! до него, уже не нужно.
+//!
+//! Вход — от участника звонка, который может быть враждебен: память ограничена по
+//! кадрам и по байтам.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use crate::wire::{VideoFrag, VideoInfo, MAX_VIDEO_FRAGS};
 
-/// Сколько байт недособранных кадров держим всего: дальше выбрасываем самые старые.
+/// Сколько байт несобранных и ждущих очереди кадров держим всего: дальше выбрасываем
+/// самые старые.
 const MAX_PENDING_BYTES: usize = 16 << 20;
 
-/// Кадр `id` уже доставлен или опоздал относительно последнего доставленного `last`.
-/// Сравнение по кругу u32 (половина круга вперёд — новее): счётчик может обернуться.
-/// Перезапуск отправителя сюда не попадает — это новый поток (новый `stream_id`), и
-/// сессия заводит для него новый сборщик.
-fn is_stale(id: u32, last: u32) -> bool {
-    (id.wrapping_sub(last) as i32) <= 0
+/// Сколько кадров держим: за время ожидания недостающего (до полсекунды) при 60 fps
+/// набегает 30 собранных следом.
+const MAX_FRAMES: usize = 64;
+
+/// `a` раньше `b` по кругу u32 (половина круга вперёд — новее): счётчик кадров может
+/// обернуться. Перезапуск отправителя сюда не попадает — это новый поток (новый
+/// `stream_id`), и сессия заводит для него новый сборщик.
+fn before(a: u32, b: u32) -> bool {
+    (a.wrapping_sub(b) as i32) < 0
 }
 
 /// Собранный целый видео-кадр.
@@ -31,14 +45,44 @@ struct FrameAcc {
     received: u16,
 }
 
-/// Собирает целые кадры из фрагментов: переупорядочивает, отбрасывает поздние и
-/// неполные (когда приходит более новый кадр). Без фоновых потоков.
-#[derive(Default)]
+impl FrameAcc {
+    fn complete(&self) -> bool {
+        self.received == self.count
+    }
+}
+
+/// Собирает кадры из фрагментов и выдаёт их по порядку. Без своих потоков и часов:
+/// время приходит в [`VideoReassembler::pop`].
 pub struct VideoReassembler {
-    last_delivered: Option<u32>,
+    /// Номер кадра, который декодер ждёт следующим; `None` — ещё ничего не отдали.
+    next: Option<u32>,
+    /// Опоры у декодера нет (начало потока или кадр потерян): годится только ключевой.
+    need_key: bool,
+    /// Без ключевого кадра дальше не пойти: собранный кадр пришлось выбросить или
+    /// недостающий не дождались. Пока поток только начался и ключевой ещё в пути —
+    /// не застряли, просить нечего.
+    stuck: bool,
+    /// Ключевой кадр ждём, но не просим ([`Self::skip_to_keyframe`] без запроса).
+    quiet: bool,
     frames: HashMap<u32, FrameAcc>,
-    /// Байты во всех недособранных кадрах (для [`MAX_PENDING_BYTES`]).
+    /// Байты во всех кадрах, что держим (для [`MAX_PENDING_BYTES`]).
     pending: usize,
+    /// С какого момента следующего кадра нет, а более новый уже собран.
+    waiting_since: Option<Instant>,
+}
+
+impl Default for VideoReassembler {
+    fn default() -> Self {
+        VideoReassembler {
+            next: None,
+            need_key: true,
+            stuck: false,
+            quiet: false,
+            frames: HashMap::new(),
+            pending: 0,
+            waiting_since: None,
+        }
+    }
 }
 
 impl VideoReassembler {
@@ -46,22 +90,18 @@ impl VideoReassembler {
         Self::default()
     }
 
-    /// Принять фрагмент. Возвращает кадр, когда он полностью собран.
-    pub fn push(&mut self, frag: VideoFrag<'_>) -> Option<CompleteFrame> {
-        // Уже доставленные/опоздавшие кадры игнорируем.
-        if self
-            .last_delivered
-            .is_some_and(|last| is_stale(frag.frame_id, last))
-        {
-            return None;
+    /// Принять фрагмент. Кадры забираются [`Self::pop`].
+    pub fn push(&mut self, frag: VideoFrag<'_>) {
+        // Кадр уже отдан или пропущен — опоздал.
+        if self.next.is_some_and(|next| before(frag.frame_id, next)) {
+            return;
         }
         if frag.frag_count == 0
             || frag.frag_count > MAX_VIDEO_FRAGS
             || frag.frag_idx >= frag.frag_count
         {
-            return None;
+            return;
         }
-
         let acc = self
             .frames
             .entry(frag.frame_id)
@@ -73,7 +113,7 @@ impl VideoReassembler {
             });
         // Тот же номер кадра с другим числом фрагментов — мусор, не наш кадр.
         if acc.count != frag.frag_count {
-            return None;
+            return;
         }
         let slot = &mut acc.parts[frag.frag_idx as usize];
         if slot.is_none() {
@@ -81,32 +121,10 @@ impl VideoReassembler {
             acc.received += 1;
             self.pending += frag.data.len();
         }
-
-        if acc.received == acc.count {
-            let acc = self.take(frag.frame_id)?;
-            let mut data = Vec::with_capacity(acc.parts.iter().flatten().map(Vec::len).sum());
-            for part in acc.parts.into_iter().flatten() {
-                data.extend_from_slice(&part);
-            }
-            self.last_delivered = Some(frag.frame_id);
-            // Неполные кадры до доставленного уже не соберутся — выбрасываем.
-            let stale: Vec<u32> = self
-                .frames
-                .keys()
-                .copied()
-                .filter(|&id| is_stale(id, frag.frame_id))
-                .collect();
-            for id in stale {
-                self.take(id);
-            }
-            return Some(CompleteFrame {
-                frame_id: frag.frame_id,
-                info: acc.info,
-                data,
-            });
-        }
-        // Предохранители от роста: по числу кадров и по байтам.
-        while self.frames.len() > 16 || self.pending > MAX_PENDING_BYTES {
+        // Предохранители от роста: по числу кадров и по байтам — выбрасываем самые
+        // старые. Если среди них ожидаемый, его не дождаться: это решит `pop` по
+        // таймауту ожидания.
+        while self.frames.len() > MAX_FRAMES || self.pending > MAX_PENDING_BYTES {
             let newest = frag.frame_id;
             let Some(&oldest) = self
                 .frames
@@ -117,10 +135,143 @@ impl VideoReassembler {
             };
             self.take(oldest);
         }
-        None
     }
 
-    /// Убрать кадр из сборки, списав его байты.
+    /// Следующий кадр для декодера, если его пора отдать. `max_wait` — сколько ждать
+    /// недостающий кадр, когда более новые уже собраны (около двух RTT: столько идёт
+    /// повтор по NACK).
+    pub fn pop(&mut self, now: Instant, max_wait: Duration) -> Option<CompleteFrame> {
+        loop {
+            let Some(next) = self.next.filter(|_| !self.need_key) else {
+                // Опоры нет: годится только ключевой кадр, самый свежий из собранных.
+                if let Some(key) = self.newest(|a| a.complete() && a.info.keyframe) {
+                    return self.deliver(key);
+                }
+                // Ключевой ещё собирается (его фрагменты повторяются по NACK): кадры за
+                // ним держим — с ним они станут декодируемы. Что до него и что собрано
+                // без него — выбрасываем.
+                let pending = self.newest(|a| a.info.keyframe);
+                let useless: Vec<u32> = self
+                    .frames
+                    .iter()
+                    .filter(|(&id, a)| pending.map_or(a.complete(), |k| before(id, k)))
+                    .map(|(&id, _)| id)
+                    .collect();
+                for id in useless {
+                    if self.take(id).is_some_and(|a| a.complete()) {
+                        self.stuck |= !self.quiet;
+                    }
+                }
+                let Some(pending) = pending else {
+                    self.waiting_since = None;
+                    return None;
+                };
+                // Ждём его не дольше `max_wait`; не дождались — он и всё, что за ним
+                // собрано, не пригодится, просим новый.
+                let since = *self.waiting_since.get_or_insert(now);
+                if now.saturating_duration_since(since) < max_wait {
+                    return None;
+                }
+                let lost: Vec<u32> = self
+                    .frames
+                    .iter()
+                    .filter(|(&id, a)| id == pending || before(pending, id) && !a.info.keyframe)
+                    .map(|(&id, _)| id)
+                    .collect();
+                for id in lost {
+                    self.take(id);
+                }
+                self.stuck |= !self.quiet;
+                self.waiting_since = None;
+                continue;
+            };
+            if self.frames.get(&next).is_some_and(FrameAcc::complete) {
+                return self.deliver(next);
+            }
+            // Собранный ключевой кадр новее ожидаемого: ждать незачем, перескакиваем.
+            if let Some(key) = self.oldest_complete_after(next, |a| a.info.keyframe) {
+                return self.deliver(key);
+            }
+            // Следующего нет, а за ним уже собранные — ждём повтора, но не вечно.
+            if self.oldest_complete_after(next, |_| true).is_none() {
+                self.waiting_since = None;
+                return None;
+            }
+            let since = *self.waiting_since.get_or_insert(now);
+            if now.saturating_duration_since(since) < max_wait {
+                return None;
+            }
+            self.need_key = true;
+            self.stuck = true;
+            self.waiting_since = None;
+        }
+    }
+
+    /// Когда [`Self::pop`] перестанет ждать недостающий кадр — для таймера сессии.
+    pub fn deadline(&self, max_wait: Duration) -> Option<Instant> {
+        self.waiting_since.map(|t| t + max_wait)
+    }
+
+    /// Декодеру не на что опереться — нужен ключевой кадр от отправителя.
+    pub fn wants_keyframe(&self) -> bool {
+        self.stuck
+    }
+
+    /// Дальше — только с ключевого кадра (декодер начат заново или его очередь
+    /// пришлось выбросить). `request` — попросить его у отправителя; без запроса
+    /// ждём очередного.
+    pub fn skip_to_keyframe(&mut self, request: bool) {
+        self.need_key = true;
+        self.stuck = request;
+        self.quiet = !request;
+        self.waiting_since = None;
+    }
+
+    fn newest(&self, pred: impl Fn(&FrameAcc) -> bool) -> Option<u32> {
+        self.frames
+            .iter()
+            .filter(|(_, a)| pred(a))
+            .map(|(&id, _)| id)
+            .reduce(|a, b| if before(a, b) { b } else { a })
+    }
+
+    fn oldest_complete_after(&self, next: u32, pred: impl Fn(&FrameAcc) -> bool) -> Option<u32> {
+        self.frames
+            .iter()
+            .filter(|(&id, a)| before(next, id) && a.complete() && pred(a))
+            .map(|(&id, _)| id)
+            .reduce(|a, b| if before(a, b) { a } else { b })
+    }
+
+    /// Отдать собранный кадр `id`; всё, что до него, выбросить.
+    fn deliver(&mut self, id: u32) -> Option<CompleteFrame> {
+        let acc = self.take(id)?;
+        let stale: Vec<u32> = self
+            .frames
+            .keys()
+            .copied()
+            .filter(|&f| before(f, id))
+            .collect();
+        for f in stale {
+            self.take(f);
+        }
+        self.next = Some(id.wrapping_add(1));
+        self.need_key = false;
+        self.stuck = false;
+        self.quiet = false;
+        self.waiting_since = None;
+        let mut data = Vec::with_capacity(acc.parts.iter().flatten().map(Vec::len).sum());
+        for part in acc.parts.into_iter().flatten() {
+            data.extend_from_slice(&part);
+        }
+        Some(CompleteFrame {
+            frame_id: id,
+            info: acc.info,
+            data,
+        })
+    }
+
+    /// Убрать кадр, списав его байты.
     fn take(&mut self, id: u32) -> Option<FrameAcc> {
         let acc = self.frames.remove(&id)?;
         self.pending -= acc.parts.iter().flatten().map(Vec::len).sum::<usize>();
@@ -132,6 +283,8 @@ impl VideoReassembler {
 mod tests {
     use super::*;
     use crate::wire::{fragment_video, parse_video_frag, MAX_VIDEO_CHUNK};
+
+    const WAIT: Duration = Duration::from_millis(300);
 
     fn make_frame(n: usize, fill: u8) -> Vec<u8> {
         vec![fill; n]
@@ -148,6 +301,24 @@ mod tests {
         VideoInfo::default()
     }
 
+    /// Положить все фрагменты, кроме `skip`, и забрать всё, что готово к `now`.
+    fn feed(r: &mut VideoReassembler, frags: &[Vec<u8>], skip: &[usize], now: Instant) -> Vec<u32> {
+        for (i, f) in frags.iter().enumerate() {
+            if !skip.contains(&i) {
+                r.push(parse_video_frag(f).unwrap());
+            }
+        }
+        drain(r, now)
+    }
+
+    fn drain(r: &mut VideoReassembler, now: Instant) -> Vec<u32> {
+        std::iter::from_fn(|| r.pop(now, WAIT)).map(|f| f.frame_id).collect()
+    }
+
+    fn frame(id: u32, info: VideoInfo) -> Vec<Vec<u8>> {
+        fragment_video(&make_frame(MAX_VIDEO_CHUNK * 2 + 100, id as u8), id, info)
+    }
+
     #[test]
     fn video_fragment_reassemble_in_order() {
         let frame = make_frame(MAX_VIDEO_CHUNK * 2 + 100, 0xAB);
@@ -155,80 +326,163 @@ mod tests {
         assert!(frags.len() > 1, "большой кадр должен разрезаться");
 
         let mut r = VideoReassembler::new();
-        let mut got = None;
         for f in &frags {
-            got = r.push(parse_video_frag(f).unwrap());
+            r.push(parse_video_frag(f).unwrap());
         }
-        let cf = got.expect("кадр должен собраться");
+        let cf = r.pop(Instant::now(), WAIT).expect("кадр должен собраться");
         assert_eq!(cf.data, frame);
         assert!(cf.info.keyframe);
         assert_eq!(cf.frame_id, 1);
     }
 
+    /// Ключевой кадр ещё собирается — это не повод его просить.
     #[test]
-    fn video_reassemble_out_of_order() {
-        let frame = make_frame(MAX_VIDEO_CHUNK * 2, 7);
-        let mut frags: Vec<Vec<u8>> = fragment_video(&frame, 10, plain());
-        assert!(
-            frags.len() > 1,
-            "кадр должен быть многофрагментным для теста"
-        );
-        frags.reverse(); // обратный порядок прихода
-
+    fn keyframe_in_flight_is_not_requested() {
+        let now = Instant::now();
         let mut r = VideoReassembler::new();
-        let mut got = None;
-        for f in &frags {
-            if let Some(c) = r.push(parse_video_frag(f).unwrap()) {
-                got = Some(c);
-            }
-        }
-        assert_eq!(got.unwrap().data, frame);
+        assert!(feed(&mut r, &frame(1, key()), &[2], now).is_empty());
+        assert!(!r.wants_keyframe());
     }
 
     #[test]
-    fn incomplete_frame_dropped_when_newer_completes() {
-        let f1 = fragment_video(&make_frame(MAX_VIDEO_CHUNK * 2 + 100, 1), 1, plain()); // потеряем фрагмент
-        let f2 = fragment_video(&make_frame(500, 2), 2, key());
+    fn video_reassemble_out_of_order() {
+        let frame = make_frame(MAX_VIDEO_CHUNK * 2, 7);
+        let mut frags: Vec<Vec<u8>> = fragment_video(&frame, 10, key());
+        assert!(frags.len() > 1, "кадр должен быть многофрагментным для теста");
+        frags.reverse(); // обратный порядок прихода
 
         let mut r = VideoReassembler::new();
-        // кадр 1 — пропускаем первый фрагмент (потеря) → не соберётся
-        for f in f1.iter().skip(1) {
-            assert!(r.push(parse_video_frag(f).unwrap()).is_none());
+        for f in &frags {
+            r.push(parse_video_frag(f).unwrap());
         }
-        // кадр 2 — полный → собирается; кадр 1 отбрасывается
-        let mut got = None;
-        for f in &f2 {
-            if let Some(c) = r.push(parse_video_frag(f).unwrap()) {
-                got = Some(c);
-            }
-        }
-        let cf = got.expect("кадр 2 собран");
-        assert_eq!(cf.frame_id, 2);
-        // запоздавший фрагмент кадра 1 теперь игнорируется
-        assert!(r.push(parse_video_frag(&f1[0]).unwrap()).is_none());
+        assert_eq!(r.pop(Instant::now(), WAIT).unwrap().data, frame);
+    }
+
+    /// Поток начинается с P-кадров (зашли посреди звонка): их не на что опереть,
+    /// просим ключевой и отдаём с него.
+    #[test]
+    fn stream_starts_at_a_keyframe() {
+        let now = Instant::now();
+        let mut r = VideoReassembler::new();
+        assert!(feed(&mut r, &frame(5, plain()), &[], now).is_empty());
+        assert!(r.wants_keyframe());
+        assert_eq!(feed(&mut r, &frame(6, key()), &[], now), [6]);
+        assert!(!r.wants_keyframe());
+        assert_eq!(feed(&mut r, &frame(7, plain()), &[], now), [7]);
+    }
+
+    /// Фрагмент потерян: более новые кадры ждут, пока его повторят, а потом идут
+    /// все по порядку.
+    #[test]
+    fn newer_frames_wait_for_a_retransmitted_fragment() {
+        let t0 = Instant::now();
+        let mut r = VideoReassembler::new();
+        assert_eq!(feed(&mut r, &frame(1, key()), &[], t0), [1]);
+        let f2 = frame(2, plain());
+        assert!(feed(&mut r, &f2, &[1], t0).is_empty());
+        assert!(feed(&mut r, &frame(3, plain()), &[], t0).is_empty(), "3 ждёт 2");
+        assert_eq!(r.deadline(WAIT), Some(t0 + WAIT));
+        // Повтор пришёл до срока.
+        let later = t0 + WAIT / 2;
+        r.push(parse_video_frag(&f2[1]).unwrap());
+        assert_eq!(drain(&mut r, later), [2, 3]);
+        assert!(!r.wants_keyframe());
+        assert_eq!(r.deadline(WAIT), None);
+    }
+
+    /// Ключевой кадр ждёт повтора фрагмента — P-кадры за ним не выбрасываются, а
+    /// идут следом, когда он соберётся.
+    #[test]
+    fn frames_after_a_pending_keyframe_are_kept() {
+        let t0 = Instant::now();
+        let mut r = VideoReassembler::new();
+        let k = frame(1, key());
+        assert!(feed(&mut r, &k, &[0], t0).is_empty());
+        assert!(feed(&mut r, &frame(2, plain()), &[], t0).is_empty());
+        assert!(!r.wants_keyframe());
+        r.push(parse_video_frag(&k[0]).unwrap());
+        assert_eq!(drain(&mut r, t0 + WAIT / 2), [1, 2]);
+    }
+
+    /// Ключевой так и не собрался — просим новый.
+    #[test]
+    fn pending_keyframe_that_never_completes_is_requested_again() {
+        let t0 = Instant::now();
+        let mut r = VideoReassembler::new();
+        assert!(feed(&mut r, &frame(1, key()), &[0], t0).is_empty());
+        assert!(feed(&mut r, &frame(2, plain()), &[], t0).is_empty());
+        assert_eq!(r.deadline(WAIT), Some(t0 + WAIT));
+        assert!(drain(&mut r, t0 + WAIT).is_empty());
+        assert!(r.wants_keyframe());
+        assert!(r.frames.is_empty());
+    }
+
+    /// Не дождались — опоры нет: P-кадры выбрасываются, нужен ключевой.
+    #[test]
+    fn gives_up_after_max_wait_and_waits_for_keyframe() {
+        let t0 = Instant::now();
+        let mut r = VideoReassembler::new();
+        feed(&mut r, &frame(1, key()), &[], t0);
+        feed(&mut r, &frame(2, plain()), &[0], t0);
+        assert!(feed(&mut r, &frame(3, plain()), &[], t0).is_empty());
+        assert!(drain(&mut r, t0 + WAIT).is_empty());
+        assert!(r.wants_keyframe());
+        assert!(feed(&mut r, &frame(4, plain()), &[], t0 + WAIT).is_empty());
+        assert_eq!(feed(&mut r, &frame(5, key()), &[], t0 + WAIT), [5]);
+        assert!(!r.wants_keyframe());
+    }
+
+    /// Собранный ключевой кадр новее недостающего — ждать незачем.
+    #[test]
+    fn keyframe_jumps_over_a_gap() {
+        let t0 = Instant::now();
+        let mut r = VideoReassembler::new();
+        feed(&mut r, &frame(1, key()), &[], t0);
+        feed(&mut r, &frame(2, plain()), &[0], t0);
+        assert_eq!(feed(&mut r, &frame(3, key()), &[], t0), [3]);
+        // Запоздавший фрагмент кадра 2 уже не нужен.
+        r.push(parse_video_frag(&frame(2, plain())[0]).unwrap());
+        assert!(drain(&mut r, t0).is_empty());
+    }
+
+    /// Тихий переход к ключевому: P-кадры выбрасываются без запроса, громкий — с ним.
+    #[test]
+    fn skip_to_keyframe_quietly_or_with_request() {
+        let now = Instant::now();
+        let mut r = VideoReassembler::new();
+        feed(&mut r, &frame(1, key()), &[], now);
+        r.skip_to_keyframe(false);
+        assert!(feed(&mut r, &frame(2, plain()), &[], now).is_empty());
+        assert!(!r.wants_keyframe());
+        r.skip_to_keyframe(true);
+        assert!(r.wants_keyframe());
+        assert_eq!(feed(&mut r, &frame(3, key()), &[], now), [3]);
+        assert!(!r.wants_keyframe());
     }
 
     /// Счётчик кадров у отправителя обернулся — видео идёт дальше, а не замерзает.
     #[test]
     fn frame_counter_wrap_keeps_video_flowing() {
+        let now = Instant::now();
         let mut r = VideoReassembler::new();
-        for id in [u32::MAX - 1, u32::MAX, 0, 1] {
-            let f = fragment_video(&make_frame(100, 1), id, plain());
-            assert!(
-                r.push(parse_video_frag(&f[0]).unwrap()).is_some(),
-                "кадр {id} принят"
-            );
+        let ids = [u32::MAX - 1, u32::MAX, 0, 1];
+        for (i, id) in ids.into_iter().enumerate() {
+            let info = if i == 0 { key() } else { plain() };
+            let f = fragment_video(&make_frame(100, 1), id, info);
+            assert_eq!(feed(&mut r, &f, &[], now), [id], "кадр {id} отдан");
         }
     }
 
     /// Опоздавший кадр выбрасывается и сразу за оборотом счётчика.
     #[test]
     fn late_frame_across_wrap_is_dropped() {
+        let now = Instant::now();
         let mut r = VideoReassembler::new();
         let f = fragment_video(&make_frame(100, 1), 2, key());
-        assert!(r.push(parse_video_frag(&f[0]).unwrap()).is_some());
-        let late = fragment_video(&make_frame(100, 3), u32::MAX - 3, plain());
-        assert!(r.push(parse_video_frag(&late[0]).unwrap()).is_none());
+        assert_eq!(feed(&mut r, &f, &[], now), [2]);
+        let late = fragment_video(&make_frame(100, 3), u32::MAX - 3, key());
+        assert!(feed(&mut r, &late, &[], now).is_empty());
+        assert!(r.frames.is_empty());
     }
 
     /// Фрагмент с заголовком из `id`, индекса и числа фрагментов (данные — 8 КБ).
@@ -243,26 +497,25 @@ mod tests {
     }
 
     /// Участник звонка не может заставить нас копить память: кадр «на 65 535
-    /// фрагментов» не принимается, а недособранное ограничено по байтам.
+    /// фрагментов» не принимается, а несобранное ограничено по байтам и кадрам.
     #[test]
     fn reassembler_memory_is_bounded() {
         let mut r = VideoReassembler::new();
-        assert!(r
-            .push(parse_video_frag(&raw_frag(1, 0, u16::MAX)).unwrap())
-            .is_none());
+        r.push(parse_video_frag(&raw_frag(1, 0, u16::MAX)).unwrap());
         assert_eq!(r.pending, 0, "кадр сверх MAX_VIDEO_FRAGS не копится");
 
-        // Много больших кадров, ни один не дособирается.
+        // Много больших кадров, ни один не собирается.
         for id in 0..16u32 {
             for idx in 0..MAX_VIDEO_FRAGS - 1 {
                 r.push(parse_video_frag(&raw_frag(id, idx, MAX_VIDEO_FRAGS)).unwrap());
             }
         }
-        assert!(
-            r.pending <= MAX_PENDING_BYTES,
-            "недособранного {} байт",
-            r.pending
-        );
+        assert!(r.pending <= MAX_PENDING_BYTES, "несобранного {} байт", r.pending);
+        // И много мелких: число кадров тоже ограничено.
+        for id in 100..1000u32 {
+            r.push(parse_video_frag(&raw_frag(id, 0, 2)).unwrap());
+        }
+        assert!(r.frames.len() <= MAX_FRAMES);
         let real: usize = r
             .frames
             .values()
