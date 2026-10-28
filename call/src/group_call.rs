@@ -95,7 +95,7 @@ impl GroupCall {
                             while let Some(out) = entry.0.pop() {
                                 let pcm = match out {
                                     JitterOut::Frame(pkt) => entry.1.decode(Some(&pkt)),
-                                    JitterOut::Lost => entry.1.decode(None),
+                                    JitterOut::Lost { .. } => entry.1.decode(None),
                                 };
                                 if let Ok(pcm) = pcm {
                                     mix_into(mix, &pcm, cap);

@@ -96,7 +96,7 @@ fn main() {
             while let Some(o) = jit.pop() {
                 match o {
                     JitterOut::Frame(pkt) => out.extend(dec.decode(Some(&pkt)).unwrap()),
-                    JitterOut::Lost => out.extend(dec.decode(None).unwrap()),
+                    JitterOut::Lost { .. } => out.extend(dec.decode(None).unwrap()),
                 }
             }
         }
@@ -104,7 +104,7 @@ fn main() {
         while let Some(o) = jit.pop() {
             match o {
                 JitterOut::Frame(pkt) => out.extend(dec.decode(Some(&pkt)).unwrap()),
-                JitterOut::Lost => out.extend(dec.decode(None).unwrap()),
+                JitterOut::Lost { .. } => out.extend(dec.decode(None).unwrap()),
             }
         }
         (got, out)

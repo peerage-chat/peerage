@@ -45,6 +45,10 @@ A packet shorter than 14 bytes is dropped. The whole packet is at most 14 + 60 0
   every member; `tw_seq` is that member's own counter.
 - `stream_id` must be drawn from a cryptographic RNG for every call, so a rejoin is never
   mistaken for the old stream.
+- Audio packets of a stream all have the same size (Opus in constant-bitrate mode). With
+  variable bitrate the size of an encrypted packet follows the sound, and phrases can be
+  recognised from sizes alone. Discontinuous transmission (no packets in silence) stays
+  off for the same reason.
 
 `tw_seq` is not used by receivers yet: it is there for the delay-based bandwidth estimate
 (ADR-014 step 7), so that adding the estimate does not need another format change.
@@ -121,6 +125,8 @@ unsafe.
   incomplete frames older than a delivered one.
 - **Audio.** Packets are reordered by `seq` in a jitter buffer. A packet older than the
   next one to play (serial arithmetic on 2¹⁶) is dropped. A missing packet is declared
-  lost (the decoder conceals it) once two later packets are waiting.
+  lost once two later packets are waiting; the decoder then recovers it from the in-band
+  FEC copy in the packet after it, or conceals it if that packet is missing too. Audio is
+  never retransmitted.
 - **Members only.** Packets from someone who is not a current call member are dropped,
   and a member who leaves loses all receive state.

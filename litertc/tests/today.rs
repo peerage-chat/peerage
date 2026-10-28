@@ -166,7 +166,7 @@ fn run_audio(cfg: LinkConfig, depth: usize) -> (u32, u32) {
         }
         match jb.pop() {
             Some(JitterOut::Frame(_)) => played += 1,
-            Some(JitterOut::Lost) => lost += 1,
+            Some(JitterOut::Lost { .. }) => lost += 1,
             None => {}
         }
     }

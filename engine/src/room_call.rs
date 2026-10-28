@@ -38,6 +38,21 @@ const RX_WAIT: Duration = Duration::from_millis(200);
 /// Как часто писать в лог статистику звонка (потери, джиттер, RTT по участникам).
 const STATS_LOG_EVERY: Duration = Duration::from_secs(5);
 
+/// Раз в столько кадров звука (50 × 20 мс = 1 с, как отчёты) кодер узнаёт потери.
+const LOSS_CHECK_FRAMES: u32 = 50;
+
+/// Худшая доля потерь нашего звука среди участников, %, по их отчётам. Кодер один на
+/// всех, поэтому FEC подстраивается под самого слабого.
+fn worst_audio_loss(s: &Session<PeerKey>) -> i32 {
+    let worst = s
+        .peers()
+        .iter()
+        .filter_map(|p| s.stats(p)?.outbound[litertc::TRACK_AUDIO as usize])
+        .map(|t| t.fraction_lost)
+        .fold(0.0f32, f32::max);
+    (worst * 100.0).ceil() as i32
+}
+
 /// Строка статистики по участникам — для разбора звонков по логу.
 fn log_stats(s: &Session<PeerKey>) {
     let pct = |t: Option<litertc::TrackStats>| t.map_or("-".to_string(), |t| format!("{:.1}%", t.fraction_lost * 100.0));
@@ -73,7 +88,13 @@ impl Decoder {
                 self.plc_run = 0;
                 self.dec.decode(Some(&pkt)).ok()
             }
-            JitterOut::Lost => {
+            // Следующий пакет уже здесь — кадр восстанавливается из его FEC-копии.
+            // Это настоящий звук, а не маскировка: счётчик PLC не растёт.
+            JitterOut::Lost { next: Some(next) } => {
+                self.plc_run = 0;
+                self.dec.decode_fec(&next).ok()
+            }
+            JitterOut::Lost { next: None } => {
                 if self.plc_run < MAX_PLC {
                     self.plc_run += 1;
                     self.dec.decode(None).ok()
@@ -207,6 +228,7 @@ impl RoomCallEngine {
                 };
                 let mut cur_bitrate = audio.bitrate;
                 let mut frame = vec![0i16; frame_len];
+                let mut frames_since_loss_check = 0u32;
                 while running.load(Ordering::Relaxed) {
                     let ready = {
                         let mut q = in_ring.lock_safe();
@@ -228,6 +250,11 @@ impl RoomCallEngine {
                     if want != cur_bitrate {
                         enc.set_bitrate(want);
                         cur_bitrate = want;
+                    }
+                    frames_since_loss_check += 1;
+                    if frames_since_loss_check >= LOSS_CHECK_FRAMES {
+                        frames_since_loss_check = 0;
+                        enc.set_expected_loss(worst_audio_loss(&session.lock_safe()));
                     }
                     let pkt = if muted.load(Ordering::Relaxed) { None } else { enc.encode(&frame).ok() };
                     match pkt {

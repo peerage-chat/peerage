@@ -115,7 +115,7 @@ impl Call {
                                 while let Some(out) = j.pop() {
                                     let pcm = match out {
                                         JitterOut::Frame(pkt) => dec.decode(Some(&pkt)),
-                                        JitterOut::Lost => dec.decode(None),
+                                        JitterOut::Lost { .. } => dec.decode(None),
                                     };
                                     if let Ok(pcm) = pcm {
                                         push_capped(ring, &pcm, cap);

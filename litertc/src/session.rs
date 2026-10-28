@@ -450,7 +450,8 @@ impl<P: Copy + Eq + Hash> Session<P> {
     }
 
     /// Следующий кадр звука участника для воспроизведения: `None` — буфер набирается
-    /// или пуст (участник молчит), [`JitterOut::Lost`] — кадр потерян, нужен PLC.
+    /// или пуст (участник молчит), [`JitterOut::Lost`] — кадр потерян: восстановить из
+    /// FEC следующего пакета, если он уже есть, иначе маскировать (PLC).
     pub fn pull_audio(&mut self, peer: &P) -> Option<JitterOut> {
         self.state.get_mut(peer)?.audio.as_mut()?.jitter.pop()
     }

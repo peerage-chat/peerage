@@ -18,8 +18,10 @@ const BURST_HEADROOM: usize = 20;
 pub enum JitterOut {
     /// Готовый кадр (payload пакета).
     Frame(Vec<u8>),
-    /// Кадр потерян — потребитель должен сделать PLC (decode(None)).
-    Lost,
+    /// Кадр потерян. `next` — следующий пакет, если он уже здесь: в нём бывает
+    /// избыточная копия потерянного кадра (Opus in-band FEC), и декодер
+    /// восстанавливает кадр из неё; иначе — маскировка потери (PLC).
+    Lost { next: Option<Vec<u8>> },
 }
 
 /// seq `a` строго раньше `b` (с учётом обёртки u16).
@@ -117,8 +119,11 @@ impl JitterBuffer {
         // объявляем потерю и запускаем PLC; иначе ждём (underrun).
         // gap_tol намеренно < depth: декларируем потерю быстро вместо тишины.
         if self.buf.len() >= self.gap_tol {
-            self.next = Some(next.wrapping_add(1));
-            return Some(JitterOut::Lost);
+            let after = next.wrapping_add(1);
+            self.next = Some(after);
+            return Some(JitterOut::Lost {
+                next: self.buf.get(&after).cloned(),
+            });
         }
         None
     }
@@ -169,7 +174,8 @@ mod tests {
         // seq 1 потерян; приходят 2 и 3 → буфер сверх глубины → объявляем потерю 1
         j.push(2, f(2));
         j.push(3, f(3));
-        assert_eq!(j.pop(), Some(JitterOut::Lost));
+        // Следующий пакет уже здесь — его отдают вместе с потерей (для FEC).
+        assert_eq!(j.pop(), Some(JitterOut::Lost { next: Some(f(2)) }));
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(2))));
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(3))));
     }
@@ -190,9 +196,22 @@ mod tests {
         assert_eq!(j.pop(), None);
         // seq 6 пришёл — теперь buf.len()=2 >= gap_tol=2 → объявляем потерю
         j.push(6, f(6));
-        assert_eq!(j.pop(), Some(JitterOut::Lost));
+        assert_eq!(j.pop(), Some(JitterOut::Lost { next: Some(f(5)) }));
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(5))));
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(6))));
+    }
+
+    /// Потеряно два подряд: у первого следующего нет (он тоже потерян) — только PLC.
+    #[test]
+    fn double_loss_has_no_fec_for_the_first() {
+        let mut j = JitterBuffer::new(1);
+        j.push(0, f(0));
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(0))));
+        j.push(3, f(3));
+        j.push(4, f(4));
+        assert_eq!(j.pop(), Some(JitterOut::Lost { next: None }));
+        assert_eq!(j.pop(), Some(JitterOut::Lost { next: Some(f(3)) }));
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(3))));
     }
 
     #[test]

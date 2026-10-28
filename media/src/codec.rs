@@ -24,6 +24,12 @@ fn opus_application(mode: OpusMode) -> Application {
     }
 }
 
+/// Нижняя граница ожидаемых потерь: при нуле Opus не кладёт FEC вовсе, и первая же
+/// потеря на чистом канале не восстанавливается.
+const MIN_EXPECTED_LOSS: i32 = 5;
+/// Верхняя: дальше FEC съедает битрейт основной речи, а не спасает её.
+const MAX_EXPECTED_LOSS: i32 = 30;
+
 /// Opus-энкодер, сконфигурированный из [`AudioSettings`].
 pub struct AudioEncoder {
     enc: Encoder,
@@ -38,12 +44,27 @@ impl AudioEncoder {
             opus_application(settings.mode),
         )?;
         enc.set_bitrate(opus::Bitrate::Bits(settings.bitrate))?;
+        // Постоянный битрейт — постоянный размер пакета: при переменном размер
+        // зашифрованного пакета повторяет звук, и по одним размерам узнаются фразы
+        // (ADR-014 §8). Не настройка, а правило безопасности.
+        enc.set_vbr(false)?;
         enc.set_inband_fec(settings.fec)?;
         if settings.fec {
-            // Подсказка кодеку об ожидаемых потерях, чтобы FEC реально включился.
-            enc.set_packet_loss_perc(10)?;
+            // Подсказка кодеку об ожидаемых потерях, чтобы FEC реально включился;
+            // в звонке её уточняют отчёты собеседников ([`Self::set_expected_loss`]).
+            enc.set_packet_loss_perc(MIN_EXPECTED_LOSS)?;
         }
         Ok(Self { enc, settings })
+    }
+
+    /// Ожидаемые потери в процентах — по ним Opus решает, сколько битов отдать
+    /// избыточной копии прошлого кадра (FEC). Без FEC в настройках — ничего.
+    pub fn set_expected_loss(&mut self, percent: i32) {
+        if self.settings.fec {
+            let _ = self
+                .enc
+                .set_packet_loss_perc(percent.clamp(MIN_EXPECTED_LOSS, MAX_EXPECTED_LOSS));
+        }
     }
 
     /// Закодировать один interleaved-кадр (длина = `interleaved_len`).
@@ -82,9 +103,19 @@ impl AudioDecoder {
 
     /// Декодировать пакет (`Some`) или восстановить потерю — PLC (`None`).
     pub fn decode(&mut self, packet: Option<&[u8]>) -> Result<Vec<i16>, CodecError> {
+        self.decode_inner(packet.unwrap_or(&[]), false)
+    }
+
+    /// Восстановить потерянный кадр из избыточной копии в СЛЕДУЮЩЕМ пакете (Opus
+    /// in-band FEC). Нет в нём копии — Opus сам делает PLC. Сам следующий пакет
+    /// потом декодируется обычным [`Self::decode`].
+    pub fn decode_fec(&mut self, next: &[u8]) -> Result<Vec<i16>, CodecError> {
+        self.decode_inner(next, true)
+    }
+
+    fn decode_inner(&mut self, packet: &[u8], fec: bool) -> Result<Vec<i16>, CodecError> {
         let mut out = vec![0i16; self.settings.interleaved_len()];
-        let fec = false;
-        let n = self.dec.decode(packet.unwrap_or(&[]), &mut out, fec)?;
+        let n = self.dec.decode(packet, &mut out, fec)?;
         out.truncate(n * self.settings.channels as usize);
         Ok(out)
     }
@@ -127,6 +158,60 @@ mod tests {
         let frame = sine(&s, 1);
         let pkt = enc.encode(&frame).unwrap();
         assert_eq!(dec.decode(Some(&pkt)).unwrap().len(), s.interleaved_len());
+    }
+
+    /// Размер пакета не зависит от звука: тишина, тон и шум — одной длины.
+    #[test]
+    fn packet_size_does_not_follow_the_sound() {
+        let s = AudioSettings::default();
+        let mut enc = AudioEncoder::new(s).unwrap();
+        let tone = sine(&s, 1);
+        let silence = vec![0i16; s.interleaved_len()];
+        let mut seed = 1u32;
+        let noise: Vec<i16> = (0..s.interleaved_len())
+            .map(|_| {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                (seed >> 16) as i16
+            })
+            .collect();
+        let mut sizes = std::collections::BTreeSet::new();
+        for _ in 0..5 {
+            for pcm in [&silence, &tone, &noise] {
+                sizes.insert(enc.encode(pcm).unwrap().len());
+            }
+        }
+        assert_eq!(sizes.len(), 1, "размеры пакетов: {sizes:?}");
+    }
+
+    /// Потерянный кадр восстанавливается из следующего пакета, и это ближе к тому,
+    /// что дал бы сам кадр, чем маскировка потери. Сравниваем с декодом без потери,
+    /// а не со входом: у Opus задержка 6,5 мс, выход сдвинут.
+    #[test]
+    fn fec_recovers_lost_frame() {
+        let s = AudioSettings::default();
+        let mut enc = AudioEncoder::new(s).unwrap();
+        enc.set_expected_loss(20);
+        let pcm = sine(&s, 12);
+        let packets: Vec<Vec<u8>> =
+            pcm.chunks(s.interleaved_len()).map(|f| enc.encode(f).unwrap()).collect();
+        let decode = |lost: Option<bool>| {
+            let mut dec = AudioDecoder::new(s).unwrap();
+            for p in &packets[..10] {
+                dec.decode(Some(p)).unwrap();
+            }
+            match lost {
+                None => dec.decode(Some(&packets[10])).unwrap(),
+                Some(true) => dec.decode_fec(&packets[11]).unwrap(),
+                Some(false) => dec.decode(None).unwrap(),
+            }
+        };
+        let reference = decode(None);
+        let err = |got: Vec<i16>| {
+            assert_eq!(got.len(), s.interleaved_len());
+            got.iter().zip(&reference).map(|(a, b)| (*a as i64 - *b as i64).pow(2)).sum::<i64>()
+        };
+        let (with_fec, with_plc) = (err(decode(Some(true))), err(decode(Some(false))));
+        assert!(with_fec < with_plc / 4, "FEC {with_fec} не лучше PLC {with_plc}");
     }
 
     #[test]
