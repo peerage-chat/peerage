@@ -3,10 +3,11 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use litertc::{parse_media, parse_video_frag, VideoReassembler};
+use litertc::{parse_media, parse_report, parse_video_frag, VideoReassembler};
 
 fuzz_target!(|data: &[u8]| {
     let _ = parse_media(data);
+    let _ = parse_report(data);
     let mut asm = VideoReassembler::new();
     let mut rest = data;
     while rest.len() >= 2 {

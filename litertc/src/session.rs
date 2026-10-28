@@ -9,17 +9,31 @@
 //! Воспроизведение тянет потребитель в своём темпе ([`Session::pull_audio`] по таймеру
 //! кадра, [`Session::pull_video`] — декодер), поэтому медиа отдаётся по запросу, а не
 //! событиями.
+//!
+//! Таймеры (отчёты получателя раз в секунду): вызывающий зовёт
+//! [`Session::handle_timeout`] не позже [`Session::poll_timeout`].
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::jitter::{JitterBuffer, JitterOut};
 use crate::reassembly::{CompleteFrame, VideoReassembler};
+use crate::stats::{RxStats, TrackStats};
 use crate::wire::{
-    fragment_video, parse_media, parse_video_frag, write_media_header, MediaHeader, VideoInfo,
-    MEDIA_HEADER_LEN, TRACK_AUDIO, TRACK_VIDEO, VIDEO_CLOCK_HZ,
+    fragment_video, parse_media, parse_report, parse_video_frag, write_media_header, write_report,
+    MediaHeader, Report, VideoInfo, MEDIA_HEADER_LEN, REPORT_V2, TRACK_AUDIO, TRACK_SCREEN,
+    TRACK_VIDEO, VIDEO_CLOCK_HZ,
 };
+
+/// Как часто каждый участник получает наш отчёт о приёме.
+const REPORT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// RTT больше этого — мусор (часы отправителя отчёта или подделка), не учитываем.
+const MAX_RTT_MS: i32 = 60_000;
+
+/// Треков три: звук, камера, экран — индексы в массивах статистики.
+const TRACKS: usize = TRACK_SCREEN as usize + 1;
 
 /// Предел очереди собранных видео-кадров участника в байтах — поверх предела в
 /// кадрах: кадр бывает до 8 МБ (`MAX_VIDEO_FRAGS`), и 60 таких — полгигабайта.
@@ -59,11 +73,17 @@ pub struct VideoFrame {
     pub info: VideoInfo,
 }
 
-/// Счётчики участника.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Статистика по участнику.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PeerStats {
     /// Принято полезной нагрузки (без заголовка), байт.
     pub rx_bytes: u64,
+    /// Время туда-обратно (сглаженное), из эха в отчётах.
+    pub rtt: Option<Duration>,
+    /// Как мы принимаем его потоки, по трекам (`TRACK_*`).
+    pub inbound: [Option<TrackStats>; TRACKS],
+    /// Как он принимает наши потоки — из его отчётов.
+    pub outbound: [Option<TrackStats>; TRACKS],
 }
 
 /// Приём звука от участника: джиттер-буфер и оценка джиттера для его глубины.
@@ -149,8 +169,28 @@ struct PeerState {
     audio: Option<AudioRx>,
     video: VideoRx,
     stats: PeerStats,
+    /// Счётчики приёма по трекам — для отчётов ему.
+    rx: [Option<RxStats>; TRACKS],
     /// Сквозной номер следующего пакета этому участнику (по всем трекам).
     tw_seq: u16,
+    /// Когда слать ему следующий отчёт; `None` — при первой возможности.
+    next_report: Option<Instant>,
+    /// `ts_ms` последнего его отчёта и когда он пришёл — для эха.
+    last_report: Option<(u32, Instant)>,
+}
+
+impl PeerState {
+    fn new() -> Self {
+        PeerState {
+            audio: None,
+            video: VideoRx::default(),
+            stats: PeerStats::default(),
+            rx: Default::default(),
+            tw_seq: 0,
+            next_report: None,
+            last_report: None,
+        }
+    }
 }
 
 /// Один звонок с нашей стороны. `P` — идентификатор участника (в Peerage — ключ).
@@ -169,6 +209,10 @@ pub struct Session<P> {
     video_epoch: Option<Instant>,
     video_queue_cap: usize,
     tx_bytes: u64,
+    /// Начало наших часов для отчётов и времени прихода (первый увиденный `now`).
+    epoch: Option<Instant>,
+    /// Последний увиденный `now` — для [`Session::poll_timeout`].
+    last_now: Option<Instant>,
 }
 
 impl<P: Copy + Eq + Hash> Session<P> {
@@ -185,7 +229,15 @@ impl<P: Copy + Eq + Hash> Session<P> {
             video_epoch: None,
             video_queue_cap: VIDEO_QUEUE_DEFAULT,
             tx_bytes: 0,
+            epoch: None,
+            last_now: None,
         }
+    }
+
+    /// Запомнить время; вернуть его от начала наших часов.
+    fn tick(&mut self, now: Instant) -> Duration {
+        self.last_now = Some(now);
+        now.saturating_duration_since(*self.epoch.get_or_insert(now))
     }
 
     /// Задать участников звонка. Им рассылается наше медиа, и только от них
@@ -199,12 +251,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
         self.state.retain(|p, _| peers.contains(p));
         self.out.retain(|t| peers.contains(&t.to));
         for p in peers {
-            self.state.entry(*p).or_insert_with(|| PeerState {
-                audio: None,
-                video: VideoRx::default(),
-                stats: PeerStats::default(),
-                tw_seq: 0,
-            });
+            self.state.entry(*p).or_insert_with(PeerState::new);
         }
     }
 
@@ -213,22 +260,26 @@ impl<P: Copy + Eq + Hash> Session<P> {
     }
 
     /// Закодированный кадр звука → пакет каждому участнику.
-    pub fn send_audio(&mut self, _now: Instant, payload: &[u8]) {
+    pub fn send_audio(&mut self, now: Instant, payload: &[u8]) {
+        self.tick(now);
         let (seq, ts) = (self.audio_seq, self.audio_ts);
         self.broadcast(TRACK_AUDIO, seq, ts, payload);
-        self.skip_audio();
+        self.audio_seq = self.audio_seq.wrapping_add(1);
+        self.audio_ts = self.audio_ts.wrapping_add(self.cfg.audio_frame_samples);
     }
 
-    /// Кадр звука не отправлен (микрофон выключен, кодер не справился): нумерация
-    /// идёт дальше, как будто кадр был, — у приёмника это пропуск, а не сдвиг времени.
+    /// Кадр звука не отправлен (микрофон выключен, кодер не справился): время идёт
+    /// дальше, номер — нет. Номер считает отправленные пакеты, иначе приёмник принял
+    /// бы выключенный микрофон за потери (и в отчётах, и в джиттер-буфере после
+    /// включения — первые ~0,4 с речи терялись).
     pub fn skip_audio(&mut self) {
-        self.audio_seq = self.audio_seq.wrapping_add(1);
         self.audio_ts = self.audio_ts.wrapping_add(self.cfg.audio_frame_samples);
     }
 
     /// Закодированный видео-кадр → фрагменты каждому участнику. `now` — момент
     /// захвата (точнее, выхода из кодера: его задержка почти постоянна).
     pub fn send_video(&mut self, now: Instant, frame: &[u8], info: VideoInfo) {
+        self.tick(now);
         let epoch = *self.video_epoch.get_or_insert(now);
         let micros = now.saturating_duration_since(epoch).as_micros();
         // Метка времени идёт по кругу u32 (13 часов при 90 кГц), как и у звука.
@@ -274,12 +325,32 @@ impl<P: Copy + Eq + Hash> Session<P> {
     /// Пакет от участника (уже расшифрован, отправитель доказан вызывающим).
     /// Не участник звонка или мусор — пакет молча выбрасывается.
     pub fn handle_datagram(&mut self, now: Instant, from: P, data: &[u8]) {
+        let since_epoch = self.tick(now);
         let Some(st) = self.state.get_mut(&from) else {
             return;
         };
+        if data.first() == Some(&REPORT_V2) {
+            if let Some(r) = parse_report(data) {
+                Self::handle_report(&self.cfg, st, now, since_epoch, r);
+            }
+            return;
+        }
         let Some(m) = parse_media(data) else { return };
         let h = m.header;
         st.stats.rx_bytes += m.payload.len() as u64;
+        if let Some(slot) = st.rx.get_mut(h.track as usize) {
+            let clock = if h.track == TRACK_AUDIO {
+                self.cfg.audio_clock_hz
+            } else {
+                VIDEO_CLOCK_HZ
+            };
+            let rx = match slot {
+                Some(r) if r.stream == h.stream_id => r,
+                slot => slot.insert(RxStats::new(h.stream_id, h.seq, clock)),
+            };
+            let arrival = (since_epoch.as_micros() * clock as u128 / 1_000_000) as i64;
+            rx.update(h.seq, h.ts, arrival);
+        }
         // Новый номер потока — отправитель начал заново (перезашёл в комнату): старое
         // состояние приёма этого трека выбрасываем, а не ждём, пока нумерация догонит.
         match h.track {
@@ -305,6 +376,76 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 audio.push(now, h.seq, h.ts, m.payload.to_vec(), clock);
             }
             _ => {}
+        }
+    }
+
+    /// Отчёт участника о том, как он принимает нас: RTT из эха, его статистика по
+    /// нашим текущим потокам (блоки о чужих номерах потока — о прошлом звонке, мимо).
+    fn handle_report(
+        cfg: &Config,
+        st: &mut PeerState,
+        now: Instant,
+        since_epoch: Duration,
+        r: Report,
+    ) {
+        st.last_report = Some((r.ts_ms, now));
+        if let Some((echo_ts, echo_delay)) = r.echo {
+            let now_ms = since_epoch.as_millis() as u32;
+            let rtt = now_ms.wrapping_sub(echo_ts).wrapping_sub(echo_delay) as i32;
+            if (0..=MAX_RTT_MS).contains(&rtt) {
+                let sample = Duration::from_millis(rtt as u64);
+                // Сглаживание как у TCP (RFC 6298): 7/8 старого + 1/8 нового.
+                st.stats.rtt = Some(st.stats.rtt.map_or(sample, |old| (old * 7 + sample) / 8));
+            }
+        }
+        for b in r.blocks.iter().filter(|b| b.stream_id == cfg.stream_id) {
+            let clock = if b.track == TRACK_AUDIO {
+                cfg.audio_clock_hz
+            } else {
+                VIDEO_CLOCK_HZ
+            };
+            if let Some(slot) = st.stats.outbound.get_mut(b.track as usize) {
+                *slot = Some(TrackStats::from_block(b, clock));
+            }
+        }
+    }
+
+    /// Когда звать [`Session::handle_timeout`]. `None` — участников нет, таймеров тоже.
+    pub fn poll_timeout(&self) -> Option<Instant> {
+        self.peers
+            .iter()
+            .filter_map(|p| self.state.get(p))
+            .filter_map(|st| st.next_report.or(self.last_now))
+            .min()
+    }
+
+    /// Сработали таймеры: разослать отчёты получателя тем, кому пора.
+    pub fn handle_timeout(&mut self, now: Instant) {
+        let now_ms = self.tick(now).as_millis() as u32;
+        for p in &self.peers {
+            let Some(st) = self.state.get_mut(p) else {
+                continue;
+            };
+            if st.next_report.is_some_and(|t| t > now) {
+                continue;
+            }
+            st.next_report = Some(now + REPORT_INTERVAL);
+            let echo = st
+                .last_report
+                .map(|(ts, at)| (ts, now.saturating_duration_since(at).as_millis() as u32));
+            let mut blocks = Vec::new();
+            for (track, slot) in st.rx.iter_mut().enumerate() {
+                if let Some(rx) = slot {
+                    blocks.push(rx.report_block(track as u8));
+                    st.stats.inbound[track] = Some(rx.snapshot());
+                }
+            }
+            let data = write_report(&Report {
+                ts_ms: now_ms,
+                echo,
+                blocks,
+            });
+            self.out.push_back(Transmit { to: *p, data });
         }
     }
 
@@ -374,8 +515,8 @@ mod tests {
         pkt
     }
 
-    /// Пакеты v2: номер потока, сквозной номер на получателя по всем трекам,
-    /// нумерация звука идёт и в тишине, видео — со временем захвата в 90 кГц.
+    /// Пакеты v2: номер потока, сквозной номер на получателя по всем трекам; в
+    /// тишине у звука идёт время, но не номер; видео — со временем захвата в 90 кГц.
     #[test]
     fn packets_match_v2_wire() {
         let t0 = Instant::now();
@@ -398,12 +539,12 @@ mod tests {
             data[0],
             [&head(TRACK_AUDIO)[..], &[0, 0, 0, 0, 0, 0, 0, 0, 0xAA]].concat()
         );
-        // seq 2, tw 1, ts 1920 = 0x0780
+        // seq 1 (тишина номер не тратит), tw 1, ts 1920 = 0x0780
         assert_eq!(
             data[1],
             [
                 &head(TRACK_AUDIO)[..],
-                &[0, 2, 0, 1, 0, 0, 0x07, 0x80, 0xBB]
+                &[0, 1, 0, 1, 0, 0, 0x07, 0x80, 0xBB]
             ]
             .concat()
         );
@@ -450,7 +591,7 @@ mod tests {
         assert_eq!(s.stats(&3), None);
         s.handle_datagram(now, 1, &pkt);
         assert_eq!(s.pull_audio(&1), Some(JitterOut::Frame(vec![0])));
-        assert_eq!(s.stats(&1), Some(PeerStats { rx_bytes: 1 }));
+        assert_eq!(s.stats(&1).map(|st| st.rx_bytes), Some(1));
     }
 
     /// Ушедший участник: ему больше ничего не уходит (даже то, что уже в очереди),

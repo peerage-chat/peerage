@@ -38,8 +38,9 @@ All integers are big-endian.
 A packet shorter than 14 bytes is dropped. The whole packet is at most 14 + 60 000 bytes.
 
 **Sender rules.**
-- Audio `seq` and `ts` advance for every 20 ms frame, including frames not sent (muted
-  microphone, encoder failure), so the receiver sees a gap rather than a time shift.
+- `seq` counts packets actually sent. Audio `ts` advances by 960 for every 20 ms frame,
+  including frames not sent (muted microphone, encoder failure): silence is a jump in
+  `ts` with no gap in `seq`, so receivers don't count it as loss.
 - One media packet goes to each call member. `stream_id`, `seq` and `ts` are the same for
   every member; `tw_seq` is that member's own counter.
 - `stream_id` must be drawn from a cryptographic RNG for every call, so a rejoin is never
@@ -65,6 +66,42 @@ into chunks of at most 8 000 bytes. Each chunk travels in its own media packet:
 
 Every fragment of a frame carries the same flags, rotation and fps. Video `seq` counts
 fragments, not frames; all fragments of a frame share its `ts`.
+
+## Receiver report
+
+Every call member sends every other member a report about once a second, on the same
+channel. It says how the reporter receives the addressee's streams, and echoes the
+addressee's last report for the round-trip time.
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| 0 | 1 | version/type | `0x21`: version 2, type 1 = receiver report. |
+| 1 | 4 | ts_ms | The reporter's clock, milliseconds, arbitrary start, wraps. |
+| 5 | 4 | echo_ts_ms | `ts_ms` of the last report received from the addressee. |
+| 9 | 4 | echo_delay_ms | Milliseconds since that report arrived. `0xFFFFFFFF`: no echo (and `echo_ts_ms` is ignored). |
+| 13 | 1 | n | Report blocks, `0 ≤ n ≤ 3`. |
+| 14 | 18·n | blocks | One per received track (below). |
+
+A report whose length is not exactly `14 + 18·n`, or with `n > 3`, is dropped.
+
+Report block — how the reporter receives one stream of the addressee:
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| 0 | 1 | track | As in the media packet. |
+| 1 | 1 | fraction_lost | Share of packets lost since the previous report, × 256 (RFC 3550 §6.4.1). |
+| 2 | 4 | stream_id | The stream the block is about. Blocks about another stream are ignored. |
+| 6 | 4 | highest_seq | Extended highest `seq` received: wraps × 2¹⁶ + `seq`. |
+| 10 | 4 | cumulative_lost | Packets expected minus received since the stream started, never below 0. |
+| 14 | 4 | jitter | Interarrival jitter (RFC 3550 §6.4.1) in the track's clock units. |
+
+**Round-trip time.** On a report with an echo, the addressee computes
+`rtt = now_ms − echo_ts_ms − echo_delay_ms` on its own clock (mod 2³²). Values outside
+0…60 000 ms are ignored; the rest are smoothed (7/8 old + 1/8 new).
+
+A hostile member can lie in its reports. Until bandwidth estimation (ADR-014 step 7),
+reports only feed statistics; after it, a lie can lower only what we send to everyone,
+which a member can already cause by dropping our packets.
 
 ## Receiver rules
 

@@ -2,10 +2,18 @@
 //! пакеты приходят от участника звонка, который может быть враждебен. Глубже то же
 //! гоняет `fuzz/fuzz_targets/media.rs` (cargo-fuzz).
 
-use litertc::{parse_media, parse_video_frag, VideoReassembler};
+use litertc::{parse_media, parse_report, parse_video_frag, write_report, VideoReassembler};
 use proptest::prelude::*;
 
 proptest! {
+    /// Разбор отчёта получателя не паникует, а разобранное переживает запись и разбор.
+    #[test]
+    fn parse_report_never_panics_and_roundtrips(data in proptest::collection::vec(any::<u8>(), 0..128)) {
+        if let Some(r) = parse_report(&data) {
+            prop_assert_eq!(parse_report(&write_report(&r)), Some(r));
+        }
+    }
+
     /// Разбор медиа-заголовка не паникует ни на каком входе.
     #[test]
     fn parse_media_never_panics(data in proptest::collection::vec(any::<u8>(), 0..4096)) {

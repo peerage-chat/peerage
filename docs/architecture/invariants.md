@@ -33,7 +33,9 @@ Two channels, by the first byte of the datagram (`core/src/media.rs`):
   `messenger/src/lib.rs`). For: chat messages, keys (MLS Welcome/KeyPackage), control
   (RoomInvite, Ack, presence control).
 - **CHAN_MEDIA** — fast: light datagrams **without acks**, loss is acceptable. For:
-  real-time audio/video only. Encrypted too (SEC-4): `Sessions::seal_media` /
+  real-time audio/video and its feedback (LiteRTC receiver reports; later NACK and
+  keyframe requests — [ADR-014](../adr/ADR-014-litertc.md)): feedback is as perishable as
+  the media it describes, and the next report replaces a lost one. Encrypted too (SEC-4): `Sessions::seal_media` /
   `open_media`, the media key of the 1:1 session with that recipient. No session — the
   frame is dropped, not queued; the sender of a frame is the session's identity.
 

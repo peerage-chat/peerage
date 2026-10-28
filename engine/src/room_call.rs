@@ -32,6 +32,33 @@ type Ring = Arc<Mutex<VecDeque<i16>>>;
 /// Подряд идущих PLC-кадров на источник; дальше — тишина (Opus PLC иначе шумит).
 const MAX_PLC: u32 = 4;
 
+/// Дольше этого поток приёма не спит: проверяет флаг остановки и таймеры.
+const RX_WAIT: Duration = Duration::from_millis(200);
+
+/// Как часто писать в лог статистику звонка (потери, джиттер, RTT по участникам).
+const STATS_LOG_EVERY: Duration = Duration::from_secs(5);
+
+/// Строка статистики по участникам — для разбора звонков по логу.
+fn log_stats(s: &Session<PeerKey>) {
+    let pct = |t: Option<litertc::TrackStats>| t.map_or("-".to_string(), |t| format!("{:.1}%", t.fraction_lost * 100.0));
+    for p in s.peers() {
+        let Some(st) = s.stats(p) else { continue };
+        let a = litertc::TRACK_AUDIO as usize;
+        let v = litertc::TRACK_VIDEO as usize;
+        let jitter = st.inbound[a].map_or("-".to_string(), |t| format!("{:.0}ms", t.jitter_ms));
+        log::info!(
+            "room-call {}: rtt={} in: audio {} jitter {} video {} | out: audio {} video {}",
+            hex::encode(&p[..4]),
+            st.rtt.map_or("-".to_string(), |r| format!("{}ms", r.as_millis())),
+            pct(st.inbound[a]),
+            jitter,
+            pct(st.inbound[v]),
+            pct(st.outbound[a]),
+            pct(st.outbound[v]),
+        );
+    }
+}
+
 /// Декодер звука одного участника и счётчик подряд идущих PLC.
 struct Decoder {
     dec: AudioDecoder,
@@ -125,23 +152,39 @@ impl RoomCallEngine {
 
         let media_rx = messenger.media_channel(2048);
 
-        // --- Приём: всё в сессию; участников сверяет она же ---
+        // --- Приём и таймеры сессии: всё в сессию; участников сверяет она же ---
         {
             let running = running.clone();
             let session = session.clone();
             let members = members.clone();
+            let msgr = messenger.clone();
             threads.push(thread::spawn(move || {
+                let mut next_log = Instant::now() + STATS_LOG_EVERY;
                 while running.load(Ordering::Relaxed) {
-                    let p = match media_rx.recv_timeout(Duration::from_millis(200)) {
-                        Ok(p) => p,
-                        Err(RecvTimeoutError::Timeout) => continue,
+                    // Пакета ждём не дольше, чем до ближайшего таймера (отчёты получателя).
+                    let wait = session
+                        .lock_safe()
+                        .poll_timeout()
+                        .map_or(RX_WAIT, |t| t.saturating_duration_since(Instant::now()))
+                        .min(RX_WAIT);
+                    let out = match media_rx.recv_timeout(wait) {
+                        Ok(p) => with_session(&session, &members, |s| {
+                            s.handle_datagram(Instant::now(), p.src, &p.data)
+                        }),
+                        Err(RecvTimeoutError::Timeout) => Vec::new(),
                         // Канал отобрали (новый media_channel) — приёма больше не будет,
                         // а крутиться на мгновенно возвращающемся recv значит 100 % CPU.
                         Err(RecvTimeoutError::Disconnected) => break,
                     };
-                    with_session(&session, &members, |s| {
-                        s.handle_datagram(Instant::now(), p.src, &p.data)
-                    });
+                    send_all(&msgr, out);
+                    let now = Instant::now();
+                    if session.lock_safe().poll_timeout().is_none_or(|t| t <= now) {
+                        send_all(&msgr, with_session(&session, &members, |s| s.handle_timeout(now)));
+                    }
+                    if now >= next_log {
+                        next_log = now + STATS_LOG_EVERY;
+                        log_stats(&session.lock_safe());
+                    }
                 }
             }));
         }

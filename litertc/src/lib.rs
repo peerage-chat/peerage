@@ -18,13 +18,16 @@ pub mod jitter;
 pub mod reassembly;
 pub mod session;
 pub mod sim;
+pub mod stats;
 pub mod wire;
 
 pub use jitter::{JitterBuffer, JitterOut};
 pub use reassembly::{CompleteFrame, VideoReassembler};
 pub use session::{Config, PeerStats, Session, Transmit, VideoFrame};
+pub use stats::TrackStats;
 pub use wire::{
-    fragment_video, parse_media, parse_video_frag, write_media_header, MediaFrame, MediaHeader,
-    VideoFrag, VideoInfo, MAX_MEDIA_PAYLOAD, MAX_VIDEO_CHUNK, MAX_VIDEO_FRAGS, MEDIA_HEADER_LEN,
-    MEDIA_V2, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO, VIDEO_CLOCK_HZ, VIDEO_HDR, VIDEO_KEYFRAME,
+    fragment_video, parse_media, parse_report, parse_video_frag, write_media_header, write_report,
+    MediaFrame, MediaHeader, Report, ReportBlock, VideoFrag, VideoInfo, MAX_MEDIA_PAYLOAD,
+    MAX_VIDEO_CHUNK, MAX_VIDEO_FRAGS, MEDIA_HEADER_LEN, MEDIA_V2, REPORT_V2, TRACK_AUDIO,
+    TRACK_SCREEN, TRACK_VIDEO, VIDEO_CLOCK_HZ, VIDEO_HDR, VIDEO_KEYFRAME,
 };

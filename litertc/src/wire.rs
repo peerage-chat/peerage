@@ -185,9 +185,158 @@ pub fn parse_video_frag(payload: &[u8]) -> Option<VideoFrag<'_>> {
     })
 }
 
+// ---- Отчёт получателя (обратная связь, как RTCP RR) ----
+//
+// Каждый участник раз в секунду шлёт каждому отчёт о том, как он принимает его
+// потоки, и эхо для RTT. Идёт по тому же CHAN_MEDIA: реальное время, потеря
+// допустима (следующий отчёт через секунду).
+// ```text
+// байт 0       : 0x21 — v2, тип 1 (отчёт)
+// байты 1..5   : ts_ms (u32) — время отправки по часам отправителя отчёта, мс
+// байты 5..9   : echo_ts_ms (u32) — ts_ms последнего отчёта, полученного от адресата
+// байты 9..13  : echo_delay_ms (u32) — сколько мс прошло с его получения; u32::MAX — эха нет
+// байт  13     : n — число блоков (0..=3)
+// байты 14..   : n блоков по 18 байт:
+//   track u8, fraction_lost u8 (доля потерь за интервал × 256), stream_id u32,
+//   highest_seq u32 (расширенный: циклы × 2¹⁶ + seq), cumulative_lost u32,
+//   jitter u32 (в единицах часов трека)
+// ```
+
+/// Байт 0 отчёта: v2, тип 1.
+pub const REPORT_V2: u8 = 0x21;
+/// Длина заголовка отчёта.
+pub const REPORT_HEADER_LEN: usize = 14;
+/// Длина блока отчёта.
+pub const REPORT_BLOCK_LEN: usize = 18;
+/// Больше блоков не бывает: по одному на трек.
+pub const MAX_REPORT_BLOCKS: usize = 3;
+/// `echo_delay_ms` без эха.
+pub const NO_ECHO: u32 = u32::MAX;
+
+/// Как получатель принимает один поток отправителя.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReportBlock {
+    pub track: u8,
+    /// Доля потерь с прошлого отчёта, × 256.
+    pub fraction_lost: u8,
+    pub stream_id: u32,
+    pub highest_seq: u32,
+    pub cumulative_lost: u32,
+    /// Межпакетный джиттер (RFC 3550, §6.4.1) в единицах часов трека.
+    pub jitter: u32,
+}
+
+/// Отчёт получателя.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Report {
+    pub ts_ms: u32,
+    /// (ts_ms из отчёта адресата, мс с его получения) — для RTT.
+    pub echo: Option<(u32, u32)>,
+    pub blocks: Vec<ReportBlock>,
+}
+
+/// Собрать отчёт. Блоков больше [`MAX_REPORT_BLOCKS`] не бывает (лишние отброшены).
+pub fn write_report(r: &Report) -> Vec<u8> {
+    let blocks = &r.blocks[..r.blocks.len().min(MAX_REPORT_BLOCKS)];
+    let mut out = Vec::with_capacity(REPORT_HEADER_LEN + blocks.len() * REPORT_BLOCK_LEN);
+    out.push(REPORT_V2);
+    out.extend_from_slice(&r.ts_ms.to_be_bytes());
+    let (echo_ts, echo_delay) = r.echo.unwrap_or((0, NO_ECHO));
+    out.extend_from_slice(&echo_ts.to_be_bytes());
+    out.extend_from_slice(&echo_delay.to_be_bytes());
+    out.push(blocks.len() as u8);
+    for b in blocks {
+        out.push(b.track);
+        out.push(b.fraction_lost);
+        out.extend_from_slice(&b.stream_id.to_be_bytes());
+        out.extend_from_slice(&b.highest_seq.to_be_bytes());
+        out.extend_from_slice(&b.cumulative_lost.to_be_bytes());
+        out.extend_from_slice(&b.jitter.to_be_bytes());
+    }
+    out
+}
+
+fn be32(b: &[u8]) -> u32 {
+    u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+}
+
+/// Разобрать отчёт. `None` — не отчёт, обрезан или блоков больше допустимого.
+pub fn parse_report(dg: &[u8]) -> Option<Report> {
+    if dg.len() < REPORT_HEADER_LEN || dg[0] != REPORT_V2 {
+        return None;
+    }
+    let n = dg[13] as usize;
+    if n > MAX_REPORT_BLOCKS || dg.len() != REPORT_HEADER_LEN + n * REPORT_BLOCK_LEN {
+        return None;
+    }
+    let echo_delay = be32(&dg[9..]);
+    let blocks = dg[REPORT_HEADER_LEN..]
+        .chunks_exact(REPORT_BLOCK_LEN)
+        .map(|b| ReportBlock {
+            track: b[0],
+            fraction_lost: b[1],
+            stream_id: be32(&b[2..]),
+            highest_seq: be32(&b[6..]),
+            cumulative_lost: be32(&b[10..]),
+            jitter: be32(&b[14..]),
+        })
+        .collect();
+    Some(Report {
+        ts_ms: be32(&dg[1..]),
+        echo: (echo_delay != NO_ECHO).then(|| (be32(&dg[5..]), echo_delay)),
+        blocks,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn golden_report() {
+        let r = Report {
+            ts_ms: 0x0102_0304,
+            echo: Some((0x0A0B_0C0D, 20)),
+            blocks: vec![ReportBlock {
+                track: TRACK_VIDEO,
+                fraction_lost: 64,
+                stream_id: 0x1122_3344,
+                highest_seq: 0x0001_0005,
+                cumulative_lost: 7,
+                jitter: 900,
+            }],
+        };
+        let bytes = write_report(&r);
+        let want: Vec<u8> = [
+            &[0x21, 1, 2, 3, 4, 0x0A, 0x0B, 0x0C, 0x0D, 0, 0, 0, 20, 1][..],
+            &[
+                1, 64, 0x11, 0x22, 0x33, 0x44, 0, 1, 0, 5, 0, 0, 0, 7, 0, 0, 3, 0x84,
+            ],
+        ]
+        .concat();
+        assert_eq!(bytes, want);
+        assert_eq!(parse_report(&bytes), Some(r));
+    }
+
+    #[test]
+    fn report_without_echo_and_bad_lengths() {
+        let r = Report {
+            ts_ms: 5,
+            echo: None,
+            blocks: vec![],
+        };
+        let bytes = write_report(&r);
+        assert_eq!(parse_report(&bytes), Some(r));
+        // Обрезанный, лишний хвост, блоков больше трёх — не отчёт.
+        assert!(parse_report(&bytes[..REPORT_HEADER_LEN - 1]).is_none());
+        assert!(parse_report(&[&bytes[..], &[0]].concat()).is_none());
+        let mut many = bytes.clone();
+        many[13] = 4;
+        many.extend_from_slice(&[0; 4 * REPORT_BLOCK_LEN]);
+        assert!(parse_report(&many).is_none());
+        // Медиа-пакет не разбирается как отчёт и наоборот.
+        assert!(parse_media(&bytes).is_none());
+    }
 
     const H: MediaHeader = MediaHeader {
         track: TRACK_AUDIO,

@@ -252,8 +252,10 @@ parses comes from such a member, so:
    rotation/fps in the protocol; Kotlin drops the side header. The stream id replaced
    both restart heuristics (the video `STALE_WINDOW` and the audio restart window of
    R-108): frame and packet numbers now compare in plain serial arithmetic. Media between old and new builds breaks here (pre-beta policy).
-5. **Feedback and stats:** receiver reports, RTT, per-peer stats (they also replace the
-   ad-hoc traffic counters).
+5. ✅ (2026-10-28) **Feedback and stats:** receiver reports, RTT, per-peer stats (they also replace the
+   ad-hoc traffic counters). Reports go out once a second from the engine's receive
+   thread (`poll_timeout`/`handle_timeout`); stats are logged every 5 s. Audio `seq` now
+   counts sent packets only, so a muted microphone is not loss.
 6. **Recovery:** NACK, retransmission, keyframe request, skip-to-keyframe; then the
    longer keyframe interval. Audio: decode Opus FEC, constant packet size, DTX off.
 7. **Bandwidth:** estimator, prioritised pacing, `TargetBitrate` → MediaCodec bitrate and resolution
