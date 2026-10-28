@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 
 use peerage_blob::disk::DiskAssembler;
-use peerage_core::vault;
 use peerage_blob::{Hash, Limits, Manifest, ManifestAssembler, ManifestPart, Reassembler};
+use peerage_core::vault;
 use peerage_messenger::{Messenger, PeerKey};
 
 /// Сколько чанков одной докачки держим запрошенными. Больше — отдающий режет
@@ -214,7 +214,10 @@ impl BlobManager {
             size,
             part,
             total,
-            hashes: hashes.chunks(32).filter_map(|c| <[u8; 32]>::try_from(c).ok()).collect(),
+            hashes: hashes
+                .chunks(32)
+                .filter_map(|c| <[u8; 32]>::try_from(c).ok())
+                .collect(),
         };
         // Уже качаем этот блоб — части больше не нужны (мог прийти дубль).
         if self.incoming.contains_key(&id) {
@@ -256,15 +259,23 @@ impl BlobManager {
             if re.is_complete() {
                 // Пустой блоб — готов сразу.
                 let manifest = re.manifest().clone();
-                return re
-                    .finish()
-                    .ok()
-                    .map(|content| Completed { id, manifest, data: CompletedData::InMemory(content) });
+                return re.finish().ok().map(|content| Completed {
+                    id,
+                    manifest,
+                    data: CompletedData::InMemory(content),
+                });
             }
             Sink::Ram(re)
         };
         let now = Instant::now();
-        let mut inc = Incoming { peer, sink, inflight: HashMap::new(), next: 0, last_chunk: now, last_pct: 0 };
+        let mut inc = Incoming {
+            peer,
+            sink,
+            inflight: HashMap::new(),
+            next: 0,
+            last_chunk: now,
+            last_pct: 0,
+        };
         self.fill_window(&id, &mut inc);
         self.incoming.insert(id, inc);
         None
@@ -280,7 +291,9 @@ impl BlobManager {
             if inc.sink.has(index) {
                 continue;
             }
-            let _ = self.messenger.send_blob_request(&inc.peer, id, index as u32);
+            let _ = self
+                .messenger
+                .send_blob_request(&inc.peer, id, index as u32);
             inc.inflight.insert(index, now);
         }
     }
@@ -290,9 +303,9 @@ impl BlobManager {
     fn send_manifest(&self, peer: &PeerKey, manifest: &Manifest) {
         for p in manifest.split() {
             let hashes: Vec<u8> = p.hashes.iter().flat_map(|h| h.iter().copied()).collect();
-            let _ = self.messenger.send_blob_manifest_part(
-                peer, &p.id, &p.mime, p.size, p.part, p.total, &hashes,
-            );
+            let _ = self
+                .messenger
+                .send_blob_manifest_part(peer, &p.id, &p.mime, p.size, p.part, p.total, &hashes);
         }
     }
 
@@ -330,7 +343,9 @@ impl BlobManager {
     /// Блоб уже отдаётся — переслать манифест ещё одному (или тому же) пиру, не
     /// трогая диск. `false` — такого в отдаче нет.
     pub fn reoffer(&mut self, peer: PeerKey, id: &Hash) -> bool {
-        let Some(out) = self.outgoing.get_mut(id) else { return false };
+        let Some(out) = self.outgoing.get_mut(id) else {
+            return false;
+        };
         out.peers.insert(peer);
         out.last_used = Instant::now();
         let manifest = out.manifest.clone();
@@ -347,18 +362,18 @@ impl BlobManager {
     /// Пир запросил чанк нашего блоба — отдать, если манифест отдавали именно ему.
     pub fn on_request(&mut self, id_bytes: &[u8], index: u32, peer: PeerKey) {
         let Some(id) = to_id(id_bytes) else { return };
-        let Some(out) = self.outgoing.get_mut(&id) else { return };
+        let Some(out) = self.outgoing.get_mut(&id) else {
+            return;
+        };
         if !out.peers.contains(&peer) {
             return;
         }
         out.last_used = Instant::now();
         let chunk = match &out.source {
             Source::Memory(chunks) => chunks.get(index as usize).cloned(),
-            Source::Stored(path) => {
-                peerage_blob::disk::read_chunk(path, index as usize, |i, b| {
-                    vault::open(&vault::chunk_purpose(&id, i), b).ok()
-                })
-            }
+            Source::Stored(path) => peerage_blob::disk::read_chunk(path, index as usize, |i, b| {
+                vault::open(&vault::chunk_purpose(&id, i), b).ok()
+            }),
         };
         if let Some(chunk) = chunk {
             let _ = self.messenger.send_blob_chunk(&peer, &id, index, &chunk);
@@ -370,7 +385,13 @@ impl BlobManager {
     /// Пришёл чанк. Проверяет его (по хэшу в манифесте) и добавляет; при полноте —
     /// собирает и возвращает [`Completed`]. Битый чанк и чанк не от того пира
     /// отбрасываются.
-    pub fn on_chunk(&mut self, peer: PeerKey, id_bytes: &[u8], index: u32, data: &[u8]) -> Option<Completed> {
+    pub fn on_chunk(
+        &mut self,
+        peer: PeerKey,
+        id_bytes: &[u8],
+        index: u32,
+        data: &[u8],
+    ) -> Option<Completed> {
         let id = to_id(id_bytes)?;
         let mut inc = self.incoming.remove(&id)?;
         if inc.peer != peer {
@@ -382,7 +403,11 @@ impl BlobManager {
             Sink::Ram(re) => re.add(index, data).is_ok(),
             // Шифруем чанк тем же at-rest ключом, что и остальные данные, и сразу
             // пишем на диск — в памяти он не задерживается.
-            Sink::Disk(d) => d.add(index, data, |i, b| vault::seal(&vault::chunk_purpose(&id, i), b)).is_ok(),
+            Sink::Disk(d) => d
+                .add(index, data, |i, b| {
+                    vault::seal(&vault::chunk_purpose(&id, i), b)
+                })
+                .is_ok(),
         };
         if !accepted {
             self.incoming.insert(id, inc);
@@ -403,12 +428,20 @@ impl BlobManager {
         match inc.sink {
             Sink::Ram(re) => {
                 let manifest = re.manifest().clone();
-                re.finish().ok().map(|content| Completed { id, manifest, data: CompletedData::InMemory(content) })
+                re.finish().ok().map(|content| Completed {
+                    id,
+                    manifest,
+                    data: CompletedData::InMemory(content),
+                })
             }
             Sink::Disk(d) => {
                 let manifest = d.manifest().clone();
                 let path = d.finish().ok()?;
-                Some(Completed { id, manifest, data: CompletedData::OnDisk(path) })
+                Some(Completed {
+                    id,
+                    manifest,
+                    data: CompletedData::OnDisk(path),
+                })
             }
         }
     }
@@ -417,16 +450,20 @@ impl BlobManager {
     /// [`CHUNK_TIMEOUT`], бросить заглохшие докачки, забыть давно не нужные отдачи.
     pub fn tick(&mut self) {
         let now = Instant::now();
-        self.incoming.retain(|_, inc| now.duration_since(inc.last_chunk) < STALL_AFTER);
+        self.incoming
+            .retain(|_, inc| now.duration_since(inc.last_chunk) < STALL_AFTER);
         for (id, inc) in self.incoming.iter_mut() {
             for (index, asked) in inc.inflight.iter_mut() {
                 if now.duration_since(*asked) >= CHUNK_TIMEOUT {
                     *asked = now;
-                    let _ = self.messenger.send_blob_request(&inc.peer, id, *index as u32);
+                    let _ = self
+                        .messenger
+                        .send_blob_request(&inc.peer, id, *index as u32);
                 }
             }
         }
-        self.outgoing.retain(|_, out| now.duration_since(out.last_used) < OUTGOING_IDLE);
+        self.outgoing
+            .retain(|_, out| now.duration_since(out.last_used) < OUTGOING_IDLE);
     }
 
     /// Прогресс докачек, изменившийся с прошлого опроса: (id, получено, всего).

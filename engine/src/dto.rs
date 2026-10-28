@@ -124,24 +124,47 @@ pub struct CallEntry {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiEvent {
-    Presence { peer: String, online: bool },
+    Presence {
+        peer: String,
+        online: bool,
+    },
     /// Новая строка переписки — личной или групповой, своей или входящей. Едет
     /// ровно та строка, что легла в историю (подпись, «переслано», ответ, номер
     /// строки): одна форма для ленты и для истории, и открытый чат не расходится с
     /// тем, что покажет перезаход.
-    Message { chat: String, group: bool, msg: peerage_core::store::StoredMessage },
-    Ack { peer: String, id: u64 },
+    Message {
+        chat: String,
+        group: bool,
+        msg: peerage_core::store::StoredMessage,
+    },
+    Ack {
+        peer: String,
+        id: u64,
+    },
     /// Собеседник отозвал своё сообщение — строка исчезла из истории.
-    Retracted { peer: String, id: u64 },
+    Retracted {
+        peer: String,
+        id: u64,
+    },
     /// В группе кто-то отозвал сообщение — историю нужно перечитать.
-    GroupRetracted { gid: String },
-    Undelivered { peer: String, id: u64 },
-    ContactRequest { peer: String, new: bool },
+    GroupRetracted {
+        gid: String,
+    },
+    Undelivered {
+        peer: String,
+        id: u64,
+    },
+    ContactRequest {
+        peer: String,
+        new: bool,
+    },
     ContactsChanged,
     GroupsChanged,
     GroupInvitesChanged,
     /// Список закреплённых в чате изменился (hex ключа собеседника или gid).
-    PinsChanged { chat: String },
+    PinsChanged {
+        chat: String,
+    },
     /// Сообщение исправлено автором: текст в ленте надо заменить на месте (вместе с
     /// упоминаниями — их участки привязаны к тексту).
     MessageEdited {
@@ -152,21 +175,52 @@ pub enum UiEvent {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         mentions: Vec<peerage_core::mention::Mention>,
     },
-    GroupRemoved { gid: String },
-    RoomInvite { peer: String, room_id: String, audio: bool, video: bool },
-    RoomDecline { peer: String, room_id: String },
-    RoomPresence { gid: String, peer: String, flags: u8, left: bool },
-    BlobReceived { id: String, mime: String, size: u64 },
+    GroupRemoved {
+        gid: String,
+    },
+    RoomInvite {
+        peer: String,
+        room_id: String,
+        audio: bool,
+        video: bool,
+    },
+    RoomDecline {
+        peer: String,
+        room_id: String,
+    },
+    RoomPresence {
+        gid: String,
+        peer: String,
+        flags: u8,
+        left: bool,
+    },
+    BlobReceived {
+        id: String,
+        mime: String,
+        size: u64,
+    },
     /// Наш адрес сменился (ADR-007): новый адрес Yggdrasil и номер эпохи. Личность
     /// при этом прежняя — контакты, верификации и группы не затронуты.
-    TransportRotated { address: String, epoch: u32 },
+    TransportRotated {
+        address: String,
+        epoch: u32,
+    },
     /// Смена адреса не удалась: новый узел не поднялся. Адрес прежний; `online` —
     /// удалось ли вернуться на него (иначе мы офлайн, и вернуть сеть может «онлайн»).
-    TransportRotateFailed { online: bool },
-    BlobProgress { id: String, done: u32, total: u32 },
+    TransportRotateFailed {
+        online: bool,
+    },
+    BlobProgress {
+        id: String,
+        done: u32,
+        total: u32,
+    },
     /// Докачка не началась: `too_large` (больше предела приёма) или `no_space`
     /// (на диске не хватает места). Заказ снят — кнопка «Скачать» снова доступна.
-    BlobFailed { id: String, reason: String },
+    BlobFailed {
+        id: String,
+        reason: String,
+    },
 }
 
 impl UiEvent {
@@ -185,17 +239,36 @@ mod tests {
     /// переименование поля в Rust обязано ломать тест, а не устройство.
     #[test]
     fn event_wire_shape_is_stable() {
-        let ev = UiEvent::Presence { peer: "aa".into(), online: true };
-        assert_eq!(ev.to_json(), r#"{"type":"presence","peer":"aa","online":true}"#);
+        let ev = UiEvent::Presence {
+            peer: "aa".into(),
+            online: true,
+        };
+        assert_eq!(
+            ev.to_json(),
+            r#"{"type":"presence","peer":"aa","online":true}"#
+        );
 
-        let ev = UiEvent::Ack { peer: "bb".into(), id: 7 };
+        let ev = UiEvent::Ack {
+            peer: "bb".into(),
+            id: 7,
+        };
         assert_eq!(ev.to_json(), r#"{"type":"ack","peer":"bb","id":7}"#);
 
         // Вариант без полей — только тег: клиент по нему перечитывает снимок.
-        assert_eq!(UiEvent::GroupsChanged.to_json(), r#"{"type":"groups_changed"}"#);
+        assert_eq!(
+            UiEvent::GroupsChanged.to_json(),
+            r#"{"type":"groups_changed"}"#
+        );
 
-        let ev = UiEvent::BlobProgress { id: "cc".into(), done: 3, total: 10 };
-        assert_eq!(ev.to_json(), r#"{"type":"blob_progress","id":"cc","done":3,"total":10}"#);
+        let ev = UiEvent::BlobProgress {
+            id: "cc".into(),
+            done: 3,
+            total: 10,
+        };
+        assert_eq!(
+            ev.to_json(),
+            r#"{"type":"blob_progress","id":"cc","done":3,"total":10}"#
+        );
 
         // Строка переписки едет целиком — теми же полями, что и в истории.
         let msg = peerage_core::store::StoredMessage {
@@ -209,7 +282,12 @@ mod tests {
             row: 9,
             ..Default::default()
         };
-        let json = UiEvent::Message { chat: "ff".into(), group: true, msg }.to_json();
+        let json = UiEvent::Message {
+            chat: "ff".into(),
+            group: true,
+            msg,
+        }
+        .to_json();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["type"], "message");
         assert_eq!(v["chat"], "ff");
@@ -222,19 +300,33 @@ mod tests {
 
     #[test]
     fn snapshot_wire_shape_is_stable() {
-        let s = OutboxStats { pending: 2, bytes: 30, peers: 1, warn: false };
+        let s = OutboxStats {
+            pending: 2,
+            bytes: 30,
+            peers: 1,
+            warn: false,
+        };
         assert_eq!(
             serde_json::to_string(&s).unwrap(),
             r#"{"pending":2,"bytes":30,"peers":1,"warn":false}"#
         );
 
-        let p = OutboxPeer { peer: "dd".into(), count: 5, bytes: 90, oldest: 111 };
+        let p = OutboxPeer {
+            peer: "dd".into(),
+            count: 5,
+            bytes: 90,
+            oldest: 111,
+        };
         assert_eq!(
             serde_json::to_string(&p).unwrap(),
             r#"{"peer":"dd","count":5,"bytes":90,"oldest":111}"#
         );
 
-        let m = RoomMember { peer: "ee".into(), audio: true, video: false };
+        let m = RoomMember {
+            peer: "ee".into(),
+            audio: true,
+            video: false,
+        };
         assert_eq!(
             serde_json::to_string(&m).unwrap(),
             r#"{"peer":"ee","audio":true,"video":false}"#

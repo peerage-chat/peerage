@@ -20,7 +20,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-atrest-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -38,19 +41,35 @@ fn blob_file_under_another_address_is_not_readable() {
     let net = LoopbackNet::new();
     let dir = tmpdir("blob");
     let ident = id(97);
-    let a = Engine::start_with_transport(dir.clone(), ident.clone(), net.endpoint(ident.public_key_bytes()))
-        .unwrap()
-        .engine;
+    let a = Engine::start_with_transport(
+        dir.clone(),
+        ident.clone(),
+        net.endpoint(ident.public_key_bytes()),
+    )
+    .unwrap()
+    .engine;
     let b_key = id(98).public_key_bytes();
     a.add_contact(&b_key, "B");
     let content = b"%PDF pretend document".to_vec();
-    a.send_media(&b_key, content.clone(), "application/pdf", "doc.pdf").unwrap();
+    a.send_media(&b_key, content.clone(), "application/pdf", "doc.pdf")
+        .unwrap();
     let real = hex::encode(peerage_blob::blob_id(&content));
-    assert_eq!(a.blob_read(&real).as_deref(), Some(&content[..]), "свой блоб читается");
+    assert_eq!(
+        a.blob_read(&real).as_deref(),
+        Some(&content[..]),
+        "свой блоб читается"
+    );
 
     let other = hex::encode(peerage_blob::blob_id(b"something else"));
-    std::fs::copy(dir.join("blobs").join(&real), dir.join("blobs").join(&other)).unwrap();
-    assert!(a.blob_read(&other).is_none(), "под чужим адресом — не читается");
+    std::fs::copy(
+        dir.join("blobs").join(&real),
+        dir.join("blobs").join(&other),
+    )
+    .unwrap();
+    assert!(
+        a.blob_read(&other).is_none(),
+        "под чужим адресом — не читается"
+    );
 }
 
 fn manager(ident: Identity, msgr: Arc<Messenger>, dir: PathBuf) -> GroupManager {
@@ -66,7 +85,11 @@ fn group_state_under_another_name_is_rejected() {
     with_key();
     let net = LoopbackNet::new();
     let ident = id(99);
-    let (msgr, _rx) = Messenger::start_with_transport(ident.clone(), net.endpoint(ident.public_key_bytes()), Config::default());
+    let (msgr, _rx) = Messenger::start_with_transport(
+        ident.clone(),
+        net.endpoint(ident.public_key_bytes()),
+        Config::default(),
+    );
     let msgr = Arc::new(msgr);
     let dir = tmpdir("group");
     let (g1, g2) = {

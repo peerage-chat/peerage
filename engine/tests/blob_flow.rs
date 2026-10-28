@@ -39,7 +39,10 @@ fn transfer_with(content: &[u8], drop_every: u32, limits: Limits) -> Completed {
     // Каталоги для блобов, собираемых сразу на диск (крупные); мелкие идут через RAM.
     let dir = std::env::temp_dir().join(format!(
         "test-blobflow-{}",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     let mut a = BlobManager::new(Arc::new(a_msgr), limits, dir.join("a"));
     let mut b = BlobManager::new(Arc::new(b_msgr), limits, dir.join("b"));
@@ -60,12 +63,22 @@ fn transfer_with(content: &[u8], drop_every: u32, limits: Limits) -> Completed {
             match ev {
                 Event::BlobManifest { peer, manifest } => {
                     lossy(&net);
-                    if let Some(done) = b.on_manifest(peer, peerage_blob::Manifest::from_json(&manifest).unwrap()) {
+                    if let Some(done) =
+                        b.on_manifest(peer, peerage_blob::Manifest::from_json(&manifest).unwrap())
+                    {
                         return done;
                     }
                 }
                 // Манифест теперь едет частями (снят потолок 4 МБ).
-                Event::BlobManifestPart { peer, id, mime, size, part, total, hashes } => {
+                Event::BlobManifestPart {
+                    peer,
+                    id,
+                    mime,
+                    size,
+                    part,
+                    total,
+                    hashes,
+                } => {
                     lossy(&net);
                     if let Some(done) =
                         b.on_manifest_part(peer, &id, &mime, size, part, total, &hashes)
@@ -73,7 +86,12 @@ fn transfer_with(content: &[u8], drop_every: u32, limits: Limits) -> Completed {
                         return done;
                     }
                 }
-                Event::BlobChunk { peer, id, index, data } => {
+                Event::BlobChunk {
+                    peer,
+                    id,
+                    index,
+                    data,
+                } => {
                     if let Some(done) = b.on_chunk(peer, &id, index, &data) {
                         return done;
                     }
@@ -98,18 +116,30 @@ fn in_memory(done: &Completed) -> Vec<u8> {
 /// Многочанковый блоб (несколько CHUNK_SIZE + хвост) доходит целым, id совпадает.
 #[test]
 fn blob_transfer_over_loopback() {
-    let content: Vec<u8> = (0..peerage_blob::CHUNK_SIZE * 2 + 777).map(|i| (i * 7) as u8).collect();
+    let content: Vec<u8> = (0..peerage_blob::CHUNK_SIZE * 2 + 777)
+        .map(|i| (i * 7) as u8)
+        .collect();
     let done = transfer(&content, 0);
-    assert_eq!(in_memory(&done), content, "содержимое восстановлено байт-в-байт");
+    assert_eq!(
+        in_memory(&done),
+        content,
+        "содержимое восстановлено байт-в-байт"
+    );
     assert_eq!(done.id, peerage_blob::blob_id(&content), "id блоба совпал");
 }
 
 /// Тот же блоб под потерями: получатель-драйвен pull переспрашивает и дожимает.
 #[test]
 fn blob_transfer_survives_packet_loss() {
-    let content: Vec<u8> = (0..peerage_blob::CHUNK_SIZE * 3 + 5).map(|i| (i ^ 0x5a) as u8).collect();
+    let content: Vec<u8> = (0..peerage_blob::CHUNK_SIZE * 3 + 5)
+        .map(|i| (i ^ 0x5a) as u8)
+        .collect();
     let done = transfer(&content, 3);
-    assert_eq!(in_memory(&done), content, "докачка дожала блоб сквозь потери");
+    assert_eq!(
+        in_memory(&done),
+        content,
+        "докачка дожала блоб сквозь потери"
+    );
 }
 
 /// Крупный блоб собирается СРАЗУ НА ДИСК и в память целиком не поднимается —
@@ -140,21 +170,39 @@ fn large_blob_streams_to_disk() {
         "содержимое не должно лежать открытым текстом"
     );
     // И читается обратно байт-в-байт (потоково, по чанкам).
-    let open = |i: usize, b: &[u8]| peerage_core::vault::open(&peerage_core::vault::chunk_purpose(&done.id, i), b).ok();
+    let open = |i: usize, b: &[u8]| {
+        peerage_core::vault::open(&peerage_core::vault::chunk_purpose(&done.id, i), b).ok()
+    };
     let restored = peerage_blob::disk::read_all(&path, open).unwrap();
-    assert_eq!(restored, content, "потоково собранный блоб восстановлен точно");
+    assert_eq!(
+        restored, content,
+        "потоково собранный блоб восстановлен точно"
+    );
 }
 
 /// Пара менеджеров в общей сети без обслуживания: тест сам решает, когда отвечать.
-fn pair(limits: Limits) -> (BlobManager, std::sync::mpsc::Receiver<Event>, BlobManager, std::sync::mpsc::Receiver<Event>, [u8; 32]) {
+fn pair(
+    limits: Limits,
+) -> (
+    BlobManager,
+    std::sync::mpsc::Receiver<Event>,
+    BlobManager,
+    std::sync::mpsc::Receiver<Event>,
+    [u8; 32],
+) {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(50), id(60));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
-    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
-    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), Config::default());
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
+    let (b_msgr, b_rx) =
+        Messenger::start_with_transport(b_id, net.endpoint(b_key), Config::default());
     let dir = std::env::temp_dir().join(format!(
         "test-blobpair-{}",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     std::mem::forget(net);
     let a = BlobManager::new(Arc::new(a_msgr), limits, dir.join("a"));
@@ -167,7 +215,16 @@ fn feed_manifest(b: &mut BlobManager, b_rx: &std::sync::mpsc::Receiver<Event>, s
     let deadline = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < deadline {
         while let Ok(ev) = b_rx.try_recv() {
-            if let Event::BlobManifestPart { peer, id, mime, size, part, total, hashes } = ev {
+            if let Event::BlobManifestPart {
+                peer,
+                id,
+                mime,
+                size,
+                part,
+                total,
+                hashes,
+            } = ev
+            {
                 b.on_manifest_part(peer, &id, &mime, size, part, total, &hashes);
             }
         }
@@ -179,7 +236,9 @@ fn feed_manifest(b: &mut BlobManager, b_rx: &std::sync::mpsc::Receiver<Event>, s
 #[test]
 fn download_asks_one_window_at_a_time() {
     let (mut a, a_rx, mut b, b_rx, b_key) = pair(Limits::default());
-    let content: Vec<u8> = (0..peerage_blob::CHUNK_SIZE * 150).map(|i| (i * 3) as u8).collect();
+    let content: Vec<u8> = (0..peerage_blob::CHUNK_SIZE * 150)
+        .map(|i| (i * 3) as u8)
+        .collect();
     a.offer(b_key, &content, "application/octet-stream");
     feed_manifest(&mut b, &b_rx, 1);
     // A молчит — считаем, сколько B попросил.

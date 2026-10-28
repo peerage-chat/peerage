@@ -17,7 +17,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-ring-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -25,7 +28,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 fn wait(secs: u64, mut cond: impl FnMut() -> bool) -> bool {
@@ -67,7 +72,11 @@ fn next_room_invite(e: &Engine, secs: u64) -> Option<serde_json::Value> {
 fn group_member_is_rung_into_the_group_room_and_stranger_is_not() {
     let net = LoopbackNet::new();
     let (a_id, b_id, c_id) = (id(61), id(62), id(63));
-    let (a_key, b_key, c_key) = (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let (a_key, b_key, c_key) = (
+        a_id.public_key_bytes(),
+        b_id.public_key_bytes(),
+        c_id.public_key_bytes(),
+    );
     let a = start(&net, a_id, tmpdir("a"));
     let b = start(&net, b_id, tmpdir("b"));
     let c = start(&net, c_id, tmpdir("c"));
@@ -78,21 +87,48 @@ fn group_member_is_rung_into_the_group_room_and_stranger_is_not() {
 
     // Группа из A и B; C — знакомый A, но не в группе.
     assert!(a.group_create("созвон"), "группа создана");
-    assert!(wait(15, || non_empty(&a.group_list_json())), "группа в списке");
-    let gid_hex = json(&a.group_list_json())[0]["gid"].as_str().unwrap().to_string();
+    assert!(
+        wait(15, || non_empty(&a.group_list_json())),
+        "группа в списке"
+    );
+    let gid_hex = json(&a.group_list_json())[0]["gid"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let gid = hex::decode(&gid_hex).unwrap();
     a.group_invite(gid.clone(), b_key);
-    assert!(wait(15, || non_empty(&b.group_invites_json())), "B получил приглашение в группу");
+    assert!(
+        wait(15, || non_empty(&b.group_invites_json())),
+        "B получил приглашение в группу"
+    );
     b.accept_group_invite(gid.clone());
-    assert!(wait(15, || a.group_members_json(&gid).contains(&hex::encode(b_key))), "A видит B в ростере");
-    assert!(wait(15, || b.group_members_json(&gid).contains(&hex::encode(a_key))), "B видит A в ростере");
+    assert!(
+        wait(15, || a
+            .group_members_json(&gid)
+            .contains(&hex::encode(b_key))),
+        "A видит B в ростере"
+    );
+    assert!(
+        wait(15, || b
+            .group_members_json(&gid)
+            .contains(&hex::encode(a_key))),
+        "B видит A в ростере"
+    );
 
     // A в комнате группы зовёт обоих: уйти должно только участнику.
     a.room_join(gid.clone(), true, false);
-    assert_eq!(a.room_ring(&gid, &[b_key, c_key], true, false), 1, "посторонний отсеян до отправки");
+    assert_eq!(
+        a.room_ring(&gid, &[b_key, c_key], true, false),
+        1,
+        "посторонний отсеян до отправки"
+    );
 
     let inv = next_room_invite(&b, 15).expect("B получил приглашение в звонок");
-    assert_eq!(inv["room_id"].as_str(), Some(gid_hex.as_str()), "зовут именно в комнату группы");
+    assert_eq!(
+        inv["room_id"].as_str(),
+        Some(gid_hex.as_str()),
+        "зовут именно в комнату группы"
+    );
     assert_eq!(inv["peer"].as_str(), Some(hex::encode(a_key).as_str()));
     assert!(next_room_invite(&c, 2).is_none(), "C ничего не получил");
 
@@ -122,7 +158,10 @@ fn hung_up_call_does_not_ring_later() {
 
     let b = start(&net, b_id, tmpdir("b-hang"));
     b.add_contact(&a_key, "A");
-    assert!(next_room_invite(&b, 8).is_none(), "сброшенный звонок не зазвонил");
+    assert!(
+        next_room_invite(&b, 8).is_none(),
+        "сброшенный звонок не зазвонил"
+    );
 }
 
 /// R-049: второй входящий во время разговора — отдельная строка «пропущен», а
@@ -131,7 +170,11 @@ fn hung_up_call_does_not_ring_later() {
 fn second_call_during_a_call_does_not_steal_the_record() {
     let net = LoopbackNet::new();
     let (a_id, b_id, c_id) = (id(83), id(84), id(85));
-    let (a_key, b_key, c_key) = (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let (a_key, b_key, c_key) = (
+        a_id.public_key_bytes(),
+        b_id.public_key_bytes(),
+        c_id.public_key_bytes(),
+    );
     let a = start(&net, a_id, tmpdir("a-busy"));
     let b = start(&net, b_id, tmpdir("b-busy"));
     let c = start(&net, c_id, tmpdir("c-busy"));
@@ -153,13 +196,26 @@ fn second_call_during_a_call_does_not_steal_the_record() {
 
     let calls = json(&b.calls_json(10));
     let calls = calls.as_array().unwrap();
-    let of = |k: &[u8; 32]| calls.iter().find(|c| c["peer"] == hex::encode(k)).cloned().unwrap();
+    let of = |k: &[u8; 32]| {
+        calls
+            .iter()
+            .find(|c| c["peer"] == hex::encode(k))
+            .cloned()
+            .unwrap()
+    };
     let with_a = of(&a_key);
     let with_c = of(&c_key);
     assert_eq!(with_a["outcome"], "answered");
-    assert!(with_a["duration"].as_i64().unwrap() >= 1, "длительность — у разговора: {calls:?}");
+    assert!(
+        with_a["duration"].as_i64().unwrap() >= 1,
+        "длительность — у разговора: {calls:?}"
+    );
     assert_eq!(with_c["outcome"], "missed");
-    assert_eq!(with_c["duration"].as_i64(), Some(0), "у пропущенного длительности нет");
+    assert_eq!(
+        with_c["duration"].as_i64(),
+        Some(0),
+        "у пропущенного длительности нет"
+    );
 }
 
 /// R-034: дозваниваемся до C, тут звонит A — и мы отвечаем ему. Отвеченным
@@ -169,7 +225,11 @@ fn second_call_during_a_call_does_not_steal_the_record() {
 fn answering_a_call_during_own_ring_marks_the_right_call() {
     let net = LoopbackNet::new();
     let (a_id, b_id, c_id) = (id(86), id(87), id(88));
-    let (a_key, b_key, c_key) = (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let (a_key, b_key, c_key) = (
+        a_id.public_key_bytes(),
+        b_id.public_key_bytes(),
+        c_id.public_key_bytes(),
+    );
     let a = start(&net, a_id, tmpdir("a-ring2"));
     let b = start(&net, b_id, tmpdir("b-ring2"));
     a.add_contact(&b_key, "B");
@@ -187,10 +247,19 @@ fn answering_a_call_during_own_ring_marks_the_right_call() {
 
     let calls = json(&b.calls_json(10));
     let calls = calls.as_array().unwrap();
-    let with_a: Vec<_> = calls.iter().filter(|c| c["peer"] == hex::encode(a_key)).collect();
-    let with_c = calls.iter().find(|c| c["peer"] == hex::encode(c_key)).unwrap();
+    let with_a: Vec<_> = calls
+        .iter()
+        .filter(|c| c["peer"] == hex::encode(a_key))
+        .collect();
+    let with_c = calls
+        .iter()
+        .find(|c| c["peer"] == hex::encode(c_key))
+        .unwrap();
     assert_eq!(with_a.len(), 1, "звонок A — одна строка: {calls:?}");
     assert_eq!(with_a[0]["outcome"], "answered");
-    assert!(with_a[0]["duration"].as_i64().unwrap() >= 1, "длительность — у разговора с A");
+    assert!(
+        with_a[0]["duration"].as_i64().unwrap() >= 1,
+        "длительность — у разговора с A"
+    );
     assert_eq!(with_c["outcome"], "unanswered", "C не отвечал");
 }

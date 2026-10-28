@@ -15,7 +15,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("peerage-media-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -23,7 +26,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 /// JPEG с EXIF-сегментом (scrub должен его снять на отправке).
@@ -35,15 +40,22 @@ fn jpeg_with_exif() -> Vec<u8> {
 }
 
 /// Найти в истории (JSON) первое сообщение заданного kind; вернуть (blob_id, mime, name).
-fn find_media(engine: &Engine, peer_hex_key: &[u8; 32], kind: &str) -> Option<(String, String, String)> {
+fn find_media(
+    engine: &Engine,
+    peer_hex_key: &[u8; 32],
+    kind: &str,
+) -> Option<(String, String, String)> {
     let hist: serde_json::Value = serde_json::from_str(&engine.history_json(peer_hex_key)).ok()?;
-    hist.as_array()?.iter().find(|m| m["kind"] == kind).map(|m| {
-        (
-            m["blob_id"].as_str().unwrap_or_default().to_string(),
-            m["mime"].as_str().unwrap_or_default().to_string(),
-            m["name"].as_str().unwrap_or_default().to_string(),
-        )
-    })
+    hist.as_array()?
+        .iter()
+        .find(|m| m["kind"] == kind)
+        .map(|m| {
+            (
+                m["blob_id"].as_str().unwrap_or_default().to_string(),
+                m["mime"].as_str().unwrap_or_default().to_string(),
+                m["name"].as_str().unwrap_or_default().to_string(),
+            )
+        })
 }
 
 #[test]
@@ -56,7 +68,9 @@ fn image_message_delivers_and_blob_pulls() {
     a.add_contact(&b_key, "B");
     b.add_contact(&a_key, "A");
 
-    let msg_id = a.send_media(&b_key, jpeg_with_exif(), "image/jpeg", "photo.jpg").expect("send_media");
+    let msg_id = a
+        .send_media(&b_key, jpeg_with_exif(), "image/jpeg", "photo.jpg")
+        .expect("send_media");
     assert!(msg_id >= 0);
 
     // У A вложение видно сразу (kind=image, блоб лежит локально).
@@ -79,7 +93,10 @@ fn image_message_delivers_and_blob_pulls() {
                 // M3, репутация: A потратил на нас трафик, отдав блоб → у B заслуги A
                 // выросли (это и повышает бюджет ресурсов, см. budget::reputation_boost).
                 let helpful = helpful_of(&b, &a_key);
-                assert!(helpful > 0, "отдавший блоб получает заслугу, было {helpful}");
+                assert!(
+                    helpful > 0,
+                    "отдавший блоб получает заслугу, было {helpful}"
+                );
 
                 a.shutdown();
                 b.shutdown();
@@ -110,19 +127,34 @@ fn file_attachment_with_caption_delivers() {
     let path = dir.join("clip.bin");
     std::fs::write(&path, &content).unwrap();
 
-    let info = peerage_engine::MediaInfo { caption: "подпись к файлу".into(), ..Default::default() };
+    let info = peerage_engine::MediaInfo {
+        caption: "подпись к файлу".into(),
+        ..Default::default()
+    };
     a.send_media_file(&b_key, &path, "application/octet-stream", "clip.bin", info)
         .expect("send_media_file");
 
     let want_id = hex::encode(peerage_blob::blob_id(&content));
     // Отправитель сохранил свою копию потоково и читает её обратно байт-в-байт.
-    assert_eq!(a.blob_read(&want_id).as_deref(), Some(&content[..]), "своя копия цела");
+    assert_eq!(
+        a.blob_read(&want_id).as_deref(),
+        Some(&content[..]),
+        "своя копия цела"
+    );
 
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let hist: serde_json::Value = serde_json::from_str(&b.history_json(&a_key)).unwrap();
-        if let Some(m) = hist.as_array().unwrap().iter().find(|m| m["blob_id"] == want_id) {
-            assert_eq!(m["text"], "подпись к файлу", "подпись пришла вместе с файлом");
+        if let Some(m) = hist
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["blob_id"] == want_id)
+        {
+            assert_eq!(
+                m["text"], "подпись к файлу",
+                "подпись пришла вместе с файлом"
+            );
             if let Some(bytes) = b.blob_read(&want_id) {
                 assert_eq!(bytes, content, "содержимое доехало байт-в-байт");
                 a.shutdown();

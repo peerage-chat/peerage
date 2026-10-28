@@ -20,7 +20,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-flood-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -28,7 +31,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 fn flood(e: &Engine) -> serde_json::Value {
@@ -56,7 +61,10 @@ fn flood_from_stranger_shows_up_in_snapshot() {
     let b = start(&net, b_id, tmpdir("b")); // жертва
 
     // Незнакомцу положен скромный бюджет (Tier::Stranger) — заваливаем его с запасом.
-    assert!(flood(&b).as_array().unwrap().is_empty(), "до флуда снимок пуст");
+    assert!(
+        flood(&b).as_array().unwrap().is_empty(),
+        "до флуда снимок пуст"
+    );
     for i in 0..600 {
         a.send_text(&b_key, &format!("флуд {i}"));
     }
@@ -76,7 +84,10 @@ fn flood_from_stranger_shows_up_in_snapshot() {
         .find(|f| f["peer"] == hex::encode(a_key))
         .cloned()
         .unwrap();
-    assert!(entry["dropped"].as_u64().unwrap() > 0, "счётчик отброшенных растёт");
+    assert!(
+        entry["dropped"].as_u64().unwrap() > 0,
+        "счётчик отброшенных растёт"
+    );
     assert_eq!(entry["blocked"], false, "пока не блокировали — флаг снят");
 
     // После блокировки источник помечен: его режет и транспорт (до FFI), и бюджет.
@@ -85,7 +96,10 @@ fn flood_from_stranger_shows_up_in_snapshot() {
         wait(10, || {
             flood(&b)
                 .as_array()
-                .map(|v| v.iter().any(|f| f["peer"] == hex::encode(a_key) && f["blocked"] == true))
+                .map(|v| {
+                    v.iter()
+                        .any(|f| f["peer"] == hex::encode(a_key) && f["blocked"] == true)
+                })
                 .unwrap_or(false)
         }),
         "после блокировки флаг должен подняться: {}",

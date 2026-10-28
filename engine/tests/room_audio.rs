@@ -17,7 +17,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-audio-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -25,7 +28,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 /// R-033: замер пропускной способности, запущенный во время звонка, не отбирает
@@ -42,7 +47,8 @@ fn bench_during_a_call_does_not_mute_it() {
 
     let room = a.room_invite_dm(b_key, true, false);
     b.room_join_dm(a_key, true, false);
-    let params: serde_json::Value = serde_json::from_str(&a.room_audio_start(room.clone(), 0, false)).unwrap();
+    let params: serde_json::Value =
+        serde_json::from_str(&a.room_audio_start(room.clone(), 0, false)).unwrap();
     b.room_audio_start(room, 0, false);
     let frame = params["frame_len"].as_u64().unwrap() as usize;
     let rate = params["sample_rate"].as_f64().unwrap();
@@ -50,7 +56,9 @@ fn bench_during_a_call_does_not_mute_it() {
     b.bench_recv_start();
 
     // A говорит (синус 440 Гц кадрами в реальном темпе), B слушает.
-    let tone: Vec<i16> = (0..frame).map(|i| ((i as f64 * 440.0 * 6.283 / rate).sin() * 8000.0) as i16).collect();
+    let tone: Vec<i16> = (0..frame)
+        .map(|i| ((i as f64 * 440.0 * 6.283 / rate).sin() * 8000.0) as i16)
+        .collect();
     let mut heard = false;
     let mut out = vec![0i16; frame];
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -62,5 +70,8 @@ fn bench_during_a_call_does_not_mute_it() {
     }
     a.room_audio_stop();
     b.room_audio_stop();
-    assert!(heard, "голос A дошёл до B, хотя B запустил замер посреди звонка");
+    assert!(
+        heard,
+        "голос A дошёл до B, хотя B запустил замер посреди звонка"
+    );
 }

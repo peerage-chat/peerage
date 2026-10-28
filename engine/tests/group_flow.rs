@@ -18,7 +18,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-it-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -39,7 +42,10 @@ fn manager_with_store(
 ) -> (GroupManager, Arc<Mutex<MessageStore>>) {
     let db = peerage_core::db::open(&dir).expect("база");
     let store = Arc::new(Mutex::new(MessageStore::open(db.clone())));
-    (GroupManager::new(id, msgr, dir, store.clone(), GroupStore::new(db)), store)
+    (
+        GroupManager::new(id, msgr, dir, store.clone(), GroupStore::new(db)),
+        store,
+    )
 }
 
 /// Разослать событие мессенджера соответствующему менеджеру группы (как event_pump).
@@ -49,7 +55,11 @@ fn dispatch(gm: &mut GroupManager, ev: Event) {
         Event::GroupInvite { peer, gid, name } => {
             gm.on_invite(peer, gid, name);
         }
-        Event::GroupKeyReply { peer, gid, key_package } => {
+        Event::GroupKeyReply {
+            peer,
+            gid,
+            key_package,
+        } => {
             gm.on_key_reply(peer, &gid, &key_package);
         }
         Event::Group { peer, data } => {
@@ -110,8 +120,12 @@ fn setup_and_join(drop_every: u32) -> Ctx {
     }
     let (a_id, b_id) = (id(10), id(20));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
-    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
-    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        ..Config::default()
+    };
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let mut gm_a = manager(a_id, Arc::new(a_msgr), tmpdir("a"));
     let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("b"));
@@ -122,14 +136,27 @@ fn setup_and_join(drop_every: u32) -> Ctx {
     let got_invite = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
         b.invites_json().contains(&hex::encode(&gid))
     });
-    assert!(got_invite, "B получил приглашение-карточку (drop_every={drop_every})");
+    assert!(
+        got_invite,
+        "B получил приглашение-карточку (drop_every={drop_every})"
+    );
     assert!(gm_b.accept_invite(&gid), "B принял приглашение");
     let joined = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
         a.members(&gid).contains(&b_key) && b.group_ids().contains(&gid)
     });
-    assert!(joined, "после accept инвайт доводит обе стороны в группу (drop_every={drop_every})");
+    assert!(
+        joined,
+        "после accept инвайт доводит обе стороны в группу (drop_every={drop_every})"
+    );
     assert!(gm_b.members(&gid).contains(&a_key), "B видит A в ростере");
-    Ctx { gm_a, a_rx, gm_b, b_rx, gid, b_key }
+    Ctx {
+        gm_a,
+        a_rx,
+        gm_b,
+        b_rx,
+        gid,
+        b_key,
+    }
 }
 
 #[test]
@@ -157,38 +184,70 @@ fn group_media_message_propagates() {
 
     let field = |gm: &GroupManager, gid: &[u8], key: &str| -> Option<String> {
         let h: serde_json::Value = serde_json::from_str(&gm.history_json(gid)).ok()?;
-        h.as_array()?.iter().find(|m| m["kind"] == "image")
+        h.as_array()?
+            .iter()
+            .find(|m| m["kind"] == "image")
             .and_then(|m| m[key].as_str().map(str::to_string))
     };
 
-    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
-        field(b, &ctx.gid, "blob_id").as_deref() == Some("abcd1234")
-    });
+    let got = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |_, b| field(b, &ctx.gid, "blob_id").as_deref() == Some("abcd1234"),
+    );
     assert!(got, "B получил групповое медиа-сообщение");
-    assert_eq!(field(&ctx.gm_b, &ctx.gid, "mime").as_deref(), Some("image/jpeg"));
-    assert_eq!(field(&ctx.gm_b, &ctx.gid, "name").as_deref(), Some("photo.jpg"));
+    assert_eq!(
+        field(&ctx.gm_b, &ctx.gid, "mime").as_deref(),
+        Some("image/jpeg")
+    );
+    assert_eq!(
+        field(&ctx.gm_b, &ctx.gid, "name").as_deref(),
+        Some("photo.jpg")
+    );
     // Размер и превью едут В САМОМ сообщении: без них получателю нечего показать
     // вместо молчаливой докачки, и карточка «скачать» невозможна.
     let num = |gm: &GroupManager, key: &str| -> Option<u64> {
         let h: serde_json::Value = serde_json::from_str(&gm.history_json(&ctx.gid)).ok()?;
-        h.as_array()?.iter().find(|m| m["kind"] == "image").and_then(|m| m[key].as_u64())
+        h.as_array()?
+            .iter()
+            .find(|m| m["kind"] == "image")
+            .and_then(|m| m[key].as_u64())
     };
     assert_eq!(num(&ctx.gm_b, "size"), Some(900_000_000));
-    assert_eq!(field(&ctx.gm_b, &ctx.gid, "thumb_id").as_deref(), Some("beef"));
+    assert_eq!(
+        field(&ctx.gm_b, &ctx.gid, "thumb_id").as_deref(),
+        Some("beef")
+    );
     // Чужое вложение не считается скачанным, пока байты не приехали.
     assert_eq!(
         {
-            let h: serde_json::Value = serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
-            h.as_array().unwrap().iter().find(|m| m["kind"] == "image").unwrap()["downloaded"].as_bool()
+            let h: serde_json::Value =
+                serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
+            h.as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["kind"] == "image")
+                .unwrap()["downloaded"]
+                .as_bool()
         },
         Some(false),
     );
     // Подпись едет ВНУТРИ того же MLS-сообщения, а не отдельным текстом следом.
-    assert_eq!(field(&ctx.gm_b, &ctx.gid, "text").as_deref(), Some("подпись в группе"));
+    assert_eq!(
+        field(&ctx.gm_b, &ctx.gid, "text").as_deref(),
+        Some("подпись в группе")
+    );
 
     // У A своё сообщение тоже записано как медиа (mine).
     let ha: serde_json::Value = serde_json::from_str(&ctx.gm_a.history_json(&ctx.gid)).unwrap();
-    let mine = ha.as_array().unwrap().iter().find(|m| m["kind"] == "image").unwrap();
+    let mine = ha
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["kind"] == "image")
+        .unwrap();
     assert_eq!(mine["mine"], true);
     assert_eq!(mine["blob_id"], "abcd1234");
 }
@@ -200,8 +259,12 @@ fn invite_card_requires_accept_and_decline_clears() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(30), id(31));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
-    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
-    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        ..Config::default()
+    };
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let mut gm_a = manager(a_id, Arc::new(a_msgr), tmpdir("a"));
     let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("b"));
@@ -214,11 +277,17 @@ fn invite_card_requires_accept_and_decline_clears() {
         b.invites_json().contains("тайный клуб")
     });
     assert!(got, "B получил карточку приглашения с именем группы");
-    assert!(!gm_b.group_ids().contains(&gid), "без accept B в группу НЕ вступает");
+    assert!(
+        !gm_b.group_ids().contains(&gid),
+        "без accept B в группу НЕ вступает"
+    );
 
     // Decline тихо убирает карточку; повторный accept уже нечему.
     assert!(gm_b.decline_invite(&gid), "decline убрал карточку");
-    assert!(!gm_b.invites_json().contains(&hex::encode(&gid)), "карточка снята");
+    assert!(
+        !gm_b.invites_json().contains(&hex::encode(&gid)),
+        "карточка снята"
+    );
     assert!(!gm_b.accept_invite(&gid), "после decline принимать нечего");
     assert!(!gm_b.group_ids().contains(&gid), "B так и не в группе");
 }
@@ -231,16 +300,25 @@ fn group_name_propagates_to_joiner() {
 
     let name_of = |gm: &GroupManager, gid: &[u8]| -> Option<String> {
         let v: serde_json::Value = serde_json::from_str(&gm.list_json()).ok()?;
-        v.as_array()?.iter()
+        v.as_array()?
+            .iter()
             .find(|g| g["gid"] == hex::encode(gid))
             .and_then(|g| g["name"].as_str().map(str::to_string))
     };
 
-    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
-        name_of(b, &ctx.gid).as_deref() == Some("тест")
-    });
+    let got = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |_, b| name_of(b, &ctx.gid).as_deref() == Some("тест"),
+    );
     assert!(got, "joiner получил настоящее имя группы");
-    assert_eq!(name_of(&ctx.gm_a, &ctx.gid).as_deref(), Some("тест"), "у админа имя не изменилось");
+    assert_eq!(
+        name_of(&ctx.gm_a, &ctx.gid).as_deref(),
+        Some("тест"),
+        "у админа имя не изменилось"
+    );
 }
 
 /// Тот же путь под потерями — доказывает, что надёжный invite-хендшейк дожимает
@@ -260,7 +338,10 @@ fn admin_kick_removes_member() {
     let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |a, b| {
         !a.members(&gid).contains(&b_key) && !b.group_ids().contains(&gid)
     });
-    assert!(ok, "после kick: A убрал B из ростера, B забыл группу (SelfRemoved)");
+    assert!(
+        ok,
+        "после kick: A убрал B из ростера, B забыл группу (SelfRemoved)"
+    );
 }
 
 /// ADR-004: участник выходит → админ отзывает его из общего ростера; локально он
@@ -270,7 +351,10 @@ fn member_leave_revoked_by_admin() {
     let mut c = setup_and_join(0);
     let (gid, b_key) = (c.gid.clone(), c.b_key);
     assert!(c.gm_b.leave(&gid), "B инициировал выход");
-    assert!(!c.gm_b.group_ids().contains(&gid), "B забыл группу локально сразу");
+    assert!(
+        !c.gm_b.group_ids().contains(&gid),
+        "B забыл группу локально сразу"
+    );
     let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |a, _b| {
         !a.members(&gid).contains(&b_key)
     });
@@ -285,34 +369,64 @@ fn group_reply_and_retract() {
     let a_hex = hex::encode(id(10).public_key_bytes());
 
     assert!(ctx.gm_a.send_text(&ctx.gid, "во сколько встречаемся?"));
-    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
-        b.history_json(&ctx.gid).contains("во сколько")
-    });
+    let got = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |_, b| b.history_json(&ctx.gid).contains("во сколько"),
+    );
     assert!(got, "сообщение дошло до B");
 
     // B отвечает на сообщение A — ссылка = (автор A, id сообщения).
     let hist_b: serde_json::Value = serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
-    let first = hist_b.as_array().unwrap().iter().find(|m| m["text"] == "во сколько встречаемся?").unwrap();
-    let target = first["id"].as_u64().expect("у группового сообщения есть id");
+    let first = hist_b
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["text"] == "во сколько встречаемся?")
+        .unwrap();
+    let target = first["id"]
+        .as_u64()
+        .expect("у группового сообщения есть id");
     assert!(target != 0, "id проставлен отправителем");
     assert!(ctx.gm_b.send_text_reply(&ctx.gid, "в семь", target, &a_hex));
 
-    let replied = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |a, _| {
-        a.history_json(&ctx.gid).contains("в семь")
-    });
+    let replied = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |a, _| a.history_json(&ctx.gid).contains("в семь"),
+    );
     assert!(replied, "ответ дошёл до A");
     let hist_a: serde_json::Value = serde_json::from_str(&ctx.gm_a.history_json(&ctx.gid)).unwrap();
-    let reply = hist_a.as_array().unwrap().iter().find(|m| m["text"] == "в семь").unwrap();
+    let reply = hist_a
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["text"] == "в семь")
+        .unwrap();
     assert_eq!(reply["reply_to"].as_u64(), Some(target));
-    assert_eq!(reply["reply_sender"], a_hex, "автор цитируемого — тот, на кого отвечали");
+    assert_eq!(
+        reply["reply_sender"], a_hex,
+        "автор цитируемого — тот, на кого отвечали"
+    );
 
     // A отзывает своё сообщение — оно исчезает и у B.
     assert_eq!(ctx.gm_a.retract(&ctx.gid, &[target]), 1);
-    let gone = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
-        !b.history_json(&ctx.gid).contains("во сколько")
-    });
+    let gone = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |_, b| !b.history_json(&ctx.gid).contains("во сколько"),
+    );
     assert!(gone, "отозванное исчезло у участника");
-    assert!(!ctx.gm_a.history_json(&ctx.gid).contains("во сколько"), "и у автора тоже");
+    assert!(
+        !ctx.gm_a.history_json(&ctx.gid).contains("во сколько"),
+        "и у автора тоже"
+    );
 }
 
 /// Упоминание — ссылка «участок + ключ»: доходит до участника, хранится у обоих,
@@ -324,42 +438,86 @@ fn group_mentions_travel_and_follow_edits() {
     let mut ctx = setup_and_join(0);
     let b_hex = hex::encode(ctx.b_key);
     let text = "@Боб, глянь";
-    let span = Mention { at: 0, len: "@Боб".len() as u32, key: b_hex.clone() };
+    let span = Mention {
+        at: 0,
+        len: "@Боб".len() as u32,
+        key: b_hex.clone(),
+    };
     // Второй участок режет «Б» пополам — его быть не должно ни у кого.
-    let broken = Mention { at: 2, len: 1, key: b_hex.clone() };
-    assert!(ctx.gm_a.send_text_full(&ctx.gid, text, 0, "", "", false, vec![span.clone(), broken]));
-    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
-        b.history_json(&ctx.gid).contains("глянь")
-    });
+    let broken = Mention {
+        at: 2,
+        len: 1,
+        key: b_hex.clone(),
+    };
+    assert!(ctx
+        .gm_a
+        .send_text_full(&ctx.gid, text, 0, "", "", false, vec![span.clone(), broken]));
+    let got = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |_, b| b.history_json(&ctx.gid).contains("глянь"),
+    );
     assert!(got, "сообщение с упоминанием дошло");
 
     let find = |gm: &GroupManager, needle: &str| -> serde_json::Value {
         let h: serde_json::Value = serde_json::from_str(&gm.history_json(&ctx.gid)).unwrap();
-        h.as_array().unwrap().iter().find(|m| m["text"].as_str().unwrap_or("").contains(needle)).unwrap().clone()
+        h.as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["text"].as_str().unwrap_or("").contains(needle))
+            .unwrap()
+            .clone()
     };
     let at_b = find(&ctx.gm_b, "глянь");
     let want = serde_json::json!([{ "at": 0, "len": span.len, "key": b_hex }]);
-    assert_eq!(at_b["mentions"], want, "у получателя ровно один честный участок");
-    assert_eq!(find(&ctx.gm_a, "глянь")["mentions"], want, "у автора то же, что ушло в сеть");
+    assert_eq!(
+        at_b["mentions"], want,
+        "у получателя ровно один честный участок"
+    );
+    assert_eq!(
+        find(&ctx.gm_a, "глянь")["mentions"],
+        want,
+        "у автора то же, что ушло в сеть"
+    );
 
     // Правка сдвигает текст — упоминание едет заново, со своим участком.
     let id = at_b["id"].as_u64().unwrap();
     let new_text = "Ну что, @Боб?";
-    let moved = Mention { at: "Ну что, ".len() as u32, len: "@Боб".len() as u32, key: b_hex.clone() };
-    assert!(ctx.gm_a.edit(&ctx.gid, id, new_text, &[moved.clone()]).is_some());
-    let edited = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
-        b.history_json(&ctx.gid).contains("Ну что")
-    });
+    let moved = Mention {
+        at: "Ну что, ".len() as u32,
+        len: "@Боб".len() as u32,
+        key: b_hex.clone(),
+    };
+    assert!(ctx
+        .gm_a
+        .edit(&ctx.gid, id, new_text, &[moved.clone()])
+        .is_some());
+    let edited = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |_, b| b.history_json(&ctx.gid).contains("Ну что"),
+    );
     assert!(edited, "правка дошла");
     assert_eq!(find(&ctx.gm_b, "Ну что")["mentions"][0]["at"], moved.at);
 
     // Правка без упоминаний снимает их, а не оставляет висеть на чужом участке.
     assert!(ctx.gm_a.edit(&ctx.gid, id, "отбой", &[]).is_some());
-    let cleared = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
-        b.history_json(&ctx.gid).contains("отбой")
-    });
+    let cleared = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |_, b| b.history_json(&ctx.gid).contains("отбой"),
+    );
     assert!(cleared);
-    assert!(find(&ctx.gm_b, "отбой").get("mentions").is_none(), "упоминаний больше нет");
+    assert!(
+        find(&ctx.gm_b, "отбой").get("mentions").is_none(),
+        "упоминаний больше нет"
+    );
 }
 
 /// Отозвать ЧУЖОЕ сообщение нельзя: автор берётся из MLS, а не из тела пакета,
@@ -368,21 +526,38 @@ fn group_mentions_travel_and_follow_edits() {
 fn group_retract_ignores_foreign_messages() {
     let mut ctx = setup_and_join(0);
     assert!(ctx.gm_a.send_text(&ctx.gid, "сообщение A"));
-    let got = pump_until(&mut ctx.gm_a, &ctx.a_rx, &mut ctx.gm_b, &ctx.b_rx, |_, b| {
-        b.history_json(&ctx.gid).contains("сообщение A")
-    });
+    let got = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |_, b| b.history_json(&ctx.gid).contains("сообщение A"),
+    );
     assert!(got);
 
     let hist_b: serde_json::Value = serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
     let foreign = hist_b.as_array().unwrap()[0]["id"].as_u64().unwrap();
-    assert_eq!(ctx.gm_b.retract(&ctx.gid, &[foreign]), 0, "B не отзывает чужое");
-    assert!(ctx.gm_a.history_json(&ctx.gid).contains("сообщение A"), "у автора всё на месте");
+    assert_eq!(
+        ctx.gm_b.retract(&ctx.gid, &[foreign]),
+        0,
+        "B не отзывает чужое"
+    );
+    assert!(
+        ctx.gm_a.history_json(&ctx.gid).contains("сообщение A"),
+        "у автора всё на месте"
+    );
 
     // Удалить у СЕБЯ — можно любое.
     let a_hex = hex::encode(id(10).public_key_bytes());
     assert_eq!(ctx.gm_b.delete_local(&ctx.gid, &[(foreign, a_hex)]), 1);
-    assert!(!ctx.gm_b.history_json(&ctx.gid).contains("сообщение A"), "у себя убрано");
-    assert!(ctx.gm_a.history_json(&ctx.gid).contains("сообщение A"), "у автора осталось");
+    assert!(
+        !ctx.gm_b.history_json(&ctx.gid).contains("сообщение A"),
+        "у себя убрано"
+    );
+    assert!(
+        ctx.gm_a.history_json(&ctx.gid).contains("сообщение A"),
+        "у автора осталось"
+    );
 }
 
 /// Перезапуск ОТПРАВИТЕЛЯ не должен ломать группу.
@@ -395,8 +570,12 @@ fn sender_restart_keeps_group_working() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(30), id(40));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
-    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
-    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        ..Config::default()
+    };
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let (a_msgr, b_msgr) = (Arc::new(a_msgr), Arc::new(b_msgr));
     let (a_dir, b_dir) = (tmpdir("restart-a"), tmpdir("restart-b"));
@@ -441,7 +620,11 @@ fn sender_restart_keeps_group_working() {
     // и запросы KeyPackage принимать.
     drop(gm_b);
     let mut gm_b = manager(b_id.clone(), b_msgr.clone(), b_dir.clone());
-    assert_eq!(gm_b.admin_key(&gid), Some(a_key), "админ известен после перезапуска");
+    assert_eq!(
+        gm_b.admin_key(&gid),
+        Some(a_key),
+        "админ известен после перезапуска"
+    );
     let list: serde_json::Value = serde_json::from_str(&gm_b.list_json()).unwrap();
     assert_eq!(list[0]["admin"], false);
 
@@ -449,7 +632,10 @@ fn sender_restart_keeps_group_working() {
     assert!(gm_b.leave(&gid));
     drop(gm_b);
     let gm_b = manager(b_id, b_msgr, b_dir);
-    assert!(!gm_b.group_ids().contains(&gid), "покинутая группа не вернулась");
+    assert!(
+        !gm_b.group_ids().contains(&gid),
+        "покинутая группа не вернулась"
+    );
     assert_eq!(gm_b.admin_key(&gid), None);
 }
 
@@ -463,8 +649,12 @@ fn accept_survives_offline_inviter() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(50), id(60));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
-    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
-    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        ..Config::default()
+    };
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let mut gm_a = manager(a_id, Arc::new(a_msgr), tmpdir("off-a"));
     let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("off-b"));
@@ -483,7 +673,10 @@ fn accept_survives_offline_inviter() {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(!gm_b.group_ids().contains(&gid), "пока он офлайн — вступления нет");
+    assert!(
+        !gm_b.group_ids().contains(&gid),
+        "пока он офлайн — вступления нет"
+    );
     assert!(
         gm_b.invites_json().contains("\"waiting\":true"),
         "карточка остаётся и честно показывает ожидание: {}",
@@ -498,7 +691,10 @@ fn accept_survives_offline_inviter() {
         }),
         "после возвращения пригласившего вступление доводится до конца"
     );
-    assert!(!gm_b.invites_json().contains(&hex::encode(&gid)), "карточка снята после вступления");
+    assert!(
+        !gm_b.invites_json().contains(&hex::encode(&gid)),
+        "карточка снята после вступления"
+    );
 }
 
 /// Приняли приглашение, KeyPackage ПОТЕРЯЛСЯ насовсем (пригласивший офлайн дольше,
@@ -517,7 +713,8 @@ fn join_survives_lost_key_package_and_restart() {
         message_ttl: Duration::from_millis(200),
         ..Config::default()
     };
-    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let b_msgr = Arc::new(b_msgr);
     let b_dir = tmpdir("lost-b");
@@ -536,7 +733,10 @@ fn join_survives_lost_key_package_and_restart() {
     gm_b.accept_invite(&gid);
     std::thread::sleep(Duration::from_millis(400));
     while a_rx.try_recv().is_ok() {}
-    assert!(!gm_a.members(&gid).contains(&b_key), "KeyPackage до админа не дошёл");
+    assert!(
+        !gm_a.members(&gid).contains(&b_key),
+        "KeyPackage до админа не дошёл"
+    );
 
     // Перезапуск клиента: состояние вступления в памяти потеряно, на диске — только
     // приглашение с отметкой «принято».
@@ -566,7 +766,10 @@ fn join_survives_lost_key_package_and_restart() {
         }
     }
     assert!(done, "вступление доведено до конца само");
-    assert!(!gm_b.invites_json().contains(&hex::encode(&gid)), "карточка снята после вступления");
+    assert!(
+        !gm_b.invites_json().contains(&hex::encode(&gid)),
+        "карточка снята после вступления"
+    );
 }
 
 /// Вторая половина той же истории: пригласивший ПЕРЕЗАПУСТИЛСЯ, пока приглашённый
@@ -577,8 +780,12 @@ fn inviter_restart_still_accepts_key_package() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(52), id(62));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
-    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
-    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        ..Config::default()
+    };
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let a_msgr = Arc::new(a_msgr);
     let a_dir = tmpdir("re-a");
@@ -612,8 +819,12 @@ fn only_admin_can_pin_in_a_group() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(101), id(102));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
-    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
-    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        ..Config::default()
+    };
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let (mut gm_a, store_a) = manager_with_store(a_id, Arc::new(a_msgr), tmpdir("pin-a"));
     let (mut gm_b, store_b) = manager_with_store(b_id, Arc::new(b_msgr), tmpdir("pin-b"));
@@ -634,8 +845,16 @@ fn only_admin_can_pin_in_a_group() {
         b.history_json(&gid).contains("встречаемся у входа")
     }));
     let hist: serde_json::Value = serde_json::from_str(&gm_a.history_json(&gid)).unwrap();
-    let msg = hist.as_array().unwrap().iter().find(|m| m["text"] == "встречаемся у входа").unwrap();
-    let (msg_id, msg_sender) = (msg["id"].as_u64().unwrap(), msg["sender"].as_str().unwrap().to_string());
+    let msg = hist
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["text"] == "встречаемся у входа")
+        .unwrap();
+    let (msg_id, msg_sender) = (
+        msg["id"].as_u64().unwrap(),
+        msg["sender"].as_str().unwrap().to_string(),
+    );
 
     assert!(gm_a.pin(&gid, msg_id, &msg_sender, true), "админ закрепил");
     assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, _| {
@@ -643,17 +862,27 @@ fn only_admin_can_pin_in_a_group() {
     }));
     let at_b = store_b.lock().unwrap().pinned(Chat::Group(&gid));
     assert_eq!(at_b.len(), 1);
-    assert_eq!(at_b[0].text, "встречаемся у входа", "закреп доехал до участника");
+    assert_eq!(
+        at_b[0].text, "встречаемся у входа",
+        "закреп доехал до участника"
+    );
 
     // Участник закрепить не может — ни у себя, ни тем более у админа.
-    assert!(!gm_b.pin(&gid, msg_id, &msg_sender, true), "не админ — отказ");
+    assert!(
+        !gm_b.pin(&gid, msg_id, &msg_sender, true),
+        "не админ — отказ"
+    );
     for _ in 0..10 {
         while let Ok(ev) = a_rx.try_recv() {
             dispatch(&mut gm_a, ev);
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(store_a.lock().unwrap().pinned(Chat::Group(&gid)).len(), 1, "чужого закрепа нет");
+    assert_eq!(
+        store_a.lock().unwrap().pinned(Chat::Group(&gid)).len(),
+        1,
+        "чужого закрепа нет"
+    );
 
     // Открепление админом убирает закреп у всех.
     assert!(gm_a.pin(&gid, msg_id, &msg_sender, false));
@@ -665,7 +894,9 @@ fn only_admin_can_pin_in_a_group() {
 /// Есть ли в истории группы у `gm` текст `text`?
 fn has_text(gm: &GroupManager, gid: &[u8], text: &str) -> bool {
     let h: serde_json::Value = serde_json::from_str(&gm.history_json(gid)).unwrap_or_default();
-    h.as_array().map(|a| a.iter().any(|m| m["text"] == text)).unwrap_or(false)
+    h.as_array()
+        .map(|a| a.iter().any(|m| m["text"] == text))
+        .unwrap_or(false)
 }
 
 /// R-002: resync по-прежнему работает — админ просит KeyPackage, перевыпускает
@@ -677,9 +908,14 @@ fn admin_resync_still_rejoins_member() {
     c.gm_a.on_resync_request(c.b_key, &gid);
     // Даём обмену KeyPackage → Remove+Add → Welcome пройти, затем проверяем чтение.
     pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, _| false);
-    assert!(c.gm_b.group_ids().contains(&gid), "B остался в группе после resync");
+    assert!(
+        c.gm_b.group_ids().contains(&gid),
+        "B остался в группе после resync"
+    );
     assert!(c.gm_a.send_text(&gid, "после resync"));
-    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, b| has_text(b, &gid, "после resync"));
+    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, b| {
+        has_text(b, &gid, "после resync")
+    });
     assert!(ok, "B читает группу после перевыпуска");
 }
 
@@ -690,7 +926,10 @@ fn key_request_from_non_admin_is_ignored() {
     let net = LoopbackNet::new();
     let (m_id, v_id) = (id(31), id(32));
     let (m_key, v_key) = (m_id.public_key_bytes(), v_id.public_key_bytes());
-    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        ..Config::default()
+    };
     let (m_msgr, m_rx) = Messenger::start_with_transport(m_id, net.endpoint(m_key), cfg.clone());
     let (v_msgr, v_rx) = Messenger::start_with_transport(v_id.clone(), net.endpoint(v_key), cfg);
     let mut gm_v = manager(v_id, Arc::new(v_msgr), tmpdir("v"));
@@ -719,8 +958,14 @@ fn resync_key_package_cannot_join_another_group() {
     // Подменяем адрес: KeyPackage от B админ применит ко второй группе.
     c.gm_a.invite(&other, c.b_key);
     pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, _| false);
-    assert!(!c.gm_b.group_ids().contains(&other), "B не вписан во вторую группу");
-    assert!(c.gm_b.group_ids().contains(&c.gid), "первая группа на месте");
+    assert!(
+        !c.gm_b.group_ids().contains(&other),
+        "B не вписан во вторую группу"
+    );
+    assert!(
+        c.gm_b.group_ids().contains(&c.gid),
+        "первая группа на месте"
+    );
 }
 
 /// R-027: одного человека можно позвать в две группы сразу. Второе приглашение не
@@ -731,8 +976,12 @@ fn one_person_invited_into_two_groups() {
     let (a_id, b_id) = (id(33), id(34));
     let b_key = b_id.public_key_bytes();
     let a_key = a_id.public_key_bytes();
-    let cfg = Config { retry_interval: Duration::from_millis(40), ..Config::default() };
-    let (a_msgr, a_rx) = Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        ..Config::default()
+    };
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
     let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
     let mut gm_a = manager(a_id, Arc::new(a_msgr), tmpdir("a2g"));
     let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("b2g"));
@@ -754,7 +1003,10 @@ fn one_person_invited_into_two_groups() {
         b.group_ids().contains(&first) && a.members(&first).contains(&b_key)
     });
     assert!(joined_first, "B вступил именно в первую группу");
-    assert!(!gm_a.members(&second).contains(&b_key), "во вторую — пока нет");
+    assert!(
+        !gm_a.members(&second).contains(&b_key),
+        "во вторую — пока нет"
+    );
 
     // Очередь вступлений: маячок продолжает со второй.
     gm_b.retry_pending_joins();

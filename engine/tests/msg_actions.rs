@@ -18,7 +18,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-msgact-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -26,7 +29,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 fn wait(secs: u64, mut cond: impl FnMut() -> bool) -> bool {
@@ -66,14 +71,20 @@ fn reply_keeps_the_reference_and_flips_the_author_side() {
     let (a, b, a_key, b_key) = pair("reply", 21, 22);
 
     let first = a.send_text(&b_key, "во сколько встречаемся?").unwrap() as u64;
-    assert!(wait(10, || !history(&b, &a_key).is_empty()), "первое сообщение дошло");
+    assert!(
+        wait(10, || !history(&b, &a_key).is_empty()),
+        "первое сообщение дошло"
+    );
 
     // Боб отвечает на сообщение Ани — для него оно ЧУЖОЕ.
     b.send_text_reply(&a_key, "в семь", first, false);
     assert!(wait(10, || history(&a, &b_key).len() == 2), "ответ дошёл");
 
     let at_a = history(&a, &b_key);
-    let reply = at_a.iter().find(|m| m["text"] == "в семь").expect("ответ в истории");
+    let reply = at_a
+        .iter()
+        .find(|m| m["text"] == "в семь")
+        .expect("ответ в истории");
     assert_eq!(reply["reply_to"].as_u64(), Some(first));
     assert_eq!(
         reply["reply_sender"].as_str(),
@@ -83,9 +94,15 @@ fn reply_keeps_the_reference_and_flips_the_author_side() {
 
     // И у самого Боба та же ссылка указывает на Аню.
     let at_b = history(&b, &a_key);
-    let own = at_b.iter().find(|m| m["text"] == "в семь").expect("свой ответ");
+    let own = at_b
+        .iter()
+        .find(|m| m["text"] == "в семь")
+        .expect("свой ответ");
     assert_eq!(own["reply_to"].as_u64(), Some(first));
-    assert_eq!(own["reply_sender"].as_str(), Some(hex::encode(a_key).as_str()));
+    assert_eq!(
+        own["reply_sender"].as_str(),
+        Some(hex::encode(a_key).as_str())
+    );
     // Автор самого ответа — Боб, и это видно без всяких флагов.
     assert_eq!(own["sender"].as_str(), Some(hex::encode(b_key).as_str()));
 }
@@ -154,8 +171,11 @@ fn deleting_locally_does_not_touch_the_other_side() {
 fn forwarding_keeps_the_original_author() {
     let net = LoopbackNet::new();
     let (a_id, b_id, c_id) = (id(31), id(32), id(33));
-    let (a_key, b_key, c_key) =
-        (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let (a_key, b_key, c_key) = (
+        a_id.public_key_bytes(),
+        b_id.public_key_bytes(),
+        c_id.public_key_bytes(),
+    );
     let a = start(&net, a_id, tmpdir("fwd-a"));
     let b = start(&net, b_id, tmpdir("fwd-b"));
     let c = start(&net, c_id, tmpdir("fwd-c"));
@@ -167,10 +187,16 @@ fn forwarding_keeps_the_original_author() {
     std::mem::forget(net);
 
     a.send_text(&b_key, "встречаемся в семь");
-    assert!(wait(10, || !history(&b, &a_key).is_empty()), "сообщение дошло до Боба");
+    assert!(
+        wait(10, || !history(&b, &a_key).is_empty()),
+        "сообщение дошло до Боба"
+    );
     let at_b = history(&b, &a_key);
     let msg = &at_b[0];
-    let refs = vec![(msg["id"].as_u64().unwrap(), msg["sender"].as_str().unwrap().to_string())];
+    let refs = vec![(
+        msg["id"].as_u64().unwrap(),
+        msg["sender"].as_str().unwrap().to_string(),
+    )];
 
     // Боб пересылает Вере сообщение Ани.
     let sent = b.forward_messages(
@@ -180,7 +206,10 @@ fn forwarding_keeps_the_original_author() {
         false,
     );
     assert_eq!(sent, 1);
-    assert!(wait(10, || !history(&c, &b_key).is_empty()), "пересланное дошло до Веры");
+    assert!(
+        wait(10, || !history(&c, &b_key).is_empty()),
+        "пересланное дошло до Веры"
+    );
 
     let at_c = history(&c, &b_key);
     let fwd = &at_c[0];
@@ -190,16 +219,26 @@ fn forwarding_keeps_the_original_author() {
         Some(hex::encode(a_key).as_str()),
         "у Веры видно, что автор — Аня, а не переславший Боб"
     );
-    assert_eq!(fwd["sender"].as_str(), Some(hex::encode(b_key).as_str()), "прислал всё же Боб");
+    assert_eq!(
+        fwd["sender"].as_str(),
+        Some(hex::encode(b_key).as_str()),
+        "прислал всё же Боб"
+    );
 
     // И у самого Боба его копия помнит источник — иначе «переслать дальше» потеряло
     // бы автора уже на втором шаге.
     let own = history(&b, &c_key);
     assert_eq!(own.len(), 1);
-    assert_eq!(own[0]["fwd_from"].as_str(), Some(hex::encode(a_key).as_str()));
+    assert_eq!(
+        own[0]["fwd_from"].as_str(),
+        Some(hex::encode(a_key).as_str())
+    );
 
     // Пересылка пересланного: источник остаётся Аня, посредник не подменяет её.
-    let refs2 = vec![(own[0]["id"].as_u64().unwrap(), own[0]["sender"].as_str().unwrap().to_string())];
+    let refs2 = vec![(
+        own[0]["id"].as_u64().unwrap(),
+        own[0]["sender"].as_str().unwrap().to_string(),
+    )];
     b.forward_messages(
         peerage_engine::ChatKey::Dm(c_key),
         &refs2,
@@ -207,11 +246,16 @@ fn forwarding_keeps_the_original_author() {
         false,
     );
     // Ищем ВХОДЯЩЕЕ: в этом чате уже лежит её собственный оригинал с тем же текстом.
-    assert!(wait(10, || history(&a, &b_key).iter().any(|m| m["mine"] == false)));
+    assert!(wait(10, || history(&a, &b_key)
+        .iter()
+        .any(|m| m["mine"] == false)));
     let back = history(&a, &b_key);
     let again = back.iter().find(|m| m["mine"] == false).unwrap();
     assert_eq!(again["text"], "встречаемся в семь");
-    assert_eq!(again["fwd_from"].as_str(), Some(hex::encode(a_key).as_str()));
+    assert_eq!(
+        again["fwd_from"].as_str(),
+        Some(hex::encode(a_key).as_str())
+    );
 }
 
 /// «Скрыть автора» скрывает его ПО-НАСТОЯЩЕМУ: ключ не уходит на провод вовсе, а
@@ -221,8 +265,11 @@ fn forwarding_keeps_the_original_author() {
 fn hidden_forward_sends_no_author_at_all() {
     let net = LoopbackNet::new();
     let (a_id, b_id, c_id) = (id(41), id(42), id(43));
-    let (a_key, b_key, c_key) =
-        (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let (a_key, b_key, c_key) = (
+        a_id.public_key_bytes(),
+        b_id.public_key_bytes(),
+        c_id.public_key_bytes(),
+    );
     let a = start(&net, a_id, tmpdir("anon-a"));
     let b = start(&net, b_id, tmpdir("anon-b"));
     let c = start(&net, c_id, tmpdir("anon-c"));
@@ -250,7 +297,11 @@ fn hidden_forward_sends_no_author_at_all() {
 
     let got = history(&c, &b_key);
     assert_eq!(got[0]["text"], "это между нами");
-    assert_eq!(got[0]["fwd_from"].as_str(), Some(""), "ключа автора у Веры нет");
+    assert_eq!(
+        got[0]["fwd_from"].as_str(),
+        Some(""),
+        "ключа автора у Веры нет"
+    );
     assert_eq!(got[0]["fwd_anon"], true, "но видно, что это пересылка");
 
     // И своя копия у Боба совпадает с тем, что ушло: показывать себе имя, которого
@@ -268,7 +319,10 @@ fn pin_in_a_dm_is_shared_by_both_sides() {
     let (a, b, a_key, b_key) = pair("pin", 51, 52);
 
     let id1 = a.send_text(&b_key, "код от домофона 47К").unwrap() as u64;
-    assert!(wait(10, || !history(&b, &a_key).is_empty()), "сообщение дошло");
+    assert!(
+        wait(10, || !history(&b, &a_key).is_empty()),
+        "сообщение дошло"
+    );
 
     let me = hex::encode(a_key);
     assert!(a.pin_message(peerage_engine::ChatKey::Dm(b_key), id1, &me, true));
@@ -288,7 +342,11 @@ fn pin_in_a_dm_is_shared_by_both_sides() {
     let at_b: serde_json::Value =
         serde_json::from_str(&b.pinned_json(peerage_engine::ChatKey::Dm(a_key))).unwrap();
     assert_eq!(at_b[0]["text"], "код от домофона 47К");
-    assert_eq!(at_b[0]["sender"].as_str(), Some(me.as_str()), "автор — Аня, а не получатель");
+    assert_eq!(
+        at_b[0]["sender"].as_str(),
+        Some(me.as_str()),
+        "автор — Аня, а не получатель"
+    );
     assert_eq!(at_b[0]["mine"], false);
 
     // Открепление тоже общее.
@@ -309,30 +367,50 @@ fn search_finds_messages_across_chats() {
 
     a.save_note("пароль от вайфая: 12345678");
     a.send_text(&b_key, "встречаемся в семь у входа");
-    assert!(wait(10, || !history(&b, &_a_key).is_empty()), "сообщение дошло");
+    assert!(
+        wait(10, || !history(&b, &_a_key).is_empty()),
+        "сообщение дошло"
+    );
 
     let hits: serde_json::Value = serde_json::from_str(&a.search_json("встреч", None, 50)).unwrap();
     let arr = hits.as_array().unwrap();
     assert_eq!(arr.len(), 1, "нашлось одно: {hits}");
     assert_eq!(arr[0]["text"], "встречаемся в семь у входа");
-    assert_eq!(arr[0]["chat"].as_str(), Some(hex::encode(b_key).as_str()), "видно, где нашлось");
+    assert_eq!(
+        arr[0]["chat"].as_str(),
+        Some(hex::encode(b_key).as_str()),
+        "видно, где нашлось"
+    );
     assert_eq!(arr[0]["group"], false);
 
     // Заметка себе — тот же поиск, чат с самим собой.
-    let notes: serde_json::Value = serde_json::from_str(&a.search_json("пароль", None, 50)).unwrap();
+    let notes: serde_json::Value =
+        serde_json::from_str(&a.search_json("пароль", None, 50)).unwrap();
     assert_eq!(notes.as_array().unwrap().len(), 1);
-    assert_eq!(notes[0]["chat"].as_str(), Some(hex::encode(_a_key).as_str()));
+    assert_eq!(
+        notes[0]["chat"].as_str(),
+        Some(hex::encode(_a_key).as_str())
+    );
 
     // По началу слова тоже (а не только по целому).
     let prefix: serde_json::Value = serde_json::from_str(&a.search_json("вайф", None, 50)).unwrap();
-    assert_eq!(prefix.as_array().unwrap().len(), 1, "префиксный поиск: {prefix}");
+    assert_eq!(
+        prefix.as_array().unwrap().len(),
+        1,
+        "префиксный поиск: {prefix}"
+    );
 
     // Чужой чат в результат не лезет.
-    let scoped: serde_json::Value = serde_json::from_str(
-        &a.search_json("пароль", Some(peerage_engine::ChatKey::Dm(b_key)), 50),
-    )
+    let scoped: serde_json::Value = serde_json::from_str(&a.search_json(
+        "пароль",
+        Some(peerage_engine::ChatKey::Dm(b_key)),
+        50,
+    ))
     .unwrap();
-    assert!(scoped.as_array().unwrap().is_empty(), "поиск в чате не видит заметок");
+    assert!(
+        scoped.as_array().unwrap().is_empty(),
+        "поиск в чате не видит заметок"
+    );
 }
 
 /// Правка доезжает до собеседника и помечается как правка; чужое сообщение
@@ -342,29 +420,49 @@ fn editing_replaces_text_on_both_sides_and_only_for_the_author() {
     let (a, b, a_key, b_key) = pair("edit", 71, 72);
 
     let id1 = a.send_text(&b_key, "встречаемся в семь").unwrap() as u64;
-    assert!(wait(10, || !history(&b, &a_key).is_empty()), "сообщение дошло");
+    assert!(
+        wait(10, || !history(&b, &a_key).is_empty()),
+        "сообщение дошло"
+    );
 
-    assert!(a.edit_message(peerage_engine::ChatKey::Dm(b_key), id1, "встречаемся в восемь"));
+    assert!(a.edit_message(
+        peerage_engine::ChatKey::Dm(b_key),
+        id1,
+        "встречаемся в восемь"
+    ));
 
     // У автора текст заменён и помечен «изменено».
     let mine = history(&a, &b_key);
     let m = mine.iter().find(|m| m["id"].as_u64() == Some(id1)).unwrap();
     assert_eq!(m["text"], "встречаемся в восемь");
-    assert!(m["edited_at"].as_i64().unwrap_or(0) > 0, "пометка о правке осталась");
+    assert!(
+        m["edited_at"].as_i64().unwrap_or(0) > 0,
+        "пометка о правке осталась"
+    );
 
     // И у собеседника — тот же текст, а не второе сообщение.
     assert!(wait(10, || {
-        history(&b, &a_key).iter().any(|m| m["text"] == "встречаемся в восемь")
+        history(&b, &a_key)
+            .iter()
+            .any(|m| m["text"] == "встречаемся в восемь")
     }));
     let at_b = history(&b, &a_key);
     assert_eq!(at_b.len(), 1, "правка заменила текст, а не добавила строку");
     assert!(at_b[0]["edited_at"].as_i64().unwrap_or(0) > 0);
 
     // Боб пытается исправить сообщение Ани — отказ, и текст у него прежний.
-    assert!(!b.edit_message(peerage_engine::ChatKey::Dm(a_key), id1, "встречаемся в девять"));
+    assert!(!b.edit_message(
+        peerage_engine::ChatKey::Dm(a_key),
+        id1,
+        "встречаемся в девять"
+    ));
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(history(&b, &a_key)[0]["text"], "встречаемся в восемь");
-    assert_eq!(history(&a, &b_key)[0]["text"], "встречаемся в восемь", "и у автора тоже");
+    assert_eq!(
+        history(&a, &b_key)[0]["text"],
+        "встречаемся в восемь",
+        "и у автора тоже"
+    );
 }
 
 /// «Очистить историю» стирает переписку только у себя: собеседник свою копию
@@ -377,7 +475,12 @@ fn clearing_history_is_local_and_takes_pins_and_queue_with_it() {
     let id1 = a.send_text(&b_key, "первое").unwrap() as u64;
     a.send_text(&b_key, "второе");
     assert!(wait(10, || history(&b, &a_key).len() == 2), "оба дошли");
-    assert!(a.pin_message(peerage_engine::ChatKey::Dm(b_key), id1, &hex::encode(a_key), true));
+    assert!(a.pin_message(
+        peerage_engine::ChatKey::Dm(b_key),
+        id1,
+        &hex::encode(a_key),
+        true
+    ));
 
     // Собеседник, которого нет в сети: сообщение ему висит в очереди отправки.
     let ghost = id(83).public_key_bytes();
@@ -390,19 +493,32 @@ fn clearing_history_is_local_and_takes_pins_and_queue_with_it() {
     a.clear_dm_history(&ghost);
 
     assert!(history(&a, &b_key).is_empty(), "у себя история пуста");
-    let pins: serde_json::Value = serde_json::from_str(&a.pinned_json(peerage_engine::ChatKey::Dm(b_key))).unwrap();
-    assert_eq!(pins.as_array().map(|v| v.len()), Some(0), "закреп ушёл вместе с историей");
+    let pins: serde_json::Value =
+        serde_json::from_str(&a.pinned_json(peerage_engine::ChatKey::Dm(b_key))).unwrap();
+    assert_eq!(
+        pins.as_array().map(|v| v.len()),
+        Some(0),
+        "закреп ушёл вместе с историей"
+    );
     assert_eq!(pending(&a), 0, "неотправленное не вернётся в чат");
-    assert!(a.contacts_json().contains(&hex::encode(b_key)), "контакт остался");
+    assert!(
+        a.contacts_json().contains(&hex::encode(b_key)),
+        "контакт остался"
+    );
     assert_eq!(history(&b, &a_key).len(), 2, "у собеседника переписка цела");
 
     // Удаление контакта стирает и переписку — так обещает подтверждение в UI.
     b.remove_contact(&a_key);
-    assert!(history(&b, &a_key).is_empty(), "удалённый контакт уходит вместе с историей");
+    assert!(
+        history(&b, &a_key).is_empty(),
+        "удалённый контакт уходит вместе с историей"
+    );
 }
 
 fn json_field(s: &str, key: &str) -> u64 {
-    serde_json::from_str::<serde_json::Value>(s).unwrap()[key].as_u64().unwrap_or(0)
+    serde_json::from_str::<serde_json::Value>(s).unwrap()[key]
+        .as_u64()
+        .unwrap_or(0)
 }
 
 /// R-056: пересылка вложения — ссылка на блоб, который у пересылающего уже есть:
@@ -412,8 +528,11 @@ fn json_field(s: &str, key: &str) -> u64 {
 fn forwarded_attachment_is_a_reference_the_recipient_pulls() {
     let net = LoopbackNet::new();
     let (a_id, b_id, c_id) = (id(34), id(35), id(36));
-    let (a_key, b_key, c_key) =
-        (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+    let (a_key, b_key, c_key) = (
+        a_id.public_key_bytes(),
+        b_id.public_key_bytes(),
+        c_id.public_key_bytes(),
+    );
     let a = start(&net, a_id, tmpdir("fwdm-a"));
     let b = start(&net, b_id, tmpdir("fwdm-b"));
     let c = start(&net, c_id, tmpdir("fwdm-c"));
@@ -428,19 +547,48 @@ fn forwarded_attachment_is_a_reference_the_recipient_pulls() {
     let blob = hex::encode(peerage_blob::blob_id(&content));
     let src = tmpdir("fwdm-src").join("clip.mp4");
     std::fs::write(&src, &content).unwrap();
-    a.send_media_file(&b_key, &src, "video/mp4", "clip.mp4", peerage_engine::MediaInfo::default()).unwrap();
-    assert!(wait(10, || !history(&b, &a_key).is_empty()), "карточка дошла до Боба");
+    a.send_media_file(
+        &b_key,
+        &src,
+        "video/mp4",
+        "clip.mp4",
+        peerage_engine::MediaInfo::default(),
+    )
+    .unwrap();
+    assert!(
+        wait(10, || !history(&b, &a_key).is_empty()),
+        "карточка дошла до Боба"
+    );
     assert!(b.download_media(&a_key, &blob));
     assert!(wait(60, || b.blob_exists(&blob)), "Боб скачал");
 
     let msg = &history(&b, &a_key)[0];
-    let refs = vec![(msg["id"].as_u64().unwrap(), msg["sender"].as_str().unwrap().to_string())];
-    let sent = b.forward_messages(peerage_engine::ChatKey::Dm(a_key), &refs, peerage_engine::ChatKey::Dm(c_key), false);
+    let refs = vec![(
+        msg["id"].as_u64().unwrap(),
+        msg["sender"].as_str().unwrap().to_string(),
+    )];
+    let sent = b.forward_messages(
+        peerage_engine::ChatKey::Dm(a_key),
+        &refs,
+        peerage_engine::ChatKey::Dm(c_key),
+        false,
+    );
     assert_eq!(sent, 1);
-    assert!(wait(10, || !history(&c, &b_key).is_empty()), "пересланное дошло до Веры");
+    assert!(
+        wait(10, || !history(&c, &b_key).is_empty()),
+        "пересланное дошло до Веры"
+    );
     let fwd = &history(&c, &b_key)[0];
-    assert_eq!(fwd["blob_id"].as_str(), Some(blob.as_str()), "тот же блоб — ссылка, а не новый файл");
-    assert_eq!(fwd["size"].as_u64(), Some(content.len() as u64), "размер для карточки на месте");
+    assert_eq!(
+        fwd["blob_id"].as_str(),
+        Some(blob.as_str()),
+        "тот же блоб — ссылка, а не новый файл"
+    );
+    assert_eq!(
+        fwd["size"].as_u64(),
+        Some(content.len() as u64),
+        "размер для карточки на месте"
+    );
     assert_eq!(fwd["fwd_from"].as_str(), Some(hex::encode(a_key).as_str()));
 
     assert!(c.download_media(&b_key, &blob));
@@ -457,6 +605,11 @@ fn two_notes_in_one_second_are_both_kept() {
     a.save_note("вторая");
     a.save_note("третья");
     let notes: serde_json::Value = serde_json::from_str(&a.notes_json()).unwrap();
-    let texts: Vec<&str> = notes.as_array().unwrap().iter().filter_map(|n| n["text"].as_str()).collect();
+    let texts: Vec<&str> = notes
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|n| n["text"].as_str())
+        .collect();
     assert_eq!(texts, ["первая", "вторая", "третья"]);
 }

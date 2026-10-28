@@ -18,14 +18,20 @@ use peerage_messenger::Messenger;
 use crate::LockRecover;
 
 fn now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Идентификатор группового сообщения: время в МИЛЛИсекундах. Уникальность нужна
 /// только в пределах отправителя (ссылка — пара «автор + id»), а секунд не хватало
 /// бы: два сообщения подряд получали бы один id и ответ указывал бы на оба.
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Строка списка групп для клиента.
@@ -195,14 +201,17 @@ impl GroupManager {
         let Some(e) = self.groups.get(id) else { return };
         let _ = std::fs::create_dir_all(&self.dir);
         let _ = e.chat.save(&self.group_path(id));
-        let _ = self.meta.save_group(id, &e.name, e.admin, self.admin_keys.get(id));
+        let _ = self
+            .meta
+            .save_group(id, &e.name, e.admin, self.admin_keys.get(id));
     }
 
     /// Записать своё/входящее сообщение группы в общее хранилище и отложить его
     /// для UI (см. [`Self::take_fresh`]).
     fn put(&mut self, gid: &[u8], msg: &StoredMessage) {
         if let Ok(row) = self.messages.lock_safe().append(Chat::Group(gid), msg) {
-            self.fresh.push((gid.to_vec(), StoredMessage { row, ..msg.clone() }));
+            self.fresh
+                .push((gid.to_vec(), StoredMessage { row, ..msg.clone() }));
         }
     }
 
@@ -215,7 +224,10 @@ impl GroupManager {
     /// в неё не входит, и после восстановления группа живёт архивом — история есть,
     /// писать нельзя. Без имени она выглядела бы чатом с шестнадцатеричным id.
     fn remember_title(&self, gid: &[u8], name: &str) {
-        let _ = self.messages.lock_safe().set_chat_title(Chat::Group(gid), name);
+        let _ = self
+            .messages
+            .lock_safe()
+            .set_chat_title(Chat::Group(gid), name);
     }
 
     fn load_all(&mut self) {
@@ -224,21 +236,39 @@ impl GroupManager {
                 self.admin_keys.insert(g.gid.clone(), k);
             }
             let path = self.group_path(&g.gid);
-            let Ok(chat) = GroupChat::load(&path, &self.identity, self.messenger.clone()) else { continue };
+            let Ok(chat) = GroupChat::load(&path, &self.identity, self.messenger.clone()) else {
+                continue;
+            };
             // Файл обязан быть состоянием ИМЕННО этой группы: подложенное под её имя
             // состояние другой группы расшифровалось бы (id в AAD не входит) и
             // подменило бы собой эту (R-038).
             if chat.group_id().as_deref() != Some(g.gid.as_slice()) {
-                log::warn!("group {}: файл состояния от другой группы — пропущен", hex::encode(&g.gid));
+                log::warn!(
+                    "group {}: файл состояния от другой группы — пропущен",
+                    hex::encode(&g.gid)
+                );
                 continue;
             }
             self.remember_title(&g.gid, &g.name);
-            self.groups.insert(g.gid, Entry { chat, name: g.name, admin: g.admin });
+            self.groups.insert(
+                g.gid,
+                Entry {
+                    chat,
+                    name: g.name,
+                    admin: g.admin,
+                },
+            );
         }
         self.invites = self.meta.sent_invites().into_iter().collect();
         for inv in self.meta.invites() {
-            self.pending_invites
-                .insert(inv.gid, PendingInvite { name: inv.name, inviter: inv.inviter, accepted: inv.accepted });
+            self.pending_invites.insert(
+                inv.gid,
+                PendingInvite {
+                    name: inv.name,
+                    inviter: inv.inviter,
+                    accepted: inv.accepted,
+                },
+            );
         }
     }
 
@@ -249,7 +279,14 @@ impl GroupManager {
         let chat = GroupChat::create(&self.identity, self.messenger.clone()).ok()?;
         let id = chat.group_id()?;
         // Создатель = админ/секвенсор (ADR-004).
-        self.groups.insert(id.clone(), Entry { chat, name: name.to_string(), admin: true });
+        self.groups.insert(
+            id.clone(),
+            Entry {
+                chat,
+                name: name.to_string(),
+                admin: true,
+            },
+        );
         self.remember_title(&id, name);
         let me = self.identity.public_key_bytes();
         self.remember_admin(&id, me);
@@ -292,7 +329,14 @@ impl GroupManager {
         // уже согласились — согласие сохраняем, иначе «ждём ответа» откатилось бы в
         // кнопки, а движок перестал бы повторять KeyPackage.
         let accepted = self.pending_invites.get(&gid).is_some_and(|i| i.accepted);
-        self.pending_invites.insert(gid.clone(), PendingInvite { name, inviter: peer, accepted });
+        self.pending_invites.insert(
+            gid.clone(),
+            PendingInvite {
+                name,
+                inviter: peer,
+                accepted,
+            },
+        );
         self.save_invite(&gid);
         true
     }
@@ -316,7 +360,9 @@ impl GroupManager {
     /// (дальше как обычный join — админ добавит нас, придёт Welcome). Имя группы из
     /// инвайта запоминаем, чтобы показать сразу. Возвращает true при успехе.
     pub fn accept_invite(&mut self, gid: &[u8]) -> bool {
-        let Some(inv) = self.pending_invites.get_mut(gid) else { return false };
+        let Some(inv) = self.pending_invites.get_mut(gid) else {
+            return false;
+        };
         // Помечаем ПРИНЯТЫМ и оставляем в списке: карточка исчезнет только когда
         // придёт Welcome. Пригласивший может быть офлайн — тогда мы повторим
         // отправку KeyPackage, как только он появится (см. `on_peer_online`).
@@ -350,7 +396,10 @@ impl GroupManager {
     /// Зовётся с маячка, поэтому НЕ зависит от presence: пригласивший может не быть
     /// нашим контактом, и тогда событий о его появлении нам никто не пришлёт.
     pub fn retry_pending_joins(&mut self) {
-        if self.last_join_retry.is_some_and(|t| t.elapsed() < JOIN_RETRY_EVERY) {
+        if self
+            .last_join_retry
+            .is_some_and(|t| t.elapsed() < JOIN_RETRY_EVERY)
+        {
             return;
         }
         let waiting = self
@@ -358,17 +407,25 @@ impl GroupManager {
             .iter()
             .find(|(_, inv)| inv.accepted)
             .map(|(gid, inv)| (gid.clone(), inv.inviter, inv.name.clone()));
-        let Some((gid, inviter, name)) = waiting else { return };
+        let Some((gid, inviter, name)) = waiting else {
+            return;
+        };
         self.last_join_retry = Some(Instant::now());
         match self.pending_kp.clone() {
             // Ожидание уже идёт — шлём тот же KeyPackage ещё раз.
             Some(kp) if self.pending.is_some() => {
-                log::info!("group {}: повторяю KeyPackage пригласившему", hex::encode(&gid));
+                log::info!(
+                    "group {}: повторяю KeyPackage пригласившему",
+                    hex::encode(&gid)
+                );
                 let _ = self.messenger.send_group_key_reply(&inviter, &gid, &kp);
             }
             // Состояние потеряно (перезапуск приложения) — начинаем вступление заново.
             _ => {
-                log::info!("group {}: возобновляю вступление после перезапуска", hex::encode(&gid));
+                log::info!(
+                    "group {}: возобновляю вступление после перезапуска",
+                    hex::encode(&gid)
+                );
                 self.send_key_package_to(inviter, gid, name);
             }
         }
@@ -380,8 +437,10 @@ impl GroupManager {
     /// Без этого «Вступить» работало только при онлайн-пригласившем, а иначе
     /// вступление терялось навсегда: карточка снята, повторить нечем.
     pub fn on_peer_online(&mut self, peer: [u8; 32]) {
-        let waiting =
-            self.pending_invites.values().any(|inv| inv.accepted && inv.inviter == peer);
+        let waiting = self
+            .pending_invites
+            .values()
+            .any(|inv| inv.accepted && inv.inviter == peer);
         if !waiting {
             return;
         }
@@ -429,29 +488,45 @@ impl GroupManager {
         fwd_anon: bool,
         mentions: Vec<Mention>,
     ) -> bool {
-        let Some(e) = self.groups.get_mut(gid) else { return false };
+        let Some(e) = self.groups.get_mut(gid) else {
+            return false;
+        };
         // id посеян временем в миллисекундах: он должен быть уникален только в
         // пределах отправителя (ссылка — пара «автор + id»).
         let id = now_ms();
         // У себя храним ровно то, что ушло в сеть — чистка та же, что в слое групп.
         let mentions = peerage_core::mention::clean(text, mentions);
-        let sent = e.chat.send_text_full(text, id, reply_to, reply_sender, fwd_from, fwd_anon, &mentions);
+        let sent = e.chat.send_text_full(
+            text,
+            id,
+            reply_to,
+            reply_sender,
+            fwd_from,
+            fwd_anon,
+            &mentions,
+        );
         if sent.is_err() {
             return false;
         }
-        self.put(gid, &StoredMessage {
-            id,
-            reply_to,
-            reply_sender: reply_sender.to_string(),
-            // kind заполняем явно: пустая строка — «неизвестно», и UI рисовал такое
-            // сообщение дважды (как текст и как подпись к вложению).
-            kind: "text".into(),
-            fwd_from: fwd_from.to_string(),
-            fwd_anon,
-            mentions,
-            text: text.to_string(), mine: true, time: now(),
-            sender: self.me_hex.clone(), ..Default::default()
-        });
+        self.put(
+            gid,
+            &StoredMessage {
+                id,
+                reply_to,
+                reply_sender: reply_sender.to_string(),
+                // kind заполняем явно: пустая строка — «неизвестно», и UI рисовал такое
+                // сообщение дважды (как текст и как подпись к вложению).
+                kind: "text".into(),
+                fwd_from: fwd_from.to_string(),
+                fwd_anon,
+                mentions,
+                text: text.to_string(),
+                mine: true,
+                time: now(),
+                sender: self.me_hex.clone(),
+                ..Default::default()
+            },
+        );
         // КРИТИЧНО: отправка двигает MLS sending-ratchet — его надо ПЕРСИСТИТЬ, иначе
         // после рестарта/убийства приложения отправитель грузит старое состояние и
         // шлёт со «старого» поколения → получатель (он-то приём сохраняет) уже
@@ -469,7 +544,9 @@ impl GroupManager {
         let mut gone: Vec<(u64, String)> = Vec::new();
         {
             let store = self.messages.lock_safe();
-            let Some(e) = self.groups.get_mut(gid) else { return 0 };
+            let Some(e) = self.groups.get_mut(gid) else {
+                return 0;
+            };
             for id in ids {
                 if *id == 0 {
                     continue;
@@ -482,7 +559,10 @@ impl GroupManager {
             }
         }
         if sent > 0 {
-            let _ = self.messages.lock_safe().delete_many(Chat::Group(gid), &gone);
+            let _ = self
+                .messages
+                .lock_safe()
+                .delete_many(Chat::Group(gid), &gone);
             // Отправка двигает MLS-ратчет — состояние обязано лечь на диск.
             self.save_group(gid);
         }
@@ -499,7 +579,11 @@ impl GroupManager {
         mentions: &[Mention],
     ) -> Option<(String, String, Vec<Mention>)> {
         let me = self.me_hex.clone();
-        if !self.messages.lock_safe().contains(Chat::Group(gid), &me, id) {
+        if !self
+            .messages
+            .lock_safe()
+            .contains(Chat::Group(gid), &me, id)
+        {
             return None;
         }
         let e = self.groups.get_mut(gid)?;
@@ -507,7 +591,10 @@ impl GroupManager {
         if e.chat.send_edit(id, text, &mentions).is_err() {
             return None;
         }
-        let _ = self.messages.lock_safe().edit_text(Chat::Group(gid), &me, id, text, &mentions, now());
+        let _ =
+            self.messages
+                .lock_safe()
+                .edit_text(Chat::Group(gid), &me, id, text, &mentions, now());
         // Рассылка двигает MLS-ратчет — состояние обязано лечь на диск.
         self.save_group(gid);
         Some((me, text.to_string(), mentions))
@@ -517,7 +604,9 @@ impl GroupManager {
     /// иначе любой участник вешал бы своё сообщение в шапку всем остальным.
     /// Возвращает true, если закреп применён и разослан.
     pub fn pin(&mut self, gid: &[u8], id: u64, sender: &str, on: bool) -> bool {
-        let Some(e) = self.groups.get_mut(gid) else { return false };
+        let Some(e) = self.groups.get_mut(gid) else {
+            return false;
+        };
         if !e.admin {
             log::warn!("pin: не админ группы {} — отказано", hex::encode(gid));
             return false;
@@ -546,15 +635,23 @@ impl GroupManager {
         if !self.groups.contains_key(gid) {
             return 0;
         }
-        self.messages.lock_safe().delete_many(Chat::Group(gid), refs).unwrap_or(0)
+        self.messages
+            .lock_safe()
+            .delete_many(Chat::Group(gid), refs)
+            .unwrap_or(0)
     }
 
     /// Отозвать участника из группы (ADR-004). Только админ. Двигает MLS-состояние
     /// → save_group. Возвращает true при успехе. Commit ушёл всем (вкл. удаляемого).
     pub fn remove_member(&mut self, gid: &[u8], peer: [u8; 32]) -> bool {
-        let Some(e) = self.groups.get_mut(gid) else { return false };
+        let Some(e) = self.groups.get_mut(gid) else {
+            return false;
+        };
         if !e.admin {
-            log::warn!("remove_member: не админ группы {} — отказано", hex::encode(gid));
+            log::warn!(
+                "remove_member: не админ группы {} — отказано",
+                hex::encode(gid)
+            );
             return false;
         }
         if e.chat.remove_member(peer).is_err() {
@@ -562,10 +659,17 @@ impl GroupManager {
         }
         // Системная строка «участник удалён» (актор — удалённый). id — время в мс:
         // системные строки одного участника не должны затирать друг друга.
-        self.put(gid, &StoredMessage {
-            id: now_ms(), mine: true, time: now(),
-            sender: hex::encode(peer), system: true, ..Default::default()
-        });
+        self.put(
+            gid,
+            &StoredMessage {
+                id: now_ms(),
+                mine: true,
+                time: now(),
+                sender: hex::encode(peer),
+                system: true,
+                ..Default::default()
+            },
+        );
         self.save_group(gid); // Commit сдвинул эпоху — персистим (инвариант MLS).
         true
     }
@@ -574,30 +678,44 @@ impl GroupManager {
     /// Байты блоба пушит вызывающий (engine) каждому участнику отдельно. Двигает
     /// sending-ratchet → save_group (как send_text). Возвращает участников для push.
     pub fn send_media(&mut self, gid: &[u8], media: &MediaBody) -> bool {
-        let Some(e) = self.groups.get_mut(gid) else { return false };
+        let Some(e) = self.groups.get_mut(gid) else {
+            return false;
+        };
         let id = now_ms();
-        let media = &MediaBody { id, ..media.clone() };
+        let media = &MediaBody {
+            id,
+            ..media.clone()
+        };
         let (fwd_from, fwd_anon) = (media.fwd_from.clone(), media.fwd_anon);
         if e.chat.send_media(media).is_err() {
             return false;
         }
-        self.put(gid, &StoredMessage {
-            id,
-            mine: true, time: now(), sender: self.me_hex.clone(),
-            // Подпись живёт в `text`: у медиа это поле свободно, как и в DM.
-            text: media.caption.clone(),
-            kind: media.kind.clone(), blob_id: media.hash.clone(),
-            mime: media.mime.clone(), name: media.name.clone(),
-            size: media.size, duration_ms: media.duration_ms,
-            width: media.width, height: media.height,
-            thumb_id: media.thumb.clone(),
-            fwd_from,
-            fwd_anon,
-            reply_to: media.reply_to,
-            reply_sender: media.reply_sender.clone(),
-            downloaded: true, // своё вложение уже у нас
-            ..Default::default()
-        });
+        self.put(
+            gid,
+            &StoredMessage {
+                id,
+                mine: true,
+                time: now(),
+                sender: self.me_hex.clone(),
+                // Подпись живёт в `text`: у медиа это поле свободно, как и в DM.
+                text: media.caption.clone(),
+                kind: media.kind.clone(),
+                blob_id: media.hash.clone(),
+                mime: media.mime.clone(),
+                name: media.name.clone(),
+                size: media.size,
+                duration_ms: media.duration_ms,
+                width: media.width,
+                height: media.height,
+                thumb_id: media.thumb.clone(),
+                fwd_from,
+                fwd_anon,
+                reply_to: media.reply_to,
+                reply_sender: media.reply_sender.clone(),
+                downloaded: true, // своё вложение уже у нас
+                ..Default::default()
+            },
+        );
         self.save_group(gid);
         true
     }
@@ -620,7 +738,9 @@ impl GroupManager {
 
     /// Ротация собственного ключа группы (PCS, ADR-004). Двигает эпоху → save_group.
     pub fn rekey(&mut self, gid: &[u8]) -> bool {
-        let Some(e) = self.groups.get_mut(gid) else { return false };
+        let Some(e) = self.groups.get_mut(gid) else {
+            return false;
+        };
         if e.chat.rekey_self().is_err() {
             return false;
         }
@@ -653,20 +773,28 @@ impl GroupManager {
         if !self.groups.contains_key(gid) {
             return "[]".into();
         }
-        let page = self.messages.lock_safe().history(Chat::Group(gid), None, crate::HISTORY_PAGE);
+        let page = self
+            .messages
+            .lock_safe()
+            .history(Chat::Group(gid), None, crate::HISTORY_PAGE);
         serde_json::to_string(&page).unwrap_or_else(|_| "[]".into())
     }
 
     /// Ключи участников (hex) — для группового звонка.
     pub fn members_json(&self, gid: &[u8]) -> String {
-        let Some(e) = self.groups.get(gid) else { return "[]".into() };
+        let Some(e) = self.groups.get(gid) else {
+            return "[]".into();
+        };
         let arr: Vec<String> = e.chat.members().iter().map(hex::encode).collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
     /// Ключи участников группы (для маячка присутствия комнаты).
     pub fn members(&self, gid: &[u8]) -> Vec<[u8; 32]> {
-        self.groups.get(gid).map(|e| e.chat.members()).unwrap_or_default()
+        self.groups
+            .get(gid)
+            .map(|e| e.chat.members())
+            .unwrap_or_default()
     }
 
     // ── События мессенджера ───────────────────────────────────────────────
@@ -681,7 +809,10 @@ impl GroupManager {
         }
         let ours = self.admin_keys.get(gid) == Some(&peer) && self.groups.contains_key(gid);
         if !ours {
-            log::warn!("запрос KeyPackage от {} — не админ этой нашей группы, игнорирую", hex::encode(peer));
+            log::warn!(
+                "запрос KeyPackage от {} — не админ этой нашей группы, игнорирую",
+                hex::encode(peer)
+            );
             return;
         }
         if let Ok((pending, kp)) = GroupChat::pending(&self.identity, self.messenger.clone()) {
@@ -735,25 +866,44 @@ impl GroupManager {
             let inbound = self.groups.get_mut(&gid).map(|e| e.chat.handle(data));
             let outcome = match inbound {
                 Some(Ok(Inbound::Message {
-                    sender, text, id, reply_to, reply_sender, fwd_from, fwd_anon, mentions,
+                    sender,
+                    text,
+                    id,
+                    reply_to,
+                    reply_sender,
+                    fwd_from,
+                    fwd_anon,
+                    mentions,
                 })) => {
                     let sender_hex = hex::encode(sender);
-                    self.put(&gid, &StoredMessage {
-                        id,
-                        reply_to,
-                        reply_sender,
-                        fwd_from,
-                        fwd_anon,
-                        mentions,
-                        kind: "text".into(),
-                        text: text.clone(), mine: false, time: now(),
-                        sender: sender_hex.clone(), ..Default::default()
-                    });
+                    self.put(
+                        &gid,
+                        &StoredMessage {
+                            id,
+                            reply_to,
+                            reply_sender,
+                            fwd_from,
+                            fwd_anon,
+                            mentions,
+                            kind: "text".into(),
+                            text: text.clone(),
+                            mine: false,
+                            time: now(),
+                            sender: sender_hex.clone(),
+                            ..Default::default()
+                        },
+                    );
                     GroupOutcome {
-                        gid: Some(gid.clone()), ..Default::default()
+                        gid: Some(gid.clone()),
+                        ..Default::default()
                     }
                 }
-                Some(Ok(Inbound::Edit { sender, target, text, mentions })) => {
+                Some(Ok(Inbound::Edit {
+                    sender,
+                    target,
+                    text,
+                    mentions,
+                })) => {
                     let who = hex::encode(sender);
                     let changed = self
                         .messages
@@ -766,7 +916,12 @@ impl GroupManager {
                         ..Default::default()
                     }
                 }
-                Some(Ok(Inbound::Pin { actor, target, sender, on })) => {
+                Some(Ok(Inbound::Pin {
+                    actor,
+                    target,
+                    sender,
+                    on,
+                })) => {
                     // Право проверяем ЗДЕСЬ: отправитель мог быть пропатчен, а в
                     // группе админ один и он известен из ростера.
                     let by_admin = self.admin_key(&gid) == Some(actor);
@@ -800,23 +955,32 @@ impl GroupManager {
                 }
                 Some(Ok(Inbound::Media { sender, media })) => {
                     let sender_hex = hex::encode(sender);
-                    self.put(&gid, &StoredMessage {
-                        id: media.id,
-                        mine: false, time: now(), sender: sender_hex.clone(),
+                    self.put(
+                        &gid,
+                        &StoredMessage {
+                            id: media.id,
+                            mine: false,
+                            time: now(),
+                            sender: sender_hex.clone(),
                             text: media.caption.clone(),
-                            kind: media.kind.clone(), blob_id: media.hash.clone(),
-                            mime: media.mime.clone(), name: media.name.clone(),
-                            size: media.size, duration_ms: media.duration_ms,
-                            width: media.width, height: media.height,
+                            kind: media.kind.clone(),
+                            blob_id: media.hash.clone(),
+                            mime: media.mime.clone(),
+                            name: media.name.clone(),
+                            size: media.size,
+                            duration_ms: media.duration_ms,
+                            width: media.width,
+                            height: media.height,
                             thumb_id: media.thumb.clone(),
-                        fwd_from: media.fwd_from.clone(),
-                        fwd_anon: media.fwd_anon,
-                        reply_to: media.reply_to,
-                        reply_sender: media.reply_sender.clone(),
-                        // Скачано ли — решит верхний слой (он знает хранилище блобов).
-                        downloaded: false,
-                        ..Default::default()
-                    });
+                            fwd_from: media.fwd_from.clone(),
+                            fwd_anon: media.fwd_anon,
+                            reply_to: media.reply_to,
+                            reply_sender: media.reply_sender.clone(),
+                            // Скачано ли — решит верхний слой (он знает хранилище блобов).
+                            downloaded: false,
+                            ..Default::default()
+                        },
+                    );
                     GroupOutcome {
                         gid: Some(gid.clone()),
                         media: Some(media),
@@ -833,19 +997,33 @@ impl GroupManager {
                         false
                     };
                     if changed {
-                        let name = self.groups.get(&gid).map(|e| e.name.clone()).unwrap_or_default();
+                        let name = self
+                            .groups
+                            .get(&gid)
+                            .map(|e| e.name.clone())
+                            .unwrap_or_default();
                         self.remember_title(&gid, &name);
                         self.save_group(&gid); // персист имени в index.json
                     }
-                    GroupOutcome { gid: Some(gid.clone()), renamed: changed, ..Default::default() }
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        renamed: changed,
+                        ..Default::default()
+                    }
                 }
                 Some(Ok(Inbound::Membership { actor })) => {
                     let actor_hex = hex::encode(actor);
-                    self.put(&gid, &StoredMessage {
-                        id: now_ms(), mine: false, time: now(),
-                        sender: actor_hex.clone(), system: true,
-                        ..Default::default()
-                    });
+                    self.put(
+                        &gid,
+                        &StoredMessage {
+                            id: now_ms(),
+                            mine: false,
+                            time: now(),
+                            sender: actor_hex.clone(),
+                            system: true,
+                            ..Default::default()
+                        },
+                    );
                     GroupOutcome {
                         gid: Some(gid.clone()),
                         ..Default::default()
@@ -856,27 +1034,48 @@ impl GroupManager {
                 Some(Ok(Inbound::SelfRemoved)) => {
                     log::info!("group {}: нас удалили из группы", hex::encode(&gid));
                     self.delete_group(&gid);
-                    return GroupOutcome { gid: Some(gid), removed: true, ..Default::default() };
+                    return GroupOutcome {
+                        gid: Some(gid),
+                        removed: true,
+                        ..Default::default()
+                    };
                 }
                 // ADR-004: отстали (пропущен Commit / удалён секрет эпохи) — просим
                 // админа заново синхронизировать нас (Remove+Add).
                 Some(Ok(Inbound::NeedsResync)) => {
-                    log::warn!("group {}: рассинхрон эпох — запрашиваю resync", hex::encode(&gid));
+                    log::warn!(
+                        "group {}: рассинхрон эпох — запрашиваю resync",
+                        hex::encode(&gid)
+                    );
                     self.request_resync(&gid);
-                    GroupOutcome { gid: Some(gid.clone()), ..Default::default() }
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        ..Default::default()
+                    }
                 }
                 Some(Err(e)) => {
                     log::warn!("group {} MLS отверг сообщение: {:?}", hex::encode(&gid), e);
-                    GroupOutcome { gid: Some(gid.clone()), ..Default::default() }
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        ..Default::default()
+                    }
                 }
-                _ => GroupOutcome { gid: Some(gid.clone()), ..Default::default() },
+                _ => GroupOutcome {
+                    gid: Some(gid.clone()),
+                    ..Default::default()
+                },
             };
             self.save_group(&gid);
             return outcome;
         }
         // Иначе — возможно Welcome для ожидающего вступления. Только от того, кому
         // мы отдали KeyPackage: чужой Welcome даже не трогает pending-состояние.
-        let Some(allowed) = self.pending_from.as_ref().filter(|(from, _)| *from == peer).map(|(_, g)| g.clone()) else {
+        let Some(allowed) = self
+            .pending_from
+            .as_ref()
+            .filter(|(from, _)| *from == peer)
+            .map(|(_, g)| g.clone())
+        else {
             return GroupOutcome::default();
         };
         let joined_gid = self.pending.as_mut().and_then(|p| {
@@ -887,7 +1086,11 @@ impl GroupManager {
             if !allowed.contains(&id) {
                 // Нужный отправитель, но не та группа. Pending уже израсходован этим
                 // Welcome — сбрасываем вступление, маячок начнёт его заново.
-                log::warn!("Welcome от {} в чужую группу {} — отвергнут", hex::encode(peer), hex::encode(&id));
+                log::warn!(
+                    "Welcome от {} в чужую группу {} — отвергнут",
+                    hex::encode(peer),
+                    hex::encode(&id)
+                );
                 self.pending = None;
                 self.pending_kp = None;
                 self.pending_from = None;
@@ -904,11 +1107,17 @@ impl GroupManager {
                     existing.chat = chat;
                     self.save_group(&id);
                     log::info!("group {}: resync завершён (перевступили)", hex::encode(&id));
-                    return GroupOutcome { gid: Some(id), ..Default::default() };
+                    return GroupOutcome {
+                        gid: Some(id),
+                        ..Default::default()
+                    };
                 }
                 // Иначе — первое вступление. Мы НЕ админ (админ — пригласивший).
                 // Имя — из принятого инвайта (иначе дефолт; админ всё равно догонит send_name).
-                let name = self.pending_join_name.take().unwrap_or_else(|| "Группа".into());
+                let name = self
+                    .pending_join_name
+                    .take()
+                    .unwrap_or_else(|| "Группа".into());
                 // Пригласивший и есть админ: приглашать и добавлять в MLS вправе
                 // только он (ADR-004).
                 if let Some(inv) = self.pending_invites.get(&id) {
@@ -918,9 +1127,20 @@ impl GroupManager {
                 self.pending_invites.remove(&id);
                 let _ = self.meta.remove_invite(&id);
                 self.remember_title(&id, &name);
-                self.groups.insert(id.clone(), Entry { chat, name, admin: false });
+                self.groups.insert(
+                    id.clone(),
+                    Entry {
+                        chat,
+                        name,
+                        admin: false,
+                    },
+                );
                 self.save_group(&id);
-                return GroupOutcome { gid: Some(id), joined: true, ..Default::default() };
+                return GroupOutcome {
+                    gid: Some(id),
+                    joined: true,
+                    ..Default::default()
+                };
             }
         }
         GroupOutcome::default()
@@ -941,7 +1161,9 @@ impl GroupManager {
     /// проситель в текущем ростере (отозванного не «лечим» назад) и не слишком
     /// часто. Просим свежий KeyPackage и помечаем обмен как re-add.
     pub fn on_resync_request(&mut self, peer: [u8; 32], gid: &[u8]) {
-        let Some(e) = self.groups.get(gid) else { return };
+        let Some(e) = self.groups.get(gid) else {
+            return;
+        };
         if !e.admin || !e.chat.members().contains(&peer) {
             return;
         }
@@ -963,7 +1185,9 @@ impl GroupManager {
     /// настоящий криптографический выход) и локально забываем группу. Если админ
     /// офлайн — остаётся мягкий локальный выход (нас отзовут при его доступности).
     pub fn leave(&mut self, gid: &[u8]) -> bool {
-        let Some(e) = self.groups.get(gid) else { return false };
+        let Some(e) = self.groups.get(gid) else {
+            return false;
+        };
         for peer in e.chat.members() {
             let _ = self.messenger.send_group_leave_request(&peer, gid);
         }

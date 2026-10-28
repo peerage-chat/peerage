@@ -20,7 +20,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-backup-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -28,11 +31,20 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 fn all() -> Parts {
-    Parts { contacts: true, messages: true, groups: true, notes: true, calls: true, attachments: true }
+    Parts {
+        contacts: true,
+        messages: true,
+        groups: true,
+        notes: true,
+        calls: true,
+        attachments: true,
+    }
 }
 
 /// Подождать условия: групповые команды исполняет актор в своём потоке, поэтому
@@ -54,7 +66,12 @@ fn fill(e: &Engine, peer: &[u8; 32]) {
     e.send_text(peer, "привет");
     e.send_text(peer, "как дела?");
     e.save_note("не забыть про хлеб");
-    e.send_media(peer, b"pretend jpeg bytes".to_vec(), "image/jpeg", "photo.jpg");
+    e.send_media(
+        peer,
+        b"pretend jpeg bytes".to_vec(),
+        "image/jpeg",
+        "photo.jpg",
+    );
 }
 
 #[test]
@@ -86,7 +103,10 @@ fn export_import_restores_conversation_on_a_clean_device() {
         .iter()
         .filter_map(|m| m["text"].as_str())
         .collect();
-    assert!(texts.contains(&"привет") && texts.contains(&"как дела?"), "тексты на месте: {texts:?}");
+    assert!(
+        texts.contains(&"привет") && texts.contains(&"как дела?"),
+        "тексты на месте: {texts:?}"
+    );
 
     // Вложение доступно локально, а не только ссылкой на него.
     let blob_id = hist
@@ -95,7 +115,10 @@ fn export_import_restores_conversation_on_a_clean_device() {
         .iter()
         .find_map(|m| m["blob_id"].as_str().filter(|s| !s.is_empty()))
         .expect("медиа-сообщение с блобом");
-    assert_eq!(fresh.blob_read(blob_id).as_deref(), Some(&b"pretend jpeg bytes"[..]));
+    assert_eq!(
+        fresh.blob_read(blob_id).as_deref(),
+        Some(&b"pretend jpeg bytes"[..])
+    );
 }
 
 #[test]
@@ -115,8 +138,15 @@ fn restore_does_not_grant_verification() {
     let b = start(&net, id(99), tmpdir("ver-dst"));
     b.backup_import(&file, "пк").unwrap();
     let contacts: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
-    assert_eq!(contacts[0]["key"], hex::encode(peer), "контакт восстановлен");
-    assert_eq!(contacts[0]["verified"], false, "но сверять его нужно заново");
+    assert_eq!(
+        contacts[0]["key"],
+        hex::encode(peer),
+        "контакт восстановлен"
+    );
+    assert_eq!(
+        contacts[0]["verified"], false,
+        "но сверять его нужно заново"
+    );
 }
 
 #[test]
@@ -129,7 +159,14 @@ fn only_selected_parts_are_included() {
     // Только контакты: ни переписки, ни заметок, ни файлов.
     let file = tmpdir("sel").join("contacts-only.peerage");
     let out = a
-        .backup_export(&file, Parts { contacts: true, ..Default::default() }, "пк")
+        .backup_export(
+            &file,
+            Parts {
+                contacts: true,
+                ..Default::default()
+            },
+            "пк",
+        )
         .unwrap();
     assert_eq!(out.contacts, 1);
     assert_eq!((out.messages, out.notes, out.calls), (0, 0, 0));
@@ -152,7 +189,14 @@ fn notes_are_separate_from_conversations() {
 
     let file = tmpdir("notes").join("msgs.peerage");
     let out = a
-        .backup_export(&file, Parts { messages: true, ..Default::default() }, "пк")
+        .backup_export(
+            &file,
+            Parts {
+                messages: true,
+                ..Default::default()
+            },
+            "пк",
+        )
         .unwrap();
     assert_eq!(out.notes, 0, "заметки не выбраны — их в копии нет");
     assert_eq!(out.messages, 3);
@@ -173,16 +217,30 @@ fn import_merges_and_is_idempotent() {
     b.send_text(&peer, "сообщение, которого не было в копии");
 
     let first = b.backup_import(&file, "пк").unwrap();
-    assert_eq!(first.contacts, 0, "существующий контакт не перезаписывается");
+    assert_eq!(
+        first.contacts, 0,
+        "существующий контакт не перезаписывается"
+    );
     assert_eq!(first.messages, 3);
 
     let second = b.backup_import(&file, "пк").unwrap();
-    assert_eq!(second.messages, 0, "повторный импорт того же файла ничего не добавляет");
+    assert_eq!(
+        second.messages, 0,
+        "повторный импорт того же файла ничего не добавляет"
+    );
 
     let hist: serde_json::Value = serde_json::from_str(&b.history_json(&peer)).unwrap();
-    let texts: Vec<&str> = hist.as_array().unwrap().iter().filter_map(|m| m["text"].as_str()).collect();
+    let texts: Vec<&str> = hist
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["text"].as_str())
+        .collect();
     assert!(texts.contains(&"привет"), "восстановленное на месте");
-    assert!(texts.contains(&"сообщение, которого не было в копии"), "местное не затёрто");
+    assert!(
+        texts.contains(&"сообщение, которого не было в копии"),
+        "местное не затёрто"
+    );
     // Локальное имя контакта важнее того, что лежало в архиве.
     let contacts: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
     assert_eq!(contacts[0]["name"], "Аня (переименована после копии)");
@@ -200,7 +258,10 @@ fn wrong_password_does_not_restore_anything() {
     let b = start(&net, id(94), tmpdir("pw-dst"));
     assert!(b.backup_import(&file, "неправильный").is_err());
     let hist: serde_json::Value = serde_json::from_str(&b.history_json(&peer)).unwrap();
-    assert!(hist.as_array().unwrap().is_empty(), "ничего не должно просочиться");
+    assert!(
+        hist.as_array().unwrap().is_empty(),
+        "ничего не должно просочиться"
+    );
 }
 
 /// Граница, которую копия НЕ переходит: членство в группе. MLS-состояние в неё не
@@ -212,11 +273,16 @@ fn restored_group_is_read_only() {
     let net = LoopbackNet::new();
     let a = start(&net, id(95), tmpdir("grp-src"));
     assert!(a.group_create("Тестовая"));
-    assert!(wait(10, || a.group_list_json().contains("Тестовая")), "группа у источника есть");
+    assert!(
+        wait(10, || a.group_list_json().contains("Тестовая")),
+        "группа у источника есть"
+    );
     let list: serde_json::Value = serde_json::from_str(&a.group_list_json()).unwrap();
     let gid = hex::decode(list[0]["gid"].as_str().unwrap()).unwrap();
     a.group_send_text(gid.clone(), "сообщение в группе".into());
-    assert!(wait(5, || a.group_history_json(&gid).contains("сообщение в группе")));
+    assert!(wait(5, || a
+        .group_history_json(&gid)
+        .contains("сообщение в группе")));
 
     let file = tmpdir("grp").join("copy.peerage");
     a.backup_export(&file, all(), "пк").unwrap();
@@ -228,8 +294,14 @@ fn restored_group_is_read_only() {
     b.group_send_text(gid.clone(), "а я всё равно напишу".into());
     std::thread::sleep(std::time::Duration::from_millis(500));
     let hist = b.group_history_json(&gid);
-    assert!(hist.contains("сообщение в группе"), "история из копии на месте");
-    assert!(!hist.contains("а я всё равно напишу"), "в архив писать нельзя: {hist}");
+    assert!(
+        hist.contains("сообщение в группе"),
+        "история из копии на месте"
+    );
+    assert!(
+        !hist.contains("а я всё равно напишу"),
+        "в архив писать нельзя: {hist}"
+    );
 }
 
 /// Групповая переписка входит в копию и переживает переезд на чистое устройство.
@@ -243,7 +315,10 @@ fn group_history_survives_backup_as_an_archive() {
     let a = start(&net, id(87), tmpdir("gsrc"));
     a.group_create("Поход");
     // Команды группы исполняет актор в своём потоке — ждём, пока группа появится.
-    assert!(wait(5, || a.group_list_json().contains("Поход")), "группа создана");
+    assert!(
+        wait(5, || a.group_list_json().contains("Поход")),
+        "группа создана"
+    );
     let list: serde_json::Value = serde_json::from_str(&a.group_list_json()).unwrap();
     let gid_hex = list[0]["gid"].as_str().expect("gid группы").to_string();
     let gid = hex::decode(&gid_hex).unwrap();
@@ -263,7 +338,10 @@ fn group_history_survives_backup_as_an_archive() {
     assert_eq!(got.group_messages, 1);
 
     let hist = b.group_history_json(&gid);
-    assert!(hist.contains("выходим в семь"), "переписка группы восстановлена: {hist}");
+    assert!(
+        hist.contains("выходим в семь"),
+        "переписка группы восстановлена: {hist}"
+    );
 
     let list: serde_json::Value = serde_json::from_str(&b.group_list_json()).unwrap();
     let row = list
@@ -287,13 +365,18 @@ fn forged_blob_in_backup_is_rejected() {
     let victim_id = hex::encode(peerage_blob::blob_id(b"real picture"));
 
     let file = tmpdir("forged-file").join("copy.peerage");
-    let mut w = peerage_core::backup::Writer::create(std::fs::File::create(&file).unwrap(), "пароль").unwrap();
+    let mut w =
+        peerage_core::backup::Writer::create(std::fs::File::create(&file).unwrap(), "пароль")
+            .unwrap();
     w.blob(&victim_id, b"forged").unwrap();
     w.blob(&honest_id, &honest).unwrap();
     w.finish().unwrap();
 
     let got = e.backup_import(&file, "пароль").unwrap();
     assert_eq!(got.attachments, 1, "принят только честный блоб");
-    assert!(!e.blob_exists(&victim_id), "подмена не легла под чужой адрес");
+    assert!(
+        !e.blob_exists(&victim_id),
+        "подмена не легла под чужой адрес"
+    );
     assert_eq!(e.blob_read(&honest_id).as_deref(), Some(&honest[..]));
 }

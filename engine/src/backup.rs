@@ -89,15 +89,28 @@ pub struct Stats {
 #[serde(tag = "rec", rename_all = "snake_case")]
 enum Rec {
     /// Идёт первой: по ней читатель узнаёт состав, не разбирая весь файл.
-    Manifest { version: u32, created: i64, me: String, parts: Parts },
+    Manifest {
+        version: u32,
+        created: i64,
+        me: String,
+        parts: Parts,
+    },
     // Именованные поля, а не newtype: внутренне тегированный enum (`tag = "rec"`)
     // не умеет сериализовать вариант-обёртку над списком.
-    Contacts { items: Vec<Contact> },
-    Messages { items: Vec<MsgRow> },
-    Calls { items: Vec<CallRow> },
+    Contacts {
+        items: Vec<Contact>,
+    },
+    Messages {
+        items: Vec<MsgRow>,
+    },
+    Calls {
+        items: Vec<CallRow>,
+    },
     /// Названия групп. Без них восстановленная переписка называлась бы hex-строкой:
     /// членство в копию не входит, и спросить имя будет не у кого.
-    Chats { items: Vec<ChatRow> },
+    Chats {
+        items: Vec<ChatRow>,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -169,7 +182,9 @@ impl Engine {
             if !seen.insert(id.clone()) {
                 continue;
             }
-            let Ok(meta) = std::fs::metadata(self.blob_dir.join(&id)) else { continue };
+            let Ok(meta) = std::fs::metadata(self.blob_dir.join(&id)) else {
+                continue;
+            };
             if meta.len() > MAX_BLOB {
                 skipped_big += 1;
                 continue;
@@ -241,7 +256,12 @@ impl Engine {
     }
 
     /// Создать копию в `path`, зашифрованную `password`.
-    pub fn backup_export(&self, path: &Path, parts: Parts, password: &str) -> Result<Stats, BackupError> {
+    pub fn backup_export(
+        &self,
+        path: &Path,
+        parts: Parts,
+        password: &str,
+    ) -> Result<Stats, BackupError> {
         let file = std::fs::File::create(path)?;
         let mut w = Writer::create(std::io::BufWriter::new(file), password)?;
         let mut stats = Stats::default();
@@ -257,7 +277,13 @@ impl Engine {
         // они единицы килобайт.
         let mut blobs: Vec<String> = Vec::new();
         if parts.contacts {
-            let contacts: Vec<Contact> = self.contacts.lock_safe().list().into_iter().cloned().collect();
+            let contacts: Vec<Contact> = self
+                .contacts
+                .lock_safe()
+                .list()
+                .into_iter()
+                .cloned()
+                .collect();
             stats.contacts = contacts.len() as u64;
             for c in &contacts {
                 if !c.avatar_id.is_empty() {
@@ -305,7 +331,11 @@ impl Engine {
                             blobs.push(m.thumb_id.clone());
                         }
                     }
-                    batch.push(MsgRow { chat: hex::encode(chat), scope, msg: m });
+                    batch.push(MsgRow {
+                        chat: hex::encode(chat),
+                        scope,
+                        msg: m,
+                    });
                 }
                 if !batch.is_empty() {
                     w.json(&Rec::Messages { items: batch })?;
@@ -320,7 +350,11 @@ impl Engine {
                 .lock_safe()
                 .chat_titles(1)
                 .into_iter()
-                .map(|(gid, name)| ChatRow { chat: hex::encode(gid), scope: 1, name })
+                .map(|(gid, name)| ChatRow {
+                    chat: hex::encode(gid),
+                    scope: 1,
+                    name,
+                })
                 .collect();
             if !items.is_empty() {
                 w.json(&Rec::Chats { items })?;
@@ -351,12 +385,16 @@ impl Engine {
             if !written.insert(id.clone()) {
                 continue;
             }
-            let Ok(meta) = std::fs::metadata(self.blob_dir.join(&id)) else { continue };
+            let Ok(meta) = std::fs::metadata(self.blob_dir.join(&id)) else {
+                continue;
+            };
             if meta.len() > MAX_BLOB {
                 stats.skipped_big += 1;
                 continue;
             }
-            let Some(bytes) = self.blob_read(&id) else { continue };
+            let Some(bytes) = self.blob_read(&id) else {
+                continue;
+            };
             stats.attachment_bytes += bytes.len() as u64;
             stats.attachments += 1;
             w.blob(&id, &bytes)?;
@@ -402,19 +440,29 @@ impl Engine {
                         Rec::Messages { items: list } => {
                             let store = self.messages.lock_safe();
                             for row in &list {
-                                let Ok(raw) = hex::decode(&row.chat) else { continue };
+                                let Ok(raw) = hex::decode(&row.chat) else {
+                                    continue;
+                                };
                                 if row.scope == 1 {
                                     // Группа: идентификатор — gid, он одинаков у всех
                                     // участников и переадресовывать его некуда.
-                                    if store.import_message(Chat::Group(&raw), &row.msg).unwrap_or(false) {
+                                    if store
+                                        .import_message(Chat::Group(&raw), &row.msg)
+                                        .unwrap_or(false)
+                                    {
                                         stats.group_messages += 1;
                                     }
                                     continue;
                                 }
-                                let Ok(peer) = <[u8; 32]>::try_from(raw.as_slice()) else { continue };
+                                let Ok(peer) = <[u8; 32]>::try_from(raw.as_slice()) else {
+                                    continue;
+                                };
                                 let is_note = peer == me || Some(peer) == src_me;
                                 let peer = if is_note { me } else { peer };
-                                if store.import_message(Chat::Dm(&peer), &row.msg).unwrap_or(false) {
+                                if store
+                                    .import_message(Chat::Dm(&peer), &row.msg)
+                                    .unwrap_or(false)
+                                {
                                     if is_note {
                                         stats.notes += 1;
                                     } else {
@@ -426,7 +474,9 @@ impl Engine {
                         Rec::Chats { items: list } => {
                             let store = self.messages.lock_safe();
                             for row in &list {
-                                let Ok(raw) = hex::decode(&row.chat) else { continue };
+                                let Ok(raw) = hex::decode(&row.chat) else {
+                                    continue;
+                                };
                                 if row.scope != 1 {
                                     continue;
                                 }
@@ -436,8 +486,12 @@ impl Engine {
                         Rec::Calls { items: list } => {
                             let store = self.calls.lock_safe();
                             for row in &list {
-                                let Ok(raw) = hex::decode(&row.peer) else { continue };
-                                let Ok(peer) = <[u8; 32]>::try_from(raw.as_slice()) else { continue };
+                                let Ok(raw) = hex::decode(&row.peer) else {
+                                    continue;
+                                };
+                                let Ok(peer) = <[u8; 32]>::try_from(raw.as_slice()) else {
+                                    continue;
+                                };
                                 let rec = CallRecord {
                                     id: 0,
                                     peer,
@@ -460,7 +514,9 @@ impl Engine {
                         continue;
                     }
                     let Ok(raw) = hex::decode(&id) else { continue };
-                    let Ok(hash) = <[u8; 32]>::try_from(raw.as_slice()) else { continue };
+                    let Ok(hash) = <[u8; 32]>::try_from(raw.as_slice()) else {
+                        continue;
+                    };
                     // Адрес обязан быть хэшем байтов: иначе подложенная копия кладёт
                     // под чужой адрес что угодно, и мы раздаём это другим как тот блоб.
                     if peerage_blob::blob_id(&data) != hash {

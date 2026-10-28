@@ -27,7 +27,10 @@ fn tiny_jpeg(a: u8, b: u8) -> Vec<u8> {
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let dir = PathBuf::from(args.next().expect("usage: mesh_node <datadir> [--name N] [--add HEX] [--avatar]"));
+    let dir = PathBuf::from(
+        args.next()
+            .expect("usage: mesh_node <datadir> [--name N] [--add HEX] [--avatar]"),
+    );
 
     let mut name: Option<String> = None;
     let mut avatar = false;
@@ -90,7 +93,11 @@ fn main() {
     if let Some(path) = &avatar_file {
         // Реальная картинка из файла (PNG/JPEG) — чтобы получатель смог её ДЕКОДИРОВАТЬ.
         let bytes = std::fs::read(path).expect("avatar file");
-        let mime = if path.ends_with(".png") { "image/png" } else { "image/jpeg" };
+        let mime = if path.ends_with(".png") {
+            "image/png"
+        } else {
+            "image/jpeg"
+        };
         let id = engine.set_self_avatar(bytes, mime);
         println!("AVATAR {id}");
     } else if avatar {
@@ -119,7 +126,10 @@ fn main() {
         println!("GROUP {gid_hex} {gname}");
         if let Ok(gid) = hex::decode(&gid_hex) {
             for h in &adds {
-                if let Some(peer) = hex::decode(h).ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok()) {
+                if let Some(peer) = hex::decode(h)
+                    .ok()
+                    .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
+                {
                     engine.group_invite(gid.clone(), peer);
                     println!("INVITED {h}");
                 }
@@ -129,7 +139,8 @@ fn main() {
     }
 
     // Одноразовая отправка картинки первому --add контакту (тест приёма медиа на клиенте).
-    let media_peer: Option<[u8; 32]> = adds.first()
+    let media_peer: Option<[u8; 32]> = adds
+        .first()
         .and_then(|h| hex::decode(h).ok())
         .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());
     let mut sent_media = false;

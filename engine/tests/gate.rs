@@ -16,7 +16,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-gate-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -24,13 +27,17 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 /// Есть ли у `e` контакт с ключом `hex`?
 fn has_contact(e: &Engine, hex: &str) -> bool {
     let v: serde_json::Value = serde_json::from_str(&e.contacts_json()).unwrap();
-    v.as_array().map(|a| a.iter().any(|c| c["key"] == hex)).unwrap_or(false)
+    v.as_array()
+        .map(|a| a.iter().any(|c| c["key"] == hex))
+        .unwrap_or(false)
 }
 
 /// Найти запрос по ключу и вернуть его превью (или None).
@@ -49,7 +56,10 @@ fn await_request(e: &Engine, hex: &str) -> String {
         if let Some(p) = request_preview(e, hex) {
             return p;
         }
-        assert!(Instant::now() < deadline, "запрос от {hex} не пришёл за 10с");
+        assert!(
+            Instant::now() < deadline,
+            "запрос от {hex} не пришёл за 10с"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -66,10 +76,21 @@ fn stranger_text_becomes_request_not_chat() {
     a.send_text(&b_key, "привет незнакомец");
 
     let a_hex = hex::encode(a_key);
-    assert_eq!(await_request(&b, &a_hex), "привет незнакомец", "превью = первое сообщение");
-    assert!(!has_contact(&b, &a_hex), "незнакомец НЕ попадает в контакты сам");
+    assert_eq!(
+        await_request(&b, &a_hex),
+        "привет незнакомец",
+        "превью = первое сообщение"
+    );
+    assert!(
+        !has_contact(&b, &a_hex),
+        "незнакомец НЕ попадает в контакты сам"
+    );
     let hist: serde_json::Value = serde_json::from_str(&b.history_json(&a_key)).unwrap();
-    assert_eq!(hist.as_array().unwrap().len(), 0, "сообщение незнакомца НЕ в чате");
+    assert_eq!(
+        hist.as_array().unwrap().len(),
+        0,
+        "сообщение незнакомца НЕ в чате"
+    );
 
     a.shutdown();
     b.shutdown();
@@ -93,10 +114,24 @@ fn accept_makes_blank_named_contact() {
     assert!(b.accept_contact_request(&a_key), "accept успешен");
 
     let v: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
-    let c = v.as_array().unwrap().iter().find(|c| c["key"] == a_hex).expect("A теперь контакт");
-    assert_eq!(c["name"], "", "локальное имя пустое → покажется самоназвание");
-    assert!(request_preview(&b, &a_hex).is_none(), "запрос снят после accept");
-    assert!(!b.accept_contact_request(&a_key), "повторный accept — уже нет запроса");
+    let c = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == a_hex)
+        .expect("A теперь контакт");
+    assert_eq!(
+        c["name"], "",
+        "локальное имя пустое → покажется самоназвание"
+    );
+    assert!(
+        request_preview(&b, &a_hex).is_none(),
+        "запрос снят после accept"
+    );
+    assert!(
+        !b.accept_contact_request(&a_key),
+        "повторный accept — уже нет запроса"
+    );
 
     // Первое сообщение не потерялось: A получил на него Ack и второй раз не пришлёт,
     // поэтому оно обязано лечь в чат при одобрении — с автором A, как входящее.
@@ -153,14 +188,25 @@ fn block_silences_then_unblock_restores() {
     // Заблокированный шлёт ещё — не должно быть ни запроса, ни чата.
     a.send_text(&b_key, "второй");
     std::thread::sleep(Duration::from_millis(500));
-    assert!(request_preview(&b, &a_hex).is_none(), "сообщение блокнутого не создаёт запрос");
+    assert!(
+        request_preview(&b, &a_hex).is_none(),
+        "сообщение блокнутого не создаёт запрос"
+    );
     let hist: serde_json::Value = serde_json::from_str(&b.history_json(&a_key)).unwrap();
-    assert_eq!(hist.as_array().unwrap().len(), 0, "сообщение блокнутого не в чате");
+    assert_eq!(
+        hist.as_array().unwrap().len(),
+        0,
+        "сообщение блокнутого не в чате"
+    );
 
     // Разблокировали → новое сообщение снова доходит как запрос.
     assert!(b.unblock_contact(&a_key), "unblock успешен");
     a.send_text(&b_key, "третий");
-    assert_eq!(await_request(&b, &a_hex), "третий", "после unblock снова запрос");
+    assert_eq!(
+        await_request(&b, &a_hex),
+        "третий",
+        "после unblock снова запрос"
+    );
 
     a.shutdown();
     b.shutdown();
@@ -188,7 +234,11 @@ fn verifying_a_contact_raises_its_budget_at_once() {
     std::thread::sleep(Duration::from_millis(500));
     let flood: serde_json::Value = serde_json::from_str(&b.flood_json()).unwrap();
     assert!(
-        !flood.as_array().unwrap().iter().any(|f| f["peer"] == hex::encode(a_key)),
+        !flood
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["peer"] == hex::encode(a_key)),
         "сверенный контакт не режется как флуд: {flood}"
     );
 }

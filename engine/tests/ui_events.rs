@@ -18,7 +18,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-uiev-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -26,7 +29,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 fn wait(secs: u64, mut cond: impl FnMut() -> bool) -> bool {
@@ -83,13 +88,21 @@ fn dm_event_carries_caption_and_forward_mark() {
     let a_hex = hex::encode(a_key);
 
     // Вложение с подписью: подпись — в той же строке, а не потеряна до перезахода.
-    let info = MediaInfo { caption: "подпись".into(), ..Default::default() };
-    a.send_media_with(&b_key, vec![7u8; 5000], "application/pdf", "doc.pdf", info).unwrap();
-    let ev = wait_message(&b, 15, |v| v["msg"]["kind"] == "file").expect("вложение пришло событием");
+    let info = MediaInfo {
+        caption: "подпись".into(),
+        ..Default::default()
+    };
+    a.send_media_with(&b_key, vec![7u8; 5000], "application/pdf", "doc.pdf", info)
+        .unwrap();
+    let ev =
+        wait_message(&b, 15, |v| v["msg"]["kind"] == "file").expect("вложение пришло событием");
     assert_eq!(ev["chat"], a_hex);
     assert_eq!(ev["group"], false);
     assert_eq!(ev["msg"]["text"], "подпись");
-    assert!(ev["msg"]["row"].as_i64().unwrap() > 0, "курсор пагинации есть");
+    assert!(
+        ev["msg"]["row"].as_i64().unwrap() > 0,
+        "курсор пагинации есть"
+    );
     let row = in_history(&b.history_json(&a_key), &ev["msg"]);
     assert_eq!(row["text"], ev["msg"]["text"]);
     assert_eq!(row["blob_id"], ev["msg"]["blob_id"]);
@@ -98,10 +111,17 @@ fn dm_event_carries_caption_and_forward_mark() {
     // Пересылка: пометка «переслано» тоже приезжает сразу.
     let own = a.send_text(&b_key, "оригинал").unwrap() as u64;
     assert!(wait_message(&b, 15, |v| v["msg"]["text"] == "оригинал").is_some());
-    let n = a.forward_messages(ChatKey::Dm(b_key), &[(own, a_hex.clone())], ChatKey::Dm(b_key), false);
+    let n = a.forward_messages(
+        ChatKey::Dm(b_key),
+        &[(own, a_hex.clone())],
+        ChatKey::Dm(b_key),
+        false,
+    );
     assert_eq!(n, 1);
-    let ev = wait_message(&b, 15, |v| v["msg"]["text"] == "оригинал" && v["msg"]["fwd_from"] != "")
-        .expect("пересланное пришло событием");
+    let ev = wait_message(&b, 15, |v| {
+        v["msg"]["text"] == "оригинал" && v["msg"]["fwd_from"] != ""
+    })
+    .expect("пересланное пришло событием");
     assert_eq!(ev["msg"]["fwd_from"], a_hex);
     a.shutdown();
     b.shutdown();
@@ -118,13 +138,27 @@ fn group_message_arrives_as_a_row_with_id() {
     b.add_contact(&a_key, "A");
 
     assert!(a.group_create("клуб"));
-    assert!(wait(15, || json(&a.group_list_json()).as_array().map(|v| !v.is_empty()).unwrap_or(false)));
-    let gid_hex = json(&a.group_list_json())[0]["gid"].as_str().unwrap().to_string();
+    assert!(wait(15, || json(&a.group_list_json())
+        .as_array()
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)));
+    let gid_hex = json(&a.group_list_json())[0]["gid"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let gid = hex::decode(&gid_hex).unwrap();
     a.group_invite(gid.clone(), b_key);
-    assert!(wait(15, || json(&b.group_invites_json()).as_array().map(|v| !v.is_empty()).unwrap_or(false)));
+    assert!(wait(15, || json(&b.group_invites_json())
+        .as_array()
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)));
     b.accept_group_invite(gid.clone());
-    assert!(wait(15, || a.group_members_json(&gid).contains(&hex::encode(b_key))), "B в ростере");
+    assert!(
+        wait(15, || a
+            .group_members_json(&gid)
+            .contains(&hex::encode(b_key))),
+        "B в ростере"
+    );
 
     a.group_send_text(gid.clone(), "привет".into());
     // Своё — тоже событием, с id, который присвоил слой групп.
@@ -137,7 +171,11 @@ fn group_message_arrives_as_a_row_with_id() {
 
     let got = wait_message(&b, 15, |v| v["msg"]["text"] == "привет").expect("входящее групповое");
     assert_eq!(got["chat"], gid_hex);
-    assert_eq!(got["msg"]["id"].as_u64(), Some(id), "тот же id, что у отправителя");
+    assert_eq!(
+        got["msg"]["id"].as_u64(),
+        Some(id),
+        "тот же id, что у отправителя"
+    );
     assert_eq!(got["msg"]["sender"], hex::encode(a_key));
     assert_eq!(got["msg"]["mine"], false);
     let row = in_history(&b.group_history_json(&gid), &got["msg"]);

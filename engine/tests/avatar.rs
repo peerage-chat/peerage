@@ -15,7 +15,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-av-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -23,7 +26,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 /// JPEG-заглушка с EXIF (APP1) для проверки scrub.
@@ -48,7 +53,11 @@ fn self_avatar_roundtrip_scrub_and_persist() {
     assert!(!got.windows(4).any(|w| w == b"Exif"), "EXIF снят scrub");
     // id — контент-адрес ОЧИЩЕННЫХ байт (а не исходных с EXIF).
     assert_eq!(id_hex, e.blob_id_hex(&got), "id = контент-адрес очищенного");
-    assert_ne!(id_hex, e.blob_id_hex(&raw), "id ≠ адрес исходного (scrub изменил байты)");
+    assert_ne!(
+        id_hex,
+        e.blob_id_hex(&raw),
+        "id ≠ адрес исходного (scrub изменил байты)"
+    );
     assert_eq!(e.self_avatar_id().as_deref(), Some(id_hex.as_str()));
 
     // Персист: пересоздаём движок на том же каталоге — аватар на месте.

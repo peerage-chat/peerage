@@ -17,7 +17,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-outbox-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -38,7 +41,9 @@ fn cfg() -> peerage_messenger::Config {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport_cfg(dir, ident, net.endpoint(key), cfg()).unwrap().engine
+    Engine::start_with_transport_cfg(dir, ident, net.endpoint(key), cfg())
+        .unwrap()
+        .engine
 }
 
 fn wait(secs: u64, mut cond: impl FnMut() -> bool) -> bool {
@@ -58,18 +63,29 @@ fn json(s: &str) -> serde_json::Value {
 
 /// Сообщение с текстом `text` в истории чата с `peer`.
 fn find(e: &Engine, peer: &[u8; 32], text: &str) -> Option<serde_json::Value> {
-    json(&e.history_json(peer)).as_array()?.iter().find(|m| m["text"] == text).cloned()
+    json(&e.history_json(peer))
+        .as_array()?
+        .iter()
+        .find(|m| m["text"] == text)
+        .cloned()
 }
 
 /// Поднять пару контактов и прогреть связь первым сообщением.
-fn pair(net: &LoopbackNet, a: (Identity, PathBuf), b: (Identity, PathBuf)) -> (Arc<Engine>, Arc<Engine>, u64) {
+fn pair(
+    net: &LoopbackNet,
+    a: (Identity, PathBuf),
+    b: (Identity, PathBuf),
+) -> (Arc<Engine>, Arc<Engine>, u64) {
     let (a_key, b_key) = (a.0.public_key_bytes(), b.0.public_key_bytes());
     let ea = start(net, a.0, a.1);
     let eb = start(net, b.0, b.1);
     ea.add_contact(&b_key, "B");
     eb.add_contact(&a_key, "A");
     let warm = ea.send_text(&b_key, "warmup").unwrap() as u64;
-    assert!(wait(10, || find(&eb, &a_key, "warmup").is_some()), "прогрев дошёл");
+    assert!(
+        wait(10, || find(&eb, &a_key, "warmup").is_some()),
+        "прогрев дошёл"
+    );
     (ea, eb, warm)
 }
 
@@ -81,7 +97,11 @@ fn reply_and_edit_survive_offline_and_restart() {
     let (a_id, b_id) = (id(81), id(82));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
     let (a_dir, b_dir) = (tmpdir("a"), tmpdir("b"));
-    let (a1, b1, warm) = pair(&net, (a_id.clone(), a_dir.clone()), (b_id.clone(), b_dir.clone()));
+    let (a1, b1, warm) = pair(
+        &net,
+        (a_id.clone(), a_dir.clone()),
+        (b_id.clone(), b_dir.clone()),
+    );
 
     b1.shutdown();
     drop(b1);
@@ -93,10 +113,20 @@ fn reply_and_edit_survive_offline_and_restart() {
 
     let b2 = start(&net, b_id, b_dir);
     let a2 = start(&net, a_id, a_dir);
-    assert!(wait(15, || find(&b2, &a_key, "ответ!").is_some()), "правка доехала");
+    assert!(
+        wait(15, || find(&b2, &a_key, "ответ!").is_some()),
+        "правка доехала"
+    );
     let m = find(&b2, &a_key, "ответ!").unwrap();
-    assert_eq!(m["reply_to"].as_u64(), Some(warm), "цитата не потерялась при досылке");
-    assert!(m["edited_at"].as_i64().unwrap_or(0) > 0, "помечено как изменённое");
+    assert_eq!(
+        m["reply_to"].as_u64(),
+        Some(warm),
+        "цитата не потерялась при досылке"
+    );
+    assert!(
+        m["edited_at"].as_i64().unwrap_or(0) > 0,
+        "помечено как изменённое"
+    );
     a2.shutdown();
     b2.shutdown();
 }
@@ -116,7 +146,10 @@ fn retract_survives_offline() {
     std::thread::sleep(Duration::from_secs(3));
 
     let b2 = start(&net, b_id, b_dir);
-    assert!(wait(15, || find(&b2, &a_key, "warmup").is_none()), "отозванное исчезло у получателя");
+    assert!(
+        wait(15, || find(&b2, &a_key, "warmup").is_none()),
+        "отозванное исчезло у получателя"
+    );
     a.shutdown();
     b2.shutdown();
 }
@@ -165,12 +198,19 @@ fn group_message_survives_member_offline() {
     let b_key = b_id.public_key_bytes();
 
     assert!(a.group_create("офлайн"));
-    assert!(wait(10, || json(&a.group_list_json()).as_array().is_some_and(|v| !v.is_empty())));
+    assert!(wait(10, || json(&a.group_list_json())
+        .as_array()
+        .is_some_and(|v| !v.is_empty())));
     let gid = hex::decode(json(&a.group_list_json())[0]["gid"].as_str().unwrap()).unwrap();
     a.group_invite(gid.clone(), b_key);
-    assert!(wait(10, || json(&b1.group_invites_json()).as_array().is_some_and(|v| !v.is_empty())));
+    assert!(wait(10, || json(&b1.group_invites_json())
+        .as_array()
+        .is_some_and(|v| !v.is_empty())));
     b1.accept_group_invite(gid.clone());
-    assert!(wait(15, || b1.group_list_json().contains(&hex::encode(&gid))), "B в группе");
+    assert!(
+        wait(15, || b1.group_list_json().contains(&hex::encode(&gid))),
+        "B в группе"
+    );
 
     b1.shutdown();
     drop(b1);
@@ -178,7 +218,9 @@ fn group_message_survives_member_offline() {
     std::thread::sleep(Duration::from_secs(3));
 
     let b2 = start(&net, b_id, b_dir);
-    let got = wait(20, || b2.group_history_json(&gid).contains("пока тебя не было"));
+    let got = wait(20, || {
+        b2.group_history_json(&gid).contains("пока тебя не было")
+    });
     assert!(got, "групповое сообщение догнало вернувшегося участника");
     a.shutdown();
     b2.shutdown();

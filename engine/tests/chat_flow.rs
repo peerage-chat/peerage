@@ -16,7 +16,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-chat-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -24,7 +27,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 /// Собрать до `want` НОВЫХ text-событий из очереди движка (или до таймаута).
@@ -90,7 +95,11 @@ fn sender_restart_no_false_dedup() {
     let texts = poll_texts(&b, 1, Duration::from_secs(6));
     a2.shutdown();
     b.shutdown();
-    assert_eq!(texts, vec!["second"], "второе сообщение после рестарта показано");
+    assert_eq!(
+        texts,
+        vec!["second"],
+        "второе сообщение после рестарта показано"
+    );
 }
 
 /// Сессии 1:1 живут только в памяти (ADR-012): ПОЛУЧАТЕЛЬ перезапустился, а у
@@ -118,7 +127,11 @@ fn receiver_restart_mid_session_recovers() {
     let texts = poll_texts(&b2, 1, Duration::from_secs(10));
     a.shutdown();
     b2.shutdown();
-    assert_eq!(texts, vec!["после"], "после перезапуска получателя связь восстановилась");
+    assert_eq!(
+        texts,
+        vec!["после"],
+        "после перезапуска получателя связь восстановилась"
+    );
 }
 
 /// Честный статус: пока сообщение ждёт доставки, оно НЕ помечается как ошибка.
@@ -140,7 +153,9 @@ fn undelivered_message_is_queued_not_failed() {
         .engine;
     a.add_contact(&b_key, "B"); // B вообще не поднимаем — доставки не будет
 
-    let msg_id = a.send_text(&b_key, "в пустоту").expect("поставлено в очередь");
+    let msg_id = a
+        .send_text(&b_key, "в пустоту")
+        .expect("поставлено в очередь");
     let status_of = |e: &Engine| -> String {
         let h: serde_json::Value = serde_json::from_str(&e.history_json(&b_key)).unwrap();
         h.as_array()
@@ -206,5 +221,9 @@ fn offline_message_survives_sender_restart() {
     let texts = poll_texts(&b2, 1, Duration::from_secs(12));
     a2.shutdown();
     b2.shutdown();
-    assert_eq!(texts, vec!["queued"], "офлайн-сообщение догналось после рестарта A");
+    assert_eq!(
+        texts,
+        vec!["queued"],
+        "офлайн-сообщение догналось после рестарта A"
+    );
 }

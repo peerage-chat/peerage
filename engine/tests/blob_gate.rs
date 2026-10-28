@@ -19,7 +19,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-blobgate-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -27,7 +30,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 fn raw(net: &LoopbackNet, ident: Identity) -> (Messenger, Receiver<Event>) {
@@ -75,11 +80,15 @@ fn unsolicited_manifest_is_ignored() {
     let (manifest, _chunks) = peerage_blob::build(&content, "application/octet-stream");
     for p in manifest.split() {
         let hashes: Vec<u8> = p.hashes.iter().flatten().copied().collect();
-        m.send_blob_manifest_part(&a_key, &p.id, &p.mime, p.size, p.part, p.total, &hashes).unwrap();
+        m.send_blob_manifest_part(&a_key, &p.id, &p.mime, p.size, p.part, p.total, &hashes)
+            .unwrap();
     }
     let asked = count_events(&m_rx, 2, |ev| matches!(ev, Event::BlobRequest { .. }));
     assert_eq!(asked, 0, "A не запросил ни одного чанка");
-    assert!(!a.blob_exists(&hex::encode(manifest.id)), "файл без спроса не появился");
+    assert!(
+        !a.blob_exists(&hex::encode(manifest.id)),
+        "файл без спроса не появился"
+    );
 }
 
 /// R-009: свой блоб отдаём контакту, но не незнакомцу, знающему хэш.
@@ -95,8 +104,12 @@ fn stored_blob_is_served_to_contact_only() {
 
     let content: Vec<u8> = (0..30_000u32).map(|i| (i * 13) as u8).collect();
     let blob = peerage_blob::blob_id(&content);
-    a.send_media(&c_key, content, "application/pdf", "doc.pdf").unwrap();
-    assert!(wait(5, || a.blob_exists(&hex::encode(blob))), "своя копия сохранена");
+    a.send_media(&c_key, content, "application/pdf", "doc.pdf")
+        .unwrap();
+    assert!(
+        wait(5, || a.blob_exists(&hex::encode(blob))),
+        "своя копия сохранена"
+    );
     // Отправитель больше не толкает файл сам: получатель попросит по хэшу.
     let pushed = count_events(&c_rx, 1, |ev| matches!(ev, Event::BlobManifestPart { .. }));
     assert_eq!(pushed, 0, "манифест не уходит без запроса");
@@ -127,9 +140,13 @@ fn large_file_downloads_by_button() {
     let src = tmpdir("src").join("video.mp4");
     std::fs::write(&src, &content).unwrap();
     let blob = hex::encode(peerage_blob::blob_id(&content));
-    a.send_media_file(&b_key, &src, "video/mp4", "video.mp4", MediaInfo::default()).unwrap();
+    a.send_media_file(&b_key, &src, "video/mp4", "video.mp4", MediaInfo::default())
+        .unwrap();
 
-    assert!(wait(10, || b.history_json(&a_key).contains(&blob)), "карточка пришла");
+    assert!(
+        wait(10, || b.history_json(&a_key).contains(&blob)),
+        "карточка пришла"
+    );
     std::thread::sleep(Duration::from_millis(500));
     assert!(!b.blob_exists(&blob), "крупное не качается само");
 
@@ -140,9 +157,19 @@ fn large_file_downloads_by_button() {
     // R-044: открыть/проиграть — потоковой выгрузкой в файл, без чтения в память.
     let out = tmpdir("out").join("video.mp4");
     assert!(b.blob_export(&blob, &out), "выгружено");
-    assert_eq!(std::fs::read(&out).unwrap(), content, "выгрузка байт-в-байт");
-    assert!(!out.with_extension("part").exists(), "временный .part убран");
-    assert!(!b.blob_export("00", &tmpdir("out2").join("x")), "нет блоба — false");
+    assert_eq!(
+        std::fs::read(&out).unwrap(),
+        content,
+        "выгрузка байт-в-байт"
+    );
+    assert!(
+        !out.with_extension("part").exists(),
+        "временный .part убран"
+    );
+    assert!(
+        !b.blob_export("00", &tmpdir("out2").join("x")),
+        "нет блоба — false"
+    );
 }
 
 /// R-030: «Очистить вложения» убирает сами файлы, но не свой аватар и не
@@ -164,17 +191,28 @@ fn clearing_attachments_keeps_avatar_and_thumbs() {
     let thumb_id = hex::encode(peerage_blob::blob_id(&thumb));
     let small: Vec<u8> = (0..20_000u32).map(|i| (i % 13) as u8).collect();
     let small_id = hex::encode(peerage_blob::blob_id(&small));
-    let info = MediaInfo { thumb: Some(thumb), ..Default::default() };
-    b.send_media_with(&a_key, small, "application/pdf", "doc.pdf", info).unwrap();
-    assert!(wait(10, || a.blob_exists(&small_id) && a.blob_exists(&thumb_id)), "вложение и миниатюра у A");
+    let info = MediaInfo {
+        thumb: Some(thumb),
+        ..Default::default()
+    };
+    b.send_media_with(&a_key, small, "application/pdf", "doc.pdf", info)
+        .unwrap();
+    assert!(
+        wait(10, || a.blob_exists(&small_id) && a.blob_exists(&thumb_id)),
+        "вложение и миниатюра у A"
+    );
 
     // Крупное — качается по кнопке; очистка застаёт его на середине.
     let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
     let src = tmpdir("src4").join("v.mp4");
     std::fs::write(&src, &big).unwrap();
     let big_id = hex::encode(peerage_blob::blob_id(&big));
-    b.send_media_file(&a_key, &src, "video/mp4", "v.mp4", MediaInfo::default()).unwrap();
-    assert!(wait(10, || a.history_json(&b_key).contains(&big_id)), "карточка крупного пришла");
+    b.send_media_file(&a_key, &src, "video/mp4", "v.mp4", MediaInfo::default())
+        .unwrap();
+    assert!(
+        wait(10, || a.history_json(&b_key).contains(&big_id)),
+        "карточка крупного пришла"
+    );
     assert!(a.download_media(&b_key, &big_id));
     std::thread::sleep(Duration::from_millis(200));
 
@@ -183,15 +221,29 @@ fn clearing_attachments_keeps_avatar_and_thumbs() {
     assert!(a.blob_exists(&thumb_id), "миниатюра на месте");
     assert!(!a.blob_exists(&small_id), "вложение удалено");
     let hist: serde_json::Value = serde_json::from_str(&a.history_json(&b_key)).unwrap();
-    let row = hist.as_array().unwrap().iter().find(|m| m["blob_id"] == small_id.as_str()).unwrap();
-    assert_eq!(row["downloaded"], false, "карточка снова предлагает «Скачать»");
+    let row = hist
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["blob_id"] == small_id.as_str())
+        .unwrap();
+    assert_eq!(
+        row["downloaded"], false,
+        "карточка снова предлагает «Скачать»"
+    );
 
     // Брошенная докачка не дописывается и не оставляет недособранных файлов.
     std::thread::sleep(Duration::from_millis(1500));
     assert!(!a.blob_exists(&big_id), "докачка брошена");
     let parts = std::fs::read_dir(dir_a.join("blobs"))
         .unwrap()
-        .filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "part"))
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|x| x == "part")
+        })
         .count();
     assert_eq!(parts, 0, "недособранных файлов не осталось");
 }

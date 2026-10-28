@@ -18,7 +18,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-gmedia-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -26,7 +29,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 /// Ждать условие, опрашивая раз в 30 мс. Возвращает false по таймауту.
@@ -49,11 +54,17 @@ fn json(s: &str) -> serde_json::Value {
 /// что список появляется не мгновенно — ждём.
 fn only_gid(e: &Engine) -> Vec<u8> {
     assert!(
-        wait(15, || json(&e.group_list_json()).as_array().map(|v| !v.is_empty()).unwrap_or(false)),
+        wait(15, || json(&e.group_list_json())
+            .as_array()
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)),
         "группа появилась в списке",
     );
     let list = json(&e.group_list_json());
-    let hex_gid = list.as_array().unwrap()[0]["gid"].as_str().unwrap().to_string();
+    let hex_gid = list.as_array().unwrap()[0]["gid"]
+        .as_str()
+        .unwrap()
+        .to_string();
     hex::decode(hex_gid).unwrap()
 }
 
@@ -62,7 +73,12 @@ fn media_msg(e: &Engine, gid: &[u8]) -> Option<serde_json::Value> {
     json(&e.group_history_json(gid))
         .as_array()?
         .iter()
-        .find(|m| m["blob_id"].as_str().map(|s| !s.is_empty()).unwrap_or(false))
+        .find(|m| {
+            m["blob_id"]
+                .as_str()
+                .map(|s| !s.is_empty())
+                .unwrap_or(false)
+        })
         .cloned()
 }
 
@@ -81,15 +97,26 @@ fn large_group_attachment_waits_for_explicit_download() {
     let gid = only_gid(&a);
     a.group_invite(gid.clone(), b_key);
     assert!(
-        wait(15, || json(&b.group_invites_json()).as_array().map(|v| !v.is_empty()).unwrap_or(false)),
+        wait(15, || json(&b.group_invites_json())
+            .as_array()
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)),
         "B получил приглашение",
     );
     b.accept_group_invite(gid.clone());
     assert!(
-        wait(15, || json(&b.group_list_json()).as_array().map(|v| !v.is_empty()).unwrap_or(false)),
+        wait(15, || json(&b.group_list_json())
+            .as_array()
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)),
         "B вступил в группу",
     );
-    assert!(wait(15, || a.group_members_json(&gid).contains(&hex::encode(b_key))), "A видит B в ростере");
+    assert!(
+        wait(15, || a
+            .group_members_json(&gid)
+            .contains(&hex::encode(b_key))),
+        "A видит B в ростере"
+    );
 
     // 3 МБ — заведомо больше порога автозагрузки.
     let content: Vec<u8> = (0..3 * 1024 * 1024).map(|i| (i * 7 ^ 0x5a) as u8).collect();
@@ -104,31 +131,61 @@ fn large_group_attachment_waits_for_explicit_download() {
         fwd_from: String::new(),
         fwd_anon: false,
     };
-    a.group_send_media(gid.clone(), content.clone(), "video/mp4".into(), "clip.mp4".into(), info);
+    a.group_send_media(
+        gid.clone(),
+        content.clone(),
+        "video/mp4".into(),
+        "clip.mp4".into(),
+        info,
+    );
 
     // Карточка доехала: размер и превью известны ДО байт, само вложение — нет.
-    assert!(wait(20, || media_msg(&b, &gid).is_some()), "B получил групповое медиа-сообщение");
+    assert!(
+        wait(20, || media_msg(&b, &gid).is_some()),
+        "B получил групповое медиа-сообщение"
+    );
     let card = media_msg(&b, &gid).unwrap();
     let blob_id = card["blob_id"].as_str().unwrap().to_string();
-    assert_eq!(card["size"].as_u64(), Some(content.len() as u64), "размер приехал в сообщении");
+    assert_eq!(
+        card["size"].as_u64(),
+        Some(content.len() as u64),
+        "размер приехал в сообщении"
+    );
     assert_eq!(card["duration_ms"].as_u64(), Some(12_000));
-    assert_eq!(card["text"].as_str(), Some("большое видео"), "подпись — внутри того же сообщения");
+    assert_eq!(
+        card["text"].as_str(),
+        Some("большое видео"),
+        "подпись — внутри того же сообщения"
+    );
     assert_eq!(card["downloaded"].as_bool(), Some(false));
-    assert!(!card["thumb_id"].as_str().unwrap().is_empty(), "превью — отдельным блобом");
-    assert!(b.blob_read(&blob_id).is_none(), "крупное групповое вложение не тянется само");
+    assert!(
+        !card["thumb_id"].as_str().unwrap().is_empty(),
+        "превью — отдельным блобом"
+    );
+    assert!(
+        b.blob_read(&blob_id).is_none(),
+        "крупное групповое вложение не тянется само"
+    );
 
     // Миниатюру, наоборот, отдаём всем сразу — без неё карточка слепая.
     let thumb_id = card["thumb_id"].as_str().unwrap().to_string();
-    assert!(wait(20, || b.blob_read(&thumb_id).is_some()), "превью доехало без спроса");
+    assert!(
+        wait(20, || b.blob_read(&thumb_id).is_some()),
+        "превью доехало без спроса"
+    );
 
     // Явное «скачать» — байты приезжают целиком, сообщение помечается скачанным.
     assert!(b.download_media(&a_key, &blob_id), "заказ принят");
     assert!(
-        wait(60, || b.blob_read(&blob_id).map(|v| v == content).unwrap_or(false)),
+        wait(60, || b
+            .blob_read(&blob_id)
+            .map(|v| v == content)
+            .unwrap_or(false)),
         "заказанное вложение доехало байт-в-байт",
     );
     assert!(
-        wait(10, || media_msg(&b, &gid).unwrap()["downloaded"].as_bool() == Some(true)),
+        wait(10, || media_msg(&b, &gid).unwrap()["downloaded"].as_bool()
+            == Some(true)),
         "история группы отметила вложение скачанным",
     );
 
@@ -152,11 +209,19 @@ fn small_group_attachment_arrives_by_itself() {
     let gid = only_gid(&a);
     a.group_invite(gid.clone(), b_key);
     assert!(
-        wait(15, || json(&b.group_invites_json()).as_array().map(|v| !v.is_empty()).unwrap_or(false)),
+        wait(15, || json(&b.group_invites_json())
+            .as_array()
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)),
         "B получил приглашение",
     );
     b.accept_group_invite(gid.clone());
-    assert!(wait(15, || a.group_members_json(&gid).contains(&hex::encode(b_key))), "A видит B в ростере");
+    assert!(
+        wait(15, || a
+            .group_members_json(&gid)
+            .contains(&hex::encode(b_key))),
+        "A видит B в ростере"
+    );
 
     let content: Vec<u8> = (0..40_000).map(|i| (i % 251) as u8).collect();
     a.group_send_media(
@@ -164,13 +229,25 @@ fn small_group_attachment_arrives_by_itself() {
         content.clone(),
         "audio/mp4".into(),
         "voice.m4a".into(),
-        MediaInfo { duration_ms: 3000, ..Default::default() },
+        MediaInfo {
+            duration_ms: 3000,
+            ..Default::default()
+        },
     );
 
-    assert!(wait(20, || media_msg(&b, &gid).is_some()), "B получил сообщение");
-    let blob_id = media_msg(&b, &gid).unwrap()["blob_id"].as_str().unwrap().to_string();
     assert!(
-        wait(30, || b.blob_read(&blob_id).map(|v| v == content).unwrap_or(false)),
+        wait(20, || media_msg(&b, &gid).is_some()),
+        "B получил сообщение"
+    );
+    let blob_id = media_msg(&b, &gid).unwrap()["blob_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        wait(30, || b
+            .blob_read(&blob_id)
+            .map(|v| v == content)
+            .unwrap_or(false)),
         "мелкое вложение приехало без нажатия кнопки",
     );
 
@@ -193,13 +270,21 @@ fn preparing_group_file_does_not_block_the_actor() {
     assert!(a.group_create("клуб"));
     let gid = only_gid(&a);
 
-    let big: Vec<u8> = (0..40 * 1024 * 1024u32).map(|i| (i * 31 ^ 0x77) as u8).collect();
+    let big: Vec<u8> = (0..40 * 1024 * 1024u32)
+        .map(|i| (i * 31 ^ 0x77) as u8)
+        .collect();
     let src = tmpdir("src-prep").join("film.mp4");
     std::fs::write(&src, &big).unwrap();
     drop(big);
     while a.poll_event().is_some() {}
 
-    a.group_send_media_file(gid.clone(), src, "video/mp4".into(), "film.mp4".into(), MediaInfo::default());
+    a.group_send_media_file(
+        gid.clone(),
+        src,
+        "video/mp4".into(),
+        "film.mp4".into(),
+        MediaInfo::default(),
+    );
     b.send_text(&a_key, "ты тут?").unwrap();
 
     // Что придёт первым: входящий текст или эхо своего вложения?
@@ -216,5 +301,9 @@ fn preparing_group_file_does_not_block_the_actor() {
         }),
         "оба события пришли: {order:?}",
     );
-    assert_eq!(order, vec!["text", "media"], "актор не ждал перешифровки файла");
+    assert_eq!(
+        order,
+        vec!["text", "media"],
+        "актор не ждал перешифровки файла"
+    );
 }

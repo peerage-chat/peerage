@@ -18,7 +18,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-wanted-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -26,7 +29,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 fn wanted(engine: &Engine) -> Vec<String> {
@@ -46,20 +51,31 @@ fn explicit_download_completes_and_clears_intent() {
     b.add_contact(&a_key, "A");
 
     // 3 МБ — заведомо больше порога автозагрузки.
-    let content: Vec<u8> = (0..3 * 1024 * 1024).map(|i| (i * 13 ^ 0x3c) as u8).collect();
-    a.send_media(&b_key, content.clone(), "video/mp4", "clip.mp4").expect("send_media");
+    let content: Vec<u8> = (0..3 * 1024 * 1024)
+        .map(|i| (i * 13 ^ 0x3c) as u8)
+        .collect();
+    a.send_media(&b_key, content.clone(), "video/mp4", "clip.mp4")
+        .expect("send_media");
 
     // Ждём карточку у B: сообщение пришло, а байты — нет (решает получатель).
     let deadline = Instant::now() + Duration::from_secs(10);
     let blob_id = loop {
         let hist: serde_json::Value = serde_json::from_str(&b.history_json(&a_key)).unwrap();
-        if let Some(m) = hist.as_array().unwrap().iter().find(|m| m["kind"] == "file" || m["kind"] == "video") {
+        if let Some(m) = hist
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["kind"] == "file" || m["kind"] == "video")
+        {
             break m["blob_id"].as_str().unwrap().to_string();
         }
         assert!(Instant::now() < deadline, "B не получил карточку вложения");
         std::thread::sleep(Duration::from_millis(30));
     };
-    assert!(b.blob_read(&blob_id).is_none(), "крупное вложение не должно тянуться само");
+    assert!(
+        b.blob_read(&blob_id).is_none(),
+        "крупное вложение не должно тянуться само"
+    );
 
     assert!(b.download_media(&a_key, &blob_id), "заказ принят");
     assert_eq!(wanted(&b), vec![blob_id.clone()], "намерение записано");
@@ -72,7 +88,10 @@ fn explicit_download_completes_and_clears_intent() {
             assert_eq!(bytes, content, "содержимое доехало байт-в-байт");
             break;
         }
-        assert!(Instant::now() < deadline, "заказанное вложение не доехало за 30с");
+        assert!(
+            Instant::now() < deadline,
+            "заказанное вложение не доехало за 30с"
+        );
         std::thread::sleep(Duration::from_millis(30));
     }
     // Ждём снятия заказа, а не проверяем мгновенный снимок: блоб становится читаемым

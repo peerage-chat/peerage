@@ -15,7 +15,10 @@ fn id(n: u8) -> Identity {
 }
 
 fn tmpdir(tag: &str) -> PathBuf {
-    let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let d = std::env::temp_dir().join(format!("test-prof-{tag}-{n}"));
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -23,7 +26,9 @@ fn tmpdir(tag: &str) -> PathBuf {
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     let key = ident.public_key_bytes();
-    Engine::start_with_transport(dir, ident, net.endpoint(key)).unwrap().engine
+    Engine::start_with_transport(dir, ident, net.endpoint(key))
+        .unwrap()
+        .engine
 }
 
 fn jpeg_with_exif() -> Vec<u8> {
@@ -45,16 +50,24 @@ fn await_profile(b: &Engine, a_hex: &str, name: &str, avatar_id: &str) -> Vec<u8
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let cj: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
-        let found = cj.as_array().and_then(|arr| arr.iter().find(|c| c["key"] == a_hex));
+        let found = cj
+            .as_array()
+            .and_then(|arr| arr.iter().find(|c| c["key"] == a_hex));
         if let Some(c) = found {
             if c["profile_name"] == name && c["avatar_id"] == avatar_id {
                 if let Some(bytes) = b.blob_read(avatar_id) {
-                    assert_eq!(c["name"], "A-note", "локальная заметка B не должна затираться");
+                    assert_eq!(
+                        c["name"], "A-note",
+                        "локальная заметка B не должна затираться"
+                    );
                     return bytes;
                 }
             }
         }
-        assert!(Instant::now() < deadline, "B не получил профиль {name}/{avatar_id} за 10с");
+        assert!(
+            Instant::now() < deadline,
+            "B не получил профиль {name}/{avatar_id} за 10с"
+        );
         std::thread::sleep(Duration::from_millis(30));
     }
 }
@@ -77,12 +90,18 @@ fn profile_propagates_name_and_avatar_by_hash() {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let cj: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
-        let found = cj.as_array().and_then(|arr| arr.iter().find(|c| c["key"] == a_hex));
+        let found = cj
+            .as_array()
+            .and_then(|arr| arr.iter().find(|c| c["key"] == a_hex));
         if let Some(c) = found {
             if c["profile_name"] == "Алиса" && c["avatar_id"] == avatar_id {
                 // B подтянул аватар по хэшу?
                 if let Some(bytes) = b.blob_read(&avatar_id) {
-                    assert_eq!(bytes, a.self_avatar().unwrap(), "аватар у B = очищенный аватар A");
+                    assert_eq!(
+                        bytes,
+                        a.self_avatar().unwrap(),
+                        "аватар у B = очищенный аватар A"
+                    );
                     assert_eq!(c["name"], "A-note", "локальная заметка B не затёрта");
                     // avatar_id — контент-адрес ОЧИЩЕННОГО (scrub снял EXIF).
                     assert_eq!(avatar_id, a.blob_id_hex(&bytes));
@@ -92,7 +111,10 @@ fn profile_propagates_name_and_avatar_by_hash() {
                 }
             }
         }
-        assert!(Instant::now() < deadline, "B не получил профиль/аватар A за 10с");
+        assert!(
+            Instant::now() < deadline,
+            "B не получил профиль/аватар A за 10с"
+        );
         std::thread::sleep(Duration::from_millis(30));
     }
 }
@@ -123,11 +145,19 @@ fn profile_change_repropagates_by_new_hash() {
     let id2 = a.set_self_avatar(jpeg_variant(0x56, 0x78), "image/jpeg");
     assert_ne!(id1, id2, "разный аватар → разный хэш");
     let got2 = await_profile(&b, &a_hex, "Алиса-2", &id2);
-    assert_eq!(got2, a.self_avatar().unwrap(), "B подтянул НОВЫЙ аватар по новому хэшу");
+    assert_eq!(
+        got2,
+        a.self_avatar().unwrap(),
+        "B подтянул НОВЫЙ аватар по новому хэшу"
+    );
     assert_ne!(got1, got2, "новые байты аватара отличаются от старых");
 
     // Старый блоб у B остаётся читаемым (контент-адрес — без перезаписи/удаления).
-    assert_eq!(b.blob_read(&id1).as_deref(), Some(got1.as_slice()), "старый аватар сохранён у B");
+    assert_eq!(
+        b.blob_read(&id1).as_deref(),
+        Some(got1.as_slice()),
+        "старый аватар сохранён у B"
+    );
 
     a.shutdown();
     b.shutdown();
@@ -153,7 +183,11 @@ fn accepted_contact_keeps_blank_name_so_self_name_shows() {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let rj: serde_json::Value = serde_json::from_str(&b.contact_requests_json()).unwrap();
-        if rj.as_array().map(|a| a.iter().any(|r| r["key"] == a_hex)).unwrap_or(false) {
+        if rj
+            .as_array()
+            .map(|a| a.iter().any(|r| r["key"] == a_hex))
+            .unwrap_or(false)
+        {
             break;
         }
         assert!(Instant::now() < deadline, "запрос от A не пришёл за 10с");
@@ -166,7 +200,10 @@ fn accepted_contact_keeps_blank_name_so_self_name_shows() {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let cj: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
-        if let Some(c) = cj.as_array().and_then(|a| a.iter().find(|c| c["key"] == a_hex)) {
+        if let Some(c) = cj
+            .as_array()
+            .and_then(|a| a.iter().find(|c| c["key"] == a_hex))
+        {
             if c["profile_name"] == "Алиса" {
                 assert_eq!(c["name"], "", "принятый контакт без плейсхолдер-имени");
                 a.shutdown();
@@ -174,7 +211,10 @@ fn accepted_contact_keeps_blank_name_so_self_name_shows() {
                 return;
             }
         }
-        assert!(Instant::now() < deadline, "B не увидел самоназвание A за 10с");
+        assert!(
+            Instant::now() < deadline,
+            "B не увидел самоназвание A за 10с"
+        );
         std::thread::sleep(Duration::from_millis(30));
     }
 }
@@ -199,7 +239,11 @@ fn names_set_before_contact_reach_both_sides_on_accept() {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let rj: serde_json::Value = serde_json::from_str(&b.contact_requests_json()).unwrap();
-        if rj.as_array().map(|r| r.iter().any(|r| r["key"] == a_hex)).unwrap_or(false) {
+        if rj
+            .as_array()
+            .map(|r| r.iter().any(|r| r["key"] == a_hex))
+            .unwrap_or(false)
+        {
             break;
         }
         assert!(Instant::now() < deadline, "запрос от A не пришёл за 10с");
@@ -245,16 +289,27 @@ fn contact_code_carries_self_name() {
     assert_eq!(a.my_contact_code(), hex::encode(a_key));
     a.set_self_name("Алиса");
     let code = a.my_contact_code();
-    assert!(code.starts_with(&format!("{}#", hex::encode(a_key))), "имя хвостом: {code}");
+    assert!(
+        code.starts_with(&format!("{}#", hex::encode(a_key))),
+        "имя хвостом: {code}"
+    );
 
     assert_eq!(b.add_contact_code(&code, ""), "added");
     let cj: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
-    let c0 = cj.as_array().unwrap().iter().find(|c| c["key"] == hex::encode(a_key)).unwrap();
+    let c0 = cj
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == hex::encode(a_key))
+        .unwrap();
     assert_eq!(c0["profile_name"], "Алиса");
     assert_eq!(c0["name"], "", "без заглушки: локальное имя пустое");
 
     // Хвост не hex — ключ всё равно добавляется, имя просто не берётся.
-    assert_eq!(c.add_contact_code(&format!("{}#не-hex", hex::encode(a_key)), ""), "added");
+    assert_eq!(
+        c.add_contact_code(&format!("{}#не-hex", hex::encode(a_key)), ""),
+        "added"
+    );
 
     a.shutdown();
     b.shutdown();
