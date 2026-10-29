@@ -47,15 +47,27 @@ type writeReq struct {
 	data []byte
 }
 
+// inPkt — принятая датаграмма, ждущая ygg_read.
+type inPkt struct {
+	from      [32]byte
+	fromKnown bool
+	data      []byte
+}
+
 type node struct {
 	core *core.Core
-	// Надёжная очередь: аудио-медиа + чат + всё прочее. Всегда дренируется перед
-	// видео. Размер 128 — ~2.5с аудио; блокирует только при аномальном заторе.
+	// Надёжная очередь: чат, ключи, управление (ygg_write). При заторе блокирует
+	// отправителя — терять их нельзя.
 	reliableCh chan writeReq
-	// Дроппабельная очередь: только видео/скрин-медиа (реалтайм, старый кадр не нужен).
-	// При переполнении пакет молча дропается — видео запрашивает keyframe само.
-	videoCh chan writeReq
-	stopCh  chan struct{}
+	// Медиа звонка (ygg_write_media) — реалтайм и запечатано: класс пакета по
+	// байтам не виден, его называет отправитель. Никогда не блокирует: при заторе
+	// пакет выбрасывается (опоздавшее медиа бесполезно; LiteRTC повторит важное и
+	// сбавит темп). Блокировка здесь останавливала бы потоки звонка целиком — и
+	// звук, и приём. Срочная очередь — звук и служебные пакеты звонка, объёмная —
+	// видео.
+	urgentCh chan writeReq
+	bulkCh   chan writeReq
+	stopCh   chan struct{}
 
 	// Чёрный список источников: пакеты от этих ключей отбрасываются ЗДЕСЬ, не
 	// пересекая FFI. Приёмный бюджет в Rust режет их и так, но каждый пакет до
@@ -65,9 +77,9 @@ type node struct {
 	blockedMu sync.RWMutex
 	blocked   map[[32]byte]struct{}
 	dropped   atomic.Uint64
-	// Буферы чтения: раньше на КАЖДУЮ входящую датаграмму выделялось 64 КБ, что
-	// под флудом превращалось в давление на GC на ровном месте.
-	readPool sync.Pool
+	// Принятое, но ещё не забранное ygg_read (см. readLoop). Закрыт — узел
+	// остановлен.
+	inCh chan inPkt
 }
 
 // isBlocked — источник в чёрном списке? Дешёвая проверка под RLock; при пустом
@@ -87,35 +99,63 @@ func (n *node) isBlocked(key []byte) bool {
 	return ok
 }
 
-// isVideoMedia определяет, является ли пакет видео/скрин медиа по первым байтам:
-// data[0] == 0x02 (CHAN_MEDIA) && data[1] == 0x01 или 0x02 (TRACK_VIDEO/TRACK_SCREEN).
-// Только эти пакеты дропаются при заторе. Чат (0x01) и аудио (0x02/0x00) — нет.
-func isVideoMedia(data []byte) bool {
-	return len(data) >= 2 && data[0] == 0x02 && (data[1] == 0x01 || data[1] == 0x02)
-}
-
 // writerLoop — единственная долгоживущая горутина записи на узел.
-// Приоритет: всегда сначала дренирует весь reliableCh, потом одно из videoCh.
+// Приоритет: срочное медиа и надёжные пакеты — дочиста, видео — по одному между ними.
 func writerLoop(n *node) {
 	for {
-		// Сначала всегда надёжные пакеты (аудио + чат).
-		drained := true
-		for drained {
+		for more := true; more; {
 			select {
+			case req := <-n.urgentCh:
+				n.core.WriteTo(req.data, req.dst) //nolint:errcheck
 			case req := <-n.reliableCh:
 				n.core.WriteTo(req.data, req.dst) //nolint:errcheck
 			default:
-				drained = false
+				more = false
 			}
 		}
-		// Потом одно видео или ждём новые данные.
 		select {
 		case <-n.stopCh:
 			return
+		case req := <-n.urgentCh:
+			n.core.WriteTo(req.data, req.dst) //nolint:errcheck
 		case req := <-n.reliableCh:
 			n.core.WriteTo(req.data, req.dst) //nolint:errcheck
-		case req := <-n.videoCh:
+		case req := <-n.bulkCh:
 			n.core.WriteTo(req.data, req.dst) //nolint:errcheck
+		}
+	}
+}
+
+// readLoop — единственная горутина чтения из ядра: забирает входящие без остановки
+// и кладёт в inCh, откуда их берёт ygg_read. Читать надо всегда: ironwood отдаёт
+// датаграмму через актор сессии с её отправителем и, пока её не забрали, держит
+// этот актор — а через него же идёт и ЗАПИСЬ этому собеседнику. Когда ygg_read
+// читал из ядра сам, медленный потребитель (поток приёма в Rust, который и сам
+// пишет надёжно, ожидая места в очереди записи) замыкал круг: запись ждала
+// чтения, чтение — записи, и под затором звонок вставал на минуты. Очередь
+// полна — пакет выброшен: чат повторится, медиа опоздало бы всё равно.
+func readLoop(n *node) {
+	defer close(n.inCh)
+	// Один буфер на узел: выделять 64 КБ на каждую датаграмму под флудом —
+	// давление на GC на ровном месте.
+	buf := make([]byte, 65535)
+	for {
+		r, from, err := n.core.ReadFrom(buf)
+		if err != nil {
+			return
+		}
+		p := inPkt{data: append([]byte(nil), buf[:r]...)}
+		if a, ok := from.(iwt.Addr); ok {
+			if n.isBlocked([]byte(a)) {
+				n.dropped.Add(1)
+				continue // молча дальше: ни копирования через границу, ни разбора
+			}
+			copy(p.from[:], a)
+			p.fromKnown = true
+		}
+		select {
+		case n.inCh <- p:
+		default:
 		}
 	}
 }
@@ -175,12 +215,15 @@ func ygg_start(seedPtr *C.uint8_t, seedLen C.int) C.uint64_t {
 	n := &node{
 		core:       c,
 		reliableCh: make(chan writeReq, 128),
-		videoCh:    make(chan writeReq, 64),
+		urgentCh:   make(chan writeReq, 128),
+		bulkCh:     make(chan writeReq, 64),
 		stopCh:     make(chan struct{}),
 		blocked:    make(map[[32]byte]struct{}),
-		readPool:   sync.Pool{New: func() any { b := make([]byte, 65535); return &b }},
+		// ~2.5 с видео на полной полосе.
+		inCh: make(chan inPkt, 512),
 	}
 	go writerLoop(n)
+	go readLoop(n)
 	return C.uint64_t(register(n))
 }
 
@@ -309,13 +352,8 @@ func ygg_add_peer(h C.uint64_t, uri *C.char) C.int {
 // Отправляет датаграмму data узлу с публичным ключом dstPub (32 байта).
 // Возвращает dataLen при успехе или -1 если узел не найден.
 //
-// Пакеты маршрутизируются в две очереди единственной writer-горутины:
-//   - CHAN_MEDIA + TRACK_VIDEO/SCREEN (data[0]==0x02, data[1]==1 или 2) → videoCh
-//     (cap 64, try-send — видео-пакет дропается при заторе, декодер запросит keyframe)
-//   - всё остальное (аудио-медиа + CHAN_CHAT + control) → reliableCh (cap 128,
-//     блокирует — терять чат и аудио нельзя)
-//
-// Writer-горутина всегда дренирует reliableCh перед videoCh → аудио/чат вне голода.
+// Надёжная запись (чат, ключи, управление): при заторе ждёт места в очереди — терять
+// эти пакеты нельзя. Медиа звонка идёт через ygg_write_media.
 func ygg_write(h C.uint64_t, dstPub *C.uint8_t, data *C.uint8_t, dataLen C.int) C.int {
 	n := get(h)
 	if n == nil {
@@ -326,54 +364,57 @@ func ygg_write(h C.uint64_t, dstPub *C.uint8_t, data *C.uint8_t, dataLen C.int) 
 	dst := iwt.Addr(ed25519.PublicKey(pub))
 	req := writeReq{dst: dst, data: buf}
 
-	if isVideoMedia(buf) {
-		// Видео/скрин-медиа — неблокирующий send. При переполнении дропаем.
-		select {
-		case n.videoCh <- req:
-		default:
-			// videoCh полон — дропаем пакет (реалтайм, старый кадр не нужен)
-		}
-	} else {
-		// Аудио + чат + всё прочее — блокирующий send (терять нельзя).
-		// Буфер 128 пакетов = ~2.5с аудио; блокировка только при аномалии.
-		select {
-		case n.reliableCh <- req:
-		case <-n.stopCh:
-			return -1
-		}
+	select {
+	case n.reliableCh <- req:
+	case <-n.stopCh:
+		return -1
 	}
 	return dataLen
+}
+
+//export ygg_write_media
+// Отправляет медиа-датаграмму звонка. Никогда не блокирует: очередь полна — пакет
+// выброшен, возвращается 0. urgent != 0 — звук и служебные пакеты (своя очередь,
+// пишется раньше видео). Возвращает dataLen, 0 (выброшен) или -1 (узел не найден).
+func ygg_write_media(h C.uint64_t, dstPub *C.uint8_t, data *C.uint8_t, dataLen C.int, urgent C.int) C.int {
+	n := get(h)
+	if n == nil {
+		return -1
+	}
+	pub := C.GoBytes(unsafe.Pointer(dstPub), 32)
+	buf := C.GoBytes(unsafe.Pointer(data), dataLen)
+	req := writeReq{dst: iwt.Addr(ed25519.PublicKey(pub)), data: buf}
+	ch := n.bulkCh
+	if urgent != 0 {
+		ch = n.urgentCh
+	}
+	select {
+	case ch <- req:
+		return dataLen
+	default:
+		return 0
+	}
 }
 
 //export ygg_read
 // Блокирующе читает одну датаграмму в out (вместимость outCap). В srcPub (32
 // байта) пишет публичный ключ отправителя. Возвращает число байт или -1.
 //
-// Пакеты от заблокированных источников (ygg_block) отбрасываются здесь и НЕ
-// пересекают FFI: вызывающему они не видны, чтение продолжается со следующего.
+// Пакеты от заблокированных источников (ygg_block) отбрасывает readLoop, и они
+// НЕ пересекают FFI: вызывающему они не видны.
 func ygg_read(h C.uint64_t, out *C.uint8_t, outCap C.int, srcPub *C.uint8_t) C.int {
 	n := get(h)
 	if n == nil {
 		return -1
 	}
-	bufp := n.readPool.Get().(*[]byte)
-	defer n.readPool.Put(bufp)
-	buf := *bufp
-	for {
-		r, from, err := n.core.ReadFrom(buf)
-		if err != nil {
-			return -1
-		}
-		a, ok := from.(iwt.Addr)
-		if ok && n.isBlocked([]byte(a)) {
-			n.dropped.Add(1)
-			continue // молча дальше: ни копирования через границу, ни разбора
-		}
-		if ok {
-			copyOut(unsafe.Pointer(srcPub), 32, []byte(a))
-		}
-		return copyOut(unsafe.Pointer(out), outCap, buf[:r])
+	p, ok := <-n.inCh
+	if !ok {
+		return -1
 	}
+	if p.fromKnown {
+		copyOut(unsafe.Pointer(srcPub), 32, p.from[:])
+	}
+	return copyOut(unsafe.Pointer(out), outCap, p.data)
 }
 
 //export ygg_block

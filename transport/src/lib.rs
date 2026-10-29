@@ -29,6 +29,13 @@ mod ffi {
         pub fn ygg_tree_count(h: u64) -> c_int;
         pub fn ygg_add_peer(h: u64, uri: *const c_char) -> c_int;
         pub fn ygg_write(h: u64, dst_pub: *const u8, data: *const u8, data_len: c_int) -> c_int;
+        pub fn ygg_write_media(
+            h: u64,
+            dst_pub: *const u8,
+            data: *const u8,
+            data_len: c_int,
+            urgent: c_int,
+        ) -> c_int;
         pub fn ygg_read(h: u64, out: *mut u8, out_cap: c_int, src_pub: *mut u8) -> c_int;
         pub fn ygg_block(h: u64, key: *const u8) -> c_int;
         pub fn ygg_unblock(h: u64, key: *const u8) -> c_int;
@@ -152,6 +159,26 @@ impl Node {
             return Err(YggError::OpFailed);
         }
         Ok(n as usize)
+    }
+
+    /// Отправить медиа-датаграмму звонка. Никогда не ждёт: очередь записи полна —
+    /// пакет выброшен (`Ok(false)`); опоздавшее медиа бесполезно, а ожидание здесь
+    /// остановило бы потоки звонка. `urgent` — звук и служебные пакеты: их очередь
+    /// пишется раньше видео.
+    pub fn write_media(&self, dst_pub: &[u8; 32], data: &[u8], urgent: bool) -> Result<bool, YggError> {
+        let n = unsafe {
+            ffi::ygg_write_media(
+                self.handle,
+                dst_pub.as_ptr(),
+                data.as_ptr(),
+                data.len() as c_int,
+                urgent as c_int,
+            )
+        };
+        if n < 0 {
+            return Err(YggError::OpFailed);
+        }
+        Ok(n > 0)
     }
 
     /// Отбрасывать пакеты от этого ключа **внутри libygg**, не поднимая их в Rust.

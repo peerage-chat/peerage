@@ -18,7 +18,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use litertc::{parse_media, write_media_header, MediaHeader, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN};
+use litertc::{
+    parse_media, write_media_header, MediaHeader, MAX_MEDIA_PAYLOAD, MEDIA_HEADER_LEN, MEDIA_RTX_V2,
+    MEDIA_V2, TRACK_AUDIO,
+};
 use peerage_core::media::{CHAN_CHAT, CHAN_MEDIA};
 use peerage_core::protocol::{Payload, ProtocolError};
 use peerage_core::session::{Received, Sessions};
@@ -36,6 +39,12 @@ pub type PeerKey = [u8; 32];
 /// сетевой слой (инвайт/группы/resync/доставка) в одном процессе без устройств.
 pub trait Transport: Send + Sync {
     fn write(&self, dst_pub: &PeerKey, data: &[u8]) -> Result<usize, YggError>;
+    /// Медиа-датаграмма звонка: никогда не ждёт, очередь полна — пакет выброшен
+    /// (`Ok(false)`). `urgent` — звук и служебные пакеты, пишутся раньше видео. По
+    /// умолчанию — обычная запись: двойнику из тестов ждать нечего.
+    fn write_media(&self, dst_pub: &PeerKey, data: &[u8], _urgent: bool) -> Result<bool, YggError> {
+        self.write(dst_pub, data).map(|_| true)
+    }
     /// Блокирующе читает одну датаграмму; возвращает (длину, ключ отправителя).
     fn read(&self, buf: &mut [u8]) -> Result<(usize, PeerKey), YggError>;
     fn address(&self) -> String;
@@ -56,6 +65,9 @@ pub trait Transport: Send + Sync {
 impl Transport for Node {
     fn write(&self, dst_pub: &PeerKey, data: &[u8]) -> Result<usize, YggError> {
         Node::write(self, dst_pub, data)
+    }
+    fn write_media(&self, dst_pub: &PeerKey, data: &[u8], urgent: bool) -> Result<bool, YggError> {
+        Node::write_media(self, dst_pub, data, urgent)
     }
     fn read(&self, buf: &mut [u8]) -> Result<(usize, PeerKey), YggError> {
         Node::read(self, buf)
@@ -1159,11 +1171,18 @@ impl Messenger {
         let mut dg = Vec::with_capacity(1 + sealed.len());
         dg.push(CHAN_MEDIA);
         dg.extend_from_slice(&sealed);
-        if let Err(e) = self.shared.node().write(&self.shared.transport_of(peer), &dg) {
-            log::warn!("peerage-media: node.write failed for track={:?} len={}: {:?}", frame.get(1), dg.len(), e);
-            return Err(MessengerError::Transport(e));
+        // Класс — до запечатывания: потом его по байтам не видно (транспорт раньше
+        // гадал по второму байту, и после SEC-4 всё медиа шло в блокирующую очередь —
+        // затор останавливал звонок целиком). Срочное всё, кроме видео.
+        let video = matches!(frame.first(), Some(&MEDIA_V2 | &MEDIA_RTX_V2))
+            && frame.get(1).is_some_and(|&t| t != TRACK_AUDIO);
+        match self.shared.node().write_media(&self.shared.transport_of(peer), &dg, !video) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                log::warn!("peerage-media: write failed for track={:?} len={}: {:?}", frame.get(1), dg.len(), e);
+                Err(MessengerError::Transport(e))
+            }
         }
-        Ok(())
     }
 
     /// Пригласить пира в голосовую комнату. Надёжно (retry-until-Ack — чинит
