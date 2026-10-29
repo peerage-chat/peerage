@@ -113,8 +113,9 @@ fn log_stats(s: &Session<PeerKey>) {
         let a = litertc::TRACK_AUDIO as usize;
         let v = litertc::TRACK_VIDEO as usize;
         let jitter = st.inbound[a].map_or("-".to_string(), |t| format!("{:.0}ms", t.jitter_ms));
+        let ls = st.lip_sync;
         log::info!(
-            "room-call {}: rtt={} in: audio {} jitter {} video {} | out: audio {} video {} | rtx {} keyreq {} | bw {}k (cuts: delay {} loss {})",
+            "room-call {}: rtt={} in: audio {} jitter {} video {} | out: audio {} video {} | rtx {} keyreq {} | bw {}k target {}k (cuts: delay {} loss {}) flight {}/{}k | lips {} wait audio {}ms video {}ms (hold {} drop {})",
             hex::encode(&p[..4]),
             st.rtt.map_or("-".to_string(), |r| format!("{}ms", r.as_millis())),
             pct(st.inbound[a]),
@@ -125,8 +126,16 @@ fn log_stats(s: &Session<PeerKey>) {
             st.retransmitted,
             st.keyframe_requests,
             st.bandwidth / 1000,
+            st.target / 1000,
             st.bandwidth_cuts.0,
             st.bandwidth_cuts.1,
+            st.in_flight.0 / 1000,
+            st.in_flight.1 / 1000,
+            ls.error_ms.map_or("-".to_string(), |e| format!("{e:+.0}ms")),
+            ls.audio_wait.as_millis(),
+            ls.video_wait.as_millis(),
+            ls.audio_holds,
+            ls.audio_drops,
         );
     }
 }

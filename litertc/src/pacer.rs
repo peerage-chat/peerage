@@ -5,7 +5,8 @@
 //! скоростью в 2,5 раза выше оценки полосы — пачка растягивается на миллисекунды,
 //! а не копится в сети. Служебные пакеты (отчёты, NACK, запросы) и звук идут сразу:
 //! они мелкие, а опоздание речи слышно. Повторы — раньше нового видео: их ждёт
-//! уже собираемый кадр.
+//! уже собираемый кадр. Видео и повторы участнику, чьё окно перегрузки полно
+//! ([`crate::bwe`]), ждут; простоявшие сверх [`MAX_QUEUE_DELAY`] выбрасываются.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -91,19 +92,30 @@ impl<P> Pacer<P> {
         self.last = Some(now);
     }
 
-    /// Следующий пакет, который можно выпустить в `now`.
-    pub fn pop(&mut self, now: Instant) -> Option<Transmit<P>> {
+    /// Первое видео или повтор участнику не из `held`: (класс, место в очереди).
+    fn first_free(&self, held: &impl Fn(&P) -> bool) -> Option<(usize, usize)> {
+        (2..4).find_map(|c| {
+            self.queues[c]
+                .iter()
+                .position(|(_, t)| !held(&t.to))
+                .map(|i| (c, i))
+        })
+    }
+
+    /// Следующий пакет, который можно выпустить в `now`. Видео и повторы участникам
+    /// из `held` (их окно перегрузки полно) ждут.
+    pub fn pop(&mut self, now: Instant, held: impl Fn(&P) -> bool) -> Option<Transmit<P>> {
         self.refill(now);
-        let class = if !self.queues[0].is_empty() {
-            0
+        let (class, i) = if !self.queues[0].is_empty() {
+            (0, 0)
         } else if !self.queues[1].is_empty() {
-            1
+            (1, 0)
         } else if self.budget > 0.0 {
-            (2..4).find(|&c| !self.queues[c].is_empty())?
+            self.first_free(&held)?
         } else {
             return None;
         };
-        let (_, t) = self.queues[class].pop_front()?;
+        let (_, t) = self.queues[class].remove(i)?;
         self.budget -= t.data.len() as f64;
         if class >= Class::Retransmit as usize {
             self.paced_bytes -= t.data.len();
@@ -111,20 +123,35 @@ impl<P> Pacer<P> {
         Some(t)
     }
 
-    /// Когда можно будет выпустить следующий пакет; `None` — очередь пуста.
-    pub fn next_release(&self, now: Instant) -> Option<Instant> {
+    /// Когда можно будет выпустить следующий пакет; `None` — выпускать нечего (или
+    /// всё оставшееся — участникам из `held`: их окно откроет обратная связь).
+    pub fn next_release(&self, now: Instant, held: impl Fn(&P) -> bool) -> Option<Instant> {
         if !self.queues[0].is_empty() || !self.queues[1].is_empty() {
             return Some(now);
         }
-        if self.paced_bytes == 0 && self.queues[2..].iter().all(VecDeque::is_empty) {
-            return None;
-        }
+        self.first_free(&held)?;
         if self.budget > 0.0 {
             return Some(now);
         }
         // Бюджет станет положительным через столько.
         let wait = (1.0 - self.budget) / self.release_rate(now);
         Some(self.last.unwrap_or(now) + Duration::from_secs_f64(wait))
+    }
+
+    /// Выбросить видео и повторы участникам из `held`, простоявшие дольше
+    /// [`MAX_QUEUE_DELAY`]: пока окно откроется, они опоздают, а потерянное приёмник
+    /// попросит заново (ключевой кадр).
+    pub fn drop_stale(&mut self, now: Instant, held: impl Fn(&P) -> bool) {
+        let paced = &mut self.paced_bytes;
+        for q in &mut self.queues[2..] {
+            q.retain(|(at, t)| {
+                let stale = held(&t.to) && now.saturating_duration_since(*at) > MAX_QUEUE_DELAY;
+                if stale {
+                    *paced -= t.data.len();
+                }
+                !stale
+            });
+        }
     }
 
     /// Убрать пакеты, которые больше не нужны (ушедшему участнику).
@@ -163,16 +190,23 @@ mod tests {
         }
         let mut released = 0;
         let mut now = t0;
-        while p.pop(now).is_some() {
+        while p.pop(now, |_| false).is_some() {
             released += 1;
         }
         assert!(released < 5, "пачкой ушло {released}");
         p.push(Class::Audio, now, t(100));
-        assert_eq!(p.pop(now).map(|t| t.data.len()), Some(100), "звук сразу");
+        assert_eq!(
+            p.pop(now, |_| false).map(|t| t.data.len()),
+            Some(100),
+            "звук сразу"
+        );
         let mut last = now;
         while released < 100 {
-            now = p.next_release(now).expect("очередь не пуста").max(now);
-            while p.pop(now).is_some() {
+            now = p
+                .next_release(now, |_| false)
+                .expect("очередь не пуста")
+                .max(now);
+            while p.pop(now, |_| false).is_some() {
                 released += 1;
                 last = now;
             }
@@ -182,7 +216,7 @@ mod tests {
             took > Duration::from_millis(250) && took < Duration::from_millis(400),
             "кадр вышел за {took:?}"
         );
-        assert_eq!(p.next_release(now), None);
+        assert_eq!(p.next_release(now, |_| false), None);
     }
 
     /// Повторы — раньше нового видео; служебные — раньше всего.
@@ -194,7 +228,7 @@ mod tests {
         p.push(Class::Retransmit, now, t(2));
         p.push(Class::Audio, now, t(1));
         p.push(Class::Control, now, t(0));
-        let order: Vec<usize> = std::iter::from_fn(|| p.pop(now))
+        let order: Vec<usize> = std::iter::from_fn(|| p.pop(now, |_| false))
             .map(|t| t.data.len())
             .collect();
         assert_eq!(order, [0, 1, 2, 3]);
@@ -211,8 +245,8 @@ mod tests {
         let mut now = t0;
         let mut released = 0;
         while released < 1000 {
-            now = p.next_release(now).unwrap().max(now);
-            while p.pop(now).is_some() {
+            now = p.next_release(now, |_| false).unwrap().max(now);
+            while p.pop(now, |_| false).is_some() {
                 released += 1;
             }
         }
@@ -221,5 +255,32 @@ mod tests {
             "очередь ушла за {:?}",
             now - t0
         );
+    }
+
+    /// Окно участника полно: его видео ждёт (звук — нет, видео другим — тоже нет),
+    /// таймер ради него не взводится, а простоявшее сверх предела выбрасывается.
+    #[test]
+    fn held_video_waits_and_goes_stale() {
+        let t0 = Instant::now();
+        let mut p = Pacer::new(100_000_000.0);
+        let to = |to: u8, len: usize| Transmit {
+            to,
+            data: vec![0; len],
+        };
+        p.push(Class::Video, t0, to(1, 10));
+        p.push(Class::Video, t0, to(2, 20));
+        p.push(Class::Audio, t0, to(1, 30));
+        let held = |p: &u8| *p == 1;
+        let order: Vec<usize> = std::iter::from_fn(|| p.pop(t0, held))
+            .map(|t| t.data.len())
+            .collect();
+        assert_eq!(order, [30, 20]);
+        assert_eq!(p.next_release(t0, held), None);
+        assert!(p.next_release(t0, |_| false).is_some(), "окно открылось");
+        p.drop_stale(t0 + MAX_QUEUE_DELAY / 2, held);
+        assert!(p.next_release(t0, |_| false).is_some(), "ещё не устарело");
+        p.drop_stale(t0 + MAX_QUEUE_DELAY * 2, held);
+        assert_eq!(p.next_release(t0, |_| false), None);
+        assert_eq!(p.paced_bytes, 0);
     }
 }

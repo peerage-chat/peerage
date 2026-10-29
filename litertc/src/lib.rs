@@ -28,7 +28,7 @@ pub mod wire;
 
 pub use jitter::{JitterBuffer, JitterOut};
 pub use reassembly::{CompleteFrame, VideoReassembler};
-pub use session::{Config, PeerStats, Session, Transmit, VideoFrame};
+pub use session::{Config, LipSync, PeerStats, Session, Transmit, VideoFrame};
 pub use stats::TrackStats;
 pub use wire::{
     fragment_video, parse_keyframe_request, parse_media, parse_nack, parse_report,

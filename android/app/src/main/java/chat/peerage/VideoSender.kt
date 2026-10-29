@@ -274,6 +274,12 @@ class VideoSender(
         }.toInt()
     }
 
+    /** Для лога, когда возраст кадра не распознан: насколько его метка отстоит от
+     *  монотонных часов и от часов с учётом сна. */
+    private fun clockGaps(ptsUs: Long): String =
+        "pts vs mono ${(System.nanoTime() / 1000 - ptsUs) / 1000}ms, " +
+            "vs boot ${(android.os.SystemClock.elapsedRealtimeNanos() / 1000 - ptsUs) / 1000}ms"
+
     private fun drain(enc: MediaCodec) {
         val info = MediaCodec.BufferInfo()
         var config: ByteArray? = null // SPS+PPS
@@ -314,11 +320,15 @@ class VideoSender(
                     // пейсит по НЕМУ, а не по своей настройке (иначе разный fps → видео не
                     // на той скорости). Оба едут в протоколе LiteRTC рядом с кадром.
                     encodedCount++
+                    val age = captureAgeUs(info.presentationTimeUs)
                     if (encodedCount % 30 == 0) {
-                        android.util.Log.i("VideoSender", "Encoded and sent 30 frames, last size = ${au.size} bytes (key=$key)")
+                        android.util.Log.i(
+                            "VideoSender",
+                            "Encoded and sent 30 frames, last size = ${au.size} bytes (key=$key, captured ${age / 1000}ms ago" +
+                                (if (age == 0) ", ${clockGaps(info.presentationTimeUs)})" else ")"),
+                        )
                         adaptBitrate()
                     }
-                    val age = captureAgeUs(info.presentationTimeUs)
                     if (sendVideo(au, key, (sensorOrientation / 90) % 4, fps, age)) requestKeyframe()
                 }
             }

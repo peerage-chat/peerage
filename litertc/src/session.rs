@@ -159,6 +159,21 @@ pub struct VideoFrame {
     pub play_at: Instant,
 }
 
+/// Как губы участника сведены со звуком (ADR-014 §8b).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LipSync {
+    /// На сколько видео позже своего звука, мс (< 0 — раньше), до поправки этой
+    /// секунды; `None` — одного из треков нет.
+    pub error_ms: Option<f32>,
+    /// Сколько ждёт звук ради губ.
+    pub audio_wait: Duration,
+    /// Сколько ждёт видео ради губ.
+    pub video_wait: Duration,
+    /// Кадров маскировки вставлено (звук ждал) и кадров выброшено (ожидание снято).
+    pub audio_holds: u64,
+    pub audio_drops: u64,
+}
+
 /// Статистика по участнику.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PeerStats {
@@ -178,6 +193,12 @@ pub struct PeerStats {
     pub bandwidth: u32,
     /// Сколько раз оценку сбавляли: из-за роста задержки и из-за потерь.
     pub bandwidth_cuts: (u64, u64),
+    /// Цель кодера для него, бит/с: оценка, урезанная, пока окно перегрузки полно.
+    pub target: u32,
+    /// В полёте (без обратной связи) и окно перегрузки, байт.
+    pub in_flight: (u64, u64),
+    /// Сведение губ со звуком.
+    pub lip_sync: LipSync,
 }
 
 /// Приём звука от участника: джиттер-буфер и оценка джиттера для его глубины.
@@ -440,15 +461,23 @@ impl<P: Copy + Eq + Hash> Session<P> {
         self.peers
             .iter()
             .filter_map(|p| self.state.get(p))
-            .map(|st| st.bwe.rate() as u32)
+            .map(|st| st.bwe.target() as u32)
             .min()
             .unwrap_or(self.max_bitrate)
     }
 
-    /// Темп выпуска: каждому участнику — его копия, поэтому цель на их число.
+    /// Темп выпуска: каждому участнику — его копия, поэтому худшая оценка на их
+    /// число. От оценки, а не от урезанной цели кодера: придержанное окном должно
+    /// уходить, как только оно откроется.
     fn update_pacing(&mut self) {
-        let total = self.target_bitrate() as f64 * self.peers.len().max(1) as f64;
-        self.pacer.set_rate(total);
+        let worst = self
+            .peers
+            .iter()
+            .filter_map(|p| self.state.get(p))
+            .map(|st| st.bwe.rate())
+            .reduce(f64::min)
+            .unwrap_or(self.max_bitrate as f64);
+        self.pacer.set_rate(worst * self.peers.len().max(1) as f64);
     }
 
     pub fn peers(&self) -> &[P] {
@@ -563,7 +592,10 @@ impl<P: Copy + Eq + Hash> Session<P> {
     /// говорит [`Session::poll_timeout`].
     pub fn poll_transmit(&mut self) -> Option<Transmit<P>> {
         let now = self.last_now?;
-        let mut t = self.pacer.pop(now)?;
+        let state = &self.state;
+        let held = |p: &P| state.get(p).is_some_and(|st| st.bwe.congested());
+        self.pacer.drop_stale(now, held);
+        let mut t = self.pacer.pop(now, held)?;
         let media = matches!(t.data.first(), Some(&MEDIA_V2 | &MEDIA_RTX_V2));
         if let (true, Some(st), Some(epoch)) = (media, self.state.get_mut(&t.to), self.epoch) {
             let seq = st.tw_seq;
@@ -681,6 +713,8 @@ impl<P: Copy + Eq + Hash> Session<P> {
             let now_ms = since_epoch.as_millis() as u32;
             let rtt = now_ms.wrapping_sub(echo_ts).wrapping_sub(echo_delay) as i32;
             if (0..=MAX_RTT_MS).contains(&rtt) {
+                st.bwe
+                    .on_rtt(since_epoch.as_secs_f64() * 1000.0, rtt as f64);
                 let sample = Duration::from_millis(rtt as u64);
                 // Сглаживание как у TCP (RFC 6298): 7/8 старого + 1/8 нового.
                 st.stats.rtt = Some(st.stats.rtt.map_or(sample, |old| (old * 7 + sample) / 8));
@@ -757,7 +791,11 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 ]
             })
             .flatten()
-            .chain(self.last_now.and_then(|now| self.pacer.next_release(now)))
+            .chain(self.last_now.and_then(|now| {
+                self.pacer.next_release(now, |p| {
+                    self.state.get(p).is_some_and(|st| st.bwe.congested())
+                })
+            }))
             .min()
     }
 
@@ -826,12 +864,14 @@ impl<P: Copy + Eq + Hash> Session<P> {
             // Кадр маскировки вместо следующего: всё дальше слышно на кадр позже.
             a.held += 1;
             a.since_adjust = 0;
+            st.stats.lip_sync.audio_holds += 1;
             return Some(JitterOut::Hold);
         }
         if adjust && a.held > want && a.jitter.len() >= 2 {
             // Кадр выброшен: всё дальше слышно на кадр раньше.
             a.held -= 1;
             a.since_adjust = 0;
+            st.stats.lip_sync.audio_drops += 1;
             a.jitter.pop();
         }
         let out = a.jitter.pop();
@@ -886,6 +926,14 @@ impl<P: Copy + Eq + Hash> Session<P> {
         self.state.get(peer).map(|s| PeerStats {
             bandwidth: s.bwe.rate() as u32,
             bandwidth_cuts: (s.bwe.cuts_delay, s.bwe.cuts_loss),
+            target: s.bwe.target() as u32,
+            in_flight: s.bwe.flight(),
+            lip_sync: LipSync {
+                error_ms: s.sync.error_ms().map(|e| e as f32),
+                audio_wait: s.sync.audio_delay(),
+                video_wait: s.sync.video_delay(),
+                ..s.stats.lip_sync
+            },
             ..s.stats
         })
     }
@@ -1028,7 +1076,12 @@ mod tests {
         assert_eq!(s.stats(&2), None);
         s.set_peers(&[1, 2]);
         assert_eq!(
-            s.stats(&2).map(|st| PeerStats { bandwidth: 0, ..st }),
+            s.stats(&2).map(|st| PeerStats {
+                bandwidth: 0,
+                target: 0,
+                in_flight: (st.in_flight.0, 0),
+                ..st
+            }),
             Some(PeerStats::default()),
             "вернулся — с чистого листа"
         );

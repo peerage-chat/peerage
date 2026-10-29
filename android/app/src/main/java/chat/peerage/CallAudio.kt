@@ -39,6 +39,9 @@ class CallAudio(
     @Volatile private var running = false
     private val threads = mutableListOf<Thread>()
 
+    /** Для лога: возраст последнего захваченного куска, мкс. */
+    @Volatile private var lastCaptureAgeUs = 0
+
     @SuppressLint("MissingPermission")
     fun start(sampleRate: Int, channels: Int) {
         val inMask = if (channels >= 2) AudioFormat.CHANNEL_IN_STEREO else AudioFormat.CHANNEL_IN_MONO
@@ -91,7 +94,9 @@ class CallAudio(
                 when {
                     n > 0 -> {
                         framesRead += n / ch
-                        push(buf, n, captureAgeUs(rec, stamp, framesRead, sampleRate))
+                        val ageUs = captureAgeUs(rec, stamp, framesRead, sampleRate)
+                        lastCaptureAgeUs = ageUs
+                        push(buf, n, ageUs)
                         // Уровень мика (RMS) для индикатора — раз в ~3 кадра (60мс), не каждый.
                         if (++levelTick >= 3) {
                             levelTick = 0
@@ -136,7 +141,10 @@ class CallAudio(
                 framesWritten += buf.size / ch
                 val nowMs = System.currentTimeMillis()
                 if (nowMs - lastLogMs >= 5000) {
-                    android.util.Log.i("CallAudio", "playback: $starvations starv/5s")
+                    android.util.Log.i(
+                        "CallAudio",
+                        "playback: $starvations starv/5s, output ${delayUs / 1000}ms, capture ${lastCaptureAgeUs / 1000}ms",
+                    )
                     starvations = 0
                     lastLogMs = nowMs
                 }

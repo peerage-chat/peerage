@@ -189,6 +189,13 @@ don't have to.
   delay-gradient-based (back off when one-way delay keeps growing), after GCC. Delay
   matters more for us than for plain UDP: Yggdrasil peer links are TCP/TLS/QUIC, so
   congestion shows up first as growing queues and latency, and only later as drops.
+- **Bound what is in flight** (congestion window, as in WebRTC): bytes sent without
+  feedback stay under estimate × (min RTT + 250 ms); past that, video and
+  retransmissions wait and audio does not. Feedback crosses the same congested links
+  in the other direction, and the TCP buffers under Yggdrasil links have no useful
+  bound, so without a window a sudden drop grows the queue for tens of seconds before
+  the first cut. While the window is full the encoder target is pushed below the
+  estimate, and the estimate does not grow above 1.5 × the delivered rate (GCC).
 - **Adapt**: `TargetBitrate` goes to the encoders. Kotlin maps the video target to an
   encoder bitrate and a resolution step; the audio target goes to Opus.
 - **Pace**: fragments of a large frame go out spread over a few milliseconds instead of
@@ -302,6 +309,30 @@ parses comes from such a member, so:
    as a keyframe with a new SPS and the decoder follows without being recreated.
    Verified live on the emulators with the aspect check relaxed (their camera has no
    small 16:9 size): 720p → 144p → 240p → 144p, decoders kept, no crash.
+   7c ✅ (2026-10-30): congestion window. Found on the emulator pair under a sudden
+   throttle: the call froze for a minute and the room dropped the peer (presence
+   beacons live 12 s). The model reproduced it (`tests/congestion.rs`: two-way video,
+   4 → 0.4 Mbit/s with a near-bottomless buffer — the queue grew 0.8 s every second
+   and never drained). Now: a per-member window (in flight vs estimate × (min RTT +
+   250 ms); min RTT only from measured samples, 200 ms before the first; forgotten after
+   30 s); the pacer holds video and retransmissions for a full window and drops those
+   held > 0.5 s; encoder pushback ×0.9/×0.95 per feedback while over the window, back
+   at once when nearly empty; growth capped at 1.5 × delivered + 10 kbit/s unless
+   application-limited. A delay overuse while application-limited (static scene,
+   sending < 65 % of the estimate) cuts from the estimate, not from the trickle that
+   arrived. Simulated: the same drop peaks at 1.6 s and is back to ~100 ms in 4 s; a
+   600 ms clean path climbs back to the ceiling after a bottleneck with no queue (the
+   window never holds it). Open: a call that *starts* inside a narrow, long-RTT
+   bottleneck still drowns — the estimate starts at the ceiling, the first RTT sample
+   is already inflated, and the delay detector never fires against a queue that stands
+   from the first second; needs a low start with ramp-up (probing). The test is kept
+   as `#[ignore]`. The emulator throttle is not a usable bench here: at
+   `network speed 400:400` it carried ≈ 20 kbit/s each way during a call.
+   The same run found libygg classifying media by `data[1]`, which after SEC-4 sealing
+   is a session-index byte, so all media went to the blocking queue and congestion
+   stopped the call threads; media now goes through a non-blocking `ygg_write_media`
+   with the class named by the sender, and libygg reads the core continuously (a slow
+   reader used to stall ironwood's session actor and with it the writes).
 8. **Playout and A/V sync:** the video jitter buffer moves from `VideoReceiver` into
    LiteRTC (`play_at`); Kotlin only decodes and renders.
    8a ✅ (2026-10-29): playout by capture timestamps (`playout.rs`). The frame's 90 kHz

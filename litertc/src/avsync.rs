@@ -84,6 +84,8 @@ pub(crate) struct AvSync {
     audio_delay_ms: f64,
     video_delay_ms: f64,
     next_update: Option<Instant>,
+    /// Расхождение при последней поправке, мс; `None` — одного трека нет.
+    error_ms: Option<f64>,
 }
 
 impl AvSync {
@@ -106,6 +108,12 @@ impl AvSync {
         Duration::from_secs_f64(self.audio_delay_ms / 1000.0)
     }
 
+    /// На сколько видео позже своего звука, мс (< 0 — раньше), по последней
+    /// поправке; `None` — одного из треков нет.
+    pub fn error_ms(&self) -> Option<f64> {
+        self.error_ms
+    }
+
     /// Сколько задержать видео ради губ.
     pub fn video_delay(&self) -> Duration {
         Duration::from_secs_f64(self.video_delay_ms / 1000.0)
@@ -116,6 +124,7 @@ impl AvSync {
             return;
         }
         self.next_update = Some(now + UPDATE_EVERY);
+        self.error_ms = None;
         let (Some(a), Some(v)) = (self.audio.fresh(now), self.video.fresh(now)) else {
             // Одного трека нет (камера выключена, тайл не на экране) — ждать
             // незачем: добавленное снимаем.
@@ -126,6 +135,7 @@ impl AvSync {
         // > 0 — видео показывают позже, чем слышен его звук.
         let mut d = v - a;
         d -= VIDEO_WRAP_MS * (d / VIDEO_WRAP_MS).round();
+        self.error_ms = Some(d);
         if d.abs() <= DEADBAND_MS {
             return;
         }

@@ -75,6 +75,11 @@ pub extern "system" fn Java_chat_peerage_Native_start<'local>(
         let _ = android_logger::init_once(
             android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("core"),
         );
+        // Паника в фоновом потоке ядра (звонок, мессенджер) пишет в stderr, а его на
+        // Android никто не читает: поток молча умирает, и остаётся гадать, почему
+        // встал звонок. Пусть она будет в logcat. Для паник на границе JNI это
+        // не замена catch_unwind — они так же перехватываются, просто видны.
+        std::panic::set_hook(Box::new(|info| log::error!("panic: {info}")));
 
         let dir = PathBuf::from(jstr(&mut env, &data_dir));
 

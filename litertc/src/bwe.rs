@@ -7,11 +7,24 @@
 //! копит очередь и задержку и только потом теряет пакеты. По задержке — AIMD:
 //! прибавляем понемногу, сбавляем сразу до 85 % того, что реально дошло. **Потери:**
 //! своя оценка — больше 10 % сбавляем, меньше 2 % прибавляем, между — держим. Итог —
-//! меньшая из двух. Оценки раздельные (как в WebRTC): общая при постоянных
+//! меньшая из двух. Если мы сами шлём заметно меньше оценки (камера смотрит в стену,
+//! кодеру нечего слать), дошедшее — не мера канала: сбавляем от своей оценки, иначе
+//! стоящая сцена роняла бы её к полу, и разгон после занял бы минуту (у WebRTC на
+//! этот случай пробы полосы, у нас их нет). Оценки раздельные (как в WebRTC): общая при постоянных
 //! неперегрузочных потерях (радио) только спускалась бы — сбросы по задержке есть,
 //! а прибавлять потери не дают. По той же причине пороги потерь считаются сверх
 //! собственных потерь канала — постоянной доли, которая есть при любой нашей
 //! скорости (радио, захлёбывающийся CPU узла).
+//!
+//! **Окно перегрузки.** Обратная связь идёт через ту же сеть и при резкой просадке
+//! полосы стоит в очереди с другой стороны — а буферы TCP под линками бездонные, и
+//! пока она дойдёт, очередь вырастает на десятки секунд. Поэтому, как в WebRTC
+//! (congestion window), в полёте — без обратной связи — держим не больше, чем канал
+//! пропускает за наименьший RTT с запасом; сверх этого видео ждёт. Пока отправку
+//! держит окно, очередь в сети стоит ровно, и детектор задержки (он ловит рост)
+//! молчит — поэтому, как в GCC, оценка не растёт выше полутора дошедших. А чтобы
+//! придержанное не копилось у нас, кодеру, пока окно переполнено, называем цель
+//! ниже оценки (congestion window pushback в WebRTC).
 //!
 //! Сведения идут из транспортной обратной связи ([`crate::wire::TransportFeedback`]):
 //! приёмник сообщает, когда пришёл каждый пакет, отправитель знает, когда его отправил.
@@ -47,6 +60,8 @@ const K_DOWN: f64 = 0.039;
 
 /// Сбавляем до этой доли дошедшего.
 const BACKOFF: f64 = 0.85;
+/// Шлём меньше этой доли оценки — канал загружен не нами (как ALR в WebRTC).
+const APP_LIMITED: f64 = 0.65;
 /// Прибавка вдали от последней перегрузки — за секунду.
 const INCREASE_PER_SEC: f64 = 1.08;
 /// Потери сверх собственных выше — сбавляем, выше нижней — не прибавляем.
@@ -65,6 +80,24 @@ const ACKED_WINDOW_MS: f64 = 500.0;
 /// раздутую очередь: обратная связь о пакете приходит через RTT плюс очередь, и если
 /// журнал забыл его раньше, оценка слепнет как раз тогда, когда нужнее всего.
 const SEND_LOG_MAX: usize = 4096;
+/// Окно перегрузки: сверх наименьшего RTT — запас на неровность кодера и интервал
+/// обратной связи.
+const CWND_QUEUE_MS: f64 = 250.0;
+/// Окно не меньше нескольких полных пакетов.
+const CWND_MIN_BYTES: f64 = 6000.0;
+/// RTT, пока его не замерили (как `DEFAULT_RTT` сессии). В минимум не идёт: если
+/// путь длиннее, окно по нему мало, и держать его 30 с значило бы душить отправку.
+const RTT_PRIOR_MS: f64 = 200.0;
+/// Наименьший RTT забывается через столько: маршрут мог стать длиннее.
+const MIN_RTT_WINDOW_MS: f64 = 30_000.0;
+/// В полёте больше этой доли окна к приходу обратной связи — отправку держит окно
+/// (а не кодеру нечего слать).
+const WINDOW_LIMITED: f64 = 0.8;
+/// Оценка растёт не выше стольких дошедших (плюс [`MAX_OVER_ACKED_BPS`]), как в GCC.
+const MAX_OVER_ACKED: f64 = 1.5;
+const MAX_OVER_ACKED_BPS: f64 = 10_000.0;
+/// Цель кодера ниже оценки не опускается дальше этой доли.
+const PUSHBACK_MIN: f64 = 0.1;
 const SEND_LOG_AGE_MS: f64 = 10_000.0;
 
 /// Что говорит задержка.
@@ -288,6 +321,17 @@ pub(crate) struct Bwe {
     updated_at: Option<f64>,
     /// Дошедшие пакеты по времени прихода (мс получателя, байт).
     acked: VecDeque<(f64, u32)>,
+    /// Отправленные пакеты (наши мс, байт).
+    sent: VecDeque<(f64, u32)>,
+    /// Ушедшие, о которых обратной связи ещё не было: (номер, наши мс, байт).
+    in_flight: VecDeque<(u16, f64, u32)>,
+    in_flight_bytes: u64,
+    /// Наименьший RTT и когда замерен (наши мс).
+    min_rtt: Option<(f64, f64)>,
+    /// К приходу последней обратной связи окно было почти полно.
+    window_limited: bool,
+    /// Доля оценки, которую называем кодеру: меньше единицы, пока окно переполнено.
+    pushback: f64,
     /// Потери в текущем окне: (потеряно, всего, начало окна).
     loss_window: (u32, u32, Option<f64>),
     /// Потери в последнем окне сверх собственных.
@@ -316,6 +360,12 @@ impl Bwe {
             capacity: None,
             updated_at: None,
             acked: VecDeque::new(),
+            sent: VecDeque::new(),
+            in_flight: VecDeque::new(),
+            in_flight_bytes: 0,
+            min_rtt: None,
+            window_limited: false,
+            pushback: 1.0,
             loss_window: (0, 0, None),
             loss: 0.0,
             inherent_loss: 0.0,
@@ -341,8 +391,66 @@ impl Bwe {
         self.rate
     }
 
+    /// Сколько выдавать кодеру: оценка, урезанная, пока окно перегрузки
+    /// переполнено, — иначе он наработает больше, чем окно пропускает, и придержанное
+    /// скопится у нас.
+    pub fn target(&self) -> f64 {
+        (self.rate * self.pushback).max(self.min)
+    }
+
     pub fn on_sent(&mut self, seq: u16, at_ms: f64, size: u32) {
         self.sends.push(seq, at_ms, size);
+        self.sent.push_back((at_ms, size));
+        // Без обратной связи окно не чистит никто — а слать можно и в пустоту.
+        while self
+            .sent
+            .front()
+            .is_some_and(|&(t, _)| at_ms - t > ACKED_WINDOW_MS)
+        {
+            self.sent.pop_front();
+        }
+        self.in_flight.push_back((seq, at_ms, size));
+        self.in_flight_bytes += size as u64;
+        // О таких старых обратная связь уже ничего не скажет (их забыл журнал).
+        while let Some(&(_, t, s)) = self.in_flight.front() {
+            if at_ms - t <= SEND_LOG_AGE_MS {
+                break;
+            }
+            self.in_flight.pop_front();
+            self.in_flight_bytes -= s as u64;
+        }
+    }
+
+    /// Замер RTT (сырой, не сглаженный) в `now_ms`. Только настоящие замеры: RTT по
+    /// умолчанию, пока их нет, мог бы оказаться меньше настоящего, и окно — меньше,
+    /// чем канал держит в полёте. Тогда отправку держало бы окно, дошедшее не
+    /// дотягивало бы до оценки, предел роста от дошедшего не давал бы ей расти, а
+    /// pushback ещё и душил бы кодер — до тех пор, пока минимум не забудется.
+    pub fn on_rtt(&mut self, now_ms: f64, rtt_ms: f64) {
+        if self
+            .min_rtt
+            .is_none_or(|(r, at)| rtt_ms <= r || now_ms - at > MIN_RTT_WINDOW_MS)
+        {
+            self.min_rtt = Some((rtt_ms, now_ms));
+        }
+    }
+
+    /// Окно перегрузки полно: в полёте больше, чем канал пропускает за наименьший
+    /// RTT с запасом. Пока так, видео этому участнику ждёт (звук и служебные — нет:
+    /// по их обратной связи окно и освободится).
+    pub fn congested(&self) -> bool {
+        self.in_flight_bytes as f64 > self.window()
+    }
+
+    /// В полёте и окно перегрузки, байт — для статистики.
+    pub fn flight(&self) -> (u64, u64) {
+        (self.in_flight_bytes, self.window() as u64)
+    }
+
+    /// Окно перегрузки, байт.
+    fn window(&self) -> f64 {
+        let rtt = self.min_rtt.map_or(RTT_PRIOR_MS, |(r, _)| r);
+        (self.rate / 8.0 * (rtt + CWND_QUEUE_MS) / 1000.0).max(CWND_MIN_BYTES)
     }
 
     /// Обратная связь пришла в `now_ms` (наши часы); `rtt_ms` — текущий RTT.
@@ -363,6 +471,29 @@ impl Bwe {
                 }
                 None => lost += 1,
             }
+        }
+        let fill = self.in_flight_bytes as f64 / self.window();
+        self.window_limited = fill > WINDOW_LIMITED;
+        // Как в WebRTC: переполнено — урезаем на 5–10 % за отчёт, почти пусто —
+        // отпускаем сразу, между — возвращаем понемногу.
+        self.pushback = if fill > 1.5 {
+            self.pushback * 0.9
+        } else if fill > 1.0 {
+            self.pushback * 0.95
+        } else if fill < 0.1 {
+            1.0
+        } else {
+            self.pushback + 0.05
+        }
+        .clamp(PUSHBACK_MIN, 1.0);
+        // Всё до последнего сообщённого — дошло или потеряно: уже не в полёте.
+        let end = fb.base_seq.wrapping_add(fb.arrivals.len() as u16);
+        while let Some(&(seq, _, size)) = self.in_flight.front() {
+            if end.wrapping_sub(seq) as i16 <= 0 {
+                break;
+            }
+            self.in_flight.pop_front();
+            self.in_flight_bytes -= size as u64;
         }
         self.count_loss(now_ms, lost, total);
         self.update(now_ms, rtt_ms);
@@ -397,20 +528,12 @@ impl Bwe {
 
     /// Дошедший битрейт за последние полсекунды прихода.
     fn acked_bps(&mut self) -> Option<f64> {
-        let last = self.acked.back()?.0;
-        while self
-            .acked
-            .front()
-            .is_some_and(|&(t, _)| last - t > ACKED_WINDOW_MS)
-        {
-            self.acked.pop_front();
-        }
-        let span = last - self.acked.front()?.0;
-        if span < ACKED_WINDOW_MS / 2.0 {
-            return None;
-        }
-        let bytes: u64 = self.acked.iter().map(|&(_, s)| s as u64).sum();
-        Some(bytes as f64 * 8.0 * 1000.0 / span)
+        window_bps(&mut self.acked, None)
+    }
+
+    /// Отправленный битрейт за последние полсекунды до `now_ms`.
+    fn sent_bps(&mut self, now_ms: f64) -> Option<f64> {
+        window_bps(&mut self.sent, Some(now_ms))
     }
 
     fn update(&mut self, now_ms: f64, rtt_ms: f64) {
@@ -433,10 +556,23 @@ impl Bwe {
             self.loss_rate *= grow;
         }
         let usage = self.delay.usage();
+        // Упёрлись в окно — шлём мало не потому, что нечего.
+        let app_limited = !self.window_limited
+            && self
+                .sent_bps(now_ms)
+                .is_some_and(|s| s < APP_LIMITED * self.rate);
+        let before = self.delay_rate;
         if usage == Usage::Over && may_decrease {
-            let base = acked.map_or(self.rate, |a| a.min(self.rate));
-            self.delay_rate = BACKOFF * base;
-            self.capacity = Some(base);
+            if app_limited {
+                // Дошедшее — то, что мы слали, а не то, что пропускает канал: ёмкость
+                // по нему не мерим. Очередь растёт не от нас; если она чужая и
+                // настоящая, сброс повторится через RTT.
+                self.delay_rate = BACKOFF * self.rate;
+            } else {
+                let base = acked.map_or(self.rate, |a| a.min(self.rate));
+                self.delay_rate = BACKOFF * base;
+                self.capacity = Some(base);
+            }
             self.decreased_at = Some(now_ms);
             self.cuts_delay += 1;
         } else if usage == Usage::Normal {
@@ -455,10 +591,35 @@ impl Bwe {
                 self.delay_rate *= grow;
             }
         }
+        // Выше полутора дошедших не растём: пока отправку держит окно, детектор
+        // задержки молчит, и без этого оценка (а с ней окно) уползала бы вверх. Когда
+        // нечего слать, дошедшее — не мера канала, и предела нет.
+        if let (false, Some(a)) = (app_limited, acked) {
+            let cap = before.max(MAX_OVER_ACKED * a + MAX_OVER_ACKED_BPS);
+            self.delay_rate = self.delay_rate.min(cap);
+        }
         self.delay_rate = self.delay_rate.clamp(self.min, self.max);
         self.loss_rate = self.loss_rate.clamp(self.min, self.max);
         self.rate = self.delay_rate.min(self.loss_rate);
     }
+}
+
+/// Битрейт пакетов окна `(мс, байт)` за последние [`ACKED_WINDOW_MS`] до `now_ms` (или
+/// до последнего пакета); старшие выбрасываются. `None` — окно ещё не набрано.
+fn window_bps(w: &mut VecDeque<(f64, u32)>, now_ms: Option<f64>) -> Option<f64> {
+    let end = now_ms.or(w.back().map(|&(t, _)| t))?;
+    while w.front().is_some_and(|&(t, _)| end - t > ACKED_WINDOW_MS) {
+        w.pop_front();
+    }
+    let span = match now_ms {
+        Some(_) => ACKED_WINDOW_MS,
+        None => end - w.front()?.0,
+    };
+    if span < ACKED_WINDOW_MS / 2.0 {
+        return None;
+    }
+    let bytes: u64 = w.iter().map(|&(_, s)| s as u64).sum();
+    Some(bytes as f64 * 8.0 * 1000.0 / span)
 }
 
 /// Когда пришли пакеты участника — для обратной связи ему (сторона получателя).
@@ -632,6 +793,74 @@ mod tests {
             lowest = lowest.min(b.rate());
         }
         assert!(b.rate() > lowest * 1.5, "разгон {lowest} → {}", b.rate());
+    }
+
+    /// Первый сброс по растущей задержке при отправке `size` байт раз в 10 мс с
+    /// оценки 2 Мбит/с: до чего сбавили.
+    fn first_delay_cut(size: u32) -> f64 {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        (b.rate, b.delay_rate, b.loss_rate) = (2_000_000.0, 2_000_000.0, 2_000_000.0);
+        let mut seq = 0u16;
+        for round in 0..100 {
+            let mut arr = Vec::new();
+            for i in 0..10 {
+                let n = round * 10 + i;
+                let t = n as f64 * 10.0;
+                b.on_sent(seq, t, size);
+                seq = seq.wrapping_add(1);
+                // Через 3 с канал пропускает две трети: очередь растёт на 5 мс с
+                // каждым пакетом.
+                let queue = (n as f64 - 300.0).max(0.0) * 5.0;
+                arr.push(Some(t + 50.0 + queue));
+            }
+            let now = (round + 1) as f64 * 100.0;
+            b.on_feedback(now, &feedback(seq.wrapping_sub(10), &arr), 100.0);
+            if b.cuts_delay > 0 {
+                return b.rate();
+            }
+        }
+        panic!("перегрузку не заметили");
+    }
+
+    /// В полёте больше окна — перегружено, пока обратная связь о них не придёт;
+    /// пока окно переполнено, цель кодера ниже оценки.
+    #[test]
+    fn window_fills_without_feedback() {
+        let mut b = Bwe::new(100_000.0, 2_000_000.0);
+        let send = |b: &mut Bwe, seqs: std::ops::RangeInclusive<u16>| {
+            for seq in seqs {
+                b.on_sent(seq, 100.0 + seq as f64, 1200);
+            }
+        };
+        b.on_sent(0, 0.0, 1200);
+        b.on_feedback(100.0, &feedback(0, &[Some(50.0)]), 100.0);
+        send(&mut b, 1..=80);
+        assert!(!b.congested(), "окно по RTT до замера (200 мс) ≈ 112 КБ");
+        // RTT 100 мс — окно 2 Мбит/с × 350 мс ≈ 87 КБ.
+        b.on_rtt(150.0, 100.0);
+        assert!(b.congested(), "в полёте 80 × 1200");
+        assert_eq!(b.target(), b.rate());
+        // Обратная связь о первых 10 пришла, когда окно было переполнено: цель
+        // кодера урезана, окно уже не полно.
+        let ten: Vec<Option<f64>> = (0..10).map(|i| Some(150.0 + i as f64)).collect();
+        b.on_feedback(300.0, &feedback(1, &ten), 100.0);
+        assert!(!b.congested(), "в полёте 70 × 1200");
+        assert!(b.target() < b.rate());
+        // О последнем — значит, и обо всех до него; почти пустое окно отпускает цель.
+        b.on_feedback(400.0, &feedback(80, &[Some(250.0)]), 100.0);
+        send(&mut b, 81..=81);
+        b.on_feedback(500.0, &feedback(81, &[Some(350.0)]), 100.0);
+        assert_eq!(b.target(), b.rate());
+    }
+
+    /// Шлём почти ничего (сцена стоит) — дошедшее не мера канала: сбавляем от своей
+    /// оценки, а не к полу. Канал загружен нами — сбавляем от дошедшего.
+    #[test]
+    fn idle_sender_is_not_cut_to_its_trickle() {
+        let idle = first_delay_cut(100); // 80 кбит/с
+        assert!(idle >= 1_600_000.0, "после сброса {idle}");
+        let busy = first_delay_cut(2500); // 2 Мбит/с
+        assert!(busy < 1_600_000.0, "после сброса {busy}");
     }
 
     /// Пропуски — на своих местах, опоздавшие к сообщённому — мимо.
