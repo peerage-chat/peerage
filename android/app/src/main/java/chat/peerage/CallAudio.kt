@@ -26,15 +26,41 @@ class CallAudio(
     /** (куда, через сколько записанное сюда будет слышно, мкс) → сэмплов. */
     private val pull: (ShortArray, Int) -> Int,
     private val mute: (Boolean) -> Unit,
-    private val fx: AudioFx = AudioFx(),
-    private val inputDevice: AudioDeviceInfo? = null,
+    fx: AudioFx = AudioFx(),
+    inputDevice: AudioDeviceInfo? = null,
     private val onLevel: (Float) -> Unit = {},
 ) {
-    private var record: AudioRecord? = null
+    /** Микрофон и его аппаратная обработка — живут и умирают вместе. */
+    private class Mic(
+        val record: AudioRecord,
+        val aec: AcousticEchoCanceler?,
+        val ns: NoiseSuppressor?,
+        val agc: AutomaticGainControl?,
+    ) {
+        fun setFx(fx: AudioFx) {
+            runCatching { aec?.enabled = fx.aec }
+            runCatching { ns?.enabled = fx.ns }
+            runCatching { agc?.enabled = fx.agc }
+        }
+
+        fun release() {
+            runCatching { record.stop() }
+            runCatching { record.release() }
+            runCatching { aec?.release() }
+            runCatching { ns?.release() }
+            runCatching { agc?.release() }
+        }
+    }
+
+    /** Меняют поток захвата (переоткрытие умершего) и [stop] — под [micLock]. */
+    @Volatile private var mic: Mic? = null
+    private val micLock = Any()
     private var track: AudioTrack? = null
-    private var aec: AcousticEchoCanceler? = null
-    private var ns: NoiseSuppressor? = null
-    private var agc: AutomaticGainControl? = null
+
+    /** Тумблеры и микрофон сейчас — с ними же откроется переоткрытый. */
+    @Volatile private var fx = fx
+
+    @Volatile private var inputDevice = inputDevice
 
     @Volatile private var running = false
     private val threads = mutableListOf<Thread>()
@@ -51,13 +77,7 @@ class CallAudio(
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_IN_COMMUNICATION
 
-        val inMin = AudioRecord.getMinBufferSize(sampleRate, inMask, fmt).coerceAtLeast(2048)
-        val rec = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sampleRate, inMask, fmt, inMin * 2)
-        inputDevice?.let { runCatching { rec.preferredDevice = it } } // выбранный микрофон
-        val sid = rec.audioSessionId
-        if (AcousticEchoCanceler.isAvailable()) aec = AcousticEchoCanceler.create(sid)?.apply { enabled = fx.aec }
-        if (NoiseSuppressor.isAvailable()) ns = NoiseSuppressor.create(sid)?.apply { enabled = fx.ns }
-        if (AutomaticGainControl.isAvailable()) agc = AutomaticGainControl.create(sid)?.apply { enabled = fx.agc }
+        val firstMic = openMic(sampleRate, inMask, fmt)
 
         val outMin = AudioTrack.getMinBufferSize(sampleRate, outMask, fmt).coerceAtLeast(2048)
         val trk = AudioTrack.Builder()
@@ -74,10 +94,9 @@ class CallAudio(
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
-        record = rec
+        mic = firstMic
         track = trk
         running = true
-        rec.startRecording()
         trk.play()
 
         val ch = if (channels >= 2) 2 else 1
@@ -89,10 +108,15 @@ class CallAudio(
             var levelTick = 0
             val stamp = AudioTimestamp()
             var framesRead = 0L
+            val recovery = MicRecovery()
             while (running) {
-                val n = rec.read(buf, 0, buf.size) // blocking: ровный 20мс ритм захвата
-                when {
-                    n > 0 -> {
+                val rec = mic?.record
+                // blocking: ровный 20мс ритм захвата. Микрофона нет (переоткрыть не
+                // вышло) — как умерший: следующая попытка позже.
+                val n = rec?.read(buf, 0, buf.size) ?: AudioRecord.ERROR_DEAD_OBJECT
+                when (val step = recovery.after(n)) {
+                    MicRecovery.Step.Go -> {
+                        rec ?: continue
                         framesRead += n / ch
                         val ageUs = captureAgeUs(rec, stamp, framesRead, sampleRate)
                         lastCaptureAgeUs = ageUs
@@ -109,9 +133,27 @@ class CallAudio(
                             onLevel((rms / 32768.0 * 4.0).toFloat().coerceIn(0f, 1f))
                         }
                     }
-                    else -> {
+                    is MicRecovery.Step.Wait -> {
                         if (!running) break
                         android.util.Log.e("CallAudio", "capture error $n")
+                        Thread.sleep(step.ms)
+                    }
+                    is MicRecovery.Step.Reopen -> {
+                        if (!running) break
+                        android.util.Log.w("CallAudio", "mic dead ($n), reopen in ${step.afterMs}ms")
+                        synchronized(micLock) {
+                            mic?.release()
+                            mic = null
+                        }
+                        Thread.sleep(step.afterMs)
+                        synchronized(micLock) {
+                            if (running) {
+                                mic = runCatching { openMic(sampleRate, inMask, fmt) }
+                                    .onFailure { android.util.Log.w("CallAudio", "mic reopen failed: $it") }
+                                    .getOrNull()
+                            }
+                        }
+                        framesRead = 0
                     }
                 }
             }
@@ -152,6 +194,34 @@ class CallAudio(
         }
     }
 
+    /** Микрофон с выбранным устройством и тумблерами, уже пишущий. Не вышло —
+     *  исключение, и ничего не удержано. */
+    @SuppressLint("MissingPermission")
+    private fun openMic(sampleRate: Int, inMask: Int, fmt: Int): Mic {
+        val inMin = AudioRecord.getMinBufferSize(sampleRate, inMask, fmt).coerceAtLeast(2048)
+        val rec = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sampleRate, inMask, fmt, inMin * 2)
+        if (rec.state != AudioRecord.STATE_INITIALIZED) {
+            rec.release()
+            error("AudioRecord not initialized")
+        }
+        inputDevice?.let { runCatching { rec.preferredDevice = it } } // выбранный микрофон
+        val sid = rec.audioSessionId
+        val m = Mic(
+            rec,
+            if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(sid) else null,
+            if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(sid) else null,
+            if (AutomaticGainControl.isAvailable()) AutomaticGainControl.create(sid) else null,
+        )
+        m.setFx(fx)
+        try {
+            rec.startRecording()
+        } catch (e: Exception) {
+            m.release()
+            throw e
+        }
+        return m
+    }
+
     /** Сколько назад записан последний прочитанный сэмпл, мкс (0 — неизвестно): по
      *  метке AudioRecord «кадр № такой-то записан тогда-то». */
     private fun captureAgeUs(rec: AudioRecord, stamp: AudioTimestamp, framesRead: Long, rate: Int): Int {
@@ -174,34 +244,30 @@ class CallAudio(
 
     /** Применить тумблеры обработки на лету (на существующих эффектах). */
     fun applyFx(newFx: AudioFx) {
-        runCatching { aec?.enabled = newFx.aec }
-        runCatching { ns?.enabled = newFx.ns }
-        runCatching { agc?.enabled = newFx.agc }
+        fx = newFx
+        mic?.setFx(newFx)
     }
 
     /** Сменить входное устройство на лету (на работающем AudioRecord). */
     fun setInputDevice(dev: AudioDeviceInfo?) {
-        runCatching { record?.preferredDevice = dev }
+        inputDevice = dev
+        runCatching { mic?.record?.preferredDevice = dev }
     }
 
     fun stop() {
         running = false
-        runCatching { record?.stop() }
+        runCatching { mic?.record?.stop() } // read() вернётся
         threads.forEach { runCatching { it.join(300) } }
         threads.clear()
-        runCatching { record?.release() }
+        synchronized(micLock) {
+            mic?.release()
+            mic = null
+        }
         runCatching { track?.pause() }
         runCatching { track?.flush() }
         runCatching { track?.stop() }
         runCatching { track?.release() }
-        runCatching { aec?.release() }
-        runCatching { ns?.release() }
-        runCatching { agc?.release() }
-        record = null
         track = null
-        aec = null
-        ns = null
-        agc = null
         runCatching {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             if (am.mode != AudioManager.MODE_NORMAL) am.mode = AudioManager.MODE_NORMAL
