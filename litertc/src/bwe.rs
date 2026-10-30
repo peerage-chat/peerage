@@ -177,7 +177,6 @@ pub(crate) struct DelayDetector {
     prev: Option<Group>,
     acc: f64,
     smoothed: f64,
-    first_arrival: Option<f64>,
     window: VecDeque<(f64, f64)>,
     deltas: u32,
     threshold: f64,
@@ -195,7 +194,6 @@ impl Default for DelayDetector {
             prev: None,
             acc: 0.0,
             smoothed: 0.0,
-            first_arrival: None,
             window: VecDeque::new(),
             deltas: 0,
             threshold: THRESHOLD_INIT,
@@ -245,8 +243,8 @@ impl DelayDetector {
         self.deltas = (self.deltas + 1).min(1000);
         self.acc += delay_delta;
         self.smoothed = SMOOTHING * self.smoothed + (1.0 - SMOOTHING) * self.acc;
-        let first = *self.first_arrival.get_or_insert(arrival);
-        self.window.push_back((arrival - first, self.smoothed));
+        // Наклону сдвиг по времени безразличен — точки по времени прихода как есть.
+        self.window.push_back((arrival, self.smoothed));
         if self.window.len() > TREND_WINDOW {
             self.window.pop_front();
         }
@@ -299,15 +297,28 @@ impl DelayDetector {
     }
 }
 
-/// Наклон прямой по точкам (метод наименьших квадратов).
+/// Доля оценки для кодера после отчёта при заполнении окна `fill` (как в WebRTC):
+/// переполнено — урезаем на 5–10 % за отчёт, почти пусто — отпускаем сразу, между —
+/// возвращаем понемногу.
+fn pushback_step(pushback: f64, fill: f64) -> f64 {
+    if fill > 1.5 {
+        pushback * 0.9
+    } else if fill > 1.0 {
+        pushback * 0.95
+    } else if fill < 0.1 {
+        1.0
+    } else {
+        pushback + 0.05
+    }
+    .clamp(PUSHBACK_MIN, 1.0)
+}
+
+/// Наклон прямой по точкам (метод наименьших квадратов). Центрировать достаточно
+/// одну ось: Σ(x − x̄)(y − ȳ) = Σ(x − x̄)·y.
 fn slope(points: &VecDeque<(f64, f64)>) -> Option<f64> {
-    let n = points.len() as f64;
-    let (sx, sy) = points
-        .iter()
-        .fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
-    let (mx, my) = (sx / n, sy / n);
+    let mx = points.iter().map(|&(x, _)| x).sum::<f64>() / points.len() as f64;
     let (num, den) = points.iter().fold((0.0, 0.0), |(num, den), &(x, y)| {
-        (num + (x - mx) * (y - my), den + (x - mx) * (x - mx))
+        (num + (x - mx) * y, den + (x - mx) * x)
     });
     (den > 0.0).then(|| num / den)
 }
@@ -506,18 +517,7 @@ impl Bwe {
         }
         let fill = self.in_flight_bytes as f64 / self.window();
         self.window_limited = fill > WINDOW_LIMITED;
-        // Как в WebRTC: переполнено — урезаем на 5–10 % за отчёт, почти пусто —
-        // отпускаем сразу, между — возвращаем понемногу.
-        self.pushback = if fill > 1.5 {
-            self.pushback * 0.9
-        } else if fill > 1.0 {
-            self.pushback * 0.95
-        } else if fill < 0.1 {
-            1.0
-        } else {
-            self.pushback + 0.05
-        }
-        .clamp(PUSHBACK_MIN, 1.0);
+        self.pushback = pushback_step(self.pushback, fill);
         // Всё до последнего сообщённого — дошло или потеряно: уже не в полёте.
         let end = fb.base_seq.wrapping_add(fb.arrivals.len() as u16);
         while let Some(&(seq, _, size)) = self.in_flight.front() {
@@ -600,50 +600,17 @@ impl Bwe {
             .decreased_at
             .is_none_or(|t| now_ms - t >= rtt_ms.max(100.0) + 100.0);
         let grow = INCREASE_PER_SEC.powf(dt / 1000.0);
-        // Потери: сбавляем от того, что шлём сейчас, — иначе от далёкого потолка
-        // сброс ничего бы не значил.
-        if self.loss > LOSS_HIGH && may_decrease {
-            self.loss_rate = self.loss_rate.min(self.rate) * (1.0 - 0.5 * self.loss);
-            self.decreased_at = Some(now_ms);
-            self.cuts_loss += 1;
-        } else if self.loss < LOSS_LOW {
-            self.loss_rate *= grow;
-        }
-        let usage = self.delay.usage();
+        self.follow_loss(now_ms, may_decrease, grow);
         // Упёрлись в окно — шлём мало не потому, что нечего.
         let app_limited = !self.window_limited
             && self
                 .sent_bps(now_ms)
                 .is_some_and(|s| s < APP_LIMITED * self.rate);
         let before = self.delay_rate;
-        if usage == Usage::Over && may_decrease {
-            if app_limited {
-                // Дошедшее — то, что мы слали, а не то, что пропускает канал: ёмкость
-                // по нему не мерим. Очередь растёт не от нас; если она чужая и
-                // настоящая, сброс повторится через RTT.
-                self.delay_rate = BACKOFF * self.rate;
-            } else {
-                let base = acked.map_or(self.rate, |a| a.min(self.rate));
-                self.delay_rate = BACKOFF * base;
-                self.capacity = Some(base);
-            }
-            self.decreased_at = Some(now_ms);
-            self.cuts_delay += 1;
-        } else if usage == Usage::Normal {
-            // Дошедшее заметно выше прошлой ёмкости — канал стал шире, она устарела.
-            if let (Some(c), Some(a)) = (self.capacity, acked) {
-                if a > c * 1.5 {
-                    self.capacity = None;
-                }
-            }
-            let near_capacity = self.capacity.is_some_and(|c| self.delay_rate > c * 0.8);
-            if near_capacity {
-                // Около известной ёмкости — по пакету за время отклика.
-                let response_s = (rtt_ms + 100.0) / 1000.0;
-                self.delay_rate += 1200.0 * 8.0 / response_s * dt / 1000.0;
-            } else {
-                self.delay_rate *= grow;
-            }
+        match self.delay.usage() {
+            Usage::Over if may_decrease => self.back_off(now_ms, acked, app_limited),
+            Usage::Normal => self.ramp_up(acked, rtt_ms, dt, grow),
+            _ => {}
         }
         // Выше полутора дошедших не растём: пока отправку держит окно, детектор
         // задержки молчит, и без этого оценка (а с ней окно) уползала бы вверх. Когда
@@ -655,6 +622,52 @@ impl Bwe {
         self.delay_rate = self.delay_rate.clamp(self.min, self.max);
         self.loss_rate = self.loss_rate.clamp(self.min, self.max);
         self.rate = self.delay_rate.min(self.loss_rate);
+    }
+
+    /// Оценка по потерям: сверх собственных больше 10 % — сбавляем от того, что
+    /// шлём сейчас (иначе от далёкого потолка сброс ничего бы не значил), меньше
+    /// 2 % — прибавляем, между — держим.
+    fn follow_loss(&mut self, now_ms: f64, may_decrease: bool, grow: f64) {
+        if self.loss > LOSS_HIGH && may_decrease {
+            self.loss_rate = self.loss_rate.min(self.rate) * (1.0 - 0.5 * self.loss);
+            self.decreased_at = Some(now_ms);
+            self.cuts_loss += 1;
+        } else if self.loss < LOSS_LOW {
+            self.loss_rate *= grow;
+        }
+    }
+
+    /// Очередь растёт: сбавляем до 85 % дошедшего и запоминаем его как ёмкость.
+    /// Если слали мало (`app_limited`), дошедшее — то, что мы слали, а не то, что
+    /// пропускает канал: ёмкость по нему не мерим, сбавляем от оценки. Очередь растёт
+    /// не от нас; если она чужая и настоящая, сброс повторится через RTT.
+    fn back_off(&mut self, now_ms: f64, acked: Option<f64>, app_limited: bool) {
+        if app_limited {
+            self.delay_rate = BACKOFF * self.rate;
+        } else {
+            let base = acked.map_or(self.rate, |a| a.min(self.rate));
+            self.delay_rate = BACKOFF * base;
+            self.capacity = Some(base);
+        }
+        self.decreased_at = Some(now_ms);
+        self.cuts_delay += 1;
+    }
+
+    /// Задержка в норме: растём — около известной ёмкости по пакету за время
+    /// отклика, вдали от неё на 8 % в секунду. Дошедшее заметно выше прошлой
+    /// ёмкости — канал стал шире, она устарела.
+    fn ramp_up(&mut self, acked: Option<f64>, rtt_ms: f64, dt: f64, grow: f64) {
+        if let (Some(c), Some(a)) = (self.capacity, acked) {
+            if a > c * 1.5 {
+                self.capacity = None;
+            }
+        }
+        if self.capacity.is_some_and(|c| self.delay_rate > c * 0.8) {
+            let response_s = (rtt_ms + 100.0) / 1000.0;
+            self.delay_rate += 1200.0 * 8.0 / response_s * dt / 1000.0;
+        } else {
+            self.delay_rate *= grow;
+        }
     }
 }
 
@@ -712,42 +725,50 @@ impl ArrivalLog {
     /// Опоздавшие к уже сообщённому диапазону не учитываются.
     pub fn take(&mut self) -> Option<TransportFeedback> {
         let got = std::mem::take(&mut self.got);
-        let newer = |a: u16, b: u16| (a.wrapping_sub(b) as i16) > 0;
-        let end = got
-            .iter()
-            .map(|&(s, _)| s)
-            .reduce(|a, b| if newer(b, a) { b } else { a })?;
-        let oldest = got
-            .iter()
-            .map(|&(s, _)| s)
-            .reduce(|a, b| if newer(a, b) { b } else { a })?;
-        let mut start = self.next.unwrap_or(oldest);
+        let (oldest, end) = seq_span(&got)?;
+        let start = self.next.unwrap_or(oldest);
         if newer(start, end) {
             return None; // всё пришедшее — опоздавшее
         }
-        let mut count = end.wrapping_sub(start) as usize + 1;
-        if count > MAX_FEEDBACK_PACKETS {
-            start = end.wrapping_sub(MAX_FEEDBACK_PACKETS as u16 - 1);
-            count = MAX_FEEDBACK_PACKETS;
-        }
+        // Не входит в один отчёт — сообщаем о самых новых.
+        let count = (end.wrapping_sub(start) as usize + 1).min(MAX_FEEDBACK_PACKETS);
+        let start = end.wrapping_sub(count as u16 - 1);
         self.next = Some(end.wrapping_add(1));
-        let mut at: Vec<Option<u64>> = vec![None; count];
-        for (seq, t) in got {
-            let i = seq.wrapping_sub(start) as usize;
-            if let Some(slot) = at.get_mut(i) {
-                *slot = Some(slot.map_or(t, |old: u64| old.min(t)));
-            }
-        }
-        let first = at.iter().flatten().min().copied()?;
-        Some(TransportFeedback {
-            base_seq: start,
-            ref_time: first as u32,
-            arrivals: at
-                .into_iter()
-                .map(|t| t.map(|t| (t - first).min(u16::MAX as u64 - 1) as u16))
-                .collect(),
-        })
+        feedback_from(&got, start, count)
     }
+}
+
+/// `a` новее `b` по кругу номеров.
+fn newer(a: u16, b: u16) -> bool {
+    (a.wrapping_sub(b) as i16) > 0
+}
+
+/// Старший и младший номер среди пришедших; `None` — ничего не пришло.
+fn seq_span(got: &[(u16, u64)]) -> Option<(u16, u16)> {
+    let seqs = || got.iter().map(|&(s, _)| s);
+    let oldest = seqs().reduce(|a, b| if newer(a, b) { b } else { a })?;
+    let newest = seqs().reduce(|a, b| if newer(b, a) { b } else { a })?;
+    Some((oldest, newest))
+}
+
+/// Отчёт о номерах `start..start + count`: время прихода каждого (первого, если
+/// пришёл дважды) от самого раннего; не пришедшие и не вошедшие — пропуски.
+fn feedback_from(got: &[(u16, u64)], start: u16, count: usize) -> Option<TransportFeedback> {
+    let mut at: Vec<Option<u64>> = vec![None; count];
+    for &(seq, t) in got {
+        if let Some(slot) = at.get_mut(seq.wrapping_sub(start) as usize) {
+            *slot = Some(slot.map_or(t, |old: u64| old.min(t)));
+        }
+    }
+    let first = at.iter().flatten().min().copied()?;
+    Some(TransportFeedback {
+        base_seq: start,
+        ref_time: first as u32,
+        arrivals: at
+            .into_iter()
+            .map(|t| t.map(|t| (t - first).min(u16::MAX as u64 - 1) as u16))
+            .collect(),
+    })
 }
 
 #[cfg(test)]
@@ -792,6 +813,45 @@ mod tests {
             overuse += (d.usage() == Usage::Over) as u32;
         }
         assert_eq!(overuse, 0, "ложных перегрузок {overuse}");
+    }
+
+    /// Тренд задержки — наклон прямой наименьших квадратов; по одной вертикали
+    /// наклона нет.
+    #[test]
+    fn slope_fits_a_line() {
+        let line: VecDeque<(f64, f64)> =
+            (10..30).map(|x| (x as f64, 2.0 * x as f64 + 5.0)).collect();
+        assert!((slope(&line).unwrap() - 2.0).abs() < 1e-9);
+        let bent = VecDeque::from([(10.0, 3.0), (11.0, 3.0), (12.0, 6.0)]);
+        assert!((slope(&bent).unwrap() - 1.5).abs() < 1e-9);
+        let vertical = VecDeque::from([(4.0, 1.0), (4.0, 9.0)]);
+        assert_eq!(slope(&vertical), None);
+    }
+
+    /// Пакет раз в 10 мс, задержка в пути — `extra(i)` сверх 50 мс. Сколько раз
+    /// детектор сказал «перегрузка» на пакетах `from..to`.
+    fn overuses(
+        d: &mut DelayDetector,
+        range: std::ops::Range<u32>,
+        extra: impl Fn(u32) -> f64,
+    ) -> u32 {
+        range
+            .map(|i| {
+                let t = i as f64 * 10.0;
+                d.on_packet(t, t + 50.0 + extra(i));
+                (d.usage() == Usage::Over) as u32
+            })
+            .sum()
+    }
+
+    /// Порог следует за трендом вниз: медленный, но непрерывный рост очереди (+0,4 мс
+    /// на пакет — ниже стартового порога) всё же признаётся перегрузкой. С
+    /// застывшим порогом канал так и забивался бы.
+    #[test]
+    fn slow_steady_queue_growth_is_caught() {
+        let mut d = DelayDetector::default();
+        assert_eq!(overuses(&mut d, 0..300, |_| 0.0), 0);
+        assert!(overuses(&mut d, 300..600, |i| (i - 300) as f64 * 0.4) > 0);
     }
 
     /// Случайный разброс задержки без роста — не перегрузка.
@@ -973,6 +1033,27 @@ mod tests {
         assert_eq!((f.base_seq, f.arrivals), (3, vec![None, Some(0)]));
     }
 
+    /// Дыра длиннее одного отчёта: сообщаем о самых новых номерах, ровно столько,
+    /// сколько входит; старше — уже не сообщить. Задержка сверх 16 с — предельная.
+    #[test]
+    fn arrival_log_reports_the_newest_that_fit() {
+        let mut a = ArrivalLog::default();
+        a.on_packet(7, 0, 100);
+        assert!(a.take().is_some());
+        let end = MAX_FEEDBACK_PACKETS as u16 + 10;
+        a.on_packet(7, end, 200);
+        let f = a.take().unwrap();
+        assert_eq!(f.arrivals.len(), MAX_FEEDBACK_PACKETS);
+        assert_eq!(f.base_seq, end - (MAX_FEEDBACK_PACKETS as u16 - 1));
+        assert_eq!(f.arrivals.last(), Some(&Some(0)));
+        let fits = MAX_FEEDBACK_PACKETS as u16 - 1;
+        a.on_packet(7, end + fits, 300);
+        a.on_packet(7, end + 1, 300 + 100_000);
+        let f = a.take().unwrap();
+        assert_eq!(f.arrivals.len(), MAX_FEEDBACK_PACKETS - 1);
+        assert_eq!(f.arrivals[0], Some(u16::MAX - 1));
+    }
+
     /// Отправитель перезапустил сессию: новый поток нумерует с нуля, и это не
     /// опоздавшие к прежнему счёту.
     #[test]
@@ -984,6 +1065,175 @@ mod tests {
         a.on_packet(8, 1, 112);
         let f = a.take().unwrap();
         assert_eq!((f.base_seq, f.arrivals), (0, vec![Some(0), Some(2)]));
+    }
+
+    /// Журнал держит ровно [`SEND_LOG_MAX`] пакетов и ровно [`SEND_LOG_AGE_MS`]
+    /// времени — больше уже нет.
+    #[test]
+    fn send_log_limits_are_inclusive() {
+        let mut l = SendLog::default();
+        for i in 0..SEND_LOG_MAX as u16 {
+            l.push(i, 0.0, 1);
+        }
+        assert!(l.get(0).is_some());
+        l.push(SEND_LOG_MAX as u16, 0.0, 1);
+        assert_eq!(l.get(0), None);
+        let mut l = SendLog::default();
+        l.push(0, 0.0, 1);
+        l.push(1, SEND_LOG_AGE_MS, 1);
+        assert!(l.get(0).is_some());
+        l.push(2, SEND_LOG_AGE_MS + 0.5, 1);
+        assert_eq!(l.get(0), None);
+    }
+
+    /// Пачка доставки: пакет догнал предыдущий (сеть копила и отдала разом) — не
+    /// позже 5 мс после него и в пределах 100 мс от начала пачки; ушедший тогда же —
+    /// всегда в пачке.
+    #[test]
+    fn delivery_burst_is_recognised() {
+        let g = Group {
+            first_send: 0.0,
+            last_send: 10.0,
+            first_arrival: 100.0,
+            last_arrival: 150.0,
+        };
+        assert!(g.in_burst(10.0, 400.0), "ушёл одновременно");
+        assert!(g.in_burst(30.0, 155.0), "догнал за 5 мс");
+        assert!(!g.in_burst(30.0, 155.5), "дольше 5 мс");
+        assert!(!g.in_burst(12.0, 154.0), "не догнал");
+        let late = Group {
+            first_arrival: 50.0,
+            ..g
+        };
+        assert!(!late.in_burst(30.0, 151.0), "пачка дольше 100 мс");
+        assert!(late.in_burst(30.0, 149.0));
+    }
+
+    /// Очередь рассасывается — детектор говорит «разгрузка» (держим оценку, пока
+    /// не опустеет), а не «норма».
+    #[test]
+    fn draining_queue_is_underuse() {
+        let mut d = DelayDetector::default();
+        overuses(&mut d, 0..100, |_| 0.0);
+        overuses(&mut d, 100..200, |i| (i - 100) as f64 * 2.0);
+        let mut under = 0;
+        for i in 200..260 {
+            let t = i as f64 * 10.0;
+            d.on_packet(t, t + 50.0 + (200.0 - (i - 200) as f64 * 3.0).max(0.0));
+            under += (d.usage() == Usage::Under) as u32;
+        }
+        assert!(under > 0);
+    }
+
+    /// Канал: пакет `size` байт раз в 10 мс, отчёт раз в 100 мс, `rounds` отчётов
+    /// с момента `*now`. `delay(n, t)` — задержка пакета n в пути, мс; `None` —
+    /// потерян. Возвращает оценку после каждого отчёта.
+    fn drive(
+        b: &mut Bwe,
+        seq: &mut u16,
+        now: &mut f64,
+        rounds: u32,
+        size: u32,
+        delay: impl Fn(u32, f64) -> Option<f64>,
+    ) -> Vec<f64> {
+        (0..rounds)
+            .map(|_| {
+                let base = *seq;
+                let arr: Vec<Option<f64>> = (0..10)
+                    .map(|i| {
+                        let t = *now + i as f64 * 10.0;
+                        b.on_sent(*seq, t, size);
+                        let n = *seq as u32;
+                        *seq = seq.wrapping_add(1);
+                        delay(n, t).map(|d| t + d)
+                    })
+                    .collect();
+                *now += 100.0;
+                b.on_feedback(*now, &feedback(base, &arr), 100.0);
+                b.rate()
+            })
+            .collect()
+    }
+
+    /// Постоянные потери канала (14 %) за несколько секунд становятся фоном:
+    /// сначала оценку режут, потом перестают — плохой канал, а не перегрузка.
+    #[test]
+    fn steady_loss_becomes_background() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        (b.rate, b.delay_rate, b.loss_rate) = (2_000_000.0, 2_000_000.0, 2_000_000.0);
+        let (mut seq, mut now) = (0u16, 0.0);
+        let lossy = |n: u32, _| (n % 7 != 0).then_some(50.0);
+        drive(&mut b, &mut seq, &mut now, 30, 1200, lossy);
+        let early = b.cuts_loss;
+        assert!(early > 0, "потери не заметили");
+        drive(&mut b, &mut seq, &mut now, 200, 1200, lossy);
+        let settled = b.cuts_loss;
+        drive(&mut b, &mut seq, &mut now, 100, 1200, lossy);
+        assert_eq!(b.cuts_loss, settled, "режем без конца");
+    }
+
+    /// Потери между 2 и 10 % — оценку по потерям не трогаем: ни вниз, ни вверх.
+    #[test]
+    fn moderate_loss_holds_the_rate() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        (b.rate, b.delay_rate, b.loss_rate) = (2_000_000.0, 2_000_000.0, 2_000_000.0);
+        let (mut seq, mut now) = (0u16, 0.0);
+        let five = |n: u32, _| (n % 20 != 0).then_some(50.0);
+        // Первая секунда — окно потерь ещё не набрано.
+        drive(&mut b, &mut seq, &mut now, 11, 2500, five);
+        let held = b.loss_rate;
+        drive(&mut b, &mut seq, &mut now, 20, 2500, five);
+        assert_eq!(b.loss_rate, held);
+        assert_eq!(b.cuts_loss, 0);
+    }
+
+    /// После перегрузки известна ёмкость канала, и около неё оценка растёт
+    /// осторожно — по пакету за время отклика (~50 кбит/с в секунду), а не на 8 %.
+    #[test]
+    fn growth_near_known_capacity_is_gentle() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        (b.rate, b.delay_rate, b.loss_rate) = (2_000_000.0, 2_000_000.0, 2_000_000.0);
+        let (mut seq, mut now) = (0u16, 0.0);
+        // Очередь растёт — перегрузка, ёмкость запомнена.
+        drive(&mut b, &mut seq, &mut now, 100, 2500, |n, _| {
+            Some(50.0 + (n as f64 - 300.0).max(0.0) * 5.0)
+        });
+        assert!(b.cuts_delay > 0);
+        let cap = b.capacity.expect("ёмкость запомнена");
+        // Канал снова чист: 3 с роста. (Очередь ушла — задержка ровная.)
+        let after_cut = b.delay_rate;
+        drive(&mut b, &mut seq, &mut now, 30, 2500, |_, _| Some(50.0));
+        assert!(b.capacity.is_some());
+        let grown = b.delay_rate - after_cut;
+        assert!(grown < 0.05 * cap, "рост {grown} при ёмкости {cap}");
+    }
+
+    /// Цель кодера по заполнению окна: переполнено вдвое — минус 10 % за отчёт,
+    /// чуть — минус 5 %, почти пусто — сразу вся оценка, иначе плюс 5 %; не ниже
+    /// 10 % оценки. На границах — более мягкий шаг.
+    #[test]
+    fn pushback_follows_window_fill() {
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-12;
+        assert!(close(pushback_step(0.5, 2.0), 0.45));
+        assert!(close(pushback_step(0.5, 1.5), 0.475));
+        assert!(close(pushback_step(0.5, 1.2), 0.475));
+        assert!(close(pushback_step(0.5, 1.0), 0.55));
+        assert!(close(pushback_step(0.5, 0.1), 0.55));
+        assert!(close(pushback_step(0.5, 0.05), 1.0));
+        assert!(close(pushback_step(0.98, 0.5), 1.0));
+        assert!(close(pushback_step(0.1, 3.0), PUSHBACK_MIN));
+    }
+
+    /// В полёте — неподтверждённое, окно — по оценке и RTT (для статистики).
+    #[test]
+    fn flight_reports_bytes_and_window() {
+        let mut b = Bwe::new(100_000.0, 10_000_000.0);
+        b.on_sent(0, 0.0, 1200);
+        b.on_sent(1, 1.0, 800);
+        let (flight, window) = b.flight();
+        assert_eq!(flight, 2000);
+        // 300 кбит/с × (200 + 250) мс = 16 875 байт.
+        assert_eq!(window, 16_875);
     }
 
     #[test]
