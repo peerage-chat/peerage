@@ -108,6 +108,18 @@ impl MicQueue {
     }
 }
 
+/// Прибавить `pcm` к миксу; вернуть уровень этого звука для индикатора 0..1.
+/// Индикатор «у участника мик ловит звук» зажигается при ЛЮБОМ звуке (0,03 ≈ RMS 160),
+/// не только речи — проще и честнее; чистую тишину гасит.
+fn add_into(mix: &mut [i32], pcm: &[i16]) -> f32 {
+    for (m, &v) in mix.iter_mut().zip(pcm) {
+        *m += v as i32;
+    }
+    let sum: f64 = pcm.iter().map(|&v| v as f64 * v as f64).sum();
+    let rms = (sum / pcm.len().max(1) as f64).sqrt();
+    (rms / 32768.0 * 6.0).min(1.0) as f32
+}
+
 /// Пришли новые кадры видео — будит потребителей, спящих в [`wait_video`].
 #[derive(Default)]
 struct VideoReady {
@@ -607,55 +619,10 @@ impl RoomCallEngine {
         let pcm_rate = self.audio.sample_rate as f64 * self.audio.channels.max(1) as f64;
         for (i, o) in out.iter_mut().enumerate() {
             if carry.is_empty() && !starved {
-                let mut mix = vec![0i32; self.frame_len];
-                let mut any = false;
-                {
-                    let heard_at = now + output + Duration::from_secs_f64(i as f64 / pcm_rate);
-                    let (peers, frames) = self.pull_frames(heard_at);
-                    let mut decs = self.decoders.lock_safe();
-                    decs.retain(|k, _| peers.contains(k));
-                    let mut lv = self.levels.lock_safe();
-                    // Release: плавное затухание уровня каждого кадра (держит сквозь паузы речи).
-                    for v in lv.values_mut() {
-                        *v *= 0.82;
-                    }
-                    for (key, frame) in frames {
-                        let dec = match decs.entry(key) {
-                            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
-                            // Декодер не создался — этого собеседника не слышно, но
-                            // паника отравила бы мьютексы и убила звук всего звонка.
-                            std::collections::hash_map::Entry::Vacant(v) => {
-                                match AudioDecoder::new(self.audio) {
-                                    Ok(dec) => v.insert(Decoder { dec, plc_run: 0 }),
-                                    Err(_) => continue,
-                                }
-                            }
-                        };
-                        if let Some(pcm) = dec.decode(frame) {
-                            let mut sum = 0f64;
-                            for (i, &v) in pcm.iter().enumerate() {
-                                sum += (v as f64) * (v as f64);
-                                if i < mix.len() {
-                                    mix[i] += v as i32;
-                                }
-                            }
-                            let rms = (sum / pcm.len().max(1) as f64).sqrt();
-                            // Индикатор «у участника мик ловит звук»: зажигаем при ЛЮБОМ
-                            // звуке (порог 0.03 ≈ RMS>160), не только речи — проще и честнее.
-                            // Гасит чистую тишину (RMS≈0). Decay держит сквозь паузы.
-                            let norm = ((rms / 32768.0 * 6.0).min(1.0)) as f32;
-                            let e = lv.entry(key).or_insert(0.0);
-                            *e = e.max(norm); // мгновенный attack — зажигаем при малейшем звуке
-                            any = true;
-                        }
-                    }
-                }
-                if any {
-                    for &m in mix.iter() {
-                        carry.push_back(m.clamp(-32768, 32767) as i16);
-                    }
-                } else {
-                    starved = true; // никто не говорит — добиваем тишиной
+                let heard_at = now + output + Duration::from_secs_f64(i as f64 / pcm_rate);
+                match self.mix_frame(heard_at) {
+                    Some(mix) => carry.extend(mix.iter().map(|&m| m.clamp(-32768, 32767) as i16)),
+                    None => starved = true, // никто не говорит — добиваем тишиной
                 }
             }
             match carry.pop_front() {
@@ -667,6 +634,40 @@ impl RoomCallEngine {
             }
         }
         produced
+    }
+
+    /// Один микс-кадр, который будет слышен в `heard_at`: по кадру с каждого
+    /// источника, декодированные и сложенные; заодно уровни речи. `None` — ни у кого
+    /// нет звука.
+    fn mix_frame(&self, heard_at: Instant) -> Option<Vec<i32>> {
+        let (peers, frames) = self.pull_frames(heard_at);
+        let mut decs = self.decoders.lock_safe();
+        decs.retain(|k, _| peers.contains(k));
+        let mut lv = self.levels.lock_safe();
+        // Release: плавное затухание уровня каждого кадра (держит сквозь паузы речи).
+        for v in lv.values_mut() {
+            *v *= 0.82;
+        }
+        let mut mix = vec![0i32; self.frame_len];
+        let mut any = false;
+        for (key, frame) in frames {
+            let dec = match decs.entry(key) {
+                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                // Декодер не создался — этого собеседника не слышно, но паника
+                // отравила бы мьютексы и убила звук всего звонка.
+                std::collections::hash_map::Entry::Vacant(v) => match AudioDecoder::new(self.audio)
+                {
+                    Ok(dec) => v.insert(Decoder { dec, plc_run: 0 }),
+                    Err(_) => continue,
+                },
+            };
+            if let Some(pcm) = dec.decode(frame) {
+                let e = lv.entry(key).or_insert(0.0);
+                *e = e.max(add_into(&mut mix, &pcm)); // мгновенный attack
+                any = true;
+            }
+        }
+        any.then_some(mix)
     }
 
     /// Hex-ключи участников, которые сейчас говорят (уровень > порога) — для
@@ -776,6 +777,26 @@ mod tests {
         let t = Instant::now();
         assert_eq!(q.next_frame(&mut [0; 10], Duration::from_millis(30)), None);
         assert!(t.elapsed() >= Duration::from_millis(30));
+    }
+
+    /// Источники складываются в микс; уровень — RMS×6 от полной шкалы, не выше 1:
+    /// тишина — 0, громкий звук — 1, тихий — пропорционально.
+    #[test]
+    fn mix_adds_sources_and_measures_level() {
+        let mut mix = vec![0i32; 3];
+        assert_eq!(add_into(&mut mix, &[100, -200, 300, 400]), {
+            let rms =
+                ((100f64.powi(2) + 200f64.powi(2) + 300f64.powi(2) + 400f64.powi(2)) / 4.0).sqrt();
+            (rms / 32768.0 * 6.0) as f32
+        });
+        assert_eq!(
+            add_into(&mut mix, &[1, 1, 1]),
+            (1.0f64 / 32768.0 * 6.0) as f32
+        );
+        assert_eq!(mix, [101, -199, 301]);
+        assert_eq!(add_into(&mut mix, &[0; 3]), 0.0);
+        assert_eq!(add_into(&mut mix, &[i16::MAX; 3]), 1.0);
+        assert_eq!(add_into(&mut [], &[]), 0.0);
     }
 
     /// Не набрался за ожидание — неполный кадр не отдаётся, и набранное не теряется.
