@@ -116,6 +116,11 @@ class VideoSender(
      *  пока новая сессия не собрана, — освобождаем в [retireOldEncoder]. */
     private var retiring: Triple<MediaCodec, Surface, Thread?>? = null
 
+    /** Подмена кодера (поток камеры) и [stop] (другой поток) — под ним: иначе кодер,
+     *  созданный, пока звонок заканчивался, лёг бы в [encoder] уже после остановки и
+     *  не освободился бы никогда (R-111). Под ним же забирается [retiring]. */
+    private val swapLock = Any()
+
     /** Перейти на размер [size]: новый кодер, сессия камеры под него. Поток камеры. */
     private fun resize(size: ResolutionLadder.Size) {
         if (!running) return
@@ -126,22 +131,34 @@ class VideoSender(
             return
         }
         retireOldEncoder() // прошлая смена не успела собраться — её кодер больше не нужен
-        val old = encoder
-        val oldSurf = inputSurface
-        if (old != null && oldSurf != null) retiring = Triple(old, oldSurf, drainThread)
-        encoder = enc // дренаж прежнего кодера видит подмену и выходит
-        inputSurface = surf
-        drainThread = thread(name = "venc-drain") { drain(enc) }
+        val swapped = synchronized(swapLock) {
+            if (running) {
+                val old = encoder
+                val oldSurf = inputSurface
+                if (old != null && oldSurf != null) retiring = Triple(old, oldSurf, drainThread)
+                encoder = enc // дренаж прежнего кодера видит подмену и выходит
+                inputSurface = surf
+                drainThread = thread(name = "venc-drain") { drain(enc) }
+            }
+            running
+        }
+        if (!swapped) {
+            release(enc, surf)
+            return
+        }
         device?.let { configureSession(it) } // нет устройства — откроется уже с новым surface
     }
 
-    private fun retireOldEncoder() {
-        val (enc, surf, drain) = retiring ?: return
-        retiring = null
-        runCatching { drain?.join(500) }
+    private fun release(enc: MediaCodec, surf: Surface) {
         runCatching { enc.stop() }
         runCatching { enc.release() }
         runCatching { surf.release() }
+    }
+
+    private fun retireOldEncoder() {
+        val (enc, surf, drain) = synchronized(swapLock) { retiring.also { retiring = null } } ?: return
+        runCatching { drain?.join(500) }
+        release(enc, surf)
     }
 
     /** Переключить фронт/тыл по ходу звонка. Энкодер остаётся (тот же Surface) —
@@ -372,7 +389,7 @@ class VideoSender(
     }
 
     fun stop() {
-        running = false
+        synchronized(swapLock) { running = false } // смена кодера после этого не подменит его
         // Сначала ОСТАНОВИТЬ камеру (иначе HAL виснет «waiting for requests» и
         // течёт память), потом закрыть сессию/устройство, затем энкодер.
         runCatching { session?.stopRepeating() }
