@@ -32,16 +32,84 @@ use rand_core::{OsRng, RngCore};
 use crate::LockRecover;
 
 type PeerKey = [u8; 32];
-type Ring = Arc<Mutex<Mic>>;
+/// Захваченный PCM, ещё не отправленный. Поток отправки ждёт на нём кадр — спит,
+/// пока его не разбудит [`MicQueue::push`] (R-113: раньше проверял каждые 2 мс).
+struct MicQueue {
+    mic: Mutex<Mic>,
+    ready: Condvar,
+    /// Больше стольких сэмплов не держим: отправка отстала — шлём свежее.
+    cap: usize,
+    /// Сэмплов (всех каналов) в секунду — для момента захвата кадра.
+    pcm_rate: f64,
+}
 
-/// Захваченный PCM, ещё не отправленный.
 #[derive(Default)]
 struct Mic {
     pcm: VecDeque<i16>,
     /// Когда записан последний сэмпл: от него считается момент захвата каждого
     /// кадра — метка времени, по которой собеседник сводит звук с видео.
     end: Option<Instant>,
+    /// Звонок кончился: кадров больше не будет.
+    closed: bool,
 }
+
+impl MicQueue {
+    fn new(cap: usize, pcm_rate: f64) -> Self {
+        MicQueue {
+            mic: Mutex::new(Mic::default()),
+            ready: Condvar::new(),
+            cap,
+            pcm_rate,
+        }
+    }
+
+    /// Захваченные сэмплы; последний записан в `end`.
+    fn push(&self, samples: &[i16], end: Instant) {
+        let mut mic = self.mic.lock_safe();
+        if mic.closed {
+            return;
+        }
+        mic.end = Some(end);
+        mic.pcm.extend(samples.iter().copied());
+        let over = mic.pcm.len().saturating_sub(self.cap);
+        mic.pcm.drain(..over);
+        drop(mic);
+        self.ready.notify_one();
+    }
+
+    /// Звонок кончился: ждущий кадр поток просыпается ни с чем.
+    fn close(&self) {
+        let mut mic = self.mic.lock_safe();
+        mic.closed = true;
+        mic.pcm.clear();
+        drop(mic);
+        self.ready.notify_all();
+    }
+
+    /// Следующий кадр в `frame`, если наберётся за `wait`; возвращает, когда записан
+    /// его первый сэмпл. `None` — не набрался или звонок кончился.
+    fn next_frame(&self, frame: &mut [i16], wait: Duration) -> Option<Instant> {
+        let mic = self.mic.lock_safe();
+        let (mut mic, _) = self
+            .ready
+            .wait_timeout_while(mic, wait, |m| !m.closed && m.pcm.len() < frame.len())
+            .unwrap_or_else(|e| e.into_inner());
+        if mic.closed || mic.pcm.len() < frame.len() {
+            return None;
+        }
+        // Первый сэмпл кадра записан раньше последнего на всё, что от него до конца.
+        let behind = Duration::from_secs_f64(mic.pcm.len() as f64 / self.pcm_rate);
+        let end = mic.end?;
+        let n = frame.len();
+        for (s, v) in frame.iter_mut().zip(mic.pcm.drain(..n)) {
+            *s = v;
+        }
+        Some(end.checked_sub(behind).unwrap_or(end))
+    }
+}
+
+/// Дольше поток отправки звука не ждёт кадра — и проверяет, идёт ли ещё звонок.
+const MIC_WAIT: Duration = Duration::from_millis(200);
 
 /// Подряд идущих PLC-кадров на источник; дальше — тишина (Opus PLC иначе шумит).
 const MAX_PLC: u32 = 4;
@@ -197,8 +265,7 @@ fn send_all(messenger: &Messenger, out: Vec<Transmit<PeerKey>>) {
 pub struct RoomCallEngine {
     running: Arc<AtomicBool>,
     muted: Arc<AtomicBool>,
-    in_ring: Ring,
-    in_cap: usize,
+    mic: Arc<MicQueue>,
     frame_len: usize,
     audio: AudioSettings,
     session: Arc<Mutex<Session<PeerKey>>>,
@@ -227,10 +294,10 @@ impl RoomCallEngine {
     ) -> Arc<RoomCallEngine> {
         let running = Arc::new(AtomicBool::new(true));
         let muted = Arc::new(AtomicBool::new(false));
-        let in_ring: Ring = Arc::new(Mutex::new(Mic::default()));
-        // Сэмплов (всех каналов) в секунду — для момента захвата кадра.
+        // Сэмплов (всех каналов) в секунду — для момента захвата кадра; держим до
+        // секунды несработанного.
         let pcm_rate = audio.sample_rate as f64 * audio.channels.max(1) as f64;
-        let in_cap = audio.interleaved_len() * 50;
+        let mic = Arc::new(MicQueue::new(audio.interleaved_len() * 50, pcm_rate));
         let frame_len = audio.interleaved_len();
         let session = Arc::new(Mutex::new(Session::new(litertc::Config {
             audio_clock_hz: audio.sample_rate,
@@ -310,7 +377,7 @@ impl RoomCallEngine {
         {
             let running = running.clone();
             let muted = muted.clone();
-            let in_ring = in_ring.clone();
+            let mic = mic.clone();
             let session = session.clone();
             let members = members.clone();
             let msgr = messenger.clone();
@@ -326,24 +393,8 @@ impl RoomCallEngine {
                 let mut frame = vec![0i16; frame_len];
                 let mut frames_since_loss_check = 0u32;
                 while running.load(Ordering::Relaxed) {
-                    let captured = {
-                        let mut mic = in_ring.lock_safe();
-                        let end = mic.end;
-                        let q = &mut mic.pcm;
-                        if q.len() >= frame_len {
-                            // Первый сэмпл кадра записан раньше последнего на всё,
-                            // что от него до конца кольца.
-                            let behind = Duration::from_secs_f64(q.len() as f64 / pcm_rate);
-                            for s in frame.iter_mut() {
-                                *s = q.pop_front().unwrap_or(0);
-                            }
-                            end.map(|e| e.checked_sub(behind).unwrap_or(e))
-                        } else {
-                            None
-                        }
-                    };
-                    let Some(captured) = captured else {
-                        thread::sleep(Duration::from_millis(2));
+                    // Спим до кадра; конец звонка будит сразу (halt → close).
+                    let Some(captured) = mic.next_frame(&mut frame, MIC_WAIT) else {
                         continue;
                     };
                     frames_since_loss_check += 1;
@@ -384,8 +435,7 @@ impl RoomCallEngine {
         Arc::new(RoomCallEngine {
             running,
             muted,
-            in_ring,
-            in_cap,
+            mic,
             frame_len,
             audio,
             session,
@@ -459,14 +509,8 @@ impl RoomCallEngine {
     /// Захваченный PCM с микрофона → в очередь отправки; последний сэмпл записан
     /// `age` назад.
     pub fn push_audio(&self, samples: &[i16], age: Duration) {
-        let mut mic = self.in_ring.lock_safe();
         let now = Instant::now();
-        mic.end = Some(now.checked_sub(age).unwrap_or(now));
-        let q = &mut mic.pcm;
-        q.extend(samples.iter().copied());
-        while q.len() > self.in_cap {
-            q.pop_front();
-        }
+        self.mic.push(samples, now.checked_sub(age).unwrap_or(now));
     }
 
     /// По кадру звука от каждого участника на один тик микса (без декодирования:
@@ -601,7 +645,7 @@ impl RoomCallEngine {
     pub fn halt(&self) {
         self.running.store(false, Ordering::Relaxed);
         self.members.lock_safe().clear();
-        self.in_ring.lock_safe().pcm.clear();
+        self.mic.close();
         // Неотправленное тоже никому: сессия без участников выбрасывает свою очередь.
         self.session.lock_safe().set_peers(&[]);
         kick(&self.kick);
@@ -618,5 +662,77 @@ impl RoomCallEngine {
 impl Drop for RoomCallEngine {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 10 сэмплов в кадре, 1000 сэмплов в секунду — кадр = 10 мс.
+    fn queue(cap: usize) -> Arc<MicQueue> {
+        Arc::new(MicQueue::new(cap, 1000.0))
+    }
+
+    /// Поток отправки спит, пока кадр не набран, и просыпается, как только набран:
+    /// без опроса по таймеру. Момент захвата кадра — по последнему сэмплу минус всё,
+    /// что до конца очереди.
+    #[test]
+    fn frame_is_handed_over_as_soon_as_it_is_full() {
+        let q = queue(1000);
+        let waiter = {
+            let q = q.clone();
+            thread::spawn(move || {
+                let mut frame = [0i16; 10];
+                let got = q.next_frame(&mut frame, Duration::from_secs(5));
+                (got, frame, Instant::now())
+            })
+        };
+        let end = Instant::now();
+        q.push(&[1; 5], end);
+        thread::sleep(Duration::from_millis(50));
+        assert!(!waiter.is_finished(), "полкадра — ещё не кадр");
+        q.push(&[2; 5], end);
+        let pushed = Instant::now();
+        let (got, frame, woke) = waiter.join().unwrap();
+        assert_eq!(got, Some(end - Duration::from_millis(10)));
+        assert_eq!(frame, [1, 1, 1, 1, 1, 2, 2, 2, 2, 2]);
+        assert!(woke - pushed < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn empty_queue_waits_no_longer_than_asked() {
+        let q = queue(1000);
+        let t = Instant::now();
+        assert_eq!(q.next_frame(&mut [0; 10], Duration::from_millis(30)), None);
+        assert!(t.elapsed() >= Duration::from_millis(30));
+    }
+
+    /// Конец звонка будит ждущий поток сразу, и кадров больше нет.
+    #[test]
+    fn close_wakes_the_waiter() {
+        let q = queue(1000);
+        let waiter = {
+            let q = q.clone();
+            thread::spawn(move || q.next_frame(&mut [0; 10], Duration::from_secs(10)))
+        };
+        thread::sleep(Duration::from_millis(20));
+        let t = Instant::now();
+        q.close();
+        assert_eq!(waiter.join().unwrap(), None);
+        assert!(t.elapsed() < Duration::from_secs(1));
+        q.push(&[1; 10], Instant::now());
+        assert_eq!(q.next_frame(&mut [0; 10], Duration::ZERO), None);
+    }
+
+    /// Сверх ёмкости выбрасывается самое старое: отправка отстала — шлём свежее.
+    #[test]
+    fn overflow_drops_the_oldest() {
+        let q = queue(20);
+        let pcm: Vec<i16> = (0..25).collect();
+        q.push(&pcm, Instant::now());
+        let mut frame = [0i16; 10];
+        assert!(q.next_frame(&mut frame, Duration::ZERO).is_some());
+        assert_eq!(frame[0], 5);
     }
 }
