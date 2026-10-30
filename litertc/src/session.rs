@@ -42,10 +42,10 @@ use crate::stats::{RxStats, TrackStats};
 use crate::wire::{
     fragment_video, parse_keyframe_request, parse_media, parse_nack, parse_report,
     parse_transport_feedback, parse_video_frag, set_tw_seq, write_keyframe_request,
-    write_media_header, write_nack, write_report, write_transport_feedback, MediaHeader, Nack,
-    Report, VideoInfo, FEEDBACK_TICK_US, KEYFRAME_REQUEST_V2, MEDIA_HEADER_LEN, MEDIA_RTX_V2,
-    MEDIA_V2, NACK_V2, REPORT_V2, TRACK_AUDIO, TRACK_PADDING, TRACK_SCREEN, TRACK_VIDEO,
-    TRANSPORT_FEEDBACK_V2, VIDEO_CLOCK_HZ,
+    write_media_header, write_nack, write_report, write_transport_feedback, MediaFrame,
+    MediaHeader, Nack, Report, VideoInfo, FEEDBACK_TICK_US, KEYFRAME_REQUEST_V2, MEDIA_HEADER_LEN,
+    MEDIA_RTX_V2, MEDIA_V2, NACK_V2, REPORT_V2, TRACK_AUDIO, TRACK_PADDING, TRACK_SCREEN,
+    TRACK_VIDEO, TRANSPORT_FEEDBACK_V2, VIDEO_CLOCK_HZ,
 };
 
 /// Как часто каждый участник получает наш отчёт о приёме.
@@ -242,6 +242,25 @@ impl AudioRx {
     }
 }
 
+/// Пакет `h` (не повтор) — в статистику приёма своего трека; новый номер потока —
+/// статистика с начала.
+fn count_received(cfg: &Config, st: &mut PeerState, h: &MediaHeader, since_epoch: Duration) {
+    let Some(slot) = st.rx.get_mut(h.track as usize) else {
+        return;
+    };
+    let clock = if h.track == TRACK_AUDIO {
+        cfg.audio_clock_hz
+    } else {
+        VIDEO_CLOCK_HZ
+    };
+    let rx = match slot {
+        Some(r) if r.stream == h.stream_id => r,
+        slot => slot.insert(RxStats::new(h.stream_id, h.seq, clock)),
+    };
+    let arrival = (since_epoch.as_micros() * clock as u128 / 1_000_000) as i64;
+    rx.update(h.seq, h.ts, arrival);
+}
+
 /// Что сделать со звуком перед очередным кадром ради губ.
 #[derive(Debug, PartialEq)]
 enum LipStep {
@@ -334,6 +353,17 @@ impl VideoRx {
         }
     }
 
+    /// Пакет нового потока (отправитель начал заново): прежнее состояние приёма —
+    /// мимо.
+    fn restart_if_new(&mut self, stream: u32) {
+        if self.stream != Some(stream) {
+            self.stream = Some(stream);
+            self.nack = NackList::default();
+            self.asm = VideoReassembler::new();
+            self.playout = Playout::default();
+        }
+    }
+
     /// Потребитель живой, но не успевает (слабый декодер): старший кадр давно пора
     /// было отдать, а перескочить не к чему — нужен ключевой кадр.
     fn consumer_behind(&self, now: Instant) -> bool {
@@ -374,6 +404,44 @@ struct PeerState {
 }
 
 impl PeerState {
+    /// Обратная связь о пришедшем, если есть о чём и пора (раз в
+    /// [`FEEDBACK_INTERVAL`]).
+    fn take_feedback(&mut self, now: Instant) -> Option<Vec<u8>> {
+        if self.arrivals.is_empty() || self.next_feedback.is_some_and(|t| t > now) {
+            return None;
+        }
+        self.next_feedback = Some(now + FEEDBACK_INTERVAL);
+        self.arrivals
+            .take()
+            .as_ref()
+            .and_then(write_transport_feedback)
+    }
+
+    /// Отчёт о приёме, если пора (раз в [`REPORT_INTERVAL`]): эхо последнего
+    /// отчёта участника (для его RTT) и блоки по нашим входящим трекам; снимки этих
+    /// блоков — в статистику.
+    fn take_report(&mut self, now: Instant, now_ms: u32) -> Option<Vec<u8>> {
+        if self.next_report.is_some_and(|t| t > now) {
+            return None;
+        }
+        self.next_report = Some(now + REPORT_INTERVAL);
+        let echo = self
+            .last_report
+            .map(|(ts, at)| (ts, now.saturating_duration_since(at).as_millis() as u32));
+        let mut blocks = Vec::new();
+        for (track, slot) in self.rx.iter_mut().enumerate() {
+            if let Some(rx) = slot {
+                blocks.push(rx.report_block(track as u8));
+                self.stats.inbound[track] = Some(rx.snapshot());
+            }
+        }
+        Some(write_report(&Report {
+            ts_ms: now_ms,
+            echo,
+            blocks,
+        }))
+    }
+
     fn new(min_bps: u32, max_bps: u32) -> Self {
         PeerState {
             audio: None,
@@ -699,13 +767,11 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 if let Some(r) = parse_report(data) {
                     Self::handle_report(&self.cfg, st, now, since_epoch, r);
                 }
-                return;
             }
             Some(&NACK_V2) => {
                 if let Some(n) = parse_nack(data) {
                     self.retransmit(from, n);
                 }
-                return;
             }
             Some(&TRANSPORT_FEEDBACK_V2) => {
                 if let Some(fb) = parse_transport_feedback(data) {
@@ -714,23 +780,40 @@ impl<P: Copy + Eq + Hash> Session<P> {
                     st.bwe.on_feedback(now_ms, &fb, rtt_ms);
                     self.update_pacing();
                 }
-                return;
             }
-            Some(&KEYFRAME_REQUEST_V2) => {
-                let ours = (TRACK_VIDEO, self.cfg.stream_id);
-                let due = st.keyframe_honoured.is_none_or(|t| {
-                    now.saturating_duration_since(t) >= KEYFRAME_REQUEST_MIN_INTERVAL
-                });
-                if parse_keyframe_request(data) == Some(ours) && due {
-                    st.keyframe_honoured = Some(now);
-                    self.keyframe_wanted = true;
+            Some(&KEYFRAME_REQUEST_V2) => self.handle_keyframe_request(now, from, data),
+            _ => {
+                if let Some(m) = parse_media(data) {
+                    self.handle_media(now, since_epoch, from, &m);
                 }
-                return;
             }
-            _ => {}
         }
-        let Some(m) = parse_media(data) else { return };
-        let h = m.header;
+    }
+
+    /// Участник просит у нас ключевой кадр нашего видео — выдать, но не чаще
+    /// [`KEYFRAME_REQUEST_MIN_INTERVAL`]: по запросу на каждый потерянный пакет кодер
+    /// выдавал бы одни ключевые кадры.
+    fn handle_keyframe_request(&mut self, now: Instant, from: P, data: &[u8]) {
+        let Some(st) = self.state.get_mut(&from) else {
+            return;
+        };
+        let ours = (TRACK_VIDEO, self.cfg.stream_id);
+        let due = st
+            .keyframe_honoured
+            .is_none_or(|t| now.saturating_duration_since(t) >= KEYFRAME_REQUEST_MIN_INTERVAL);
+        if parse_keyframe_request(data) == Some(ours) && due {
+            st.keyframe_honoured = Some(now);
+            self.keyframe_wanted = true;
+        }
+    }
+
+    /// Медиа-пакет участника: в журнал прихода (обратная связь), в статистику, в
+    /// приём своего трека.
+    fn handle_media(&mut self, now: Instant, since_epoch: Duration, from: P, m: &MediaFrame<'_>) {
+        let Some(st) = self.state.get_mut(&from) else {
+            return;
+        };
+        let h = &m.header;
         st.arrivals.on_packet(
             h.stream_id,
             h.tw_seq,
@@ -743,18 +826,8 @@ impl<P: Copy + Eq + Hash> Session<P> {
         st.stats.rx_bytes += m.payload.len() as u64;
         // Повторы в статистику приёма не идут: потери в отчётах — потери первой
         // отправки, по ним судят о канале.
-        if let Some(slot) = st.rx.get_mut(h.track as usize).filter(|_| !m.retransmit) {
-            let clock = if h.track == TRACK_AUDIO {
-                self.cfg.audio_clock_hz
-            } else {
-                VIDEO_CLOCK_HZ
-            };
-            let rx = match slot {
-                Some(r) if r.stream == h.stream_id => r,
-                slot => slot.insert(RxStats::new(h.stream_id, h.seq, clock)),
-            };
-            let arrival = (since_epoch.as_micros() * clock as u128 / 1_000_000) as i64;
-            rx.update(h.seq, h.ts, arrival);
+        if !m.retransmit {
+            count_received(&self.cfg, st, h, since_epoch);
         }
         // Новый номер потока — отправитель начал заново (перезашёл в комнату): старое
         // состояние приёма этого трека выбрасываем, а не ждём, пока нумерация догонит.
@@ -763,12 +836,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 let Some(frag) = parse_video_frag(m.payload) else {
                     return;
                 };
-                if st.video.stream != Some(h.stream_id) {
-                    st.video.stream = Some(h.stream_id);
-                    st.video.nack = NackList::default();
-                    st.video.asm = VideoReassembler::new();
-                    st.video.playout = Playout::default();
-                }
+                st.video.restart_if_new(h.stream_id);
                 st.video.nack.on_packet(now, h.seq);
                 st.video.asm.push(frag, h.ts);
                 self.service_video(now, from);
@@ -901,39 +969,11 @@ impl<P: Copy + Eq + Hash> Session<P> {
             let Some(st) = self.state.get_mut(p) else {
                 continue;
             };
-            if !st.arrivals.is_empty() && st.next_feedback.is_none_or(|t| t <= now) {
-                st.next_feedback = Some(now + FEEDBACK_INTERVAL);
-                if let Some(data) = st
-                    .arrivals
-                    .take()
-                    .as_ref()
-                    .and_then(write_transport_feedback)
-                {
-                    self.pacer
-                        .push(Class::Control, now, Transmit { to: *p, data });
-                }
+            let due = [st.take_feedback(now), st.take_report(now, now_ms)];
+            for data in due.into_iter().flatten() {
+                self.pacer
+                    .push(Class::Control, now, Transmit { to: *p, data });
             }
-            if st.next_report.is_some_and(|t| t > now) {
-                continue;
-            }
-            st.next_report = Some(now + REPORT_INTERVAL);
-            let echo = st
-                .last_report
-                .map(|(ts, at)| (ts, now.saturating_duration_since(at).as_millis() as u32));
-            let mut blocks = Vec::new();
-            for (track, slot) in st.rx.iter_mut().enumerate() {
-                if let Some(rx) = slot {
-                    blocks.push(rx.report_block(track as u8));
-                    st.stats.inbound[track] = Some(rx.snapshot());
-                }
-            }
-            let data = write_report(&Report {
-                ts_ms: now_ms,
-                echo,
-                blocks,
-            });
-            self.pacer
-                .push(Class::Control, now, Transmit { to: *p, data });
         }
         for p in self.peers.clone() {
             self.service_video(now, p);

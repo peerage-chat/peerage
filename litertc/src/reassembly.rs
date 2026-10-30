@@ -54,6 +54,13 @@ impl FrameAcc {
     }
 }
 
+/// Что делать [`VideoReassembler::pop`] дальше.
+enum Step {
+    Deliver(u32),
+    Wait,
+    Again,
+}
+
 /// Собирает кадры из фрагментов и выдаёт их по порядку. Без своих потоков и часов:
 /// время приходит в [`VideoReassembler::pop`].
 pub struct VideoReassembler {
@@ -100,10 +107,7 @@ impl VideoReassembler {
         if self.next.is_some_and(|next| before(frag.frame_id, next)) {
             return;
         }
-        if frag.frag_count == 0
-            || frag.frag_count > MAX_VIDEO_FRAGS
-            || frag.frag_idx >= frag.frag_count
-        {
+        if !(1..=MAX_VIDEO_FRAGS).contains(&frag.frag_count) || frag.frag_idx >= frag.frag_count {
             return;
         }
         let acc = self
@@ -126,11 +130,14 @@ impl VideoReassembler {
             acc.received += 1;
             self.pending += frag.data.len();
         }
-        // Предохранители от роста: по числу кадров и по байтам — выбрасываем самые
-        // старые. Если среди них ожидаемый, его не дождаться: это решит `pop` по
-        // таймауту ожидания.
+        self.bound(frag.frame_id);
+    }
+
+    /// Предохранители от роста: по числу кадров и по байтам — выбрасываем самые
+    /// старые (относительно только что пришедшего `newest`). Если среди них
+    /// ожидаемый, его не дождаться: это решит `pop` по таймауту ожидания.
+    fn bound(&mut self, newest: u32) {
         while self.frames.len() > MAX_FRAMES || self.pending > MAX_PENDING_BYTES {
-            let newest = frag.frame_id;
             let Some(&oldest) = self
                 .frames
                 .keys()
@@ -147,69 +154,101 @@ impl VideoReassembler {
     /// повтор по NACK).
     pub fn pop(&mut self, now: Instant, max_wait: Duration) -> Option<CompleteFrame> {
         loop {
-            let Some(next) = self.next.filter(|_| !self.need_key) else {
-                // Опоры нет: годится только ключевой кадр, самый свежий из собранных.
-                if let Some(key) = self.newest(|a| a.complete() && a.info.keyframe) {
-                    return self.deliver(key);
-                }
-                // Ключевой ещё собирается (его фрагменты повторяются по NACK): кадры за
-                // ним держим — с ним они станут декодируемы. Что до него и что собрано
-                // без него — выбрасываем.
-                let pending = self.newest(|a| a.info.keyframe);
-                let useless: Vec<u32> = self
-                    .frames
-                    .iter()
-                    .filter(|(&id, a)| pending.map_or(a.complete(), |k| before(id, k)))
-                    .map(|(&id, _)| id)
-                    .collect();
-                for id in useless {
-                    if self.take(id).is_some_and(|a| a.complete()) {
-                        self.stuck |= !self.quiet;
-                    }
-                }
-                let Some(pending) = pending else {
-                    self.waiting_since = None;
-                    return None;
-                };
-                // Ждём его не дольше `max_wait`; не дождались — он и всё, что за ним
-                // собрано, не пригодится, просим новый.
-                let since = *self.waiting_since.get_or_insert(now);
-                if now.saturating_duration_since(since) < max_wait {
-                    return None;
-                }
-                let lost: Vec<u32> = self
-                    .frames
-                    .iter()
-                    .filter(|(&id, a)| id == pending || before(pending, id) && !a.info.keyframe)
-                    .map(|(&id, _)| id)
-                    .collect();
-                for id in lost {
-                    self.take(id);
-                }
-                self.stuck |= !self.quiet;
-                self.waiting_since = None;
-                continue;
+            let step = match self.next.filter(|_| !self.need_key) {
+                Some(next) => self.step_in_order(next, now, max_wait),
+                None => self.step_from_keyframe(now, max_wait),
             };
-            if self.frames.get(&next).is_some_and(FrameAcc::complete) {
-                return self.deliver(next);
+            match step {
+                Step::Deliver(id) => return self.deliver(id),
+                Step::Wait => return None,
+                Step::Again => {}
             }
-            // Собранный ключевой кадр новее ожидаемого: ждать незачем, перескакиваем.
-            if let Some(key) = self.oldest_complete_after(next, |a| a.info.keyframe) {
-                return self.deliver(key);
-            }
-            // Следующего нет, а за ним уже собранные — ждём повтора, но не вечно.
-            if self.oldest_complete_after(next, |_| true).is_none() {
-                self.waiting_since = None;
-                return None;
-            }
-            let since = *self.waiting_since.get_or_insert(now);
-            if now.saturating_duration_since(since) < max_wait {
-                return None;
-            }
-            self.need_key = true;
-            self.stuck = true;
-            self.waiting_since = None;
         }
+    }
+
+    /// Опора есть, ждём кадр `next`. Собран — отдать; собран ключевой новее — к нему;
+    /// за дырой собранного нет — ждать нечего; есть — ждём повтора, но не дольше
+    /// `max_wait`, а там нужен ключевой кадр.
+    fn step_in_order(&mut self, next: u32, now: Instant, max_wait: Duration) -> Step {
+        if self.frames.get(&next).is_some_and(FrameAcc::complete) {
+            return Step::Deliver(next);
+        }
+        if let Some(key) = self.oldest_complete_after(next, |a| a.info.keyframe) {
+            return Step::Deliver(key);
+        }
+        if self.oldest_complete_after(next, |_| true).is_none() {
+            self.waiting_since = None;
+            return Step::Wait;
+        }
+        if !self.waited(now, max_wait) {
+            return Step::Wait;
+        }
+        self.need_key = true;
+        self.stuck = true;
+        Step::Again
+    }
+
+    /// Опоры нет: годится только ключевой кадр, самый свежий из собранных. Ключевой
+    /// ещё собирается (его фрагменты повторяются по NACK) — кадры за ним держим, с
+    /// ним они станут декодируемы; что до него и что собрано без него — выбрасываем.
+    /// Ждём его не дольше `max_wait`; не дождались — он и всё, что за ним собрано,
+    /// не пригодится, просим новый.
+    fn step_from_keyframe(&mut self, now: Instant, max_wait: Duration) -> Step {
+        if let Some(key) = self.newest(|a| a.complete() && a.info.keyframe) {
+            return Step::Deliver(key);
+        }
+        let pending = self.newest(|a| a.info.keyframe);
+        self.drop_unusable(pending);
+        let Some(pending) = pending else {
+            self.waiting_since = None;
+            return Step::Wait;
+        };
+        if !self.waited(now, max_wait) {
+            return Step::Wait;
+        }
+        self.give_up(pending);
+        Step::Again
+    }
+
+    /// Ждём с первого вызова; прошло `max_wait` — хватит (отсчёт сброшен).
+    fn waited(&mut self, now: Instant, max_wait: Duration) -> bool {
+        let since = *self.waiting_since.get_or_insert(now);
+        if now.saturating_duration_since(since) < max_wait {
+            return false;
+        }
+        self.waiting_since = None;
+        true
+    }
+
+    /// Без опоры: выбросить кадры до собираемого ключевого `pending` (нет его —
+    /// всё собранное). Собранный, но выброшенный кадр — повод попросить ключевой.
+    fn drop_unusable(&mut self, pending: Option<u32>) {
+        let useless: Vec<u32> = self
+            .frames
+            .iter()
+            .filter(|(&id, a)| pending.map_or(a.complete(), |k| before(id, k)))
+            .map(|(&id, _)| id)
+            .collect();
+        for id in useless {
+            if self.take(id).is_some_and(|a| a.complete()) {
+                self.stuck |= !self.quiet;
+            }
+        }
+    }
+
+    /// Ключевой `pending` не дособрался: он и кадры за ним (кроме ключевых) не
+    /// пригодятся — просим новый.
+    fn give_up(&mut self, pending: u32) {
+        let lost: Vec<u32> = self
+            .frames
+            .iter()
+            .filter(|(&id, a)| id == pending || before(pending, id) && !a.info.keyframe)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in lost {
+            self.take(id);
+        }
+        self.stuck |= !self.quiet;
     }
 
     /// Когда [`Self::pop`] перестанет ждать недостающий кадр — для таймера сессии.

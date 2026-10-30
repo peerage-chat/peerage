@@ -80,6 +80,22 @@ impl Playout {
         self.window.push_back((t, transit));
         let target = self.target();
 
+        let offset = self.follow_target(t, target);
+
+        let play_ms = ts_ms + offset + self.sync_ms;
+        let play = if play_ms >= 0.0 {
+            epoch + Duration::from_secs_f64(play_ms / 1000.0)
+        } else {
+            epoch
+        };
+        let play = self.bounded(now, play);
+        self.last_play = Some(play);
+        play
+    }
+
+    /// Смещение к моменту `t` (мс): растёт до цели сразу, убывает плавно —
+    /// [`DECAY_MS_PER_S`], а при большом лишнем запасе вдвое быстрее.
+    fn follow_target(&mut self, t: f64, target: f64) -> f64 {
         let offset = match self.offset {
             Some(o) if target < o => {
                 let dt = (t - self.updated_at).max(0.0);
@@ -94,25 +110,16 @@ impl Playout {
         };
         self.offset = Some(offset);
         self.updated_at = t;
+        offset
+    }
 
-        let play_ms = ts_ms + offset + self.sync_ms;
-        let mut play = if play_ms >= 0.0 {
-            epoch + Duration::from_secs_f64(play_ms / 1000.0)
-        } else {
-            epoch
-        };
-        // Не раньше, чем кадр готов (редкий опоздавший — за пределом перцентиля —
-        // показывается сразу), не раньше прошлого кадра (смещение убывает) и не
-        // позже, чем через секунду сверх задержки ради губ: дальше задержка хуже
-        // опоздания.
-        play = play.max(now);
-        if let Some(last) = self.last_play {
-            play = play.max(last);
-        }
+    /// Не раньше, чем кадр готов (редкий опоздавший — за пределом перцентиля —
+    /// показывается сразу), не раньше прошлого кадра (смещение убывает) и не позже,
+    /// чем через секунду сверх задержки ради губ: дальше задержка хуже опоздания.
+    fn bounded(&self, now: Instant, play: Instant) -> Instant {
+        let play = self.last_play.map_or(play, |last| play.max(last)).max(now);
         let cap = now + Duration::from_secs_f64((MAX_EXTRA_DELAY_MS + self.sync_ms) / 1000.0);
-        play = play.min(cap);
-        self.last_play = Some(play);
-        play
+        play.min(cap)
     }
 
     /// Смещение, которое покрывает [`PERCENTILE`] кадров окна, — но не больше
