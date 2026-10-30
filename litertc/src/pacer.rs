@@ -54,6 +54,11 @@ impl<P> Pacer<P> {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn rate(&self) -> f64 {
+        self.rate_bps
+    }
+
     pub fn set_rate(&mut self, rate_bps: f64) {
         self.rate_bps = rate_bps;
     }

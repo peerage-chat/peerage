@@ -735,12 +735,19 @@ impl<P: Copy + Eq + Hash> Session<P> {
 
     /// Пакет пробы полосы ([`crate::probe`]), если кому-то пора: пустой, на треке
     /// заполнения.
+    /// Когда участнику пора следующий пакет пробы и какого размера. Срок — в
+    /// часах сессии: и таймер, и выпуск сверяются с одним и тем же моментом (из мс
+    /// в `Instant` срок округляется вниз, и сверка в мс в этот момент говорила
+    /// «рано» — таймер срабатывал впустую).
+    fn probe_due(&self, st: &PeerState) -> Option<(Instant, usize)> {
+        let (at_ms, size) = st.bwe.probe_due()?;
+        Some((self.epoch? + Duration::from_secs_f64(at_ms / 1000.0), size))
+    }
+
     fn probe(&self, now: Instant) -> Option<Transmit<P>> {
-        let at_ms = now.saturating_duration_since(self.epoch?).as_secs_f64() * 1000.0;
         let (to, size) = self.peers.iter().find_map(|p| {
-            let st = self.state.get(p)?;
-            let (due, size) = st.bwe.probe_due()?;
-            (due <= at_ms).then_some((*p, size))
+            let (due, size) = self.probe_due(self.state.get(p)?)?;
+            (due <= now).then_some((*p, size))
         })?;
         let header = MediaHeader {
             track: TRACK_PADDING,
@@ -938,11 +945,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 let feedback = (!st.arrivals.is_empty())
                     .then(|| st.next_feedback.or(self.last_now))
                     .flatten();
-                let probe = st
-                    .bwe
-                    .probe_due()
-                    .zip(self.epoch)
-                    .map(|((at_ms, _), e)| e + Duration::from_secs_f64(at_ms / 1000.0));
+                let probe = self.probe_due(st).map(|(at, _)| at);
                 [
                     st.next_report.or(self.last_now),
                     v.asm.deadline(max_frame_wait(rtt)),
@@ -1604,9 +1607,12 @@ mod tests {
 
     #[test]
     fn peers_are_the_room() {
+        let t0 = Instant::now();
         let mut s = Session::new(CFG);
         s.set_peers(&[7, 9]);
         assert_eq!(s.peers(), [7, 9]);
+        s.send_audio(t0, t0, &[1, 2, 3]);
+        assert_eq!(s.tx_bytes(), 2 * 3, "по копии каждому");
     }
 
     /// NACK повторяет только наше видео: чужой трек или чужой поток — мимо.
@@ -1679,6 +1685,10 @@ mod tests {
         let audio = st.outbound[TRACK_AUDIO as usize].unwrap();
         assert_eq!((audio.fraction_lost, audio.jitter_ms), (0.25, 10.0));
         assert!(st.outbound[TRACK_VIDEO as usize].is_none(), "чужой поток");
+        // Окно — по наименьшему RTT (100 мс); через 30 с он забыт, годится 300.
+        assert_eq!(st.in_flight.1, 13_125);
+        s.handle_datagram(t0 + ms(31_000), 7, &report(30_650, vec![]));
+        assert_eq!(s.stats(&7).unwrap().in_flight.1, 20_625);
     }
 
     /// Статистика участника: оценка полосы, цель кодера, окно, принятые треки и
@@ -1702,6 +1712,8 @@ mod tests {
         pkt.extend(fragment_video(&[1, 2, 3], 0, key()).remove(0));
         s.handle_datagram(t0, 7, &pkt);
         s.handle_timeout(t0);
+        let bwe = &mut s.state.get_mut(&7).unwrap().bwe;
+        (bwe.cuts_delay, bwe.cuts_loss) = (1, 2);
         let sync = &mut s.state.get_mut(&7).unwrap().sync;
         for i in 0..60u64 {
             let cap = i * 20;
@@ -1710,6 +1722,7 @@ mod tests {
         }
         let st = s.stats(&7).unwrap();
         assert_eq!(st.bandwidth, 300_000);
+        assert_eq!(st.bandwidth_cuts, (1, 2));
         assert_eq!(st.target, s.state[&7].bwe.target() as u32);
         assert!(st.target > 0);
         assert_eq!(st.in_flight, (0, 16_875));
@@ -1768,27 +1781,116 @@ mod tests {
     }
 
     /// Каждому участнику — своя копия, поэтому темп выпуска — худшая оценка на их
-    /// число: кадр двоим уходит за то же время, что одному.
+    /// число.
     #[test]
-    fn pacing_scales_with_the_number_of_peers() {
-        let released = |peers: &[u8]| {
-            let t0 = Instant::now();
-            let mut s = Session::new(CFG);
-            s.set_peers(peers);
-            s.send_video(t0, t0, &[0; 30_000], key());
-            let mut bytes = 0;
-            for t in 0..=100 {
-                s.handle_timeout(t0 + ms(t));
-                bytes += drain(&mut s)
-                    .iter()
-                    .filter(|t| t.data[1] == TRACK_VIDEO)
-                    .map(|t| t.data.len())
-                    .sum::<usize>();
-            }
-            bytes / peers.len()
+    fn pacing_is_worst_estimate_times_peers() {
+        let mut s = Session::new(CFG);
+        s.set_peers(&[7, 9]);
+        assert_eq!(s.pacer.rate(), 2.0 * 300_000.0);
+        s.set_bitrate_bounds(50_000, 200_000);
+        assert_eq!(s.pacer.rate(), 2.0 * 200_000.0);
+        s.set_peers(&[7]);
+        assert_eq!(s.pacer.rate(), 200_000.0);
+    }
+
+    /// Медиа-пакет со своим сквозным номером (= номеру пакета) и меткой `ts`.
+    fn media(track: u8, stream_id: u32, seq: u16, ts: u32) -> Vec<u8> {
+        let mut pkt = vec![0u8; MEDIA_HEADER_LEN + 1];
+        let h = MediaHeader {
+            track,
+            stream_id,
+            seq,
+            tw_seq: seq,
+            ts,
         };
-        let one = released(&[7]);
-        assert!(one < 30_000, "темп держит отправку: {one}");
-        assert!(released(&[7, 9]).abs_diff(one) < one / 10);
+        write_media_header(&mut pkt, &h);
+        pkt
+    }
+
+    /// Статистика приёма звука — в его часах (ровный поток без джиттера); новый
+    /// поток отправителя — счёт заново, а не «потеряно 90 пакетов».
+    #[test]
+    fn inbound_audio_stats_use_audio_clock_and_restart_with_stream() {
+        let t0 = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[1]);
+        for i in 0..10u16 {
+            let at = t0 + ms(i as u64 * 20);
+            s.handle_datagram(at, 1, &media(TRACK_AUDIO, 1, i, i as u32 * 960));
+        }
+        s.handle_timeout(t0 + ms(200));
+        let a = s.stats(&1).unwrap().inbound[TRACK_AUDIO as usize].unwrap();
+        assert_eq!((a.highest_seq, a.lost, a.jitter_ms), (9, 0, 0.0));
+        for i in 0..3u16 {
+            let at = t0 + ms(300 + i as u64 * 20);
+            s.handle_datagram(at, 1, &media(TRACK_AUDIO, 2, 100 + i, i as u32 * 960));
+        }
+        s.handle_timeout(t0 + ms(1200));
+        let a = s.stats(&1).unwrap().inbound[TRACK_AUDIO as usize].unwrap();
+        assert_eq!((a.highest_seq, a.lost), (102, 0));
+    }
+
+    /// Обратная связь: после тишины — сразу с первым пакетом, дальше не чаще раза в
+    /// 100 мс (ровно через 100 — уже можно). Отчёт — раз в секунду, ровно через
+    /// секунду — следующий.
+    #[test]
+    fn feedback_and_reports_keep_their_intervals() {
+        let t0 = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[1]);
+        let sent =
+            |s: &mut Session<u8>, kind: u8| drain(s).iter().filter(|t| t.data[0] == kind).count();
+        s.handle_timeout(t0);
+        assert_eq!(sent(&mut s, REPORT_V2), 1);
+        assert_eq!(sent(&mut s, TRANSPORT_FEEDBACK_V2), 0);
+        for (seq, at, expected) in [(0, 1, 1), (1, 50, 0), (2, 101, 1)] {
+            let now = t0 + ms(at);
+            s.handle_datagram(now, 1, &media(TRACK_AUDIO, 1, seq, 0));
+            s.handle_timeout(now);
+            assert_eq!(sent(&mut s, TRANSPORT_FEEDBACK_V2), expected, "{at} мс");
+        }
+        s.handle_timeout(t0 + ms(1000));
+        assert_eq!(sent(&mut s, REPORT_V2), 1);
+    }
+
+    /// Запрос ключевого кадра повторяется через секунду — таймер не в прошлом.
+    #[test]
+    fn keyframe_retry_is_due_later() {
+        let t0 = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[1]);
+        let mut pkt = media(TRACK_VIDEO, 5, 0, 0);
+        pkt.truncate(MEDIA_HEADER_LEN);
+        pkt.extend(fragment_video(&[1, 2, 3], 0, VideoInfo::default()).remove(0));
+        s.handle_datagram(t0, 1, &pkt);
+        let out = drain(&mut s);
+        assert!(out.iter().any(|t| t.data[0] == KEYFRAME_REQUEST_V2));
+        assert!(s.poll_timeout().unwrap() >= t0);
+    }
+
+    /// Пробы уходят по таймеру сессии: он указывает на срок пробы, не в прошлое и
+    /// не в далёкое будущее.
+    #[test]
+    fn probes_are_driven_by_the_timer() {
+        let t0 = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[9]);
+        s.send_video(t0, t0, &[2; 10], key());
+        let mut now = t0;
+        let mut probes = 0;
+        for _ in 0..500 {
+            let at = s.poll_timeout().unwrap();
+            assert!(at >= now, "таймер в прошлом");
+            if at > t0 + ms(100) {
+                break;
+            }
+            now = at;
+            s.handle_timeout(now);
+            probes += drain(&mut s)
+                .iter()
+                .filter(|t| t.data[1] == TRACK_PADDING)
+                .count();
+        }
+        assert!(probes >= 10, "пакетов проб {probes}");
     }
 }
