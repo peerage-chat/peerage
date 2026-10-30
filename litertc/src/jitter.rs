@@ -48,8 +48,6 @@ pub struct JitterBuffer {
     buf: BTreeMap<u16, (u32, Vec<u8>)>,
     /// Метка последнего отданного кадра.
     played_ts: Option<u32>,
-    /// DIAG: счётчик пакетов, выброшенных anti-latency капом (читать+сброс).
-    dropped: u32,
 }
 
 impl JitterBuffer {
@@ -67,7 +65,6 @@ impl JitterBuffer {
             next: None,
             buf: BTreeMap::new(),
             played_ts: None,
-            dropped: 0,
         }
     }
 
@@ -79,7 +76,6 @@ impl JitterBuffer {
             while self.buf.len() > self.depth {
                 let oldest = *self.buf.keys().next().unwrap();
                 self.buf.remove(&oldest);
-                self.dropped += 1;
             }
             self.next = self.buf.keys().next().copied();
         }
@@ -100,11 +96,6 @@ impl JitterBuffer {
     /// Метка времени последнего отданного кадра; `None`, если отдана потеря.
     pub fn played_ts(&self) -> Option<u32> {
         self.played_ts
-    }
-
-    /// DIAG: прочитать и обнулить счётчик выброшенных капом пакетов.
-    pub fn take_dropped(&mut self) -> u32 {
-        std::mem::take(&mut self.dropped)
     }
 
     /// Принять пакет с меткой времени `ts`. Слишком старые (уже воспроизведённые)
@@ -129,7 +120,6 @@ impl JitterBuffer {
             while self.buf.len() > self.depth {
                 let oldest = *self.buf.keys().next().unwrap();
                 self.buf.remove(&oldest);
-                self.dropped += 1;
             }
             self.next = self.buf.keys().next().copied();
         }
@@ -159,11 +149,9 @@ impl JitterBuffer {
         None
     }
 
+    #[allow(clippy::len_without_is_empty)] // пустота не нужна никому
     pub fn len(&self) -> usize {
         self.buf.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
     }
 }
 
@@ -283,8 +271,7 @@ mod tests {
         for s in 0..15u16 {
             j.push(s, 0, f(s as u8));
         }
-        assert_eq!(j.take_dropped(), 0, "пачка из 15 не должна дропаться");
-        // И все 15 извлекаются по порядку.
+        // Все 15 извлекаются по порядку — ни один не выброшен.
         for s in 0..15u16 {
             assert_eq!(j.pop(), Some(JitterOut::Frame(f(s as u8))));
         }
@@ -296,6 +283,49 @@ mod tests {
         j.push(5, 0, f(5));
         assert_eq!(j.pop(), Some(JitterOut::Frame(f(5)))); // next=6
         j.push(3, 0, f(3)); // опоздал — отброшен
-        assert!(j.is_empty());
+        assert_eq!(j.len(), 0);
+    }
+
+    /// Буфер, играющий с кадра `first`, с `queued` кадрами в очереди.
+    fn playing(depth: usize, queued: u16) -> JitterBuffer {
+        let mut j = JitterBuffer::new(depth);
+        assert!(!j.is_playing());
+        for s in 0..=queued {
+            j.push(s, 0, f(s as u8));
+        }
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(0))));
+        assert!(j.is_playing());
+        assert_eq!(j.len(), queued as usize);
+        j
+    }
+
+    /// Джиттер утих — глубина меньше, и накопленное сверх нового потолка
+    /// (глубина + запас на пачки) выбрасывается сразу: задержка уходит вместе с
+    /// джиттером. Ровно на потолке — ещё нет.
+    #[test]
+    fn shallower_depth_drops_the_backlog() {
+        let mut j = playing(5, 23);
+        j.set_depth(3); // потолок 23 — ровно столько и лежит
+        assert_eq!(j.len(), 23);
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(1))));
+        let mut j = playing(5, 24);
+        j.set_depth(3);
+        assert_eq!(j.len(), 3);
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(22))));
+    }
+
+    /// Задержка, которую буфер копит нарочно (звук ждёт видео), поднимает
+    /// потолок: её не выбрасывают как убегание.
+    #[test]
+    fn held_delay_is_not_dropped() {
+        let mut j = playing(2, 30);
+        j.set_extra(10); // потолок 2 + 10 + 20 = 32
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(1))));
+        assert_eq!(j.len(), 29);
+        let mut j = playing(2, 30);
+        j.set_extra(8); // потолок 30: лежит 30 — ещё можно
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(1))));
+        j.set_extra(0);
+        assert_eq!(j.pop(), Some(JitterOut::Frame(f(29))));
     }
 }
