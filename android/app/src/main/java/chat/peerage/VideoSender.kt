@@ -109,8 +109,10 @@ class VideoSender(
     /** Ступени разрешения; задаются в [start]. */
     private var ladder: ResolutionLadder? = null
 
-    /** Ступень, под которую сейчас настроен кодер. */
-    private var appliedStep = 0
+    /** Ступень, под которую сейчас настроен кодер: пишет поток камеры, когда новый
+     *  кодер встал, читает дренаж. Не встал — ступень прежняя, и следующий такт
+     *  [adaptBitrate] попросит снова (R-112). */
+    @Volatile private var appliedStep = 0
 
     /** Прежний кодер после смены разрешения: камера ещё может писать в его surface,
      *  пока новая сессия не собрана, — освобождаем в [retireOldEncoder]. */
@@ -121,9 +123,10 @@ class VideoSender(
      *  не освободился бы никогда (R-111). Под ним же забирается [retiring]. */
     private val swapLock = Any()
 
-    /** Перейти на размер [size]: новый кодер, сессия камеры под него. Поток камеры. */
-    private fun resize(size: ResolutionLadder.Size) {
-        if (!running) return
+    /** Перейти на ступень [step]: новый кодер, сессия камеры под него. Поток камеры. */
+    private fun resize(step: Int) {
+        val size = ladder?.steps?.getOrNull(step) ?: return
+        if (!running || step == appliedStep) return
         val (enc, surf) = try {
             createEncoder(size, currentBitrate)
         } catch (e: Exception) {
@@ -146,6 +149,8 @@ class VideoSender(
             release(enc, surf)
             return
         }
+        appliedStep = step
+        android.util.Log.i("VideoSender", "resolution → ${size.width}x${size.height}")
         device?.let { configureSession(it) } // нет устройства — откроется уже с новым surface
     }
 
@@ -365,12 +370,7 @@ class VideoSender(
         if (target <= 0) return
         ladder?.let { l ->
             val step = l.update(target, android.os.SystemClock.elapsedRealtime())
-            if (step != appliedStep) {
-                appliedStep = step
-                val size = l.steps[step]
-                android.util.Log.i("VideoSender", "resolution → ${size.width}x${size.height} (target $target)")
-                camHandler?.post { resize(size) }
-            }
+            if (step != appliedStep) camHandler?.post { resize(step) }
         }
         if (kotlin.math.abs(target - currentBitrate) * 10 < currentBitrate) return
         val p = android.os.Bundle()
