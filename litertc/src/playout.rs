@@ -236,6 +236,43 @@ mod tests {
         }
     }
 
+    /// Большой лишний запас (сеть была на 600 мс медленнее, окно её забыло)
+    /// уходит вдвое быстрее малого: 100 мс в секунду, пока сверх цели больше 250 мс.
+    #[test]
+    fn large_excess_delay_falls_faster() {
+        let t0 = Instant::now();
+        let mut p = Playout::default();
+        let mut last = t0;
+        let mut at = t0;
+        // 10 с медленной сети, затем 13 с обычной: окно (10 с по приходу) забыло
+        // медленную, и запас спадает уже 2,6 с — быстро бы на 260 мс, медленно на 130.
+        for i in 0..700u64 {
+            let extra = if i < 300 { 600 } else { 0 };
+            at = t0 + ms(i * 33 + 50 + extra);
+            last = p.schedule(at, ts(i * 33));
+        }
+        let delay = last - (at - ms(50));
+        assert!(delay < ms(450), "задержка {delay:?}");
+        assert!(delay > ms(330), "задержка {delay:?}");
+    }
+
+    /// Задержку ради губ сняли (2 с → 0,5 с): кадр, которому по очереди пришлось
+    /// бы ждать прошлый, показывается не позже чем через секунду сверх новой
+    /// задержки.
+    #[test]
+    fn wait_is_capped_when_sync_delay_drops() {
+        let t0 = Instant::now();
+        let mut p = Playout::default();
+        p.set_sync_delay(ms(2000));
+        for i in 0..30u64 {
+            p.schedule(t0 + ms(i * 33 + 50), ts(i * 33));
+        }
+        p.set_sync_delay(ms(500));
+        let now = t0 + ms(30 * 33 + 50);
+        let play = p.schedule(now, ts(30 * 33));
+        assert_eq!(play, now + ms(1500));
+    }
+
     /// Задержка ради губ сдвигает показ целиком, темп прежний.
     #[test]
     fn sync_delay_shifts_playback() {
