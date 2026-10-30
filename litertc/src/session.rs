@@ -230,24 +230,65 @@ impl AudioRx {
 
     fn push(&mut self, now: Instant, seq: u16, ts: u32, payload: Vec<u8>, clock_hz: f64) {
         if let (Some(l_ts), Some(l_arr)) = (self.last_ts, self.last_arrival) {
-            let send_diff_samples = ts.wrapping_sub(l_ts) as i32;
-            let send_diff_ms = (send_diff_samples as f64) / (clock_hz / 1000.0);
-            let recv_diff_ms = now.saturating_duration_since(l_arr).as_secs_f64() * 1000.0;
-            let d = (recv_diff_ms - send_diff_ms).abs();
-            let alpha = if d > self.jitter_estimate_ms {
-                0.25
-            } else {
-                0.0625
-            };
-            self.jitter_estimate_ms += (d - self.jitter_estimate_ms) * alpha;
-
-            let target_depth = ((self.jitter_estimate_ms / 20.0).round() as usize + 2).clamp(2, 8);
-            self.jitter.set_depth(target_depth);
+            let send_ms = ts.wrapping_sub(l_ts) as i32 as f64 * 1000.0 / clock_hz;
+            let recv_ms = now.saturating_duration_since(l_arr).as_secs_f64() * 1000.0;
+            self.jitter_estimate_ms = jitter_estimate(self.jitter_estimate_ms, recv_ms, send_ms);
+            self.jitter
+                .set_depth(depth_for_jitter(self.jitter_estimate_ms));
         }
         self.last_ts = Some(ts);
         self.last_arrival = Some(now);
         self.jitter.push(seq, ts, payload);
     }
+}
+
+/// Что сделать со звуком перед очередным кадром ради губ.
+#[derive(Debug, PartialEq)]
+enum LipStep {
+    Play,
+    /// Кадр маскировки вместо следующего: всё дальше слышно на кадр позже.
+    Hold,
+    /// Кадр выбросить: всё дальше слышно на кадр раньше.
+    Drop,
+}
+
+impl AudioRx {
+    /// Шаг сведения губ: звук должен отставать на `want` кадров. Не чаще раза в
+    /// [`AUDIO_ADJUST_EVERY`] кадров и только пока буфер играет: не хватает — кадр
+    /// маскировки, лишнее — выбросить кадр, если в буфере есть хотя бы два.
+    fn lip_step(&mut self, want: usize) -> LipStep {
+        self.jitter.set_extra(want);
+        self.since_adjust = self.since_adjust.saturating_add(1);
+        if self.since_adjust < AUDIO_ADJUST_EVERY || !self.jitter.is_playing() {
+            return LipStep::Play;
+        }
+        let step = if self.held < want {
+            self.held += 1;
+            LipStep::Hold
+        } else if self.held > want && self.jitter.len() >= 2 {
+            self.held -= 1;
+            LipStep::Drop
+        } else {
+            return LipStep::Play;
+        };
+        self.since_adjust = 0;
+        step
+    }
+}
+
+/// Оценка джиттера звука, мс: между соседними пакетами пришли через `recv_ms`, а
+/// сняты через `send_ms` — разница и есть разброс. Растёт быстро (¼ разницы),
+/// спадает медленно (1/16, как в RFC 3550): лучше лишний кадр задержки, чем дыра.
+fn jitter_estimate(est_ms: f64, recv_ms: f64, send_ms: f64) -> f64 {
+    let d = (recv_ms - send_ms).abs();
+    let alpha = if d > est_ms { 0.25 } else { 0.0625 };
+    est_ms + (d - est_ms) * alpha
+}
+
+/// Глубина буфера звука под джиттер: по кадру (20 мс) на его величину и два сверху,
+/// от 2 до 8 кадров.
+fn depth_for_jitter(est_ms: f64) -> usize {
+    ((est_ms / 20.0).round() as usize + 2).clamp(2, 8)
 }
 
 /// Приём видео от участника: пропущенные пакеты, сборка кадров и очередь собранных
@@ -910,22 +951,16 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let st = self.state.get_mut(peer)?;
         let a = st.audio.as_mut()?;
         let want = (st.sync.audio_delay().as_secs_f64() / frame_s).round() as usize;
-        a.jitter.set_extra(want);
-        a.since_adjust = a.since_adjust.saturating_add(1);
-        let adjust = a.since_adjust >= AUDIO_ADJUST_EVERY && a.jitter.is_playing();
-        if adjust && a.held < want {
-            // Кадр маскировки вместо следующего: всё дальше слышно на кадр позже.
-            a.held += 1;
-            a.since_adjust = 0;
-            st.stats.lip_sync.audio_holds += 1;
-            return Some(JitterOut::Hold);
-        }
-        if adjust && a.held > want && a.jitter.len() >= 2 {
-            // Кадр выброшен: всё дальше слышно на кадр раньше.
-            a.held -= 1;
-            a.since_adjust = 0;
-            st.stats.lip_sync.audio_drops += 1;
-            a.jitter.pop();
+        match a.lip_step(want) {
+            LipStep::Hold => {
+                st.stats.lip_sync.audio_holds += 1;
+                return Some(JitterOut::Hold);
+            }
+            LipStep::Drop => {
+                st.stats.lip_sync.audio_drops += 1;
+                a.jitter.pop();
+            }
+            LipStep::Play => {}
         }
         let out = a.jitter.pop();
         if let (Some(JitterOut::Frame(_)), Some(ts)) = (&out, a.jitter.played_ts()) {
@@ -1378,6 +1413,96 @@ mod tests {
             2,
             "счётчик — пришедшие, не лежащие"
         );
+    }
+
+    /// Ждём недостающий кадр две попытки NACK (2,5 RTT и 50 мс сверху), от 0,1 до
+    /// 0,8 с; NACK повторяем через RTT и 30 мс, не чаще 50 мс.
+    #[test]
+    fn video_waits_scale_with_rtt() {
+        let ms = Duration::from_millis;
+        assert_eq!(max_frame_wait(ms(100)), ms(300));
+        assert_eq!(max_frame_wait(ms(10)), ms(100));
+        assert_eq!(max_frame_wait(ms(1000)), ms(800));
+        assert_eq!(nack_retry(ms(100)), ms(130));
+        assert_eq!(nack_retry(ms(5)), ms(50));
+    }
+
+    /// Джиттер звука растёт на четверть разницы, спадает на шестнадцатую; глубина
+    /// буфера — кадр на 20 мс джиттера плюс два, в пределах 2…8.
+    #[test]
+    fn audio_depth_follows_jitter() {
+        assert_eq!(jitter_estimate(10.0, 70.0, 20.0), 20.0);
+        assert_eq!(jitter_estimate(26.0, 20.0, 20.0), 24.375);
+        assert_eq!(jitter_estimate(10.0, 0.0, 20.0), 12.5);
+        assert_eq!(depth_for_jitter(0.0), 2);
+        assert_eq!(depth_for_jitter(29.0), 3);
+        assert_eq!(depth_for_jitter(31.0), 4);
+        assert_eq!(depth_for_jitter(500.0), 8);
+    }
+
+    /// Тик воспроизведения как в [`Session::pull_audio`]: пришёл кадр `seq`, шаг
+    /// губ, затем кадр в вывод.
+    fn tick(a: &mut AudioRx, seq: &mut u16, want: usize) -> LipStep {
+        a.jitter.push(*seq, 0, vec![0]);
+        *seq += 1;
+        let step = a.lip_step(want);
+        if step != LipStep::Hold {
+            a.jitter.pop();
+        }
+        step
+    }
+
+    /// Звук должен отстать на 2 кадра: кадр маскировки раз в 5 кадров, пока не
+    /// наберётся; задержку сняли — по кадру выбрасываем с тем же темпом.
+    #[test]
+    fn lip_sync_holds_and_drops_one_frame_at_a_time() {
+        let mut a = AudioRx::new(1, 1);
+        let mut seq = 0;
+        let at = |steps: Vec<LipStep>, want: LipStep| -> Vec<usize> {
+            (0..steps.len()).filter(|&i| steps[i] == want).collect()
+        };
+        let steps = (0..15).map(|_| tick(&mut a, &mut seq, 2)).collect();
+        assert_eq!(at(steps, LipStep::Hold), [4, 9]);
+        let steps = (0..15).map(|_| tick(&mut a, &mut seq, 0)).collect();
+        // С прошлой подстройки прошло больше 5 кадров — первый выброс сразу.
+        assert_eq!(at(steps, LipStep::Drop), [0, 5]);
+        assert_eq!(a.held, 0);
+    }
+
+    /// Не играет — подстраивать нечего; выбрасывать последний кадр — значит
+    /// сделать дыру.
+    #[test]
+    fn lip_sync_waits_for_playback_and_keeps_the_last_frame() {
+        let mut a = AudioRx::new(1, 3);
+        a.jitter.push(0, 0, vec![0]);
+        assert!((0..10).all(|_| a.lip_step(2) == LipStep::Play), "не играет");
+        // Играет, лишнего три кадра, но в буфере всего один — не выбрасываем.
+        let mut a = AudioRx::new(1, 1);
+        a.held = 3;
+        let mut seq = 0;
+        let steps: Vec<LipStep> = (0..10).map(|_| tick(&mut a, &mut seq, 0)).collect();
+        assert!(!steps.contains(&LipStep::Drop));
+    }
+
+    /// Пакеты звука, пришедшие с разбросом, углубляют буфер: до начала игры он
+    /// копит больше кадров.
+    #[test]
+    fn jittery_audio_gets_a_deeper_buffer() {
+        let t0 = Instant::now();
+        let mut a = AudioRx::new(1, 2);
+        // 20 мс кадры (960 сэмплов при 48 кГц), приходят то сразу, то через 80 мс.
+        for i in 0..40u16 {
+            let at = t0 + Duration::from_millis(i as u64 * 20 + if i % 2 == 0 { 0 } else { 80 });
+            a.push(at, i, i as u32 * 960, vec![i as u8], 48_000.0);
+        }
+        assert!(a.jitter_estimate_ms > 50.0, "{}", a.jitter_estimate_ms);
+        let mut b = AudioRx::new(1, 2);
+        for i in 0..40u16 {
+            let at = t0 + Duration::from_millis(i as u64 * 20);
+            b.push(at, i, i as u32 * 960, vec![i as u8], 48_000.0);
+        }
+        // Спадает на 1/16 за пакет: с 30 мс за 40 ровных пакетов — до 2,4.
+        assert!(b.jitter_estimate_ms < 2.5, "{}", b.jitter_estimate_ms);
     }
 
     #[test]
