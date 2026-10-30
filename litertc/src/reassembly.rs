@@ -288,7 +288,7 @@ impl VideoReassembler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::{fragment_video, parse_video_frag, MAX_VIDEO_CHUNK};
+    use crate::wire::{fragment_video, parse_video_frag, MAX_VIDEO_CHUNK, VIDEO_KEYFRAME};
 
     const WAIT: Duration = Duration::from_millis(300);
 
@@ -508,6 +508,60 @@ mod tests {
         out.extend_from_slice(&[0, 0, 0]); // флаги, поворот, fps
         out.extend_from_slice(&[0u8; MAX_VIDEO_CHUNK]);
         out
+    }
+
+    /// Самый крупный допустимый кадр — ровно [`MAX_VIDEO_FRAGS`] фрагментов —
+    /// собирается.
+    #[test]
+    fn largest_allowed_frame_is_assembled() {
+        let mut r = VideoReassembler::new();
+        for idx in 0..MAX_VIDEO_FRAGS {
+            let mut f = raw_frag(1, idx, MAX_VIDEO_FRAGS);
+            f[8] = VIDEO_KEYFRAME;
+            r.push(parse_video_frag(&f).unwrap(), 0);
+        }
+        assert_eq!(drain(&mut r, Instant::now()), [1]);
+    }
+
+    /// Несобранных кадров держим ровно [`MAX_FRAMES`]: с ещё одним старший
+    /// выбрасывается, и его повтор уже ничего не соберёт.
+    #[test]
+    fn unfinished_frames_up_to_the_limit_are_kept() {
+        let t0 = Instant::now();
+        for (frames, first_kept) in [(MAX_FRAMES as u32, true), (MAX_FRAMES as u32 + 1, false)] {
+            let mut r = VideoReassembler::new();
+            assert_eq!(feed(&mut r, &frame(0, key()), &[], t0), [0]);
+            let mut late = Vec::new();
+            for id in 1..=frames {
+                let f = frame(id, plain());
+                feed(&mut r, &f, &[1], t0);
+                if id == 1 {
+                    late = f;
+                }
+            }
+            r.push(parse_video_frag(&late[1]).unwrap(), 0);
+            assert_eq!(
+                drain(&mut r, t0).first() == Some(&1),
+                first_kept,
+                "{frames}"
+            );
+        }
+    }
+
+    /// Не дождались кадра: он и собранное за ним не нужны, но ключевой кадр,
+    /// который ещё собирается, не выбрасывается — с ним видео и пойдёт дальше.
+    #[test]
+    fn keyframe_in_progress_survives_giving_up() {
+        let t0 = Instant::now();
+        let mut r = VideoReassembler::new();
+        feed(&mut r, &frame(1, key()), &[], t0);
+        feed(&mut r, &frame(2, plain()), &[0], t0);
+        feed(&mut r, &frame(3, plain()), &[], t0);
+        let k = frame(4, key());
+        feed(&mut r, &k, &[2], t0);
+        assert!(drain(&mut r, t0 + WAIT).is_empty(), "кадр 3 не нужен");
+        r.push(parse_video_frag(&k[2]).unwrap(), 0);
+        assert_eq!(drain(&mut r, t0 + WAIT), [4]);
     }
 
     /// Участник звонка не может заставить нас копить память: кадр «на 65 535
