@@ -77,9 +77,9 @@ type node struct {
 	blockedMu sync.RWMutex
 	blocked   map[[32]byte]struct{}
 	dropped   atomic.Uint64
-	// Принятое, но ещё не забранное ygg_read (см. readLoop). Закрыт — узел
+	// Принятое, но ещё не забранное ygg_read (см. readLoop). Закрыта — узел
 	// остановлен.
-	inCh chan inPkt
+	in *inQueue
 }
 
 // isBlocked — источник в чёрном списке? Дешёвая проверка под RLock; при пустом
@@ -127,15 +127,15 @@ func writerLoop(n *node) {
 }
 
 // readLoop — единственная горутина чтения из ядра: забирает входящие без остановки
-// и кладёт в inCh, откуда их берёт ygg_read. Читать надо всегда: ironwood отдаёт
+// и кладёт в n.in, откуда их берёт ygg_read. Читать надо всегда: ironwood отдаёт
 // датаграмму через актор сессии с её отправителем и, пока её не забрали, держит
 // этот актор — а через него же идёт и ЗАПИСЬ этому собеседнику. Когда ygg_read
 // читал из ядра сам, медленный потребитель (поток приёма в Rust, который и сам
 // пишет надёжно, ожидая места в очереди записи) замыкал круг: запись ждала
 // чтения, чтение — записи, и под затором звонок вставал на минуты. Очередь
-// полна — пакет выброшен: чат повторится, медиа опоздало бы всё равно.
+// полна — пакет выброшен (inQueue).
 func readLoop(n *node) {
-	defer close(n.inCh)
+	defer n.in.close()
 	// Один буфер на узел: выделять 64 КБ на каждую датаграмму под флудом —
 	// давление на GC на ровном месте.
 	buf := make([]byte, 65535)
@@ -153,10 +153,7 @@ func readLoop(n *node) {
 			copy(p.from[:], a)
 			p.fromKnown = true
 		}
-		select {
-		case n.inCh <- p:
-		default:
-		}
+		n.in.offer(p)
 	}
 }
 
@@ -220,7 +217,8 @@ func ygg_start(seedPtr *C.uint8_t, seedLen C.int) C.uint64_t {
 		stopCh:     make(chan struct{}),
 		blocked:    make(map[[32]byte]struct{}),
 		// ~2.5 с видео на полной полосе.
-		inCh: make(chan inPkt, 512),
+		// Секунда с лишним видео на потолке или 64 блока файла по 64 КБ.
+		in: newInQueue(512, 4<<20),
 	}
 	go writerLoop(n)
 	go readLoop(n)
@@ -407,7 +405,7 @@ func ygg_read(h C.uint64_t, out *C.uint8_t, outCap C.int, srcPub *C.uint8_t) C.i
 	if n == nil {
 		return -1
 	}
-	p, ok := <-n.inCh
+	p, ok := n.in.take()
 	if !ok {
 		return -1
 	}
