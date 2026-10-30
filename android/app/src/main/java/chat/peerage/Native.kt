@@ -497,11 +497,12 @@ object Native {
     external fun roomRequestKeyframe(sessionPtr: Long, peerHex: String)
 
     /**
-     * Следующий входящий H264-кадр от peer, если его пора декодировать:
+     * Следующий входящий H264-кадр от peer, как только его пора декодировать:
      * `[поворот (угол/90)][срок кадра от «сейчас», мкс: i32 BE, ≤ 0][access-unit…]`.
-     * Пустой массив — пока нечего (сроки расписывает LiteRTC по меткам захвата).
+     * Ждёт не дольше [waitUs]; пустой массив — за это время нечего (сроки расписывает
+     * LiteRTC по меткам захвата). Блокирует — только с потока декодера.
      */
-    external fun roomPullVideoPacket(sessionPtr: Long, peerHex: String): ByteArray
+    external fun roomPullVideoPacket(sessionPtr: Long, peerHex: String, waitUs: Int): ByteArray
 
     // ── Диагностика: тест пропускной способности меша ─────────────────────
     /** Включить приём бенча (считать входящие bench-датаграммы). */

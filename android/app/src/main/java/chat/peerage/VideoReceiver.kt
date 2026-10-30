@@ -35,7 +35,9 @@ class VideoReceiver(
     /** Задержка своего декодера изменилась ([decoderDelayNs], мкс) — звук ждёт видео с
      *  её учётом. Зовётся из потока декодера, раз в секунду. */
     private val reportDelay: (Int) -> Unit = {},
-    private val pullVideoPacket: () -> ByteArray,
+    /** Следующий кадр, как только его пора декодировать; ждёт не дольше заданного,
+     *  мкс (пустой — за это время нечего). */
+    private val pullVideoPacket: (Int) -> ByteArray,
 ) {
     private var decoder: MediaCodec? = null
     private var loopThread: Thread? = null
@@ -68,6 +70,8 @@ class VideoReceiver(
         var worstShownLateUs = 0L
         var fedCount = 0L
         var outCount = 0L
+        // Кадров в декодере сейчас — для решения, ждать ли нового в LiteRTC.
+        var inDecoder = 0
 
         while (running) {
             try {
@@ -92,6 +96,7 @@ class VideoReceiver(
                     }
                     decoder = dec
                     pending = null
+                    inDecoder = 0
                     // Опоры у нового декодера нет; ключевой по расписанию — раз в 10 с.
                     requestKeyframe()
                     android.util.Log.i(
@@ -110,7 +115,9 @@ class VideoReceiver(
                 //    ≤ 0), дальше access-unit. Срок едет в pts.
                 while (true) {
                     if (pending == null) {
-                        val raw = pullVideoPacket()
+                        // В декодере пусто — ждать нечего, кроме нового кадра: спим в
+                        // LiteRTC до его срока. Иначе — не ждём: пора забирать выход.
+                        val raw = pullVideoPacket(if (inDecoder == 0) IDLE_WAIT_US else 0)
                         if (raw.size < PULL_HEADER) break
                         val rot = ((raw[0].toInt() and 0xFF) % 4) * 90
                         if (rot != lastRotation) {
@@ -130,6 +137,7 @@ class VideoReceiver(
                         ib.put(au)
                         currentDec.queueInputBuffer(inIdx, 0, au.size, pendingDueUs, 0)
                         fedCount++
+                        inDecoder++
                     } else {
                         currentDec.queueInputBuffer(inIdx, 0, 0, pendingDueUs, 0)
                     }
@@ -147,6 +155,7 @@ class VideoReceiver(
                 if (outIdx >= 0) {
                     val lateNs = System.nanoTime() - info.presentationTimeUs * 1_000L
                     outCount++
+                    inDecoder = (inDecoder - 1).coerceAtLeast(0)
                     runCatching { currentDec.releaseOutputBuffer(outIdx, true) }
                     decoderDelayNs += ((lateNs - decoderDelayNs) * DELAY_SMOOTHING).toLong()
                     worstShownLateUs = maxOf(worstShownLateUs, lateNs / 1_000L)
@@ -216,6 +225,10 @@ class VideoReceiver(
 
         /** Дольше не ждём выхода декодера: пора снова подавать. */
         const val POLL_US = 4_000L
+
+        /** Пустой декодер ждёт нового кадра не дольше этого — и проверяет, не пора ли
+         *  остановиться (R-113: раньше крутился по [POLL_US] и без кадров). */
+        const val IDLE_WAIT_US = 100_000
 
         /** Сглаживание задержки декодера (доля нового замера). */
         const val DELAY_SMOOTHING = 0.05

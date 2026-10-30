@@ -2721,9 +2721,15 @@ impl Engine {
         }
     }
 
-    /// Следующий видео-кадр участника, если его пора декодировать (`play_at` — срок).
-    pub fn room_pull_video(&self, peer: &[u8; 32]) -> Option<litertc::VideoFrame> {
-        self.room_engine().and_then(|e| e.pull_video_for(peer))
+    /// Следующий видео-кадр участника, как только его пора декодировать (`play_at` —
+    /// срок); ждёт не дольше `wait`.
+    pub fn room_pull_video(
+        &self,
+        peer: &[u8; 32],
+        wait: std::time::Duration,
+    ) -> Option<litertc::VideoFrame> {
+        self.room_engine()
+            .and_then(|e| e.pull_video_for(peer, wait))
     }
 
     // — Диагностика: тест пропускной способности меша —

@@ -2233,7 +2233,7 @@ class AppModel private constructor() {
             onRotation = { rot -> roomMemberRotation[peerHex] = rot },
             requestKeyframe = { Native.roomRequestKeyframe(sessionPtr, peerHex) },
             reportDelay = { us -> Native.roomSetVideoDelay(sessionPtr, peerHex, us) },
-        ) { Native.roomPullVideoPacket(sessionPtr, peerHex) }.also { it.start() }
+        ) { waitUs -> Native.roomPullVideoPacket(sessionPtr, peerHex, waitUs) }.also { it.start() }
     }
 
     /** Отключить приёмник пира (его тайл ушёл — вышел / перестал слать видео). */

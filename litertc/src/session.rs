@@ -398,6 +398,8 @@ pub struct Session<P> {
     epoch: Option<Instant>,
     /// Последний увиденный `now` — для [`Session::poll_timeout`].
     last_now: Option<Instant>,
+    /// Сколько кадров видео встало в очередь показа за всю сессию.
+    video_queued: u64,
 }
 
 impl<P: Copy + Eq + Hash> Session<P> {
@@ -419,6 +421,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
             tx_bytes: 0,
             epoch: None,
             last_now: None,
+            video_queued: 0,
         }
     }
 
@@ -787,6 +790,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
         v.playout.set_sync_delay(st.sync.video_delay());
         while let Some(frame) = v.asm.pop(now, wait) {
             v.push(now, frame);
+            self.video_queued += 1;
         }
         let Some(stream_id) = v.stream else { return };
         let nack = Nack {
@@ -942,6 +946,18 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let f = v.queue.pop_front()?;
         st.sync.observe_video(f.play_at + st.render_delay, f.ts);
         Some(f)
+    }
+
+    /// Сколько кадров видео встало в очередь показа за всю сессию (от всех). Вырос —
+    /// потребителю, спящему до [`Session::next_video_at`], есть что пересмотреть.
+    pub fn video_frames_queued(&self) -> u64 {
+        self.video_queued
+    }
+
+    /// Срок старшего кадра участника в очереди показа: раньше него
+    /// [`Session::pull_video`] ничего не отдаст. `None` — очередь пуста.
+    pub fn next_video_at(&self, peer: &P) -> Option<Instant> {
+        Some(self.state.get(peer)?.video.queue.front()?.play_at)
     }
 
     /// Сколько кадр участника идёт через видео-декодер потребителя: от срока
@@ -1330,6 +1346,38 @@ mod tests {
             .pull_video(at + Duration::from_millis(33), &1)
             .expect("второй — к своему показу");
         assert_eq!(f1.play_at - f0.play_at, Duration::from_millis(33));
+    }
+
+    /// Потребитель видео не опрашивает сессию: по счётчику видно, что пришёл кадр, а
+    /// по сроку старшего — до когда спать.
+    #[test]
+    fn consumer_knows_when_the_next_frame_is_due() {
+        let t0 = Instant::now();
+        let mut tx = Session::new(CFG);
+        tx.set_peers(&[9]);
+        tx.set_bitrate_bounds(1_000_000_000, 1_000_000_000);
+        let mut rx = Session::new(CFG);
+        rx.set_peers(&[1]);
+        assert_eq!(rx.video_frames_queued(), 0);
+        assert_eq!(rx.next_video_at(&1), None);
+        tx.send_video(t0, t0, &[0; 10], key());
+        let first = drain(&mut tx);
+        let t1 = t0 + Duration::from_millis(33);
+        tx.send_video(t1, t1, &[1; 10], VideoInfo::default());
+        let at = t0 + Duration::from_millis(300);
+        for t in first.iter().chain(&drain(&mut tx)) {
+            rx.handle_datagram(at, 1, &t.data);
+        }
+        assert_eq!(rx.video_frames_queued(), 2);
+        assert_eq!(rx.next_video_at(&1), Some(at));
+        rx.pull_video(at, &1).unwrap();
+        assert_eq!(rx.next_video_at(&1), Some(at + Duration::from_millis(33)));
+        assert_eq!(rx.next_video_at(&2), None);
+        assert_eq!(
+            rx.video_frames_queued(),
+            2,
+            "счётчик — пришедшие, не лежащие"
+        );
     }
 
     #[test]

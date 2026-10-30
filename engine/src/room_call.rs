@@ -108,6 +108,54 @@ impl MicQueue {
     }
 }
 
+/// Пришли новые кадры видео — будит потребителей, спящих в [`wait_video`].
+#[derive(Default)]
+struct VideoReady {
+    lock: Mutex<()>,
+    cv: Condvar,
+}
+
+impl VideoReady {
+    fn notify(&self) {
+        let _g = self.lock.lock_safe();
+        self.cv.notify_all();
+    }
+}
+
+/// Следующий кадр `peer`, как только его пора декодировать; ждёт не дольше `wait`.
+/// Спит до срока старшего кадра или до прихода новых ([`VideoReady::notify`]) — декодер
+/// не опрашивает сессию (R-113: раньше каждые 4 мс на плитку). Замок `ready` держится
+/// от проверки до сна: уведомление между ними не потеряется.
+fn wait_video(
+    session: &Mutex<Session<PeerKey>>,
+    ready: &VideoReady,
+    running: &AtomicBool,
+    peer: &PeerKey,
+    wait: Duration,
+) -> Option<VideoFrame> {
+    let deadline = Instant::now() + wait;
+    let mut guard = ready.lock.lock_safe();
+    loop {
+        let now = Instant::now();
+        let next = {
+            let mut s = session.lock_safe();
+            if let Some(f) = s.pull_video(now, peer) {
+                return Some(f);
+            }
+            s.next_video_at(peer)
+        };
+        if now >= deadline || !running.load(Ordering::Relaxed) {
+            return None;
+        }
+        let until = next.map_or(deadline, |t| t.min(deadline));
+        guard = ready
+            .cv
+            .wait_timeout(guard, until.saturating_duration_since(now))
+            .unwrap_or_else(|e| e.into_inner())
+            .0;
+    }
+}
+
 /// Дольше поток отправки звука не ждёт кадра — и проверяет, идёт ли ещё звонок.
 const MIC_WAIT: Duration = Duration::from_millis(200);
 
@@ -266,6 +314,7 @@ pub struct RoomCallEngine {
     running: Arc<AtomicBool>,
     muted: Arc<AtomicBool>,
     mic: Arc<MicQueue>,
+    video_ready: Arc<VideoReady>,
     frame_len: usize,
     audio: AudioSettings,
     session: Arc<Mutex<Session<PeerKey>>>,
@@ -298,6 +347,7 @@ impl RoomCallEngine {
         // секунды несработанного.
         let pcm_rate = audio.sample_rate as f64 * audio.channels.max(1) as f64;
         let mic = Arc::new(MicQueue::new(audio.interleaved_len() * 50, pcm_rate));
+        let video_ready = Arc::new(VideoReady::default());
         let frame_len = audio.interleaved_len();
         let session = Arc::new(Mutex::new(Session::new(litertc::Config {
             audio_clock_hz: audio.sample_rate,
@@ -319,13 +369,21 @@ impl RoomCallEngine {
             let members = members.clone();
             let msgr = messenger.clone();
             let k = kick_.clone();
+            let video_ready = video_ready.clone();
             threads.push(thread::spawn(move || {
+                let mut seen = 0;
                 while running.load(Ordering::Relaxed) {
                     match media_rx.recv_timeout(RX_WAIT) {
                         Ok(p) => {
+                            let mut queued = seen;
                             let out = with_session(&session, &members, |s| {
-                                s.handle_datagram(Instant::now(), p.src, &p.data)
+                                s.handle_datagram(Instant::now(), p.src, &p.data);
+                                queued = s.video_frames_queued();
                             });
+                            if queued != seen {
+                                seen = queued;
+                                video_ready.notify();
+                            }
                             send_all(&msgr, out);
                             kick(&k);
                         }
@@ -345,15 +403,24 @@ impl RoomCallEngine {
             let members = members.clone();
             let msgr = messenger.clone();
             let k = kick_.clone();
+            let video_ready = video_ready.clone();
             threads.push(thread::spawn(move || {
                 let mut next_log = Instant::now() + STATS_LOG_EVERY;
+                let mut seen = 0;
                 while running.load(Ordering::Relaxed) {
                     let now = Instant::now();
+                    let mut queued = seen;
                     let out = with_session(&session, &members, |s| {
                         if s.poll_timeout().is_some_and(|t| t <= now) {
                             s.handle_timeout(now);
                         }
+                        queued = s.video_frames_queued();
                     });
+                    // Кадр мог собраться и по таймеру (дождались недостающего).
+                    if queued != seen {
+                        seen = queued;
+                        video_ready.notify();
+                    }
                     send_all(&msgr, out);
                     if now >= next_log {
                         next_log = now + STATS_LOG_EVERY;
@@ -436,6 +503,7 @@ impl RoomCallEngine {
             running,
             muted,
             mic,
+            video_ready,
             frame_len,
             audio,
             session,
@@ -487,8 +555,9 @@ impl RoomCallEngine {
 
     /// Следующий входящий H264-кадр от peer, если его пора декодировать: LiteRTC
     /// расписывает сроки по меткам захвата (`VideoFrame::play_at`).
-    pub fn pull_video_for(&self, peer: &PeerKey) -> Option<VideoFrame> {
-        self.session.lock_safe().pull_video(Instant::now(), peer)
+    /// Ждёт не дольше `wait`: декодеру без кадров незачем крутиться.
+    pub fn pull_video_for(&self, peer: &PeerKey, wait: Duration) -> Option<VideoFrame> {
+        wait_video(&self.session, &self.video_ready, &self.running, peer, wait)
     }
 
     /// Сколько кадр участника идёт через наш видео-декодер (срок → экран): звук
@@ -646,6 +715,7 @@ impl RoomCallEngine {
         self.running.store(false, Ordering::Relaxed);
         self.members.lock_safe().clear();
         self.mic.close();
+        self.video_ready.notify();
         // Неотправленное тоже никому: сессия без участников выбрасывает свою очередь.
         self.session.lock_safe().set_peers(&[]);
         kick(&self.kick);
@@ -708,6 +778,18 @@ mod tests {
         assert!(t.elapsed() >= Duration::from_millis(30));
     }
 
+    /// Не набрался за ожидание — неполный кадр не отдаётся, и набранное не теряется.
+    #[test]
+    fn partial_frame_waits_for_the_rest() {
+        let q = queue(1000);
+        q.push(&[1; 5], Instant::now());
+        let mut frame = [0i16; 10];
+        assert_eq!(q.next_frame(&mut frame, Duration::from_millis(10)), None);
+        q.push(&[2; 5], Instant::now());
+        assert!(q.next_frame(&mut frame, Duration::ZERO).is_some());
+        assert_eq!(frame, [1, 1, 1, 1, 1, 2, 2, 2, 2, 2]);
+    }
+
     /// Конец звонка будит ждущий поток сразу, и кадров больше нет.
     #[test]
     fn close_wakes_the_waiter() {
@@ -723,6 +805,93 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(1));
         q.push(&[1; 10], Instant::now());
         assert_eq!(q.next_frame(&mut [0; 10], Duration::ZERO), None);
+    }
+
+    const A: PeerKey = [1; 32];
+    const B: PeerKey = [2; 32];
+
+    fn session(peer: PeerKey) -> Session<PeerKey> {
+        let mut s = Session::new(litertc::Config {
+            audio_clock_hz: 48_000,
+            audio_frame_samples: 960,
+            jitter_depth: 1,
+            stream_id: 7,
+        });
+        s.set_peers(&[peer]);
+        s.set_bitrate_bounds(1_000_000_000, 1_000_000_000);
+        s
+    }
+
+    /// Два кадра от A (ключевой и следующий, сняты с разницей 33 мс), как их увидит B.
+    fn two_frames() -> Vec<Vec<u8>> {
+        let mut tx = session(B);
+        let t0 = Instant::now();
+        let key = VideoInfo {
+            keyframe: true,
+            ..Default::default()
+        };
+        tx.send_video(t0, t0, &[5; 100], key);
+        let t1 = t0 + Duration::from_millis(33);
+        tx.send_video(t1, t1, &[6; 100], VideoInfo::default());
+        std::iter::from_fn(|| tx.poll_transmit())
+            .map(|t| t.data)
+            .collect()
+    }
+
+    /// Декодер спит в ожидании кадра и просыпается, когда тот пришёл и подошёл его
+    /// срок, — не раньше срока и без опроса.
+    #[test]
+    fn video_consumer_sleeps_until_a_frame_is_due() {
+        let rx = Arc::new(Mutex::new(session(A)));
+        let ready = Arc::new(VideoReady::default());
+        let running = Arc::new(AtomicBool::new(true));
+        let waiter = {
+            let (rx, ready, running) = (rx.clone(), ready.clone(), running.clone());
+            thread::spawn(move || {
+                let f = wait_video(&rx, &ready, &running, &A, Duration::from_secs(5));
+                (f, Instant::now())
+            })
+        };
+        thread::sleep(Duration::from_millis(30));
+        assert!(!waiter.is_finished(), "кадров нет — ждёт");
+        let sent = Instant::now();
+        {
+            let mut s = rx.lock_safe();
+            for p in two_frames() {
+                s.handle_datagram(Instant::now(), A, &p);
+            }
+        }
+        ready.notify();
+        let (f, woke) = waiter.join().unwrap();
+        let f = f.expect("кадр пришёл");
+        assert!(woke >= f.play_at, "отдан раньше срока");
+        assert!(woke - sent < Duration::from_secs(2));
+        // Второй уже лежит, но его показ — через 33 мс: проснуться к сроку, без
+        // уведомлений.
+        let f = wait_video(&rx, &ready, &running, &A, Duration::from_secs(5)).unwrap();
+        assert!(Instant::now() >= f.play_at, "отдан раньше срока");
+        assert!(Instant::now() - woke >= Duration::from_millis(25));
+    }
+
+    #[test]
+    fn video_consumer_gives_up_after_wait_or_on_halt() {
+        let rx = Mutex::new(session(A));
+        let ready = Arc::new(VideoReady::default());
+        let running = Arc::new(AtomicBool::new(true));
+        let t = Instant::now();
+        assert!(wait_video(&rx, &ready, &running, &A, Duration::from_millis(30)).is_none());
+        assert!(t.elapsed() >= Duration::from_millis(30));
+        let rx = Arc::new(rx);
+        let waiter = {
+            let (rx, ready, running) = (rx.clone(), ready.clone(), running.clone());
+            thread::spawn(move || wait_video(&rx, &ready, &running, &A, Duration::from_secs(10)))
+        };
+        thread::sleep(Duration::from_millis(20));
+        let t = Instant::now();
+        running.store(false, Ordering::Relaxed);
+        ready.notify();
+        assert!(waiter.join().unwrap().is_none());
+        assert!(t.elapsed() < Duration::from_secs(1));
     }
 
     /// Сверх ёмкости выбрасывается самое старое: отправка отстала — шлём свежее.

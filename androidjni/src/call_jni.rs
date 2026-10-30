@@ -386,8 +386,8 @@ pub extern "system" fn Java_chat_peerage_Native_roomVideoTargetBitrate<'local>(
     })
 }
 
-/// Следующий входящий H264-кадр от peer, если его пора декодировать; пустой массив —
-/// пока нечего. Раскладка (только для JNI, не протокол): `[поворот (четверти
+/// Следующий входящий H264-кадр от peer, как только его пора декодировать; ждёт не
+/// дольше `wait_us`, пустой массив — за это время нечего. Раскладка (только для JNI, не протокол): `[поворот (четверти
 /// оборота)][срок кадра от «сейчас», мкс: i32 BE, ≤ 0][access-unit…]`.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_roomPullVideoPacket<'local>(
@@ -395,12 +395,13 @@ pub extern "system" fn Java_chat_peerage_Native_roomPullVideoPacket<'local>(
     _class: JClass<'local>,
     session_ptr: jlong,
     peer_hex: JString<'local>,
+    wait_us: jint,
 ) -> JByteArray<'local> {
     jni_safe!(empty_bytes(&env), {
         let empty = empty_bytes(&env);
         let Some(e) = (unsafe { engine(session_ptr) }) else { return empty };
         let Some(key) = parse_key(&jstr(&mut env, &peer_hex)) else { return empty };
-        match e.room_pull_video(&key) {
+        match e.room_pull_video(&key, delay_us(wait_us, std::time::Duration::from_secs(1))) {
             Some(f) => {
                 let now = std::time::Instant::now();
                 let play_in_us = match f.play_at.checked_duration_since(now) {
