@@ -44,8 +44,8 @@ use crate::wire::{
     parse_transport_feedback, parse_video_frag, set_tw_seq, write_keyframe_request,
     write_media_header, write_nack, write_report, write_transport_feedback, MediaHeader, Nack,
     Report, VideoInfo, FEEDBACK_TICK_US, KEYFRAME_REQUEST_V2, MEDIA_HEADER_LEN, MEDIA_RTX_V2,
-    MEDIA_V2, NACK_V2, REPORT_V2, TRACK_AUDIO, TRACK_SCREEN, TRACK_VIDEO, TRANSPORT_FEEDBACK_V2,
-    VIDEO_CLOCK_HZ,
+    MEDIA_V2, NACK_V2, REPORT_V2, TRACK_AUDIO, TRACK_PADDING, TRACK_SCREEN, TRACK_VIDEO,
+    TRANSPORT_FEEDBACK_V2, VIDEO_CLOCK_HZ,
 };
 
 /// Как часто каждый участник получает наш отчёт о приёме.
@@ -552,6 +552,9 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 ts,
             };
             st.rtx_budget = (st.rtx_budget + payload.len() as f64 * RTX_SHARE).min(RTX_BURST);
+            if class == Class::Video {
+                st.bwe.start_probing();
+            }
             let data = media_packet(&header, payload, false);
             self.pacer.push(class, now, Transmit { to: *p, data });
         }
@@ -598,7 +601,10 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let state = &self.state;
         let held = |p: &P| state.get(p).is_some_and(|st| st.bwe.congested());
         self.pacer.drop_stale(now, held);
-        let mut t = self.pacer.pop(now, held)?;
+        let (mut t, probe) = match self.pacer.pop(now, held) {
+            Some(t) => (t, false),
+            None => (self.probe(now)?, true),
+        };
         let media = matches!(t.data.first(), Some(&MEDIA_V2 | &MEDIA_RTX_V2));
         if let (true, Some(st), Some(epoch)) = (media, self.state.get_mut(&t.to), self.epoch) {
             let next = self.tw_seq.entry(t.to).or_default();
@@ -606,9 +612,35 @@ impl<P: Copy + Eq + Hash> Session<P> {
             *next = next.wrapping_add(1);
             set_tw_seq(&mut t.data, seq);
             let at_ms = now.saturating_duration_since(epoch).as_secs_f64() * 1000.0;
-            st.bwe.on_sent(seq, at_ms, t.data.len() as u32);
+            let size = t.data.len() as u32;
+            st.bwe.on_sent(seq, at_ms, size);
+            if probe {
+                st.bwe.on_probe_sent(seq, at_ms, size);
+            }
         }
         Some(t)
+    }
+
+    /// Пакет пробы полосы ([`crate::probe`]), если кому-то пора: пустой, на треке
+    /// заполнения.
+    fn probe(&self, now: Instant) -> Option<Transmit<P>> {
+        let at_ms = now.saturating_duration_since(self.epoch?).as_secs_f64() * 1000.0;
+        let (to, size) = self.peers.iter().find_map(|p| {
+            let st = self.state.get(p)?;
+            let (due, size) = st.bwe.probe_due()?;
+            (due <= at_ms).then_some((*p, size))
+        })?;
+        let header = MediaHeader {
+            track: TRACK_PADDING,
+            stream_id: self.cfg.stream_id,
+            seq: 0,
+            tw_seq: 0,
+            ts: 0,
+        };
+        Some(Transmit {
+            to,
+            data: media_packet(&header, &vec![0; size], false),
+        })
     }
 
     /// Пакет от участника (уже расшифрован, отправитель доказан вызывающим).
@@ -655,12 +687,16 @@ impl<P: Copy + Eq + Hash> Session<P> {
         }
         let Some(m) = parse_media(data) else { return };
         let h = m.header;
-        st.stats.rx_bytes += m.payload.len() as u64;
         st.arrivals.on_packet(
             h.stream_id,
             h.tw_seq,
             since_epoch.as_micros() as u64 / FEEDBACK_TICK_US,
         );
+        // Заполнение проб полосы — только для обратной связи.
+        if h.track == TRACK_PADDING {
+            return;
+        }
+        st.stats.rx_bytes += m.payload.len() as u64;
         // Повторы в статистику приёма не идут: потери в отчётах — потери первой
         // отправки, по ним судят о канале.
         if let Some(slot) = st.rx.get_mut(h.track as usize).filter(|_| !m.retransmit) {
@@ -789,12 +825,18 @@ impl<P: Copy + Eq + Hash> Session<P> {
                 let feedback = (!st.arrivals.is_empty())
                     .then(|| st.next_feedback.or(self.last_now))
                     .flatten();
+                let probe = st
+                    .bwe
+                    .probe_due()
+                    .zip(self.epoch)
+                    .map(|((at_ms, _), e)| e + Duration::from_secs_f64(at_ms / 1000.0));
                 [
                     st.next_report.or(self.last_now),
                     v.asm.deadline(max_frame_wait(rtt)),
                     v.nack.next_due(nack_retry(rtt)),
                     keyframe,
                     feedback,
+                    probe,
                 ]
             })
             .flatten()
@@ -1051,6 +1093,45 @@ mod tests {
         assert_eq!(tw, [(1, 0), (1, 1), (2, 0)]);
     }
 
+    /// Пошло видео — пошли пробы полосы: пустые пакеты на треке заполнения в общей
+    /// сквозной нумерации. Приёмник отмечает их приход для обратной связи, и только.
+    /// Звук сам по себе проб не зовёт.
+    #[test]
+    fn video_starts_bandwidth_probes() {
+        let t0 = Instant::now();
+        let mut tx = Session::new(CFG);
+        tx.set_peers(&[9]);
+        tx.send_audio(t0, t0, &[1]);
+        assert!(drain(&mut tx).iter().all(|t| t.data[1] == TRACK_AUDIO));
+        tx.send_video(t0, t0, &[2; 10], key());
+        let mut out = Vec::new();
+        for ms in 0..100 {
+            let now = t0 + Duration::from_millis(ms);
+            tx.handle_timeout(now);
+            out.extend(drain(&mut tx));
+        }
+        let probes: Vec<&Transmit<u8>> =
+            out.iter().filter(|t| t.data[1] == TRACK_PADDING).collect();
+        assert!(probes.len() >= 10, "пакетов проб {}", probes.len());
+        let tw: Vec<u16> = out
+            .iter()
+            .filter_map(|t| parse_media(&t.data))
+            .map(|m| m.header.tw_seq)
+            .collect();
+        assert_eq!(tw, (1..=tw.len() as u16).collect::<Vec<_>>());
+
+        let mut rx = Session::new(CFG);
+        rx.set_peers(&[1]);
+        for t in probes {
+            rx.handle_datagram(t0, 1, &t.data);
+        }
+        assert_eq!(rx.stats(&1).unwrap().rx_bytes, 0);
+        rx.handle_timeout(t0);
+        assert!(drain(&mut rx)
+            .iter()
+            .any(|t| t.data[0] == TRANSPORT_FEEDBACK_V2));
+    }
+
     /// Забытого и вернувшегося участника нумеруем дальше: он нас не забывал, и
     /// номера с нуля его журнал прихода счёл бы опоздавшими — обратная связь
     /// замолчала бы, а окно перегрузки навсегда заперло бы видео.
@@ -1165,7 +1246,7 @@ mod tests {
         let t0 = Instant::now();
         let mut tx = Session::new(CFG);
         tx.set_peers(&[9]);
-        tx.set_bitrate_bounds(100_000, 1_000_000_000);
+        tx.set_bitrate_bounds(1_000_000_000, 1_000_000_000);
         let mut rx = Session::new(CFG);
         rx.set_peers(&[1]);
         let mut now = t0;
@@ -1196,7 +1277,7 @@ mod tests {
             let t0 = Instant::now();
             let mut tx = Session::new(CFG);
             tx.set_peers(&[9]);
-            tx.set_bitrate_bounds(100_000, 1_000_000_000);
+            tx.set_bitrate_bounds(1_000_000_000, 1_000_000_000);
             let mut rx = Session::new(CFG);
             rx.set_peers(&[1]);
             let mut asked = false;
@@ -1227,7 +1308,7 @@ mod tests {
         let t0 = Instant::now();
         let mut tx = Session::new(CFG);
         tx.set_peers(&[9]);
-        tx.set_bitrate_bounds(100_000, 1_000_000_000);
+        tx.set_bitrate_bounds(1_000_000_000, 1_000_000_000);
         let mut rx = Session::new(CFG);
         rx.set_peers(&[1]);
         // Оба кадра пришли разом (первый задержался): второй показывать через 33 мс
@@ -1257,7 +1338,7 @@ mod tests {
         let mut tx = Session::new(CFG);
         tx.set_peers(&[9]);
         // Без ровного темпа: кадр нужен целиком в один момент.
-        tx.set_bitrate_bounds(100_000, 1_000_000_000);
+        tx.set_bitrate_bounds(1_000_000_000, 1_000_000_000);
         let mut rx = Session::new(CFG);
         rx.set_peers(&[1]);
         let frame = vec![0x5A; MAX_VIDEO_CHUNK * 3 + 1];

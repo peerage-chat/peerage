@@ -37,6 +37,9 @@ pub const MAX_MEDIA_PAYLOAD: usize = 60_000;
 pub const TRACK_AUDIO: u8 = 0;
 pub const TRACK_VIDEO: u8 = 1;
 pub const TRACK_SCREEN: u8 = 2;
+/// Заполнение проб полосы: пустой payload, приёмник только отмечает приход для
+/// обратной связи. Приёмники до него и так поступали с неизвестным треком так же.
+pub const TRACK_PADDING: u8 = 3;
 
 /// Частота часов видео: метка времени видео-пакета — время захвата в этих единицах.
 pub const VIDEO_CLOCK_HZ: u32 = 90_000;

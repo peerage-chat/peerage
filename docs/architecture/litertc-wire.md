@@ -28,7 +28,7 @@ All integers are big-endian.
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
 | 0 | 1 | version/type | `0x20`: version 2 (high nibble), type 0 = media (low nibble). `0x24`: type 4 = media retransmitted after a NACK (below). Anything else: drop. |
-| 1 | 1 | track | `0` audio, `1` camera video, `2` screen. Unknown: drop. |
+| 1 | 1 | track | `0` audio, `1` camera video, `2` screen, `3` padding (bandwidth probes: zero payload). Padding and unknown tracks: record the arrival for transport feedback, then drop. |
 | 2 | 4 | stream_id | Random, chosen by the sender for each call. A new value means the sender started over. |
 | 6 | 2 | seq | Per-track packet counter, wraps at 2¹⁶. |
 | 8 | 2 | tw_seq | Transport-wide counter: one per recipient, across all tracks, in the order packets leave the sender (after pacing), wraps at 2¹⁶. |
@@ -158,8 +158,22 @@ not reported again. A range longer than 1024 keeps its newest 1024.
   in between it holds.
 - *Estimate* = the lower of the two. They are kept apart (as in WebRTC) so that
   delay-triggered cuts cannot ratchet the estimate down while moderate loss forbids
-  growth. Both start at the upper bound (set by the caller from the codec settings)
-  and stay between the bounds.
+  growth. Both start at 300 kbit/s (as in WebRTC) and stay between the bounds set by
+  the caller from the codec settings.
+- *Probes.* Starting at the ceiling would flood a narrow path with a queue that stands
+  from the first second — and the delay detector catches a growing queue, not a
+  standing one. Growing from 300 kbit/s by 8 % a second would take half a minute. So,
+  when video first goes to a member, the sender probes: 10 padding packets over 60 ms
+  at 3× and then 6× the estimate. A probe that arrived as evenly as it left shows its
+  own rate; one stretched by a bottleneck shows the arrival rate (× 0.95 when below
+  90 % of the sent rate). Rates are counted between the first and last packet (minus
+  the last one sent / the first one received); fewer than 80 % received shows nothing.
+  A shown rate above the estimate raises both estimates at once unless the delay says
+  overuse; lower ones are left to the delay and loss logic. A probe that showed at
+  least 70 % of its rate is followed by one at 2× the new estimate, up to the ceiling;
+  one that showed nothing is repeated at most twice in a row. A probe is not started
+  while the congestion window is full, but once started it is not paused by it (a
+  stretched probe would understate the path).
 
 The encoders get the lowest estimate across members (one encoder serves everyone). A
 member who lies in its feedback can lower only what we send, which it could already
@@ -169,7 +183,11 @@ cause by dropping our packets.
 of members, with at most 5 ms of unused rate saved up, so a keyframe spreads over
 milliseconds instead of overflowing a queue on the path; no video packet waits longer
 than 0.5 s (the pace rises instead). Control packets (reports, feedback, NACK, keyframe
-requests) and audio are never delayed; retransmissions go before new video.
+requests) and audio are never delayed; retransmissions go before new video. Video and
+retransmissions to a member whose bytes in flight (sent, no feedback yet) exceed
+estimate × (min RTT + 250 ms) wait; ones held over 0.5 s are dropped. Probe packets are
+scheduled from the probe's start (packet *n* at start + bytes so far / rate), so timer
+lateness does not slow the probe down.
 
 ## NACK
 

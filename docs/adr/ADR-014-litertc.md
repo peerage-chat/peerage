@@ -322,17 +322,33 @@ parses comes from such a member, so:
    sending < 65 % of the estimate) cuts from the estimate, not from the trickle that
    arrived. Simulated: the same drop peaks at 1.6 s and is back to ~100 ms in 4 s; a
    600 ms clean path climbs back to the ceiling after a bottleneck with no queue (the
-   window never holds it). Open: a call that *starts* inside a narrow, long-RTT
-   bottleneck still drowns — the estimate starts at the ceiling, the first RTT sample
-   is already inflated, and the delay detector never fires against a queue that stands
-   from the first second; needs a low start with ramp-up (probing). The test is kept
-   as `#[ignore]`. The emulator throttle is not a usable bench here: at
+   window never holds it). A call that *started* inside a narrow, long-RTT bottleneck
+   still drowned — closed by 7d below. The emulator throttle is not a usable bench here: at
    `network speed 400:400` it carried ≈ 20 kbit/s each way during a call.
    The same run found libygg classifying media by `data[1]`, which after SEC-4 sealing
    is a session-index byte, so all media went to the blocking queue and congestion
    stopped the call threads; media now goes through a non-blocking `ygg_write_media`
    with the class named by the sender, and libygg reads the core continuously (a slow
    reader used to stall ironwood's session actor and with it the writes).
+   The emulator run also showed that the transport-wide counter restarted at 0 when
+   a member was dropped and re-added (beacons lost under the throttle) while the
+   member's arrival log still expected the old numbering: feedback stopped, and with
+   the window that locked video to it for good. The counter now lives for the whole
+   session; the receiver resets its arrival log when the sender's `stream_id` changes.
+   7d ✅ (2026-10-30): low start and probes (`probe.rs`, after WebRTC's
+   ProbeController / ProbeBitrateEstimator). The estimate starts at 300 kbit/s; when
+   video first goes to a member, padding probes (track 3, 10 packets over 60 ms) at 3×
+   and 6× the start, then 2× each confirmed result up to the ceiling; a probe that
+   shows nothing (loss, reordering) is retried at most twice. Padding instead of
+   retransmitted media keeps probes independent of the history and exact in size;
+   receivers that predate it already count unknown tracks in their feedback and drop
+   them. A started probe is not paused by the congestion window (at the start the
+   window is smaller than the probe, and a stretched probe understates the path).
+   Simulated: a call starting in a 300 kbit/s, 600 ms-RTT bottleneck stays at
+   325–470 ms one-way (300 ms propagation) instead of drowning; a 4 Mbit/s path is at
+   2.4 Mbit/s within a second. Not done: probing after a large drop or while
+   application-limited (WebRTC has both) — recovery from a past bottleneck is still the
+   8 %/s ramp.
 8. **Playout and A/V sync:** the video jitter buffer moves from `VideoReceiver` into
    LiteRTC (`play_at`); Kotlin only decodes and renders.
    8a ✅ (2026-10-29): playout by capture timestamps (`playout.rs`). The frame's 90 kHz

@@ -20,6 +20,7 @@ pub mod jitter;
 mod nack;
 mod pacer;
 mod playout;
+mod probe;
 pub mod reassembly;
 pub mod session;
 pub mod sim;

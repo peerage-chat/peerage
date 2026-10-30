@@ -10,7 +10,7 @@
 //! меньшая из двух. Если мы сами шлём заметно меньше оценки (камера смотрит в стену,
 //! кодеру нечего слать), дошедшее — не мера канала: сбавляем от своей оценки, иначе
 //! стоящая сцена роняла бы её к полу, и разгон после занял бы минуту (у WebRTC на
-//! этот случай пробы полосы, у нас их нет). Оценки раздельные (как в WebRTC): общая при постоянных
+//! этот случай пробы полосы и в простое, у нас — только при разгоне). Оценки раздельные (как в WebRTC): общая при постоянных
 //! неперегрузочных потерях (радио) только спускалась бы — сбросы по задержке есть,
 //! а прибавлять потери не дают. По той же причине пороги потерь считаются сверх
 //! собственных потерь канала — постоянной доли, которая есть при любой нашей
@@ -26,12 +26,17 @@
 //! придержанное не копилось у нас, кодеру, пока окно переполнено, называем цель
 //! ниже оценки (congestion window pushback в WebRTC).
 //!
+//! **Старт снизу.** Оценка начинается с [`START_BPS`] и разгоняется пробами
+//! ([`crate::probe`]): с потолка в узком месте очередь стояла бы с первой секунды, и
+//! детектор задержки (он ловит рост) её не увидел бы.
+//!
 //! Сведения идут из транспортной обратной связи ([`crate::wire::TransportFeedback`]):
 //! приёмник сообщает, когда пришёл каждый пакет, отправитель знает, когда его отправил.
 //! Враждебный участник может солгать — и снизить только то, что мы шлём (ADR-014 §8).
 
 use std::collections::VecDeque;
 
+use crate::probe::{Outcome, Prober};
 use crate::wire::{TransportFeedback, FEEDBACK_TICK_US, MAX_FEEDBACK_PACKETS};
 
 /// Пакеты, ушедшие в пределах этого интервала, — одна группа (пачка фрагментов кадра).
@@ -58,6 +63,9 @@ const THRESHOLD_MAX: f64 = 600.0;
 const K_UP: f64 = 0.0087;
 const K_DOWN: f64 = 0.039;
 
+/// Начальная оценка (как в WebRTC): по ней звонок идёт почти по любому каналу, а
+/// выше поднимают пробы.
+const START_BPS: f64 = 300_000.0;
 /// Сбавляем до этой доли дошедшего.
 const BACKOFF: f64 = 0.85;
 /// Шлём меньше этой доли оценки — канал загружен не нами (как ALR в WebRTC).
@@ -339,21 +347,21 @@ pub(crate) struct Bwe {
     inherent_loss: f64,
     /// Развёрнутое время получателя: (последнее `ref_time`, его значение без оборота).
     ref_clock: Option<(u32, i64)>,
+    probes: Prober,
     /// Сколько раз сбавляли из-за роста задержки и из-за потерь — для статистики.
     pub cuts_delay: u64,
     pub cuts_loss: u64,
 }
 
 impl Bwe {
-    /// Начинаем с `max`: до первой перегрузки причин сбавлять нет, а разгон с малого
-    /// по 8 % в секунду занял бы десятки секунд плохой картинки.
     pub fn new(min: f64, max: f64) -> Self {
+        let start = START_BPS.clamp(min, max);
         Bwe {
             sends: SendLog::default(),
             delay: DelayDetector::default(),
-            rate: max,
-            delay_rate: max,
-            loss_rate: max,
+            rate: start,
+            delay_rate: start,
+            loss_rate: start,
             min,
             max,
             decreased_at: None,
@@ -370,6 +378,7 @@ impl Bwe {
             loss: 0.0,
             inherent_loss: 0.0,
             ref_clock: None,
+            probes: Prober::default(),
             cuts_delay: 0,
             cuts_loss: 0,
         }
@@ -378,9 +387,11 @@ impl Bwe {
     pub fn set_bounds(&mut self, min: f64, max: f64) {
         self.min = min;
         self.max = max;
-        // Сведений о канале ещё нет — начинаем с нового потолка, как в [`Self::new`].
+        // Сведений о канале ещё нет — начинаем со старта в новых пределах, как в
+        // [`Self::new`].
         if self.updated_at.is_none() {
-            (self.delay_rate, self.loss_rate) = (max, max);
+            let start = START_BPS.clamp(min, max);
+            (self.delay_rate, self.loss_rate) = (start, start);
         }
         self.delay_rate = self.delay_rate.clamp(min, max);
         self.loss_rate = self.loss_rate.clamp(min, max);
@@ -396,6 +407,26 @@ impl Bwe {
     /// скопится у нас.
     pub fn target(&self) -> f64 {
         (self.rate * self.pushback).max(self.min)
+    }
+
+    /// Пошло видео: пора узнать, сколько канал держит (пробы начала звонка; звуку
+    /// хватает и старта).
+    pub fn start_probing(&mut self) {
+        self.probes.start(self.rate, self.max);
+    }
+
+    /// Когда отправить следующий пакет пробы (наши мс) и какого размера. Новую при
+    /// полном окне перегрузки не начинаем — в полёте и так достаточно; начатую не
+    /// прерываем: растянутая, она показала бы меньше, чем канал держит (а окно на
+    /// старте как раз меньше пробы).
+    pub fn probe_due(&self) -> Option<(f64, usize)> {
+        let (at, size, started) = self.probes.due()?;
+        (started || !self.congested()).then_some((at, size))
+    }
+
+    /// Ушёл пакет пробы (после [`Self::on_sent`] с ним же).
+    pub fn on_probe_sent(&mut self, seq: u16, at_ms: f64, size: u32) {
+        self.probes.on_sent(seq, at_ms, size);
     }
 
     pub fn on_sent(&mut self, seq: u16, at_ms: f64, size: u32) {
@@ -463,9 +494,10 @@ impl Bwe {
                 continue;
             };
             total += 1;
-            match a {
-                Some(d) => {
-                    let arrival = ref_ms + *d as f64 * FEEDBACK_TICK_US as f64 / 1000.0;
+            let arrival = a.map(|d| ref_ms + d as f64 * FEEDBACK_TICK_US as f64 / 1000.0);
+            self.probes.on_report(seq, send_ms, arrival, size);
+            match arrival {
+                Some(arrival) => {
                     self.delay.on_packet(send_ms, arrival);
                     self.acked.push_back((arrival, size));
                 }
@@ -497,6 +529,27 @@ impl Bwe {
         }
         self.count_loss(now_ms, lost, total);
         self.update(now_ms, rtt_ms);
+        for o in self.probes.take_results(now_ms) {
+            self.apply_probe(&o);
+        }
+    }
+
+    /// Итог пробы: показала полосу выше оценки — поднимаем сразу (обе: по потерям
+    /// она иначе держала бы итог внизу), если очередь как раз не растёт. Ниже — не
+    /// трогаем: сбавлять — дело задержки и потерь, а проба шире оценки, и пришедший
+    /// темп — ещё и чужая доля узкого места.
+    fn apply_probe(&mut self, o: &Outcome) {
+        if let Some(shown) = o.shown.filter(|&s| s > self.rate) {
+            if self.delay.usage() != Usage::Over {
+                self.delay_rate = self.delay_rate.max(shown).min(self.max);
+                self.loss_rate = self.loss_rate.max(shown).min(self.max);
+                self.rate = self.delay_rate.min(self.loss_rate);
+                if self.capacity.is_some_and(|c| shown > c) {
+                    self.capacity = None;
+                }
+            }
+        }
+        self.probes.next(o, self.rate, self.max);
     }
 
     fn unwrap_ref(&mut self, t: u32) -> i64 {
@@ -836,6 +889,11 @@ mod tests {
     #[test]
     fn window_fills_without_feedback() {
         let mut b = Bwe::new(100_000.0, 2_000_000.0);
+        // Проба уже показала потолок.
+        b.apply_probe(&Outcome {
+            shown: Some(2_000_000.0),
+            target: 2_000_000.0,
+        });
         let send = |b: &mut Bwe, seqs: std::ops::RangeInclusive<u16>| {
             for seq in seqs {
                 b.on_sent(seq, 100.0 + seq as f64, 1200);
