@@ -172,6 +172,87 @@ impl<P> Pacer<P> {
 mod tests {
     use super::*;
 
+    fn to(peer: u8, len: usize) -> Transmit<u8> {
+        Transmit {
+            to: peer,
+            data: vec![0; len],
+        }
+    }
+
+    /// Сколько байт выпущено за `ms` миллисекунд по шагу в 1 мс.
+    fn released(p: &mut Pacer<u8>, t0: Instant, ms: u64) -> usize {
+        (0..ms)
+            .flat_map(|i| {
+                let now = t0 + Duration::from_millis(i);
+                std::iter::from_fn(move || Some(now)).take(1)
+            })
+            .map(|now| {
+                std::iter::from_fn(|| p.pop(now, |_| false))
+                    .map(|t| t.data.len())
+                    .sum::<usize>()
+            })
+            .sum()
+    }
+
+    /// Видео выходит темпом в 2,5 оценки: 1 Мбит/с — около 31 КБ за 100 мс.
+    #[test]
+    fn video_leaves_at_two_and_a_half_times_the_estimate() {
+        let t0 = Instant::now();
+        let mut p = Pacer::new(1_000_000.0);
+        for _ in 0..100 {
+            p.push(Class::Video, t0, to(1, 1000));
+        }
+        let bytes = released(&mut p, t0, 100);
+        assert!((29_000..=34_000).contains(&bytes), "{bytes}");
+    }
+
+    /// Звук и служебные не ждут бюджета: выпускать их — сейчас.
+    #[test]
+    fn audio_is_due_at_once() {
+        let t0 = Instant::now();
+        let mut p = Pacer::new(1_000_000.0);
+        p.push(Class::Video, t0, to(1, 100_000));
+        assert!(p.pop(t0, |_| false).is_some()); // бюджет ушёл в минус
+        p.push(Class::Audio, t0, to(1, 100));
+        assert_eq!(p.next_release(t0, |_| false), Some(t0));
+    }
+
+    /// Удержанное видео выбрасывается, простояв дольше срока, — не ровно в срок.
+    #[test]
+    fn held_video_is_dropped_after_its_deadline() {
+        let t0 = Instant::now();
+        let mut p = Pacer::new(1_000_000.0);
+        p.push(Class::Video, t0, to(1, 1000));
+        p.drop_stale(t0 + MAX_QUEUE_DELAY, |_| true);
+        assert!(p.pop(t0 + MAX_QUEUE_DELAY, |_| false).is_some());
+        p.push(Class::Video, t0, to(1, 1000));
+        p.drop_stale(t0 + MAX_QUEUE_DELAY + Duration::from_millis(1), |_| true);
+        assert!(p.pop(t0 + MAX_QUEUE_DELAY, |_| false).is_none());
+    }
+
+    /// Очередь ушедшему участнику убрана — и в темп выпуска оставшимся она больше
+    /// не входит: иначе им досталась бы чужая спешка.
+    #[test]
+    fn departed_peer_queue_does_not_speed_up_others() {
+        let t0 = Instant::now();
+        let mut p = Pacer::new(100_000.0);
+        for _ in 0..100 {
+            p.push(Class::Video, t0, to(2, 1000));
+        }
+        for _ in 0..10 {
+            p.push(Class::Video, t0, to(1, 1000));
+        }
+        p.retain(|t| t.to == 1);
+        // 400 мс спустя у старшего пакета осталось 100 мс: 10 КБ за них — 100 КБ/с.
+        let now = t0 + Duration::from_millis(400);
+        let bytes = released(&mut p, now, 10);
+        assert!(bytes <= 3000, "выпущено {bytes}");
+        assert_eq!(
+            released(&mut p, now + Duration::from_millis(10), 200),
+            9000 - bytes + 1000
+        );
+    }
+
     fn t(len: usize) -> Transmit<u8> {
         Transmit {
             to: 1,

@@ -190,11 +190,27 @@ mod tests {
         assert_eq!(n.due(t1 + RETRY, RETRY, AGE), [13]);
         assert_eq!(n.due(t1 + RETRY * 2, RETRY, AGE), [13]);
         assert_eq!(
-            n.due(t1 + RETRY * 3, RETRY, AGE),
-            [] as [u16; 0],
-            "попытки кончились"
+            n.next_due(RETRY),
+            None,
+            "попытки кончились — будить незачем"
         );
-        assert_eq!(n.next_due(RETRY), None);
+        assert_eq!(n.due(t1 + RETRY * 3, RETRY, AGE), [] as [u16; 0]);
+    }
+
+    /// Дыра ровно в [`MAX_MISSING`] номеров ещё чинится повтором, на один шире —
+    /// уже нет (её закроет ключевой кадр).
+    #[test]
+    fn widest_gap_still_repaired() {
+        let t0 = Instant::now();
+        let t1 = t0 + REORDER_GRACE;
+        let mut n = NackList::default();
+        n.on_packet(t0, 0);
+        n.on_packet(t0, MAX_MISSING as u16 + 1);
+        assert_eq!(n.due(t1, RETRY, AGE).len(), MAX_MISSING);
+        let mut n = NackList::default();
+        n.on_packet(t0, 0);
+        n.on_packet(t0, MAX_MISSING as u16 + 2);
+        assert!(n.due(t1, RETRY, AGE).is_empty());
     }
 
     #[test]
@@ -233,18 +249,20 @@ mod tests {
         }
         assert_eq!(h.get(65_535), Some((5, &[5u8][..])));
         assert_eq!(h.get(2), Some((8, &[8u8][..])));
-        assert_eq!(h.get(4), None);
-        // Через секунду старое забыто.
-        h.push(t0 + HISTORY_AGE * 2, 4, 10, &[10]);
+        assert_eq!(h.get(5), None);
+        // Ровно в срок — ещё помним; позже — забыто.
+        h.push(t0 + HISTORY_AGE, 4, 10, &[10]);
+        assert_eq!(h.get(65_530), Some((0, &[0u8][..])));
+        h.push(t0 + HISTORY_AGE * 2, 5, 11, &[11]);
         assert_eq!(h.get(3), None);
-        assert_eq!(h.get(4), Some((10, &[10u8][..])));
-        // По байтам.
+        assert_eq!(h.get(5), Some((11, &[11u8][..])));
+        // По байтам: двум большим не уместиться.
         let big = vec![0u8; HISTORY_BYTES / 2 + 1];
-        for seq in 5..8u16 {
+        for seq in 6..9u16 {
             h.push(t0 + HISTORY_AGE * 2, seq, 0, &big);
         }
-        assert!(h.bytes <= HISTORY_BYTES);
-        assert_eq!(h.get(5), None);
-        assert!(h.get(7).is_some());
+        assert_eq!(h.get(6), None);
+        assert_eq!(h.get(7), None);
+        assert!(h.get(8).is_some());
     }
 }
