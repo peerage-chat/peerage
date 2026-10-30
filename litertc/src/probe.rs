@@ -47,14 +47,49 @@ pub(crate) struct Outcome {
     pub target: f64,
 }
 
+/// Дошедший пакет пробы: (наши мс отправки, мс прихода у получателя, байт).
+type Got = (f64, f64, u32);
+
+/// Темпы ухода и прихода пачки, бит/с. Темп — байты между первым и последним:
+/// последний ушедший уже не в счёт отправки, первый пришедший — не в счёт прихода.
+/// Один пакет (или ушли разом) — темпа отправки нет. Пришла разом (сеть отдала
+/// пачкой) — деление на ноль даёт бесконечный темп прихода: канал не уже ушедшего.
+fn rates(got: &[Got]) -> Option<(f64, f64)> {
+    let total: u64 = got.iter().map(|g| g.2 as u64).sum();
+    let (send_ms, _, last_sent) = span(got, |g| g.0)?;
+    let (recv_ms, first_got, _) = span(got, |g| g.1)?;
+    (send_ms > 0.0).then(|| {
+        let send = (total - last_sent) as f64 * 8000.0 / send_ms;
+        let recv = (total - first_got) as f64 * 8000.0 / recv_ms;
+        (send, recv)
+    })
+}
+
+/// Длительность пачки по `key` (отправка или приход) и размеры её первого и
+/// последнего пакета.
+fn span(got: &[Got], key: fn(&Got) -> f64) -> Option<(f64, u64, u64)> {
+    let first = got.iter().min_by(|a, b| key(a).total_cmp(&key(b)))?;
+    let last = got.iter().max_by(|a, b| key(a).total_cmp(&key(b)))?;
+    Some((key(last) - key(first), first.2 as u64, last.2 as u64))
+}
+
+/// Какую полосу показывают темпы: пришла заметно медленнее, чем ушла, — канал
+/// насыщен, его мера — пришедший темп с запасом; иначе — меньший из двух.
+fn shown(send: f64, recv: f64) -> f64 {
+    if recv < SATURATED * send {
+        SATURATED_UTILIZATION * recv
+    } else {
+        send.min(recv)
+    }
+}
+
 struct Cluster {
     /// Темп, бит/с.
     target: f64,
     packet: usize,
     /// Отправлено: (сквозной номер, наши мс, байт).
     sent: Vec<(u16, f64, u32)>,
-    /// Дошло: (наши мс отправки, мс прихода у получателя, байт).
-    got: Vec<(f64, f64, u32)>,
+    got: Vec<Got>,
     /// О скольких пакетах пробы уже сообщили (дошёл или потерян).
     reported: usize,
 }
@@ -85,35 +120,11 @@ impl Cluster {
 
     /// Какую полосу показала, бит/с; `None` — ничего не показала.
     fn estimate(&self) -> Option<f64> {
-        let got = &self.got;
-        if got.len() < 2 || (got.len() as f64) < MIN_RECEIVED * self.sent.len() as f64 {
+        if (self.got.len() as f64) < MIN_RECEIVED * self.sent.len() as f64 {
             return None;
         }
-        let total: u64 = got.iter().map(|&(_, _, s)| s as u64).sum();
-        // Темп — байты между первым и последним: последний ушедший уже не в счёт
-        // отправки, первый пришедший — не в счёт прихода.
-        let by = |key: fn(&(f64, f64, u32)) -> f64| {
-            let first = got.iter().min_by(|a, b| key(a).total_cmp(&key(b)))?;
-            let last = got.iter().max_by(|a, b| key(a).total_cmp(&key(b)))?;
-            Some((key(last) - key(first), first.2 as u64, last.2 as u64))
-        };
-        let (send_ms, _, last_sent) = by(|g| g.0)?;
-        let (recv_ms, first_got, _) = by(|g| g.1)?;
-        if send_ms <= 0.0 {
-            return None;
-        }
-        let send = (total - last_sent) as f64 * 8000.0 / send_ms;
-        // Пришла разом (сеть отдала пачкой) — канал не уже ушедшего темпа.
-        let recv = if recv_ms > 0.0 {
-            (total - first_got) as f64 * 8000.0 / recv_ms
-        } else {
-            f64::INFINITY
-        };
-        Some(if recv < SATURATED * send {
-            SATURATED_UTILIZATION * recv
-        } else {
-            send.min(recv)
-        })
+        let (send, recv) = rates(&self.got)?;
+        Some(shown(send, recv))
     }
 }
 
@@ -290,6 +301,35 @@ mod tests {
         assert!(p.due().is_none(), "после неподтверждённой проб больше нет");
     }
 
+    /// Обратная связь идёт обо всех пакетах подряд, а проба считает только свои:
+    /// видео между её пакетами не делает её ни законченной, ни иной.
+    #[test]
+    fn other_packets_do_not_count_toward_a_probe() {
+        let mut p = Prober::default();
+        p.start(300_000.0, 10_000_000.0);
+        for i in 0..PROBE_PACKETS {
+            p.on_report(100 + i as u16, 1000.0, Some(1050.0), 1200);
+        }
+        run(&mut p, 0, |_, at| Some(at + 50.0));
+        for i in 0..PROBE_PACKETS {
+            p.on_report(200 + i as u16, 1000.0, Some(1050.0), 1200);
+        }
+        let o = p.take_results(2000.0);
+        assert_eq!(o.len(), 1);
+        let shown = o[0].shown.unwrap();
+        assert!((shown - 900_000.0).abs() < 1000.0, "{shown}");
+        assert_eq!(p.take_results(2000.0), []);
+    }
+
+    /// Дошло 8 из 10 — ровно столько, сколько нужно, чтобы проба что-то показала.
+    #[test]
+    fn eight_of_ten_is_enough() {
+        let mut p = Prober::default();
+        p.start(300_000.0, 10_000_000.0);
+        run(&mut p, 0, |i, at| (i < 8).then_some(at + 50.0));
+        assert!(p.take_results(2000.0)[0].shown.is_some());
+    }
+
     /// Дошло мало — проба ничего не говорит; без ответа — со временем забывается.
     /// Не показавшую повторяем, но не без конца.
     #[test]
@@ -306,9 +346,11 @@ mod tests {
             let (at, size, _) = p.due().unwrap();
             p.on_sent(0, at, size as u32);
         }
-        assert_eq!(p.take_results(5000.0), []);
+        // Забывается, когда с последнего пакета прошло больше срока, — не раньше.
+        let last = p.measuring[0].sent.last().unwrap().1;
+        assert_eq!(p.take_results(last + RESULT_TIMEOUT_MS), []);
         assert_eq!(p.measuring.len(), 1);
-        let o = p.take_results(20_000.0);
+        let o = p.take_results(last + RESULT_TIMEOUT_MS + 1.0);
         assert_eq!(o, [nothing(1_800_000.0)]);
         for _ in 0..RETRIES {
             p.next(&o[0], 300_000.0, 10_000_000.0);
