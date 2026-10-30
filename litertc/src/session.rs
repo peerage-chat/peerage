@@ -317,8 +317,6 @@ struct PeerState {
     stats: PeerStats,
     /// Счётчики приёма по трекам — для отчётов ему.
     rx: [Option<RxStats>; TRACKS],
-    /// Сквозной номер следующего пакета этому участнику (по всем трекам).
-    tw_seq: u16,
     /// Когда слать ему следующий отчёт; `None` — при первой возможности.
     next_report: Option<Instant>,
     /// `ts_ms` последнего его отчёта и когда он пришёл — для эха.
@@ -343,7 +341,6 @@ impl PeerState {
             render_delay: Duration::ZERO,
             stats: PeerStats::default(),
             rx: Default::default(),
-            tw_seq: 0,
             next_report: None,
             last_report: None,
             // Полный с начала: первые потери звонка тоже чинятся повтором.
@@ -377,6 +374,11 @@ pub struct Session<P> {
     /// Текущие участники в порядке, заданном вызывающим (порядок рассылки).
     peers: Vec<P>,
     state: HashMap<P, PeerState>,
+    /// Сквозной номер следующего пакета каждому участнику (по всем трекам). Живёт
+    /// всю сессию, а не с [`PeerState`]: забыв участника (не дошли маячки), мы не
+    /// забываем, что он нас слышал, — его журнал прихода ждёт продолжения, а номера
+    /// с нуля счёл бы опоздавшими, и обратная связь замолчала бы.
+    tw_seq: HashMap<P, u16>,
     pacer: Pacer<P>,
     min_bitrate: u32,
     max_bitrate: u32,
@@ -404,6 +406,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
             cfg,
             peers: Vec::new(),
             state: HashMap::new(),
+            tw_seq: HashMap::new(),
             pacer: Pacer::new(DEFAULT_MAX_BITRATE as f64),
             min_bitrate: DEFAULT_MIN_BITRATE,
             max_bitrate: DEFAULT_MAX_BITRATE,
@@ -598,8 +601,9 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let mut t = self.pacer.pop(now, held)?;
         let media = matches!(t.data.first(), Some(&MEDIA_V2 | &MEDIA_RTX_V2));
         if let (true, Some(st), Some(epoch)) = (media, self.state.get_mut(&t.to), self.epoch) {
-            let seq = st.tw_seq;
-            st.tw_seq = st.tw_seq.wrapping_add(1);
+            let next = self.tw_seq.entry(t.to).or_default();
+            let seq = *next;
+            *next = next.wrapping_add(1);
             set_tw_seq(&mut t.data, seq);
             let at_ms = now.saturating_duration_since(epoch).as_secs_f64() * 1000.0;
             st.bwe.on_sent(seq, at_ms, t.data.len() as u32);
@@ -652,8 +656,11 @@ impl<P: Copy + Eq + Hash> Session<P> {
         let Some(m) = parse_media(data) else { return };
         let h = m.header;
         st.stats.rx_bytes += m.payload.len() as u64;
-        st.arrivals
-            .on_packet(h.tw_seq, since_epoch.as_micros() as u64 / FEEDBACK_TICK_US);
+        st.arrivals.on_packet(
+            h.stream_id,
+            h.tw_seq,
+            since_epoch.as_micros() as u64 / FEEDBACK_TICK_US,
+        );
         // Повторы в статистику приёма не идут: потери в отчётах — потери первой
         // отправки, по ним судят о канале.
         if let Some(slot) = st.rx.get_mut(h.track as usize).filter(|_| !m.retransmit) {
@@ -1042,6 +1049,27 @@ mod tests {
             .map(|t| (t.to, parse_media(&t.data).unwrap().header.tw_seq))
             .collect();
         assert_eq!(tw, [(1, 0), (1, 1), (2, 0)]);
+    }
+
+    /// Забытого и вернувшегося участника нумеруем дальше: он нас не забывал, и
+    /// номера с нуля его журнал прихода счёл бы опоздавшими — обратная связь
+    /// замолчала бы, а окно перегрузки навсегда заперло бы видео.
+    #[test]
+    fn readded_peer_continues_tw_seq() {
+        let now = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[1]);
+        s.send_audio(now, now, &[1]);
+        let mut out = drain(&mut s);
+        s.set_peers(&[]);
+        s.set_peers(&[1]);
+        s.send_audio(now, now, &[2]);
+        out.extend(drain(&mut s));
+        let tw: Vec<u16> = out
+            .iter()
+            .map(|t| parse_media(&t.data).unwrap().header.tw_seq)
+            .collect();
+        assert_eq!(tw, [0, 1]);
     }
 
     #[test]

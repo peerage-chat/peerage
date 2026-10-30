@@ -625,6 +625,9 @@ fn window_bps(w: &mut VecDeque<(f64, u32)>, now_ms: Option<f64>) -> Option<f64> 
 /// Когда пришли пакеты участника — для обратной связи ему (сторона получателя).
 #[derive(Default)]
 pub(crate) struct ArrivalLog {
+    /// Поток отправителя, чьи номера считаем: новый поток (он перезапустил сессию)
+    /// нумерует с нуля, и прежний счёт к нему не относится.
+    stream: Option<u32>,
     /// Первый сквозной номер, о котором ещё не сообщали.
     next: Option<u16>,
     /// (сквозной номер, приход в единицах [`FEEDBACK_TICK_US`]) с прошлой обратной связи.
@@ -632,7 +635,13 @@ pub(crate) struct ArrivalLog {
 }
 
 impl ArrivalLog {
-    pub fn on_packet(&mut self, seq: u16, ticks: u64) {
+    pub fn on_packet(&mut self, stream: u32, seq: u16, ticks: u64) {
+        if self.stream != Some(stream) {
+            *self = ArrivalLog {
+                stream: Some(stream),
+                ..ArrivalLog::default()
+            };
+        }
         // Предел — на случай, если таймер долго не зовут: больше в одну обратную
         // связь всё равно не войдёт.
         if self.got.len() < 4 * MAX_FEEDBACK_PACKETS {
@@ -867,18 +876,31 @@ mod tests {
     #[test]
     fn arrival_log_covers_gaps_and_ignores_late() {
         let mut a = ArrivalLog::default();
-        a.on_packet(65_535, 100);
-        a.on_packet(1, 104);
-        a.on_packet(2, 103);
+        a.on_packet(7, 65_535, 100);
+        a.on_packet(7, 1, 104);
+        a.on_packet(7, 2, 103);
         let f = a.take().unwrap();
         assert_eq!(f.base_seq, 65_535);
         assert_eq!(f.ref_time, 100);
         assert_eq!(f.arrivals, [Some(0), None, Some(4), Some(3)]);
-        a.on_packet(0, 110); // опоздал: о нём уже сообщили как о потерянном
+        a.on_packet(7, 0, 110); // опоздал: о нём уже сообщили как о потерянном
         assert_eq!(a.take(), None);
-        a.on_packet(4, 120);
+        a.on_packet(7, 4, 120);
         let f = a.take().unwrap();
         assert_eq!((f.base_seq, f.arrivals), (3, vec![None, Some(0)]));
+    }
+
+    /// Отправитель перезапустил сессию: новый поток нумерует с нуля, и это не
+    /// опоздавшие к прежнему счёту.
+    #[test]
+    fn arrival_log_restarts_with_new_stream() {
+        let mut a = ArrivalLog::default();
+        a.on_packet(7, 30_000, 100);
+        assert!(a.take().is_some());
+        a.on_packet(8, 0, 110);
+        a.on_packet(8, 1, 112);
+        let f = a.take().unwrap();
+        assert_eq!((f.base_seq, f.arrivals), (0, vec![Some(0), Some(2)]));
     }
 
     #[test]
