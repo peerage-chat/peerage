@@ -844,14 +844,14 @@ mod tests {
             .sum()
     }
 
-    /// Порог следует за трендом вниз: медленный, но непрерывный рост очереди (+0,4 мс
+    /// Порог следует за трендом вниз: медленный, но непрерывный рост очереди (+0,3 мс
     /// на пакет — ниже стартового порога) всё же признаётся перегрузкой. С
     /// застывшим порогом канал так и забивался бы.
     #[test]
     fn slow_steady_queue_growth_is_caught() {
         let mut d = DelayDetector::default();
         assert_eq!(overuses(&mut d, 0..300, |_| 0.0), 0);
-        assert!(overuses(&mut d, 300..600, |i| (i - 300) as f64 * 0.4) > 0);
+        assert!(overuses(&mut d, 300..600, |i| (i - 300) as f64 * 0.3) > 0);
     }
 
     /// Случайный разброс задержки без роста — не перегрузка.
@@ -1162,7 +1162,7 @@ mod tests {
         let mut b = Bwe::new(100_000.0, 4_000_000.0);
         (b.rate, b.delay_rate, b.loss_rate) = (2_000_000.0, 2_000_000.0, 2_000_000.0);
         let (mut seq, mut now) = (0u16, 0.0);
-        let lossy = |n: u32, _| (n % 7 != 0).then_some(50.0);
+        let lossy = |n: u32, _| (!n.is_multiple_of(7)).then_some(50.0);
         drive(&mut b, &mut seq, &mut now, 30, 1200, lossy);
         let early = b.cuts_loss;
         assert!(early > 0, "потери не заметили");
@@ -1178,7 +1178,7 @@ mod tests {
         let mut b = Bwe::new(100_000.0, 4_000_000.0);
         (b.rate, b.delay_rate, b.loss_rate) = (2_000_000.0, 2_000_000.0, 2_000_000.0);
         let (mut seq, mut now) = (0u16, 0.0);
-        let five = |n: u32, _| (n % 20 != 0).then_some(50.0);
+        let five = |n: u32, _| (!n.is_multiple_of(20)).then_some(50.0);
         // Первая секунда — окно потерь ещё не набрано.
         drive(&mut b, &mut seq, &mut now, 11, 2500, five);
         let held = b.loss_rate;
@@ -1248,5 +1248,261 @@ mod tests {
         l.push(4, 20_000.0, 1);
         assert_eq!(l.get(3), None, "старше десяти секунд — забыто");
         assert_eq!(l.get(4), Some((20_000.0, 1)));
+    }
+
+    /// Пакеты, ушедшие в пределах 5 мс от первого в группе, — одна группа (в том
+    /// числе ушедшие в тот же миг); ушедший раньше группы — переставлен в пути и не
+    /// учитывается.
+    #[test]
+    fn packets_sent_together_form_one_group() {
+        let mut d = DelayDetector::default();
+        d.on_packet(100.0, 150.0);
+        d.on_packet(104.0, 160.0);
+        d.on_packet(100.0, 170.0);
+        d.on_packet(99.0, 200.0);
+        let g = d.cur.as_ref().unwrap();
+        assert_eq!(
+            (g.first_send, g.last_send, g.last_arrival),
+            (100.0, 104.0, 170.0)
+        );
+        assert!(d.prev.is_none());
+    }
+
+    /// Шаги задержки, растущей всё быстрее (группа раз в `send_delta` мс), пока
+    /// детектор не скажет «перегрузка»: сколько групп подряд он к тому моменту
+    /// видел над порогом.
+    fn overusing_before_over(send_delta: f64) -> u32 {
+        let mut d = DelayDetector::default();
+        let mut before = 0;
+        for i in 0..200 {
+            let delta = (i as f64 - 25.0).max(0.0) * 0.5;
+            d.update(delta, send_delta, i as f64 * send_delta);
+            if d.usage() == Usage::Over {
+                return before;
+            }
+            before = d.overuse_count;
+        }
+        panic!("перегрузку не заметил");
+    }
+
+    /// Перегрузка — не одна группа над порогом, а хотя бы две и дольше 10 мс:
+    /// группы по 20 мс — хватает двух; по 5 мс — нужно три (две — ровно 10 мс).
+    #[test]
+    fn overuse_needs_two_groups_and_ten_ms() {
+        assert_eq!(overusing_before_over(20.0), 1);
+        assert_eq!(overusing_before_over(5.0), 2);
+    }
+
+    /// Порог тянется к |тренду| пропорционально времени (вверх медленно, вниз
+    /// быстро; шаг времени — не больше 100 мс), всплеск больше порога на 15 его не
+    /// двигает, а сам порог держится в пределах.
+    #[test]
+    fn threshold_follows_trend_but_not_spikes() {
+        let mut d = DelayDetector::default();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        d.adapt_threshold(0.0, 0.0);
+        assert_eq!(d.threshold, THRESHOLD_INIT);
+        d.adapt_threshold(27.5, 10.0); // ровно порог + 15 — ещё не всплеск
+        assert!(
+            near(d.threshold, 12.5 + K_UP * 15.0 * 10.0),
+            "{}",
+            d.threshold
+        );
+        d.adapt_threshold(40.0, 20.0);
+        assert!(near(d.threshold, 13.805), "всплеск: {}", d.threshold);
+        d.adapt_threshold(3.805, 30.0);
+        assert!(
+            near(d.threshold, 13.805 - K_DOWN * 10.0 * 10.0),
+            "{}",
+            d.threshold
+        );
+        d.adapt_threshold(-14.905, 1000.0);
+        assert!(
+            near(d.threshold, 9.905 + K_UP * 5.0 * 100.0),
+            "{}",
+            d.threshold
+        );
+        d.adapt_threshold(0.0, 2000.0);
+        assert_eq!(d.threshold, THRESHOLD_MIN);
+    }
+
+    /// Отправленный темп — за последние полсекунды включительно.
+    #[test]
+    fn sent_rate_window_is_half_a_second() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        b.on_sent(0, 0.0, 1000);
+        b.on_sent(1, 500.0, 1000);
+        assert_eq!(b.sent_bps(500.0), Some(32_000.0));
+        b.on_sent(2, 501.0, 1000);
+        assert_eq!(b.sent_bps(501.0), Some(32_000.0));
+    }
+
+    /// Ушедшее больше 10 с назад обратная связь уже не покроет — из полёта долой
+    /// (ровно 10 с — ещё в полёте).
+    #[test]
+    fn flight_forgets_sends_too_old_for_feedback() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        b.on_sent(0, 0.0, 1000);
+        b.on_sent(1, SEND_LOG_AGE_MS, 300);
+        assert_eq!(b.flight().0, 1300);
+        b.on_sent(2, SEND_LOG_AGE_MS + 1.0, 200);
+        assert_eq!(b.flight().0, 500);
+    }
+
+    /// Окно — по наименьшему RTT за 30 с: больший замер его не сменит, равный
+    /// продлит, а через 30 с после последнего наименьшего годится любой.
+    #[test]
+    fn window_uses_minimum_rtt_of_last_30_s() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        // 300 кбит/с × (RTT + 250) мс.
+        let window = |b: &Bwe| b.flight().1;
+        b.on_rtt(0.0, 100.0);
+        assert_eq!(window(&b), 13_125);
+        b.on_rtt(10.0, 150.0);
+        assert_eq!(window(&b), 13_125);
+        b.on_rtt(20_000.0, 100.0);
+        b.on_rtt(30_001.0, 150.0);
+        assert_eq!(window(&b), 13_125, "наименьший продлён в 20 с");
+        b.on_rtt(50_000.0, 150.0);
+        assert_eq!(window(&b), 13_125, "ровно 30 с — ещё в силе");
+        b.on_rtt(50_001.0, 150.0);
+        assert_eq!(window(&b), 15_000);
+    }
+
+    /// Перегружено, когда в полёте больше окна; ровно окно — ещё нет.
+    #[test]
+    fn congested_only_past_the_window() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        b.on_sent(0, 0.0, 16_875);
+        assert!(!b.congested());
+        b.on_sent(1, 1.0, 1);
+        assert!(b.congested());
+    }
+
+    /// Собственные потери канала растут к замеренным на десятую разницы за окно,
+    /// а падают сразу; сверх них — потери перегрузки.
+    #[test]
+    fn inherent_loss_rises_slowly_and_falls_at_once() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-12;
+        b.count_loss(0.0, 5, 100);
+        b.count_loss(1000.0, 0, 0);
+        assert!(near(b.inherent_loss, 0.005) && near(b.loss, 0.05));
+        b.count_loss(2000.0, 5, 100);
+        assert!(near(b.inherent_loss, 0.0095) && near(b.loss, 0.045));
+        b.count_loss(3000.0, 0, 100);
+        assert_eq!((b.inherent_loss, b.loss), (0.0, 0.0));
+    }
+
+    /// Ровно 10 % и ровно 2 % потерь — оценку по потерям держим.
+    #[test]
+    fn loss_limits_are_exclusive() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        for loss in [LOSS_HIGH, LOSS_LOW] {
+            b.loss = loss;
+            b.follow_loss(0.0, true, 1.08);
+            assert_eq!(b.loss_rate, START_BPS, "{loss}");
+        }
+    }
+
+    /// Сбавляли недавно (меньше RTT + 100 мс назад, RTT не меньше 100) — новая
+    /// перегрузка оценку не режет, пока сброс не сказался.
+    #[test]
+    fn overuse_right_after_a_cut_waits() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        b.delay.usage = Usage::Over;
+        b.update(0.0, 50.0);
+        b.update(199.0, 50.0);
+        assert_eq!(b.cuts_delay, 1);
+        b.update(200.0, 50.0);
+        assert_eq!(b.cuts_delay, 2);
+    }
+
+    /// Слали мало — сбавляем от оценки, ёмкость не меряем.
+    #[test]
+    fn app_limited_back_off_keeps_capacity_unknown() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        b.back_off(0.0, Some(100_000.0), true);
+        assert_eq!(b.delay_rate, BACKOFF * START_BPS);
+        assert_eq!(b.capacity, None);
+    }
+
+    /// Выше полутора дошедших + 10 кбит/с оценка не растёт.
+    #[test]
+    fn growth_is_capped_by_what_got_through() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        b.acked.extend([(0.0, 0), (500.0, 12_500)]); // 200 кбит/с
+        b.sent.push_back((0.0, 12_500)); // шлём столько же — не мало
+        b.updated_at = Some(-1000.0);
+        b.update(0.0, 100.0);
+        assert_eq!(b.rate(), 1.5 * 200_000.0 + 10_000.0);
+    }
+
+    /// Около известной ёмкости (выше 80 % её) растём по пакету за отклик, ниже —
+    /// на 8 % в секунду; дошедшее больше полутора ёмкостей её сбрасывает.
+    #[test]
+    fn ramp_up_near_and_far_from_capacity() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        // Пакет 1200 байт за 200 мс отклика за секунду — 48 кбит/с.
+        for (rate, grown) in [(800_000.0, 864_000.0), (900_000.0, 948_000.0)] {
+            b.capacity = Some(1_000_000.0);
+            b.delay_rate = rate;
+            b.ramp_up(None, 100.0, 1000.0, 1.08);
+            assert!(
+                (b.delay_rate - grown).abs() < 1e-6,
+                "{rate}: {}",
+                b.delay_rate
+            );
+        }
+        for (acked, kept) in [(150_000.0, true), (150_001.0, false), (100_000.0, true)] {
+            b.capacity = Some(100_000.0);
+            b.ramp_up(Some(acked), 100.0, 0.0, 1.0);
+            assert_eq!(b.capacity.is_some(), kept, "{acked}");
+        }
+    }
+
+    /// Проба показала больше оценки — ёмкость забыта, только если показала и больше
+    /// неё.
+    #[test]
+    fn probe_above_capacity_forgets_it() {
+        let mut b = Bwe::new(100_000.0, 4_000_000.0);
+        b.capacity = Some(1_000_000.0);
+        b.apply_probe(&Outcome {
+            shown: Some(500_000.0),
+            target: 600_000.0,
+        });
+        assert_eq!((b.rate(), b.capacity), (500_000.0, Some(1_000_000.0)));
+        b.apply_probe(&Outcome {
+            shown: Some(1_000_000.0),
+            target: 1_200_000.0,
+        });
+        assert_eq!(b.capacity, Some(1_000_000.0), "ровно ёмкость — не больше");
+        b.apply_probe(&Outcome {
+            shown: Some(1_500_000.0),
+            target: 1_800_000.0,
+        });
+        assert_eq!((b.rate(), b.capacity), (1_500_000.0, None));
+    }
+
+    /// Темп по пакетам окна: от первого до последнего, не меньше четверти секунды
+    /// (короче — не мера); старше полусекунды до конца — не в счёт.
+    #[test]
+    fn window_rate_needs_a_quarter_second() {
+        let mut w = VecDeque::from([(0.0, 1000), (250.0, 1000)]);
+        assert_eq!(window_bps(&mut w, None), Some(64_000.0));
+        let mut w = VecDeque::from([(0.0, 1000), (100.0, 1000)]);
+        assert_eq!(window_bps(&mut w, None), None);
+        let mut w = VecDeque::from([(0.0, 1000), (500.0, 1000)]);
+        assert_eq!(window_bps(&mut w, None), Some(32_000.0));
+    }
+
+    /// Пришедших между отчётами копится не больше, чем влезет в четыре.
+    #[test]
+    fn arrival_log_is_bounded() {
+        let mut l = ArrivalLog::default();
+        for i in 0..=4 * MAX_FEEDBACK_PACKETS {
+            l.on_packet(1, i as u16, i as u64);
+        }
+        assert_eq!(l.got.len(), 4 * MAX_FEEDBACK_PACKETS);
     }
 }

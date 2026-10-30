@@ -1,0 +1,3 @@
+# Настройки cargo-mutants (scripts/mutants.sh).
+# sim.rs — модель сети для тестов, не код звонка: её мутанты проверяли бы сами тесты.
+exclude_globs = ["litertc/src/sim.rs"]

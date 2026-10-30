@@ -193,4 +193,19 @@ mod tests {
         let b = s.report_block(0);
         assert_eq!((b.cumulative_lost, b.fraction_lost), (0, 0));
     }
+
+    /// Снимок для показа — в долях и миллисекундах: пакет 2 из 0..=3 потерян (¼),
+    /// один пришёл на 100 мс позже соседа (джиттер 300 → 281,25 единиц 48 кГц).
+    #[test]
+    fn snapshot_is_in_fractions_and_ms() {
+        let mut s = RxStats::new(1, 0, 48_000);
+        s.update(0, 0, 0);
+        s.update(1, 960, 960 + 4800);
+        s.update(3, 2880, 2880 + 4800);
+        s.report_block(0);
+        let snap = s.snapshot();
+        assert_eq!((snap.highest_seq, snap.lost), (3, 1));
+        assert_eq!(snap.fraction_lost, 0.25);
+        assert_eq!(snap.jitter_ms, 281.25 * 1000.0 / 48_000.0);
+    }
 }

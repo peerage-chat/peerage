@@ -1087,7 +1087,7 @@ impl<P: Copy + Eq + Hash> Session<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::{MAX_VIDEO_CHUNK, MEDIA_V2};
+    use crate::wire::{ReportBlock, MAX_VIDEO_CHUNK, MEDIA_V2};
     use std::time::Duration;
 
     const CFG: Config = Config {
@@ -1570,5 +1570,225 @@ mod tests {
                 play_at: now,
             })
         );
+    }
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    /// Очередь видео, которую потребитель не забирает, держится до 150 кадров и
+    /// 32 МБ включительно; больше — сброс до следующего ключевого кадра.
+    #[test]
+    fn video_queue_is_cut_by_count_and_by_bytes() {
+        let now = Instant::now();
+        let frame = |id: u32, len: usize| CompleteFrame {
+            frame_id: id,
+            ts: id * 3000,
+            info: VideoInfo::default(),
+            data: vec![0; len],
+        };
+        let mut v = VideoRx::default();
+        for id in 0..VIDEO_QUEUE_HARD as u32 {
+            v.push(now, frame(id, 1));
+        }
+        assert_eq!(v.queue.len(), VIDEO_QUEUE_HARD);
+        v.push(now, frame(VIDEO_QUEUE_HARD as u32, 1));
+        assert!(v.queue.is_empty());
+        let mut v = VideoRx::default();
+        v.push(now, frame(0, VIDEO_QUEUE_BYTES - 1));
+        v.push(now, frame(1, 1));
+        assert_eq!(v.queue.len(), 2);
+        v.push(now, frame(2, 1));
+        assert!(v.queue.is_empty());
+    }
+
+    #[test]
+    fn peers_are_the_room() {
+        let mut s = Session::new(CFG);
+        s.set_peers(&[7, 9]);
+        assert_eq!(s.peers(), [7, 9]);
+    }
+
+    /// NACK повторяет только наше видео: чужой трек или чужой поток — мимо.
+    #[test]
+    fn nack_for_another_track_or_stream_is_ignored() {
+        let t0 = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[7]);
+        s.send_video(t0, t0, &[0xCC; 100], key());
+        drain(&mut s);
+        let nack = |track, stream_id| {
+            write_nack(&Nack {
+                track,
+                stream_id,
+                seqs: vec![0],
+            })
+            .unwrap()
+        };
+        let rtx = |s: &mut Session<u8>| {
+            drain(s)
+                .iter()
+                .filter(|t| t.data[0] == MEDIA_RTX_V2)
+                .count()
+        };
+        s.handle_datagram(t0, 7, &nack(TRACK_AUDIO, CFG.stream_id));
+        assert_eq!(rtx(&mut s), 0, "звук не повторяем");
+        s.handle_datagram(t0, 7, &nack(TRACK_VIDEO, CFG.stream_id + 1));
+        assert_eq!(rtx(&mut s), 0, "чужой поток");
+        s.handle_datagram(t0, 7, &nack(TRACK_VIDEO, CFG.stream_id));
+        assert_eq!(rtx(&mut s), 1);
+    }
+
+    /// RTT из эха отчёта сглаживается как у TCP: 7/8 старого + 1/8 нового. Блоки
+    /// отчёта — статистика нашей отправки, но только о нашем потоке.
+    #[test]
+    fn report_gives_smoothed_rtt_and_our_outbound_stats() {
+        let t0 = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[7]);
+        s.handle_timeout(t0);
+        let block = |track, stream_id| ReportBlock {
+            track,
+            fraction_lost: 64,
+            stream_id,
+            highest_seq: 10,
+            cumulative_lost: 2,
+            jitter: 480,
+        };
+        let report = |echo_ts, blocks| {
+            write_report(&Report {
+                ts_ms: 0,
+                echo: Some((echo_ts, 50)),
+                blocks,
+            })
+        };
+        s.handle_datagram(
+            t0 + ms(300),
+            7,
+            &report(
+                150,
+                vec![
+                    block(TRACK_AUDIO, CFG.stream_id),
+                    block(TRACK_VIDEO, CFG.stream_id + 1),
+                ],
+            ),
+        );
+        s.handle_datagram(t0 + ms(600), 7, &report(350, vec![]));
+        let st = s.stats(&7).unwrap();
+        assert_eq!(st.rtt, Some(Duration::from_micros(112_500)));
+        let audio = st.outbound[TRACK_AUDIO as usize].unwrap();
+        assert_eq!((audio.fraction_lost, audio.jitter_ms), (0.25, 10.0));
+        assert!(st.outbound[TRACK_VIDEO as usize].is_none(), "чужой поток");
+    }
+
+    /// Статистика участника: оценка полосы, цель кодера, окно, принятые треки и
+    /// сведение губ — как их видит сессия.
+    #[test]
+    fn stats_show_bandwidth_tracks_and_lip_sync() {
+        let t0 = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[7]);
+        let mut pkt = vec![0u8; MEDIA_HEADER_LEN];
+        write_media_header(
+            &mut pkt,
+            &MediaHeader {
+                track: TRACK_VIDEO,
+                stream_id: 5,
+                seq: 0,
+                tw_seq: 0,
+                ts: 0,
+            },
+        );
+        pkt.extend(fragment_video(&[1, 2, 3], 0, key()).remove(0));
+        s.handle_datagram(t0, 7, &pkt);
+        s.handle_timeout(t0);
+        let sync = &mut s.state.get_mut(&7).unwrap().sync;
+        for i in 0..60u64 {
+            let cap = i * 20;
+            sync.observe_audio(t0 + ms(cap + 100), (cap * 48) as u32, 48_000);
+            sync.observe_video(t0 + ms(cap + 300), (cap * 90) as u32);
+        }
+        let st = s.stats(&7).unwrap();
+        assert_eq!(st.bandwidth, 300_000);
+        assert_eq!(st.target, s.state[&7].bwe.target() as u32);
+        assert!(st.target > 0);
+        assert_eq!(st.in_flight, (0, 16_875));
+        assert!(st.inbound[TRACK_VIDEO as usize].is_some());
+        assert!(st.lip_sync.audio_wait > Duration::ZERO);
+        assert!(st.lip_sync.error_ms.is_some());
+        let sync = &mut s.state.get_mut(&7).unwrap().sync;
+        *sync = AvSync::default();
+        for i in 0..60u64 {
+            let cap = i * 20;
+            sync.observe_audio(t0 + ms(cap + 300), (cap * 48) as u32, 48_000);
+            sync.observe_video(t0 + ms(cap + 100), (cap * 90) as u32);
+        }
+        assert!(s.stats(&7).unwrap().lip_sync.video_wait > Duration::ZERO);
+    }
+
+    /// Звук ждёт видео — кадры маскировки считаются; ждать перестал — выброшенные
+    /// кадры тоже.
+    #[test]
+    fn lip_sync_holds_and_drops_are_counted() {
+        let t0 = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[7]);
+        let mut seq = 0u16;
+        // Тик воспроизведения: пришёл пакет — забрали кадр.
+        let mut tick = |s: &mut Session<u8>| {
+            s.handle_datagram(t0, 7, &audio_pkt(1, seq, seq as u8));
+            seq += 1;
+            s.pull_audio(t0, &7)
+        };
+        let st = s.state.get_mut(&7).unwrap();
+        for i in 0..60u64 {
+            let cap = i * 20;
+            st.sync
+                .observe_audio(t0 + ms(cap + 100), (cap * 48) as u32, 48_000);
+            st.sync.observe_video(t0 + ms(cap + 300), (cap * 90) as u32);
+        }
+        let holds = (0..15)
+            .filter(|_| tick(&mut s) == Some(JitterOut::Hold))
+            .count() as u64;
+        assert!(holds > 0);
+        assert_eq!(s.stats(&7).unwrap().lip_sync.audio_holds, holds);
+        s.state.get_mut(&7).unwrap().sync = AvSync::default();
+        (0..15).for_each(|_| drop(tick(&mut s)));
+        assert!(s.stats(&7).unwrap().lip_sync.audio_drops > 0);
+    }
+
+    /// Видео от участника ещё не было — просить ключевой кадр не у кого.
+    #[test]
+    fn keyframe_before_any_video_is_not_requested() {
+        let t0 = Instant::now();
+        let mut s = Session::new(CFG);
+        s.set_peers(&[7]);
+        s.request_keyframe(t0, &7);
+        assert!(!s.state[&7].video.asm.wants_keyframe());
+    }
+
+    /// Каждому участнику — своя копия, поэтому темп выпуска — худшая оценка на их
+    /// число: кадр двоим уходит за то же время, что одному.
+    #[test]
+    fn pacing_scales_with_the_number_of_peers() {
+        let released = |peers: &[u8]| {
+            let t0 = Instant::now();
+            let mut s = Session::new(CFG);
+            s.set_peers(peers);
+            s.send_video(t0, t0, &[0; 30_000], key());
+            let mut bytes = 0;
+            for t in 0..=100 {
+                s.handle_timeout(t0 + ms(t));
+                bytes += drain(&mut s)
+                    .iter()
+                    .filter(|t| t.data[1] == TRACK_VIDEO)
+                    .map(|t| t.data.len())
+                    .sum::<usize>();
+            }
+            bytes / peers.len()
+        };
+        let one = released(&[7]);
+        assert!(one < 30_000, "темп держит отправку: {one}");
+        assert!(released(&[7, 9]).abs_diff(one) < one / 10);
     }
 }

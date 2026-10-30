@@ -746,4 +746,41 @@ mod tests {
         empty[3..5].copy_from_slice(&[0, 0]);
         assert_eq!(parse_transport_feedback(&empty), None);
     }
+
+    /// Пределы включительно: пакет из одного заголовка (пустой payload), отчёт с
+    /// предельным числом блоков, обратная связь о предельном числе пакетов.
+    #[test]
+    fn wire_limits_are_inclusive() {
+        let mut pkt = vec![0; MEDIA_HEADER_LEN];
+        write_media_header(&mut pkt, &MediaHeader::default());
+        assert_eq!(parse_media(&pkt).map(|m| m.payload.len()), Some(0));
+        let r = Report {
+            blocks: vec![ReportBlock::default(); MAX_REPORT_BLOCKS],
+            ..Report::default()
+        };
+        assert_eq!(parse_report(&write_report(&r)), Some(r));
+        let f = TransportFeedback {
+            base_seq: 1,
+            ref_time: 2,
+            arrivals: vec![Some(3); MAX_FEEDBACK_PACKETS],
+        };
+        let dg = write_transport_feedback(&f).unwrap();
+        assert_eq!(parse_transport_feedback(&dg), Some(f));
+    }
+
+    /// Задержка, совпавшая с меткой «не пришёл», пишется на единицу меньше — пакет
+    /// остаётся пришедшим.
+    #[test]
+    fn huge_arrival_delay_stays_received() {
+        let f = TransportFeedback {
+            base_seq: 0,
+            ref_time: 0,
+            arrivals: vec![Some(u16::MAX), None],
+        };
+        let dg = write_transport_feedback(&f).unwrap();
+        assert_eq!(
+            parse_transport_feedback(&dg).unwrap().arrivals,
+            [Some(u16::MAX - 1), None]
+        );
+    }
 }
