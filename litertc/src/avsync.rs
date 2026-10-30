@@ -167,14 +167,27 @@ mod tests {
     /// поправки); поправку применяем как настоящие треки. Возвращает итоговую
     /// разницу показа видео и звука, мс.
     fn run(sync: &mut AvSync, t0: Instant, secs: u64, audio_ms: u64, video_ms: u64) -> f64 {
+        run_from(sync, t0, 0, secs, audio_ms, video_ms)
+    }
+
+    /// То же, но захват начался `clock_ms` назад по часам отправителя (от них —
+    /// метки обоих треков).
+    fn run_from(
+        sync: &mut AvSync,
+        t0: Instant,
+        clock_ms: u64,
+        secs: u64,
+        audio_ms: u64,
+        video_ms: u64,
+    ) -> f64 {
         let mut gap = 0.0;
         for i in 0..secs * 50 {
             let cap = i * 20; // мс захвата
             let audio_at = t0 + ms(cap + audio_ms) + sync.audio_delay();
-            sync.observe_audio(audio_at, (cap * 48) as u32, AUDIO_HZ);
+            sync.observe_audio(audio_at, ((clock_ms + cap) * 48) as u32, AUDIO_HZ);
             if i % 2 == 0 {
                 let video_at = t0 + ms(cap + video_ms) + sync.video_delay();
-                sync.observe_video(video_at, (cap * 90) as u32);
+                sync.observe_video(video_at, ((clock_ms + cap) * 90) as u32);
                 gap =
                     (video_at - t0).as_secs_f64() * 1000.0 - (audio_at - t0).as_secs_f64() * 1000.0;
             }
@@ -224,6 +237,105 @@ mod tests {
         let mut s = AvSync::default();
         run(&mut s, Instant::now(), 40, 50, 1500);
         assert_eq!(s.audio_delay(), ms(500));
+    }
+
+    /// Звонок идёт 14 часов: метка видео (90 кГц) уже обернулась через u32, метка
+    /// звука — ещё нет. Губы сводятся так же.
+    #[test]
+    fn video_clock_wrap_is_harmless() {
+        let mut s = AvSync::default();
+        let gap = run_from(&mut s, Instant::now(), 14 * 3600 * 1000, 15, 100, 300);
+        assert!(gap.abs() <= DEADBAND_MS, "расхождение {gap} мс");
+        assert!(
+            s.audio_delay() >= ms(170),
+            "звук ждёт {:?}",
+            s.audio_delay()
+        );
+    }
+
+    /// Поправка — раз в секунду, ровно через секунду после прошлой, и по шагу.
+    /// Первая — от первого замера (звук в t0 + 100 мс): видео в t0 + 1100 мс.
+    #[test]
+    fn correction_steps_once_a_second() {
+        let t0 = Instant::now();
+        let mut s = AvSync::default();
+        run(&mut s, t0, 1, 100, 300);
+        assert_eq!(s.audio_delay(), ms(40));
+        assert!(
+            s.error_ms().is_some_and(|e| e > 150.0),
+            "{:?}",
+            s.error_ms()
+        );
+        s.observe_audio(t0 + ms(2100), 2000 * 48, AUDIO_HZ);
+        assert_eq!(s.audio_delay(), ms(80));
+    }
+
+    /// Один кадр видео, показанный на 250 мс позже (декодер споткнулся), — не
+    /// повод сдвигать звук: отставание сглажено.
+    #[test]
+    fn one_late_frame_does_not_move_the_sound() {
+        let t0 = Instant::now();
+        let mut s = AvSync::default();
+        run(&mut s, t0, 3, 100, 100);
+        // Следующий замер — ровно в момент поправки.
+        s.observe_video(t0 + ms(3000 + 100 + 250), 3000 * 90);
+        assert!(
+            s.error_ms().is_some_and(|e| e.abs() < DEADBAND_MS),
+            "{:?}",
+            s.error_ms()
+        );
+        assert_eq!(s.audio_delay(), Duration::ZERO);
+    }
+
+    /// Трек, не замеренный 2 с, считается пропавшим — и одного трека не
+    /// сравнить.
+    #[test]
+    fn track_older_than_two_seconds_is_gone() {
+        let t0 = Instant::now();
+        let mut s = AvSync::default();
+        s.observe_video(t0, 0);
+        s.observe_audio(t0 + ms(1000), 0, AUDIO_HZ);
+        assert!(s.error_ms().is_some());
+        s.observe_audio(t0 + ms(2000), 1000 * 48, AUDIO_HZ);
+        assert_eq!(s.error_ms(), None);
+    }
+
+    /// Ускорившийся трек отдаёт задержку по шагу в секунду, не разом: рывок звука —
+    /// один кадр маскировки.
+    #[test]
+    fn delay_is_taken_back_step_by_step() {
+        let t0 = Instant::now();
+        let mut s = AvSync::default();
+        run(&mut s, t0, 15, 100, 300);
+        let before = s.audio_delay();
+        run(&mut s, t0 + ms(15_000), 1, 100, 100);
+        assert_eq!(s.audio_delay(), before - ms(40));
+    }
+
+    /// Без звука задержка видео уходит так же — по шагу в секунду.
+    #[test]
+    fn video_delay_goes_away_without_audio() {
+        let t0 = Instant::now();
+        let mut s = AvSync::default();
+        run(&mut s, t0, 10, 250, 120);
+        let before = s.video_delay();
+        assert!(before >= ms(80), "видео ждёт {before:?}");
+        for i in 0..4 * 30u64 {
+            let cap = 10_000 + i * 33;
+            s.observe_video(t0 + ms(cap + 120) + s.video_delay(), (cap * 90) as u32);
+        }
+        let after = s.video_delay();
+        assert!(
+            after < before && after + ms(80) >= before,
+            "{before:?} → {after:?}"
+        );
+    }
+
+    #[test]
+    fn ms_since_is_signed() {
+        let t0 = Instant::now();
+        assert_eq!(ms_since(t0, t0 + ms(1500)), 1500.0);
+        assert_eq!(ms_since(t0 + ms(1500), t0), -1500.0);
     }
 
     /// Видео пропало — задержка звука уходит.
