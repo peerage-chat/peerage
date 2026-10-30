@@ -198,6 +198,21 @@ impl Prober {
         }
     }
 
+    /// Обратная связь сообщила обо всех номерах до `end` (не включая). Получатель о
+    /// номере сообщает один раз, а отчёты идут без подтверждения: о пакетах проб
+    /// раньше `end`, которых отчёт не упомянул (потерялся он сам), больше не узнать —
+    /// они потеряны.
+    pub fn on_covered(&mut self, end: u16) {
+        for c in &mut self.measuring {
+            if c.sent
+                .last()
+                .is_some_and(|&(s, _, _)| end.wrapping_sub(s) as i16 > 0)
+            {
+                c.reported = c.sent.len();
+            }
+        }
+    }
+
     /// Итоги проб, о каждом пакете которых уже сообщили (или которые пора забыть),
     /// по порядку. Зовущий поднимает по ним оценку и зовёт [`Prober::next`].
     pub fn take_results(&mut self, now_ms: f64) -> Vec<Outcome> {
@@ -328,6 +343,51 @@ mod tests {
         p.start(300_000.0, 10_000_000.0);
         run(&mut p, 0, |i, at| (i < 8).then_some(at + 50.0));
         assert!(p.take_results(2000.0)[0].shown.is_some());
+    }
+
+    /// Отчёт о части пакетов пробы потерялся (обратная связь — без подтверждения, и
+    /// повторно о тех же номерах не сообщают). Как только отчёт ушёл дальше пробы,
+    /// она закрыта: не сообщённые — потеряны, а 9 из 10 — достаточно. Ждать 10 с
+    /// нельзя: всё это время новые пробы не идут.
+    #[test]
+    fn report_past_the_probe_closes_it() {
+        let mut p = Prober::default();
+        p.start(300_000.0, 10_000_000.0);
+        for i in 0..PROBE_PACKETS {
+            let (at, size, _) = p.due().unwrap();
+            let at = at.max(1000.0);
+            p.on_sent(i as u16, at, size as u32);
+            if i < 9 {
+                p.on_report(i as u16, at, Some(at + 50.0), size as u32);
+            }
+        }
+        assert_eq!(p.take_results(2000.0), []);
+        p.on_covered(9);
+        assert_eq!(
+            p.take_results(2000.0),
+            [],
+            "пакет 9 ещё может прийти в отчёте"
+        );
+        p.on_covered(10);
+        let o = p.take_results(2000.0);
+        assert_eq!(o.len(), 1);
+        assert!(o[0].shown.is_some(), "{o:?}");
+    }
+
+    /// Ушла разом (таймер проспал весь её срок) — темпа отправки нет, и проба ничего
+    /// не показывает, как бы ровно ни пришла.
+    #[test]
+    fn probe_sent_at_once_shows_nothing() {
+        let mut p = Prober::default();
+        p.start(300_000.0, 10_000_000.0);
+        for i in 0..PROBE_PACKETS {
+            let (_, size, _) = p.due().unwrap();
+            p.on_sent(i as u16, 1000.0, size as u32);
+            p.on_report(i as u16, 1000.0, Some(1050.0 + i as f64), size as u32);
+        }
+        let o = p.take_results(2000.0);
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].shown, None);
     }
 
     /// Дошло мало — проба ничего не говорит; без ответа — со временем забывается.

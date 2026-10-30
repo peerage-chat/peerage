@@ -527,6 +527,7 @@ impl Bwe {
             self.in_flight.pop_front();
             self.in_flight_bytes -= size as u64;
         }
+        self.probes.on_covered(end);
         self.count_loss(now_ms, lost, total);
         self.update(now_ms, rtt_ms);
         for o in self.probes.take_results(now_ms) {
@@ -886,6 +887,30 @@ mod tests {
 
     /// В полёте больше окна — перегружено, пока обратная связь о них не придёт;
     /// пока окно переполнено, цель кодера ниже оценки.
+    #[test]
+    fn probe_result_survives_a_lost_report() {
+        let mut b = Bwe::new(100_000.0, 10_000_000.0);
+        b.start_probing();
+        let mut sent = Vec::new();
+        for seq in 0..10u16 {
+            let (at, size) = b.probe_due().unwrap();
+            b.on_sent(seq, at, size as u32);
+            b.on_probe_sent(seq, at, size as u32);
+            sent.push(at);
+        }
+        // Отчёт о пакетах 0–8 дошёл, о пакете 9 — потерялся; следующий отчёт уже о
+        // видео после пробы.
+        let first: Vec<Option<f64>> = sent[..9].iter().map(|t| Some(t + 50.0)).collect();
+        b.on_feedback(200.0, &feedback(0, &first), 100.0);
+        assert!(
+            b.rate() < 2.0 * START_BPS,
+            "проба ещё ждёт отчёта о пакете 9"
+        );
+        b.on_sent(10, 100.0, 1200);
+        b.on_feedback(300.0, &feedback(10, &[Some(150.0)]), 100.0);
+        assert!(b.rate() > 2.0 * START_BPS, "проба не учтена: {}", b.rate());
+    }
+
     #[test]
     fn window_fills_without_feedback() {
         let mut b = Bwe::new(100_000.0, 2_000_000.0);
