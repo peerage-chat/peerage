@@ -37,7 +37,9 @@ Android Jetpack Compose. GPL-3.0. Цель — v1.0 (на гранты не по
   `LD_LIBRARY_PATH` и исключает несобираемый desktop).
 - `./gradlew ktlintFormat` перед коммитом Kotlin. Rust-части Android — через WSL
   (`scripts/rebuild-android.sh <ABI>`; при изменении ygg.go FFI — `build-android-libs.sh`).
-- Коммиты — по-русски, с `Co-Authored-By`. Коммитить/пушить только по просьбе.
+- Коммиты — по-русски, с `Co-Authored-By`. **Коммитить и пушить в master — всегда, без
+  спроса** (перекрывает правило ub-mode «не пушить, спросить»). Force-push и переписывание
+  истории — только с явного разрешения.
 
 ## graphify
 
