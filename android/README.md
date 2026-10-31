@@ -37,17 +37,24 @@ cargo install cargo-ndk
 
 ```bash
 bash scripts/build-android-libs.sh arm64-v8a   # phones; x86_64 for the emulator
-bash scripts/rebuild-peerage-android.sh x86_64     # faster: only the Rust library
+bash scripts/rebuild-android.sh x86_64         # faster: only the Rust library
 ```
 
 The scripts put the libraries into `android/app/src/main/jniLibs/<ABI>/` (not in git).
-Build them BEFORE Gradle.
+Build them BEFORE Gradle. `rebuild-android.sh` is only safe when `ygg/libygg` did not
+change: a fresh Rust library may need symbols the old `libygg.so` lacks, and the app then
+dies on start (`dlopen failed: cannot locate symbol`).
 
 ## Building the APK
 
+One command does all of it — both native libraries, Gradle, signing:
+
 ```bash
-cd android && ./gradlew assembleDebug
+scripts/build-apk.sh          # → peerage-arm64.apk (x86_64 for the emulator)
 ```
+
+By hand: `cd android && ./gradlew assembleDebug` (debug build, signed automatically), or
+`assembleRelease` and sign the unsigned APK with `apksigner`.
 
 Or open `android/` in Android Studio. Run `./gradlew ktlintFormat` before committing Kotlin,
 and `./gradlew testDebugUnitTest` for the unit tests.

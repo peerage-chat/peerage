@@ -45,10 +45,16 @@ Some internal documents (design, plans, bug notes) are in Russian.
 The Rust core and the Go wrapper around yggdrasil-go build on Linux (WSL on Windows).
 
 ```sh
-scripts/test-all.sh                          # the whole Rust test suite
-bash scripts/build-android-libs.sh x86_64    # libygg + Rust core for the emulator (arm64-v8a for phones)
-cd android && ./gradlew :app:assembleDebug   # the APK
+scripts/build-apk.sh           # signed APK for phones → peerage-arm64.apk
+scripts/build-apk.sh x86_64    # for the emulator → peerage-x86_64.apk
+scripts/test-all.sh            # the whole Rust test suite (from Linux/WSL)
 ```
+
+`build-apk.sh` runs from Linux or from Git Bash on Windows (the native part goes through
+WSL). It rebuilds both native libraries for the ABI, builds the release APK with Gradle and
+signs it with the Android SDK debug key (`~/.android/debug.keystore`; your own key via
+`PEERAGE_KEYSTORE` and friends — see the script header). Copy the APK to the phone and
+install it; updates install over the previous build as long as the key is the same.
 
 Toolchain: Rust 1.95+, Go 1.24+, Android NDK r28c + cargo-ndk, Gradle 8.9 + JDK 21.
 Details: [ARCHITECTURE.md §10](docs/ARCHITECTURE.md#10-build-and-development).
