@@ -60,7 +60,8 @@ $windows && signer="${signer}.bat"
 ks="${PEERAGE_KEYSTORE:-$HOME/.android/debug.keystore}"
 [ -f "$ks" ] || { echo "нет ключа $ks (появится после любой debug-сборки в Android Studio)" >&2; exit 1; }
 $windows && ks="$(cygpath -w "$ks")"
-"$signer" sign --ks "$ks" \
+# v4 (.idsig рядом с APK) — для потоковой установки через adb; при ручной не нужна.
+"$signer" sign --v4-signing-enabled false --ks "$ks" \
     --ks-pass "pass:${PEERAGE_KS_PASS:-android}" \
     --ks-key-alias "${PEERAGE_KEY_ALIAS:-androiddebugkey}" \
     --key-pass "pass:${PEERAGE_KEY_PASS:-android}" \
