@@ -229,43 +229,49 @@ fn worst_audio_loss(s: &Session<PeerKey>) -> i32 {
     (worst * 100.0).ceil() as i32
 }
 
-/// Строка статистики по участникам — для разбора звонков по логу.
+/// Статистика по участникам — в лог, для разбора звонков.
 fn log_stats(s: &Session<PeerKey>) {
+    for p in s.peers() {
+        if let Some(st) = s.stats(p) {
+            log::info!("{}", stats_line(p, &st));
+        }
+    }
+}
+
+/// Строка статистики участника `p`: потери, джиттер, RTT, полоса, сведение губ.
+fn stats_line(p: &PeerKey, st: &litertc::PeerStats) -> String {
     let pct = |t: Option<litertc::TrackStats>| {
         t.map_or("-".to_string(), |t| {
             format!("{:.1}%", t.fraction_lost * 100.0)
         })
     };
-    for p in s.peers() {
-        let Some(st) = s.stats(p) else { continue };
-        let a = litertc::TRACK_AUDIO as usize;
-        let v = litertc::TRACK_VIDEO as usize;
-        let jitter = st.inbound[a].map_or("-".to_string(), |t| format!("{:.0}ms", t.jitter_ms));
-        let ls = st.lip_sync;
-        log::info!(
-            "room-call {}: rtt={} in: audio {} jitter {} video {} | out: audio {} video {} | rtx {} keyreq {} | bw {}k target {}k (cuts: delay {} loss {}) flight {}/{}k | lips {} wait audio {}ms video {}ms (hold {} drop {})",
-            hex::encode(&p[..4]),
-            st.rtt.map_or("-".to_string(), |r| format!("{}ms", r.as_millis())),
-            pct(st.inbound[a]),
-            jitter,
-            pct(st.inbound[v]),
-            pct(st.outbound[a]),
-            pct(st.outbound[v]),
-            st.retransmitted,
-            st.keyframe_requests,
-            st.bandwidth / 1000,
-            st.target / 1000,
-            st.bandwidth_cuts.0,
-            st.bandwidth_cuts.1,
-            st.in_flight.0 / 1000,
-            st.in_flight.1 / 1000,
-            ls.error_ms.map_or("-".to_string(), |e| format!("{e:+.0}ms")),
-            ls.audio_wait.as_millis(),
-            ls.video_wait.as_millis(),
-            ls.audio_holds,
-            ls.audio_drops,
-        );
-    }
+    let a = litertc::TRACK_AUDIO as usize;
+    let v = litertc::TRACK_VIDEO as usize;
+    let jitter = st.inbound[a].map_or("-".to_string(), |t| format!("{:.0}ms", t.jitter_ms));
+    let ls = st.lip_sync;
+    format!(
+        "room-call {}: rtt={} in: audio {} jitter {} video {} | out: audio {} video {} | rtx {} keyreq {} | bw {}k target {}k (cuts: delay {} loss {}) flight {}/{}k | lips {} wait audio {}ms video {}ms (hold {} drop {})",
+        hex::encode(&p[..4]),
+        st.rtt.map_or("-".to_string(), |r| format!("{}ms", r.as_millis())),
+        pct(st.inbound[a]),
+        jitter,
+        pct(st.inbound[v]),
+        pct(st.outbound[a]),
+        pct(st.outbound[v]),
+        st.retransmitted,
+        st.keyframe_requests,
+        st.bandwidth / 1000,
+        st.target / 1000,
+        st.bandwidth_cuts.0,
+        st.bandwidth_cuts.1,
+        st.in_flight.0 / 1000,
+        st.in_flight.1 / 1000,
+        ls.error_ms.map_or("-".to_string(), |e| format!("{e:+.0}ms")),
+        ls.audio_wait.as_millis(),
+        ls.video_wait.as_millis(),
+        ls.audio_holds,
+        ls.audio_drops,
+    )
 }
 
 /// Декодер звука одного участника и счётчик подряд идущих PLC.
@@ -924,5 +930,78 @@ mod tests {
         let mut frame = [0i16; 10];
         assert!(q.next_frame(&mut frame, Duration::ZERO).is_some());
         assert_eq!(frame[0], 5);
+    }
+
+    /// Отчёт участника о нашем звуке: доля потерь `fraction` из 256.
+    fn report_about_audio(fraction: u8) -> Vec<u8> {
+        litertc::write_report(&litertc::Report {
+            ts_ms: 0,
+            echo: None,
+            blocks: vec![litertc::ReportBlock {
+                track: litertc::TRACK_AUDIO,
+                fraction_lost: fraction,
+                stream_id: 7,
+                ..Default::default()
+            }],
+        })
+    }
+
+    /// Кодер один на всех — FEC под самого слабого: худшие потери звука среди
+    /// участников, в процентах с округлением вверх.
+    #[test]
+    fn worst_audio_loss_is_the_weakest_peer() {
+        let mut s = session(A);
+        s.set_peers(&[A, B]);
+        assert_eq!(worst_audio_loss(&s), 0, "отчётов нет");
+        let now = Instant::now();
+        s.handle_datagram(now, A, &report_about_audio(13)); // 5,08 %
+        assert_eq!(worst_audio_loss(&s), 6);
+        s.handle_datagram(now, B, &report_about_audio(64)); // 25 %
+        assert_eq!(worst_audio_loss(&s), 25);
+    }
+
+    /// Строка статистики для разбора звонка по логу: чего ещё нет — «-», есть — в
+    /// процентах.
+    #[test]
+    fn stats_line_shows_missing_as_dash() {
+        let mut s = session(A);
+        let line = stats_line(&A, &s.stats(&A).unwrap());
+        assert!(
+            line.starts_with(
+                "room-call 01010101: rtt=- in: audio - jitter - video - | out: audio - video -"
+            ),
+            "{line}"
+        );
+        s.handle_datagram(Instant::now(), A, &report_about_audio(64));
+        let line = stats_line(&A, &s.stats(&A).unwrap());
+        assert!(line.contains("out: audio 25.0% video -"), "{line}");
+    }
+
+    /// Потеря без FEC — маскировка, но не дольше [`MAX_PLC`] кадров подряд (дальше
+    /// Opus PLC шумит) — потом тишина; настоящий или восстановленный из FEC кадр
+    /// счёт сбрасывает.
+    #[test]
+    fn concealment_is_capped_and_reset_by_real_audio() {
+        let audio = AudioSettings::default();
+        let n = audio.interleaved_len();
+        let pkt = AudioEncoder::new(audio)
+            .unwrap()
+            .encode(&vec![1000; n])
+            .unwrap();
+        let mut d = Decoder {
+            dec: AudioDecoder::new(audio).unwrap(),
+            plc_run: 0,
+        };
+        let frame = d.decode(JitterOut::Frame(pkt.clone()));
+        assert_eq!(frame.map(|p| p.len()), Some(n));
+        let lost: Vec<bool> = (0..MAX_PLC + 2)
+            .map(|_| d.decode(JitterOut::Lost { next: None }).is_some())
+            .collect();
+        assert_eq!(lost, [true, true, true, true, false, false]);
+        let fec = d.decode(JitterOut::Lost {
+            next: Some(pkt.clone()),
+        });
+        assert!(fec.is_some(), "из FEC следующего");
+        assert!(d.decode(JitterOut::Hold).is_some(), "счёт сброшен");
     }
 }

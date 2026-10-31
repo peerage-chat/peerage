@@ -33,15 +33,20 @@ fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
         .engine
 }
 
-/// R-033: замер пропускной способности, запущенный во время звонка, не отбирает
-/// у звонка медиа-канал — голос A по-прежнему слышен у B.
-#[test]
-fn bench_during_a_call_does_not_mute_it() {
-    let net = LoopbackNet::new();
-    let (a_id, b_id) = (id(101), id(102));
+/// Звонок A ↔ B в комнате 1:1 на петле `net`.
+struct Call {
+    a: Arc<Engine>,
+    b: Arc<Engine>,
+    a_key: [u8; 32],
+    /// Кадр звука A: синус 440 Гц.
+    tone: Vec<i16>,
+}
+
+fn call(net: &LoopbackNet, seed: u8) -> Call {
+    let (a_id, b_id) = (id(seed), id(seed + 1));
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
-    let a = start(&net, a_id, tmpdir("a"));
-    let b = start(&net, b_id, tmpdir("b"));
+    let a = start(net, a_id, tmpdir("a"));
+    let b = start(net, b_id, tmpdir("b"));
     a.add_contact(&b_key, "B");
     b.add_contact(&a_key, "A");
 
@@ -52,26 +57,97 @@ fn bench_during_a_call_does_not_mute_it() {
     b.room_audio_start(room, 0, false);
     let frame = params["frame_len"].as_u64().unwrap() as usize;
     let rate = params["sample_rate"].as_f64().unwrap();
-
-    b.bench_recv_start();
-
-    // A говорит (синус 440 Гц кадрами в реальном темпе), B слушает.
-    let tone: Vec<i16> = (0..frame)
-        .map(|i| ((i as f64 * 440.0 * 6.283 / rate).sin() * 8000.0) as i16)
+    let tone = (0..frame)
+        .map(|i| ((i as f64 * 440.0 * std::f64::consts::TAU / rate).sin() * 8000.0) as i16)
         .collect();
-    let mut heard = false;
-    let mut out = vec![0i16; frame];
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline && !heard {
-        a.room_push_audio(&tone, Duration::ZERO);
-        std::thread::sleep(Duration::from_millis(20));
-        let n = b.room_pull_audio(&mut out, Duration::ZERO);
-        heard = out[..n].iter().any(|s| s.unsigned_abs() > 500);
+    Call { a, b, a_key, tone }
+}
+
+impl Call {
+    /// Кадр звука A в реальном темпе (`mic` — с микрофона, иначе A молчит), B
+    /// забирает кадр микса; `until` по B — до 10 с.
+    fn talk_until(&self, mic: bool, until: impl Fn(&Engine, &[i16]) -> bool) -> bool {
+        let mut out = vec![0i16; self.tone.len()];
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if mic {
+                self.a.room_push_audio(&self.tone, Duration::ZERO);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+            let n = self.b.room_pull_audio(&mut out, Duration::ZERO);
+            if until(&self.b, &out[..n]) {
+                return true;
+            }
+        }
+        false
     }
-    a.room_audio_stop();
-    b.room_audio_stop();
+}
+
+impl Drop for Call {
+    fn drop(&mut self) {
+        self.a.room_audio_stop();
+        self.b.room_audio_stop();
+    }
+}
+
+fn loud(pcm: &[i16]) -> bool {
+    pcm.iter().any(|s| s.unsigned_abs() > 500)
+}
+
+/// R-033: замер пропускной способности, запущенный во время звонка, не отбирает
+/// у звонка медиа-канал — голос A по-прежнему слышен у B.
+#[test]
+fn bench_during_a_call_does_not_mute_it() {
+    let net = LoopbackNet::new();
+    let c = call(&net, 101);
+    c.b.bench_recv_start();
+    // A говорит (синус 440 Гц кадрами в реальном темпе), B слушает.
     assert!(
-        heard,
+        c.talk_until(true, |_, pcm| loud(pcm)),
         "голос A дошёл до B, хотя B запустил замер посреди звонка"
     );
+}
+
+/// B видит, что A говорит (рамка говорящего), и трафик: сколько пришло от A; свой
+/// исходящий — только медиа (у молчащего B ноль, у A — его звук). A выключил микрофон — рамка у B гаснет.
+#[test]
+fn listener_sees_who_speaks_and_the_traffic() {
+    let net = LoopbackNet::new();
+    let c = call(&net, 111);
+    let a_hex = hex::encode(c.a_key);
+    let speaking = |b: &Engine| b.room_speaking_json().contains(&a_hex);
+    assert!(c.talk_until(true, |b, _| speaking(b)), "A говорит");
+    let traffic: serde_json::Value = serde_json::from_str(&c.b.room_traffic_json()).unwrap();
+    assert!(traffic[&a_hex].as_u64().unwrap() > 0, "{traffic}");
+    assert_eq!(
+        traffic["self"], 0,
+        "B молчит — своих медиа не шлёт: {traffic}"
+    );
+    let sent: serde_json::Value = serde_json::from_str(&c.a.room_traffic_json()).unwrap();
+    assert!(sent["self"].as_u64().unwrap() > 0, "{sent}");
+    c.a.room_set_muted(true);
+    assert!(c.talk_until(true, |b, _| !speaking(b)), "A замолчал");
+    assert_eq!(c.b.room_speaking_json(), "[]");
+}
+
+/// Кадр камеры A доходит до B целиком и с тем, что о нём сказал кодер.
+#[test]
+fn video_frame_reaches_the_other_side() {
+    let net = LoopbackNet::new();
+    let c = call(&net, 121);
+    let key = litertc::VideoInfo {
+        keyframe: true,
+        rotation: 1,
+        fps: 30,
+    };
+    let frame: Vec<u8> = (0..5000u32).map(|i| i as u8).collect();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut got = None;
+    while got.is_none() && Instant::now() < deadline {
+        c.a.room_push_video(&frame, key, Duration::ZERO);
+        got = c.b.room_pull_video(&c.a_key, Duration::from_millis(200));
+    }
+    let got = got.expect("кадр дошёл");
+    assert_eq!((got.data, got.info), (frame, key));
+    assert!(c.b.room_traffic_json().contains(&hex::encode(c.a_key)));
 }
