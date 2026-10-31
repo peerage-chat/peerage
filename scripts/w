@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Выполнить команду в WSL из корня проекта, с окружением сборки:
+#   scripts/w cargo test -p litertc --lib
+#   scripts/w scripts/mutants.sh -p litertc --since HEAD~1
+#   scripts/w go test ./...                 (из ygg/libygg — см. ниже про --cd)
+#
+# Зачем: `wsl bash -c '…'` из Git Bash ломается на кавычках — Git Bash сам
+# подставляет `$PATH` и пути `/mnt/…`, heredoc-и доходят битыми, а фоновый `&`
+# умирает вместе с wsl. Здесь аргументы уходят в WSL как есть (`wsl --exec`, без
+# второй оболочки), а окружение собирается внутри:
+#   - scripts/local.env (машинные настройки, напр. CARGO_TARGET_DIR на другом диске);
+#   - ~/.cargo/bin и /usr/local/go/bin в PATH;
+#   - LD_LIBRARY_PATH до ygg/libygg (без него тесты messenger/engine не стартуют).
+# Каталог — корень проекта; `--cd <подкаталог>` первым аргументом — другой.
+# Уже внутри WSL скрипт просто готовит окружение и выполняет команду.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+if ! uname -r | grep -qi microsoft; then
+    # Git Bash: перезапуститься в WSL. MSYS_NO_PATHCONV — чтобы Git Bash не
+    # переписывал аргументы, похожие на пути.
+    MSYS_NO_PATHCONV=1 exec wsl.exe --cd "$(cygpath -w "$ROOT")" --exec bash scripts/w "$@"
+fi
+
+cd "$ROOT"
+if [ "${1:-}" = "--cd" ]; then
+    cd "$2"
+    shift 2
+fi
+[ -f "$ROOT/scripts/local.env" ] && . "$ROOT/scripts/local.env"
+export PATH="$HOME/.cargo/bin:/usr/local/go/bin:$PATH"
+export LD_LIBRARY_PATH="$ROOT/ygg/libygg:${LD_LIBRARY_PATH:-}"
+exec "$@"
