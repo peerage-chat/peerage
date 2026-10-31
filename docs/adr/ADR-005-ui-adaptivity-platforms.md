@@ -1,6 +1,7 @@
 # ADR-005: UI adaptivity and target platforms
 
-**Status:** Accepted — 2026-07-04 (v1.0 implements only Compact; the seams now, the
+**Status:** Accepted — 2026-07-04. **Amended 2026-11-01:** Medium and Expanded (landscape phone,
+tablet) are now **in v1.0** — see "Amendment" at the end. Original scope: (v1.0 implements only Compact; the seams now, the
 Medium/Expanded layouts and the desktop — additively later)
 **Date:** 2026-07-04
 **Decided by:** project owner
@@ -121,3 +122,13 @@ original question about the grid.
       `when(screen)` — no `NavController` stack). Hoisting the selection into a shared holder —
       when an ExpandedShell appears (the second consumer). *(checked 2026-07-04)*
 - [ ] After v1.0: implement the Medium/Expanded branches of the shell (additively).
+
+## Amendment (2026-11-01)
+
+**Decided by:** project owner, at the start of the whole-UI redesign
+([ui-redesign.md](../design/ui-redesign.md)).
+
+A phone turned to landscape is a small tablet, and the app must work properly there. So
+**Medium and Expanded are implemented before v1.0**, not after. Every screen of the
+redesign is designed in all three widths at once. The platform priorities, the seams and
+the breakpoints above stay as they are; only the "Compact only in v1.0" scope changes.
