@@ -1,3 +1,38 @@
 # Настройки cargo-mutants (scripts/mutants.sh).
 # sim.rs — модель сети для тестов, не код звонка: её мутанты проверяли бы сами тесты.
 exclude_globs = ["litertc/src/sim.rs"]
+
+# Принятые выжившие: равносильные мутанты или без видимого эффекта — разобраны в
+# docs/REVIEW.md (R-115). Без номеров строк: код сдвигается, имя «файл + замена +
+# функция» — нет. Где та же замена в функции встречается не раз — с колонкой (она
+# меняется, только если правят саму строку). Проверка: `cargo mutants --list` с
+# конфигом и `--no-config` — разница должна быть ровно этим списком. Новый выживший
+# сюда — только с объяснением, почему он безвреден.
+exclude_re = [
+    # Границы `<`/`<=`, `>`/`>=` на f64 и Instant: равенство на практике не встречается и ничего не меняет (R-115).
+    'litertc/src/bwe\.rs:\d+:\d+: replace < with <= in Group::in_burst$',
+    'litertc/src/bwe\.rs:\d+:21: replace > with >= in DelayDetector::update$',
+    'litertc/src/bwe\.rs:\d+:\d+: replace < with <= in DelayDetector::update$',
+    'litertc/src/bwe\.rs:\d+:\d+: replace > with >= in Bwe::on_feedback$',
+    'litertc/src/bwe\.rs:\d+:52: replace > with >= in Bwe::apply_probe$',
+    'litertc/src/bwe\.rs:\d+:\d+: replace < with <= in Bwe::count_loss$',
+    'litertc/src/bwe\.rs:\d+:\d+: replace < with <= in Bwe::update$',
+    'litertc/src/probe\.rs:\d+:\d+: replace > with >= in rates$',
+    'litertc/src/probe\.rs:\d+:\d+: replace < with <= in shown$',
+    'litertc/src/session\.rs:\d+:\d+: replace > with >= in jitter_estimate$',
+    'litertc/src/session\.rs:\d+:71: replace > with >= in VideoRx::push$',
+    'litertc/src/session\.rs:\d+:\d+: replace < with <= in VideoRx::consumer_behind$',
+    'litertc/src/session\.rs:\d+:\d+: replace > with >= in VideoRx::consumer_behind$',
+    'litertc/src/session\.rs:\d+:\d+: replace < with <= in Session<P>::retransmit$',
+    # Равенство без эффекта: при равных значениях обе ветки дают одно и то же (R-115).
+    'litertc/src/bwe\.rs:\d+:\d+: replace < with <= in DelayDetector::adapt_threshold$',
+    'litertc/src/stats\.rs:\d+:\d+: replace > with >= in RxStats::update$',
+    'litertc/src/stats\.rs:\d+:\d+: replace < with <= in RxStats::update$',
+    'litertc/src/wire\.rs:\d+:\d+: replace < with <= in parse_nack$',
+    'litertc/src/wire\.rs:\d+:\d+: replace < with <= in parse_transport_feedback$',
+    # Пустой журнал прихода и так ничего не даёт; экранный трек не используется (R-115).
+    'litertc/src/bwe\.rs:\d+:\d+: replace ArrivalLog::is_empty -> bool with false$',
+    'litertc/src/session\.rs:\d+:\d+: replace \+ with \*$',
+    # RTT в мс → в секундах для on_feedback: меняет только ритм сбросов (200 мс вместо 300), виден лишь через весь цикл обратной связи (R-115).
+    'litertc/src/session\.rs:\d+:57: replace \* with / in Session<P>::handle_datagram$',
+]
