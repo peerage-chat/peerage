@@ -45,3 +45,7 @@ identity.key
 # graphify: граф кода (пересобирается целиком) и локальные хуки Claude Code
 graphify-out/
 .claude/settings.local.json
+.claude/ub-log.md
+
+# APK из scripts/build-apk.sh
+peerage-*.apk
