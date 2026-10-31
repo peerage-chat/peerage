@@ -229,13 +229,12 @@ fn worst_audio_loss(s: &Session<PeerKey>) -> i32 {
     (worst * 100.0).ceil() as i32
 }
 
-/// Статистика по участникам — в лог, для разбора звонков.
-fn log_stats(s: &Session<PeerKey>) {
-    for p in s.peers() {
-        if let Some(st) = s.stats(p) {
-            log::info!("{}", stats_line(p, &st));
-        }
-    }
+/// Статистика по участникам — по строке на каждого, для разбора звонков по логу.
+fn stats_lines(s: &Session<PeerKey>) -> Vec<String> {
+    s.peers()
+        .iter()
+        .filter_map(|p| Some(stats_line(p, &s.stats(p)?)))
+        .collect()
 }
 
 /// Строка статистики участника `p`: потери, джиттер, RTT, полоса, сведение губ.
@@ -394,7 +393,9 @@ fn timer_loop(sh: Shared) {
         send_all(&sh.messenger, out);
         if now >= next_log {
             next_log = now + STATS_LOG_EVERY;
-            log_stats(&sh.session.lock_safe());
+            for line in stats_lines(&sh.session.lock_safe()) {
+                log::info!("{line}");
+            }
         }
         let wait = timer_wait(&sh.session.lock_safe(), Instant::now());
         wait_kick(&sh.kick, wait);
@@ -1089,5 +1090,18 @@ mod tests {
         assert_eq!(tx.bitrate, narrow);
         tx.apply_bitrate(16_000);
         assert_eq!(tx.bitrate, 16_000, "настройка ниже предела канала");
+    }
+
+    /// В лог — по строке на участника звонка.
+    #[test]
+    fn stats_are_logged_per_peer() {
+        let mut s = session(A);
+        s.set_peers(&[A, B]);
+        let lines = stats_lines(&s);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with("room-call 01010101:"), "{}", lines[0]);
+        assert!(lines[1].starts_with("room-call 02020202:"), "{}", lines[1]);
+        s.set_peers(&[]);
+        assert!(stats_lines(&s).is_empty());
     }
 }
