@@ -18,7 +18,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use litertc::{JitterOut, Session, Transmit, VideoFrame, VideoInfo};
 use peerage_core::settings::AudioSettings;
 use peerage_media::{AudioDecoder, AudioEncoder};
-use peerage_messenger::Messenger;
+use peerage_messenger::{MediaPacket, Messenger};
 use rand_core::{OsRng, RngCore};
 
 use crate::LockRecover;
@@ -327,21 +327,184 @@ fn send_all(messenger: &Messenger, out: Vec<Transmit<PeerKey>>) {
     }
 }
 
+/// Общее для потоков звонка и его методов.
+#[derive(Clone)]
+struct Shared {
+    running: Arc<AtomicBool>,
+    session: Arc<Mutex<Session<PeerKey>>>,
+    members: Arc<Mutex<Vec<PeerKey>>>,
+    messenger: Arc<Messenger>,
+    kick: Kick,
+    video_ready: Arc<VideoReady>,
+}
+
+impl Shared {
+    /// `f` над сессией (см. [`with_session`]); собрались новые кадры видео (`seen` —
+    /// сколько их было) — разбудить потребителей.
+    fn step(
+        &self,
+        seen: &mut u64,
+        f: impl FnOnce(&mut Session<PeerKey>),
+    ) -> Vec<Transmit<PeerKey>> {
+        let mut queued = *seen;
+        let out = with_session(&self.session, &self.members, |s| {
+            f(s);
+            queued = s.video_frames_queued();
+        });
+        if queued != *seen {
+            *seen = queued;
+            self.video_ready.notify();
+        }
+        out
+    }
+}
+
+/// Приём: датаграммы участников — в сессию; участников сверяет она же.
+fn rx_loop(sh: Shared, media_rx: Receiver<MediaPacket>) {
+    let mut seen = 0;
+    while sh.running.load(Ordering::Relaxed) {
+        match media_rx.recv_timeout(RX_WAIT) {
+            Ok(p) => {
+                let out = sh.step(&mut seen, |s| {
+                    s.handle_datagram(Instant::now(), p.src, &p.data)
+                });
+                send_all(&sh.messenger, out);
+                kick(&sh.kick);
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            // Канал отобрали (новый media_channel) — приёма больше не будет, а
+            // крутиться на мгновенно возвращающемся recv значит 100 % CPU.
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+/// Таймеры сессии и выпуск отложенного (видео ровным темпом), статистика в лог.
+fn timer_loop(sh: Shared) {
+    let mut next_log = Instant::now() + STATS_LOG_EVERY;
+    let mut seen = 0;
+    while sh.running.load(Ordering::Relaxed) {
+        let now = Instant::now();
+        // Кадр мог собраться и по таймеру (дождались недостающего).
+        let out = sh.step(&mut seen, |s| {
+            if s.poll_timeout().is_some_and(|t| t <= now) {
+                s.handle_timeout(now);
+            }
+        });
+        send_all(&sh.messenger, out);
+        if now >= next_log {
+            next_log = now + STATS_LOG_EVERY;
+            log_stats(&sh.session.lock_safe());
+        }
+        let wait = timer_wait(&sh.session.lock_safe(), Instant::now());
+        wait_kick(&sh.kick, wait);
+    }
+}
+
+/// Сколько потоку таймеров спать: до ближайшего таймера сессии, но не меньше
+/// миллисекунды (точнее выпуск не нужен, а нулевой сон — это кручение, если таймер
+/// почему-то не снялся) и не больше [`RX_WAIT`] (проверить, идёт ли звонок).
+fn timer_wait(s: &Session<PeerKey>, now: Instant) -> Duration {
+    s.poll_timeout()
+        .map_or(RX_WAIT, |t| t.saturating_duration_since(now))
+        .clamp(Duration::from_millis(1), RX_WAIT)
+}
+
+/// Кодер звука и его битрейт: настройка пользователя, но не больше, чем позволяет
+/// канал.
+struct AudioTx {
+    enc: AudioEncoder,
+    /// Битрейт, выставленный кодеру.
+    bitrate: i32,
+    /// Предел канала: [`audio_bitrate`] от оценки полосы.
+    channel: i32,
+    /// Кадров с прошлой сверки с каналом.
+    frames: u32,
+}
+
+impl AudioTx {
+    fn new(enc: AudioEncoder, bitrate: i32) -> Self {
+        AudioTx {
+            enc,
+            bitrate,
+            channel: bitrate,
+            frames: 0,
+        }
+    }
+
+    /// Ещё кадр; раз в [`LOSS_CHECK_FRAMES`] — сверка с каналом: FEC под худшие
+    /// потери, предел битрейта по оценке полосы.
+    fn follow_channel(&mut self, session: &Mutex<Session<PeerKey>>) {
+        self.frames += 1;
+        if self.frames < LOSS_CHECK_FRAMES {
+            return;
+        }
+        self.frames = 0;
+        let s = session.lock_safe();
+        self.enc.set_expected_loss(worst_audio_loss(&s));
+        self.channel = audio_bitrate(s.target_bitrate(), i32::MAX);
+    }
+
+    /// Битрейт из настроек `user` (меняются на лету), но не выше предела канала.
+    fn apply_bitrate(&mut self, user: i32) {
+        let want = user.min(self.channel);
+        if want != self.bitrate {
+            self.enc.set_bitrate(want);
+            self.bitrate = want;
+        }
+    }
+}
+
+/// Отправка: PCM с микрофона → Opus → сессия → участникам. Спит до кадра; конец
+/// звонка будит сразу (halt → close).
+fn send_loop(
+    sh: Shared,
+    mic: Arc<MicQueue>,
+    muted: Arc<AtomicBool>,
+    target_bitrate: Arc<AtomicI32>,
+    audio: AudioSettings,
+) {
+    let Ok(enc) = AudioEncoder::new(audio) else {
+        return;
+    };
+    let mut tx = AudioTx::new(enc, audio.bitrate);
+    let mut frame = vec![0i16; audio.interleaved_len()];
+    while sh.running.load(Ordering::Relaxed) {
+        let Some(captured) = mic.next_frame(&mut frame, MIC_WAIT) else {
+            continue;
+        };
+        tx.follow_channel(&sh.session);
+        tx.apply_bitrate(target_bitrate.load(Ordering::Relaxed));
+        // Не отправленный кадр (микрофон выключен) номер не тратит, а метка
+        // следующего — по времени его захвата.
+        if muted.load(Ordering::Relaxed) {
+            continue;
+        }
+        let Ok(pkt) = tx.enc.encode(&frame) else {
+            continue;
+        };
+        if !sh.running.load(Ordering::Relaxed) {
+            break;
+        }
+        let out = with_session(&sh.session, &sh.members, |s| {
+            s.send_audio(Instant::now(), captured, &pkt)
+        });
+        send_all(&sh.messenger, out);
+        kick(&sh.kick);
+    }
+}
+
 /// Активный мультипати звонок комнаты.
 pub struct RoomCallEngine {
-    running: Arc<AtomicBool>,
+    sh: Shared,
     muted: Arc<AtomicBool>,
     mic: Arc<MicQueue>,
-    video_ready: Arc<VideoReady>,
     frame_len: usize,
     audio: AudioSettings,
-    session: Arc<Mutex<Session<PeerKey>>>,
     /// Декодеры звука по участникам; трогает только [`Self::pull_audio`].
     decoders: Mutex<HashMap<PeerKey, Decoder>>,
     /// Смешанный PCM, ещё не отданный потребителю.
     mix_carry: Mutex<VecDeque<i16>>,
-    messenger: Arc<Messenger>,
-    members: Arc<Mutex<Vec<PeerKey>>>,
     /// Уровень речи на участника (0..1, сглажен): attack мгновенный, decay плавный.
     /// Считается в [`pull_audio`] по RMS кадра источника. Для active-speaker рамки.
     levels: Mutex<HashMap<PeerKey, f32>>,
@@ -349,7 +512,6 @@ pub struct RoomCallEngine {
     /// к энкодеру без пересоздания сессии (чтобы не было дыры в звуке). На узком
     /// канале звук получает меньше ([`audio_bitrate`]).
     target_bitrate: Arc<AtomicI32>,
-    kick: Kick,
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -359,179 +521,53 @@ impl RoomCallEngine {
         audio: AudioSettings,
         members: Arc<Mutex<Vec<PeerKey>>>,
     ) -> Arc<RoomCallEngine> {
-        let running = Arc::new(AtomicBool::new(true));
-        let muted = Arc::new(AtomicBool::new(false));
         // Сэмплов (всех каналов) в секунду — для момента захвата кадра; держим до
         // секунды несработанного.
         let pcm_rate = audio.sample_rate as f64 * audio.channels.max(1) as f64;
         let mic = Arc::new(MicQueue::new(audio.interleaved_len() * 50, pcm_rate));
-        let video_ready = Arc::new(VideoReady::default());
-        let frame_len = audio.interleaved_len();
-        let session = Arc::new(Mutex::new(Session::new(litertc::Config {
-            audio_clock_hz: audio.sample_rate,
-            audio_frame_samples: audio.frame_samples() as u32,
-            jitter_depth: audio.jitter_depth,
-            // Новый на каждый звонок: так собеседник отличит наш перезаход от
-            // опоздавших пакетов прошлого раза.
-            stream_id: OsRng.next_u32(),
-        })));
-        let mut threads = Vec::new();
-
-        let media_rx = messenger.media_channel(2048);
-        let kick_: Kick = Arc::new((Mutex::new(false), Condvar::new()));
-
-        // --- Приём: датаграммы в сессию; участников сверяет она же ---
-        {
-            let running = running.clone();
-            let session = session.clone();
-            let members = members.clone();
-            let msgr = messenger.clone();
-            let k = kick_.clone();
-            let video_ready = video_ready.clone();
-            threads.push(thread::spawn(move || {
-                let mut seen = 0;
-                while running.load(Ordering::Relaxed) {
-                    match media_rx.recv_timeout(RX_WAIT) {
-                        Ok(p) => {
-                            let mut queued = seen;
-                            let out = with_session(&session, &members, |s| {
-                                s.handle_datagram(Instant::now(), p.src, &p.data);
-                                queued = s.video_frames_queued();
-                            });
-                            if queued != seen {
-                                seen = queued;
-                                video_ready.notify();
-                            }
-                            send_all(&msgr, out);
-                            kick(&k);
-                        }
-                        Err(RecvTimeoutError::Timeout) => {}
-                        // Канал отобрали (новый media_channel) — приёма больше не будет,
-                        // а крутиться на мгновенно возвращающемся recv значит 100 % CPU.
-                        Err(RecvTimeoutError::Disconnected) => break,
-                    }
-                }
-            }));
-        }
-
-        // --- Таймеры сессии и выпуск отложенного (видео ровным темпом) ---
-        {
-            let running = running.clone();
-            let session = session.clone();
-            let members = members.clone();
-            let msgr = messenger.clone();
-            let k = kick_.clone();
-            let video_ready = video_ready.clone();
-            threads.push(thread::spawn(move || {
-                let mut next_log = Instant::now() + STATS_LOG_EVERY;
-                let mut seen = 0;
-                while running.load(Ordering::Relaxed) {
-                    let now = Instant::now();
-                    let mut queued = seen;
-                    let out = with_session(&session, &members, |s| {
-                        if s.poll_timeout().is_some_and(|t| t <= now) {
-                            s.handle_timeout(now);
-                        }
-                        queued = s.video_frames_queued();
-                    });
-                    // Кадр мог собраться и по таймеру (дождались недостающего).
-                    if queued != seen {
-                        seen = queued;
-                        video_ready.notify();
-                    }
-                    send_all(&msgr, out);
-                    if now >= next_log {
-                        next_log = now + STATS_LOG_EVERY;
-                        log_stats(&session.lock_safe());
-                    }
-                    // Не меньше миллисекунды: точнее выпуск не нужен, а нулевой сон —
-                    // это кручение, если таймер почему-то не снялся.
-                    let wait = session
-                        .lock_safe()
-                        .poll_timeout()
-                        .map_or(RX_WAIT, |t| t.saturating_duration_since(Instant::now()))
-                        .clamp(Duration::from_millis(1), RX_WAIT);
-                    wait_kick(&k, wait);
-                }
-            }));
-        }
-
+        let muted = Arc::new(AtomicBool::new(false));
         let target_bitrate = Arc::new(AtomicI32::new(audio.bitrate));
-
-        // --- Отправка: PCM из Kotlin → Opus → сессия → участникам ---
-        {
-            let running = running.clone();
-            let muted = muted.clone();
-            let mic = mic.clone();
-            let session = session.clone();
-            let members = members.clone();
-            let msgr = messenger.clone();
-            let target_bitrate = target_bitrate.clone();
-            let k = kick_.clone();
-            threads.push(thread::spawn(move || {
-                let mut enc = match AudioEncoder::new(audio) {
-                    Ok(e) => e,
-                    Err(_) => return,
-                };
-                let mut cur_bitrate = audio.bitrate;
-                let mut channel_bitrate = audio.bitrate;
-                let mut frame = vec![0i16; frame_len];
-                let mut frames_since_loss_check = 0u32;
-                while running.load(Ordering::Relaxed) {
-                    // Спим до кадра; конец звонка будит сразу (halt → close).
-                    let Some(captured) = mic.next_frame(&mut frame, MIC_WAIT) else {
-                        continue;
-                    };
-                    frames_since_loss_check += 1;
-                    if frames_since_loss_check >= LOSS_CHECK_FRAMES {
-                        frames_since_loss_check = 0;
-                        let s = session.lock_safe();
-                        enc.set_expected_loss(worst_audio_loss(&s));
-                        channel_bitrate = audio_bitrate(s.target_bitrate(), i32::MAX);
-                    }
-                    // Битрейт — из настроек звука (меняются на лету), но не больше, чем
-                    // позволяет канал.
-                    let want = target_bitrate.load(Ordering::Relaxed).min(channel_bitrate);
-                    if want != cur_bitrate {
-                        enc.set_bitrate(want);
-                        cur_bitrate = want;
-                    }
-                    let pkt = if muted.load(Ordering::Relaxed) {
-                        None
-                    } else {
-                        enc.encode(&frame).ok()
-                    };
-                    // Не отправленный кадр (микрофон выключен) номер не тратит, а
-                    // метка следующего — по времени его захвата.
-                    if let Some(pkt) = pkt {
-                        if !running.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        let out = with_session(&session, &members, |s| {
-                            s.send_audio(Instant::now(), captured, &pkt)
-                        });
-                        send_all(&msgr, out);
-                        kick(&k);
-                    }
-                }
-            }));
-        }
-
+        let media_rx = messenger.media_channel(2048);
+        let sh = Shared {
+            running: Arc::new(AtomicBool::new(true)),
+            session: Arc::new(Mutex::new(Session::new(litertc::Config {
+                audio_clock_hz: audio.sample_rate,
+                audio_frame_samples: audio.frame_samples() as u32,
+                jitter_depth: audio.jitter_depth,
+                // Новый на каждый звонок: так собеседник отличит наш перезаход от
+                // опоздавших пакетов прошлого раза.
+                stream_id: OsRng.next_u32(),
+            }))),
+            members,
+            messenger,
+            kick: Arc::new((Mutex::new(false), Condvar::new())),
+            video_ready: Arc::new(VideoReady::default()),
+        };
+        let threads = vec![
+            {
+                let sh = sh.clone();
+                thread::spawn(move || rx_loop(sh, media_rx))
+            },
+            {
+                let sh = sh.clone();
+                thread::spawn(move || timer_loop(sh))
+            },
+            {
+                let (sh, mic, muted) = (sh.clone(), mic.clone(), muted.clone());
+                let target_bitrate = target_bitrate.clone();
+                thread::spawn(move || send_loop(sh, mic, muted, target_bitrate, audio))
+            },
+        ];
         Arc::new(RoomCallEngine {
-            running,
+            sh,
             muted,
             mic,
-            video_ready,
-            frame_len,
+            frame_len: audio.interleaved_len(),
             audio,
-            session,
             decoders: Mutex::new(HashMap::new()),
             mix_carry: Mutex::new(VecDeque::new()),
-            messenger,
-            members,
             levels: Mutex::new(HashMap::new()),
             target_bitrate,
-            kick: kick_,
             threads: Mutex::new(threads),
         })
     }
@@ -540,7 +576,8 @@ impl RoomCallEngine {
     /// поднимается выше него вместе со звуком.
     pub fn set_video_max_bitrate(&self, bps: u32) {
         let audio = self.target_bitrate.load(Ordering::Relaxed).max(0) as u32;
-        self.session
+        self.sh
+            .session
             .lock_safe()
             .set_bitrate_bounds(MIN_BITRATE, bps.saturating_add(audio));
     }
@@ -548,7 +585,7 @@ impl RoomCallEngine {
     /// Сколько сейчас отдать видео-кодеру, бит/с: оценка полосы до самого слабого
     /// участника за вычетом звука и заголовков его пакетов.
     pub fn video_target_bitrate(&self) -> u32 {
-        let total = self.session.lock_safe().target_bitrate();
+        let total = self.sh.session.lock_safe().target_bitrate();
         let user = self.target_bitrate.load(Ordering::Relaxed);
         // ~50 пакетов звука в секунду по 14 байт заголовка LiteRTC — около 6 кбит/с.
         let audio = audio_bitrate(total, user).max(0) as u32 + 6_000;
@@ -560,14 +597,14 @@ impl RoomCallEngine {
     /// кодер выдаст его следующим.
     pub fn push_video(&self, frame: &[u8], info: VideoInfo, age: Duration) -> bool {
         let mut wanted = false;
-        let out = with_session(&self.session, &self.members, |s| {
+        let out = with_session(&self.sh.session, &self.sh.members, |s| {
             let now = Instant::now();
             s.send_video(now, now.checked_sub(age).unwrap_or(now), frame, info);
             wanted = s.take_keyframe_request();
         });
-        send_all(&self.messenger, out);
+        send_all(&self.sh.messenger, out);
         // Остаток кадра выйдет ровным темпом — его выпустит поток таймеров.
-        kick(&self.kick);
+        kick(&self.sh.kick);
         wanted
     }
 
@@ -575,22 +612,31 @@ impl RoomCallEngine {
     /// расписывает сроки по меткам захвата (`VideoFrame::play_at`).
     /// Ждёт не дольше `wait`: декодеру без кадров незачем крутиться.
     pub fn pull_video_for(&self, peer: &PeerKey, wait: Duration) -> Option<VideoFrame> {
-        wait_video(&self.session, &self.video_ready, &self.running, peer, wait)
+        wait_video(
+            &self.sh.session,
+            &self.sh.video_ready,
+            &self.sh.running,
+            peer,
+            wait,
+        )
     }
 
     /// Сколько кадр участника идёт через наш видео-декодер (срок → экран): звук
     /// ждёт видео с учётом этого.
     pub fn set_video_render_delay(&self, peer: &PeerKey, delay: Duration) {
-        self.session.lock_safe().set_video_render_delay(peer, delay);
+        self.sh
+            .session
+            .lock_safe()
+            .set_video_render_delay(peer, delay);
     }
 
     /// Декодер видео участника начат заново — ему нужен ключевой кадр.
     pub fn request_keyframe(&self, peer: &PeerKey) {
-        let out = with_session(&self.session, &self.members, |s| {
+        let out = with_session(&self.sh.session, &self.sh.members, |s| {
             s.request_keyframe(Instant::now(), peer)
         });
-        send_all(&self.messenger, out);
-        kick(&self.kick);
+        send_all(&self.sh.messenger, out);
+        kick(&self.sh.kick);
     }
 
     /// Захваченный PCM с микрофона → в очередь отправки; последний сэмпл записан
@@ -604,7 +650,7 @@ impl RoomCallEngine {
     /// замок сессии держим коротко) и текущий список участников. Кадр будет
     /// слышен в `heard_at`.
     fn pull_frames(&self, heard_at: Instant) -> (Vec<PeerKey>, Vec<(PeerKey, JitterOut)>) {
-        let mut s = self.session.lock_safe();
+        let mut s = self.sh.session.lock_safe();
         let peers = s.peers().to_vec();
         let frames = peers
             .iter()
@@ -697,7 +743,7 @@ impl RoomCallEngine {
     /// Накопленные байты трафика: {hex_участника: rx_всего, "self": tx_всего}. Клиент
     /// считает скорость (kbps) по дельте между опросами. Для тех-инфо чипа.
     pub fn traffic_json(&self) -> String {
-        let s = self.session.lock_safe();
+        let s = self.sh.session.lock_safe();
         let mut m: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
         for p in s.peers() {
             if let Some(st) = s.stats(p) {
@@ -719,13 +765,13 @@ impl RoomCallEngine {
     /// «положить трубку» — оно не стоит ни в какой очереди за входящим трафиком
     /// (класс Signal RingRTC CVE-2026-113380). Дождаться потоков — [`stop`].
     pub fn halt(&self) {
-        self.running.store(false, Ordering::Relaxed);
-        self.members.lock_safe().clear();
+        self.sh.running.store(false, Ordering::Relaxed);
+        self.sh.members.lock_safe().clear();
         self.mic.close();
-        self.video_ready.notify();
+        self.sh.video_ready.notify();
         // Неотправленное тоже никому: сессия без участников выбрасывает свою очередь.
-        self.session.lock_safe().set_peers(&[]);
-        kick(&self.kick);
+        self.sh.session.lock_safe().set_peers(&[]);
+        kick(&self.sh.kick);
     }
 
     pub fn stop(&self) {
@@ -1003,5 +1049,45 @@ mod tests {
         });
         assert!(fec.is_some(), "из FEC следующего");
         assert!(d.decode(JitterOut::Hold).is_some(), "счёт сброшен");
+    }
+
+    /// Таймер сессии через 50 мс — спать 50; уже прошёл — миллисекунду, не ноль;
+    /// таймеров нет или далеко — не дольше RX_WAIT.
+    #[test]
+    fn timer_sleeps_until_the_session_timer_within_limits() {
+        let mut s = session(A);
+        let now = Instant::now();
+        assert_eq!(timer_wait(&s, now), RX_WAIT, "нет ни одного таймера");
+        s.handle_timeout(now);
+        let due = s.poll_timeout().unwrap();
+        let wait = timer_wait(&s, due - Duration::from_millis(50));
+        assert_eq!(wait, Duration::from_millis(50).min(RX_WAIT));
+        assert_eq!(
+            timer_wait(&s, due + Duration::from_secs(1)),
+            Duration::from_millis(1)
+        );
+        assert_eq!(timer_wait(&s, due - Duration::from_secs(5)), RX_WAIT);
+    }
+
+    /// Битрейт звука — из настроек, но раз в секунду (50 кадров) сверяется с каналом:
+    /// на узком — четверть оценки полосы.
+    #[test]
+    fn audio_bitrate_follows_the_channel_once_a_second() {
+        let audio = AudioSettings::default();
+        let mut tx = AudioTx::new(AudioEncoder::new(audio).unwrap(), audio.bitrate);
+        let s = Mutex::new(session(A));
+        s.lock_safe().set_bitrate_bounds(100_000, 100_000);
+        let narrow = (s.lock_safe().target_bitrate() / 4) as i32;
+        assert!(narrow < audio.bitrate);
+        for _ in 1..LOSS_CHECK_FRAMES {
+            tx.follow_channel(&s);
+        }
+        tx.apply_bitrate(audio.bitrate);
+        assert_eq!(tx.bitrate, audio.bitrate, "ещё не сверялся");
+        tx.follow_channel(&s);
+        tx.apply_bitrate(audio.bitrate);
+        assert_eq!(tx.bitrate, narrow);
+        tx.apply_bitrate(16_000);
+        assert_eq!(tx.bitrate, 16_000, "настройка ниже предела канала");
     }
 }
