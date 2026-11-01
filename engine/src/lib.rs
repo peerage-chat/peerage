@@ -2991,7 +2991,10 @@ fn event_pump(
         blobs::BlobManager::new(messenger.clone(), peerage_blob::Limits::default(), blob_dir);
     engine.resume_all_wanted(); // докачки, начатые до перезапуска
     refresh_group_cache(&engine, &groups); // прайм кэша
+                                           // Клиент читает оба списка до прайма — объявляем оба. Без второго сохранённое
+                                           // приглашение (в т. ч. принятое, ждущее пригласившего) не появлялось после перезапуска.
     push_event(&engine, dto::UiEvent::GroupsChanged);
+    push_event(&engine, dto::UiEvent::GroupInvitesChanged);
     let mut last_beacon = Instant::now();
     // Один поток подготовки — вложения уходят в группу в том порядке, в каком их
     // отправили.

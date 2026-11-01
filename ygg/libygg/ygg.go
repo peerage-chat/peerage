@@ -266,13 +266,21 @@ func ygg_listen(h C.uint64_t, uri *C.char, out *C.char, outCap C.int) C.int {
 }
 
 //export ygg_peer_count
-// Число активных пиров (прямых соединений).
+// Число активных пиров — только поднятых соединений. GetPeers отдаёт и настроенные
+// пиры, до которых сейчас не достучаться (Up=false): без сети их было бы «8 узлов»,
+// и статус «нет соединения» не показался бы никогда.
 func ygg_peer_count(h C.uint64_t) C.int {
 	n := get(h)
 	if n == nil {
 		return -1
 	}
-	return C.int(len(n.core.GetPeers()))
+	up := 0
+	for _, p := range n.core.GetPeers() {
+		if p.Up {
+			up++
+		}
+	}
+	return C.int(up)
 }
 
 //export ygg_peers_json

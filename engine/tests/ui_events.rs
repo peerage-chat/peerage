@@ -183,3 +183,50 @@ fn group_message_arrives_as_a_row_with_id() {
     a.shutdown();
     b.shutdown();
 }
+
+/// Сохранённое приглашение после перезапуска объявляется событием: клиент читает список
+/// приглашений по `group_invites_changed`, а кэш наполняет актор уже после старта. Без
+/// события принятое и ждущее пригласившего приглашение пропадало с экрана до следующего
+/// изменения — а при офлайн-пригласившем его не было.
+#[test]
+fn saved_invite_is_announced_after_restart() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(75), id(76));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let b_dir = tmpdir("inv-b");
+    let a = start(&net, a_id, tmpdir("inv-a"));
+    let b = start(&net, b_id, b_dir.clone());
+    a.add_contact(&b_key, "A-side B");
+    b.add_contact(&a_key, "A");
+
+    assert!(a.group_create("дача"));
+    assert!(wait(15, || json(&a.group_list_json())
+        .as_array()
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)));
+    let gid_hex = json(&a.group_list_json())[0]["gid"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    a.group_invite(hex::decode(&gid_hex).unwrap(), b_key);
+    assert!(wait(15, || b.group_invites_json().contains(&gid_hex)));
+    a.shutdown();
+    b.shutdown();
+    drop(b);
+
+    // Та же личность (семя детерминировано) и тот же каталог — перезапуск.
+    let b = start(&net, id(76), b_dir);
+    let mut announced = false;
+    assert!(
+        wait(15, || {
+            while let Some(js) = b.poll_event() {
+                if json(&js)["type"] == "group_invites_changed" {
+                    announced = true;
+                }
+            }
+            announced && b.group_invites_json().contains(&gid_hex)
+        }),
+        "после перезапуска приглашение объявлено событием и видно в списке"
+    );
+    b.shutdown();
+}
