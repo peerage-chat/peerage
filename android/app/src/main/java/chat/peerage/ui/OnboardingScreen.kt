@@ -370,7 +370,7 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
         ) {
             Box(
                 // Свой аватар — круг: человек, как и везде в приложении.
-                Modifier.size(96.dp).clip(CircleShape).background(Tokens.Colors.avatar),
+                Modifier.size(96.dp).clip(CircleShape).background(Tokens.Colors.avatar).imageOutline(CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 val av = model.selfAvatar

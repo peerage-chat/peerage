@@ -248,7 +248,8 @@ private fun CameraTile(onClick: () -> Unit) {
 private fun GalleryTile(g: GalleryItem, pickedAt: Int, onClick: () -> Unit) {
     val bmp = rememberThumb(g)
     Box(
-        Modifier.fillMaxWidth().aspectRatio(1f).background(Tokens.Colors.avatar).clickable { onClick() },
+        Modifier.fillMaxWidth().aspectRatio(1f).background(Tokens.Colors.avatar)
+            .imageOutline(androidx.compose.ui.graphics.RectangleShape).clickable { onClick() },
     ) {
         if (bmp != null) {
             Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)

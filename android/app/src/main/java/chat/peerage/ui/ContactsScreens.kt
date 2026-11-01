@@ -581,12 +581,14 @@ private fun BackupStripView(model: AppModel, nav: HomeNav) {
 /** Пилюля полосы: видимая высота 36, зона касания — 48. */
 @Composable
 private fun StripPill(text: String, bg: Color, fg: Color, onClick: () -> Unit) {
+    val press = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Box(
         Modifier.minimumInteractiveComponentSize()
+            .pressScale(press)
             .heightIn(min = Tokens.Size.pill)
             .clip(RoundedCornerShape(Tokens.Radius.pill))
             .background(bg)
-            .clickable(role = Role.Button) { onClick() }
+            .clickable(interactionSource = press, indication = null, role = Role.Button) { onClick() }
             .padding(horizontal = Tokens.Space.m + Tokens.Space.xxs),
         contentAlignment = Alignment.Center,
     ) {

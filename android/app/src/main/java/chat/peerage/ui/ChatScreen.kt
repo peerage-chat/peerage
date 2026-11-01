@@ -809,14 +809,19 @@ internal fun MessageInput(
                 contentAlignment = Alignment.Center,
             ) {
                 val send = hasText || hasPicked
-                Crossfade(send, animationSpec = tween(Tokens.Anim.fast), label = "send") { s ->
-                    Icon(
-                        if (s) Icons.AutoMirrored.Filled.Send else Icons.Filled.Mic,
-                        stringResource(if (s) R.string.common_send else R.string.chat_voice),
-                        tint = if (recording) Color.White else HoloAccentDark,
-                        modifier = Modifier.size(Tokens.Size.iconM),
-                    )
-                }
+                val tint = if (recording) Color.White else HoloAccentDark
+                SwapIcon(
+                    send,
+                    { Icon(Icons.Filled.Mic, stringResource(R.string.chat_voice), tint = tint, modifier = Modifier.size(Tokens.Size.iconM)) },
+                    {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            stringResource(R.string.common_send),
+                            tint = tint,
+                            modifier = Modifier.size(Tokens.Size.iconM),
+                        )
+                    },
+                )
                 // Счётчик того, сколько файлов уйдёт этим нажатием.
                 if (hasPicked) {
                     Text(
@@ -992,10 +997,11 @@ internal fun MessageBubble(
                     if (photoBubble) Modifier else Modifier.background(if (m.mine) BubbleOut else BubbleIn),
                 )
                 .then(
-                    if (selected) {
-                        Modifier.border(1.dp, HoloAccent, bubbleShape(m.mine, pos))
-                    } else {
-                        Modifier
+                    when {
+                        selected -> Modifier.border(1.dp, HoloAccent, bubbleShape(m.mine, pos))
+                        // Фото без подписи — само себе пузырь: обводка картинки по его форме.
+                        photoBubble -> Modifier.imageOutline(bubbleShape(m.mine, pos))
+                        else -> Modifier
                     },
                 )
                 // Длинный тап — вход в режим выделения; в режиме короткий тап
@@ -1190,7 +1196,7 @@ internal fun ImageAttachment(
     // нельзя — палец всегда попадал в картинку, а не в поля пузыря.
     Box(
         Modifier.size(if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble)
-            .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface))
+            .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface).imageOutline(RoundedCornerShape(Tokens.Radius.chip)))
             .combinedClickable(
                 enabled = bmp != null,
                 onClick = onOpen,
@@ -1228,7 +1234,7 @@ internal fun VideoAttachment(
     val frame = rememberBitmap(thumb, cacheKey, side)
     Box(
         Modifier.size(if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble)
-            .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)))
+            .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).imageOutline(RoundedCornerShape(Tokens.Radius.chip)))
             .background(Color.Black)
             .combinedClickable(
                 enabled = ready,
@@ -1441,7 +1447,7 @@ internal fun PendingAttachmentCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(48.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.thumbScrim),
+            Modifier.size(48.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.thumbScrim).imageOutline(RoundedCornerShape(Tokens.Radius.chip)),
             contentAlignment = Alignment.Center,
         ) {
             val bmp = rememberBitmap(thumb, thumbId, 48.dp)

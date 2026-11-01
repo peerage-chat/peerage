@@ -28,6 +28,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -67,10 +68,12 @@ import kotlin.math.abs
  */
 @Composable
 internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Colors.iconBar, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
     Box(
         Modifier.size(Tokens.Size.touch)
+            .pressScale(press)
             .clip(RoundedCornerShape(Tokens.Radius.button))
-            .clickable(role = Role.Button, onClickLabel = desc) { onClick() },
+            .clickable(interactionSource = press, indication = null, role = Role.Button, onClickLabel = desc) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -207,7 +210,8 @@ internal fun SquareAvatar(
     }
     Box(Modifier.size(size), contentAlignment = Alignment.BottomEnd) {
         Box(
-            Modifier.size(size).clip(shape).background(bg ?: avatarColor(name)),
+            Modifier.size(size).clip(shape).background(bg ?: avatarColor(name))
+                .then(if (bmp != null) Modifier.imageOutline(shape) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
             when {
@@ -439,12 +443,14 @@ internal fun OptionChip(
 
 @Composable
 internal fun AccentButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
     Button(
         onClick = onClick,
         enabled = enabled,
+        interactionSource = press,
         // Высота как у поля ввода: на material-умолчании (~33dp) радиус 14 съедает
         // почти всю сторону, и кнопка читается капсулой, а не нашей плашкой.
-        modifier = modifier.heightIn(min = Tokens.Size.inputField),
+        modifier = modifier.pressScale(press).heightIn(min = Tokens.Size.inputField),
         shape = RoundedCornerShape(Tokens.Radius.button),
         // Неактивная — плашкой с приглушённым текстом: тёмный текст акцента на material-сером
         // не читается вовсе.
@@ -512,10 +518,12 @@ internal fun SheetHandle() {
 /** Кнопка без подложки: второстепенное действие под главной («Отклонить», «Заблокировать»). */
 @Composable
 internal fun GhostButton(text: String, color: Color = Tokens.Colors.accent, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
     Box(
         modifier.heightIn(min = Tokens.Size.touch)
+            .pressScale(press)
             .clip(RoundedCornerShape(Tokens.Radius.button))
-            .clickable(role = Role.Button) { onClick() }
+            .clickable(interactionSource = press, indication = null, role = Role.Button) { onClick() }
             .padding(horizontal = Tokens.Space.l),
         contentAlignment = Alignment.Center,
     ) {
@@ -537,13 +545,8 @@ internal fun PlateButton(
 ) {
     val fg = if (danger) Tokens.Colors.iconDangerMuted else Color.White
     val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) PressScale else 1f, tween(Tokens.Anim.fast), label = "press")
     Row(
-        modifier.graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-        }
+        modifier.pressScale(press)
             .heightIn(min = Tokens.Size.touch)
             .clip(RoundedCornerShape(Tokens.Radius.button))
             .background(if (danger) Tokens.Colors.dangerPlate else Tokens.Colors.raised)
@@ -559,6 +562,24 @@ internal fun PlateButton(
 
 /** Сжатие кнопки под пальцем: заметно, но не «проваливается» (меньше 0.95 — уже утрировано). */
 internal const val PressScale = 0.96f
+
+/**
+ * Нажатие — масштаб 0.96 (app-ui.md → «Отделка»): кнопки, плитки, пилюли. Не строки (там
+ * подсветка) и не пузыри. [source] — тот же, что у `clickable`, иначе нажатия не видно.
+ */
+@Composable
+internal fun Modifier.pressScale(source: MutableInteractionSource): Modifier {
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) PressScale else 1f, tween(Tokens.Anim.fast), label = "press")
+    return graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
+
+/** Обводка картинки — 1 px белым 10 % по её форме: фото не сливается с тёмным фоном. */
+internal fun Modifier.imageOutline(shape: androidx.compose.ui.graphics.Shape): Modifier =
+    border(1.dp, Tokens.Colors.imageEdge, shape)
 
 /**
  * Второстепенная кнопка: та же форма и высота, что у [AccentButton], но контуром.
@@ -1098,10 +1119,12 @@ internal fun UndoSnackbar(slot: UndoSlot, modifier: Modifier = Modifier) {
             Text("$secs", color = Color.White, fontSize = Tokens.Font.caption, style = Tokens.Text.meta)
         }
         Text(u.text, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
+        val press = remember { MutableInteractionSource() }
         Box(
             Modifier.heightIn(min = Tokens.Size.suggest)
+                .pressScale(press)
                 .clip(RoundedCornerShape(Tokens.Radius.button))
-                .clickable(role = Role.Button) { slot.undo() }
+                .clickable(interactionSource = press, indication = null, role = Role.Button) { slot.undo() }
                 .padding(horizontal = Tokens.Space.m),
             contentAlignment = Alignment.Center,
         ) {
@@ -1203,4 +1226,36 @@ private class AnchorEndPosition(private val margin: Int) : androidx.compose.ui.w
         val maxY = (windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin)
         return androidx.compose.ui.unit.IntOffset(x, y.coerceIn(margin, maxY))
     }
+}
+
+/**
+ * Иконка, меняющая смысл на месте (микрофон ↔ отправить, app-ui.md → «Движение»): обе в
+ * дереве, уходящая гаснет и сжимается к 0.25 с размытием 4 dp, приходящая — наоборот;
+ * пружина без отскока. Размытие — с Android 12, раньше только прозрачность и масштаб.
+ */
+@Composable
+internal fun SwapIcon(second: Boolean, first: @Composable () -> Unit, other: @Composable () -> Unit) {
+    val p by animateFloatAsState(
+        if (second) 1f else 0f,
+        androidx.compose.animation.core.spring(dampingRatio = 1f),
+        label = "swap",
+    )
+    Box(contentAlignment = Alignment.Center) {
+        SwapLayer(1f - p, first)
+        SwapLayer(p, other)
+    }
+}
+
+@Composable
+private fun SwapLayer(shown: Float, content: @Composable () -> Unit) {
+    if (shown <= 0.001f) return
+    Box(
+        Modifier.graphicsLayer {
+            alpha = shown
+            val s = 0.25f + 0.75f * shown
+            scaleX = s
+            scaleY = s
+        }.blur(Tokens.Size.swapBlur * (1f - shown), androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded),
+        contentAlignment = Alignment.Center,
+    ) { content() }
 }
