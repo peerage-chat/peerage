@@ -22,6 +22,7 @@ CSS += """.thumb{width:76px;height:76px;border-radius:14px;flex:none}
 .badge{position:absolute;right:-2px;bottom:-2px;width:20px;height:20px;border-radius:6px;background:#33B5E5;border:2px solid #2A2B31;box-sizing:border-box}
 """
 
+SCAN_PLUS = '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"></path><path d="M12 8v8M8 12h8"></path>'
 WARN = '<path d="M12 4l9 16H3z"></path><path d="M12 10v4M12 17h.01"></path>'
 LINK = '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"></path><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"></path>'
 
@@ -65,6 +66,29 @@ sys_sheet = page("Системное меню «Поделиться»", '<div s
                            for t in ["Peerage", "Почта", "Диск", "Ещё"])
                  + '</div></div>')
 
+
+# ---------- 2б. Настройка: чаты в системном меню ----------
+SHARE_I = SHARE
+toggle = page("Настройка: чаты в системном меню", hdr("Конфиденциальность") + body(
+    '<div class="sec">Система</div><div class="grp">'
+    + grow(SHARE_I, "Чаты в меню «Поделиться»", "Последние чаты видны в системном меню вне приложения", '<span class="tg"><i></i></span>')
+    + '</div>'
+    + '<div class="cap" style="margin-top:8px;">Выключено: имена и фото чатов не передаются системе. Отправить в Peerage можно и так — через значок приложения в меню.</div>'
+    + FILL))
+
+# ---------- 2в. Ярлыки на значке приложения ----------
+def sc(icon, t):
+    return f'<button class="mi">{ic(icon, 20, "#9AA3AD", NF)}<span style="flex:1;">{t}</span></button>'
+
+
+shortcuts = page("Ярлыки на значке", '<div style="flex:1;position:relative;background:linear-gradient(180deg,#1A2230,#0F1318);">'
+                 + '<div class="cap" style="position:absolute;left:16px;right:16px;top:16px;padding:0;color:#B8BEC8;">Набросок рабочего стола: долгое нажатие на значок</div>'
+                 + '<div class="menu" style="position:absolute;left:96px;top:520px;width:232px;">'
+                 + sc(SCAN_PLUS, "Добавить контакт") + sc(QRI, "Мой код") + '</div>'
+                 + '<div style="position:absolute;left:176px;top:640px;display:flex;flex-direction:column;align-items:center;gap:6px;">'
+                 + '<div style="width:60px;height:60px;border-radius:18px;background:#33B5E5;"></div>'
+                 + '<span style="font-size:12px;color:#ECEDEF;">Peerage</span></div></div>')
+
 # ---------- 3. Ссылка · А · https со своим доменом ----------
 def foreign(link_html, note):
     return ('<div class="hdr"><div style="width:40px;"></div><b style="color:#9AA3AD;font-weight:500;font-size:15px;">'
@@ -75,7 +99,7 @@ def foreign(link_html, note):
 
 
 link_a = page("Ссылка-приглашение: А, https", foreign(
-    '<a class="lnk u" href="#">https://[домен]/add#3f9a1c07e2b4…</a>',
+    '<a class="lnk u" href="#">https://peerage.chat/add#3f9a1c07e2b4…</a>',
     'Ссылка нажимается в любом мессенджере. Нажатие открывает Peerage, без приложения — страницу с ключом '
     'и ссылкой на установку. Часть после # браузер на сервер не отправляет.'))
 
@@ -90,7 +114,7 @@ my = page("Мой код: ссылка", hdr("Мой код") + body(
     '<div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:8px 0 20px;">'
     + qr_svg() + '<div class="obt" style="margin:0;font-size:22px;">Аня</div></div>'
     + '<div class="grp">'
-    + grow(LINK, "Ссылка-приглашение", "https://[домен]/add#3f9a1c07e2b4…", '')
+    + grow(LINK, "Ссылка-приглашение", "https://peerage.chat/add#3f9a1c07e2b4…", '')
     + grow(COPY, "Скопировать ссылку", None, '')
     + grow(SHARE, "Поделиться", None, '')
     + '</div>'
@@ -130,15 +154,17 @@ reqs = page("Запросы: имя как у контакта", hdr("Запро
 
 rows = [
     [("Main.dc.html", share_in, "«Поделиться»: выбор чата"),
-     ("SystemShare.dc.html", sys_sheet, "Системное меню: последние чаты")],
-    [("LinkA.dc.html", link_a, "Ссылка · А: https и свой домен"),
-     ("LinkB.dc.html", link_b, "Ссылка · Б: своя схема"),
+     ("SystemShare.dc.html", sys_sheet, "Системное меню: последние чаты"),
+     ("ShareToggle.dc.html", toggle, "Настройка: чаты в меню, выкл. по умолчанию"),
+     ("Shortcuts.dc.html", shortcuts, "Ярлыки на значке")],
+    [("LinkA.dc.html", link_a, "Ссылка · А ✓: peerage.chat (после беты)"),
+     ("LinkB.dc.html", link_b, "Ссылка · Б: своя схема (отвергнуто)"),
      ("MyCode.dc.html", my, "Мой код: ссылка"),
      ("LinkOpened.dc.html", opened, "Открыта ссылка → запрос")],
     [("Request.dc.html", req, "Запрос: имя как у контакта"),
      ("Requests.dc.html", reqs, "Список запросов")],
 ]
-row_titles = ["Поделиться в Peerage", "Ссылка-приглашение", "Имя как у контакта"]
+row_titles = ["Поделиться и ярлыки", "Ссылка-приглашение", "Имя как у контакта"]
 boards, order, notes = {}, [], {}
 for r, row in enumerate(rows):
     y = r * 1235
