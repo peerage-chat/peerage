@@ -38,6 +38,8 @@ import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
@@ -448,25 +450,72 @@ internal fun AccentButton(text: String, modifier: Modifier = Modifier, enabled: 
 }
 
 /**
- * Подтверждение необратимого действия: заголовок, пояснение, красная кнопка и отмена.
- * Диалогов такого вида в экранах десяток — новые собираются из этого.
+ * Подтверждение — шторка снизу (app-ui.md → «Общие элементы»): вопрос, одна строка
+ * последствия, красная кнопка действия и «Отмена». Для того, что уходит в сеть или не
+ * возвращается; обратимое «у себя» — снекбаром «Отменить», а не шторкой.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ConfirmDialog(title: String, text: String, ok: String, onOk: () -> Unit, onClose: () -> Unit) {
-    AlertDialog(
+internal fun ConfirmSheet(title: String, text: String, ok: String, onOk: () -> Unit, onClose: () -> Unit) {
+    ModalBottomSheet(
         onDismissRequest = onClose,
-        title = { Text(title) },
-        text = { Text(text) },
-        confirmButton = {
-            TextButton(onClick = {
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Tokens.Colors.group,
+        // Без тональной подсветки Material: она подмешивает акцент, и ступень group синела.
+        tonalElevation = 0.dp,
+        shape = RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel),
+        dragHandle = { SheetHandle() },
+    ) {
+        Column(
+            Modifier.fillMaxWidth().navigationBarsPadding()
+                .padding(start = Tokens.Space.l, end = Tokens.Space.l, bottom = Tokens.Space.xl),
+            verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+        ) {
+            Text(
+                title,
+                color = Color.White,
+                fontSize = Tokens.Font.sheet,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = Tokens.Space.xs).semantics { heading() },
+            )
+            Text(
+                text,
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.label,
+                modifier = Modifier.padding(horizontal = Tokens.Space.xs),
+            )
+            PlateButton(ok, modifier = Modifier.fillMaxWidth(), danger = true) {
                 onOk()
                 onClose()
-            }) { Text(ok, color = HoloError) }
-        },
-        dismissButton = {
-            TextButton(onClick = onClose) { Text(stringResource(R.string.common_cancel), color = HoloSecondary) }
-        },
+            }
+            PlateButton(stringResource(R.string.common_cancel), modifier = Modifier.fillMaxWidth(), onClick = onClose)
+        }
+    }
+}
+
+/** Ручка шторки: показывает, что её можно утянуть вниз. */
+@Composable
+internal fun SheetHandle() {
+    Box(
+        Modifier.padding(top = Tokens.Space.s, bottom = Tokens.Space.xs)
+            .size(width = Tokens.Size.handleW, height = Tokens.Size.handleH)
+            .clip(RoundedCornerShape(percent = 50))
+            .background(Tokens.Colors.handle),
     )
+}
+
+/** Кнопка без подложки: второстепенное действие под главной («Отклонить», «Заблокировать»). */
+@Composable
+internal fun GhostButton(text: String, color: Color = Tokens.Colors.accent, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier.heightIn(min = Tokens.Size.touch)
+            .clip(RoundedCornerShape(Tokens.Radius.button))
+            .clickable(role = Role.Button) { onClick() }
+            .padding(horizontal = Tokens.Space.l),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = color, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
+    }
 }
 
 /**
@@ -474,7 +523,14 @@ internal fun ConfirmDialog(title: String, text: String, ok: String, onOk: () -> 
  * до 0.96 — отклик пальцу (app-ui.md → «Отделка»); у строк вместо этого подсветка.
  */
 @Composable
-internal fun PlateButton(text: String, icon: ImageVector? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun PlateButton(
+    text: String,
+    icon: ImageVector? = null,
+    modifier: Modifier = Modifier,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val fg = if (danger) Tokens.Colors.iconDangerMuted else Color.White
     val press = remember { MutableInteractionSource() }
     val pressed by press.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) PressScale else 1f, tween(Tokens.Anim.fast), label = "press")
@@ -485,14 +541,14 @@ internal fun PlateButton(text: String, icon: ImageVector? = null, modifier: Modi
         }
             .heightIn(min = Tokens.Size.touch)
             .clip(RoundedCornerShape(Tokens.Radius.button))
-            .background(Tokens.Colors.raised)
+            .background(if (danger) Tokens.Colors.dangerPlate else Tokens.Colors.raised)
             .clickable(interactionSource = press, indication = null, role = Role.Button) { onClick() }
             .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s, Alignment.CenterHorizontally),
     ) {
-        if (icon != null) Icon(icon, null, tint = Color.White, modifier = Modifier.size(Tokens.Size.iconRow))
-        Text(text, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium, maxLines = 1)
+        if (icon != null) Icon(icon, null, tint = fg, modifier = Modifier.size(Tokens.Size.iconRow))
+        Text(text, color = fg, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 

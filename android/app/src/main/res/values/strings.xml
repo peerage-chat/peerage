@@ -158,7 +158,6 @@
     <string name="settings_outbox_warn">Warn about a growing outbox</string>
     <string name="settings_outbox_warn_hint">Messages are never deleted — this only shows a notice</string>
     <!-- Contact requests (gate instead of TOFU auto-add) -->
-    <string name="requests_header">Requests · %1$d</string>
     <string name="req_accept">Accept</string>
     <string name="req_decline">Decline</string>
     <string name="req_block">Block</string>
@@ -216,8 +215,7 @@
     <string name="group_leave_confirm">Messages from this group will stop arriving. To return, someone has to invite you again.</string>
     <string name="group_leave_ok">Leave</string>
     <!-- Group invites as cards -->
-    <string name="group_invites_header">Group invites · %1$d</string>
-    <string name="group_invite_from">Invited by %1$s</string>
+    <string name="group_invite_from">from %1$s</string>
     <string name="group_invite_join">Join</string>
     <string name="cd_join_call">Join call</string>
     <string name="cd_leave_call">Leave call</string>
@@ -711,7 +709,7 @@
 
     <string name="saved_delete_note">Notes live only on your device — deleting them changes nothing for anyone else.</string>
 
-    <string name="group_invite_waiting">You accepted — waiting for the person who invited you. It will complete as soon as they are online.</string>
+    <string name="group_invite_waiting">Accepted. Joining completes when the inviter is online.</string>
     <string name="backup_part_groups">Group chats</string>
     <plurals name="backup_n_group_messages">
         <item quantity="one">%d message</item>
@@ -792,4 +790,13 @@
     <string name="cd_verified">Key verified</string>
     <string name="cd_muted">Muted</string>
     <string name="folder_dm">Direct</string>
+    <string name="tab_requests">Requests</string>
+    <string name="req_tag">Request</string>
+    <string name="invite_tag">Invite</string>
+    <string name="req_no_message">No message</string>
+    <string name="req_title">Contact request</string>
+    <string name="invite_title">Group invite</string>
+    <string name="req_greeting">Greeting</string>
+    <string name="req_block_title">Block %1$s?</string>
+    <string name="req_block_text">Messages from this key are no longer accepted.</string>
 </resources>

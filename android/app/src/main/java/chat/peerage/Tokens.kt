@@ -35,6 +35,7 @@ object Tokens {
         val accent = Color(0xFF33B5E5)
         val accentDark = Color(0xFF04222E) // текст/иконка НА акценте
         val accentMuted = Color(0xFF13313D) // выбранный чип/таб (приглушённый акцент)
+        val accentSoft = Color(0xFF7FD0EE) // текст на accentMuted: метка, пилюля
         val accentBadge = Color(0x2233B5E5) // фон бейджа (акцент @13%)
 
         // ── Поверхности ───────────────────────────────────────────────────────
@@ -77,6 +78,9 @@ object Tokens {
         // ── Кнопки звонка ─────────────────────────────────────────────────────
         val btnNeutral = Color(0xFF3A3D44) // mic on / invite / camera
         val btnDangerMuted = Color(0xFF3A2A2C) // выключенное (mic off / video off)
+        val dangerPlate = Color(0xFF3A1E22) // красная кнопка в шторке (текст iconDangerMuted)
+        val handle = Color(0xFF3A3B42) // ручка шторки
+        val rowRequest = Color(0xFF1A1B20) // строка запроса/приглашения на главной — чуть другой фон
         val iconDangerMuted = Color(0xFFFF8A8A) // иконка выключенного
 
         // ── Чат ───────────────────────────────────────────────────────────────
@@ -288,6 +292,9 @@ object Tokens {
         val photoBubble = 240.dp // снимок, который сам себе пузырь (и шапка над ним)
         val photoInBubble = 220.dp // снимок внутри пузыря с подписью
         val metaReserve = 44.dp // место справа у вложения под время в углу пузыря
+        val handleW = 36.dp // ручка шторки
+        val handleH = 4.dp
+        val primaryButton = 52.dp // главная кнопка экрана-решения, во всю ширину
         val touch = 48.dp // минимальная зона касания (Android): плашка может быть меньше, зона — нет
     }
 

@@ -464,7 +464,7 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
     }
 
     confirmRemove?.let { key ->
-        ConfirmDialog(
+        ConfirmSheet(
             title = stringResource(R.string.group_remove_title),
             text = stringResource(R.string.group_remove_confirm, model.peerName(key)),
             ok = stringResource(R.string.group_remove_member),
@@ -473,7 +473,7 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
         )
     }
     if (confirmLeave) {
-        ConfirmDialog(
+        ConfirmSheet(
             title = stringResource(R.string.group_leave),
             text = stringResource(R.string.group_leave_confirm),
             ok = stringResource(R.string.group_leave_ok),

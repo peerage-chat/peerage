@@ -7,6 +7,7 @@ package chat.peerage.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,7 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,12 +80,14 @@ internal fun ChatsPager(
     pager: PagerState,
     onOpenDm: (String) -> Unit,
     onOpenGroup: (String) -> Unit,
+    onOpenRequest: (String) -> Unit,
+    onOpenInvite: (String) -> Unit,
 ) {
     // Состояние пейджера живёт выше (MainActivity): по нему же рисуются табы, так что
     // синхронизировать нечего — и драться двум эффектам тоже нечему.
     val keys = folderKeys(model)
     HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-        ContactsScreen(model, keys.getOrElse(page) { "all" }, onOpenDm, onOpenGroup)
+        ContactsScreen(model, keys.getOrElse(page) { "all" }, onOpenDm, onOpenGroup, onOpenRequest, onOpenInvite)
     }
 }
 
@@ -94,11 +97,20 @@ internal fun ContactsScreen(
     activeFilter: String,
     onOpenDm: (String) -> Unit,
     onOpenGroup: (String) -> Unit,
+    onOpenRequest: (String) -> Unit,
+    onOpenInvite: (String) -> Unit,
 ) {
     // Пользовательская папка — это ФИЛЬТР по правилам, встроенные — по типу чата.
     val folder = model.folderById(activeFilter)
     val showDm = folder != null || activeFilter == "all" || activeFilter == "dm"
     val showRoom = folder != null || activeFilter == "all" || activeFilter == "room"
+
+    // Запросы и приглашения — строками над чатами: в «Все», запросы ещё в «Личные»,
+    // приглашения — в «Группы»; на вкладке «Запросы» — только они.
+    val showReq = activeFilter == "all" || activeFilter == "dm" || activeFilter == RequestsFolder
+    val showInv = activeFilter == "all" || activeFilter == "room" || activeFilter == RequestsFolder
+    val requests = if (showReq) model.contactRequests.sortedByDescending { it.time } else emptyList()
+    val invites = if (showInv) model.groupInvites.toList() else emptyList()
     val dmList = if (folder == null) model.contacts else model.contacts.filter { model.folderHasDm(folder, it.key) }
     val groupList = if (folder == null) model.groups else model.groups.filter { model.folderHasGroup(folder, it.gid) }
 
@@ -178,23 +190,25 @@ internal fun ContactsScreen(
                 model.contactRequests.isEmpty() && model.groupInvites.isEmpty() ->
                 CenterMessage(stringResource(R.string.contacts_empty))
             else -> LazyColumn(Modifier.fillMaxSize()) {
-                // Гейт: входящие запросы от незнакомцев — карточками наверху (фильтр DM/all).
-                if (showDm && model.contactRequests.isNotEmpty()) {
-                    item(key = "req_header") {
-                        SectionTitle(stringResource(R.string.requests_header, model.contactRequests.size))
-                    }
-                    items(model.contactRequests, key = { "req_${it.key}" }) { r ->
-                        ContactRequestCard(model, r)
-                    }
+                items(requests, key = { "req_${it.key}" }) { r ->
+                    RequestRow(
+                        title = r.shortKey,
+                        tag = stringResource(R.string.req_tag),
+                        preview = r.preview.ifBlank { stringResource(R.string.req_no_message) },
+                        time = r.time,
+                        group = false,
+                        first = r == requests.first(),
+                    ) { onOpenRequest(r.key) }
                 }
-                // Приглашения в группы — карточками (фильтр Комнаты/all).
-                if (showRoom && model.groupInvites.isNotEmpty()) {
-                    item(key = "ginv_header") {
-                        SectionTitle(stringResource(R.string.group_invites_header, model.groupInvites.size))
-                    }
-                    items(model.groupInvites, key = { "ginv_${it.gid}" }) { inv ->
-                        GroupInviteCard(model, inv)
-                    }
+                items(invites, key = { "ginv_${it.gid}" }) { inv ->
+                    RequestRow(
+                        title = inv.name.ifBlank { stringResource(R.string.group_default_name) },
+                        tag = stringResource(R.string.invite_tag),
+                        preview = stringResource(R.string.group_invite_from, model.peerName(inv.inviter)),
+                        time = 0,
+                        group = true,
+                        first = requests.isEmpty() && inv == invites.first(),
+                    ) { onOpenInvite(inv.gid) }
                 }
                 // Один список прямо на панели: личные чаты и группы вперемешку,
                 // закреплённые сверху (на ступень светлее).
@@ -202,7 +216,7 @@ internal fun ContactsScreen(
                     ChatListRow(
                         model = model,
                         row = r,
-                        first = i == 0,
+                        first = i == 0 && requests.isEmpty() && invites.isEmpty(),
                         // Граница между закреплёнными и остальными — разделитель во
                         // всю ширину: он и разделяет группы, и не оставляет дыры.
                         fullDivider = i > 0 && rows[i - 1].pinned && !r.pinned,
@@ -211,7 +225,7 @@ internal fun ContactsScreen(
                 }
                 // Папка, в которую ничего не попало, — словами, а не пустым экраном:
                 // пустота читается как «список не загрузился».
-                if (rows.isEmpty()) {
+                if (rows.isEmpty() && requests.isEmpty() && invites.isEmpty()) {
                     item(key = "empty") {
                         Box(Modifier.fillParentMaxHeight(0.6f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             Text(stringResource(R.string.folder_empty), color = HoloSecondary, fontSize = Tokens.Font.body)
@@ -436,106 +450,87 @@ private fun chatPreview(model: AppModel, row: ChatRowUi): String {
  * Одна раскладка на обе — раньше это были две копии с одинаковыми отступами, и
  * поправить одну значило забыть про вторую.
  */
+/**
+ * Строка запроса или приглашения над чатами: чуть другой фон и метка «Запрос» / «Приглашение».
+ * Кнопок в строке нет — решение принимается в карточке, где видно всё, что пришло.
+ */
 @Composable
-private fun DecisionCard(
-    avatar: @Composable () -> Unit,
-    title: @Composable () -> Unit,
-    subtitle: String,
-    subtitleLines: Int = 1,
-    actions: @Composable RowScope.() -> Unit,
+private fun RequestRow(
+    title: String,
+    tag: String,
+    preview: String,
+    time: Long,
+    group: Boolean,
+    first: Boolean,
+    onClick: () -> Unit,
 ) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs)
-            .clip(RoundedCornerShape(Tokens.Radius.card))
-            .background(HoloSurface)
-            .padding(Tokens.Space.m),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            avatar()
-            Spacer(Modifier.width(Tokens.Space.m))
-            Column(Modifier.weight(1f)) {
-                title()
-                if (subtitle.isNotBlank()) {
-                    Text(
-                        subtitle,
-                        color = HoloSecondary,
-                        fontSize = Tokens.Font.body,
-                        maxLines = subtitleLines,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+    Column(Modifier.fillMaxWidth().background(Tokens.Colors.rowRequest)) {
+        if (!first) {
+            HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.divider, modifier = Modifier.padding(start = AvatarRowInset))
         }
-        Spacer(Modifier.height(Tokens.Space.m))
         Row(
+            Modifier.fillMaxWidth()
+                .clickable(role = Role.Button) { onClick() }
+                .heightIn(min = Tokens.Size.chatRow)
+                .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-            content = actions,
-        )
-    }
-}
-
-/** Карточка входящего запроса в контакты (гейт вместо TOFU): аватар-буква, короткий
- *  ключ, превью первого сообщения и кнопки Принять / Отклонить / Заблокировать. */
-@Composable
-private fun ContactRequestCard(model: AppModel, r: ContactRequest) {
-    DecisionCard(
-        avatar = { SquareAvatar(r.key, size = Tokens.Size.avatarRow, circle = true) },
-        title = {
-            Text(
-                r.shortKey + "…",
-                color = Color.White,
-                fontSize = Tokens.Font.label,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        subtitle = r.preview,
-        subtitleLines = 2,
-    ) {
-        AccentButton(stringResource(R.string.req_accept)) { model.acceptRequest(r.key) }
-        OutlineButton(stringResource(R.string.req_decline), tint = HoloSecondary) { model.declineRequest(r.key) }
-        Spacer(Modifier.weight(1f))
-        TextButton(onClick = { model.blockRequest(r.key) }) {
-            Text(stringResource(R.string.req_block), color = HoloError)
-        }
-    }
-}
-
-/** Карточка входящего приглашения в группу (вместо тихого авто-входа): аватар-иконка,
- *  имя группы, кто пригласил, кнопки Принять / Отклонить. */
-@Composable
-private fun GroupInviteCard(model: AppModel, inv: GroupInvite) {
-    DecisionCard(
-        avatar = {
-            SquareAvatar(inv.name.ifBlank { "#" }, size = Tokens.Size.avatarRow, bg = Tokens.Colors.groupAvatar) {
-                Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+        ) {
+            SquareAvatar(title, size = Tokens.Size.avatarRow, circle = !group)
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                    ) {
+                        Text(
+                            title,
+                            color = Color.White,
+                            fontSize = Tokens.Font.name,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        RowTag(tag)
+                    }
+                    if (time > 0) {
+                        Spacer(Modifier.width(Tokens.Space.s))
+                        Text(
+                            fmtListTime(time),
+                            style = Tokens.Text.meta,
+                            color = Tokens.Colors.tertiary,
+                            fontSize = Tokens.Font.small,
+                            maxLines = 1,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(Tokens.Space.xxs))
+                Text(
+                    preview,
+                    color = Tokens.Colors.secondary,
+                    fontSize = Tokens.Font.preview,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-        },
-        title = {
-            Text(
-                inv.name.ifBlank { stringResource(R.string.group_default_name) },
-                color = Color.White,
-                fontSize = Tokens.Font.label,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        subtitle = stringResource(R.string.group_invite_from, model.peerName(inv.inviter)),
-    ) {
-        if (inv.waiting) {
-            // Согласие уже дано, но пригласивший офлайн: карточка остаётся и честно
-            // говорит, чего ждём. Раньше она просто исчезала, и вступление молча
-            // терялось — повторить было нечем.
-            Text(stringResource(R.string.group_invite_waiting), color = HoloSecondary, fontSize = Tokens.Font.body)
-        } else {
-            AccentButton(stringResource(R.string.group_invite_join)) { model.acceptGroupInvite(inv.gid) }
-            OutlineButton(stringResource(R.string.req_decline), tint = HoloSecondary) { model.declineGroupInvite(inv.gid) }
         }
     }
+}
+
+/** Метка у имени в строке: «Запрос», «Приглашение». */
+@Composable
+private fun RowTag(text: String) {
+    Text(
+        text,
+        color = Tokens.Colors.accentSoft,
+        fontSize = Tokens.Font.caption,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(Tokens.Radius.badge)).background(Tokens.Colors.accentMuted)
+            .padding(horizontal = Tokens.Space.xs + Tokens.Space.xxs, vertical = Tokens.Space.xxs),
+    )
 }
 
 /** Отступ разделителя у строки с аватаром: поле карточки + аватар + зазор до текста.

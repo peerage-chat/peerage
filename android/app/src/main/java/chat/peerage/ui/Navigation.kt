@@ -49,7 +49,12 @@ internal fun folderTitle(model: AppModel, key: String): String =
  *  страницы пейджера — свайп и табы обязаны совпадать. */
 @Composable
 internal fun folderKeys(model: AppModel): List<String> =
-    Folders.map { it.first } + model.folders.map { it.id }
+    Folders.map { it.first } + (if (hasRequests(model)) listOf(RequestsFolder) else emptyList()) + model.folders.map { it.id }
+
+/** Вкладка «Запросы · N»: стоит после «Группы», пока есть хоть один запрос или приглашение. */
+internal const val RequestsFolder = "requests"
+
+internal fun hasRequests(model: AppModel): Boolean = model.contactRequests.isNotEmpty() || model.groupInvites.isNotEmpty()
 
 /**
  * Шапка главной на фоне: аватар (→ «Профиль»; он же говорит, под кем ты сейчас), «Чаты» со
@@ -128,6 +133,13 @@ internal fun FolderTabs(
                     key == activeFilter,
                     if (key == "all") unreadAll else 0,
                 ) { onFilter(key) }
+            }
+            if (hasRequests(model)) {
+                FolderTab(
+                    stringResource(R.string.tab_requests),
+                    activeFilter == RequestsFolder,
+                    model.contactRequests.size + model.groupInvites.size,
+                ) { onFilter(RequestsFolder) }
             }
             model.folders.forEach { f ->
                 FolderTab(f.name, f.id == activeFilter, 0) { onFilter(f.id) }

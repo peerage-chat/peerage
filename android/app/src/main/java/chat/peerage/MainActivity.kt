@@ -220,6 +220,8 @@ internal enum class Screen {
     CreateGroup,
     AddMember,
     MyCode,
+    Request,
+    Invite,
     Scanner,
     ContactList,
     Calls,
@@ -276,6 +278,9 @@ private fun CompactShell(model: AppModel) {
     var screen by nav
     // id редактируемой папки (null — создаём новую).
     var editFolder by remember { mutableStateOf<String?>(null) }
+    // Открытая карточка запроса (ключ) и приглашения (gid).
+    var requestKey by remember { mutableStateOf("") }
+    var inviteGid by remember { mutableStateOf("") }
     // Ключ контакта, которого пришли СВЕРЯТЬ сканером (null — обычное добавление).
     var verifyingPeer by remember { mutableStateOf<String?>(null) }
     val ctx = LocalContext.current
@@ -347,6 +352,8 @@ private fun CompactShell(model: AppModel) {
                             BarIcon(TablerIcons.Pencil, stringResource(R.string.cd_edit_profile)) { screen = Screen.EditProfile }
                         }
                         Screen.MyCode -> TopBar(stringResource(R.string.my_code_title), onBack = goBack)
+                        Screen.Request -> TopBar(stringResource(R.string.req_title), onBack = goBack)
+                        Screen.Invite -> TopBar(stringResource(R.string.invite_title), onBack = goBack)
                         Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = goBack)
                         Screen.GroupChat -> GroupChatTopBar(
                             model,
@@ -426,6 +433,14 @@ private fun CompactShell(model: AppModel) {
                                         model.openGroup(it)
                                         screen = Screen.GroupChat
                                     },
+                                    onOpenRequest = {
+                                        requestKey = it
+                                        screen = Screen.Request
+                                    },
+                                    onOpenInvite = {
+                                        inviteGid = it
+                                        screen = Screen.Invite
+                                    },
                                 )
                             }
                             Screen.Chat -> ChatScreen(model)
@@ -463,6 +478,8 @@ private fun CompactShell(model: AppModel) {
                             }
                             Screen.Me -> ProfileScreen(model, navigate)
                             Screen.MyCode -> MyCodeScreen(model) { screen = Screen.Scanner }
+                            Screen.Request -> RequestScreen(model, requestKey, onDone = goBack)
+                            Screen.Invite -> InviteScreen(model, inviteGid, onDone = goBack)
                             Screen.Info -> ContactProfileScreen(
                                 model,
                                 onMessage = { screen = Screen.Chat },
