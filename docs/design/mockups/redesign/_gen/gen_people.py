@@ -96,15 +96,27 @@ add = page("Добавить контакт", hdr("Добавить контак
 
 # ---------- 2. Код распознан ----------
 found = page("Добавить контакт: код распознан", hdr("Добавить контакт") + body(
-    '<div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 0 24px;">'
-    + av("Алиса", 88) + '<div class="obt" style="margin:8px 0 0;font-size:24px;">Алиса</div>'
-    + '<div class="cap" style="font-variant-numeric:tabular-nums;">ключ 3f9a1c07…</div></div>'
-    + '<div class="sec">Как подписать у себя</div>'
+    '<div style="display:flex;align-items:center;gap:14px;padding:8px 0 20px;">'
+    + av("Алиса", 64) + '<div><div class="obt" style="margin:0;font-size:22px;">Алиса</div>'
+    + '<div class="cap" style="font-variant-numeric:tabular-nums;padding:0;">ключ 3f9a1c07…</div></div></div>'
+    + '<div class="sec">Приветствие</div>'
+    + '<div class="inp" style="align-items:flex-start;min-height:96px;padding-top:14px;"><span class="v" style="line-height:22px;">Привет! Это Аня, с курсов по керамике<span class="cr"></span></span></div>'
+    + '<div class="cap" style="margin-top:8px;">Уйдёт запросом в контакты вместе с именем этого профиля; фото — после принятия. Алиса решит, принять ли.</div>'
+    + SP16 + '<div class="sec">Как подписать у себя</div>'
     + '<div class="inp"><span class="p">Алиса</span></div>'
-    + '<div class="cap" style="margin-top:8px;">Необязательно. Видно только на этом телефоне.</div>' + SP16
-    + '<div class="grp">' + grow(MSG, "Первое сообщение — запросом",
-                                  "Пока Алиса не добавила этот телефон, сообщение придёт ей запросом в контакты. Переписка откроется, когда она примет.", '') + '</div>'
-    + FILL) + foot("Добавить и написать", "Сканировать другой"))
+    + '<div class="cap" style="margin-top:8px;">Необязательно. Видно только на этом телефоне.</div>'
+    + FILL) + foot("Отправить запрос", "Сканировать другой"))
+
+# ---------- 2б. Запрос отправлен: чат ----------
+WAIT = ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9FC6D6" stroke-width="2" '
+        'stroke-linecap="round" aria-label="Ждёт" role="img"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>')
+pending = page("Запрос отправлен: чат", chat_header("Алиса", "запрос отправлен") + PANEL
+               + '<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:3px;padding:12px 14px;">'
+               + '<div class="lbl">Сегодня</div>'
+               + '<div style="align-self:center;max-width:300px;text-align:center;font-size:13px;line-height:18px;color:#B8B8C0;background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:14px;margin:6px 0 10px;">Запрос в контакты отправлен. Сообщения ниже Алиса получит, когда примет его.</div>'
+               + f'<div class="bout o1">Привет! Это Аня, с курсов по керамике<span class="mto">14:31 {WAIT}</span></div>'
+               + f'<div class="bout o2">Скину фото с занятия, как добавишь<span class="mto">14:32 {WAIT}</span></div>'
+               + '</div>' + composer() + '</div>')
 
 # ---------- 3. Ошибки кода ----------
 def err(title, sub):
@@ -210,17 +222,18 @@ g_a = page("Новая группа: А, сначала название", hdr("
 
 rows = [
     [("Main.dc.html", add, "Добавить контакт: сразу камера"),
-     ("Found.dc.html", found, "Код распознан: кто это + про запрос"),
+     ("Found.dc.html", found, "✓ Код распознан: приветствие = запрос"),
+     ("Pending.dc.html", pending, "Запрос отправлен: чат ждёт принятия"),
      ("Errors.dc.html", errs, "Что не так с кодом"),
      ("MyCode.dc.html", mycode, "Мой код: без адреса и знаков"),
      ("MeEdit.dc.html", me_edit, "Свой профиль: имя и фото")],
-    [("GroupPick.dc.html", g1, "Новая группа · Б: сначала участники"),
+    [("GroupPick.dc.html", g1, "Новая группа · Б ✓ Сначала участники"),
      ("GroupName.dc.html", g2, "Новая группа · Б: название, кто админ"),
      ("Invite.dc.html", addm, "Пригласить: несколько сразу, статусы"),
      ("Member.dc.html", sheet, "Участник: шторка админа"),
-     ("Leave.dc.html", leave, "ВОПРОС: выход админа — передать права"),
+     ("Leave.dc.html", leave, "✓ Выход админа: передать права"),
      ("GroupEdit.dc.html", gedit, "Правка группы (админ): название, фото")],
-    [("GroupA.dc.html", g_a, "Новая группа · А: сначала название (как сейчас)")],
+    [("GroupA.dc.html", g_a, "Новая группа · А: сначала название — отвергнут")],
 ]
 row_titles = ["Контакты и свой профиль", "Группы", "Вариант"]
 boards, order, notes = {}, [], {}
