@@ -207,7 +207,7 @@ forgot = page("Пароль хранилища: забыт", '<div style="height
               + heading("Данные зашифрованы", None, ic(LOCK, 34, "#33B5E5")) + FILL + '</div>'
               + '<div class="dim"></div><div class="sheet"><div class="hdl"></div>'
               + '<div class="sht">Пароль забыт</div>'
-              + '<div class="sub" style="font-size:14px;line-height:20px;">Пароль не восстанавливается: обход для владельца был бы обходом для любого. Переписка на этом телефоне останется закрытой.</div>'
+              + '<div class="sub" style="font-size:14px;line-height:20px;">Пароль не восстанавливается. Переписка на этом телефоне останется закрытой.</div>'
               + '<div class="grp" style="background:#26272D;">'
               + grow(KEY, "Личность — по 24 словам", "Ключ тот же; переписку и адрес в сети вернёт файл копии данных", '')
               + '</div>'

@@ -79,7 +79,6 @@ hold = page("Исходящие: очистить всё", hdr("Исходящи
             + '<div class="sht">Очистить всю очередь?</div>'
             + '<div class="sub" style="font-size:14px;line-height:20px;">1 248 сообщений для Глеба, Бориса и Веры не дойдут никогда. Это сообщения с этого телефона, которые ещё никто не получил; вернуть их будет неоткуда.</div>'
             + '<button class="btn red" style="position:relative;overflow:hidden;"><span style="position:absolute;left:0;top:0;bottom:0;width:58%;background:rgba(255,107,107,0.25);"></span><span style="position:relative;">Удерживать, чтобы очистить</span></button>'
-            + '<div class="sub" style="text-align:center;">Отмены не будет — поэтому удержание, а не нажатие.</div>'
             + '<button class="btn">Не очищать</button></div>')
 
 # ---------- 4. Общий поиск ----------
@@ -203,7 +202,7 @@ bdone = page("Копия данных: готово", hdr("Копия данны
     + '<div class="obt" style="margin:0;font-size:24px;">Копия готова</div><div class="cap">backup-2026-11-01.peerage · 48 МБ</div></div>'
     + '<div class="grp">' + ''.join(f'<div class="gr"><div class="gt"><b>{a}</b></div><span style="color:#8E8E98;font-size:15px;font-variant-numeric:tabular-nums;">{b}</span></div>'
                                     for a, b in [("Контакты", "23"), ("Сообщения", "4 812"), ("Групповые", "1 250"), ("Заметки", "37")]) + '</div>'
-    + '<div class="cap" style="margin-top:8px;">Отметки «сверен» в копию не входят: файл могли подменить, а сверка — это то, что проверено лично.</div>'
+    + '<div class="cap" style="margin-top:8px;">Отметки «сверен» в копию не входят — после восстановления контакты сверяются заново.</div>'
     + FILL) + foot("Готово"))
 
 rows = [
@@ -213,7 +212,7 @@ rows = [
      ("Search.dc.html", search, "Общий поиск: люди, группы, сообщения")],
     [("Folders.dc.html", folders, "Папки"),
      ("FolderEdit.dc.html", editor, "Папка: правка, живой счётчик"),
-     ("Blocked.dc.html", blocked, "Заблокированные (новый экран)")],
+     ("Blocked.dc.html", blocked, "✓ Заблокированные: имя хранится при блокировке")],
     [("Flood.dc.html", flood, "Поток трафика"),
      ("Rotate.dc.html", rot, "Сменить адрес: кому сообщить"),
      ("RotateProgress.dc.html", prog, "Смена адреса: ход")],
