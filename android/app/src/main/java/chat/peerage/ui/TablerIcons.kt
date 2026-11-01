@@ -17,12 +17,12 @@ import androidx.compose.ui.unit.dp
  * и без нужды в R8-tree-shaking → нулевой вес-оверхед.
  *
  * ДОБАВЛЕНИЕ иконки: взять path-данные из tabler-icons `icons/outline/<name>.svg`
- * (обводка 2px, круглые концы — [tabler] это проставляет) и завести `val`.
+ * (обводка 1.5 при 20 dp — app-ui.md, круглые концы — [tabler] это проставляет) и завести `val`.
  * Тинт задаёт вызывающий через `Icon(tint = …)` — цвет обводки здесь неважен.
  */
 object TablerIcons
 
-/** Собрать ImageVector из одной или нескольких SVG-path строк Tabler (24×24, stroke 2px). */
+/** Собрать ImageVector из одной или нескольких SVG-path строк Tabler (24×24, обводка 1.5). */
 private fun tabler(name: String, vararg paths: String): ImageVector =
     ImageVector.Builder(
         name = "ti_$name",
@@ -35,7 +35,7 @@ private fun tabler(name: String, vararg paths: String): ImageVector =
             addPath(
                 pathData = PathParser().parsePathString(d).toNodes(),
                 stroke = SolidColor(Color.Black), // перекрывается Icon(tint)
-                strokeLineWidth = 2f,
+                strokeLineWidth = 1.5f,
                 strokeLineCap = StrokeCap.Round,
                 strokeLineJoin = StrokeJoin.Round,
             )
@@ -275,5 +275,121 @@ val TablerIcons.BatteryCharging: ImageVector by lazy {
         "M16 7h1a2 2 0 0 1 2 2v.5a.5 .5 0 0 0 .5 .5a.5 .5 0 0 1 .5 .5v3a.5 .5 0 0 1 -.5 .5a.5 .5 0 0 0 -.5 .5v.5a2 2 0 0 1 -2 2h-2",
         "M8 7h-2a2 2 0 0 0 -2 2v6a2 2 0 0 0 2 2h1",
         "M12 8l-2 4h3l-2 4",
+    )
+}
+
+val TablerIcons.Phone: ImageVector by lazy {
+    tabler(
+        "phone",
+        "M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2",
+    )
+}
+
+val TablerIcons.Bookmark: ImageVector by lazy {
+    tabler(
+        "bookmark",
+        "M18 7v14l-6 -4l-6 4v-14a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4z",
+    )
+}
+
+val TablerIcons.Topology: ImageVector by lazy {
+    tabler(
+        "topology-star-3",
+        "M10 19a2 2 0 1 0 -4 0a2 2 0 0 0 4 0z",
+        "M18 5a2 2 0 1 0 -4 0a2 2 0 0 0 4 0z",
+        "M10 5a2 2 0 1 0 -4 0a2 2 0 0 0 4 0z",
+        "M6 12a2 2 0 1 0 -4 0a2 2 0 0 0 4 0z",
+        "M18 19a2 2 0 1 0 -4 0a2 2 0 0 0 4 0z",
+        "M14 12a2 2 0 1 0 -4 0a2 2 0 0 0 4 0z",
+        "M22 12a2 2 0 1 0 -4 0a2 2 0 0 0 4 0z",
+        "M6 12h4",
+        "M14 12h4",
+        "M15 7l-2 3",
+        "M9 7l2 3",
+        "M11 14l-2 3",
+        "M13 14l2 3",
+    )
+}
+
+val TablerIcons.Database: ImageVector by lazy {
+    tabler(
+        "database",
+        "M12 6m-8 0a8 3 0 1 0 16 0a8 3 0 1 0 -16 0",
+        "M4 6v6a8 3 0 0 0 16 0v-6",
+        "M4 12v6a8 3 0 0 0 16 0v-6",
+    )
+}
+
+val TablerIcons.EyeOff: ImageVector by lazy {
+    tabler(
+        "eye-off",
+        "M10.585 10.587a2 2 0 0 0 2.829 2.828",
+        "M16.681 16.673a8.717 8.717 0 0 1 -4.681 1.327c-3.6 0 -6.6 -2 -9 -6c1.272 -2.12 2.712 -3.678 4.32 -4.674m2.86 -1.146a9.055 9.055 0 0 1 1.82 -.18c3.6 0 6.6 2 9 6c-.666 1.11 -1.379 2.067 -2.138 2.87",
+        "M3 3l18 18",
+    )
+}
+
+val TablerIcons.Video: ImageVector by lazy {
+    tabler(
+        "video",
+        "M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4z",
+        "M3 6m0 2a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z",
+    )
+}
+
+val TablerIcons.InfoCircle: ImageVector by lazy {
+    tabler(
+        "info-circle",
+        "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0",
+        "M12 9h.01",
+        "M11 12h1v4h1",
+    )
+}
+
+val TablerIcons.Qrcode: ImageVector by lazy {
+    tabler(
+        "qrcode",
+        "M4 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z",
+        "M7 17l0 .01",
+        "M14 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z",
+        "M7 7l0 .01",
+        "M4 14m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z",
+        "M17 7l0 .01",
+        "M14 14l3 0",
+        "M20 14l0 .01",
+        "M14 14l0 3",
+        "M14 20l3 0",
+        "M17 17l3 0",
+        "M20 17l0 3",
+    )
+}
+
+val TablerIcons.Copy: ImageVector by lazy {
+    tabler(
+        "copy",
+        "M7 7m0 2.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667z",
+        "M4.012 16.737a2.005 2.005 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1",
+    )
+}
+
+val TablerIcons.Share: ImageVector by lazy {
+    tabler(
+        "share",
+        "M6 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0",
+        "M18 6m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0",
+        "M18 18m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0",
+        "M8.7 10.7l6.6 -3.4",
+        "M8.7 13.3l6.6 3.4",
+    )
+}
+
+val TablerIcons.Scan: ImageVector by lazy {
+    tabler(
+        "scan",
+        "M4 7v-1a2 2 0 0 1 2 -2h2",
+        "M4 17v1a2 2 0 0 0 2 2h2",
+        "M16 4h2a2 2 0 0 1 2 2v1",
+        "M16 20h2a2 2 0 0 0 2 -2v-1",
+        "M5 12l14 0",
     )
 }

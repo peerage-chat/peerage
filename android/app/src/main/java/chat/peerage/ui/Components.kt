@@ -2,6 +2,8 @@
 
 package chat.peerage.ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -9,8 +11,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.selection.toggleable
@@ -27,12 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
@@ -52,7 +55,7 @@ import kotlin.math.abs
 // ── Общие элементы ──────────────────────────────────────────────────────────
 
 /**
- * Иконка-кнопка топ-бара: плашка на слое панели, 38dp с иконкой 20dp.
+ * Иконка-кнопка топ-бара: плашка цвета панели на фоне шапки, 38dp с иконкой 20dp.
  * Фон обязателен — без него иконка на фоне экрана не отличается от подписи и не
  * читается как нажимаемая (правило «контролы отличаются от контента»).
  * Нажимается вся зона 48dp вокруг плашки: на Android меньше — промахи пальцем.
@@ -68,10 +71,10 @@ internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Color
         Box(
             Modifier.size(Tokens.Size.barButton)
                 .clip(RoundedCornerShape(Tokens.Radius.button))
-                .background(Tokens.Colors.surface),
+                .background(Tokens.Colors.panel),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
+            Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconRow))
         }
     }
 }
@@ -101,7 +104,7 @@ internal fun TopBar(
             title,
             color = Color.White,
             fontSize = Tokens.Font.title,
-            fontWeight = FontWeight.Medium,
+            fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -131,7 +134,8 @@ internal fun CountBadge(text: String, muted: Boolean = false) {
             text,
             style = Tokens.Text.meta,
             color = if (muted) Tokens.Colors.unreadMutedText else HoloAccentDark,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = Tokens.Font.small,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
     }
@@ -164,37 +168,6 @@ internal fun badgeCount(n: Int): String = if (n > 99) "99+" else "$n"
 @Composable
 internal fun StatusDot(online: Boolean) {
     Box(Modifier.size(10.dp).clip(CircleShape).background(if (online) HoloOnline else OfflineDot))
-}
-
-/** Индикатор пиров меша в шапке Главной (⊹ N). Тап → «Сеть»,
- *  долгий тап — диагностический бенч приёма. */
-@Composable
-internal fun PeerIndicator(peers: Int, onTap: () -> Unit = {}, onLongPress: () -> Unit = {}) {
-    // Та же плашка, что у иконок-кнопок рядом: индикатор нажимаем, значит выглядит
-    // как остальные кнопки шапки.
-    Row(
-        Modifier.padding(horizontal = Tokens.Space.xs)
-            .height(Tokens.Size.barButton)
-            .clip(RoundedCornerShape(Tokens.Radius.button))
-            .background(Tokens.Colors.surface)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onTap() },
-                    onLongPress = { onLongPress() },
-                )
-            }
-            .padding(horizontal = Tokens.Space.m),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
-    ) {
-        Icon(
-            painterResource(R.drawable.ic_glyph),
-            stringResource(R.string.menu_network),
-            tint = if (peers > 0) HoloOnline else HoloSecondary,
-            modifier = Modifier.size(Tokens.Size.iconS),
-        )
-        Text("$peers", color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
-    }
 }
 
 /**
@@ -284,32 +257,32 @@ internal fun FieldLabel(text: String) {
 // заголовок секции — СНАРУЖИ, над ней. Так группа читается как один предмет, а
 // заголовок не оказывается «первой строкой списка», к которой хочется прикоснуться.
 
-/** Заголовок секции — над карточкой, приглушённый и мелкий. */
+/** Подпись группы — над ней, вне подложки, по одной вертикали с текстом в группе. */
 @Composable
 internal fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
-        color = Tokens.Colors.secondary,
-        fontSize = Tokens.Font.small,
+        color = Tokens.Colors.tertiary,
+        fontSize = Tokens.Font.body,
         fontWeight = FontWeight.Medium,
         modifier = modifier.padding(
-            start = Tokens.Space.l,
-            end = Tokens.Space.l,
-            top = Tokens.Space.m,
-            bottom = Tokens.Space.xs,
+            start = Tokens.Space.panelText,
+            end = Tokens.Space.panelText,
+            top = Tokens.Space.l,
+            bottom = Tokens.Space.s,
         ),
     )
 }
 
 /**
- * Карточка-секция: фон слоя карточки, скругление 20, строки внутри.
- * Отступ по бокам — 8dp, как у списка чатов: карточки всех экранов обязаны стоять
- * по одной вертикали, иначе переход между экранами читается как сдвиг всего макета.
+ * Группа строк на панели «листа»: ступень `group`, скругление 18 при отступе панели 10 —
+ * концентрично её 28. Отступ один на все экраны: группы стоят по одной вертикали, иначе
+ * переход между экранами читается как сдвиг всего макета.
  */
 @Composable
 internal fun CardSection(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s)
+        modifier.fillMaxWidth().padding(horizontal = Tokens.Space.panel)
             .clip(RoundedCornerShape(Tokens.Radius.card))
             .background(Tokens.Colors.surface),
         content = content,
@@ -330,7 +303,7 @@ internal fun CardBlock(
 ) {
     val r = Tokens.Radius.card
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s)
+        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.panel)
             .clip(
                 RoundedCornerShape(
                     topStart = if (first) r else 0.dp,
@@ -368,11 +341,47 @@ internal fun CardRow(
         modifier.fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .heightIn(min = Tokens.Size.cardRow)
-            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+            .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
         content = content,
     )
 }
+
+/**
+ * Строка-раздел в группе: плитка с иконкой, название, справа значение («12», «1,2 ГБ»). Шеврона
+ * нет — что строка ведёт дальше, говорит сама группа разделов. Разделитель — от названия.
+ */
+@Composable
+internal fun NavRow(
+    icon: ImageVector,
+    label: String,
+    value: String = "",
+    divider: Boolean = true,
+    onClick: () -> Unit,
+) {
+    if (divider) {
+        HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.divider, modifier = Modifier.padding(start = NavRowInset))
+    }
+    Row(
+        Modifier.fillMaxWidth()
+            .clickable(role = Role.Button) { onClick() }
+            .heightIn(min = Tokens.Size.navRow)
+            .padding(start = Tokens.Space.l, end = Tokens.Space.l, top = Tokens.Space.s, bottom = Tokens.Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+    ) {
+        Box(
+            Modifier.size(Tokens.Size.rowIcon).clip(RoundedCornerShape(Tokens.Radius.inner)).background(Tokens.Colors.raised),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = Tokens.Colors.iconBar, modifier = Modifier.size(Tokens.Size.iconRow))
+        }
+        Text(label, color = Color.White, fontSize = Tokens.Font.name, modifier = Modifier.weight(1f))
+        if (value.isNotEmpty()) Text(value, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.preview, maxLines = 1)
+    }
+}
+
+private val NavRowInset = Tokens.Space.l + Tokens.Size.rowIcon + Tokens.Space.m
 
 /**
  * Строка с переключателем нажимается ЦЕЛИКОМ и озвучивается как переключатель с текстом строки
@@ -459,6 +468,36 @@ internal fun ConfirmDialog(title: String, text: String, ok: String, onOk: () -> 
         },
     )
 }
+
+/**
+ * Кнопка-плашка на панели: ступень над группой, иконка + подпись, 48 dp. Нажатие сжимает её
+ * до 0.96 — отклик пальцу (app-ui.md → «Отделка»); у строк вместо этого подсветка.
+ */
+@Composable
+internal fun PlateButton(text: String, icon: ImageVector? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) PressScale else 1f, tween(Tokens.Anim.fast), label = "press")
+    Row(
+        modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+            .heightIn(min = Tokens.Size.touch)
+            .clip(RoundedCornerShape(Tokens.Radius.button))
+            .background(Tokens.Colors.raised)
+            .clickable(interactionSource = press, indication = null, role = Role.Button) { onClick() }
+            .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s, Alignment.CenterHorizontally),
+    ) {
+        if (icon != null) Icon(icon, null, tint = Color.White, modifier = Modifier.size(Tokens.Size.iconRow))
+        Text(text, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}
+
+/** Сжатие кнопки под пальцем: заметно, но не «проваливается» (меньше 0.95 — уже утрировано). */
+internal const val PressScale = 0.96f
 
 /**
  * Второстепенная кнопка: та же форма и высота, что у [AccentButton], но контуром.
@@ -793,8 +832,8 @@ internal val PasswordKeyboard = androidx.compose.foundation.text.KeyboardOptions
 
 @Composable
 internal fun inputColors() = TextFieldDefaults.colors(
-    focusedContainerColor = HoloBg,
-    unfocusedContainerColor = HoloBg,
+    focusedContainerColor = Tokens.Colors.group,
+    unfocusedContainerColor = Tokens.Colors.group,
     focusedTextColor = Color.White,
     unfocusedTextColor = Color.White,
     cursorColor = HoloAccent,

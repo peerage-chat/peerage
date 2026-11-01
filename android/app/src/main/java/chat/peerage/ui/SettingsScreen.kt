@@ -18,18 +18,13 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headset
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
@@ -50,79 +45,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
-
-/**
- * Настройки — ОГЛАВЛЕНИЕ, а не простыня.
- *
- * Раньше всё жило одним экраном: ключи, тумблеры, радиогруппа качества и справка о
- * лицензии шли подряд. Такой экран нельзя просмотреть — только пролистать, и найти
- * в нём что-то можно, лишь помня, где оно лежит. Теперь корень отвечает на вопрос
- * «где искать», а настройка живёт в своей категории.
- */
-@Composable
-internal fun SettingsScreen(
-    onSecurity: () -> Unit = {},
-    onPrivacy: () -> Unit = {},
-    onMedia: () -> Unit = {},
-    onNotifications: () -> Unit = {},
-    onAbout: () -> Unit = {},
-    onEditProfile: () -> Unit = {},
-    onNetwork: () -> Unit = {},
-    onStorage: () -> Unit = {},
-) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
-    ) {
-        // Профиль и данные — то, что человек чаще всего и ищет в настройках.
-        SectionTitle(stringResource(R.string.settings_title_profile_data))
-        CardSection {
-            SettingRow(
-                Icons.Filled.Person,
-                stringResource(R.string.settings_edit_profile),
-                null,
-                divider = false,
-                onClick = onEditProfile,
-            )
-            SettingRow(Icons.Filled.Share, stringResource(R.string.settings_net_battery), null, onClick = onNetwork)
-            SettingRow(Icons.Filled.Storage, stringResource(R.string.menu_storage), null, onClick = onStorage)
-        }
-
-        SectionTitle(stringResource(R.string.settings_title_sections))
-        CardSection {
-            SettingRow(
-                Icons.Filled.Shield,
-                stringResource(R.string.settings_cat_security),
-                stringResource(R.string.settings_cat_security_desc),
-                divider = false,
-                onClick = onSecurity,
-            )
-            SettingRow(
-                Icons.Filled.VisibilityOff,
-                stringResource(R.string.settings_cat_privacy),
-                stringResource(R.string.settings_cat_privacy_desc),
-                onClick = onPrivacy,
-            )
-            SettingRow(
-                Icons.Filled.Videocam,
-                stringResource(R.string.settings_cat_media),
-                stringResource(R.string.settings_cat_media_desc),
-                onClick = onMedia,
-            )
-            SettingRow(
-                Icons.Filled.Notifications,
-                stringResource(R.string.settings_cat_notifications),
-                stringResource(R.string.settings_cat_notifications_desc),
-                onClick = onNotifications,
-            )
-            SettingRow(
-                Icons.Filled.Info,
-                stringResource(R.string.settings_cat_about),
-                stringResource(R.string.settings_cat_about_desc),
-                onClick = onAbout,
-            )
-        }
-    }
-}
 
 /** Безопасность: копия ключа, блокировка приложения, шифрование хранилища, сверка. */
 @Composable

@@ -101,8 +101,7 @@
     <!-- ── Navigation / drawer / folders ───────────────────────────────── -->
     <string name="nav_chats">Chats</string>
     <string name="folder_all">All</string>
-    <string name="folder_rooms">Rooms</string>
-    <string name="folder_channels">Channels</string>
+    <string name="folder_rooms">Groups</string>
     <string name="folder_create">Create folder</string>
     <string name="menu_contacts">Contacts</string>
     <string name="menu_calls">Calls</string>
@@ -129,9 +128,7 @@
     <string name="title_scan_qr">Scan QR</string>
     <string name="title_search">Search</string>
     <string name="newchat_title">New chat</string>
-    <string name="newchat_channel">New channel</string>
     <string name="newchat_contacts_header">Contacts</string>
-    <string name="badge_soon">soon</string>
     <string name="cd_search">Search</string>
     <string name="cd_add_contact">Add contact</string>
     <string name="cd_refresh">Refresh</string>
@@ -153,7 +150,6 @@
     <string name="contacts_empty">No contacts yet. Add one with their exchange code.</string>
     <string name="contacts_empty_title">No contacts</string>
     <string name="contacts_empty_hint">Add a peer by key or QR — using the button above</string>
-    <string name="channels_soon">Channels — soon</string>
     <!-- Offline queue growth warning (nothing is ever deleted, this is just a notice) -->
     <plurals name="outbox_warn">
         <item quantity="one">%d message is still waiting to be delivered. It is kept and goes out once the recipient is online.</item>
@@ -174,8 +170,6 @@
     <string name="add_error">Invalid key</string>
     <string name="label_name">Name</string>
     <string name="qr_cd">Public key QR code</string>
-    <string name="me_fingerprint_label">Fingerprint (verify in person)</string>
-    <string name="me_address_label">Yggdrasil address</string>
     <string name="me_pubkey_label">Public key</string>
     <string name="me_copy_key">Copy code</string>
     <string name="info_verified">Verified</string>
@@ -472,7 +466,7 @@
     <string name="folder_name_hint">Folder name</string>
     <string name="folder_include">Include</string>
     <string name="folder_type_dm">Direct</string>
-    <string name="folder_type_room">Rooms</string>
+    <string name="folder_type_room">Groups</string>
     <string name="folder_pick_chats">Or pick specific chats:</string>
     <string name="folder_exclude">Exclude</string>
     <string name="folder_exclude_read">Read</string>
@@ -485,7 +479,6 @@
     <string name="folder_delete_ok">Delete</string>
     <string name="common_save">Save</string>
     <string name="folder_edit_title">Folder</string>
-    <string name="fp_self_hint">Show this to your contact so they can compare it with what they see for you.</string>
     <string name="profile_message">Message</string>
     <string name="profile_call">Call</string>
     <string name="profile_verified_hint">Keys were checked in person. If the set below matches what %1$s sees, the connection is direct — nobody in between.</string>
@@ -610,7 +603,6 @@
     <string name="settings_at_rest">Data encryption</string>
     <string name="settings_verified">Verified contacts</string>
     <string name="settings_verified_count">%1$d of %2$d verified in person</string>
-    <string name="settings_net_battery">Network and battery</string>
     <string name="settings_tap_avatar">Tap the avatar to change it</string>
     <string name="settings_your_name">Your name</string>
     <string name="settings_name_hint">This is what contacts see. The name goes to them only.</string>
@@ -756,21 +748,10 @@
 
     <!-- ── "Me" screen (replaces the drawer) ────────────────────────────── -->
     <string name="me_title">Profile</string>
-    <string name="me_qr_card">My exchange code</string>
-    <string name="me_qr_hint">Show it to someone — they add you without any server</string>
-    <plurals name="peers_online">
-        <item quantity="one">%d peer online</item>
-        <item quantity="other">%d peers online</item>
-    </plurals>
-    <string name="settings_title_sections">Sections</string>
-    <string name="settings_title_profile_data">Profile and data</string>
     <!-- ── Settings: categories ─────────────────────────────────────────── -->
     <string name="settings_cat_security">Security</string>
-    <string name="settings_cat_security_desc">Key, app lock, storage encryption</string>
     <string name="settings_cat_privacy">Privacy</string>
-    <string name="settings_cat_privacy_desc">What we never send about you</string>
     <string name="settings_cat_media">Media and calls</string>
-    <string name="settings_cat_media_desc">Default video and sound for calls</string>
     <string name="media_video_section">Video</string>
     <string name="media_audio_section">Sound</string>
     <string name="media_camera">Camera</string>
@@ -779,9 +760,7 @@
     <string name="media_defaults_hint">Applies to the next calls. During a call, long-press the Video or Microphone button.</string>
     <string name="call_video_settings">Video settings</string>
     <string name="settings_cat_notifications">Notifications</string>
-    <string name="settings_cat_notifications_desc">What to show besides messages</string>
     <string name="settings_cat_about">About</string>
-    <string name="settings_cat_about_desc">Version, transport, license</string>
     <string name="recovery_title">Data won\'t open</string>
     <string name="recovery_sub">The key to this phone\'s chats is unavailable</string>
     <string name="recovery_reason_key_lost">Android reset the encryption key. This happens after changing the screen lock or a system update.</string>
@@ -793,4 +772,24 @@
     <string name="recovery_new_sub">A new identity will be created</string>
     <string name="recovery_new_body">Contacts will see you as a new person and will have to add you again. The old data will be set aside, not deleted.</string>
     <string name="recovery_failed">Couldn\'t set the data aside. Try again</string>
+
+    <!-- Home and Profile (redesign, 2026-11-01) -->
+    <plurals name="net_status_online">
+        <item quantity="one">Online · %d node</item>
+        <item quantity="other">Online · %d nodes</item>
+    </plurals>
+    <string name="net_status_offline">No connection · looking for nodes</string>
+    <plurals name="net_nodes">
+        <item quantity="one">%d node</item>
+        <item quantity="other">%d nodes</item>
+    </plurals>
+    <string name="cd_edit_profile">Edit profile</string>
+    <string name="my_code_title">My code</string>
+    <string name="my_code_hint">Scanning this code adds this phone to contacts.</string>
+    <string name="my_code_copy">Copy</string>
+    <string name="my_code_share">Share</string>
+    <string name="my_code_scan">Scan a code</string>
+    <string name="cd_verified">Key verified</string>
+    <string name="cd_muted">Muted</string>
+    <string name="folder_dm">Direct</string>
 </resources>

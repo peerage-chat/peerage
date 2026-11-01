@@ -95,8 +95,7 @@
     <!-- ── Навигация / меню / папки ────────────────────────────────────── -->
     <string name="nav_chats">Чаты</string>
     <string name="folder_all">Все</string>
-    <string name="folder_rooms">Комнаты</string>
-    <string name="folder_channels">Каналы</string>
+    <string name="folder_rooms">Группы</string>
     <string name="folder_create">Создать папку</string>
     <string name="menu_contacts">Контакты</string>
     <string name="menu_calls">Звонки</string>
@@ -125,9 +124,7 @@
     <string name="title_scan_qr">Сканировать QR</string>
     <string name="title_search">Поиск</string>
     <string name="newchat_title">Новый чат</string>
-    <string name="newchat_channel">Новый канал</string>
     <string name="newchat_contacts_header">Контакты</string>
-    <string name="badge_soon">скоро</string>
     <string name="cd_search">Поиск</string>
     <string name="cd_add_contact">Добавить контакт</string>
     <string name="cd_refresh">Обновить</string>
@@ -151,7 +148,6 @@
     <string name="contacts_empty">Контактов пока нет. Добавьте по коду обмена.</string>
     <string name="contacts_empty_title">Нет контактов</string>
     <string name="contacts_empty_hint">Добавьте собеседника по ключу или QR — кнопкой вверху</string>
-    <string name="channels_soon">Каналы — скоро</string>
     <!-- Предупреждение о разросшейся очереди (ничего не удаляется, это только уведомление) -->
     <plurals name="outbox_warn">
         <item quantity="one">%d сообщение ещё ждёт доставки. Всё сохранено — уйдёт, когда получатель появится в сети.</item>
@@ -174,8 +170,6 @@
     <string name="add_error">Неверный ключ</string>
     <string name="label_name">Имя</string>
     <string name="qr_cd">QR код публичного ключа</string>
-    <string name="me_fingerprint_label">Отпечаток (сверьте при встрече)</string>
-    <string name="me_address_label">Адрес Yggdrasil</string>
     <string name="me_pubkey_label">Публичный ключ</string>
     <string name="me_copy_key">Скопировать код</string>
     <string name="info_verified">Проверен</string>
@@ -486,7 +480,7 @@
     <string name="folder_name_hint">Название папки</string>
     <string name="folder_include">Включить</string>
     <string name="folder_type_dm">Личные</string>
-    <string name="folder_type_room">Комнаты</string>
+    <string name="folder_type_room">Группы</string>
     <string name="folder_pick_chats">Или выберите конкретные чаты:</string>
     <string name="folder_exclude">Исключить</string>
     <string name="folder_exclude_read">Прочитанные</string>
@@ -501,7 +495,6 @@
     <string name="folder_delete_ok">Удалить</string>
     <string name="common_save">Сохранить</string>
     <string name="folder_edit_title">Папка</string>
-    <string name="fp_self_hint">Покажите собеседнику, чтобы он сравнил с тем, что видит у себя.</string>
     <string name="profile_message">Сообщение</string>
     <string name="profile_call">Звонок</string>
     <string name="profile_verified_hint">Ключи сверены лично. Если набор ниже совпадает с тем, что видит %1$s, — связь идёт напрямую, без посредника.</string>
@@ -634,7 +627,6 @@
     <string name="settings_at_rest">Шифрование данных</string>
     <string name="settings_verified">Проверенные контакты</string>
     <string name="settings_verified_count">%1$d из %2$d сверены лично</string>
-    <string name="settings_net_battery">Сеть и батарея</string>
     <string name="settings_tap_avatar">Нажмите на аватар, чтобы сменить</string>
     <string name="settings_your_name">Ваше имя</string>
     <string name="settings_name_hint">Так вас увидят контакты. Имя уходит только им.</string>
@@ -790,23 +782,10 @@
 
     <!-- ── Экран «Я» (замена выдвижного меню) ───────────────────────────── -->
     <string name="me_title">Профиль</string>
-    <string name="me_qr_card">Мой код для обмена</string>
-    <string name="me_qr_hint">Покажите его собеседнику — он добавит вас без сервера</string>
-    <plurals name="peers_online">
-        <item quantity="one">%d пир в сети</item>
-        <item quantity="few">%d пира в сети</item>
-        <item quantity="many">%d пиров в сети</item>
-        <item quantity="other">%d пира в сети</item>
-    </plurals>
-    <string name="settings_title_sections">Разделы</string>
-    <string name="settings_title_profile_data">Профиль и данные</string>
     <!-- ── Настройки: категории ─────────────────────────────────────────── -->
     <string name="settings_cat_security">Безопасность</string>
-    <string name="settings_cat_security_desc">Ключ, блокировка, шифрование хранилища</string>
     <string name="settings_cat_privacy">Приватность</string>
-    <string name="settings_cat_privacy_desc">Что мы не отправляем о вас</string>
     <string name="settings_cat_media">Медиа и звонки</string>
-    <string name="settings_cat_media_desc">Видео и звук звонков по умолчанию</string>
     <string name="media_video_section">Видео</string>
     <string name="media_audio_section">Звук</string>
     <string name="media_camera">Камера</string>
@@ -815,9 +794,7 @@
     <string name="media_defaults_hint">Действует со следующего звонка. Во время звонка — долгое нажатие на кнопку «Видео» или «Микрофон».</string>
     <string name="call_video_settings">Настройки видео</string>
     <string name="settings_cat_notifications">Уведомления</string>
-    <string name="settings_cat_notifications_desc">Что показывать помимо сообщений</string>
     <string name="settings_cat_about">О приложении</string>
-    <string name="settings_cat_about_desc">Версия, транспорт, лицензия</string>
     <string name="recovery_title">Данные не открываются</string>
     <string name="recovery_sub">Ключ к переписке на этом телефоне недоступен</string>
     <string name="recovery_reason_key_lost">Система сбросила ключ шифрования. Так бывает после смены блокировки экрана или обновления прошивки.</string>
@@ -829,4 +806,28 @@
     <string name="recovery_new_sub">Будет создана новая личность</string>
     <string name="recovery_new_body">Контакты увидят вас как нового человека, им придётся добавить вас заново. Старые данные отложим, а не удалим.</string>
     <string name="recovery_failed">Не удалось отложить данные. Попробуйте ещё раз</string>
+
+    <!-- Главная и «Профиль» (перепроектирование, 2026-11-01) -->
+    <plurals name="net_status_online">
+        <item quantity="one">В сети · %d узел</item>
+        <item quantity="few">В сети · %d узла</item>
+        <item quantity="many">В сети · %d узлов</item>
+        <item quantity="other">В сети · %d узла</item>
+    </plurals>
+    <string name="net_status_offline">Нет соединения · поиск узлов</string>
+    <plurals name="net_nodes">
+        <item quantity="one">%d узел</item>
+        <item quantity="few">%d узла</item>
+        <item quantity="many">%d узлов</item>
+        <item quantity="other">%d узла</item>
+    </plurals>
+    <string name="cd_edit_profile">Изменить профиль</string>
+    <string name="my_code_title">Мой код</string>
+    <string name="my_code_hint">Кто отсканирует код, добавит этот телефон в контакты.</string>
+    <string name="my_code_copy">Скопировать</string>
+    <string name="my_code_share">Поделиться</string>
+    <string name="my_code_scan">Сканировать код</string>
+    <string name="cd_verified">Ключ сверен</string>
+    <string name="cd_muted">Без звука</string>
+    <string name="folder_dm">Личные</string>
 </resources>

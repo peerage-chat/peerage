@@ -10,9 +10,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
@@ -29,10 +28,11 @@ import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import chat.peerage.ui.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -193,8 +193,8 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
     }
 
     when {
-        model.error != null -> CenterMessage(stringResource(R.string.app_error, model.error.orEmpty()))
-        model.me == null -> CenterMessage(stringResource(R.string.app_connecting))
+        model.error != null -> CenterMessage(stringResource(R.string.app_error, model.error.orEmpty()), Modifier.background(HoloBg))
+        model.me == null -> CenterMessage(stringResource(R.string.app_connecting), Modifier.background(HoloBg))
         !onboarded -> OnboardingFlow(model) {
             prefs.edit().putBoolean("onboarded", true).apply()
             onboarded = true
@@ -204,8 +204,8 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
 }
 
 @Composable
-internal fun CenterMessage(text: String) {
-    Box(Modifier.fillMaxSize().background(HoloBg), contentAlignment = Alignment.Center) {
+internal fun CenterMessage(text: String, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(text, color = HoloSecondary, fontSize = Tokens.Font.body)
     }
 }
@@ -219,7 +219,7 @@ internal enum class Screen {
     GroupChat,
     CreateGroup,
     AddMember,
-    Settings,
+    MyCode,
     Scanner,
     ContactList,
     Calls,
@@ -271,7 +271,7 @@ private fun CompactShell(model: AppModel) {
     val dataDir = LocalContext.current.filesDir.absolutePath
     val nav = remember {
         val fromNotif = activity?.intent?.getBooleanExtra(FloodNotifier.EXTRA_OPEN_ROTATE, false) == true
-        NavState(if (fromNotif) Screen.RotateAddress else Screen.Contacts)
+        NavState(if (fromNotif) Screen.RotateAddress else debugStartScreen(activity) ?: Screen.Contacts)
     }
     var screen by nav
     // id редактируемой папки (null — создаём новую).
@@ -299,7 +299,6 @@ private fun CompactShell(model: AppModel) {
     val folders = folderKeys(model)
     val folderPager = rememberPagerState { folders.size }
     val activeFilter = folders.getOrElse(folderPager.targetPage) { "all" }
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val selectFolder: (String) -> Unit = { key ->
         val i = folders.indexOf(key)
@@ -332,44 +331,22 @@ private fun CompactShell(model: AppModel) {
                 Column(Modifier.fillMaxSize()) {
                     // ── Шапка: конфигурируется по текущему экрану ─────────────────────
                     when (screen) {
-                        Screen.Contacts -> TopBar(
-                            if (activeFilter == "all") stringResource(R.string.nav_chats) else folderTitle(model, activeFilter),
-                            leading = {
-                                // Аватар как вход в профиль: он же и говорит, под кем
-                                // ты сейчас, — гамбургер об этом молчал.
-                                // Своего отступа слева НЕТ: 8dp даёт сама шапка, и
-                                // аватар встаёт ровно по той же вертикали, что
-                                // карточки и табы ниже. Свой добавочный отступ
-                                // уводил его вправо, и левый край экрана «ступенькой»
-                                // расходился сверху вниз.
-                                Box(
-                                    Modifier.padding(end = Tokens.Space.m)
-                                        .clickable { screen = Screen.Me },
-                                ) {
-                                    SquareAvatar(
-                                        model.selfName.ifBlank { model.me?.pubkey ?: "?" },
-                                        size = 38.dp,
-                                        avatarBytes = model.selfAvatar,
-                                        circle = true,
-                                        ring = HoloBg,
-                                    )
-                                }
-                            },
-                        ) {
-                            PeerIndicator(
-                                model.netPeers,
-                                onTap = { screen = Screen.Network },
-                                onLongPress = { model.startBenchRecv() },
-                            )
-                            BarIcon(TablerIcons.Search, stringResource(R.string.cd_search)) { screen = Screen.Search }
-                        }
+                        Screen.Contacts -> HomeTopBar(
+                            model,
+                            onProfile = { screen = Screen.Me },
+                            onNetwork = { screen = Screen.Network },
+                            onSearch = { screen = Screen.Search },
+                        )
                         Screen.Chat -> ChatTopBar(
                             model,
                             onBack = goBack,
                             onProfile = { screen = Screen.Info },
                         )
                         Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = goBack)
-                        Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = goBack)
+                        Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = goBack) {
+                            BarIcon(TablerIcons.Pencil, stringResource(R.string.cd_edit_profile)) { screen = Screen.EditProfile }
+                        }
+                        Screen.MyCode -> TopBar(stringResource(R.string.my_code_title), onBack = goBack)
                         Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = goBack)
                         Screen.GroupChat -> GroupChatTopBar(
                             model,
@@ -379,7 +356,6 @@ private fun CompactShell(model: AppModel) {
                         Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = goBack)
                         Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = goBack)
                         Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = goBack)
-                        Screen.Settings -> TopBar(stringResource(R.string.menu_settings), onBack = goBack)
                         Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = goBack)
                         Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = goBack)
                         Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = goBack)
@@ -408,33 +384,50 @@ private fun CompactShell(model: AppModel) {
                         Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = goBack)
                         Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = goBack)
                     }
-                    // ── Папки табами: только на главном экране ──────────────────────
-                    if (screen == Screen.Contacts) {
-                        FolderTabs(
-                            model,
-                            activeFilter,
-                            onFilter = selectFolder,
-                            onManage = { screen = Screen.Folders },
-                        )
-                    }
                     // ── Контент экрана (без шапки) ────────────────────────────────────
                     // Перехода между экранами НЕ анимируем: Crossfade держал бы оба
                     // экрана смонтированными, а у наших есть эффекты (камера, запись,
                     // поллинг, автоскролл) — они шли бы парой. Анимируем то, что внутри.
-                    Box(Modifier.weight(1f)) {
+                    // «Лист» (app-ui.md): под шапкой — панель со скруглённым верхом во всю
+                    // высоту, содержимое экрана на ней. Чаты переходят на лист вместе со
+                    // своей лентой и полем ввода (фаза 2 плана), до того — на фоне.
+                    val sheet = screen != Screen.Chat && screen != Screen.GroupChat
+                    // Системная полоса навигации — продолжение того, что над ней: панели
+                    // листа или фона чата; иначе внизу экрана остаётся чужая тёмная полоса.
+                    val barColor = (if (sheet) Tokens.Colors.panel else Tokens.Colors.bg).toArgb()
+                    SideEffect { activity?.window?.navigationBarColor = barColor }
+                    Box(
+                        Modifier.weight(1f).then(
+                            if (sheet) {
+                                Modifier.clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
+                                    .background(Tokens.Colors.panel)
+                            } else {
+                                Modifier
+                            },
+                        ),
+                    ) {
                         when (screen) {
-                            Screen.Contacts -> ChatsPager(
-                                model,
-                                folderPager,
-                                onOpenDm = {
-                                    model.openChat(it)
-                                    screen = Screen.Chat
-                                },
-                                onOpenGroup = {
-                                    model.openGroup(it)
-                                    screen = Screen.GroupChat
-                                },
-                            )
+                            Screen.Contacts -> Column {
+                                // Папки — на панели, над списком: табы едут вместе с ним.
+                                FolderTabs(
+                                    model,
+                                    activeFilter,
+                                    onFilter = selectFolder,
+                                    onManage = { screen = Screen.Folders },
+                                )
+                                ChatsPager(
+                                    model,
+                                    folderPager,
+                                    onOpenDm = {
+                                        model.openChat(it)
+                                        screen = Screen.Chat
+                                    },
+                                    onOpenGroup = {
+                                        model.openGroup(it)
+                                        screen = Screen.GroupChat
+                                    },
+                                )
+                            }
                             Screen.Chat -> ChatScreen(model)
                             Screen.Add -> AddScreen(
                                 model,
@@ -468,7 +461,8 @@ private fun CompactShell(model: AppModel) {
                                     screen = Screen.Info
                                 }
                             }
-                            Screen.Me -> MeScreen(model, navigate)
+                            Screen.Me -> ProfileScreen(model, navigate)
+                            Screen.MyCode -> MyCodeScreen(model) { screen = Screen.Scanner }
                             Screen.Info -> ContactProfileScreen(
                                 model,
                                 onMessage = { screen = Screen.Chat },
@@ -502,16 +496,6 @@ private fun CompactShell(model: AppModel) {
                                 },
                             )
                             Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
-                            Screen.Settings -> SettingsScreen(
-                                onSecurity = { screen = Screen.SettingsSecurity },
-                                onPrivacy = { screen = Screen.SettingsPrivacy },
-                                onMedia = { screen = Screen.SettingsMedia },
-                                onNotifications = { screen = Screen.SettingsNotifications },
-                                onAbout = { screen = Screen.SettingsAbout },
-                                onEditProfile = { screen = Screen.EditProfile },
-                                onNetwork = { screen = Screen.Network },
-                                onStorage = { screen = Screen.Storage },
-                            )
                             Screen.SettingsSecurity -> SettingsSecurityScreen(
                                 model,
                                 onVaultLevel = { screen = Screen.VaultLevel },
@@ -537,7 +521,7 @@ private fun CompactShell(model: AppModel) {
                             )
                             Screen.Network -> NetworkScreen(
                                 model,
-                                onMyQr = { screen = Screen.Me },
+                                onMyQr = { screen = Screen.MyCode },
                                 onOpenOutbox = { screen = Screen.Outbox },
                                 onFlood = { screen = Screen.Flood },
                                 onRotate = { screen = Screen.RotateAddress },
@@ -607,4 +591,16 @@ private fun CompactShell(model: AppModel) {
             }
         }
     }
+}
+
+/**
+ * Рычаг для проверки экранов на эмуляторе: отладочная сборка открывается сразу на экране из
+ * `--es debug_screen <Screen>` (`adb shell am start -S -n chat.peerage/.MainActivity …`).
+ * Релизная сборка этот параметр не читает.
+ */
+private fun debugStartScreen(activity: android.app.Activity?): Screen? {
+    val app = activity?.applicationInfo ?: return null
+    if (app.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE == 0) return null
+    val name = activity.intent?.getStringExtra("debug_screen") ?: return null
+    return Screen.entries.firstOrNull { it.name == name }
 }
