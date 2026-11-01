@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -38,7 +39,9 @@ import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -1052,3 +1055,69 @@ internal fun InputStrip(title: String, body: String, onCancel: () -> Unit) {
 @Composable
 internal fun EditStrip(text: String, onCancel: () -> Unit) =
     InputStrip(stringResource(R.string.chat_editing), text, onCancel)
+
+/**
+ * Снекбар «Отменить» (макет `shared/Undo`): кольцо-отсчёт с секундами, что сделано, «Отменить».
+ * Длительность — рекомендованная системой для текста с кнопкой: с TalkBack она дольше.
+ * Вежливая живая область — появление зачитывается, не перебивая; кольцо из озвучки убрано,
+ * иначе каждая секунда читалась бы вслух.
+ */
+@Composable
+internal fun UndoSnackbar(slot: UndoSlot, modifier: Modifier = Modifier) {
+    val u = slot.current ?: return
+    val ctx = LocalContext.current
+    val total = remember(u) { undoTimeoutMs(ctx) }
+    val left = remember(u) { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(u) {
+        left.animateTo(0f, tween(total, easing = androidx.compose.animation.core.LinearEasing))
+        slot.expire(u)
+    }
+    val secs = kotlin.math.ceil(left.value * total / 1000f).toInt()
+    Row(
+        modifier.fillMaxWidth()
+            .heightIn(min = Tokens.Size.primaryButton)
+            .shadow(Tokens.Size.snackShadow, RoundedCornerShape(Tokens.Radius.field))
+            .clip(RoundedCornerShape(Tokens.Radius.field))
+            .background(Tokens.Colors.snack)
+            .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }
+            .padding(start = Tokens.Space.l, end = Tokens.Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+    ) {
+        Box(Modifier.size(Tokens.Size.undoRing).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+            androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+                val stroke = Tokens.Size.undoStroke.toPx()
+                // Окружность r = 9 из 24 (как в макете): средняя линия обводки на 1/8 от края.
+                val inset = size.minDimension / 8
+                val arc = androidx.compose.ui.geometry.Size(size.width - inset * 2, size.height - inset * 2)
+                val tl = androidx.compose.ui.geometry.Offset(inset, inset)
+                val st = androidx.compose.ui.graphics.drawscope.Stroke(stroke)
+                drawArc(Tokens.Colors.handle, 0f, 360f, false, tl, arc, style = st)
+                drawArc(Tokens.Colors.accent, -90f, 360f * left.value, false, tl, arc, style = st)
+            }
+            Text("$secs", color = Color.White, fontSize = Tokens.Font.caption, style = Tokens.Text.meta)
+        }
+        Text(u.text, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
+        Box(
+            Modifier.heightIn(min = Tokens.Size.suggest)
+                .clip(RoundedCornerShape(Tokens.Radius.button))
+                .clickable(role = Role.Button) { slot.undo() }
+                .padding(horizontal = Tokens.Space.m),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(stringResource(R.string.undo_action), color = Tokens.Colors.accent, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+/** Сколько держать «Отменить»: 5 с, или сколько попросит система (TalkBack, «время на действие»). */
+private fun undoTimeoutMs(ctx: android.content.Context): Int {
+    val base = 5_000
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return base
+    val am = ctx.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager
+    return am.getRecommendedTimeoutMillis(
+        base,
+        android.view.accessibility.AccessibilityManager.FLAG_CONTENT_TEXT or
+            android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS,
+    )
+}

@@ -124,6 +124,9 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         AppLock.onBackground()
+        // Отложенное «удалить у себя» выполняем при уходе: снекбара в фоне не видно, а убитый
+        // процесс иначе молча вернул бы удалённое.
+        model.undo.flush()
         // При включённой блокировке прячем и снимок в «недавних»: иначе переписка
         // видна любому, кто открыл список задач, — замок в такой паре бесполезен.
         if (AppLock.enabled) {
@@ -603,6 +606,14 @@ private fun CompactShell(model: AppModel) {
                     }
                 }
             }
+            // «Отменить» — над полем ввода в чате и над FAB на главной, у низа на прочих.
+            val overInput = screen == Screen.Contacts || screen == Screen.Chat || screen == Screen.GroupChat || screen == Screen.Saved
+            UndoSnackbar(
+                model.undo,
+                Modifier.align(Alignment.BottomCenter)
+                    .padding(horizontal = Tokens.Space.m)
+                    .padding(bottom = if (overInput) Tokens.Size.fabClearance else Tokens.Space.xxl),
+            )
             // FAB «новый чат» — только на Главной, под оверлеями звонка.
             if (screen == Screen.Contacts && model.dmCallPeer == null && model.incomingCall == null) {
                 FloatingActionButton(

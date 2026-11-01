@@ -324,9 +324,29 @@ class AppModel private constructor() {
      */
     val messages = mutableStateMapOf<String, SnapshotStateList<Message>>()
 
-    /** Лента чата: `chat(hex)` — личный, `chat(gid, group = true)` — групповой. */
-    fun chat(id: String?, group: Boolean = false): List<Message> =
-        id?.let { messages[chatKey(it, group)] }.orEmpty()
+    /** Лента чата: `chat(hex)` — личный, `chat(gid, group = true)` — групповой. Без
+     *  удалённого, чьё удаление ещё можно отменить ([hidden]). */
+    fun chat(id: String?, group: Boolean = false): List<Message> {
+        val key = id?.let { chatKey(it, group) } ?: return emptyList()
+        val list = messages[key].orEmpty()
+        val gone = hidden[key] ?: return list
+        return list.filter { MsgRef(it.id, it.sender) !in gone }
+    }
+
+    /** Удалённое «у себя», пока идёт отсчёт «Отменить»: уже не видно, но в движке ещё
+     *  лежит. Ключ — [chatKey] или [NOTES_KEY]. Удалённое не возвращается, поэтому после
+     *  выполнения ссылки здесь не чистим — они просто ни на что не указывают. */
+    private val hidden = mutableStateMapOf<String, Set<MsgRef>>()
+
+    /** «Отменить» в снекбаре — один слот на приложение. */
+    val undo = UndoSlot()
+
+    /** Спрятать [refs] сразу, удалить через [del] по истечении отсчёта, вернуть по «Отменить». */
+    internal fun deleteWithUndo(key: String, refs: List<MsgRef>, plural: Int, del: () -> Unit) {
+        hidden[key] = hidden[key].orEmpty() + refs
+        val text = appContext?.resources?.getQuantityString(plural, refs.size, refs.size).orEmpty()
+        undo.offer(text, commit = { ops.execute(del) }, revert = { hidden[key] = hidden[key].orEmpty() - refs.toSet() })
+    }
 
     var currentChat by mutableStateOf<String?>(null)
     var netPeers by mutableStateOf(0)
@@ -1604,12 +1624,13 @@ class AppModel private constructor() {
 
     fun selectedText(key: String): String = selectedTextOf(key)
 
-    /** Удалить выделенное только у себя. */
+    /** Удалить выделенное только у себя — со снекбаром «Отменить»: до конца отсчёта
+     *  сообщения только спрятаны, в движок удаление уходит потом. */
     fun deleteSelected(key: String, group: Boolean = false) {
         val refs = selection.toList()
         if (refs.isEmpty()) return
         selection = emptySet()
-        ops.execute {
+        deleteWithUndo(chatKey(key, group), refs, R.plurals.undo_msgs_deleted) {
             if (group) {
                 Native.groupDeleteMessages(sessionPtr, key, wireGroupRefs(refs))
                 // Ленту группы перечитает событие от движка.
@@ -1619,6 +1640,10 @@ class AppModel private constructor() {
             }
         }
     }
+
+    /** Заметки без тех, чьё удаление ещё можно отменить. */
+    val shownNotes: List<Message>
+        get() = hidden[NOTES_KEY]?.let { gone -> notes.filter { MsgRef(it.id, it.sender) !in gone } } ?: notes
 
     /** Отозвать выделенные СВОИ сообщения у собеседника. Чужие не трогаем. */
     fun retractSelected(key: String, group: Boolean = false) {

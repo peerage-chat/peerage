@@ -46,9 +46,9 @@ internal fun SavedScreen(model: AppModel) {
     val selection = model.selection
     LaunchedEffect(Unit) { model.refreshNotes() }
     // Лента привязана к низу, как в ChatScreen: вниз — только на НОВУЮ заметку.
-    val lastNote = model.notes.lastOrNull()?.id
+    val lastNote = model.shownNotes.lastOrNull()?.id
     LaunchedEffect(lastNote) {
-        if (model.notes.isNotEmpty()) listState.animateScrollToItem(0)
+        if (model.shownNotes.isNotEmpty()) listState.animateScrollToItem(0)
     }
     PagingOlder(listState, Unit) { model.loadOlderNotes {} }
 
@@ -68,7 +68,7 @@ internal fun SavedScreen(model: AppModel) {
         }
         if (selection.isNotEmpty()) SavedSelectionBar(model)
         if (me.isNotEmpty()) PinnedBar(model, me, group = false, canUnpin = true)
-        if (model.notes.isEmpty()) {
+        if (model.shownNotes.isEmpty()) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 EmptyState(
                     Icons.Filled.Bookmark,
@@ -83,7 +83,7 @@ internal fun SavedScreen(model: AppModel) {
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = Tokens.Space.m),
             ) {
                 // От свежей к старой: лента привязана к низу.
-                items(model.notes.asReversed(), key = { it.id }) { n ->
+                items(model.shownNotes.asReversed(), key = { it.id }) { n ->
                     val selected = MsgRef(n.id, n.sender) in selection
                     Row(
                         Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s)
@@ -176,7 +176,6 @@ private fun SavedSelectionBar(model: AppModel) {
     val ctx = LocalContext.current
     val sel = model.selection
     val myKey = model.me?.pubkey.orEmpty()
-    var confirm by remember { mutableStateOf(false) }
 
     Row(
         Modifier.fillMaxWidth().background(HoloSurface).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
@@ -216,26 +215,8 @@ private fun SavedSelectionBar(model: AppModel) {
             }
             model.clearSelection()
         }
-        BarIcon(Icons.Filled.Delete, stringResource(R.string.chat_delete)) { confirm = true }
-    }
-
-    if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text(stringResource(R.string.chat_delete_title, sel.size)) },
-            text = { Text(stringResource(R.string.saved_delete_note)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    model.deleteSelectedNotes()
-                    confirm = false
-                }) { Text(stringResource(R.string.folder_delete_ok), color = HoloError) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirm = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
-        )
+        // Заметки удаляются только здесь — значит, «Отменить» вместо подтверждения.
+        BarIcon(Icons.Filled.Delete, stringResource(R.string.chat_delete)) { model.deleteSelectedNotes() }
     }
 }
 

@@ -732,7 +732,6 @@
     <string name="chat_reply_you">Вы</string>
     <string name="chat_reply_gone">сообщение удалено</string>
 
-    <string name="saved_delete_note">Заметки только у вас — удаление ни у кого больше ничего не меняет.</string>
 
     <string name="group_invite_waiting">Согласие отправлено. Вступление — когда пригласивший появится в сети.</string>
     <string name="backup_part_groups">Групповые чаты</string>
@@ -879,4 +878,17 @@
     <string name="settings_key_show">Показать ключ</string>
     <string name="settings_key_checked">Проверена %1$s</string>
     <string name="settings_key_failed">Проверка не пройдена</string>
+    <string name="undo_action">Отменить</string>
+    <plurals name="undo_msgs_deleted">
+        <item quantity="one">%d сообщение удалено</item>
+        <item quantity="few">%d сообщения удалены</item>
+        <item quantity="many">%d сообщений удалено</item>
+        <item quantity="other">%d сообщения удалены</item>
+    </plurals>
+    <plurals name="undo_notes_deleted">
+        <item quantity="one">%d заметка удалена</item>
+        <item quantity="few">%d заметки удалены</item>
+        <item quantity="many">%d заметок удалено</item>
+        <item quantity="other">%d заметки удалены</item>
+    </plurals>
 </resources>

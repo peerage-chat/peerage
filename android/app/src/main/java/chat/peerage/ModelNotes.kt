@@ -51,16 +51,19 @@ fun AppModel.deleteNote(id: Long) = ops.execute {
     refreshNotes()
 }
 
-/** Удалить выделенные заметки (чат с самим собой). */
+/** Удалить выделенные заметки (чат с самим собой) — со снекбаром «Отменить». */
 fun AppModel.deleteSelectedNotes() {
     val refs = selection.toList()
     if (refs.isEmpty()) return
     selection = emptySet()
     val key = me?.pubkey ?: return
     val json = wireDmRefs(refs)
-    ops.execute {
+    deleteWithUndo(NOTES_KEY, refs, R.plurals.undo_notes_deleted) {
         Native.deleteMessages(sessionPtr, key, json)
         val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
         notes.replaceWith(list)
     }
 }
+
+/** Ключ заметок в скрытом-до-отмены ([AppModel.deleteWithUndo]): у ленты заметок нет [AppModel.chatKey]. */
+internal const val NOTES_KEY = "notes"
