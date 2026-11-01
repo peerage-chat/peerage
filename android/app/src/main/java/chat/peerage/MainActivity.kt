@@ -425,22 +425,28 @@ private fun CompactShell(model: AppModel) {
                                 ChatsPager(
                                     model,
                                     folderPager,
-                                    onOpenDm = {
-                                        model.openChat(it)
-                                        screen = Screen.Chat
-                                    },
-                                    onOpenGroup = {
-                                        model.openGroup(it)
-                                        screen = Screen.GroupChat
-                                    },
-                                    onOpenRequest = {
-                                        requestKey = it
-                                        screen = Screen.Request
-                                    },
-                                    onOpenInvite = {
-                                        inviteGid = it
-                                        screen = Screen.Invite
-                                    },
+                                    HomeNav(
+                                        openDm = {
+                                            model.openChat(it)
+                                            screen = Screen.Chat
+                                        },
+                                        openGroup = {
+                                            model.openGroup(it)
+                                            screen = Screen.GroupChat
+                                        },
+                                        openRequest = {
+                                            requestKey = it
+                                            screen = Screen.Request
+                                        },
+                                        openInvite = {
+                                            inviteGid = it
+                                            screen = Screen.Invite
+                                        },
+                                        openOutbox = { screen = Screen.Outbox },
+                                        myCode = { screen = Screen.MyCode },
+                                        scan = { screen = Screen.Scanner },
+                                        newGroup = { screen = Screen.CreateGroup },
+                                    ),
                                 )
                             }
                             Screen.Chat -> ChatScreen(model)

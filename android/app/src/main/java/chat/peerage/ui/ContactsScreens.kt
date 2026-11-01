@@ -16,7 +16,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
@@ -24,7 +26,6 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -36,6 +37,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
@@ -75,19 +77,12 @@ private data class ChatRowUi(
  * зоне всегда дерутся, и проигрывает более редкий — то есть папки.
  */
 @Composable
-internal fun ChatsPager(
-    model: AppModel,
-    pager: PagerState,
-    onOpenDm: (String) -> Unit,
-    onOpenGroup: (String) -> Unit,
-    onOpenRequest: (String) -> Unit,
-    onOpenInvite: (String) -> Unit,
-) {
+internal fun ChatsPager(model: AppModel, pager: PagerState, nav: HomeNav) {
     // Состояние пейджера живёт выше (MainActivity): по нему же рисуются табы, так что
     // синхронизировать нечего — и драться двум эффектам тоже нечему.
     val keys = folderKeys(model)
     HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-        ContactsScreen(model, keys.getOrElse(page) { "all" }, onOpenDm, onOpenGroup, onOpenRequest, onOpenInvite)
+        ContactsScreen(model, keys.getOrElse(page) { "all" }, nav)
     }
 }
 
@@ -95,10 +90,7 @@ internal fun ChatsPager(
 internal fun ContactsScreen(
     model: AppModel,
     activeFilter: String,
-    onOpenDm: (String) -> Unit,
-    onOpenGroup: (String) -> Unit,
-    onOpenRequest: (String) -> Unit,
-    onOpenInvite: (String) -> Unit,
+    nav: HomeNav,
 ) {
     // Пользовательская папка — это ФИЛЬТР по правилам, встроенные — по типу чата.
     val folder = model.folderById(activeFilter)
@@ -153,28 +145,7 @@ internal fun ContactsScreen(
     )
 
     Column(Modifier.fillMaxSize()) {
-        // Очередь недоставленного разрослась. НИЧЕГО не удаляем — сообщения ждут
-        // доставки; просто предупреждаем, чтобы человек знал (тумблер в Настройках).
-        if (model.outboxWarn && model.warnOutboxGrowth) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs)
-                    .clip(RoundedCornerShape(Tokens.Radius.card))
-                    .background(Tokens.Colors.noticeBg)
-                    .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Warning, null, tint = Tokens.Colors.noticeText, modifier = Modifier.size(Tokens.Size.iconS))
-                Spacer(Modifier.width(Tokens.Space.m))
-                Text(
-                    pluralStringResource(R.plurals.outbox_warn, model.outboxPending, model.outboxPending),
-                    color = Tokens.Colors.noticeText,
-                    fontSize = Tokens.Font.body,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
+        QueueStrip(model, nav.openOutbox)
         // Счётчик пиров переехал в шапку (PeerIndicator). Здесь — только бенч-замер
         // приёма, пока он активен (диагностика; запуск — долгим тапом по индикатору).
         if (model.benchRecv) {
@@ -187,8 +158,7 @@ internal fun ContactsScreen(
         }
         when {
             model.contacts.isEmpty() && model.groups.isEmpty() &&
-                model.contactRequests.isEmpty() && model.groupInvites.isEmpty() ->
-                CenterMessage(stringResource(R.string.contacts_empty))
+                model.contactRequests.isEmpty() && model.groupInvites.isEmpty() -> HomeEmpty(nav)
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(requests, key = { "req_${it.key}" }) { r ->
                     RequestRow(
@@ -198,7 +168,7 @@ internal fun ContactsScreen(
                         time = r.time,
                         group = false,
                         first = r == requests.first(),
-                    ) { onOpenRequest(r.key) }
+                    ) { nav.openRequest(r.key) }
                 }
                 items(invites, key = { "ginv_${it.gid}" }) { inv ->
                     RequestRow(
@@ -208,7 +178,7 @@ internal fun ContactsScreen(
                         time = 0,
                         group = true,
                         first = requests.isEmpty() && inv == invites.first(),
-                    ) { onOpenInvite(inv.gid) }
+                    ) { nav.openInvite(inv.gid) }
                 }
                 // Один список прямо на панели: личные чаты и группы вперемешку,
                 // закреплённые сверху (на ступень светлее).
@@ -220,7 +190,7 @@ internal fun ContactsScreen(
                         // Граница между закреплёнными и остальными — разделитель во
                         // всю ширину: он и разделяет группы, и не оставляет дыры.
                         fullDivider = i > 0 && rows[i - 1].pinned && !r.pinned,
-                        onClick = { if (r.group) onOpenGroup(r.id) else onOpenDm(r.id) },
+                        onClick = { if (r.group) nav.openGroup(r.id) else nav.openDm(r.id) },
                     )
                 }
                 // Папка, в которую ничего не попало, — словами, а не пустым экраном:
@@ -450,6 +420,102 @@ private fun chatPreview(model: AppModel, row: ChatRowUi): String {
  * Одна раскладка на обе — раньше это были две копии с одинаковыми отступами, и
  * поправить одну значило забыть про вторую.
  */
+/** Куда ведёт главная: чаты, карточки решений и действия пустого состояния и полос. */
+internal class HomeNav(
+    val openDm: (String) -> Unit,
+    val openGroup: (String) -> Unit,
+    val openRequest: (String) -> Unit,
+    val openInvite: (String) -> Unit,
+    val openOutbox: () -> Unit,
+    val myCode: () -> Unit,
+    val scan: () -> Unit,
+    val newGroup: () -> Unit,
+)
+
+/**
+ * Полоса очереди над списком: сообщения ждут отправки. Видна, когда нет соединения (уйдут при
+ * его появлении) или очередь выросла (уйдут, когда получатели появятся в сети; предупреждение
+ * выключается в настройках). Ничего не удаляется. Тап — «Исходящие».
+ */
+@Composable
+private fun QueueStrip(model: AppModel, onOpen: () -> Unit) {
+    val n = model.outboxPending
+    val offline = model.netPeers == 0
+    if (n <= 0 || !(offline || (model.outboxWarn && model.warnOutboxGrowth))) return
+    Row(
+        Modifier.fillMaxWidth()
+            .padding(start = Tokens.Space.panel, end = Tokens.Space.panel, top = Tokens.Space.m, bottom = Tokens.Space.xs)
+            .clip(RoundedCornerShape(Tokens.Radius.field))
+            .background(Tokens.Colors.queueStrip)
+            .clickable(role = Role.Button) { onOpen() }
+            .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+    ) {
+        Icon(TablerIcons.Clock, null, tint = Tokens.Colors.queueText, modifier = Modifier.size(Tokens.Size.iconRow))
+        Column(Modifier.weight(1f)) {
+            Text(
+                pluralStringResource(R.plurals.queue_count, n, n),
+                color = Tokens.Colors.queueText,
+                fontSize = Tokens.Font.preview,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                stringResource(if (offline) R.string.queue_offline_sub else R.string.queue_growth_sub),
+                color = Tokens.Colors.queueSub,
+                fontSize = Tokens.Font.small,
+            )
+        }
+        Icon(TablerIcons.ChevronRight, null, tint = Tokens.Colors.queueSub, modifier = Modifier.size(Tokens.Size.iconS))
+    }
+}
+
+/**
+ * Пустая главная: что это за место и как его наполнить. Контакт добавляется только кодом —
+ * поэтому главное действие «Показать мой код», рядом — «Сканировать код».
+ */
+@Composable
+private fun HomeEmpty(nav: HomeNav) {
+    Box(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = Tokens.Space.xxl, vertical = Tokens.Space.xxl),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.panel)).background(Tokens.Colors.group)
+                .padding(start = Tokens.Space.xl, end = Tokens.Space.xl, top = Tokens.Space.xxl, bottom = Tokens.Space.xl),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier.size(Tokens.Size.avatarProfile).clip(RoundedCornerShape(Tokens.Radius.group))
+                    .background(Tokens.Colors.accentMuted),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(TablerIcons.Messages, null, tint = Tokens.Colors.accent, modifier = Modifier.size(Tokens.Size.iconXl))
+            }
+            Text(
+                stringResource(R.string.home_empty_title),
+                color = Color.White,
+                fontSize = Tokens.Font.sheet,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = Tokens.Space.l),
+            )
+            Text(
+                stringResource(R.string.home_empty_text),
+                color = Tokens.Colors.secondary,
+                fontSize = Tokens.Font.preview,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = Tokens.Space.s),
+            )
+            Spacer(Modifier.height(Tokens.Space.xl))
+            AccentButton(stringResource(R.string.home_empty_my_code), Modifier.fillMaxWidth(), onClick = nav.myCode)
+            Spacer(Modifier.height(Tokens.Space.s))
+            PlateButton(stringResource(R.string.my_code_scan), TablerIcons.Scan, Modifier.fillMaxWidth(), onClick = nav.scan)
+            GhostButton(stringResource(R.string.home_empty_group), modifier = Modifier.padding(top = Tokens.Space.xs), onClick = nav.newGroup)
+        }
+    }
+}
+
 /**
  * Строка запроса или приглашения над чатами: чуть другой фон и метка «Запрос» / «Приглашение».
  * Кнопок в строке нет — решение принимается в карточке, где видно всё, что пришло.

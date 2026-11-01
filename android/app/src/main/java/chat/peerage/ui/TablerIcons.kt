@@ -393,3 +393,11 @@ val TablerIcons.Scan: ImageVector by lazy {
         "M5 12l14 0",
     )
 }
+
+val TablerIcons.Clock: ImageVector by lazy {
+    tabler(
+        "clock",
+        "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0",
+        "M12 7v5l3 3",
+    )
+}

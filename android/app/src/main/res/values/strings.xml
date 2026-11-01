@@ -147,14 +147,9 @@
 
     <!-- ── Contacts / add / info ───────────────────────────────────────── -->
     <string name="folder_empty">Nothing in this folder yet.</string>
-    <string name="contacts_empty">No contacts yet. Add one with their exchange code.</string>
     <string name="contacts_empty_title">No contacts</string>
     <string name="contacts_empty_hint">Add a peer by key or QR — using the button above</string>
     <!-- Offline queue growth warning (nothing is ever deleted, this is just a notice) -->
-    <plurals name="outbox_warn">
-        <item quantity="one">%d message is still waiting to be delivered. It is kept and goes out once the recipient is online.</item>
-        <item quantity="other">%d messages are still waiting to be delivered. They are kept — recipients will get them once online.</item>
-    </plurals>
     <string name="settings_outbox_warn">Warn about a growing outbox</string>
     <string name="settings_outbox_warn_hint">Messages are never deleted — this only shows a notice</string>
     <!-- Contact requests (gate instead of TOFU auto-add) -->
@@ -799,4 +794,14 @@
     <string name="req_greeting">Greeting</string>
     <string name="req_block_title">Block %1$s?</string>
     <string name="req_block_text">Messages from this key are no longer accepted.</string>
+    <plurals name="queue_count">
+        <item quantity="one">%d message queued</item>
+        <item quantity="other">%d messages queued</item>
+    </plurals>
+    <string name="queue_offline_sub">Sent once a connection appears</string>
+    <string name="queue_growth_sub">Sent when recipients come online</string>
+    <string name="home_empty_title">No chats yet</string>
+    <string name="home_empty_text">Contacts are added by QR code or exchange code.</string>
+    <string name="home_empty_my_code">Show my code</string>
+    <string name="home_empty_group">Create a group</string>
 </resources>

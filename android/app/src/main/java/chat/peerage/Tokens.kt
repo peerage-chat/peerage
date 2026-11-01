@@ -126,6 +126,11 @@ object Tokens {
         val roomBanner = Color(0xFF12331A) // баннер «в комнате идёт звонок»
         val destructive = error // «удалить участника», «выйти из группы» — тот же красный текста
 
+        // Полоса очереди над списком главной
+        val queueStrip = Color(0xFF2A2418)
+        val queueText = Color(0xFFF2E3C8)
+        val queueSub = Color(0xFFBFAE90)
+
         // Предупреждения
         val noticeBg = Color(0xFF3A2F12) // плашка-предупреждение (очередь разрослась)
         val noticeText = Color(0xFFF6C453) // текст и знак на ней
