@@ -256,7 +256,7 @@ restored = page("Восстановление: личность на месте"
 fileline = (f'<div class="grp"><div class="gr">{ic(FILE, 22, "#9AA3AD", NF)}<div class="gt"><b>backup-2026-10-30.peerage</b><span>48 МБ · снят 30 октября</span></div>'
             + '<button class="pill" style="background:#26272D;color:#C4C7CC;">Другой</button></div></div>')
 bkpass = page("Восстановление: пароль копии", screen(
-    "", None, heading("Пароль копии", "Тот, что задавался при создании файла. Он не совпадает с 24 словами."),
+    "", None, heading("Пароль копии", "Эта копия дополнительно закрыта паролем. Копия без пароля открывается сразу — этого шага нет."),
     SP24 + fileline + SP16
     + '<div class="inp"><span class="v">••••••••••<span class="cr"></span></span>' + ic(EYE_OFF, 20, "#9AA3AD", NF) + '</div>'
     + '<div class="cap" style="margin-top:8px;">Переписка добавится к той, что уже есть на устройстве; ничего не затирается.</div>' + FILL,
@@ -304,7 +304,7 @@ rows = [
     [("Restore.dc.html", restore, "Восст. 1 · Та же сетка, что при записи; подсказка по буквам"),
      ("Mismatch.dc.html", mismatch, "Восст. 2 · Слова верны, сумма не сходится"),
      ("Restored.dc.html", restored, "Восст. 3 · Личность есть → перенести переписку?"),
-     ("BackupPass.dc.html", bkpass, "Восст. 4 · Файл копии + пароль"),
+     ("BackupPass.dc.html", bkpass, "Восст. 4 · Пароль — только если копия им закрыта"),
      ("Done.dc.html", done, "Восст. 5 · Итог с цифрами, про группы")],
     [("PermsB.dc.html", perms_b, "6 · Б · Разрешение на экран — отвергнут"),
      ("BigWelcome.dc.html", big, "Шрифт ×2.0: прокрутка, кнопки прибиты"),
