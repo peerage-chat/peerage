@@ -23,6 +23,13 @@ CSS += """.glyphs{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
 .radio b{display:block;font-size:15px;font-weight:500;color:#ECEDEF}
 .radio span{display:block;font-size:13px;line-height:18px;color:#8E8E98;margin-top:3px}
 .radio .rc{margin-top:1px}
+.risk{display:flex;gap:8px;margin-top:8px;font-size:13px;line-height:18px;color:#F2C98A}
+.sub2{margin:0 16px 14px 52px;padding:12px 14px;border-radius:14px;background:#26272D;display:flex;align-items:center;gap:12px}
+.sub2 b{flex:1;font-size:14px;font-weight:500;color:#ECEDEF}
+.tg.on{background:#33B5E5}.tg.on i{left:21px;background:#04222E}
+.bio{position:absolute;left:12px;right:12px;bottom:12px;background:#2A2B31;border-radius:28px;padding:24px 20px 16px;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.bio b{font-size:18px;font-weight:500;color:#ECEDEF}
+.bio span{font-size:14px;color:#B8B8C0}
 .hdr{display:flex;align-items:center;gap:6px;padding:14px 12px 10px 8px}
 .hdr b{font-size:20px;font-weight:700;color:#ECEDEF}
 .sec{font-size:13px;font-weight:500;color:#8E8E98;padding:0 4px 8px}
@@ -93,6 +100,8 @@ VER = '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"></path><path d="
 MAYBE = '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"></path><path d="M10 9.5a2 2 0 1 1 2.5 2c-.4.2-.5.6-.5 1M12 15.5h.01"></path>'
 FACE = '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"></path><path d="M9 10h.01M15 10h.01M9.5 15a3.5 3.5 0 0 0 5 0"></path>'
 
+FINGER = '<path d="M8 11a4 4 0 0 1 8 0v2a8 8 0 0 1-1.5 4.7M12 11v3a6 6 0 0 1-2 4.5M5.5 8.5A7 7 0 0 1 19 10v2M5 13v-1.5M8.5 19.5A9 9 0 0 0 9 14v-2.5"></path>'
+
 
 def hdr(title):
     return '<div class="hdr">' + btn(BACK, "Назад") + f'<b>{title}</b></div>'
@@ -160,8 +169,11 @@ verified = page("Сверка ключа: сверен", hdr("Сверка кл�
 # ---------- 6. Замок ----------
 lock = page("Блокировка приложения", '<div class="ob" style="align-items:center;justify-content:center;text-align:center;gap:12px;">'
             + f'{MESH}<div class="obt" style="margin:8px 0 0;">Peerage заблокирован</div>'
-            + '<div class="obs">Разблокировка — отпечатком, лицом или PIN телефона.</div></div>'
-            + '<div class="obf"><button class="btn pri" style="min-height:52px;">' + ic(FACE, 20, "#04222E") + 'Разблокировать</button></div>')
+            + '<div class="obs">Отпечаток, лицо или PIN телефона — то, что настроено в системе.</div></div>'
+            + '<div class="obf"><button class="btn pri" style="min-height:52px;">' + ic(FINGER, 20, "#04222E") + 'Разблокировать</button></div>'
+            + '<div class="dim"></div><div class="bio" role="dialog" aria-label="Системный запрос биометрии">'
+            + ic(FINGER, 56, "#33B5E5") + '<b>Разблокировать Peerage</b><span>Приложите палец к сканеру</span>'
+            + '<button class="btn ghost" style="margin-top:8px;">Использовать PIN</button></div>')
 
 # ---------- 7. Пароль хранилища ----------
 vault = page("Пароль хранилища", '<div style="height:72px;flex:none;"></div><div class="ob">'
@@ -169,6 +181,13 @@ vault = page("Пароль хранилища", '<div style="height:72px;flex:no
              + SP24 + '<div class="inp" style="box-shadow:inset 0 0 0 1.5px #FF6B6B;"><span class="v">•••••••<span class="cr"></span></span>' + ic(EYE_OFF, 20, "#9AA3AD", NF) + '</div>'
              + '<div class="cap" style="color:#FF8A8A;margin-top:8px;">Неверный пароль</div>'
              + FILL + '</div>' + foot("Открыть", "Пароль забыт"))
+
+vault_bio = page("Пароль хранилища: отпечаток", '<div style="height:72px;flex:none;"></div><div class="ob">'
+                 + heading("Данные зашифрованы", "Переписка на этом телефоне закрыта паролем.", ic(LOCK, 34, "#33B5E5"))
+                 + FILL + '</div>' + foot("Ввести пароль", None)
+                 + '<div class="dim"></div><div class="bio" role="dialog" aria-label="Системный запрос биометрии">'
+                 + ic(FINGER, 56, "#33B5E5") + '<b>Открыть переписку</b><span>Приложите палец к сканеру</span>'
+                 + '<button class="btn ghost" style="margin-top:8px;">Ввести пароль</button></div>')
 
 # ---------- 8. Пароль забыт ----------
 forgot = page("Пароль хранилища: забыт", '<div style="height:72px;flex:none;"></div><div class="ob">'
@@ -184,20 +203,25 @@ forgot = page("Пароль хранилища: забыт", '<div style="height
               + '<button class="btn">Вспомнить ещё раз</button></div>')
 
 # ---------- 9. Уровень шифрования ----------
-def radio(on, t, s):
+RISK = (f'<div class="risk">{ic(WARN, 16, "#F2C98A", NF)}<div>Система может сбросить ключ устройства — после смены '
+        'блокировки экрана или обновления прошивки. Тогда переписка не откроется; вернуть её можно только из файла копии данных.</div></div>')
+
+
+def radio(on, t, s, extra=""):
     mark = f'<div class="rc on">{ic(CHECK, 14, "#04222E")}</div>' if on else '<div class="rc"></div>'
-    return f'<div class="radio">{mark}<div><b>{t}</b><span>{s}</span></div></div>'
+    return f'<div class="radio">{mark}<div><b>{t}</b><span>{s}</span>{extra}</div></div>'
 
 
 level = page("Шифрование данных", hdr("Шифрование данных") + body(
     '<div class="grp">'
-    + radio(False, "Ключ устройства", "Открывается само. Снятая копия памяти бесполезна, но разблокированный телефон в чужих руках открывает переписку.")
-    + radio(True, "Пароль", "Спрашивается при каждом запуске. Переписка закрыта и на разблокированном телефоне.")
-    + radio(False, "Ключ устройства и пароль", "Нужны и этот телефон, и пароль: снятая с него копия без пароля бесполезна.")
-    + '</div>' + SP24 + '<div class="sec">Новый пароль</div>'
+    + radio(False, "Ключ устройства", "Открывается само. Снятая копия памяти бесполезна, но разблокированный телефон в чужих руках открывает переписку.", RISK)
+    + radio(True, "Пароль", "Спрашивается при запуске; после перезагрузки сообщения не принимаются, пока пароль не введён. От сброса ключа устройства не зависит.")
+    + '<div class="sub2">' + ic(FINGER, 20, "#9AA3AD", NF) + '<b>Открывать отпечатком</b><div class="tg on"><i></i></div></div>'
+    + radio(False, "Ключ устройства и пароль", "Нужны и этот телефон, и пароль: снятая с него копия без пароля бесполезна.", RISK)
+    + '</div>' + SP16 + '<div class="sec">Новый пароль</div>'
     + '<div class="inp"><span class="v">••••••••••</span></div><div style="height:8px;"></div>'
     + '<div class="inp"><span class="p">Повторить</span></div>' + SP16
-    + f'<div class="warn">{ic(WARN, 20, "#F2C98A", NF)}<div>Забытый пароль не восстанавливается. Личность вернут 24 слова, переписку — файл копии данных.</div></div>'
+    + f'<div class="warn">{ic(WARN, 20, "#F2C98A", NF)}<div>Забытый пароль не восстанавливается: личность вернут 24 слова, переписку — файл копии данных.</div></div>'
     + FILL) + foot("Применить"))
 
 # ---------- 10. Показать ключ ----------
@@ -219,10 +243,11 @@ rows = [
      ("Match.dc.html", ok_sheet, "Код совпал: шторка, не тост"),
      ("Mismatch.dc.html", bad_sheet, "Код не совпал"),
      ("Verified.dc.html", verified, "Сверен: когда и как")],
-    [("Lock.dc.html", lock, "Блокировка приложения"),
+    [("Lock.dc.html", lock, "Блокировка: сразу системная биометрия"),
      ("Vault.dc.html", vault, "Пароль хранилища при запуске"),
+     ("VaultBio.dc.html", vault_bio, "Пароль хранилища: сначала отпечаток"),
      ("Forgot.dc.html", forgot, "Пароль забыт: что остаётся"),
-     ("Level.dc.html", level, "Шифрование данных: уровень"),
+     ("Level.dc.html", level, "Уровень: риск сброса ключа + отпечаток"),
      ("ShowKey.dc.html", showkey, "Безопасность → Ключ (после разблокировки)"),
      ("Recovery.dc.html", recovery, "Данные не открываются")],
 ]
