@@ -90,6 +90,8 @@ object Tokens {
         val folderSelected = Color(0xFF1C3A47)
         val unreadMuted = Color(0xFF3A3A42) // счётчик чата без звука
         val selectedRow = Color(0x2933B5E5) // строка выделенного сообщения (акцент @16%)
+        val checkEdge = Color(0xFF6B6C74) // кружок выбора, пока не отмечен
+        val dim = Color(0x99000000) // затемнение под меню у пузыря (чёрный @60%)
 
         // Цитата ВНУТРИ цветного пузыря: полупрозрачный белый, а не наш серый — серый
         // на синем исходящем читается пятном чужого слоя.
@@ -314,6 +316,9 @@ object Tokens {
         val undoStroke = 2.5.dp
         val snackShadow = 8.dp
         val menu = 248.dp // ширина всплывающего меню
+        val check = 22.dp // кружок выбора сообщения у ведущего края
+        val checkStroke = 1.5.dp // контур пустого кружка выбора
+        val checkMark = 14.dp // галочка в отмеченном кружке
         val menuShadow = 12.dp
         val swapBlur = 4.dp // размытие уходящей иконки при смене на месте
         val phraseRow = 36.dp // строка слова в сетке 24 слов

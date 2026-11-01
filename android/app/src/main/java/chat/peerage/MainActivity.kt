@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -342,9 +343,17 @@ private fun CompactShell(model: AppModel) {
     run {
         Box(Modifier.fillMaxSize()) {
             // Системная полоса навигации — продолжение листа над ней: иначе внизу экрана
-            // остаётся чужая тёмная полоса.
-            val barColor = Tokens.Colors.panel.toArgb()
-            SideEffect { activity?.window?.navigationBarColor = barColor }
+            // остаётся чужая тёмная полоса. Под меню у пузыря обе полосы темнеют вместе с
+            // экраном — иначе светлые края выдают, что затемнение «не до конца».
+            val dimmed = model.bubbleActions != null
+            fun bar(c: androidx.compose.ui.graphics.Color) =
+                (if (dimmed) Tokens.Colors.dim.compositeOver(c) else c).toArgb()
+            val navColor = bar(Tokens.Colors.panel)
+            val statusColor = bar(Tokens.Colors.bg)
+            SideEffect {
+                activity?.window?.navigationBarColor = navColor
+                activity?.window?.statusBarColor = statusColor
+            }
             Surface(Modifier.fillMaxSize(), color = HoloBg) {
                 ScreenTransitions(nav, backEnabled = !inCall && nav.depth > 1, onBack = goBack) { s ->
                     Box(Modifier.fillMaxSize()) {
@@ -618,6 +627,8 @@ private fun CompactShell(model: AppModel) {
                     .padding(horizontal = Tokens.Space.m)
                     .padding(bottom = if (overInput) Tokens.Size.fabClearance else Tokens.Space.xxl),
             )
+            // Меню у пузыря — над всем экраном: затемнение и меню рядом с пузырём.
+            BubbleMenuHost(model)
             if (model.showRingSheet && model.currentRoom != null) {
                 RingSheet(model) { model.showRingSheet = false }
                 BackHandler { model.showRingSheet = false }

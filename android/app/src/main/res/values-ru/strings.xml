@@ -724,8 +724,6 @@
     <string name="chat_copy">Копировать</string>
     <string name="chat_reply">Ответить</string>
     <string name="chat_delete">Удалить</string>
-    <string name="chat_delete_title">Удалить сообщений: %1$d</string>
-    <string name="chat_delete_note_all">«У всех» — это просьба удалить, а не гарантия: собеседник мог прочитать сообщение или сохранить его раньше.</string>
     <string name="chat_delete_note_foreign">Чужие сообщения можно убрать только у себя — переписывать чужую историю нельзя.</string>
     <string name="chat_delete_for_me">Удалить у себя</string>
     <string name="chat_delete_for_all">Удалить у всех</string>
@@ -767,6 +765,28 @@
     <string name="chats_time_yesterday">вчера</string>
     <string name="chat_menu_pin">Закрепить</string>
     <string name="chat_menu_unpin">Открепить</string>
+    <string name="select_clear">Снять выбор</string>
+    <string name="select_count">Выбрано: %1$d</string>
+    <string name="select_hint">Нажатие на сообщение добавляет его к выбранным</string>
+    <string name="act_save">В «Сохранённое»</string>
+    <string name="act_select">Выбрать</string>
+    <string name="act_status">%1$s · %2$s</string>
+    <string name="act_delivered">Доставлено</string>
+    <string name="act_sent">Отправлено</string>
+    <string name="act_sending">Отправляется</string>
+    <string name="act_queued">В очереди</string>
+    <string name="act_failed">Не доставлено</string>
+    <string name="act_today">сегодня, %1$s</string>
+    <string name="act_yesterday">вчера, %1$s</string>
+    <string name="act_on_day">%1$s, %2$s</string>
+    <string name="act_received">Получено</string>
+    <string name="delete_note_all">«У всех» — просьба удалить их и у остальных. Если сообщения уже прочитаны или сохранены, это не отменить.</string>
+    <plurals name="delete_title">
+        <item quantity="one">Удалить %1$d сообщение?</item>
+        <item quantity="few">Удалить %1$d сообщения?</item>
+        <item quantity="many">Удалить %1$d сообщений?</item>
+        <item quantity="other">Удалить %1$d сообщения?</item>
+    </plurals>
     <string name="chat_menu_mute">Без звука</string>
     <string name="chat_menu_profile">Профиль</string>
     <string name="chat_menu_invite">Пригласить</string>

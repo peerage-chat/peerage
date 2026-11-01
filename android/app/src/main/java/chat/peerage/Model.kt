@@ -1506,6 +1506,14 @@ class AppModel private constructor() {
         }
     }
 
+    /** Одно сообщение — в «Сохранённое»: та же пересылка себе, без выбора адресата. */
+    fun saveToSaved(src: ChatTarget, m: Message) {
+        val mine = me?.pubkey ?: return
+        forwarding = src to listOf(m.id to m.sender)
+        forwardHideAuthor = false
+        forwardTo(ChatTarget(mine, group = false))
+    }
+
     /** hex автора цитируемого сообщения: «моё» — это я, иначе собеседник. */
     private fun replyAuthor(peerKey: String, reply: Message?): String = when {
         reply == null -> ""
@@ -1584,6 +1592,9 @@ class AppModel private constructor() {
     var replyTarget by mutableStateOf<Message?>(null)
         private set
 
+    /** Открытое меню у пузыря; null — закрыто. */
+    var bubbleActions by mutableStateOf<BubbleActions?>(null)
+
     fun toggleSelect(m: Message) {
         // Сообщения без id (старый клиент) выбрать нельзя: с ними нечего делать —
         // ни отозвать, ни ответить, а «удалить у себя» без ссылки не адресуется.
@@ -1597,6 +1608,7 @@ class AppModel private constructor() {
         selection = emptySet()
         replyTarget = null
         editTarget = null
+        bubbleActions = null
         jumpTo = 0L // недостигнутая цель прошлого чата не должна сработать в новом
     }
 
@@ -1628,8 +1640,13 @@ class AppModel private constructor() {
      *  сообщения только спрятаны, в движок удаление уходит потом. */
     fun deleteSelected(key: String, group: Boolean = false) {
         val refs = selection.toList()
-        if (refs.isEmpty()) return
         selection = emptySet()
+        deleteRefs(key, group, refs)
+    }
+
+    /** Удалить у себя названное (меню у пузыря — без режима выбора); со снекбаром «Отменить». */
+    fun deleteRefs(key: String, group: Boolean, refs: List<MsgRef>) {
+        if (refs.isEmpty()) return
         deleteWithUndo(chatKey(key, group), refs, R.plurals.undo_msgs_deleted) {
             if (group) {
                 Native.groupDeleteMessages(sessionPtr, key, wireGroupRefs(refs))
@@ -1647,9 +1664,15 @@ class AppModel private constructor() {
 
     /** Отозвать выделенные СВОИ сообщения у собеседника. Чужие не трогаем. */
     fun retractSelected(key: String, group: Boolean = false) {
-        val ids = selection.filter { isMine(it) }.map { it.id }
-        if (ids.isEmpty()) return
+        val refs = selection.toList()
         selection = emptySet()
+        retractRefs(key, group, refs)
+    }
+
+    /** Отозвать у собеседников названные СВОИ сообщения. Чужие не трогаем. */
+    fun retractRefs(key: String, group: Boolean, refs: List<MsgRef>) {
+        val ids = refs.filter { isMine(it) }.map { it.id }
+        if (ids.isEmpty()) return
         val json = ids.joinToString(prefix = "[", postfix = "]")
         ops.execute {
             if (group) {

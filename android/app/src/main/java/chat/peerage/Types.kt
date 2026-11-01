@@ -116,6 +116,17 @@ data class Mention(val at: Int, val len: Int, val key: String)
 data class ChatTarget(val id: String, val group: Boolean, val title: String = "")
 
 /**
+ * Меню у пузыря (долгое нажатие): сообщение, его чат и где пузырь лежит в окне — меню
+ * встаёт рядом, а затемнение обходит пузырь по его форме.
+ */
+data class BubbleActions(
+    val msg: Message,
+    val chat: ChatTarget,
+    val bounds: androidx.compose.ui.geometry.Rect,
+    val shape: androidx.compose.ui.graphics.Shape,
+)
+
+/**
  * Ссылка на строку истории: id сообщения плюс его автор (ADR-006). Пара, а не один
  * id: id посеян временем ОТПРАВИТЕЛЯ, поэтому у моего и чужого сообщения он может
  * совпасть.

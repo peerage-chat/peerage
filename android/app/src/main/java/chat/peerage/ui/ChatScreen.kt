@@ -19,30 +19,26 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudQueue
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
@@ -63,8 +59,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -271,7 +270,8 @@ internal fun ChatScreen(model: AppModel) {
         LazyColumn(
             state = listState,
             reverseLayout = true,
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = Tokens.Space.m),
+            // Поля по бокам даёт ряд сообщения: заливка выбора идёт во всю ширину листа.
+            modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
             // Порядок элементов — от свежего к старому; i — индекс в хронологии.
             // Ключ — пара «автор + id»: состояние пузыря (просмотрщик, голосовое) и
@@ -506,105 +506,39 @@ internal fun E2EBanner() {
 }
 
 /**
- * Панель действий над выделенными сообщениями.
- *
- * Ответ доступен только когда выбрано ОДНО: ответ на пять сообщений сразу — не
- * действие, а вопрос «на какое из них», и отвечать за пользователя тут нельзя.
+ * Шапка режима выбора (app-ui.md → «Действия», макет `chatact/Multi`): снять выбор · «Выбрано: N»
+ * · Переслать · Копировать · Удалить. Ответ, правка и закреп — из меню у пузыря: они про одно
+ * сообщение.
  */
 @Composable
 internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
     val key = (if (group) model.currentGroup else model.currentChat) ?: return
     val ctx = LocalContext.current
-    val sel = model.selection
     var confirmDelete by remember { mutableStateOf(false) }
-    // «Назад» в режиме выделения снимает выделение, а не уводит из чата.
+    // «Назад» в режиме выбора снимает выбор, а не уводит из чата.
     BackHandler { model.clearSelection() }
 
     Row(
-        Modifier.fillMaxWidth().background(HoloAccentDark).height(Tokens.Size.topBar).padding(horizontal = Tokens.Space.s),
+        Modifier.fillMaxWidth().background(HoloBg).height(Tokens.Size.topBar).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel)) { model.clearSelection() }
+        BarIcon(TablerIcons.X, stringResource(R.string.select_clear)) { model.clearSelection() }
         Text(
-            sel.size.toString(),
+            stringResource(R.string.select_count, model.selection.size),
             color = Color.White,
-            fontSize = Tokens.Font.title,
+            fontSize = Tokens.Font.name,
             fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f).padding(start = Tokens.Space.s),
+            modifier = Modifier.weight(1f).padding(start = Tokens.Space.s).politeLive(),
         )
-        if (sel.size == 1) {
-            BarIcon(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_reply)) {
-                val ref = sel.first()
-                model.chat(key, group).firstOrNull { it.id == ref.id && it.sender == ref.sender }
-                    ?.let { model.startReply(it) }
-            }
-        }
-        BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
-            model.beginForward(key, group)
-        }
-        if (sel.size == 1 && model.isMine(sel.first())) {
-            val ref = sel.first()
-            BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
-                model.chat(key, group).firstOrNull { it.id == ref.id && it.mine }
-                    ?.let { model.editTarget = it }
-                model.clearSelection()
-            }
-        }
-        val mayPin = !group || model.groups.firstOrNull { it.gid == key }?.admin == true
-        if (sel.size == 1 && mayPin) {
-            val ref = sel.first()
-            val msg = model.chat(key, group).firstOrNull { it.id == ref.id && it.sender == ref.sender }
-            val already = model.pinned[key].orEmpty().any { it.id == ref.id && it.sender == ref.sender }
-            BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
-                msg?.let { model.setPinned(key, group, it, !already) }
-                model.clearSelection()
-            }
-        }
-        BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
+        BarIcon(TablerIcons.Forward, stringResource(R.string.forward_action)) { model.beginForward(key, group) }
+        BarIcon(TablerIcons.Copy, stringResource(R.string.chat_copy)) {
             val text = model.selectedTextOf(key, group)
-            if (text.isNotEmpty()) {
-                copyToClipboard(ctx, text, "message")
-            }
+            if (text.isNotEmpty()) copyToClipboard(ctx, text, "message")
             model.clearSelection()
         }
-        BarIcon(Icons.Filled.Delete, stringResource(R.string.chat_delete)) { confirmDelete = true }
+        BarIcon(TablerIcons.Trash, stringResource(R.string.chat_delete)) { confirmDelete = true }
     }
-
-    if (confirmDelete) {
-        val allMine = sel.all { model.isMine(it) }
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text(stringResource(R.string.chat_delete_title, sel.size)) },
-            // Честно про границу: отзыв — просьба, а не гарантия. Обещать «удалено у
-            // всех» нельзя: собеседник мог прочитать сообщение или снять экран раньше.
-            text = {
-                Text(
-                    stringResource(
-                        if (allMine) R.string.chat_delete_note_all else R.string.chat_delete_note_foreign,
-                    ),
-                )
-            },
-            confirmButton = {
-                Column(horizontalAlignment = Alignment.End) {
-                    if (allMine) {
-                        TextButton(onClick = {
-                            model.retractSelected(key, group)
-                            confirmDelete = false
-                        }) { Text(stringResource(R.string.chat_delete_for_all), color = HoloError) }
-                    }
-                    TextButton(onClick = {
-                        model.deleteSelected(key, group)
-                        confirmDelete = false
-                    }) { Text(stringResource(R.string.chat_delete_for_me), color = HoloError) }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
-        )
-    }
+    if (confirmDelete) DeleteSheet(model, key, group, model.selection.toList()) { confirmDelete = false }
 }
 
 /** Чип-разделитель даты. */
@@ -685,6 +619,11 @@ internal fun MessageInput(
     onMentionPicked: (String, String) -> Unit = { _, _ -> },
     onSend: () -> Unit,
 ) {
+    // Пока идёт выбор, поле ввода не нужно: на его месте — как выбирать дальше.
+    if (model?.selection?.isNotEmpty() == true) {
+        SelectHint()
+        return
+    }
     // Поле держим как TextFieldValue: панели эмодзи нужна ПОЗИЦИЯ КУРСОРА, иначе
     // символ всегда падал бы в конец, даже если человек правит середину строки.
     var field by remember { mutableStateOf(TextFieldValue(value)) }
@@ -931,6 +870,34 @@ internal fun MessageRow(
     group: Boolean = false,
     animate: Boolean = false,
 ) {
+    val selecting = model.selection.isNotEmpty() && !m.system
+    // Выбор — у всего ряда (app-ui.md → «Действия»): заливка во всю ширину и кружок у
+    // ведущего края. Не обводка пузыря: обводкой отмечено упоминание меня.
+    val selected = selecting && MsgRef(m.id, m.sender) in model.selection
+    val press = remember { MutableInteractionSource() }
+    Row(
+        Modifier.fillMaxWidth()
+            .background(if (selected) Tokens.Colors.selectedRow else Color.Transparent)
+            .then(
+                if (selecting) {
+                    Modifier.toggleable(selected, press, indication = null, role = Role.Checkbox) { model.toggleSelect(m) }
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = Tokens.Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (selecting) {
+            SelectCheck(selected)
+            Spacer(Modifier.width(Tokens.Space.m))
+        }
+        Box(Modifier.weight(1f)) { MessageRowContent(model, m, pos, group, animate) }
+    }
+}
+
+@Composable
+private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group: Boolean, animate: Boolean) {
     when {
         m.system -> {
             val who = groupSenderName(model, m.sender)
@@ -1021,7 +988,18 @@ internal fun MessageBubble(
         label = "bubble",
     )
     val selecting = model.selection.isNotEmpty()
-    val selected = MsgRef(m.id, m.sender) in model.selection
+    // Где пузырь лежит в окне — для меню у него. Не состояние: прокрутка двигает пузырь
+    // каждый кадр, а читается место только в момент долгого нажатия.
+    val place = remember { BubblePlace() }
+    // Долгое нажатие — меню у пузыря; в режиме выбора — переключить выбор. Вложения
+    // зовут то же: иначе палец на картинке съедал бы жест целиком.
+    val onLong = {
+        if (selecting) {
+            model.toggleSelect(m)
+        } else if (chatId != null && m.id != 0L) {
+            model.bubbleActions = BubbleActions(m, ChatTarget(chatId, group), place.rect, bubbleShape(m.mine, pos))
+        }
+    }
     // Мета одна на все ветки пузыря: и когда она встроена в текст, и когда лежит
     // поверх вложения — это один и тот же набор значков.
     val meta: @Composable () -> Unit = {
@@ -1032,10 +1010,7 @@ internal fun MessageBubble(
             .graphicsLayer {
                 alpha = appear
                 translationY = (1f - appear) * 24f
-            }
-            // Подсветка на ВСЮ строку, а не на пузырь: так видно, что выбрано
-            // сообщение целиком, включая вложение и подпись.
-            .background(if (selected) Tokens.Colors.selectedRow else Color.Transparent),
+            },
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
         // Карточка «скачать» превращается в готовое вложение — это подмена
@@ -1052,22 +1027,20 @@ internal fun MessageBubble(
         val photoHeader = photoBubble &&
             (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
         Box(
-            Modifier.widthIn(max = Tokens.Size.bubbleMax).clip(bubbleShape(m.mine, pos))
+            Modifier.widthIn(max = Tokens.Size.bubbleMax)
+                .onGloballyPositioned { place.rect = it.boundsInRoot() }
+                .clip(bubbleShape(m.mine, pos))
                 .then(
                     if (photoBubble) Modifier else Modifier.background(if (m.mine) BubbleOut else BubbleIn),
                 )
                 .then(
-                    when {
-                        selected -> Modifier.border(1.dp, HoloAccent, bubbleShape(m.mine, pos))
-                        // Фото без подписи — само себе пузырь: обводка картинки по его форме.
-                        photoBubble -> Modifier.imageOutline(bubbleShape(m.mine, pos))
-                        else -> Modifier
-                    },
+                    // Фото без подписи — само себе пузырь: обводка картинки по его форме.
+                    if (photoBubble) Modifier.imageOutline(bubbleShape(m.mine, pos)) else Modifier,
                 )
-                // Длинный тап — вход в режим выделения; в режиме короткий тап
-                // переключает, а не открывает вложение (иначе выбор был бы ловушкой).
+                // Длинный тап — меню у пузыря; в режиме выбора короткий тап переключает,
+                // а не открывает вложение (иначе выбор был бы ловушкой).
                 .combinedClickable(
-                    onLongClick = { model.toggleSelect(m) },
+                    onLongClick = onLong,
                     onClick = { if (selecting) model.toggleSelect(m) },
                 )
                 .then(
@@ -1141,7 +1114,7 @@ internal fun MessageBubble(
                                 blobBytes,
                                 onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
                                 bare = photoBubble,
-                                onLongClick = { model.toggleSelect(m) },
+                                onLongClick = onLong,
                                 cacheKey = m.blobId,
                             )
                             // Видео — тот же кадр, что и фото, плюс метка
@@ -1153,11 +1126,11 @@ internal fun MessageBubble(
                                 m.durationMs,
                                 onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
                                 bare = photoBubble,
-                                onLongClick = { model.toggleSelect(m) },
+                                onLongClick = onLong,
                                 cacheKey = m.thumbId,
                             )
                             "voice" -> VoiceAttachment(blobBytes, m.blobId, m.durationMs)
-                            "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready) { model.toggleSelect(m) }
+                            "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready, onLongClick = onLong)
                             // Текст обтекает мету: она едет в конец последней строки
                             // и переносится сама, если та её не вмещает.
                             else -> BubbleText(bubbleText(model, m)) { meta() }
@@ -1228,6 +1201,11 @@ internal fun MessageBubble(
             },
         )
     }
+}
+
+/** Место пузыря в окне; обновляется раскладкой, читается по долгому нажатию. */
+private class BubblePlace {
+    var rect = androidx.compose.ui.geometry.Rect.Zero
 }
 
 /** Сторона снимка, который сам себе пузырь. Шапка над ним (цитата, «Переслано»)

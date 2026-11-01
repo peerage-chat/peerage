@@ -441,6 +441,22 @@ val TablerIcons.Logout: ImageVector by lazy {
     )
 }
 
+val TablerIcons.Reply: ImageVector by lazy {
+    tabler("arrow-back-up", "M9 14l-4 -4l4 -4", "M5 10h11a4 4 0 1 1 0 8h-1")
+}
+
+val TablerIcons.Forward: ImageVector by lazy {
+    tabler("arrow-forward-up", "M15 14l4 -4l-4 -4", "M19 10h-11a4 4 0 1 0 0 8h1")
+}
+
+val TablerIcons.CircleCheck: ImageVector by lazy {
+    tabler("circle-check", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0", "M9 12l2 2l4 -4")
+}
+
+val TablerIcons.X: ImageVector by lazy {
+    tabler("x", "M18 6l-12 12", "M6 6l12 12")
+}
+
 val TablerIcons.UserPlus: ImageVector by lazy {
     tabler("user-plus", "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0", "M16 19h6", "M19 16v6", "M6 21v-2a4 4 0 0 1 4 -4h4")
 }

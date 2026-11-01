@@ -694,8 +694,6 @@
     <string name="chat_copy">Copy</string>
     <string name="chat_reply">Reply</string>
     <string name="chat_delete">Delete</string>
-    <string name="chat_delete_title">Delete messages: %1$d</string>
-    <string name="chat_delete_note_all">«For everyone» is a request, not a guarantee: the other side may have read or saved the message earlier.</string>
     <string name="chat_delete_note_foreign">Messages from others can only be removed on your side — rewriting someone else\'s history is not possible.</string>
     <string name="chat_delete_for_me">Delete for me</string>
     <string name="chat_delete_for_all">Delete for everyone</string>
@@ -735,6 +733,26 @@
     <string name="chats_time_yesterday">yesterday</string>
     <string name="chat_menu_pin">Pin</string>
     <string name="chat_menu_unpin">Unpin</string>
+    <string name="select_clear">Clear selection</string>
+    <string name="select_count">Selected: %1$d</string>
+    <string name="select_hint">Tap a message to add it to the selection</string>
+    <string name="act_save">Add to Saved</string>
+    <string name="act_select">Select</string>
+    <string name="act_status">%1$s · %2$s</string>
+    <string name="act_delivered">Delivered</string>
+    <string name="act_sent">Sent</string>
+    <string name="act_sending">Sending</string>
+    <string name="act_queued">Queued</string>
+    <string name="act_failed">Not delivered</string>
+    <string name="act_today">today, %1$s</string>
+    <string name="act_yesterday">yesterday, %1$s</string>
+    <string name="act_on_day">%1$s, %2$s</string>
+    <string name="act_received">Received</string>
+    <string name="delete_note_all">“For everyone” asks the others to delete them too. Messages already read or saved can’t be recalled.</string>
+    <plurals name="delete_title">
+        <item quantity="one">Delete %1$d message?</item>
+        <item quantity="other">Delete %1$d messages?</item>
+    </plurals>
     <string name="chat_menu_mute">Mute</string>
     <string name="chat_menu_profile">Profile</string>
     <string name="chat_menu_invite">Invite</string>

@@ -468,6 +468,18 @@ internal fun AccentButton(text: String, modifier: Modifier = Modifier, enabled: 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ConfirmSheet(title: String, text: String, ok: String, onOk: () -> Unit, onClose: () -> Unit) {
+    ActionSheet(title, text, onClose) {
+        PlateButton(ok, modifier = Modifier.fillMaxWidth(), danger = true) {
+            onOk()
+            onClose()
+        }
+        PlateButton(stringResource(R.string.common_cancel), modifier = Modifier.fillMaxWidth(), onClick = onClose)
+    }
+}
+
+/** Шторка-решение: заголовок, пояснение и кнопки [buttons] столбиком (опасная — первой). */
+@Composable
+internal fun ActionSheet(title: String, text: String, onClose: () -> Unit, buttons: @Composable ColumnScope.() -> Unit) {
     ModalBottomSheet(
         onDismissRequest = onClose,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -495,11 +507,7 @@ internal fun ConfirmSheet(title: String, text: String, ok: String, onOk: () -> U
                 fontSize = Tokens.Font.label,
                 modifier = Modifier.padding(horizontal = Tokens.Space.xs),
             )
-            PlateButton(ok, modifier = Modifier.fillMaxWidth(), danger = true) {
-                onOk()
-                onClose()
-            }
-            PlateButton(stringResource(R.string.common_cancel), modifier = Modifier.fillMaxWidth(), onClick = onClose)
+            buttons()
         }
     }
 }
@@ -683,7 +691,7 @@ internal fun dayKey(ts: Long): Long {
     return c.get(java.util.Calendar.YEAR) * 1000L + c.get(java.util.Calendar.DAY_OF_YEAR)
 }
 
-private fun yearOf(ts: Long): Long = dayKey(ts) / 1000
+internal fun yearOf(ts: Long): Long = dayKey(ts) / 1000
 
 // ── Автор сообщения ─────────────────────────────────────────────────────────
 // Живёт здесь, а не в экране группы: имя и цвет автора нужны и ленте, и цитате,
@@ -1160,17 +1168,21 @@ internal fun PopMenu(open: Boolean, onDismiss: () -> Unit, content: @Composable 
         popupPositionProvider = position,
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.PopupProperties(focusable = true),
-    ) {
-        val shape = RoundedCornerShape(Tokens.Radius.group)
-        Column(
-            Modifier.width(Tokens.Size.menu)
-                .shadow(Tokens.Size.menuShadow, shape)
-                .clip(shape)
-                .background(Tokens.Colors.group)
-                .border(1.dp, Tokens.Colors.menuEdge, shape),
-            content = content,
-        )
-    }
+    ) { MenuSurface(content = content) }
+}
+
+/** Подложка меню: ступень group с тенью и тонкой кромкой. Одна у «⋮» и у меню пузыря. */
+@Composable
+internal fun MenuSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(Tokens.Radius.group)
+    Column(
+        modifier.width(Tokens.Size.menu)
+            .shadow(Tokens.Size.menuShadow, shape)
+            .clip(shape)
+            .background(Tokens.Colors.group)
+            .border(1.dp, Tokens.Colors.menuEdge, shape),
+        content = content,
+    )
 }
 
 /** Строка меню: иконка и подпись; [trailing] — переключатель справа, если пункт им и является. */

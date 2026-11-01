@@ -145,7 +145,8 @@ private fun GroupChatContent(model: AppModel) {
             LazyColumn(
                 state = listState,
                 reverseLayout = true,
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = Tokens.Space.m),
+                // Поля по бокам даёт ряд сообщения: заливка выбора идёт во всю ширину листа.
+                modifier = Modifier.weight(1f).fillMaxWidth(),
             ) {
                 // От свежего к старому; i — индекс в хронологии (см. ChatScreen).
                 // Ключ — пара «автор + id»: состояние пузыря (просмотрщик, голосовое) и

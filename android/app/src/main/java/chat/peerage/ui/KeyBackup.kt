@@ -339,6 +339,6 @@ internal fun KeyFlowScreen(model: AppModel, wordsFirst: Boolean, onDone: () -> U
 }
 
 /** Вежливая живая область: изменение текста зачитывается, не перебивая. */
-private fun Modifier.politeLive(): Modifier = semantics {
+internal fun Modifier.politeLive(): Modifier = semantics {
     liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
 }
