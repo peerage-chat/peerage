@@ -176,19 +176,37 @@ phrase = page("Первый запуск: 24 слова", screen(
     extra=f'<div class="cap" style="display:flex;align-items:center;gap:6px;justify-content:center;padding-bottom:4px;">{ic(SHIELD, 16, "#8BC34A", NF)}Экран защищён от снимков</div>'))
 
 # ---------- 5. Проверка (вариант) ----------
-def quiz(n, opts, on=None):
-    return (f'<div class="qz"><div class="qh">Слово №{n}</div><div class="qo">'
-            + ''.join(f'<button class="{"on" if o == on else ""}">{o}</button>' for o in opts) + '</div></div>')
+def keyboard(sugs):
+    """Клавиатура с полосой подсказок слов BIP39 (первая — подходящая лучше всех)."""
+    keys = ''.join('<div class="kr">' + ''.join(f'<div class="k">{ch}</div>' for ch in row) + '</div>'
+                   for row in ["qwertyuiop", "asdfghjkl"])
+    keys += '<div class="kr"><div class="k w2">⇧</div>' + ''.join(f'<div class="k">{ch}</div>' for ch in "zxcvbnm") + '<div class="k w2">⌫</div></div>'
+    keys += '<div class="kr"><div class="k w2">?123</div><div class="k sp"></div><div class="k w2">далее</div></div>'
+    sug = ''.join(f'<button class="{"b" if i == 0 else ""}">{w}</button>' for i, w in enumerate(sugs))
+    return f'<div class="kb"><div class="sug">{sug}</div>{keys}</div>'
 
 
-check = page("Первый запуск: проверка слов", screen(
-    "", 2, heading("Проверка", "Три слова из записанных — чтобы убедиться, что запись читается."),
-    SP24 + '<div style="display:flex;flex-direction:column;gap:20px;">'
-    + quiz(4, ["grace", "grain", "grant", "grape"], "grain")
-    + quiz(11, ["quote", "quiz", "quick", "quit"], "quote")
-    + quiz(20, ["weapon", "wealth", "weasel", "weather"])
-    + '</div>' + FILL,
-    "Проверить", "Показать слова ещё раз"))
+def word_field(n, text, on=False):
+    """Поле одного слова по номеру — тот же ввод, что в сетке восстановления."""
+    cr = '<span class="cr"></span>' if on else ''
+    ring = ' style="box-shadow:inset 0 0 0 1.5px #33B5E5;"' if on else ''
+    return (f'<div style="display:flex;flex-direction:column;gap:6px;"><div class="qh">Слово №{n}</div>'
+            f'<div class="inp"{ring}><span class="v">{text}{cr}</span></div></div>')
+
+
+def check_screen(title, step, sub, sec):
+    """Проверка трёх слов: и в онбординге, и по напоминанию — один экран.
+    Ответ один на все три («Слова не совпали»), какое неверно — не говорится."""
+    return page(title, top(step) + '<div class="ob">' + heading("Проверка", sub)
+                + '<div style="display:flex;flex-direction:column;gap:14px;margin-top:20px;">'
+                + word_field(4, "grain") + word_field(11, "quote") + word_field(20, "wea", on=True)
+                + '</div>' + FILL + '</div>' + foot("Проверить", sec)
+                + keyboard(["weapon", "wealth", "weasel"]))
+
+
+check = check_screen("Первый запуск: проверка слов", 2,
+                     "Три слова из записанных — по номерам. Подсказка — по первым буквам.",
+                     "Показать слова ещё раз")
 
 # ---------- 6. Разрешения · А одним экраном ----------
 GRANTED = f'<div class="ok">{ic(CHECK, 18, "#8BC34A")}Разрешено</div>'
@@ -211,18 +229,12 @@ perms_b = page("Первый запуск: разрешения по одном�
 # ---------- 7. Восстановление · ввод ----------
 slots = [(w, "ok") for w in WORDS[:7]] + [("har", "on")] + [("", "")] * 16
 slots[4] = ("tisue", "bad")
-keys = ''.join('<div class="kr">' + ''.join(f'<div class="k">{ch}</div>' for ch in row) + '</div>'
-               for row in ["qwertyuiop", "asdfghjkl"])
-keys += '<div class="kr"><div class="k w2">⇧</div>' + ''.join(f'<div class="k">{ch}</div>' for ch in "zxcvbnm") + '<div class="k w2">⌫</div></div>'
-keys += '<div class="kr"><div class="k w2">?123</div><div class="k sp"></div><div class="k w2">далее</div></div>'
-kb = ('<div class="kb"><div class="sug"><button class="b">harbor</button><button>hard</button><button>harvest</button></div>'
-      + keys + '</div>')
 restore = page("Восстановление: ввод слов",
                top(None) + '<div class="ob">'
                + f'<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;"><div class="obt" style="font-size:24px;line-height:30px;margin:0;">Восстановление</div><button class="pill" style="display:flex;align-items:center;gap:6px;">{ic(PASTE, 16, "#7FD0EE")}Вставить</button></div>'
                + '<div class="obs" style="margin:6px 0 4px;">24 слова в том порядке, в каком записаны.</div>'
                + '<div class="cap" style="color:#FF8A8A;padding:0 0 8px;">№5 — нет такого слова</div>'
-               + phrase_grid(slots) + FILL + '</div>' + kb)
+               + phrase_grid(slots) + FILL + '</div>' + keyboard(["harbor", "hard", "harvest"]))
 
 # ---------- 8. Восстановление · фраза не сходится ----------
 swapped = [(w, "ok") for w in WORDS[:14] + ["pilot", "ozone"] + WORDS[16:]]
@@ -287,7 +299,7 @@ rows = [
      ("Profile.dc.html", profile, "2 · Имя и фото (шаг 1 из 3), можно пропустить"),
      ("KeyIntro.dc.html", keyi, "3 · Копия ключа: зачем и как хранить"),
      ("Phrase.dc.html", phrase, "4 · 24 слова, экран защищён"),
-     ("Check.dc.html", check, "5 · ✓ Проверка трёх слов (выбор из 4)"),
+     ("Check.dc.html", check, "5 · ✓ Проверка трёх слов (ввод с подсказкой)"),
      ("Perms.dc.html", perms, "6 · А ✓ Разрешения одним экраном + автозапуск")],
     [("Restore.dc.html", restore, "Восст. 1 · Та же сетка, что при записи; подсказка по буквам"),
      ("Mismatch.dc.html", mismatch, "Восст. 2 · Слова верны, сумма не сходится"),
