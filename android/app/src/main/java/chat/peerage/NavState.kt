@@ -1,6 +1,9 @@
 package chat.peerage
 
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlin.reflect.KProperty
 
 /**
@@ -31,6 +34,17 @@ internal class NavState(initial: Screen, private val root: Screen = Screen.Conta
 
     operator fun setValue(thisRef: Any?, property: KProperty<*>, value: Screen) = go(value)
 
+    /** Последний шаг был вглубь (новый экран) или назад (вернулись к бывшему) — для
+     *  направления перехода, когда прежнего экрана в истории уже нет. */
+    var lastForward by mutableStateOf(true)
+        private set
+
+    /** Куда ведёт «назад»; null — на главной. Для предиктивного жеста: его тянут заранее. */
+    val previous: Screen? get() = stack.getOrNull(stack.lastIndex - 1)
+
+    /** Место экрана в истории; -1 — его там нет. По нему переход решает «вглубь» или «назад». */
+    fun indexOf(s: Screen): Int = stack.indexOf(s)
+
     fun go(dest: Screen) {
         val i = stack.indexOf(dest)
         if (i >= 0) {
@@ -38,11 +52,13 @@ internal class NavState(initial: Screen, private val root: Screen = Screen.Conta
         } else {
             stack.add(dest)
         }
+        lastForward = i < 0
     }
 
     /** Шаг назад. На главной не делает ничего: выход из приложения решает система. */
     fun back() {
         if (stack.size > 1) stack.removeAt(stack.lastIndex)
+        lastForward = false
     }
 
     /** Заменить текущий экран на [dest]. */
@@ -54,5 +70,6 @@ internal class NavState(initial: Screen, private val root: Screen = Screen.Conta
     /** Уйти со всех экранов из [gone] (например, нас исключили из открытой группы). */
     fun leave(gone: Set<Screen>) {
         while (stack.size > 1 && current in gone) stack.removeAt(stack.lastIndex)
+        lastForward = false
     }
 }

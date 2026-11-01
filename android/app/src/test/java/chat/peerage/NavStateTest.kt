@@ -22,6 +22,34 @@ class NavStateTest {
         assertEquals(Screen.SettingsSecurity, m.current)
     }
 
+    /** Предиктивный «назад» тянет к экрану, куда «назад» и приведёт. */
+    @Test
+    fun previousIsWhereBackLeads() {
+        val n = nav(Screen.Me, Screen.SettingsSecurity)
+        assertEquals(Screen.Me, n.previous)
+        assertEquals(2, n.indexOf(Screen.SettingsSecurity))
+        n.back()
+        assertEquals(Screen.Me, n.current)
+        assertEquals(-1, n.indexOf(Screen.SettingsSecurity))
+        n.back()
+        assertEquals(null, n.previous)
+    }
+
+    /** Направление перехода, когда прежнего экрана в истории уже нет: «назад» и «вглубь». */
+    @Test
+    fun lastStepDirection() {
+        val n = nav(Screen.Me)
+        assertEquals(true, n.lastForward)
+        n.back()
+        assertEquals(false, n.lastForward)
+        n.go(Screen.Me)
+        n.go(Screen.Storage)
+        n.go(Screen.Me) // к уже открытому — это возврат
+        assertEquals(false, n.lastForward)
+        n.replace(Screen.Saved)
+        assertEquals(true, n.lastForward)
+    }
+
     /** Любой путь вперёд разматывается назад в точности в обратном порядке. */
     @Test
     fun anyForwardPathUnwindsInReverse() {

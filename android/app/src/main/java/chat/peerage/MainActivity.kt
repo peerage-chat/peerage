@@ -328,9 +328,9 @@ private fun CompactShell(model: AppModel) {
     // входящего гасим (не выходим); слои внутри экранов (выделение, панели, настройки
     // звонка) перехватывают её своими обработчиками раньше этого. На главной без
     // оверлеев обработчик выключен — back выходит штатно.
-    BackHandler(enabled = model.dmCallPeer != null || model.incomingCall != null || nav.depth > 1) {
-        if (model.incomingCall == null && model.dmCallPeer == null) goBack()
-    }
+    // Обычный «назад» по экранам — предиктивный, в ScreenTransitions; здесь только звонок.
+    val inCall = model.dmCallPeer != null || model.incomingCall != null
+    BackHandler(enabled = inCall) {}
 
     val navigate: (Screen) -> Unit = { dest -> screen = dest }
 
@@ -341,267 +341,277 @@ private fun CompactShell(model: AppModel) {
     // переключению папок, третий горизонтальный жест дрался бы с ними.
     run {
         Box(Modifier.fillMaxSize()) {
+            // Системная полоса навигации — продолжение того, что над ней: панели листа или
+            // фона чата. По экрану-цели: во время перехода смонтированы оба.
+            val barColor = (if (screen != Screen.Chat && screen != Screen.GroupChat) Tokens.Colors.panel else Tokens.Colors.bg).toArgb()
+            SideEffect { activity?.window?.navigationBarColor = barColor }
             Surface(Modifier.fillMaxSize(), color = HoloBg) {
-                Column(Modifier.fillMaxSize()) {
-                    // ── Шапка: конфигурируется по текущему экрану ─────────────────────
-                    when (screen) {
-                        Screen.Contacts -> HomeTopBar(
-                            model,
-                            onProfile = { screen = Screen.Me },
-                            onNetwork = { screen = Screen.Network },
-                            onSearch = { screen = Screen.Search },
-                        )
-                        Screen.Chat -> ChatTopBar(
-                            model,
-                            onBack = goBack,
-                            onProfile = { screen = Screen.Info },
-                        )
-                        Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = goBack)
-                        Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = goBack) {
-                            BarIcon(TablerIcons.Pencil, stringResource(R.string.cd_edit_profile)) { screen = Screen.EditProfile }
-                        }
-                        Screen.MyCode -> TopBar(stringResource(R.string.my_code_title), onBack = goBack)
-                        Screen.Request -> TopBar(stringResource(R.string.req_title), onBack = goBack)
-                        Screen.Invite -> TopBar(stringResource(R.string.invite_title), onBack = goBack)
-                        Screen.KeyFlow -> TopBar(
-                            stringResource(if (keyWordsFirst) R.string.key_flow_title else R.string.backup_check),
-                            onBack = goBack,
-                        )
-                        Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = goBack)
-                        Screen.GroupChat -> GroupChatTopBar(
-                            model,
-                            onBack = goBack,
-                            onInfo = { screen = Screen.AddMember },
-                        )
-                        Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = goBack)
-                        Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = goBack)
-                        Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = goBack)
-                        Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = goBack)
-                        Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = goBack)
-                        Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = goBack)
-                        Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = goBack)
-                        Screen.SettingsAbout -> TopBar(stringResource(R.string.settings_cat_about), onBack = goBack)
-                        Screen.Scanner -> TopBar(
-                            stringResource(if (verifyingPeer != null) R.string.title_verify_qr else R.string.title_scan_qr),
-                            onBack = goBack,
-                        )
-                        Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
-                            BarIcon(Icons.Filled.PersonAdd, stringResource(R.string.cd_add_contact)) { screen = Screen.Add }
-                        }
-                        Screen.Calls -> TopBar(stringResource(R.string.menu_calls), onBack = goBack)
-                        Screen.Network -> TopBar(stringResource(R.string.menu_network), onBack = goBack) {
-                            BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
-                        }
-                        Screen.EditProfile -> TopBar(stringResource(R.string.settings_edit_profile), onBack = goBack)
-                        Screen.VaultLevel -> TopBar(stringResource(R.string.settings_at_rest), onBack = goBack)
-                        Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
-                        Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = goBack)
-                        Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = goBack)
-                        Screen.Storage -> TopBar(stringResource(R.string.menu_storage), onBack = goBack)
-                        Screen.Backup -> TopBar(stringResource(R.string.backup_title), onBack = goBack)
-                        Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = goBack)
-                        Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = goBack)
-                        Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = goBack)
-                        Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = goBack)
-                    }
-                    // ── Контент экрана (без шапки) ────────────────────────────────────
-                    // Перехода между экранами НЕ анимируем: Crossfade держал бы оба
-                    // экрана смонтированными, а у наших есть эффекты (камера, запись,
-                    // поллинг, автоскролл) — они шли бы парой. Анимируем то, что внутри.
-                    // «Лист» (app-ui.md): под шапкой — панель со скруглённым верхом во всю
-                    // высоту, содержимое экрана на ней. Чаты переходят на лист вместе со
-                    // своей лентой и полем ввода (фаза 2 плана), до того — на фоне.
-                    val sheet = screen != Screen.Chat && screen != Screen.GroupChat
-                    // Системная полоса навигации — продолжение того, что над ней: панели
-                    // листа или фона чата; иначе внизу экрана остаётся чужая тёмная полоса.
-                    val barColor = (if (sheet) Tokens.Colors.panel else Tokens.Colors.bg).toArgb()
-                    SideEffect { activity?.window?.navigationBarColor = barColor }
-                    Box(
-                        Modifier.weight(1f).then(
-                            if (sheet) {
-                                Modifier.clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
-                                    .background(Tokens.Colors.panel)
-                            } else {
-                                Modifier
-                            },
-                        ),
-                    ) {
-                        when (screen) {
-                            Screen.Contacts -> Column {
-                                // Папки — на панели, над списком: табы едут вместе с ним.
-                                FolderTabs(
+                ScreenTransitions(nav, backEnabled = !inCall && nav.depth > 1, onBack = goBack) { s ->
+                    Box(Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize().background(HoloBg)) {
+                            // ── Шапка: конфигурируется по экрану ──────────────────────────────
+                            when (s) {
+                                Screen.Contacts -> HomeTopBar(
                                     model,
-                                    activeFilter,
-                                    onFilter = selectFolder,
-                                    onManage = { screen = Screen.Folders },
+                                    onProfile = { screen = Screen.Me },
+                                    onNetwork = { screen = Screen.Network },
+                                    onSearch = { screen = Screen.Search },
                                 )
-                                ChatsPager(
+                                Screen.Chat -> ChatTopBar(
                                     model,
-                                    folderPager,
-                                    HomeNav(
-                                        openDm = {
+                                    onBack = goBack,
+                                    onProfile = { screen = Screen.Info },
+                                )
+                                Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = goBack)
+                                Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = goBack) {
+                                    BarIcon(TablerIcons.Pencil, stringResource(R.string.cd_edit_profile)) { screen = Screen.EditProfile }
+                                }
+                                Screen.MyCode -> TopBar(stringResource(R.string.my_code_title), onBack = goBack)
+                                Screen.Request -> TopBar(stringResource(R.string.req_title), onBack = goBack)
+                                Screen.Invite -> TopBar(stringResource(R.string.invite_title), onBack = goBack)
+                                Screen.KeyFlow -> TopBar(
+                                    stringResource(if (keyWordsFirst) R.string.key_flow_title else R.string.backup_check),
+                                    onBack = goBack,
+                                )
+                                Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = goBack)
+                                Screen.GroupChat -> GroupChatTopBar(
+                                    model,
+                                    onBack = goBack,
+                                    onInfo = { screen = Screen.AddMember },
+                                )
+                                Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = goBack)
+                                Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = goBack)
+                                Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = goBack)
+                                Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = goBack)
+                                Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = goBack)
+                                Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = goBack)
+                                Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = goBack)
+                                Screen.SettingsAbout -> TopBar(stringResource(R.string.settings_cat_about), onBack = goBack)
+                                Screen.Scanner -> TopBar(
+                                    stringResource(if (verifyingPeer != null) R.string.title_verify_qr else R.string.title_scan_qr),
+                                    onBack = goBack,
+                                )
+                                Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
+                                    BarIcon(Icons.Filled.PersonAdd, stringResource(R.string.cd_add_contact)) { screen = Screen.Add }
+                                }
+                                Screen.Calls -> TopBar(stringResource(R.string.menu_calls), onBack = goBack)
+                                Screen.Network -> TopBar(stringResource(R.string.menu_network), onBack = goBack) {
+                                    BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
+                                }
+                                Screen.EditProfile -> TopBar(stringResource(R.string.settings_edit_profile), onBack = goBack)
+                                Screen.VaultLevel -> TopBar(stringResource(R.string.settings_at_rest), onBack = goBack)
+                                Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
+                                Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = goBack)
+                                Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = goBack)
+                                Screen.Storage -> TopBar(stringResource(R.string.menu_storage), onBack = goBack)
+                                Screen.Backup -> TopBar(stringResource(R.string.backup_title), onBack = goBack)
+                                Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = goBack)
+                                Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = goBack)
+                                Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = goBack)
+                                Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = goBack)
+                            }
+                            // ── Контент экрана (без шапки) ────────────────────────────────────
+                            // «Лист» (app-ui.md): под шапкой — панель со скруглённым верхом во всю
+                            // высоту, содержимое экрана на ней. Чаты переходят на лист вместе со
+                            // своей лентой и полем ввода (фаза 2 плана), до того — на фоне.
+                            val sheet = s != Screen.Chat && s != Screen.GroupChat
+                            Box(
+                                Modifier.weight(1f).then(
+                                    if (sheet) {
+                                        Modifier.clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
+                                            .background(Tokens.Colors.panel)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
+                            ) {
+                                when (s) {
+                                    Screen.Contacts -> Column {
+                                        // Папки — на панели, над списком: табы едут вместе с ним.
+                                        FolderTabs(
+                                            model,
+                                            activeFilter,
+                                            onFilter = selectFolder,
+                                            onManage = { screen = Screen.Folders },
+                                        )
+                                        ChatsPager(
+                                            model,
+                                            folderPager,
+                                            HomeNav(
+                                                openDm = {
+                                                    model.openChat(it)
+                                                    screen = Screen.Chat
+                                                },
+                                                openGroup = {
+                                                    model.openGroup(it)
+                                                    screen = Screen.GroupChat
+                                                },
+                                                openRequest = {
+                                                    requestKey = it
+                                                    screen = Screen.Request
+                                                },
+                                                openInvite = {
+                                                    inviteGid = it
+                                                    screen = Screen.Invite
+                                                },
+                                                openOutbox = { screen = Screen.Outbox },
+                                                myCode = { screen = Screen.MyCode },
+                                                scan = { screen = Screen.Scanner },
+                                                newGroup = { screen = Screen.CreateGroup },
+                                                keyFlow = openKeyFlow,
+                                                dataBackup = { screen = Screen.Backup },
+                                            ),
+                                        )
+                                    }
+                                    Screen.Chat -> ChatScreen(model)
+                                    Screen.Add -> AddScreen(
+                                        model,
+                                        scannedKey = scanResult,
+                                        onScan = { screen = Screen.Scanner },
+                                        onDone = goBack,
+                                    )
+                                    Screen.Scanner -> QrScannerScreen { key ->
+                                        val target = verifyingPeer
+                                        if (target == null) {
+                                            scanResult = key
+                                            screen = Screen.Add
+                                        } else {
+                                            // Сверка: сканируем QR собеседника и сравниваем с
+                                            // ключом, который у нас записан. Совпало — метим
+                                            // проверенным; не совпало — ГРОМКО говорим об этом,
+                                            // это ровно тот случай, ради которого сверка и нужна.
+                                            verifyingPeer = null
+                                            // Сверяем только личность: код обмена несёт ещё адрес
+                                            // («:…») и самоназвание («#…»), а они меняются.
+                                            val identity = key.trim().substringBefore('#').substringBefore(':')
+                                            val ok = identity.equals(target, ignoreCase = true)
+                                            if (ok && model.contacts.firstOrNull { it.key == target }?.verified != true) {
+                                                model.toggleVerified(target)
+                                            }
+                                            android.widget.Toast.makeText(
+                                                ctx,
+                                                ctx.getString(if (ok) R.string.verify_match else R.string.verify_mismatch),
+                                                if (ok) android.widget.Toast.LENGTH_SHORT else android.widget.Toast.LENGTH_LONG,
+                                            ).show()
+                                            screen = Screen.Info
+                                        }
+                                    }
+                                    Screen.Me -> ProfileScreen(model, navigate)
+                                    Screen.MyCode -> MyCodeScreen(model) { screen = Screen.Scanner }
+                                    Screen.Request -> RequestScreen(model, requestKey, onDone = goBack)
+                                    Screen.Invite -> InviteScreen(model, inviteGid, onDone = goBack)
+                                    Screen.KeyFlow -> KeyFlowScreen(model, keyWordsFirst, onDone = goBack)
+                                    Screen.Info -> ContactProfileScreen(
+                                        model,
+                                        onMessage = { screen = Screen.Chat },
+                                        onScanQr = {
+                                            verifyingPeer = model.currentChat
+                                            screen = Screen.Scanner
+                                        },
+                                        onDeleted = { screen = Screen.Contacts },
+                                    )
+                                    Screen.GroupChat -> GroupChatScreen(model) { key ->
+                                        // «@я» — свой профиль; контакт — его карточка; с
+                                        // незнакомцем из группы открывать нечего.
+                                        when {
+                                            key == model.me?.pubkey -> screen = Screen.Me
+                                            model.contacts.any { it.key == key } -> {
+                                                model.openChat(key)
+                                                screen = Screen.Info
+                                            }
+                                        }
+                                    }
+                                    Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Contacts }
+                                    Screen.NewChat -> NewChatScreen(
+                                        model,
+                                        onNewGroup = { screen = Screen.CreateGroup },
+                                        onAddContact = { screen = Screen.Add },
+                                        // Выбор собеседника завершает «Новый чат»: назад из
+                                        // чата — на главную, а не обратно в выбор.
+                                        onOpenDm = {
+                                            model.openChat(it)
+                                            nav.replace(Screen.Chat)
+                                        },
+                                    )
+                                    Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
+                                    Screen.SettingsSecurity -> SettingsSecurityScreen(
+                                        model,
+                                        onVaultLevel = { screen = Screen.VaultLevel },
+                                        onContacts = { screen = Screen.ContactList },
+                                        onKeyFlow = openKeyFlow,
+                                        vaultLevel = VaultKeyManager.level(java.io.File(dataDir)),
+                                    )
+                                    Screen.SettingsPrivacy -> SettingsPrivacyScreen()
+                                    Screen.SettingsMedia -> SettingsMediaScreen(model)
+                                    Screen.SettingsNotifications -> SettingsNotificationsScreen(model)
+                                    Screen.SettingsAbout -> SettingsAboutScreen()
+                                    Screen.ContactList -> ContactListScreen(model) {
+                                        model.openChat(it)
+                                        screen = Screen.Chat
+                                    }
+                                    Screen.Calls -> CallsScreen(
+                                        model,
+                                        onCallPeer = { model.callDm(it) },
+                                        onJoinRoom = {
+                                            model.openGroup(it)
+                                            model.joinRoom(it)
+                                            screen = Screen.GroupChat
+                                        },
+                                    )
+                                    Screen.Network -> NetworkScreen(
+                                        model,
+                                        onMyQr = { screen = Screen.MyCode },
+                                        onOpenOutbox = { screen = Screen.Outbox },
+                                        onFlood = { screen = Screen.Flood },
+                                        onRotate = { screen = Screen.RotateAddress },
+                                    )
+                                    Screen.Flood -> FloodScreen(model) { screen = Screen.RotateAddress }
+                                    // Пока идёт смена адреса, экран выбора подменяется ходом
+                                    // операции: пользователь минуту офлайн и должен видеть, почему.
+                                    Screen.RotateAddress -> if (model.rotation != null) {
+                                        // Ход операции живёт на том же экране: уводить человека
+                                        // в другое место в момент, когда он на минуту офлайн,
+                                        // — ровно тогда, когда он хочет видеть, что происходит.
+                                        RotationProgress(model) { nav.replace(Screen.Network) }
+                                    } else {
+                                        RotateAddressScreen(model) {}
+                                    }
+                                    Screen.EditProfile -> EditProfileScreen(model) { goBack() }
+                                    Screen.VaultLevel -> VaultLevelScreen(model, dataDir) { goBack() }
+                                    Screen.Saved -> SavedScreen(model)
+                                    Screen.Storage -> StorageScreen(model) { screen = Screen.Backup }
+                                    Screen.Backup -> BackupScreen(model) { screen = Screen.Storage }
+                                    Screen.Folders -> FoldersScreen(model) { id ->
+                                        editFolder = id
+                                        screen = Screen.FolderEdit
+                                    }
+                                    Screen.FolderEdit -> FolderEditorScreen(model, editFolder) { screen = Screen.Folders }
+                                    Screen.Outbox -> OutboxScreen(model) { peer ->
+                                        model.openChat(peer)
+                                        screen = Screen.Chat
+                                    }
+                                    Screen.Search -> SearchScreen(
+                                        model,
+                                        onOpenDm = {
                                             model.openChat(it)
                                             screen = Screen.Chat
                                         },
-                                        openGroup = {
+                                        onOpenGroup = {
                                             model.openGroup(it)
                                             screen = Screen.GroupChat
                                         },
-                                        openRequest = {
-                                            requestKey = it
-                                            screen = Screen.Request
-                                        },
-                                        openInvite = {
-                                            inviteGid = it
-                                            screen = Screen.Invite
-                                        },
-                                        openOutbox = { screen = Screen.Outbox },
-                                        myCode = { screen = Screen.MyCode },
-                                        scan = { screen = Screen.Scanner },
-                                        newGroup = { screen = Screen.CreateGroup },
-                                        keyFlow = openKeyFlow,
-                                        dataBackup = { screen = Screen.Backup },
-                                    ),
-                                )
-                            }
-                            Screen.Chat -> ChatScreen(model)
-                            Screen.Add -> AddScreen(
-                                model,
-                                scannedKey = scanResult,
-                                onScan = { screen = Screen.Scanner },
-                                onDone = goBack,
-                            )
-                            Screen.Scanner -> QrScannerScreen { key ->
-                                val target = verifyingPeer
-                                if (target == null) {
-                                    scanResult = key
-                                    screen = Screen.Add
-                                } else {
-                                    // Сверка: сканируем QR собеседника и сравниваем с
-                                    // ключом, который у нас записан. Совпало — метим
-                                    // проверенным; не совпало — ГРОМКО говорим об этом,
-                                    // это ровно тот случай, ради которого сверка и нужна.
-                                    verifyingPeer = null
-                                    // Сверяем только личность: код обмена несёт ещё адрес
-                                    // («:…») и самоназвание («#…»), а они меняются.
-                                    val identity = key.trim().substringBefore('#').substringBefore(':')
-                                    val ok = identity.equals(target, ignoreCase = true)
-                                    if (ok && model.contacts.firstOrNull { it.key == target }?.verified != true) {
-                                        model.toggleVerified(target)
-                                    }
-                                    android.widget.Toast.makeText(
-                                        ctx,
-                                        ctx.getString(if (ok) R.string.verify_match else R.string.verify_mismatch),
-                                        if (ok) android.widget.Toast.LENGTH_SHORT else android.widget.Toast.LENGTH_LONG,
-                                    ).show()
-                                    screen = Screen.Info
+                                    )
                                 }
                             }
-                            Screen.Me -> ProfileScreen(model, navigate)
-                            Screen.MyCode -> MyCodeScreen(model) { screen = Screen.Scanner }
-                            Screen.Request -> RequestScreen(model, requestKey, onDone = goBack)
-                            Screen.Invite -> InviteScreen(model, inviteGid, onDone = goBack)
-                            Screen.KeyFlow -> KeyFlowScreen(model, keyWordsFirst, onDone = goBack)
-                            Screen.Info -> ContactProfileScreen(
-                                model,
-                                onMessage = { screen = Screen.Chat },
-                                onScanQr = {
-                                    verifyingPeer = model.currentChat
-                                    screen = Screen.Scanner
-                                },
-                                onDeleted = { screen = Screen.Contacts },
-                            )
-                            Screen.GroupChat -> GroupChatScreen(model) { key ->
-                                // «@я» — свой профиль; контакт — его карточка; с
-                                // незнакомцем из группы открывать нечего.
-                                when {
-                                    key == model.me?.pubkey -> screen = Screen.Me
-                                    model.contacts.any { it.key == key } -> {
-                                        model.openChat(key)
-                                        screen = Screen.Info
-                                    }
-                                }
-                            }
-                            Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Contacts }
-                            Screen.NewChat -> NewChatScreen(
-                                model,
-                                onNewGroup = { screen = Screen.CreateGroup },
-                                onAddContact = { screen = Screen.Add },
-                                // Выбор собеседника завершает «Новый чат»: назад из
-                                // чата — на главную, а не обратно в выбор.
-                                onOpenDm = {
-                                    model.openChat(it)
-                                    nav.replace(Screen.Chat)
-                                },
-                            )
-                            Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
-                            Screen.SettingsSecurity -> SettingsSecurityScreen(
-                                model,
-                                onVaultLevel = { screen = Screen.VaultLevel },
-                                onContacts = { screen = Screen.ContactList },
-                                onKeyFlow = openKeyFlow,
-                                vaultLevel = VaultKeyManager.level(java.io.File(dataDir)),
-                            )
-                            Screen.SettingsPrivacy -> SettingsPrivacyScreen()
-                            Screen.SettingsMedia -> SettingsMediaScreen(model)
-                            Screen.SettingsNotifications -> SettingsNotificationsScreen(model)
-                            Screen.SettingsAbout -> SettingsAboutScreen()
-                            Screen.ContactList -> ContactListScreen(model) {
-                                model.openChat(it)
-                                screen = Screen.Chat
-                            }
-                            Screen.Calls -> CallsScreen(
-                                model,
-                                onCallPeer = { model.callDm(it) },
-                                onJoinRoom = {
-                                    model.openGroup(it)
-                                    model.joinRoom(it)
-                                    screen = Screen.GroupChat
-                                },
-                            )
-                            Screen.Network -> NetworkScreen(
-                                model,
-                                onMyQr = { screen = Screen.MyCode },
-                                onOpenOutbox = { screen = Screen.Outbox },
-                                onFlood = { screen = Screen.Flood },
-                                onRotate = { screen = Screen.RotateAddress },
-                            )
-                            Screen.Flood -> FloodScreen(model) { screen = Screen.RotateAddress }
-                            // Пока идёт смена адреса, экран выбора подменяется ходом
-                            // операции: пользователь минуту офлайн и должен видеть, почему.
-                            Screen.RotateAddress -> if (model.rotation != null) {
-                                // Ход операции живёт на том же экране: уводить человека
-                                // в другое место в момент, когда он на минуту офлайн,
-                                // — ровно тогда, когда он хочет видеть, что происходит.
-                                RotationProgress(model) { nav.replace(Screen.Network) }
-                            } else {
-                                RotateAddressScreen(model) {}
-                            }
-                            Screen.EditProfile -> EditProfileScreen(model) { goBack() }
-                            Screen.VaultLevel -> VaultLevelScreen(model, dataDir) { goBack() }
-                            Screen.Saved -> SavedScreen(model)
-                            Screen.Storage -> StorageScreen(model) { screen = Screen.Backup }
-                            Screen.Backup -> BackupScreen(model) { screen = Screen.Storage }
-                            Screen.Folders -> FoldersScreen(model) { id ->
-                                editFolder = id
-                                screen = Screen.FolderEdit
-                            }
-                            Screen.FolderEdit -> FolderEditorScreen(model, editFolder) { screen = Screen.Folders }
-                            Screen.Outbox -> OutboxScreen(model) { peer ->
-                                model.openChat(peer)
-                                screen = Screen.Chat
-                            }
-                            Screen.Search -> SearchScreen(
-                                model,
-                                onOpenDm = {
-                                    model.openChat(it)
-                                    screen = Screen.Chat
-                                },
-                                onOpenGroup = {
-                                    model.openGroup(it)
-                                    screen = Screen.GroupChat
-                                },
-                            )
+                        }
+                        // FAB «новый чат» — часть главной: уезжает вместе с ней, под оверлеями звонка.
+                        if (s == Screen.Contacts && !inCall) {
+                            FloatingActionButton(
+                                onClick = { screen = Screen.NewChat },
+                                modifier = Modifier.align(Alignment.BottomEnd).padding(Tokens.Space.xl),
+                                containerColor = HoloAccent,
+                                contentColor = HoloAccentDark,
+                            ) { Icon(TablerIcons.Pencil, stringResource(R.string.cd_new_chat), modifier = Modifier.size(Tokens.Size.iconM)) }
                         }
                     }
                 }
@@ -614,15 +624,6 @@ private fun CompactShell(model: AppModel) {
                     .padding(horizontal = Tokens.Space.m)
                     .padding(bottom = if (overInput) Tokens.Size.fabClearance else Tokens.Space.xxl),
             )
-            // FAB «новый чат» — только на Главной, под оверлеями звонка.
-            if (screen == Screen.Contacts && model.dmCallPeer == null && model.incomingCall == null) {
-                FloatingActionButton(
-                    onClick = { screen = Screen.NewChat },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(Tokens.Space.xl),
-                    containerColor = HoloAccent,
-                    contentColor = HoloAccentDark,
-                ) { Icon(TablerIcons.Pencil, stringResource(R.string.cd_new_chat), modifier = Modifier.size(Tokens.Size.iconM)) }
-            }
             if (model.showRingSheet && model.currentRoom != null) {
                 RingSheet(model) { model.showRingSheet = false }
                 BackHandler { model.showRingSheet = false }

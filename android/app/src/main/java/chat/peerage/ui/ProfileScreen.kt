@@ -61,7 +61,9 @@ internal fun ProfileScreen(model: AppModel, navigate: (Screen) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
         ) {
-            SquareAvatar(name, size = Tokens.Size.avatarProfile, avatarBytes = model.selfAvatar, circle = true)
+            Box(Modifier.sharedElement(SELF_AVATAR)) {
+                SquareAvatar(name, size = Tokens.Size.avatarProfile, avatarBytes = model.selfAvatar, circle = true)
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     name,
