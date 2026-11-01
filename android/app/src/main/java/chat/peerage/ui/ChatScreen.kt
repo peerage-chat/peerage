@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -21,9 +22,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
@@ -50,6 +54,8 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,11 +63,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
@@ -69,6 +78,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
@@ -892,7 +902,75 @@ internal fun MessageRow(
             SelectCheck(selected)
             Spacer(Modifier.width(Tokens.Space.m))
         }
-        Box(Modifier.weight(1f)) { MessageRowContent(model, m, pos, group, animate) }
+        if (selecting || m.system || m.id == 0L) {
+            Box(Modifier.weight(1f)) { MessageRowContent(model, m, pos, group, animate) }
+        } else {
+            SwipeToReply(Modifier.weight(1f), onReply = { model.startReply(m) }) {
+                MessageRowContent(model, m, pos, group, animate)
+            }
+        }
+    }
+}
+
+/**
+ * Ответ свайпом влево (app-ui.md → «Жесты», макет `chatact/Swipe`): пузырь едет за пальцем,
+ * справа проявляется стрелка; за порогом — отклик, отпустил — ответ. Жест не начинается у
+ * правого края: там системный «назад».
+ */
+@Composable
+private fun SwipeToReply(modifier: Modifier, onReply: () -> Unit, content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val offset = remember { Animatable(0f) }
+    val threshold = with(density) { Tokens.Size.swipeReply.toPx() }
+    val edge = maxOf(
+        WindowInsets.systemGestures.getRight(density, LayoutDirection.Ltr),
+        with(density) { Tokens.Space.xxl.roundToPx() },
+    )
+    val latestReply by rememberUpdatedState(onReply)
+    Box(
+        modifier.pointerInput(Unit) {
+            var active = false
+            var armed = false
+            val settle = { scope.launch { offset.animateTo(0f, tween(Tokens.Anim.normal)) } }
+            detectHorizontalDragGestures(
+                onDragStart = { start ->
+                    active = start.x < size.width - edge
+                    armed = false
+                },
+                onDragEnd = {
+                    if (armed) latestReply()
+                    settle()
+                },
+                onDragCancel = { settle() },
+            ) { change, dx ->
+                if (!active) return@detectHorizontalDragGestures
+                // Дальше порога тянется туже: видно, что дальше тянуть незачем.
+                val raw = offset.value + if (-offset.value > threshold) dx / 3 else dx
+                val v = raw.coerceIn(-threshold * 1.5f, 0f)
+                change.consume()
+                scope.launch { offset.snapTo(v) }
+                val now = -v >= threshold
+                if (now && !armed) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                armed = now
+            }
+        },
+    ) {
+        Box(Modifier.graphicsLayer { translationX = offset.value }) { content() }
+        Box(
+            Modifier.align(Alignment.CenterEnd)
+                .graphicsLayer {
+                    val p = (-offset.value / threshold).coerceIn(0f, 1f)
+                    alpha = p
+                    scaleX = 0.6f + 0.4f * p
+                    scaleY = 0.6f + 0.4f * p
+                }
+                .size(Tokens.Size.replyBadge)
+                .clip(CircleShape)
+                .background(Tokens.Colors.raised),
+            contentAlignment = Alignment.Center,
+        ) { Icon(TablerIcons.Reply, null, tint = Tokens.Colors.accentSoft, modifier = Modifier.size(Tokens.Size.iconS)) }
     }
 }
 
