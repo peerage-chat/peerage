@@ -107,8 +107,21 @@ def hdr(title):
     return '<div class="hdr">' + btn(BACK, "Назад") + f'<b>{title}</b></div>'
 
 
-def body(inner):
-    return f'<div class="ob" style="padding-top:4px;">{inner}</div>'
+LIST_OPEN = ('<!--panel--><div style="flex:1;min-height:0;background:#16171B;border-radius:28px 28px 0 0;'
+             'display:flex;flex-direction:column;overflow:hidden;">')
+
+
+def close_panel(html):
+    """Экран «листа»: панель открывается в body() и закрывается здесь, после подвала."""
+    if "<!--panel-->" not in html:
+        return html
+    i = html.rindex("\n</div>\n</x-dc>")
+    return html[:i] + "</div>" + html[i:]
+
+
+def body(inner, pad=16):
+    """Содержимое на панели «листа» (шапка — на фоне, над ней)."""
+    return LIST_OPEN + f'<div class="ob" style="padding-top:{pad}px;">{inner}</div>'
 
 
 def state(icon, color, bg, title, sub):
@@ -258,7 +271,7 @@ for r, row in enumerate(rows):
     notes[f"t{r + 1}"] = {"x": 0, "y": y - 300, "text": row_titles[r], "kind": "title1", "maxW": 2860}
     for i, (name, html, title) in enumerate(row):
         with open(os.path.join(P, name), "w", encoding="utf-8") as f:
-            f.write(html)
+            f.write(close_panel(html))
         boards[name] = {"x": i * 492, "y": y, "w": 412, "h": 892, "title": title}
         order.append(name)
 canvas = {"v": 3, "createdOnFiles": {"v": 1, "at": "2026-11-01T23:30:00Z"}, "title": "Безопасность Peerage",

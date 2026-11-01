@@ -253,7 +253,7 @@ restored = page("Восстановление: личность на месте"
     + FILL, "Выбрать файл копии", "Продолжить без переписки", back=False))
 
 # ---------- 10. Пароль файла ----------
-fileline = (f'<div class="grp"><div class="gr">{ic(FILE, 22, "#9AA3AD", NF)}<div class="gt"><b>peerage-2026-10-30.backup</b><span>48 МБ · снят 30 октября</span></div>'
+fileline = (f'<div class="grp"><div class="gr">{ic(FILE, 22, "#9AA3AD", NF)}<div class="gt"><b>backup-2026-10-30.peerage</b><span>48 МБ · снят 30 октября</span></div>'
             + '<button class="pill" style="background:#26272D;color:#C4C7CC;">Другой</button></div></div>')
 bkpass = page("Восстановление: пароль копии", screen(
     "", None, heading("Пароль копии", "Тот, что задавался при создании файла. Он не совпадает с 24 словами."),
