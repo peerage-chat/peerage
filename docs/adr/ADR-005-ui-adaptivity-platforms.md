@@ -132,3 +132,22 @@ A phone turned to landscape is a small tablet, and the app must work properly th
 **Medium and Expanded are implemented before v1.0**, not after. Every screen of the
 redesign is designed in all three widths at once. The platform priorities, the seams and
 the breakpoints above stay as they are; only the "Compact only in v1.0" scope changes.
+
+## Amendment 2 (2026-11-01): layouts after the redesign
+
+**Decided by:** project owner, in the redesign pass (decision 8 of
+[ui-redesign.md](../design/ui-redesign.md); consolidated in [app-ui.md](../design/app-ui.md),
+section «Адаптив»).
+
+The redesign dropped the swipe-in left menu (navigation now goes through the «Профиль»
+screen opened from the avatar), so there is no menu to turn into a nav rail. The shells
+above are replaced:
+
+- **Below 720dp** — one pane, as on a phone in portrait.
+- **From 720dp** — list and chat side by side, two panels on the dark background; the chat
+  feed and composer are capped at ~760dp and centred in their panel. No nav rail.
+
+So there are two layouts, not three, and the split point is 720dp instead of the 600/840
+classes. Still decided by window width (`WindowSizeClass` width in dp), not by device, and
+the content composables still know nothing about the width. The tiers, seams and platform
+priorities above are unchanged.
