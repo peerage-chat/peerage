@@ -29,6 +29,7 @@
 | `special/` | Особые сообщения в ленте | [TPP2vbMCLLRmAudpB7s9Fc](https://claude.ai/artifact/TPP2vbMCLLRmAudpB7s9Fc) |
 | `requests/` | Запросы и приглашения | [7BjgsS3G7Nus8zQPH6cCLS](https://claude.ai/artifact/7BjgsS3G7Nus8zQPH6cCLS) |
 | `viewer/` | Просмотр фото и видео | [SYFqEhupR4L2xrHjgFJ2Cq](https://claude.ai/artifact/SYFqEhupR4L2xrHjgFJ2Cq) |
+| `onboard/` | Первый запуск: новая личность, 24 слова, восстановление с переносом переписки, разрешения | [FEwZX9VE2FDL4SbmxWG4JN](https://claude.ai/artifact/FEwZX9VE2FDL4SbmxWG4JN) |
 
 `_gen/` — генераторы последних холстов (`python -I _gen/gen_chatact.py <папка>` пишет
 `<папка>/project/…`); остальные холсты писались вручную. Холст правится в артефакте или
