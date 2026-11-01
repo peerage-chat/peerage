@@ -34,6 +34,7 @@
 | `people/` | Контакты и группы: добавить контакт, свой код и профиль, создать группу, пригласить, права админа | [5fL9zC3CyvGEgQ1Lopxmxg](https://claude.ai/artifact/5fL9zC3CyvGEgQ1Lopxmxg) |
 | `misc/` | Второстепенные экраны: сохранённое, исходящие, поиск, папки, заблокированные, поток трафика, смена адреса, копия данных | [3Lm7Fu8XokunU7M2vQiFsp](https://claude.ai/artifact/3Lm7Fu8XokunU7M2vQiFsp) |
 | `shared/` | Общие элементы: меню «⋮» чата и группы, подтверждения (диалог / шторка), «Отменить» | [5HnRVSnQGqBQ5rKXHugAG8](https://claude.ai/artifact/5HnRVSnQGqBQ5rKXHugAG8) |
+| `android/` | Встраивание в Android: «Поделиться» в Peerage, ссылка-приглашение (А/Б), запрос с именем как у контакта | [KK4bdoBMdwWJN9VUGzCdiS](https://claude.ai/artifact/KK4bdoBMdwWJN9VUGzCdiS) |
 
 `_gen/` — генераторы последних холстов (`python -I _gen/gen_chatact.py <папка>` пишет
 `<папка>/project/…`); остальные холсты писались вручную. Холст правится в артефакте или
