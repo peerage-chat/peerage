@@ -39,8 +39,6 @@ import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -211,7 +209,7 @@ internal fun MediaViewer(
                     }
                     Box {
                         BarIcon(Icons.Filled.MoreVert, stringResource(R.string.common_more)) { menu = true }
-                        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                        PopMenu(menu, onDismiss = { menu = false }) {
                             ViewerMenuItem(Icons.Filled.Download, R.string.viewer_save) {
                                 menu = false
                                 withContent(model, item, bytes) { saveWithPermission(ctx, storagePerm, it, item) }
@@ -228,7 +226,8 @@ internal fun MediaViewer(
                                 menu = false
                                 onShowInChat(item)
                             }
-                            ViewerMenuItem(Icons.Filled.Delete, R.string.viewer_delete, HoloError) {
+                            PopMenuDivider()
+                            ViewerMenuItem(Icons.Filled.Delete, R.string.viewer_delete, danger = true) {
                                 menu = false
                                 confirmDelete = true
                             }
@@ -321,24 +320,8 @@ private fun withContent(model: AppModel, item: ViewerItem, bytes: ByteArray?, us
 }
 
 @Composable
-private fun ViewerMenuItem(
-    icon: ImageVector,
-    labelRes: Int,
-    tint: Color = Color.White,
-    onClick: () -> Unit,
-) {
-    DropdownMenuItem(
-        text = { Text(stringResource(labelRes), color = tint, fontSize = Tokens.Font.label) },
-        leadingIcon = {
-            Icon(
-                icon,
-                null,
-                tint = if (tint == Color.White) HoloSecondary else tint,
-                modifier = Modifier.size(Tokens.Size.iconM),
-            )
-        },
-        onClick = onClick,
-    )
+private fun ViewerMenuItem(icon: ImageVector, labelRes: Int, danger: Boolean = false, onClick: () -> Unit) {
+    PopMenuItem(icon, stringResource(labelRes), danger = danger, onClick = onClick)
 }
 
 /** Одна страница пейджера: снимок с зумом или видео. */

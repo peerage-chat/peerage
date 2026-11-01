@@ -369,25 +369,20 @@ private fun ChatRowBadge(row: ChatRowUi) {
  *  разной цены — поэтому меню, а не свайп по строке (горизонталь отдана папкам). */
 @Composable
 private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose: () -> Unit) {
-    DropdownMenu(expanded = open, onDismissRequest = onClose) {
-        DropdownMenuItem(
-            text = {
-                Text(stringResource(if (row.pinned) R.string.chat_menu_unpin else R.string.chat_menu_pin))
-            },
-            onClick = {
-                model.pinChat(row.id, row.group, !row.pinned)
-                onClose()
-            },
-        )
-        DropdownMenuItem(
-            text = {
-                Text(stringResource(if (row.muted) R.string.chat_menu_unmute else R.string.chat_menu_mute))
-            },
-            onClick = {
-                model.muteChat(row.id, row.group, !row.muted)
-                onClose()
-            },
-        )
+    PopMenu(open, onClose) {
+        PopMenuItem(
+            TablerIcons.Pin,
+            stringResource(if (row.pinned) R.string.chat_menu_unpin else R.string.chat_menu_pin),
+        ) {
+            model.pinChat(row.id, row.group, !row.pinned)
+            onClose()
+        }
+        // Звук — переключатель: состояние видно, и пункт не меняет название под рукой.
+        PopMenuItem(
+            TablerIcons.BellOff,
+            stringResource(R.string.chat_menu_mute),
+            trailing = { Switch(checked = row.muted, onCheckedChange = null) },
+        ) { model.muteChat(row.id, row.group, !row.muted) }
     }
 }
 

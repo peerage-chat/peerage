@@ -130,6 +130,7 @@ object Tokens {
         val queueStrip = Color(0xFF2A2418)
         val queueText = Color(0xFFF2E3C8)
         val queueSub = Color(0xFFBFAE90)
+        val menuEdge = Color(0x0AFFFFFF) // кромка меню: отделяет от группы под ним
         val snack = Color(0xFF2A2B31) // снекбар «Отменить» — над панелью и группами
         val stripAmber = Color(0xFFFFB74D) // иконка и главная кнопка янтарной полосы-напоминания
         val onStripAmber = Color(0xFF2A1A00) // текст на [stripAmber]
@@ -310,6 +311,8 @@ object Tokens {
         val undoRing = 22.dp // кольцо-отсчёт снекбара «Отменить»
         val undoStroke = 2.5.dp
         val snackShadow = 8.dp
+        val menu = 248.dp // ширина всплывающего меню
+        val menuShadow = 12.dp
         val phraseRow = 36.dp // строка слова в сетке 24 слов
         val phraseNum = 20.dp // колонка номера слова в сетке
         val touch = 48.dp // минимальная зона касания (Android): плашка может быть меньше, зона — нет

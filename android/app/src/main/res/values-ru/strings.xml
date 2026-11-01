@@ -768,7 +768,6 @@
     <string name="chat_menu_pin">Закрепить</string>
     <string name="chat_menu_unpin">Открепить</string>
     <string name="chat_menu_mute">Без звука</string>
-    <string name="chat_menu_unmute">Со звуком</string>
 
     <!-- ── Экран «Я» (замена выдвижного меню) ───────────────────────────── -->
     <string name="me_title">Профиль</string>

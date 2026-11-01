@@ -736,7 +736,6 @@
     <string name="chat_menu_pin">Pin</string>
     <string name="chat_menu_unpin">Unpin</string>
     <string name="chat_menu_mute">Mute</string>
-    <string name="chat_menu_unmute">Unmute</string>
 
     <!-- ── "Me" screen (replaces the drawer) ────────────────────────────── -->
     <string name="me_title">Profile</string>

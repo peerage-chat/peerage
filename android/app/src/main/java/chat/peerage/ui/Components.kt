@@ -1121,3 +1121,86 @@ private fun undoTimeoutMs(ctx: android.content.Context): Int {
             android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS,
     )
 }
+
+/**
+ * Меню одного вида (app-ui.md → «Общие элементы», макет `shared/GroupMenu`): у строки
+ * чата, «⋮», в просмотре. Подложка group с тенью, строки с иконкой, опасное — после
+ * разделителя, красным. Встаёт у правого верхнего угла якоря (родителя); если снизу не
+ * помещается — поднимается так, чтобы низ совпал с низом якоря.
+ */
+@Composable
+internal fun PopMenu(open: Boolean, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    if (!open) return
+    val margin = with(androidx.compose.ui.platform.LocalDensity.current) { Tokens.Space.s.roundToPx() }
+    val position = remember(margin) { AnchorEndPosition(margin) }
+    androidx.compose.ui.window.Popup(
+        popupPositionProvider = position,
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+    ) {
+        val shape = RoundedCornerShape(Tokens.Radius.group)
+        Column(
+            Modifier.width(Tokens.Size.menu)
+                .shadow(Tokens.Size.menuShadow, shape)
+                .clip(shape)
+                .background(Tokens.Colors.group)
+                .border(1.dp, Tokens.Colors.menuEdge, shape),
+            content = content,
+        )
+    }
+}
+
+/** Строка меню: иконка и подпись; [trailing] — переключатель справа, если пункт им и является. */
+@Composable
+internal fun PopMenuItem(
+    icon: ImageVector,
+    label: String,
+    danger: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = Tokens.Size.touch)
+            .clickable(role = Role.Button) { onClick() }
+            .padding(horizontal = Tokens.Space.l),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m + Tokens.Space.xxs),
+    ) {
+        Icon(
+            icon,
+            null,
+            tint = if (danger) Tokens.Colors.error else Tokens.Colors.secondary,
+            modifier = Modifier.size(Tokens.Size.iconRow),
+        )
+        Text(
+            label,
+            color = if (danger) Tokens.Colors.error else Color.White,
+            fontSize = Tokens.Font.label,
+            modifier = Modifier.weight(1f).padding(vertical = Tokens.Space.m),
+        )
+        trailing?.invoke()
+    }
+}
+
+/** Разделитель перед опасным пунктом меню. */
+@Composable
+internal fun PopMenuDivider() {
+    HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.raised)
+}
+
+/** Правый верх меню — к правому верху якоря; не влезает вниз — вверх от низа якоря. */
+private class AnchorEndPosition(private val margin: Int) : androidx.compose.ui.window.PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: androidx.compose.ui.unit.IntRect,
+        windowSize: androidx.compose.ui.unit.IntSize,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        popupContentSize: androidx.compose.ui.unit.IntSize,
+    ): androidx.compose.ui.unit.IntOffset {
+        val maxX = (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin)
+        val x = (anchorBounds.right - popupContentSize.width - margin).coerceIn(margin, maxX)
+        val below = anchorBounds.top + popupContentSize.height <= windowSize.height - margin
+        val y = if (below) anchorBounds.top else anchorBounds.bottom - popupContentSize.height
+        val maxY = (windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin)
+        return androidx.compose.ui.unit.IntOffset(x, y.coerceIn(margin, maxY))
+    }
+}
