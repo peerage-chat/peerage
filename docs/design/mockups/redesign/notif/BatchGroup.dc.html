@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Разговоры без звука и сводка</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+</style>
+</helmet>
+<div style="width: 412px; height: 640px; box-sizing: border-box; padding: 24px 12px; background: #101114; font-family: Roboto, system-ui, sans-serif; display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 13px; font-weight: 500; color: #A0A4AA; padding: 0 8px 4px;">Разговоры</div>
+
+<div style="background: #26282C; border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; gap: 8px; align-items: center;">
+<div style="width: 20px; height: 20px; border-radius: 50%; background: #33B5E5; color: #04222E; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;">P</div>
+<span style="font-size: 13px; color: #A0A4AA; flex: 1;">Peerage · 20 сообщений в 5 чатах</span>
+<span style="font-size: 12px; color: #04222E; background: #33B5E5; border-radius: 10px; padding: 1px 7px; font-weight: 500;">5</span>
+</div>
+
+<div style="display: flex; gap: 12px; align-items: center;">
+<div style="width: 36px; height: 36px; border-radius: 50%; background: #00695C; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 500; flex: none;">П</div>
+<div style="flex: 1; min-width: 0;">
+<div style="font-size: 14px; font-weight: 500; color: #ECEDEF;">Походы <span style="font-weight: 400; color: #A0A4AA;">· 9</span></div>
+<div style="font-size: 13px; color: #C4C7CC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Боб: <span style="color: #33B5E5;">@fix</span> завтра в 8 у станции?</div>
+</div>
+</div>
+
+<div style="display: flex; gap: 12px; align-items: center;">
+<div style="width: 36px; height: 36px; border-radius: 50%; background: #3949AB; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 500; flex: none;">А</div>
+<div style="flex: 1; min-width: 0;">
+<div style="font-size: 14px; font-weight: 500; color: #ECEDEF;">Алиса <span style="font-weight: 400; color: #A0A4AA;">· 6</span></div>
+<div style="font-size: 13px; color: #C4C7CC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Хочу занести книгу</div>
+</div>
+</div>
+
+<div style="display: flex; gap: 12px; align-items: center;">
+<div style="width: 36px; height: 36px; border-radius: 50%; background: #AD4E1E; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 500; flex: none;">К</div>
+<div style="flex: 1; min-width: 0;">
+<div style="font-size: 14px; font-weight: 500; color: #ECEDEF;">Карина <span style="font-weight: 400; color: #A0A4AA;">· 3</span></div>
+<div style="font-size: 13px; color: #C4C7CC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Файл: отчёт.pdf</div>
+</div>
+</div>
+
+<div style="display: flex; gap: 12px; align-items: center;">
+<div style="width: 36px; height: 36px; border-radius: 50%; background: #6D4C41; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 500; flex: none;">В</div>
+<div style="flex: 1; min-width: 0;">
+<div style="font-size: 14px; font-weight: 500; color: #ECEDEF;">Влад</div>
+<div style="font-size: 13px; color: #C4C7CC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Пропущенный звонок</div>
+</div>
+</div>
+
+<div style="font-size: 13px; color: #A0A4AA; padding-left: 48px;">и ещё 1 чат</div>
+</div>
+
+<div style="font-size: 13px; font-weight: 500; color: #A0A4AA; padding: 8px 8px 4px;">Уведомления</div>
+<div style="background: #26282C; border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 6px;">
+<div style="display: flex; gap: 8px; align-items: center;">
+<div style="width: 20px; height: 20px; border-radius: 50%; background: #33B5E5; color: #04222E; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;">P</div>
+<span style="font-size: 13px; color: #A0A4AA;">Peerage · Запросы</span>
+</div>
+<div style="font-size: 15px; font-weight: 500; color: #ECEDEF;">2 запроса в контакты</div>
+<div style="font-size: 14px; color: #C4C7CC;">Дима, Лена</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":640}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

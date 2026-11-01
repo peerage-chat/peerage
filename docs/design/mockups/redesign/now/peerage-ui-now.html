@@ -1,0 +1,127 @@
+<title>Peerage UI: как сейчас</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: лента разделов, в каждом — сетка снимков в натуральной пропорции телефона; клик открывает снимок крупно */
+:root{
+  --bg:#F3F5F7; --surface:#FFFFFF; --fg:#16191D; --muted:#5B636D; --line:#D9DEE3; --accent:#0F7FA8; --note:#8A5A00;
+  --f-display:"Manrope",system-ui,sans-serif; --f-body:"Inter Tight","Segoe UI",system-ui,sans-serif; --f-mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1013; --surface:#171A1E; --fg:#E7EAEE; --muted:#9AA3AD; --line:#2A2F35; --accent:#33B5E5; --note:#E8B04B; color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0E1013; --surface:#171A1E; --fg:#E7EAEE; --muted:#9AA3AD; --line:#2A2F35; --accent:#33B5E5; --note:#E8B04B; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+.wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:48px}
+header h1{font-family:var(--f-display);font-weight:800;font-size:clamp(28px,4vw,40px);margin:0 0 8px;text-wrap:balance}
+header p{margin:0;color:var(--muted);max-width:68ch}
+section h2{font-family:var(--f-display);font-size:22px;font-weight:700;margin:0 0 6px}
+section > p{margin:0 0 18px;color:var(--muted);max-width:72ch}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:20px}
+.grid.wide{grid-template-columns:repeat(auto-fill,minmax(420px,1fr))}
+figure{margin:0;display:flex;flex-direction:column;gap:8px;min-width:0}
+figure button{all:unset;cursor:zoom-in;display:block;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--surface)}
+figure button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+figure img{display:block;width:100%;height:auto}
+figcaption{font-size:13px;display:flex;flex-direction:column;gap:3px}
+figcaption b{font-weight:600}
+figcaption .id{font-family:var(--f-mono);font-size:11px;color:var(--muted);letter-spacing:.02em}
+figcaption .n{color:var(--note)}
+dialog{border:none;padding:0;background:transparent;max-width:96vw;max-height:94vh}
+dialog::backdrop{background:rgba(5,7,9,.85)}
+dialog img{max-width:96vw;max-height:94vh;display:block;border-radius:12px}
+@media (max-width:480px){.grid.wide{grid-template-columns:1fr}}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Inter+Tight:wght@400;600&family=JetBrains+Mono&display=swap">
+
+<div class="wrap">
+<header>
+  <h1>Peerage UI: как сейчас</h1>
+  <p>Снимки сборки от 30 октября 2026 с эмулятора (1080×2400, язык системы английский). Отправная точка для перепроектирования. Жёлтым — что заметил по ходу съёмки; это заметки, не решения. Клик по снимку открывает его крупно.</p>
+</header>
+
+<section>
+  <h2>Главная и папки</h2>
+  <p>Шапка с аватаром «Я», папки чипами, список разговоров, кнопка нового чата.</p>
+  <div class="grid">
+    <figure><button data-src="shots/00-splash.png"><img src="shots/00-splash.png" alt="Заставка"></button><figcaption><b>Заставка</b><span class="n">Белый фон у тёмного приложения.</span><span class="id">00-splash</span></figcaption></figure>
+    <figure><button data-src="shots/01-home.png"><img src="shots/01-home.png" alt="Главная"></button><figcaption><b>Главная, папка «Все»</b><span class="n">Аватары — круги, хотя в июне решили квадраты. Ниже карточки — пустота.</span><span class="id">01-home</span></figcaption></figure>
+    <figure><button data-src="shots/01b-home-with-group.png"><img src="shots/01b-home-with-group.png" alt="Главная с группой"></button><figcaption><b>Главная с группой</b><span class="id">01b-home-with-group</span></figcaption></figure>
+    <figure><button data-src="shots/03-folder-rooms.png"><img src="shots/03-folder-rooms.png" alt="Папка Комнаты"></button><figcaption><b>Пустая папка</b><span class="n">Пустое состояние — одна строка текста.</span><span class="id">03-folder-rooms</span></figcaption></figure>
+    <figure><button data-src="shots/04-folder-channels.png"><img src="shots/04-folder-channels.png" alt="Папка Каналы"></button><figcaption><b>Папка «Каналы»</b><span class="n">Недоделанное на виду: «Channels — soon».</span><span class="id">04-folder-channels</span></figcaption></figure>
+    <figure><button data-src="shots/05-folder-chats.png"><img src="shots/05-folder-chats.png" alt="Папка Чаты"></button><figcaption><b>Папка «Чаты»</b><span class="id">05-folder-chats</span></figcaption></figure>
+    <figure><button data-src="shots/06-search.png"><img src="shots/06-search.png" alt="Поиск"></button><figcaption><b>Поиск</b><span class="id">06-search</span></figcaption></figure>
+    <figure><button data-src="shots/07-folder-edit.png"><img src="shots/07-folder-edit.png" alt="Папки"></button><figcaption><b>Папки</b><span class="id">07-folder-edit</span></figcaption></figure>
+    <figure><button data-src="shots/08-new-chat.png"><img src="shots/08-new-chat.png" alt="Новый чат"></button><figcaption><b>Новый чат</b><span class="n">«New channel · soon».</span><span class="id">08-new-chat</span></figcaption></figure>
+    <figure><button data-src="shots/09-add-contact.png"><img src="shots/09-add-contact.png" alt="Добавить контакт"></button><figcaption><b>Добавить контакт</b><span class="id">09-add-contact</span></figcaption></figure>
+  </div>
+</section>
+
+<section>
+  <h2>«Я» и разделы</h2>
+  <p>Бокового меню больше нет: профиль и вход в разделы — на одном экране «Я», он открывается аватаром в шапке.</p>
+  <div class="grid">
+    <figure><button data-src="shots/10-my-profile.png"><img src="shots/10-my-profile.png" alt="Профиль"></button><figcaption><b>«Я», верх</b><span class="id">10-my-profile</span></figcaption></figure>
+    <figure><button data-src="shots/12-me-sections.png"><img src="shots/12-me-sections.png" alt="Разделы"></button><figcaption><b>«Я», разделы внизу</b><span class="n">Разделы приложения спрятаны под QR-кодом и отпечатком.</span><span class="id">12-me-sections</span></figcaption></figure>
+    <figure><button data-src="shots/13-contacts.png"><img src="shots/13-contacts.png" alt="Контакты"></button><figcaption><b>Контакты</b><span class="id">13-contacts</span></figcaption></figure>
+    <figure><button data-src="shots/14-calls.png"><img src="shots/14-calls.png" alt="Звонки"></button><figcaption><b>История звонков</b><span class="n">Список из «Deleted group · Room call» — мусор по удалённым группам.</span><span class="id">14-calls</span></figcaption></figure>
+    <figure><button data-src="shots/15-network.png"><img src="shots/15-network.png" alt="Сеть"></button><figcaption><b>Сеть</b><span class="n">Много технического: адреса, пинги, трафик.</span><span class="id">15-network</span></figcaption></figure>
+    <figure><button data-src="shots/16-saved.png"><img src="shots/16-saved.png" alt="Сохранённое"></button><figcaption><b>Сохранённое</b><span class="id">16-saved</span></figcaption></figure>
+    <figure><button data-src="shots/17-storage.png"><img src="shots/17-storage.png" alt="Хранилище"></button><figcaption><b>Хранилище</b><span class="id">17-storage</span></figcaption></figure>
+  </div>
+</section>
+
+<section>
+  <h2>Настройки</h2>
+  <p>Уже разложены карточками по разделам. «Профиль» и «Сеть и батарея» ведут на экраны выше.</p>
+  <div class="grid">
+    <figure><button data-src="shots/20-settings.png"><img src="shots/20-settings.png" alt="Настройки"></button><figcaption><b>Настройки</b><span class="id">20-settings</span></figcaption></figure>
+    <figure><button data-src="shots/24-set-security.png"><img src="shots/24-set-security.png" alt="Безопасность"></button><figcaption><b>Безопасность</b><span class="id">24-set-security</span></figcaption></figure>
+    <figure><button data-src="shots/25-set-privacy.png"><img src="shots/25-set-privacy.png" alt="Приватность"></button><figcaption><b>Приватность</b><span class="id">25-set-privacy</span></figcaption></figure>
+    <figure><button data-src="shots/26-set-media.png"><img src="shots/26-set-media.png" alt="Медиа и звонки"></button><figcaption><b>Медиа и звонки</b><span class="id">26-set-media</span></figcaption></figure>
+    <figure><button data-src="shots/26-set-media-b.png"><img src="shots/26-set-media-b.png" alt="Медиа и звонки, низ"></button><figcaption><b>Медиа и звонки, низ</b><span class="id">26-set-media-b</span></figcaption></figure>
+    <figure><button data-src="shots/27-set-notif.png"><img src="shots/27-set-notif.png" alt="Уведомления"></button><figcaption><b>Уведомления</b><span class="n">Один переключатель — экран заменит спроектированное.</span><span class="id">27-set-notif</span></figcaption></figure>
+    <figure><button data-src="shots/28-set-about.png"><img src="shots/28-set-about.png" alt="О приложении"></button><figcaption><b>О приложении</b><span class="id">28-set-about</span></figcaption></figure>
+  </div>
+</section>
+
+<section>
+  <h2>Чат и контакт</h2>
+  <div class="grid">
+    <figure><button data-src="shots/30-chat.png"><img src="shots/30-chat.png" alt="Чат"></button><figcaption><b>Личный чат</b><span class="id">30-chat</span></figcaption></figure>
+    <figure><button data-src="shots/42-chat-keyboard.png"><img src="shots/42-chat-keyboard.png" alt="Чат с клавиатурой"></button><figcaption><b>Ввод с клавиатурой</b><span class="id">42-chat-keyboard</span></figcaption></figure>
+    <figure><button data-src="shots/31-attach.png"><img src="shots/31-attach.png" alt="Вложение"></button><figcaption><b>Вложение</b><span class="id">31-attach</span></figcaption></figure>
+    <figure><button data-src="shots/32-emoji.png"><img src="shots/32-emoji.png" alt="Эмодзи"></button><figcaption><b>Эмодзи</b><span class="id">32-emoji</span></figcaption></figure>
+    <figure><button data-src="shots/34-contact-profile.png"><img src="shots/34-contact-profile.png" alt="Профиль контакта"></button><figcaption><b>Профиль контакта</b><span class="id">34-contact-profile</span></figcaption></figure>
+    <figure><button data-src="shots/35-contact-profile-b.png"><img src="shots/35-contact-profile-b.png" alt="Профиль контакта, низ"></button><figcaption><b>Профиль контакта, низ</b><span class="id">35-contact-profile-b</span></figcaption></figure>
+  </div>
+</section>
+
+<section>
+  <h2>Группы</h2>
+  <p>Тестовую группу «Hiking» создал для съёмки: старых групп на эмуляторе не осталось.</p>
+  <div class="grid">
+    <figure><button data-src="shots/40-create-group.png"><img src="shots/40-create-group.png" alt="Новая группа"></button><figcaption><b>Новая группа</b><span class="id">40-create-group</span></figcaption></figure>
+    <figure><button data-src="shots/41-group-chat.png"><img src="shots/41-group-chat.png" alt="Групповой чат"></button><figcaption><b>Групповой чат</b><span class="id">41-group-chat</span></figcaption></figure>
+    <figure><button data-src="shots/43-group-add-member.png"><img src="shots/43-group-add-member.png" alt="Добавить участника"></button><figcaption><b>«Добавить участника»</b><span class="n">Отдельного экрана группы нет: и шапка, и «⋮» ведут сюда, «Покинуть группу» — тоже здесь.</span><span class="id">43-group-add-member</span></figcaption></figure>
+  </div>
+</section>
+
+<section>
+  <h2>Ландшафт</h2>
+  <p>Повёрнутый телефон — это уже ширина «Expanded» (около 900 dp), но раскладка телефонная, растянутая.</p>
+  <div class="grid wide">
+    <figure><button data-src="shots/50-land-home.png"><img src="shots/50-land-home.png" alt="Главная в ландшафте"></button><figcaption><b>Главная</b><span class="n">Список на всю ширину, справа пусто.</span><span class="id">50-land-home</span></figcaption></figure>
+    <figure><button data-src="shots/51-land-chat.png"><img src="shots/51-land-chat.png" alt="Чат в ландшафте"></button><figcaption><b>Чат</b><span class="n">Свои сообщения прижаты к правому краю, лента шириной в экран.</span><span class="id">51-land-chat</span></figcaption></figure>
+    <figure><button data-src="shots/52-land-chat-keyboard.png"><img src="shots/52-land-chat-keyboard.png" alt="Чат с клавиатурой в ландшафте"></button><figcaption><b>Чат с клавиатурой</b><span class="n">Клавиатура съедает почти всю высоту.</span><span class="id">52-land-chat-keyboard</span></figcaption></figure>
+  </div>
+</section>
+</div>
+
+<dialog id="zoom" aria-label="Снимок крупно"><img id="zoom-img" alt=""></dialog>
+<script>
+const dlg=document.getElementById('zoom'), big=document.getElementById('zoom-img');
+document.querySelectorAll('figure button').forEach(b=>b.addEventListener('click',()=>{
+  big.src=b.dataset.src; big.alt=b.querySelector('img').alt; dlg.showModal();
+}));
+dlg.addEventListener('click',()=>dlg.close());
+</script>

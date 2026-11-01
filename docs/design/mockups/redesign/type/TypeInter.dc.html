@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Шрифт Inter</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&amp;family=Roboto:wght@400&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.sp{display:flex;align-items:baseline;gap:12px;color:#ECEDEF}
+.sz{width:58px;flex:none;font-size:11px;color:#8E8E98;font-family:Roboto,system-ui,sans-serif;font-weight:400}
+.row{display:flex;gap:12px;align-items:center;padding:0 16px;height:72px;box-sizing:border-box}
+.av{width:48px;height:48px;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:500;font-size:18px;border-radius:50%}
+.mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.nm{font-size:16px;font-weight:500;color:#ECEDEF}
+.pv{font-size:14px;color:#8E8E98;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm{font-size:12px;color:#7A7A84}
+.bd{min-width:22px;height:22px;border-radius:11px;background:#33B5E5;color:#04222E;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 7px;box-sizing:border-box}
+.bin{align-self:flex-start;max-width:290px;background:#23242A;color:#E6E7EA;font-size:15px;line-height:21px;padding:7px 12px;border-radius:17px 17px 17px 6px}
+.bout{align-self:flex-end;max-width:290px;background:#1F4657;color:#EAF6FB;font-size:15px;line-height:21px;padding:7px 12px;border-radius:17px 17px 6px 17px}
+.mt{font-size:11px;color:#9AA3AD;margin-left:8px}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+<div style="display: flex; flex-direction: column; gap: 10px; padding: 22px 20px 22px;">
+<div class="sp"><span class="sz">24 · 500</span><span style="font-size: 24px; font-weight: 500;">Алиса Ветрова</span></div>
+<div class="sp"><span class="sz">22 · 700</span><span style="font-size: 22px; font-weight: 700;">Чаты</span></div>
+<div class="sp"><span class="sz">16 · 500</span><span style="font-size: 16px; font-weight: 500;">Походы на выходные</span></div>
+<div class="sp"><span class="sz">15 · 400</span><span style="font-size: 15px;">Съешь же ещё этих мягких булок</span></div>
+<div class="sp"><span class="sz">14 · 400</span><span style="font-size: 14px; color: #B8B8C0;">Боб: завтра в 8 у станции?</span></div>
+<div class="sp"><span class="sz">13 · 500</span><span style="font-size: 13px; font-weight: 500; color: #8E8E98;">Участники · 5</span></div>
+<div class="sp"><span class="sz">12 · 400</span><span style="font-size: 12px; color: #8BC34A;">В сети · 8 узлов</span></div>
+<div class="sp"><span class="sz">11 · 400</span><span style="font-size: 11px; color: #9AA3AD;">14:22 · 0:12 · 1,2 ГБ</span></div>
+</div>
+
+<div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; overflow: hidden; padding-top: 6px;">
+<div class="row"><div class="av" style="background:#3949AB">А</div><div class="mid"><div class="nm">Алиса</div><div class="pv">Хочу занести книгу</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;"><div class="tm">14:20</div><div class="bd">2</div></div></div>
+<div class="row"><div class="av" style="background:#00695C;border-radius:14px">П</div><div class="mid"><div class="nm">Походы</div><div class="pv"><span style="color:#B8B8C0;font-weight:500;">Боб:</span> <span style="color:#33B5E5">@fix</span> завтра в 8 у станции?</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;"><div class="tm">14:02</div><div class="bd">@</div></div></div>
+<div style="height: 1px; background: #222328; margin: 8px 0;"></div>
+<div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; padding: 12px 14px 18px;">
+<div class="bin">Ты сегодня дома? Хочу занести книгу, которую брала в сентябре<span class="mt">14:18</span></div>
+<div class="bout">да, после семи, звони в домофон 24<span class="mt" style="color:#9FC6D6;">14:19</span></div>
+<div class="bin">Отлично, тогда до вечера<span class="mt">14:20</span></div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

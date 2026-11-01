@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Уведомления</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.grp{background:#1C1D22;border-radius:18px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+.r{display:flex;align-items:center;gap:14px;min-height:56px;padding:9px 14px;background:none;border:none;width:100%;box-sizing:border-box;font-family:inherit;color:#ECEDEF;font-size:16px;text-align:left}
+.lb{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sub{font-size:13px;line-height:18px;color:#8E8E98}
+.dv{height:1px;background:#26272D;margin-left:14px}
+.hd{font-size:13px;font-weight:500;color:#8E8E98;padding:0 6px;margin-bottom:-6px}
+.tg{width:44px;height:26px;border-radius:13px;background:#33B5E5;position:relative;flex:none}
+.tg i{position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#04222E}
+.tg.off{background:#3A3B42}.tg.off i{left:3px;right:auto;background:#8E8E98}
+.ch{flex:none}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+<div style="display: flex; align-items: center; gap: 10px; padding: 14px 12px 14px 8px;">
+<button class="ib" style="background: none;" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+<div style="flex: 1; font-size: 22px; font-weight: 700; color: #ECEDEF;">Уведомления</div>
+</div>
+
+<div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; gap: 14px; padding: 10px; overflow: hidden;">
+
+<div class="hd">Сообщения</div>
+<div class="grp">
+<button class="r"><span class="lb"><span>Личные чаты</span><span class="sub">Звук «Капля» · вибрация</span></span><svg class="ch" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8E8E98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+<div class="dv"></div>
+<button class="r"><span class="lb"><span>Группы</span><span class="sub">Звук «Капля» · без вибрации</span></span><svg class="ch" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8E8E98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+<div class="dv"></div>
+<button class="r"><span class="lb"><span>Упоминания</span><span class="sub">Звук «Звонок» · вибрация</span></span><svg class="ch" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8E8E98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+<div class="dv"></div>
+<div class="r"><span class="lb"><span>Текст в уведомлении</span><span class="sub">При блокировке приложения текст скрыт всегда</span></span><span class="tg"><i></i></span></div>
+</div>
+
+<div class="hd">Звонки</div>
+<div class="grp">
+<button class="r"><span class="lb"><span>Входящие звонки</span><span class="sub">Рингтон «Peerage» · вибрация · на весь экран</span></span><svg class="ch" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8E8E98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+</div>
+
+<div class="hd">Прочее</div>
+<div class="grp">
+<div class="r"><span class="lb"><span>Запросы и приглашения</span></span><span class="tg"><i></i></span></div>
+<div class="dv"></div>
+<div class="r"><span class="lb"><span>Передача файлов</span></span><span class="tg"><i></i></span></div>
+<div class="dv"></div>
+<div class="r"><span class="lb"><span>Флуд на адрес</span></span><span class="tg"><i></i></span></div>
+<div class="dv"></div>
+<div class="r"><span class="lb"><span>Рост очереди отправки</span><span class="sub">Только предупреждение, сообщения не удаляются</span></span><span class="tg off"><i></i></span></div>
+</div>
+
+<div class="grp">
+<button class="r"><span class="lb"><span>Постоянное уведомление</span><span class="sub">Держит соединение в фоне. Скрывается в настройках Android, работа не прерывается.</span></span><svg class="ch" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8E8E98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"></path></svg></button>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

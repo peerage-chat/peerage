@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>О приложении</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.grp{background:#1C1D22;border-radius:18px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+.r{display:flex;align-items:center;gap:14px;min-height:52px;padding:9px 14px;background:none;border:none;width:100%;box-sizing:border-box;font-family:inherit;color:#ECEDEF;font-size:16px;text-align:left}
+.lb{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sub{font-size:13px;line-height:18px;color:#8E8E98}
+.v{color:#8E8E98;font-size:14px;flex:none}
+.dv{height:1px;background:#26272D;margin-left:14px}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+<div style="display: flex; align-items: center; gap: 10px; padding: 14px 12px 4px 8px;">
+<button class="ib" style="background: none;" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+<div style="flex: 1; font-size: 22px; font-weight: 700; color: #ECEDEF;">О приложении</div>
+</div>
+
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 16px 26px;">
+<div style="width: 88px; height: 88px; border-radius: 26px; background: #16171B; display: flex; align-items: center; justify-content: center; margin-bottom: 8px;"><svg width="56" height="56" viewBox="0 0 24 24" aria-hidden="true"><path d="M4,15.5a4.5,4.5 0,1 0,9 0a4.5,4.5 0,1 0,-9 0M7.207,11.19L6.017,7.224M11.682,12.318L17.227,6.773M12.81,16.793L16.776,17.983" fill="none" stroke="#33B5E5" stroke-width="2" stroke-linecap="round"></path><path d="M2.7,5.5a2.8,2.8 0,1 0,5.6 0a2.8,2.8 0,1 0,-5.6 0M15.7,5.5a2.8,2.8 0,1 0,5.6 0a2.8,2.8 0,1 0,-5.6 0M15.7,18.5a2.8,2.8 0,1 0,5.6 0a2.8,2.8 0,1 0,-5.6 0" fill="#33B5E5"></path></svg></div>
+<div style="font-size: 22px; font-weight: 700; color: #ECEDEF;">Peerage</div>
+<div style="font-size: 13px; color: #8E8E98;">Версия 0.9.0 (412)</div>
+</div>
+
+<div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; gap: 14px; padding: 10px; overflow: hidden;">
+
+<div class="grp">
+<div class="r"><span class="lb">Транспорт</span><span class="v">Yggdrasil, без серверов</span></div>
+<div class="dv"></div>
+<div class="r"><span class="lb">Шифрование</span><span class="v">Сквозное, всегда</span></div>
+<div class="dv"></div>
+<div class="r"><span class="lb">Лицензия</span><span class="v">GPL-3.0</span></div>
+</div>
+
+<div class="grp">
+<button class="r"><span class="lb"><span>Сохранить лог</span><span class="sub">Текстовый файл для сообщения об ошибке. Пересылается вручную, сам никуда не уходит.</span></span></button>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

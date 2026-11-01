@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Медиа и звонки</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.grp{background:#1C1D22;border-radius:18px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+.r{display:flex;align-items:center;gap:14px;min-height:56px;padding:9px 14px;background:none;border:none;width:100%;box-sizing:border-box;font-family:inherit;color:#ECEDEF;font-size:16px;text-align:left}
+.lb{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sub{font-size:13px;line-height:18px;color:#8E8E98}
+.v{color:#8E8E98;font-size:14px;flex:none}
+.dv{height:1px;background:#26272D;margin-left:14px}
+.hd{font-size:13px;font-weight:500;color:#8E8E98;padding:0 6px;margin-bottom:-6px}
+.tg{width:44px;height:26px;border-radius:13px;background:#33B5E5;position:relative;flex:none}
+.tg i{position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#04222E}
+.seg{display:flex;background:#26272D;border-radius:12px;padding:3px;gap:3px;margin:0 14px 12px}
+.sg{flex:1;height:36px;border-radius:9px;border:none;background:none;color:#B8B8C0;font-family:inherit;font-size:14px;font-weight:500}
+.sg.on{background:#13313D;color:#7FD0EE}
+.sl{font-size:14px;color:#ECEDEF;padding:12px 14px 8px}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+<div style="display: flex; align-items: center; gap: 10px; padding: 14px 12px 14px 8px;">
+<button class="ib" style="background: none;" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+<div style="flex: 1; font-size: 22px; font-weight: 700; color: #ECEDEF;">Медиа и звонки</div>
+</div>
+
+<div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; gap: 14px; padding: 10px; overflow: hidden;">
+
+<div class="hd">Видео</div>
+<div class="grp">
+<div class="sl">Камера по умолчанию</div>
+<div class="seg"><button class="sg on">Фронтальная</button><button class="sg">Тыловая</button></div>
+<div class="dv"></div>
+<button class="r"><span class="lb"><span>Качество видео</span><span class="sub">Режимы камеры и кодека этого устройства</span></span><span class="v">Авто · до 1080p 30</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8E8E98" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M9 6l6 6-6 6"></path></svg></button>
+</div>
+
+<div class="hd">Звук</div>
+<div class="grp">
+<button class="r"><span class="lb">Микрофон</span><span class="v">Встроенный</span></button>
+<div class="dv"></div>
+<button class="r"><span class="lb">Вывод</span><span class="v">Динамик</span></button>
+<div class="dv"></div>
+<div class="sl">Качество звука</div>
+<div class="seg"><button class="sg on">Авто</button><button class="sg">Голос</button><button class="sg">Аудио</button></div>
+<div class="sub" style="padding: 0 14px 12px; margin-top: -4px;">Авто — 16–128 кбит по каналу · Голос — до 32 · Аудио — 128 (музыка)</div>
+</div>
+
+<div class="hd">Обработка</div>
+<div class="grp">
+<div class="r"><span class="lb">Шумоподавление</span><span class="tg"><i></i></span></div>
+<div class="dv"></div>
+<div class="r"><span class="lb">Эхоподавление</span><span class="tg"><i></i></span></div>
+<div class="dv"></div>
+<div class="r"><span class="lb">Авто-громкость</span><span class="tg"><i></i></span></div>
+</div>
+
+<div class="sub" style="padding: 0 6px;">Действует со следующего звонка. Во время звонка — долгое нажатие на «Видео» или «Микрофон».</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

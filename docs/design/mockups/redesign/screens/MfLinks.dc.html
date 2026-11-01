@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Медиа и файлы: ссылки</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.tab{height:42px;padding:0 4px;background:none;border:none;border-bottom:2px solid transparent;color:#8E8E98;font-size:15px;font-weight:500;font-family:inherit}
+.tab.sel{color:#ECEDEF;border-bottom-color:#33B5E5}
+.mo{font-size:13px;font-weight:500;color:#8E8E98;padding:14px 20px 4px}
+.r{display:flex;align-items:flex-start;gap:14px;padding:12px 20px;box-sizing:border-box}
+.dm{width:44px;height:44px;border-radius:12px;background:#23242A;color:#C4C7CC;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none}
+.lb{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.host{font-size:15px;font-weight:500;color:#ECEDEF}
+.url{font-size:13px;color:#33B5E5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctx{font-size:13px;line-height:18px;color:#B8B8C0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{font-size:12px;color:#8E8E98}
+.dv{height:1px;background:#222328;margin-left:78px}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+<div style="display: flex; align-items: center; gap: 10px; padding: 14px 12px 14px 8px;">
+<button class="ib" style="background: none;" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+<div style="flex: 1; display: flex; flex-direction: column;">
+<div style="font-size: 22px; font-weight: 700; color: #ECEDEF;">Медиа и файлы</div>
+<div style="font-size: 12px; color: #8E8E98;">Походы · 126</div>
+</div>
+</div>
+
+<div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; overflow: hidden;">
+<div style="display: flex; gap: 20px; padding: 4px 20px 0; border-bottom: 1px solid #222328;">
+<button class="tab">Медиа</button><button class="tab">Файлы</button><button class="tab">Голосовые</button><button class="tab sel">Ссылки</button>
+</div>
+
+<div class="mo">Октябрь</div>
+<div class="r"><span class="dm">W</span><span class="lb"><span class="host">ru.wikipedia.org</span><span class="url">ru.wikipedia.org/wiki/Ладожское_озеро</span><span class="ctx">Боб: вот тут про северный берег</span><span class="sub">12 окт.</span></span></div>
+<div class="dv"></div>
+<div class="r"><span class="dm">Y</span><span class="lb"><span class="host">yandex.ru</span><span class="url">yandex.ru/pogoda/priozersk</span><span class="ctx">Карина: на субботу обещают +6</span><span class="sub">10 окт.</span></span></div>
+<div class="dv"></div>
+<div class="r"><span class="dm">R</span><span class="lb"><span class="host">rzd.ru</span><span class="url">rzd.ru/tickets/spb-priozersk</span><span class="ctx">вы: электричка 7:12 с Финляндского</span><span class="sub">9 окт.</span></span></div>
+<div class="mo">Сентябрь</div>
+<div class="r"><span class="dm">G</span><span class="lb"><span class="host">github.com</span><span class="url">github.com/osmandapp/OsmAnd</span><span class="ctx">Влад: офлайн-карты, ставьте заранее</span><span class="sub">14 сент.</span></span></div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Первый запуск, карточка</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.tab{height:42px;padding:0 4px;background:none;border:none;border-bottom:2px solid transparent;color:#8E8E98;font-size:15px;font-weight:500;font-family:inherit}
+.tab.sel{color:#ECEDEF;border-bottom-color:#33B5E5}
+.btn{height:48px;border-radius:24px;border:none;font-family:inherit;font-size:15px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:10px;width:100%}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+<div style="display: flex; align-items: center; gap: 12px; padding: 14px 12px 14px 14px;">
+<button style="width: 40px; height: 40px; border-radius: 50%; background: #5D2A2A; color: #FFFFFF; font-size: 16px; font-weight: 500; border: none; font-family: inherit;" aria-label="Профиль">Ф</button>
+<div style="flex: 1; display: flex; flex-direction: column;">
+<div style="font-size: 22px; font-weight: 700; color: #ECEDEF;">Чаты</div>
+<div style="font-size: 12px; color: #8BC34A;">В сети · 6 узлов</div>
+</div>
+<button class="ib" aria-label="Поиск"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg></button>
+</div>
+
+<div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; overflow: hidden;">
+<div style="display: flex; gap: 20px; padding: 4px 20px 0; border-bottom: 1px solid #222328;">
+<button class="tab sel">Все</button><button class="tab">Личные</button><button class="tab">Группы</button>
+</div>
+
+<div style="flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 24px 60px;">
+<div style="background: #1C1D22; border-radius: 24px; padding: 28px 22px 22px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center;">
+<div style="width: 64px; height: 64px; border-radius: 22px; background: #13313D; display: flex; align-items: center; justify-content: center; margin-bottom: 6px;"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#33B5E5" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6" height="6"></rect><rect x="14" y="4" width="6" height="6"></rect><rect x="4" y="14" width="6" height="6"></rect><path d="M14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2"></path></svg></div>
+<div style="font-size: 20px; font-weight: 500; color: #ECEDEF;">Чатов пока нет</div>
+<div style="font-size: 14px; line-height: 20px; color: #9A9AA4; max-width: 280px;">Контакт добавляется по QR-коду или ссылке-приглашению. Сервера с номерами и поиском людей нет.</div>
+<div style="display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 12px;">
+<button class="btn" style="background: #33B5E5; color: #04222E;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#04222E" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6" height="6"></rect><rect x="14" y="4" width="6" height="6"></rect><rect x="4" y="14" width="6" height="6"></rect><path d="M14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2"></path></svg>Показать мой код</button>
+<button class="btn" style="background: #26272D; color: #ECEDEF;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ECEDEF" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M4 12h16"></path></svg>Сканировать код</button>
+</div>
+<button style="background: none; border: none; font-family: inherit; font-size: 14px; font-weight: 500; color: #33B5E5; height: 44px; padding: 0 12px;">Создать группу</button>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

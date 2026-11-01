@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Поиск в чате: перейти к дате</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.fld{flex:1;min-width:0;height:44px;border-radius:14px;background:#16171B;display:flex;align-items:center;gap:8px;padding:0 6px 0 12px;box-sizing:border-box}
+.qt{flex:1;min-width:0;color:#ECEDEF;font-size:16px;white-space:nowrap;overflow:hidden}
+.ph{flex:1;color:#7A7A84;font-size:16px}
+.cr{display:inline-block;width:2px;height:19px;background:#33B5E5;vertical-align:-4px;margin-left:1px}
+.tok{display:flex;align-items:center;gap:4px;height:28px;padding:0 6px 0 10px;border-radius:8px;background:#13313D;color:#7FD0EE;font-size:14px;font-weight:500;flex:none}
+.bin{align-self:flex-start;max-width:290px;background:#23242A;color:#E6E7EA;font-size:15px;line-height:21px;padding:7px 12px;border-radius:18px}
+.bout{align-self:flex-end;max-width:290px;background:#1F4657;color:#EAF6FB;font-size:15px;line-height:21px;padding:7px 12px;border-radius:18px}
+.s1{border-bottom-left-radius:6px}.s2{border-top-left-radius:6px}
+.mt{font-size:11px;color:#9AA3AD;margin-left:8px;white-space:nowrap}
+.mto{font-size:11px;color:#9FC6D6;margin-left:8px;white-space:nowrap}
+.lbl{align-self:center;font-size:12px;color:#B8B8C0;background:rgba(255,255,255,0.06);padding:3px 10px;border-radius:10px;margin:4px 0}
+.q{background:rgba(255,255,255,0.1);border-left:3px solid #7FD0EE;border-radius:10px;padding:4px 8px;margin-bottom:5px;font-size:13px;line-height:17px}
+.hl{background:rgba(51,181,229,0.30);color:#FFFFFF;border-radius:4px;padding:0 2px}
+.hlc{background:#33B5E5;color:#04222E;border-radius:4px;padding:0 2px}
+.grp{background:#1C1D22;border-radius:18px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+.r{display:flex;align-items:center;gap:14px;min-height:52px;padding:9px 14px;background:none;border:none;width:100%;box-sizing:border-box;font-family:inherit;color:#ECEDEF;font-size:16px;text-align:left}
+.lb{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sub{font-size:13px;line-height:18px;color:#8E8E98}
+.v{color:#8E8E98;font-size:14px;flex:none}
+.dv{height:1px;background:#26272D;margin-left:48px}
+.hd{font-size:13px;font-weight:500;color:#8E8E98;padding:0 6px;margin-bottom:-6px}
+.chip{display:flex;align-items:center;gap:6px;height:34px;padding:0 10px 0 14px;border-radius:17px;background:#1C1D22;border:none;color:#C4C7CC;font-family:inherit;font-size:14px;flex:none}
+.chip.on{background:#13313D;color:#7FD0EE}
+.pill{display:flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-radius:14px;background:#1C1D22;border:none;color:#ECEDEF;font-family:inherit;font-size:14px;font-weight:500;flex:none}
+.bar{display:flex;align-items:center;gap:8px;padding:8px 12px 16px;border-top:1px solid #222328}
+.cnt{flex:1;font-size:15px;color:#ECEDEF;font-variant-numeric:tabular-nums}
+.av{width:36px;height:36px;border-radius:50%;color:#FFFFFF;font-size:15px;font-weight:500;display:flex;align-items:center;justify-content:center;flex:none}
+.hit{display:flex;gap:12px;padding:10px 14px;align-items:flex-start}
+.hn{display:flex;align-items:baseline;gap:8px}
+.hn b{flex:1;font-size:15px;font-weight:500;color:#ECEDEF}
+.hn span{font-size:12px;color:#8E8E98;font-variant-numeric:tabular-nums}
+.hs{font-size:14px;line-height:19px;color:#B8B8C0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px}
+.hdv{height:1px;background:#26272D;margin-left:62px}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);row-gap:2px;text-align:center}
+.wd{font-size:12px;color:#8E8E98;height:28px;line-height:28px}
+.d{height:44px;display:flex;align-items:center;justify-content:center}
+.d i{font-style:normal;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;color:#ECEDEF;font-variant-numeric:tabular-nums}
+.d.no i{color:#4A4B52}
+.d.sel i{background:#33B5E5;color:#04222E;font-weight:500}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; position: relative;">
+<div style="display: flex; align-items: center; gap: 8px; padding: 14px 12px 14px 8px;"><button class="ib" style="background: none;" aria-label="Закрыть поиск"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button><div class="fld"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9AA3AD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><circle cx="11" cy="11" r="6.5"></circle><path d="M20 20l-4.2-4.2"></path></svg><span class="ph">Поиск в чате</span></div><button class="ib" style="background:#13313D;" aria-label="Перейти к дате"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7FD0EE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M9 3v4M15 3v4"></path></svg></button></div><div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; overflow: hidden;"><div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; padding: 12px 14px;">
+<div class="lbl">Сегодня</div>
+<div class="bin s1">Ты сегодня дома?<span class="mt">14:18</span></div>
+<div class="bin s2">Хочу занести книгу<span class="mt">14:18</span></div>
+</div>
+</div>
+<div style="position: absolute; inset: 0; background: rgba(0,0,0,0.55);"></div>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; background: #1C1D22; border-radius: 28px 28px 0 0; padding: 10px 16px 20px; display: flex; flex-direction: column; gap: 10px;">
+<div style="align-self: center; width: 36px; height: 4px; border-radius: 2px; background: #3A3B42;"></div>
+<div style="font-size: 20px; font-weight: 700; color: #ECEDEF; padding: 6px 4px 0;">Перейти к дате</div>
+<div style="display: flex; align-items: center; gap: 8px;">
+<button class="ib" style="background:none;" aria-label="Предыдущий месяц"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+<button style="flex: 1; background: none; border: none; color: #ECEDEF; font-family: inherit; font-size: 16px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px;">Октябрь 2026<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10l5 5 5-5"></path></svg></button>
+<button class="ib" style="background:none;" aria-label="Следующий месяц"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+</div>
+<div class="cal"><div class="wd">Пн</div><div class="wd">Вт</div><div class="wd">Ср</div><div class="wd">Чт</div><div class="wd">Пт</div><div class="wd">Сб</div><div class="wd">Вс</div><div></div><div></div><div></div><div class="d"><i>1</i></div><div class="d"><i>2</i></div><div class="d"><i>3</i></div><div class="d no"><i>4</i></div><div class="d"><i>5</i></div><div class="d no"><i>6</i></div><div class="d no"><i>7</i></div><div class="d"><i>8</i></div><div class="d"><i>9</i></div><div class="d"><i>10</i></div><div class="d no"><i>11</i></div><div class="d sel"><i>12</i></div><div class="d"><i>13</i></div><div class="d"><i>14</i></div><div class="d no"><i>15</i></div><div class="d no"><i>16</i></div><div class="d"><i>17</i></div><div class="d no"><i>18</i></div><div class="d no"><i>19</i></div><div class="d"><i>20</i></div><div class="d"><i>21</i></div><div class="d"><i>22</i></div><div class="d no"><i>23</i></div><div class="d"><i>24</i></div><div class="d no"><i>25</i></div><div class="d no"><i>26</i></div><div class="d"><i>27</i></div><div class="d"><i>28</i></div><div class="d"><i>29</i></div><div class="d"><i>30</i></div><div class="d"><i>31</i></div></div>
+<div class="sub" style="padding: 0 4px;">Тусклые дни — без сообщений. Нажатие на день открывает его первое сообщение.</div>
+<div style="display: flex; gap: 8px; padding-top: 4px;">
+<button class="pill" style="flex:1;justify-content:center;background:#26272D;">К первому сообщению</button>
+<button class="pill" style="flex:1;justify-content:center;background:#26272D;">К последнему</button>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

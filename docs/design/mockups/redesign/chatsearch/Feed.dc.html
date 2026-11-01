@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Поиск в чате: в ленте</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.fld{flex:1;min-width:0;height:44px;border-radius:14px;background:#16171B;display:flex;align-items:center;gap:8px;padding:0 6px 0 12px;box-sizing:border-box}
+.qt{flex:1;min-width:0;color:#ECEDEF;font-size:16px;white-space:nowrap;overflow:hidden}
+.ph{flex:1;color:#7A7A84;font-size:16px}
+.cr{display:inline-block;width:2px;height:19px;background:#33B5E5;vertical-align:-4px;margin-left:1px}
+.tok{display:flex;align-items:center;gap:4px;height:28px;padding:0 6px 0 10px;border-radius:8px;background:#13313D;color:#7FD0EE;font-size:14px;font-weight:500;flex:none}
+.bin{align-self:flex-start;max-width:290px;background:#23242A;color:#E6E7EA;font-size:15px;line-height:21px;padding:7px 12px;border-radius:18px}
+.bout{align-self:flex-end;max-width:290px;background:#1F4657;color:#EAF6FB;font-size:15px;line-height:21px;padding:7px 12px;border-radius:18px}
+.s1{border-bottom-left-radius:6px}.s2{border-top-left-radius:6px}
+.mt{font-size:11px;color:#9AA3AD;margin-left:8px;white-space:nowrap}
+.mto{font-size:11px;color:#9FC6D6;margin-left:8px;white-space:nowrap}
+.lbl{align-self:center;font-size:12px;color:#B8B8C0;background:rgba(255,255,255,0.06);padding:3px 10px;border-radius:10px;margin:4px 0}
+.q{background:rgba(255,255,255,0.1);border-left:3px solid #7FD0EE;border-radius:10px;padding:4px 8px;margin-bottom:5px;font-size:13px;line-height:17px}
+.hl{background:rgba(51,181,229,0.30);color:#FFFFFF;border-radius:4px;padding:0 2px}
+.hlc{background:#33B5E5;color:#04222E;border-radius:4px;padding:0 2px}
+.grp{background:#1C1D22;border-radius:18px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+.r{display:flex;align-items:center;gap:14px;min-height:52px;padding:9px 14px;background:none;border:none;width:100%;box-sizing:border-box;font-family:inherit;color:#ECEDEF;font-size:16px;text-align:left}
+.lb{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sub{font-size:13px;line-height:18px;color:#8E8E98}
+.v{color:#8E8E98;font-size:14px;flex:none}
+.dv{height:1px;background:#26272D;margin-left:48px}
+.hd{font-size:13px;font-weight:500;color:#8E8E98;padding:0 6px;margin-bottom:-6px}
+.chip{display:flex;align-items:center;gap:6px;height:34px;padding:0 10px 0 14px;border-radius:17px;background:#1C1D22;border:none;color:#C4C7CC;font-family:inherit;font-size:14px;flex:none}
+.chip.on{background:#13313D;color:#7FD0EE}
+.pill{display:flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-radius:14px;background:#1C1D22;border:none;color:#ECEDEF;font-family:inherit;font-size:14px;font-weight:500;flex:none}
+.bar{display:flex;align-items:center;gap:8px;padding:8px 12px 16px;border-top:1px solid #222328}
+.cnt{flex:1;font-size:15px;color:#ECEDEF;font-variant-numeric:tabular-nums}
+.av{width:36px;height:36px;border-radius:50%;color:#FFFFFF;font-size:15px;font-weight:500;display:flex;align-items:center;justify-content:center;flex:none}
+.hit{display:flex;gap:12px;padding:10px 14px;align-items:flex-start}
+.hn{display:flex;align-items:baseline;gap:8px}
+.hn b{flex:1;font-size:15px;font-weight:500;color:#ECEDEF}
+.hn span{font-size:12px;color:#8E8E98;font-variant-numeric:tabular-nums}
+.hs{font-size:14px;line-height:19px;color:#B8B8C0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px}
+.hdv{height:1px;background:#26272D;margin-left:62px}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);row-gap:2px;text-align:center}
+.wd{font-size:12px;color:#8E8E98;height:28px;line-height:28px}
+.d{height:44px;display:flex;align-items:center;justify-content:center}
+.d i{font-style:normal;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;color:#ECEDEF;font-variant-numeric:tabular-nums}
+.d.no i{color:#4A4B52}
+.d.sel i{background:#33B5E5;color:#04222E;font-weight:500}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; position: relative;">
+<div style="display: flex; align-items: center; gap: 8px; padding: 14px 12px 14px 8px;"><button class="ib" style="background: none;" aria-label="Закрыть поиск"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button><div class="fld"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9AA3AD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><circle cx="11" cy="11" r="6.5"></circle><path d="M20 20l-4.2-4.2"></path></svg><span class="qt">книг<span class="cr"></span></span><button class="ib" style="width:32px;height:32px;background:none;" aria-label="Очистить"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9AA3AD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div><button class="ib" aria-label="Перейти к дате"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M9 3v4M15 3v4"></path></svg></button></div><div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; overflow: hidden;">
+<div style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; padding: 12px 14px;">
+<div class="lbl">12 октября</div>
+<div class="bin s1">Дочитала ту <span class="hl">книгу</span>, что ты советовал<span class="mt">18:02</span></div>
+<div class="bin s2">Конец так себе, но середина — огонь<span class="mt">18:03</span></div>
+<div style="height: 6px;"></div>
+<div class="bout">а я говорил<span class="mto">18:05 <svg width="16" height="10" viewBox="0 0 18 12" fill="none" stroke="#9AD7EE" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-label="Доставлено" role="img"><path d="M1.5 6.5l3.2 3.2L11 2.5"></path><path d="M8.2 9.2l.5.5L15 2.5"></path></svg></span></div>
+<div class="lbl">Сегодня</div>
+<div class="bin s1">Ты сегодня дома?<span class="mt">14:18</span></div>
+<div class="bin s2">Хочу занести <span class="hlc">книгу</span><span class="mt">14:18</span></div>
+<div style="height: 6px;"></div>
+<div class="bout"><div class="q"><div style="color:#9AD7EE;font-weight:500;">Алиса</div>Хочу занести книгу</div>да, после семи<span class="mto">14:19 <svg width="16" height="10" viewBox="0 0 18 12" fill="none" stroke="#9AD7EE" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-label="Доставлено" role="img"><path d="M1.5 6.5l3.2 3.2L11 2.5"></path><path d="M8.2 9.2l.5.5L15 2.5"></path></svg></span></div>
+<div class="bout">и захвати вторую <span class="hl">книжку</span>, если не жалко<span class="mto">14:20 <svg width="16" height="10" viewBox="0 0 18 12" fill="none" stroke="#9AD7EE" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-label="Доставлено" role="img"><path d="M1.5 6.5l3.2 3.2L11 2.5"></path><path d="M8.2 9.2l.5.5L15 2.5"></path></svg></span></div>
+</div>
+<div class="bar"><span class="cnt">2 из 12</span><button class="pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"></path></svg>Списком</button><button class="ib" style="background:#1C1D22;" aria-label="Предыдущее совпадение"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"></path></svg></button><button class="ib" style="background:#1C1D22;" aria-label="Следующее совпадение"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button></div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

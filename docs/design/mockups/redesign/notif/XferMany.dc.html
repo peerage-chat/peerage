@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Несколько передач</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+</style>
+</helmet>
+<div style="width: 412px; height: 640px; box-sizing: border-box; padding: 24px 12px; background: #101114; font-family: Roboto, system-ui, sans-serif; display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 13px; font-weight: 500; color: #A0A4AA; padding: 0 8px 4px;">Беззвучные</div>
+
+<div style="background: #26282C; border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; gap: 8px; align-items: center;">
+<div style="width: 20px; height: 20px; border-radius: 50%; background: #33B5E5; color: #04222E; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none;">P</div>
+<span style="font-size: 13px; color: #A0A4AA; flex: 1;">Peerage · Передача файлов · 37%</span>
+</div>
+<div style="font-size: 15px; font-weight: 500; color: #ECEDEF;">3 файла · 46 из 126 МБ</div>
+<div style="height: 4px; border-radius: 2px; background: #3A3D42;"><div style="width: 37%; height: 4px; border-radius: 2px; background: #33B5E5;"></div></div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="display: flex; gap: 8px; font-size: 14px; color: #C4C7CC;"><span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">↓ отчёт.pdf · Карина</span><span style="color: #A0A4AA;">52%</span></div>
+<div style="display: flex; gap: 8px; font-size: 14px; color: #C4C7CC;"><span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">↑ поход.mp4 · Походы</span><span style="color: #A0A4AA;">18%</span></div>
+<div style="display: flex; gap: 8px; font-size: 14px; color: #C4C7CC;"><span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">↓ карта.gpx · Боб</span><span style="color: #A0A4AA;">в очереди</span></div>
+</div>
+<div style="display: flex; gap: 8px; margin-left: -8px;">
+<button style="background: none; border: none; padding: 10px 8px; min-height: 44px; font: inherit; font-size: 14px; font-weight: 500; color: #33B5E5;">Отменить все</button>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":640}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

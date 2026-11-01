@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Профиль группы, витрина</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.act{flex:1;height:64px;border-radius:18px;background:#16171B;border:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-family:inherit;font-size:12px;font-weight:500;color:#ECEDEF;padding:0}
+.act.pri{background:#33B5E5;color:#04222E}
+.grp{background:#1C1D22;border-radius:18px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+.r{display:flex;align-items:center;gap:14px;min-height:56px;padding:0 14px;background:none;border:none;width:100%;box-sizing:border-box;font-family:inherit;color:#ECEDEF;font-size:16px;text-align:left}
+.ic{width:36px;height:36px;border-radius:8px;background:#26272D;display:flex;align-items:center;justify-content:center;flex:none}
+.lb{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.sub{font-size:13px;color:#8E8E98}
+.v{color:#8E8E98;font-size:14px}
+.dv{height:1px;background:#26272D;margin-left:64px}
+.dz{color:#FF7A7A}
+.m{width:36px;height:36px;border-radius:50%;color:#FFFFFF;font-size:15px;font-weight:500;display:flex;align-items:center;justify-content:center;flex:none;position:relative}
+.on{position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;background:#8BC34A;border:2px solid #1C1D22}
+.chip{font-size:11px;font-weight:500;color:#7FD0EE;background:#13313D;padding:3px 8px;border-radius:8px}
+.hd{font-size:13px;font-weight:500;color:#8E8E98;padding:0 6px;margin-bottom:-6px}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: Roboto, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+<div style="display: flex; align-items: center; gap: 10px; padding: 14px 12px 4px 8px;">
+<button class="ib" style="background: none;" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+<div style="flex: 1;"></div>
+<button class="ib" aria-label="Изменить группу"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path><path d="M13.5 6.5l4 4"></path></svg></button>
+</div>
+
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 16px 18px;">
+<div style="width: 96px; height: 96px; border-radius: 28px; background: #00695C; color: #FFFFFF; font-size: 38px; font-weight: 500; display: flex; align-items: center; justify-content: center; margin-bottom: 8px;">П</div>
+<div style="font-size: 24px; font-weight: 500; color: #ECEDEF;">Походы</div>
+<div style="font-size: 13px; color: #8E8E98;">5 участников · <span style="color: #8BC34A;">3 в сети</span></div>
+<div style="display: flex; gap: 10px; width: 100%; margin-top: 14px;">
+<button class="act pri"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#04222E" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"></path></svg>Звонок</button>
+<button class="act"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ECEDEF" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="8" r="4"></circle><path d="M3 20a7 7 0 0 1 12.5-4.3M19 14v6M16 17h6"></path></svg>Добавить</button>
+<button class="act"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ECEDEF" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg>Звук</button>
+<button class="act"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ECEDEF" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>Поиск</button>
+</div>
+</div>
+
+<div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; gap: 14px; padding: 10px; overflow: hidden;">
+
+<div class="grp">
+<button class="r"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C4C7CC" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 20a2 2 0 0 0 4 0"></path></svg></span><span class="lb"><span>Уведомления</span><span class="sub">Только упоминания</span></span></button>
+<div class="dv"></div>
+<button class="r"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C4C7CC" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 16l5-5 4 4 3-3 6 6"></path></svg></span><span class="lb">Медиа и файлы</span><span class="v">126</span></button>
+</div>
+
+<div class="hd">Участники · 5</div>
+<div class="grp">
+<button class="r" style="color: #33B5E5;"><span class="ic" style="background: #13313D;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#33B5E5" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></span><span class="lb">Добавить участника</span></button>
+<div class="dv"></div>
+<button class="r"><span class="m" style="background:#5D2A2A">Ф<i class="on"></i></span><span class="lb"><span>fix <span style="color:#8E8E98;">(вы)</span></span><span class="sub" style="color:#8BC34A;">в сети</span></span><span class="chip">админ</span></button>
+<div class="dv"></div>
+<button class="r"><span class="m" style="background:#2E6B3A">Б<i class="on"></i></span><span class="lb"><span>Боб</span><span class="sub" style="color:#8BC34A;">в сети</span></span><span class="chip">админ</span></button>
+<div class="dv"></div>
+<button class="r"><span class="m" style="background:#3949AB">А<i class="on"></i></span><span class="lb"><span>Алиса</span><span class="sub" style="color:#8BC34A;">в сети</span></span></button>
+<div class="dv"></div>
+<button class="r"><span class="m" style="background:#AD4E1E">К</span><span class="lb"><span>Карина</span><span class="sub">не в сети</span></span></button>
+<div class="dv"></div>
+<button class="r"><span class="m" style="background:#6D4C41">В</span><span class="lb"><span>Влад</span><span class="sub">не в сети</span></span></button>
+</div>
+
+<div class="grp">
+<button class="r dz"><span class="lb">Выйти из группы</span></button>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

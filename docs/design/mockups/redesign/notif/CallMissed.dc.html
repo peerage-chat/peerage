@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Пропущенный звонок</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+</style>
+</helmet>
+<div style="width: 412px; height: 640px; box-sizing: border-box; padding: 24px 12px; background: #101114; font-family: Roboto, system-ui, sans-serif; display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 13px; font-weight: 500; color: #A0A4AA; padding: 0 8px 4px;">Разговоры</div>
+
+<div style="background: #26282C; border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; gap: 12px; align-items: flex-start;">
+<div style="position: relative; width: 44px; height: 44px; flex: none;">
+<div style="width: 44px; height: 44px; border-radius: 50%; background: #6D4C41; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 500;">В</div>
+<div style="position: absolute; right: -3px; bottom: -3px; width: 18px; height: 18px; border-radius: 50%; background: #33B5E5; border: 2px solid #26282C; color: #04222E; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">P</div>
+</div>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<div style="display: flex; gap: 6px; align-items: baseline;"><span style="font-size: 15px; font-weight: 500; color: #ECEDEF;">Влад</span><span style="font-size: 13px; color: #A0A4AA;">· сейчас</span></div>
+<div style="font-size: 14px; color: #C4C7CC; line-height: 20px;">Набери, как сможешь</div>
+<div style="font-size: 14px; color: #F28B82; line-height: 20px; display: flex; gap: 6px; align-items: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F28B82" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 7L7 17M7 9v8h8"></path></svg>Пропущенный аудиозвонок</div>
+</div>
+</div>
+<div style="display: flex; gap: 8px; padding-left: 48px;">
+<button style="background: none; border: none; padding: 10px 8px; min-height: 44px; font: inherit; font-size: 14px; font-weight: 500; color: #33B5E5;">Перезвонить</button>
+<button style="background: none; border: none; padding: 10px 8px; min-height: 44px; font: inherit; font-size: 14px; font-weight: 500; color: #33B5E5;">Ответить</button>
+<button style="background: none; border: none; padding: 10px 8px; min-height: 44px; font: inherit; font-size: 14px; font-weight: 500; color: #33B5E5;">Прочитано</button>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":640}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
