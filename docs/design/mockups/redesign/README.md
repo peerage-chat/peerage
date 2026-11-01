@@ -31,6 +31,7 @@
 | `viewer/` | Просмотр фото и видео | [SYFqEhupR4L2xrHjgFJ2Cq](https://claude.ai/artifact/SYFqEhupR4L2xrHjgFJ2Cq) |
 | `onboard/` | Первый запуск: новая личность, 24 слова, восстановление с переносом переписки, разрешения | [FEwZX9VE2FDL4SbmxWG4JN](https://claude.ai/artifact/FEwZX9VE2FDL4SbmxWG4JN) |
 | `security/` | Безопасность: сверка ключа контакта, блокировка, пароль хранилища, показ ключа | [NMcfp1QdEHdvMuvKzpRicg](https://claude.ai/artifact/NMcfp1QdEHdvMuvKzpRicg) |
+| `people/` | Контакты и группы: добавить контакт, свой код и профиль, создать группу, пригласить, права админа | [5fL9zC3CyvGEgQ1Lopxmxg](https://claude.ai/artifact/5fL9zC3CyvGEgQ1Lopxmxg) |
 
 `_gen/` — генераторы последних холстов (`python -I _gen/gen_chatact.py <папка>` пишет
 `<папка>/project/…`); остальные холсты писались вручную. Холст правится в артефакте или
