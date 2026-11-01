@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Headset
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -256,6 +255,7 @@ private fun GroupChatContent(model: AppModel) {
  *  войти/выйти из комнаты · меню. */
 @Composable
 internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit) {
+    var confirmLeave by remember { mutableStateOf(false) }
     if (model.selection.isNotEmpty()) {
         SelectionTopBar(model, group = true)
         return
@@ -305,7 +305,53 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
                 BarIcon(Icons.Filled.Call, stringResource(R.string.cd_join_call)) { join(gid) }
             }
         }
-        BarIcon(Icons.Filled.MoreVert, stringResource(R.string.common_more), tint = Color.White, onClick = onInfo)
+        if (gid != null) {
+            Box {
+                var menu by remember { mutableStateOf(false) }
+                BarIcon(TablerIcons.DotsVertical, stringResource(R.string.common_more), tint = Color.White) { menu = true }
+                GroupMenu(model, gid, menu, onClose = { menu = false }, onInfo = onInfo) { confirmLeave = true }
+            }
+        }
+    }
+    // Выход уводит из чата сам: модель забывает группу, и навигация уходит с её экранов.
+    if (confirmLeave && gid != null) {
+        ConfirmSheet(
+            title = stringResource(R.string.group_leave),
+            text = stringResource(R.string.group_leave_confirm),
+            ok = stringResource(R.string.group_leave_ok),
+            onOk = { model.leaveGroup(gid) },
+            onClose = { confirmLeave = false },
+        )
+    }
+}
+
+/**
+ * «⋮» группы (app-ui.md → «Чат группы», макет `shared/GroupMenu`). «Пригласить» и «О группе»
+ * пока ведут на один экран участников — разойдутся в шагах 3.4 (шторка приглашения) и
+ * 3.1 (витрина группы). Поиск и «Медиа и файлы» — вместе с их экранами (2.9, 3.2).
+ */
+@Composable
+private fun GroupMenu(model: AppModel, gid: String, open: Boolean, onClose: () -> Unit, onInfo: () -> Unit, onLeave: () -> Unit) {
+    val muted = model.chatSummaries[model.chatKey(gid, group = true)]?.muted == true
+    PopMenu(open, onClose) {
+        PopMenuItem(
+            TablerIcons.BellOff,
+            stringResource(R.string.chat_menu_mute),
+            trailing = { Switch(checked = muted, onCheckedChange = null) },
+        ) { model.muteChat(gid, group = true, muted = !muted) }
+        PopMenuItem(TablerIcons.UserPlus, stringResource(R.string.chat_menu_invite)) {
+            onClose()
+            onInfo()
+        }
+        PopMenuItem(TablerIcons.InfoCircle, stringResource(R.string.chat_menu_group_info)) {
+            onClose()
+            onInfo()
+        }
+        PopMenuDivider()
+        PopMenuItem(TablerIcons.Logout, stringResource(R.string.group_leave), danger = true) {
+            onClose()
+            onLeave()
+        }
     }
 }
 

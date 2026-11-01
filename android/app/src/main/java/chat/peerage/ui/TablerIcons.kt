@@ -406,3 +406,41 @@ val TablerIcons.Clock: ImageVector by lazy {
 val TablerIcons.Key: ImageVector by lazy {
     tabler("key", "M8 15m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0", "M11 12l9 -9", "M17 6l3 3", "M14 9l2 2")
 }
+
+/** Меню «⋮» и шапки (макеты `shared/Main`, `shared/GroupMenu`). */
+val TablerIcons.DotsVertical: ImageVector by lazy {
+    tabler(
+        "dots-vertical",
+        "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+        "M11 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+        "M11 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+    )
+}
+
+val TablerIcons.Trash: ImageVector by lazy {
+    tabler(
+        "trash",
+        "M4 7l16 0",
+        "M10 11l0 6",
+        "M14 11l0 6",
+        "M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12",
+        "M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3",
+    )
+}
+
+val TablerIcons.Ban: ImageVector by lazy {
+    tabler("ban", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0", "M5.7 5.7l12.6 12.6")
+}
+
+val TablerIcons.Logout: ImageVector by lazy {
+    tabler(
+        "logout",
+        "M14 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2",
+        "M9 12h12l-3 -3",
+        "M18 15l3 -3",
+    )
+}
+
+val TablerIcons.UserPlus: ImageVector by lazy {
+    tabler("user-plus", "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0", "M16 19h6", "M19 16v6", "M6 21v-2a4 4 0 0 1 4 -4h4")
+}

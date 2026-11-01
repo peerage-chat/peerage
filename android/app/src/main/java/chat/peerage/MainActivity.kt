@@ -341,9 +341,9 @@ private fun CompactShell(model: AppModel) {
     // переключению папок, третий горизонтальный жест дрался бы с ними.
     run {
         Box(Modifier.fillMaxSize()) {
-            // Системная полоса навигации — продолжение того, что над ней: панели листа или
-            // фона чата. По экрану-цели: во время перехода смонтированы оба.
-            val barColor = (if (screen != Screen.Chat && screen != Screen.GroupChat) Tokens.Colors.panel else Tokens.Colors.bg).toArgb()
+            // Системная полоса навигации — продолжение листа над ней: иначе внизу экрана
+            // остаётся чужая тёмная полоса.
+            val barColor = Tokens.Colors.panel.toArgb()
             SideEffect { activity?.window?.navigationBarColor = barColor }
             Surface(Modifier.fillMaxSize(), color = HoloBg) {
                 ScreenTransitions(nav, backEnabled = !inCall && nav.depth > 1, onBack = goBack) { s ->
@@ -412,18 +412,12 @@ private fun CompactShell(model: AppModel) {
                             }
                             // ── Контент экрана (без шапки) ────────────────────────────────────
                             // «Лист» (app-ui.md): под шапкой — панель со скруглённым верхом во всю
-                            // высоту, содержимое экрана на ней. Чаты переходят на лист вместе со
-                            // своей лентой и полем ввода (фаза 2 плана), до того — на фоне.
-                            val sheet = s != Screen.Chat && s != Screen.GroupChat
+                            // высоту, содержимое экрана на ней; у чата на листе — закреплённое,
+                            // лента и поле ввода.
                             Box(
-                                Modifier.weight(1f).then(
-                                    if (sheet) {
-                                        Modifier.clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
-                                            .background(Tokens.Colors.panel)
-                                    } else {
-                                        Modifier
-                                    },
-                                ),
+                                Modifier.weight(1f)
+                                    .clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
+                                    .background(Tokens.Colors.panel),
                             ) {
                                 when (s) {
                                     Screen.Contacts -> Column {

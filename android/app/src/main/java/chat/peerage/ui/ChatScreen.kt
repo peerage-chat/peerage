@@ -47,7 +47,6 @@ import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
@@ -80,6 +79,8 @@ import kotlinx.coroutines.withContext
 
 @Composable
 internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit) {
+    // Заблокированный перестаёт быть контактом — в его чате делать нечего.
+    var confirm by remember { mutableStateOf<ChatDanger?>(null) }
     // Выделение забирает верхнюю панель целиком: пока что-то выбрано, «назад» и
     // профиль не нужны, а нужен выход из режима и действия над выбранным.
     if (model.selection.isNotEmpty()) {
@@ -141,7 +142,66 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                 runWithPerm(arrayOf(Manifest.permission.RECORD_AUDIO), R.string.perm_denied_mic) { model.callDm(key) }
             }
         }
-        BarIcon(Icons.Filled.MoreVert, stringResource(R.string.common_more), tint = Color.White, onClick = onProfile)
+        if (key != null) {
+            Box {
+                var menu by remember { mutableStateOf(false) }
+                BarIcon(TablerIcons.DotsVertical, stringResource(R.string.common_more), tint = Color.White) { menu = true }
+                ChatMenu(model, key, menu, onClose = { menu = false }, onProfile = onProfile) { confirm = it }
+            }
+        }
+    }
+    val k = key ?: return
+    when (confirm) {
+        ChatDanger.Clear -> ConfirmSheet(
+            title = stringResource(R.string.chat_clear_title),
+            text = stringResource(R.string.profile_clear_history_confirm),
+            ok = stringResource(R.string.profile_clear_history_ok),
+            onOk = { model.clearHistory(k) },
+            onClose = { confirm = null },
+        )
+        ChatDanger.Block -> ConfirmSheet(
+            title = stringResource(R.string.chat_block_title),
+            text = stringResource(R.string.profile_block_confirm, name),
+            ok = stringResource(R.string.profile_block),
+            onOk = {
+                model.blockRequest(k)
+                onBack()
+            },
+            onClose = { confirm = null },
+        )
+        null -> {}
+    }
+}
+
+/** Опасные пункты «⋮» личного чата — каждый через шторку-подтверждение. */
+private enum class ChatDanger { Clear, Block }
+
+/**
+ * «⋮» личного чата (app-ui.md → «Чат», макет `shared/Main`). Поиск и «Медиа и файлы» встанут
+ * сюда вместе со своими экранами (шаги 2.9 и 3.2).
+ */
+@Composable
+private fun ChatMenu(model: AppModel, key: String, open: Boolean, onClose: () -> Unit, onProfile: () -> Unit, onDanger: (ChatDanger) -> Unit) {
+    val muted = model.chatSummaries[model.chatKey(key, group = false)]?.muted == true
+    PopMenu(open, onClose) {
+        PopMenuItem(
+            TablerIcons.BellOff,
+            stringResource(R.string.chat_menu_mute),
+            trailing = { Switch(checked = muted, onCheckedChange = null) },
+        ) { model.muteChat(key, group = false, muted = !muted) }
+        PopMenuItem(TablerIcons.User, stringResource(R.string.chat_menu_profile)) {
+            onClose()
+            onProfile()
+        }
+        PopMenuDivider()
+        PopMenuItem(TablerIcons.Trash, stringResource(R.string.profile_clear_history), danger = true) {
+            onClose()
+            onDanger(ChatDanger.Clear)
+        }
+        PopMenuItem(TablerIcons.Ban, stringResource(R.string.profile_block), danger = true) {
+            onClose()
+            onDanger(ChatDanger.Block)
+        }
     }
 }
 
@@ -645,7 +705,7 @@ internal fun MessageInput(
         attachOpen = false
     }
 
-    Column(Modifier.fillMaxWidth().background(HoloBg)) {
+    Column(Modifier.fillMaxWidth()) {
         // Цитата видна ровно там, где человек печатает ответ: иначе легко забыть,
         // что сообщение уйдёт ответом, и получить «ответ» не на то.
         replyStrip?.invoke()
@@ -907,7 +967,7 @@ internal fun MessageRow(
                     size = Tokens.Size.avatarSeries,
                     online = model.online[m.sender] == true,
                     circle = true,
-                    ring = HoloBg,
+                    ring = Tokens.Colors.panel, // лента — на листе
                 )
             } else {
                 Spacer(Modifier.width(Tokens.Size.avatarSeries))

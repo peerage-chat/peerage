@@ -768,6 +768,11 @@
     <string name="chat_menu_pin">Закрепить</string>
     <string name="chat_menu_unpin">Открепить</string>
     <string name="chat_menu_mute">Без звука</string>
+    <string name="chat_menu_profile">Профиль</string>
+    <string name="chat_menu_invite">Пригласить</string>
+    <string name="chat_menu_group_info">О группе</string>
+    <string name="chat_clear_title">Очистить историю?</string>
+    <string name="chat_block_title">Заблокировать контакт?</string>
 
     <!-- ── Экран «Я» (замена выдвижного меню) ───────────────────────────── -->
     <string name="me_title">Профиль</string>
