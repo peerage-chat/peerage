@@ -36,7 +36,7 @@ internal val LocalScreenScope = compositionLocalOf<AnimatedVisibilityScope?> { n
 
 /**
  * Переходы между экранами (app-ui.md → «Движение»): вглубь — новый экран въезжает справа,
- * прежний отходит на четверть и гаснет; назад — зеркально. Предиктивный «назад» (Android 14+)
+ * прежний отходит на четверть и гаснет; назад — зеркально; «Профиль» — с левой стороны. Предиктивный «назад» (Android 14+)
  * тянет тот же переход за пальцем: отпустил — довели, отменил — вернули.
  *
  * Оба экрана во время перехода смонтированы (~300 мс): эффекты уходящего (камера, плеер)
@@ -76,11 +76,16 @@ internal fun ScreenTransitions(
                     val from = nav.indexOf(initialState)
                     val to = nav.indexOf(targetState)
                     val forward = if (from < 0) nav.lastForward else to > from
+                    // «Профиль» открывают своим аватаром слева сверху — он и выезжает слева,
+                    // и уходит туда же. Экраны глубже него — как все, справа.
+                    val side = if ((if (forward) targetState else initialState) == Screen.Me) -1 else 1
                     val spec = tween<androidx.compose.ui.unit.IntOffset>(Tokens.Anim.screen, easing = FastOutSlowInEasing)
                     val fade = tween<Float>(Tokens.Anim.screen)
-                    val enter = slideInHorizontally(spec) { if (forward) it else -it / 4 } + fadeIn(fade, if (forward) 1f else 0.6f)
-                    val exit = slideOutHorizontally(spec) { if (forward) -it / 4 else it } + fadeOut(fade, if (forward) 0.6f else 1f)
-                    (enter togetherWith exit).apply { targetContentZIndex = if (forward) 1f else -1f }
+                    val enter = slideInHorizontally(spec) { side * if (forward) it else -it / 4 } + fadeIn(fade, if (forward) 1f else 0.6f)
+                    val exit = slideOutHorizontally(spec) { side * if (forward) -it / 4 else it } + fadeOut(fade, if (forward) 0.6f else 1f)
+                    // Слой — место в истории: глубже лежит выше. Уходящий хранит слой, с которым
+                    // пришёл, — с «−1 на назад» цепочка «назад → назад» клала главную поверх.
+                    (enter togetherWith exit).apply { targetContentZIndex = to.toFloat() }
                 },
                 contentKey = { it },
                 modifier = Modifier,
