@@ -78,9 +78,9 @@ close = page("Просмотр: закрытие протяжкой", behind
              + '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.55);"></div>'
              + '<div class="photo" style="top:330px;left:36px;right:36px;height:262px;border-radius:18px;" role="img" aria-label="Фото уменьшается к пузырю"></div>')
 
-rows = [("Main.dc.html", va, "А · Как сейчас: всё в «⋮», подпись снизу"),
-        ("Menu.dc.html", vam, "А · Меню «⋮» (+ «Ответить»)"),
-        ("Bar.dc.html", vb, "Б · Частые действия панелью снизу"),
+rows = [("Main.dc.html", va, "А ✓ · Всё в «⋮», подпись снизу"),
+        ("Menu.dc.html", vam, "А ✓ · Меню «⋮» (+ «Ответить»)"),
+        ("Bar.dc.html", vb, "Б · Панель снизу — отвергнут"),
         ("Video.dc.html", vid, "Видео: пауза по центру, таймлайн внизу"),
         ("Close.dc.html", close, "Протяжка вниз: фон гаснет, снимок уходит в пузырь")]
 boards, order = {}, []
