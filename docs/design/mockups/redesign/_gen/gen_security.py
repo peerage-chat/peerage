@@ -31,8 +31,8 @@ CSS += """.glyphs{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
 .bio b{font-size:18px;font-weight:500;color:#ECEDEF}
 .bio span{font-size:14px;color:#B8B8C0}
 .hdr{display:flex;align-items:center;gap:6px;padding:14px 12px 10px 8px}
-.hdr b{font-size:20px;font-weight:700;color:#ECEDEF}
-.sec{font-size:13px;font-weight:500;color:#8E8E98;padding:0 4px 8px}
+.hdr b{font-size:22px;font-weight:700;color:#ECEDEF}
+.sec{font-size:13px;font-weight:500;color:#8E8E98;padding:0 6px 8px}
 """
 
 PAL = ["#4FC3F7", "#4DB6AC", "#81C784", "#AED581", "#FFD54F", "#FFB74D", "#FF8A65", "#E57373",
@@ -121,7 +121,7 @@ def close_panel(html):
 
 def body(inner, pad=16):
     """Содержимое на панели «листа» (шапка — на фоне, над ней)."""
-    return LIST_OPEN + f'<div class="ob" style="padding-top:{pad}px;">{inner}</div>'
+    return LIST_OPEN + f'<div class="ob" style="padding:{pad}px 10px 0;">{inner}</div>'
 
 
 def state(icon, color, bg, title, sub):

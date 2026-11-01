@@ -27,11 +27,11 @@ CSS += """.ob{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 2
 .warn{display:flex;gap:12px;padding:14px 16px;border-radius:18px;background:#2A2116;color:#F2C98A;font-size:14px;line-height:20px}
 .inp{display:flex;align-items:center;gap:12px;min-height:52px;padding:0 16px;border-radius:16px;background:#1C1D22;box-sizing:border-box}
 .inp .v{flex:1;font-size:16px;color:#ECEDEF}
-.inp .p{flex:1;font-size:16px;color:#7A7A84}
-.cap{font-size:13px;line-height:18px;color:#8E8E98;padding:0 4px}
+.inp .p{flex:1;font-size:16px;color:#8E8E98}
+.cap{font-size:13px;line-height:18px;color:#8E8E98;padding:0 6px}
 .wg{display:grid;grid-template-columns:1fr 1fr;grid-auto-flow:column;grid-template-rows:repeat(12,auto);column-gap:12px;background:#1C1D22;border-radius:18px;padding:10px 16px}
 .w{display:flex;align-items:baseline;gap:10px;min-height:36px;align-items:center;font-size:16px;font-weight:500;color:#ECEDEF}
-.w i{font-style:normal;width:20px;text-align:right;font-size:12px;font-weight:400;color:#7A7A84;font-variant-numeric:tabular-nums}
+.w i{font-style:normal;width:20px;text-align:right;font-size:12px;font-weight:400;color:#8E8E98;font-variant-numeric:tabular-nums}
 .w u{text-decoration:none;flex:1;min-width:0;align-self:stretch;display:flex;align-items:center;border-bottom:1px solid #2E2F36}
 .w u.on{border-bottom:1.5px solid #33B5E5}
 .w u.bad{border-bottom:1.5px solid #FF6B6B;color:#FF8A8A}

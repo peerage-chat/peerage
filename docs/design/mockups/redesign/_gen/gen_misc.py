@@ -64,8 +64,8 @@ saved = page("Сохранённое", hdr("Сохранённое", btn(SEARCH,
 orow = lambda n, sub, extra='': prow(n, sub, extra + chev())
 outbox = page("Исходящие", hdr("Исходящие") + body(
     tiles([("1 248", "сообщений"), ("3,4 МБ", "объём"), ("24 дня", "самое старое")])
-    + '<div class="cap" style="margin:10px 0 16px;">Уйдут, как только получатель появится в сети. Сервера, который подержал бы их, нет — поэтому очередь сама не чистится.</div>'
-    + f'<div class="warn" style="margin-bottom:16px;">{ic(WARN, 20, "#F2C98A", NF)}<div><b style="display:block;font-weight:500;">Очередь разрослась</b>Больше тысячи неотправленных — обычно получатель давно не появлялся в сети.</div></div>'
+    + '<div class="cap" style="margin:10px 0 16px;">Уйдут, как только получатель появится в сети. Очередь сама не очищается.</div>'
+    + f'<div class="warn" style="margin-bottom:16px;">{ic(WARN, 20, "#F2C98A", NF)}<div><b style="display:block;font-weight:500;">Очередь разрослась</b>Больше тысячи неотправленных.</div></div>'
     + '<div class="sec">По получателям</div><div class="grp">'
     + orow("Глеб", "1 204 · 3,2 МБ · не в сети 24 дня")
     + orow("Борис", "31 · 120 КБ · отправляется…")

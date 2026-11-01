@@ -20,7 +20,7 @@ a{color:#33B5E5}a:hover{color:#7FD0EE}
 .ck.on{border:none;background:#33B5E5;display:flex;align-items:center;justify-content:center}
 .cmp{display:flex;align-items:flex-end;gap:8px;padding:8px 12px 16px}
 .fld{flex:1;min-height:46px;border-radius:16px;background:#1C1D22;display:flex;align-items:center;gap:10px;padding:0 12px;box-sizing:border-box}
-.ph{flex:1;color:#7A7A84;font-size:15px}
+.ph{flex:1;color:#8E8E98;font-size:15px}
 .tx{flex:1;color:#ECEDEF;font-size:15px;line-height:21px;padding:12px 0}
 .cr{display:inline-block;width:2px;height:18px;background:#33B5E5;vertical-align:-3px;margin-left:1px}
 .snd{width:46px;height:46px;border-radius:16px;background:#33B5E5;border:none;display:flex;align-items:center;justify-content:center;flex:none}

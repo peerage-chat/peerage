@@ -8,8 +8,8 @@ P = os.path.join(OUT, "project")
 os.makedirs(P, exist_ok=True)
 
 CSS += """.hdr{display:flex;align-items:center;gap:6px;padding:14px 12px 10px 8px}
-.hdr b{flex:1;font-size:20px;font-weight:700;color:#ECEDEF}
-.sec{font-size:13px;font-weight:500;color:#8E8E98;padding:0 4px 8px}
+.hdr b{flex:1;font-size:22px;font-weight:700;color:#ECEDEF}
+.sec{font-size:13px;font-weight:500;color:#8E8E98;padding:0 6px 8px}
 .cam{position:relative;height:300px;border-radius:28px;overflow:hidden;background:linear-gradient(160deg,#2B3440,#151A20 60%,#202830)}
 .cam i{position:absolute;width:44px;height:44px;border:3px solid #FFFFFF;border-radius:4px}
 .cam .h{position:absolute;left:0;right:0;bottom:16px;text-align:center;font-size:14px;color:#FFFFFF}
@@ -21,7 +21,7 @@ CSS += """.hdr{display:flex;align-items:center;gap:6px;padding:14px 12px 10px 8p
 .pr.dis b{color:#7A7A84}
 .chip{display:flex;align-items:center;gap:6px;min-height:36px;padding:0 6px 0 4px;border-radius:18px;background:#26272D;font-size:14px;color:#ECEDEF;flex:none}
 .chip .av{width:28px;height:28px;font-size:12px}
-.srch{display:flex;align-items:center;gap:10px;min-height:46px;padding:0 14px;border-radius:16px;background:#1C1D22;color:#7A7A84;font-size:15px}
+.srch{display:flex;align-items:center;gap:10px;min-height:46px;padding:0 14px;border-radius:16px;background:#1C1D22;color:#8E8E98;font-size:15px}
 .qr{width:232px;height:232px;padding:16px;border-radius:24px;background:#FFFFFF;box-sizing:content-box}
 .tag{font-size:12px;color:#8E8E98;background:#26272D;border-radius:10px;padding:3px 8px;flex:none}
 """
@@ -54,7 +54,7 @@ def close_panel(html):
 
 def body(inner, pad=16):
     """Содержимое на панели «листа» (шапка — на фоне, над ней)."""
-    return LIST_OPEN + f'<div class="ob" style="padding-top:{pad}px;">{inner}</div>'
+    return LIST_OPEN + f'<div class="ob" style="padding:{pad}px 10px 0;">{inner}</div>'
 
 
 def av(name, size=40, sq=False):
@@ -102,9 +102,9 @@ add = page("Добавить контакт", hdr("Добавить контак
     + '<div class="h">Навести на код собеседника</div></div>' + SP16
     + '<div class="grp">'
     + grow(PASTE, "Вставить код", "Если код прислали сообщением", '')
-    + grow(QRI, "Показать свой код", "Чтобы собеседник отсканировал этот телефон", '')
+    + grow(QRI, "Показать свой код", "Для сканирования с другого телефона", '')
     + '</div>'
-    + '<div class="cap" style="margin-top:8px;">Код передаётся лицом к лицу или любым мессенджером: в нём ключ, адрес в сети и имя. Сервера, через который ищут людей, нет.</div>'
+    + '<div class="cap" style="margin-top:8px;">Код передаётся лицом к лицу или любым мессенджером: в нём ключ, адрес в сети и имя.</div>'
     + FILL))
 
 # ---------- 2. Код распознан ----------
@@ -176,7 +176,7 @@ chips = '<div style="display:flex;gap:6px;overflow:hidden;padding-bottom:12px;">
     f'<div class="chip">{av(n, 28)}{n}{ic(CLOSE, 14, "#9AA3AD", NF)}</div>' for n in ["Алиса", "Вера"]) + '</div>'
 rows6 = ''.join(prow(n, s, check(n in ("Алиса", "Вера"))) for n, s in PEOPLE[:6])
 g1 = page("Новая группа: участники", hdr("Новая группа", '<span class="cap" style="padding-right:12px;">2 выбрано</span>') + body(
-    chips + f'<div class="srch">{ic(SEARCH, 20, "#7A7A84", NF)}Поиск по контактам</div>' + '<div style="height:12px;"></div>'
+    chips + f'<div class="srch">{ic(SEARCH, 20, "#8E8E98", NF)}Поиск по контактам</div>' + '<div style="height:12px;"></div>'
     + f'<div class="grp">{rows6}</div>' + FILL) + foot("Далее"))
 
 # ---------- 7. Новая группа · имя ----------
@@ -195,7 +195,7 @@ rows8 = (prow("Алиса", "уже в группе", '', 'dis') + prow("Бор�
          + prow("Глеб", "в сети 3 дня назад", check(True)) + prow("Дина", "в сети", check(False))
          + prow("Егор", "в сети сегодня", check(True)))
 addm = page("Пригласить в группу", hdr("Пригласить", '<span class="cap" style="padding-right:12px;">2 выбрано</span>') + body(
-    f'<div class="srch">{ic(SEARCH, 20, "#7A7A84", NF)}Поиск по контактам</div>' + '<div style="height:12px;"></div>'
+    f'<div class="srch">{ic(SEARCH, 20, "#8E8E98", NF)}Поиск по контактам</div>' + '<div style="height:12px;"></div>'
     + f'<div class="grp">{rows8}</div>'
     + '<div class="cap" style="margin-top:8px;">Приглашают только из контактов. Каждый получит карточку «Вступить / Отклонить» и войдёт в группу, когда примет.</div>'
     + FILL) + foot("Пригласить · 2"))

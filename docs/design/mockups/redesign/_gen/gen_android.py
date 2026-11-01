@@ -38,7 +38,7 @@ thumbs = ('<div style="display:flex;gap:8px;align-items:center;padding-bottom:16
           '<div class="cap" style="padding:0 0 0 6px;">2 фото · 4,1 МБ</div></div>')
 share_in = page("Поделиться в Peerage: выбор чата", xhdr("Отправить в Peerage") + body(
     thumbs
-    + f'<div class="srch">{ic(SEARCH, 20, "#7A7A84", NF)}Кому</div>' + '<div style="height:12px;"></div>'
+    + f'<div class="srch">{ic(SEARCH, 20, "#8E8E98", NF)}Кому</div>' + '<div style="height:12px;"></div>'
     + '<div class="grp">'
     + prow("Сохранённое", "заметки себе", check(False))
     + prow("Алиса", "в сети", check(True))
