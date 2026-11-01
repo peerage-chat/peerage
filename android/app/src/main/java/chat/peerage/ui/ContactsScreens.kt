@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
@@ -146,6 +148,7 @@ internal fun ContactsScreen(
 
     Column(Modifier.fillMaxSize()) {
         QueueStrip(model, nav.openOutbox)
+        BackupStripView(model, nav)
         // Счётчик пиров переехал в шапку (PeerIndicator). Здесь — только бенч-замер
         // приёма, пока он активен (диагностика; запуск — долгим тапом по индикатору).
         if (model.benchRecv) {
@@ -430,6 +433,9 @@ internal class HomeNav(
     val myCode: () -> Unit,
     val scan: () -> Unit,
     val newGroup: () -> Unit,
+    /** Копия ключа: true — с 24 слов (сделать, сверить), false — сразу проверка. */
+    val keyFlow: (wordsFirst: Boolean) -> Unit,
+    val dataBackup: () -> Unit,
 )
 
 /**
@@ -469,6 +475,132 @@ private fun QueueStrip(model: AppModel, onOpen: () -> Unit) {
         Icon(TablerIcons.ChevronRight, null, tint = Tokens.Colors.queueSub, modifier = Modifier.size(Tokens.Size.iconS))
     }
 }
+
+/**
+ * Напоминание о копиях — одно за раз, под полосой очереди (app-ui.md → «Напоминания о
+ * копиях»). Какое и когда — решает [chat.peerage.BackupFacts]; «Позже» только откладывает.
+ * Янтарные — когда ключ под угрозой, нейтральные — плановое.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BackupStripView(model: AppModel, nav: HomeNav) {
+    val hasChats = model.chatSummaries.values.any { it.lastTime > 0 }
+    val strip = model.backupFacts.strip(System.currentTimeMillis() / 1000, hasChats) ?: return
+    val amber = strip == BackupStrip.KEY_MISSING || strip == BackupStrip.KEY_CHECK_FAILED
+    val title: String
+    val text: String
+    val primary: String
+    val secondary: String
+    val onPrimary: () -> Unit
+    val onSecondary: () -> Unit
+    val later = stringResource(R.string.backup_later)
+    when (strip) {
+        BackupStrip.KEY_MISSING -> {
+            title = stringResource(R.string.backup_key_missing)
+            text = stringResource(R.string.backup_key_missing_sub)
+            primary = stringResource(R.string.backup_key_make)
+            secondary = later
+            onPrimary = { nav.keyFlow(true) }
+            onSecondary = { model.backupLater(strip) }
+        }
+        BackupStrip.KEY_CHECK_DUE -> {
+            val days = daysSince(model.backupFacts.keyCheckedAt)
+            title = stringResource(R.string.backup_check)
+            text = pluralStringResource(R.plurals.backup_check_sub, days, days)
+            primary = stringResource(R.string.backup_check_go)
+            secondary = later
+            onPrimary = { nav.keyFlow(false) }
+            onSecondary = { model.backupLater(strip) }
+        }
+        BackupStrip.KEY_CHECK_FAILED -> {
+            title = stringResource(R.string.backup_check_failed)
+            text = stringResource(R.string.backup_check_failed_sub)
+            primary = stringResource(R.string.backup_reconcile)
+            secondary = stringResource(R.string.backup_check_again)
+            onPrimary = { nav.keyFlow(true) }
+            onSecondary = { nav.keyFlow(false) }
+        }
+        BackupStrip.DATA_STALE -> {
+            val at = model.backupFacts.dataBackupAt
+            val days = daysSince(at)
+            title = if (at == 0L) {
+                stringResource(R.string.backup_data_none)
+            } else {
+                pluralStringResource(R.plurals.backup_data_ago, days, days)
+            }
+            text = stringResource(R.string.backup_data_sub)
+            primary = stringResource(R.string.backup_data_make)
+            secondary = later
+            onPrimary = nav.dataBackup
+            onSecondary = { model.backupLater(strip) }
+        }
+    }
+    val fg = if (amber) Tokens.Colors.queueText else Color.White
+    val sub = if (amber) Tokens.Colors.queueSub else Tokens.Colors.secondary
+    Column(
+        Modifier.fillMaxWidth()
+            .padding(start = Tokens.Space.panel, end = Tokens.Space.panel, top = Tokens.Space.m, bottom = Tokens.Space.xs)
+            .clip(RoundedCornerShape(Tokens.Radius.field))
+            .background(if (amber) Tokens.Colors.queueStrip else Tokens.Colors.group)
+            // Низ и зазор ужаты на запас зоны касания пилюль (48 при видимых 36).
+            .padding(start = Tokens.Space.m + Tokens.Space.xxs, end = Tokens.Space.m + Tokens.Space.xxs, top = Tokens.Space.m + Tokens.Space.xxs, bottom = Tokens.Space.s),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+            Icon(
+                when (strip) {
+                    BackupStrip.KEY_CHECK_FAILED -> TablerIcons.AlertTriangle
+                    BackupStrip.DATA_STALE -> TablerIcons.Database
+                    else -> TablerIcons.Key
+                },
+                null,
+                tint = if (amber) Tokens.Colors.stripAmber else Tokens.Colors.accent,
+                modifier = Modifier.size(Tokens.Size.iconRow),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(title, color = fg, fontSize = Tokens.Font.preview, fontWeight = FontWeight.Medium)
+                Text(
+                    text,
+                    color = sub,
+                    fontSize = Tokens.Font.small,
+                    lineHeight = Tokens.Font.lineHeightLoose,
+                    modifier = Modifier.padding(top = Tokens.Space.xxs),
+                )
+            }
+        }
+        // Переносом, а не обрезкой: «Сверить» и «Проверить ещё раз» на крупном шрифте в строку не встают.
+        FlowRow(
+            Modifier.padding(start = Tokens.Size.iconRow + Tokens.Space.m, top = Tokens.Space.xs),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+        ) {
+            StripPill(
+                primary,
+                bg = if (amber) Tokens.Colors.stripAmber else Tokens.Colors.accentMuted,
+                fg = if (amber) Tokens.Colors.onStripAmber else Tokens.Colors.accentSoft,
+                onClick = onPrimary,
+            )
+            StripPill(secondary, bg = Color.Transparent, fg = sub, onClick = onSecondary)
+        }
+    }
+}
+
+/** Пилюля полосы: видимая высота 36, зона касания — 48. */
+@Composable
+private fun StripPill(text: String, bg: Color, fg: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.minimumInteractiveComponentSize()
+            .heightIn(min = Tokens.Size.pill)
+            .clip(RoundedCornerShape(Tokens.Radius.pill))
+            .background(bg)
+            .clickable(role = Role.Button) { onClick() }
+            .padding(horizontal = Tokens.Space.m + Tokens.Space.xxs),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = fg, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}
+
+/** Целых дней с момента `at` (unix-секунды). */
+private fun daysSince(at: Long): Int = ((System.currentTimeMillis() / 1000 - at) / BackupFacts.DAY).toInt().coerceAtLeast(0)
 
 /**
  * Пустая главная: что это за место и как его наполнить. Контакт добавляется только кодом —

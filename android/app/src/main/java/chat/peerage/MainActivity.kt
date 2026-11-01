@@ -222,6 +222,7 @@ internal enum class Screen {
     MyCode,
     Request,
     Invite,
+    KeyFlow,
     Scanner,
     ContactList,
     Calls,
@@ -281,6 +282,11 @@ private fun CompactShell(model: AppModel) {
     // Открытая карточка запроса (ключ) и приглашения (gid).
     var requestKey by remember { mutableStateOf("") }
     var inviteGid by remember { mutableStateOf("") }
+    var keyWordsFirst by remember { mutableStateOf(true) }
+    val openKeyFlow: (Boolean) -> Unit = {
+        keyWordsFirst = it
+        screen = Screen.KeyFlow
+    }
     // Ключ контакта, которого пришли СВЕРЯТЬ сканером (null — обычное добавление).
     var verifyingPeer by remember { mutableStateOf<String?>(null) }
     val ctx = LocalContext.current
@@ -354,6 +360,10 @@ private fun CompactShell(model: AppModel) {
                         Screen.MyCode -> TopBar(stringResource(R.string.my_code_title), onBack = goBack)
                         Screen.Request -> TopBar(stringResource(R.string.req_title), onBack = goBack)
                         Screen.Invite -> TopBar(stringResource(R.string.invite_title), onBack = goBack)
+                        Screen.KeyFlow -> TopBar(
+                            stringResource(if (keyWordsFirst) R.string.key_flow_title else R.string.backup_check),
+                            onBack = goBack,
+                        )
                         Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = goBack)
                         Screen.GroupChat -> GroupChatTopBar(
                             model,
@@ -446,6 +456,8 @@ private fun CompactShell(model: AppModel) {
                                         myCode = { screen = Screen.MyCode },
                                         scan = { screen = Screen.Scanner },
                                         newGroup = { screen = Screen.CreateGroup },
+                                        keyFlow = openKeyFlow,
+                                        dataBackup = { screen = Screen.Backup },
                                     ),
                                 )
                             }
@@ -486,6 +498,7 @@ private fun CompactShell(model: AppModel) {
                             Screen.MyCode -> MyCodeScreen(model) { screen = Screen.Scanner }
                             Screen.Request -> RequestScreen(model, requestKey, onDone = goBack)
                             Screen.Invite -> InviteScreen(model, inviteGid, onDone = goBack)
+                            Screen.KeyFlow -> KeyFlowScreen(model, keyWordsFirst, onDone = goBack)
                             Screen.Info -> ContactProfileScreen(
                                 model,
                                 onMessage = { screen = Screen.Chat },
@@ -523,6 +536,7 @@ private fun CompactShell(model: AppModel) {
                                 model,
                                 onVaultLevel = { screen = Screen.VaultLevel },
                                 onContacts = { screen = Screen.ContactList },
+                                onKeyFlow = openKeyFlow,
                                 vaultLevel = VaultKeyManager.level(java.io.File(dataDir)),
                             )
                             Screen.SettingsPrivacy -> SettingsPrivacyScreen()

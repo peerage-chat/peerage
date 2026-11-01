@@ -507,6 +507,12 @@ impl Engine {
         self.identity.seed_phrase()
     }
 
+    /// Проверка копии ключа: слова на номерах (с 1) совпадают с сид-фразой. Фраза
+    /// наружу не выходит — только ответ.
+    pub fn seed_words_match(&self, picks: &[(usize, &str)]) -> bool {
+        self.identity.seed_words_match(picks)
+    }
+
     // — Сообщения 1:1 —
     /// Отправить текст. Возвращает id (≥0) или None при ошибке.
     pub fn send_text(&self, key: &[u8; 32], text: &str) -> Option<i64> {

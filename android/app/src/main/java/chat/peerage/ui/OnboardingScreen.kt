@@ -413,6 +413,31 @@ private fun ProfileStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit)
 @Composable
 private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Unit) {
     var revealed by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    if (checking) {
+        // Копия отмечается сделанной только проверкой; провал — тоже итог: на главной
+        // встанет полоса «не пройдена» со сверкой.
+        BackHandler { checking = false }
+        Column(Modifier.fillMaxSize().background(HoloBg).padding(top = Tokens.Space.xxl)) {
+            Text(
+                stringResource(R.string.backup_check),
+                color = Color.White,
+                fontSize = Tokens.Font.title,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = Tokens.Space.xl),
+            )
+            KeyCheckContent(
+                model,
+                onPassed = onDone,
+                onFailed = onDone,
+                onShowWords = {
+                    checking = false
+                    model.revealSeedPhrase()
+                },
+            )
+        }
+        return
+    }
     if (revealed) {
         SecureFlag() // секрет на экране — блокируем скриншот/запись/превью
         OnbScaffold(
@@ -420,9 +445,8 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
             desc = stringResource(R.string.onb_phrase_sub),
             primary = stringResource(R.string.onb_wrote_down),
             onPrimary = {
-                model.markKeyBackupDone()
                 model.clearRevealedPhrase()
-                onDone()
+                checking = true
             },
             secondary = stringResource(R.string.common_back),
             onSecondary = {
@@ -467,29 +491,42 @@ private fun KeyBackupStep(model: AppModel, onDone: () -> Unit, onSkip: () -> Uni
     }
 }
 
-/** Сетка 24 слов сид-фразы: два столбца по 12, каждое пронумеровано. `phrase` = null —
- *  ещё грузится (читается через ops). */
+/** Сетка 24 слов сид-фразы (макет `onboard/Phrase`): два столбца по 12 — 1–12 слева,
+ *  13–24 справа, — каждое пронумеровано. По высоте — по содержимому, без растяжения.
+ *  `phrase` = null — ещё грузится (читается через ops). */
 @Composable
-internal fun ColumnScope.PhraseGrid(phrase: String?) {
+internal fun PhraseGrid(phrase: String?) {
     val words = phrase?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
+    val shape = RoundedCornerShape(Tokens.Radius.group)
     if (words.size < 24) {
-        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-            Text("…", color = HoloSecondary, fontSize = Tokens.Font.title)
+        Box(Modifier.fillMaxWidth().clip(shape).background(Tokens.Colors.group).padding(Tokens.Space.xl), Alignment.Center) {
+            Text("…", color = Tokens.Colors.tertiary, fontSize = Tokens.Font.title)
         }
         return
     }
     Row(
-        Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(Tokens.Colors.tile)
-            .border(1.dp, HoloBorder, RoundedCornerShape(Tokens.Radius.button)).padding(Tokens.Space.m),
+        Modifier.fillMaxWidth().clip(shape).background(Tokens.Colors.group)
+            .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s + Tokens.Space.xxs),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         for (col in 0 until 2) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.SpaceEvenly) {
+            Column(Modifier.weight(1f)) {
                 for (row in 0 until 12) {
                     val i = col * 12 + row
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${i + 1}", color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.width(22.dp))
-                        Text(words[i], color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
+                    Row(
+                        Modifier.heightIn(min = Tokens.Size.phraseRow),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s + Tokens.Space.xxs),
+                    ) {
+                        Text(
+                            "${i + 1}",
+                            color = Tokens.Colors.tertiary,
+                            fontSize = Tokens.Font.small,
+                            textAlign = TextAlign.End,
+                            style = Tokens.Text.meta,
+                            modifier = Modifier.width(Tokens.Size.phraseNum),
+                        )
+                        Text(words[i], color = Color.White, fontSize = Tokens.Font.name, fontWeight = FontWeight.Medium)
                     }
                 }
             }

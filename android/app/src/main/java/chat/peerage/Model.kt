@@ -88,16 +88,49 @@ class AppModel private constructor() {
 
     fun revealSeedPhrase() = ops.execute { revealedPhrase = Native.seedPhrase(sessionPtr) }
 
-    /** Записал ли пользователь резервную копию ключа (M4). Локальный факт, не
-     *  секрет: без него человек не узнает, что личность держится на одной фразе. */
-    var keyBackupDone by mutableStateOf(false)
+    /** Что известно о копиях ключа и данных — от этого зависят полосы-напоминания на
+     *  главной ([BackupFacts.strip]). Локальные факты, не секрет. */
+    var backupFacts by mutableStateOf(BackupFacts())
         private set
 
-    /** Отметить, что фраза записана (нажал «Записал»). */
-    fun markKeyBackupDone() {
-        keyBackupDone = true
-        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-            ?.edit()?.putBoolean("key_backup_done", true)?.apply()
+    /** Копия ключа есть — значит, хоть раз прошла проверку трёх слов (не «нажал Записал»). */
+    val keyBackupDone get() = backupFacts.keyDone
+
+    private fun updateBackup(change: BackupFacts.(Long) -> BackupFacts) {
+        backupFacts = backupFacts.change(System.currentTimeMillis() / 1000)
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)?.let { backupFacts.save(it) }
+    }
+
+    /** «Позже» на полосе-напоминании. */
+    fun backupLater(s: BackupStrip) = updateBackup { later(s, it) }
+
+    /** Ключ показан целиком. После проваленной проверки это и есть «сверить»: полоса
+     *  «не пройдена» вернётся завтра, если проверка так и не пройдёт. */
+    fun keyReconciled() {
+        if (backupFacts.keyFailed) updateBackup { reconciled(it) }
+    }
+
+    /** Проверка копии ключа: совпали ли слова на номерах (с 1). Сама фраза в UI не
+     *  приходит. Итог записывается здесь же: успех — копия есть, лестница дальше;
+     *  [final] и не совпало — проверка не пройдена. */
+    fun checkKeyWords(picks: List<Pair<Int, String>>, final: Boolean, onResult: (Boolean) -> Unit) = ops.execute {
+        val ok = Native.checkSeedWords(sessionPtr, picks.joinToString(" ") { "${it.first} ${it.second}" })
+        onMain {
+            if (ok) {
+                updateBackup { checkPassed(it) }
+            } else if (final) {
+                updateBackup { checkFailed(it) }
+            }
+            onResult(ok)
+        }
+    }
+
+    /** Словарь BIP39 — подсказки при вводе слов. Грузится один раз, через [ops]. */
+    var bip39 by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    fun loadBip39() {
+        if (bip39.isEmpty()) ops.execute { Native.bip39Words().split(" ").let { w -> onMain { bip39 = w } } }
     }
 
     fun clearRevealedPhrase() {
@@ -451,17 +484,9 @@ class AppModel private constructor() {
     // данных — переписку.
 
     /** Когда сделана последняя копия данных (unix-секунды); 0 — не делалась.
-     *  Локальный факт, как и [keyBackupDone]: сам файл мы после сохранения не видим
-     *  (он у пользователя), а сказать «копии нет» после её создания — врать. */
-    var dataBackupAt by mutableStateOf(0L)
-        internal set
-
-    private fun markDataBackupDone() {
-        val now = System.currentTimeMillis() / 1000
-        dataBackupAt = now
-        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-            ?.edit()?.putLong("data_backup_at", now)?.apply()
-    }
+     *  Локальный факт: сам файл мы после сохранения не видим (он у пользователя), а
+     *  сказать «копии нет» после её создания — врать. */
+    val dataBackupAt get() = backupFacts.dataBackupAt
 
     /** Что и сколько войдёт в копию. Считается по базе, поэтому через [ops]. */
     internal var backupEstimate by mutableStateOf(BackupStatsDto())
@@ -483,7 +508,7 @@ class AppModel private constructor() {
         val out = Native.backupExport(sessionPtr, path, json, password)
         val stats = decodeOrNull<BackupStatsDto>(out)
             ?: BackupStatsDto(error = "не удалось создать копию")
-        if (stats.error.isEmpty()) markDataBackupDone()
+        if (stats.error.isEmpty()) onMain { updateBackup { dataDone(it) } }
         return stats
     }
 
@@ -1021,8 +1046,7 @@ class AppModel private constructor() {
         transportEpoch = Native.transportEpoch(sessionPtr)
         val prefs = appContext
             ?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-        keyBackupDone = prefs?.getBoolean("key_backup_done", false) ?: false
-        dataBackupAt = prefs?.getLong("data_backup_at", 0L) ?: 0L
+        prefs?.let { p -> BackupFacts.load(p, System.currentTimeMillis() / 1000).let { onMain { backupFacts = it } } }
         refreshContactsNow()
         refreshRequestsNow()
         refreshGroupsNow()

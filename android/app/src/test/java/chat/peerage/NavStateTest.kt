@@ -15,7 +15,7 @@ class NavStateTest {
         n.back()
         assertEquals(Screen.NewChat, n.current)
 
-        val m = nav(Screen.Settings, Screen.SettingsSecurity, Screen.ContactList, Screen.Add)
+        val m = nav(Screen.Me, Screen.SettingsSecurity, Screen.ContactList, Screen.Add)
         m.back()
         assertEquals(Screen.ContactList, m.current)
         m.back()
@@ -27,7 +27,7 @@ class NavStateTest {
     fun anyForwardPathUnwindsInReverse() {
         val path = listOf(
             Screen.Me,
-            Screen.Settings,
+            Screen.MyCode,
             Screen.Storage,
             Screen.Backup,
         )

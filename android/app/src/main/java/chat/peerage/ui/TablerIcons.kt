@@ -401,3 +401,8 @@ val TablerIcons.Clock: ImageVector by lazy {
         "M12 7v5l3 3",
     )
 }
+
+/** Ключ — полосы и экраны копии ключа (контур как в макете `empty/BackupStrips`). */
+val TablerIcons.Key: ImageVector by lazy {
+    tabler("key", "M8 15m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0", "M11 12l9 -9", "M17 6l3 3", "M14 9l2 2")
+}

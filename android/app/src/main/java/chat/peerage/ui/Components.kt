@@ -443,9 +443,11 @@ internal fun AccentButton(text: String, modifier: Modifier = Modifier, enabled: 
         // почти всю сторону, и кнопка читается капсулой, а не нашей плашкой.
         modifier = modifier.heightIn(min = Tokens.Size.inputField),
         shape = RoundedCornerShape(Tokens.Radius.button),
-        colors = ButtonDefaults.buttonColors(containerColor = HoloAccent),
+        // Неактивная — плашкой с приглушённым текстом: тёмный текст акцента на material-сером
+        // не читается вовсе.
+        colors = ButtonDefaults.buttonColors(containerColor = HoloAccent, disabledContainerColor = Tokens.Colors.raised),
     ) {
-        Text(text, color = HoloAccentDark, fontWeight = FontWeight.Medium)
+        Text(text, color = if (enabled) HoloAccentDark else Tokens.Colors.tertiary, fontWeight = FontWeight.Medium)
     }
 }
 

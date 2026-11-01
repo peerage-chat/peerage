@@ -66,6 +66,18 @@ impl Identity {
             .to_string()
     }
 
+    /// Проверка копии ключа: совпадают ли слова на номерах `picks` (номер с 1, как на
+    /// экране) с сид-фразой. Фраза из ядра не выходит — наружу только да/нет. Пустой
+    /// набор и номер вне 1..=24 — не совпало; регистр и пробелы вокруг слова не важны.
+    pub fn seed_words_match(&self, picks: &[(usize, &str)]) -> bool {
+        let phrase = self.seed_phrase();
+        let words: Vec<&str> = phrase.split_whitespace().collect();
+        !picks.is_empty()
+            && picks.iter().all(|&(n, w)| {
+                n >= 1 && words.get(n - 1).is_some_and(|x| *x == w.trim().to_lowercase())
+            })
+    }
+
     /// Восстановить личность из секретной сид-фразы (24 слова BIP39). Пробелы/регистр
     /// нормализуются. Обратна [`seed_phrase`].
     pub fn from_phrase(phrase: &str) -> Result<Self, IdentityError> {
@@ -268,6 +280,12 @@ pub fn addr_for_key(public_key: &[u8; 32]) -> Ipv6Addr {
     Ipv6Addr::from(addr)
 }
 
+/// Словарь BIP39 (английский, 2048 слов) — подсказки при вводе фразы и проверке копии:
+/// UI берёт его отсюда, а не своей копией, чтобы ввод и разбор фразы не разошлись.
+pub fn bip39_words() -> &'static [&'static str; 2048] {
+    bip39::Language::English.word_list()
+}
+
 /// 8 слов BIP39 из первых 88 бит SHA-256(публичный ключ).
 pub fn fingerprint_words(public_key: &[u8; 32]) -> [&'static str; FINGERPRINT_WORDS] {
     let hash = Sha256::digest(public_key);
@@ -461,6 +479,29 @@ mod tests {
         assert_eq!(Identity::from_phrase(&messy).unwrap().seed(), id.seed());
         // Мусор → ошибка, не паника.
         assert!(Identity::from_phrase("not a valid mnemonic phrase").is_err());
+    }
+
+    #[test]
+    fn seed_words_check_needs_every_pick_right() {
+        // Проверка копии: слова по номерам (с 1) сверяются с фразой; одно неверное,
+        // номер вне 1..=24 или пустой набор — не совпало. Регистр и пробелы не важны.
+        let id = Identity::from_seed(&[7u8; 32]).unwrap();
+        let phrase = id.seed_phrase();
+        let w: Vec<&str> = phrase.split_whitespace().collect();
+        let up = format!(" {} ", w[19].to_uppercase());
+        assert!(id.seed_words_match(&[(4, w[3]), (11, w[10]), (20, up.as_str())]));
+        assert!(!id.seed_words_match(&[(4, w[3]), (11, w[11]), (20, w[19])]));
+        assert!(!id.seed_words_match(&[(0, w[0])]));
+        assert!(!id.seed_words_match(&[(25, w[0])]));
+        assert!(!id.seed_words_match(&[]));
+    }
+
+    #[test]
+    fn bip39_wordlist_is_the_english_one() {
+        let words = bip39_words();
+        assert_eq!(words.len(), 2048);
+        assert_eq!(words[0], "abandon");
+        assert_eq!(words[2047], "zoo");
     }
 
     /// Известный вектор: для ключа из всех 0x01 проверяем,

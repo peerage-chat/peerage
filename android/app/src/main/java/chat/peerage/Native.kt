@@ -23,6 +23,13 @@ object Native {
     /** Секретная сид-фраза (24 слова BIP39) для резервной копии ключа (M4). СЕКРЕТ. */
     external fun seedPhrase(sessionPtr: Long): String
 
+    /** Проверка копии ключа: `picks` — «номер слово» через пробел, номер с 1. true — все
+     *  совпали. Сама фраза в Kotlin не приходит. */
+    external fun checkSeedWords(sessionPtr: Long, picks: String): Boolean
+
+    /** Словарь BIP39, 2048 слов через пробел. Без сессии. */
+    external fun bip39Words(): String
+
     /** Импорт личности из фразы (M4): валидирует и перезаписывает profile.json.
      *  true = успех (Kotlin затем перезапускает процесс). Не трогает живую сессию. */
     external fun importSeedPhrase(dataDir: String, phrase: String): Boolean

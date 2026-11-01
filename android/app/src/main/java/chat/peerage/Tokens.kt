@@ -130,6 +130,8 @@ object Tokens {
         val queueStrip = Color(0xFF2A2418)
         val queueText = Color(0xFFF2E3C8)
         val queueSub = Color(0xFFBFAE90)
+        val stripAmber = Color(0xFFFFB74D) // иконка и главная кнопка янтарной полосы-напоминания
+        val onStripAmber = Color(0xFF2A1A00) // текст на [stripAmber]
 
         // Предупреждения
         val noticeBg = Color(0xFF3A2F12) // плашка-предупреждение (очередь разрослась)
@@ -300,6 +302,12 @@ object Tokens {
         val handleW = 36.dp // ручка шторки
         val handleH = 4.dp
         val primaryButton = 52.dp // главная кнопка экрана-решения, во всю ширину
+        val formField = 52.dp // поле формы на панели: слово проверки ключа
+        val pill = 36.dp // кнопка-пилюля полосы-напоминания (зона касания — touch)
+        val suggest = 40.dp // подсказка слова над клавиатурой
+        val focusRing = 1.5.dp // обводка поля в фокусе или с ошибкой
+        val phraseRow = 36.dp // строка слова в сетке 24 слов
+        val phraseNum = 20.dp // колонка номера слова в сетке
         val touch = 48.dp // минимальная зона касания (Android): плашка может быть меньше, зона — нет
     }
 

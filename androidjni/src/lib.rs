@@ -145,6 +145,39 @@ pub extern "system" fn Java_chat_peerage_Native_seedPhrase<'local>(
     })
 }
 
+/// Проверка копии ключа: `picks` — пары «номер слово» через пробел («4 grain 11 quote»),
+/// номер с 1. true — все слова на своих местах; кривой ввод — false. Фраза в Kotlin не
+/// попадает: экран проверки знает только ответ.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_checkSeedWords<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    picks: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let picks = jstr(&mut env, &picks);
+        let parts: Vec<&str> = picks.split_whitespace().collect();
+        if parts.len() % 2 != 0 { return JNI_FALSE; }
+        let mut pairs = Vec::with_capacity(parts.len() / 2);
+        for pair in parts.chunks(2) {
+            let Ok(n) = pair[0].parse::<usize>() else { return JNI_FALSE };
+            pairs.push((n, pair[1]));
+        }
+        if e.seed_words_match(&pairs) { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
+/// Словарь BIP39 (2048 слов через пробел) — подсказки при вводе фразы. Без сессии.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_bip39Words<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, ""), { ret(&env, &peerage_core::identity::bip39_words().join(" ")) })
+}
+
 /// Импорт личности из сид-фразы (M4 «У меня уже есть ключ»): валидирует 24 слова и
 /// ПЕРЕЗАПИСЫВАЕТ profile.json импортированной личностью (запечатывается глобальным
 /// vault-ключом, уже установленным при старте движка). Возвращает true при успехе.

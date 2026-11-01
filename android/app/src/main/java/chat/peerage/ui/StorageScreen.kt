@@ -221,7 +221,7 @@ private fun KindLegend(kinds: List<Pair<String, Long>>) {
 }
 
 /** Дата «1 августа 2026» — человеку важен возраст копии, а не время суток. */
-private fun fmtDay(ts: Long): String =
+internal fun fmtDay(ts: Long): String =
     java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault())
         .format(java.util.Date(ts * 1000))
 

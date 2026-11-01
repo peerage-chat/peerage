@@ -2,7 +2,6 @@
 
 package chat.peerage.ui
 
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -14,6 +13,7 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CameraFront
 import androidx.compose.material.icons.filled.CameraRear
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.GraphicEq
@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
@@ -52,13 +53,9 @@ internal fun SettingsSecurityScreen(
     model: AppModel,
     onVaultLevel: () -> Unit = {},
     onContacts: () -> Unit = {},
+    onKeyFlow: (wordsFirst: Boolean) -> Unit = {},
     vaultLevel: VaultLevel = VaultLevel.KEYSTORE,
 ) {
-    var showPhrase by remember { mutableStateOf(false) }
-    if (showPhrase) {
-        SeedPhraseSheet(model) { showPhrase = false }
-        return
-    }
     val ctx = LocalContext.current
     val deviceSecure = remember { AppLock.deviceSecure(ctx) }
     Column(
@@ -66,17 +63,22 @@ internal fun SettingsSecurityScreen(
     ) {
         Spacer(Modifier.height(Tokens.Space.m))
         CardSection {
+            // Копия ключа отмечается сделанной только проверкой трёх слов: «записал» без
+            // проверки — обещание, а не копия.
+            val facts = model.backupFacts
             SettingRow(
                 Icons.Filled.Key,
                 stringResource(R.string.settings_key_backup),
-                if (model.keyBackupDone) {
-                    stringResource(R.string.settings_key_backup_done)
-                } else {
-                    stringResource(R.string.settings_key_backup_todo)
+                when {
+                    facts.keyFailed -> stringResource(R.string.settings_key_failed)
+                    facts.keyDone -> stringResource(R.string.settings_key_checked, fmtDay(facts.keyCheckedAt))
+                    else -> stringResource(R.string.settings_key_backup_todo)
                 },
-                valueColor = if (model.keyBackupDone) HoloOnline else HoloWarn,
+                valueColor = if (facts.keyDone && !facts.keyFailed) HoloOnline else HoloWarn,
                 divider = false,
-            ) { showPhrase = true }
+            ) { onKeyFlow(!facts.keyDone) }
+            SettingRow(Icons.Filled.Check, stringResource(R.string.settings_key_check), null) { onKeyFlow(false) }
+            SettingRow(Icons.Filled.Visibility, stringResource(R.string.settings_key_show), null) { onKeyFlow(true) }
             // Блокировка: подтверждение — системное (биометрия/PIN устройства), своего
             // секрета мы не храним. Без экрана блокировки на устройстве включать нечего.
             SettingSwitchRow(
@@ -516,40 +518,6 @@ private fun SettingSwitchRow(
             }
         }
         Switch(checked = checked, enabled = enabled, onCheckedChange = null)
-    }
-}
-
-/**
- * Показ сид-фразы из настроек. Тот же путь, что в онбординге: экран под FLAG_SECURE,
- * фраза нигде не сохраняется, «Записал» отмечает резервную копию сделанной.
- */
-@Composable
-private fun SeedPhraseSheet(model: AppModel, onClose: () -> Unit) {
-    LaunchedEffect(Unit) { model.revealSeedPhrase() }
-    BackHandler(onBack = onClose)
-    SecureFlag()
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
-    ) {
-        Text(
-            stringResource(R.string.onb_phrase_title),
-            color = Color.White,
-            fontSize = Tokens.Font.title,
-            fontWeight = FontWeight.Medium,
-        )
-        Text(stringResource(R.string.onb_phrase_sub), color = HoloSecondary, fontSize = Tokens.Font.body)
-        PhraseGrid(model.revealedPhrase)
-        AccentButton(stringResource(R.string.onb_wrote_down)) {
-            model.markKeyBackupDone()
-            model.clearRevealedPhrase()
-            onClose()
-        }
-        // Кнопкой, а не голым текстом: у текста зона касания — высота строки.
-        OutlineButton(stringResource(R.string.common_back)) {
-            model.clearRevealedPhrase()
-            onClose()
-        }
     }
 }
 
