@@ -303,7 +303,7 @@ internal fun HoldToConfirmDialog(
                 ) {
                     Box(
                         Modifier.fillMaxHeight().fillMaxWidth(progress)
-                            .background(HoloError.copy(alpha = 0.2f)),
+                            .background(Tokens.Colors.errorFill.copy(alpha = 0.2f)),
                     )
                     Text(stringResource(R.string.common_hold), color = HoloError, fontWeight = FontWeight.Medium)
                 }

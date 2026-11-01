@@ -247,7 +247,7 @@ internal fun ContactProfileScreen(
             }
             // «Без звука» — локальная пометка чата: собеседник о ней не узнаёт,
             // поэтому она и живёт здесь, а не в общих настройках уведомлений.
-            CardRow {
+            CardRow(modifier = Modifier.switchRow(muted) { model.muteChat(key, false, it) }) {
                 Icon(
                     if (muted) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
                     null,
@@ -261,7 +261,7 @@ internal fun ContactProfileScreen(
                     fontSize = Tokens.Font.label,
                     modifier = Modifier.weight(1f),
                 )
-                Switch(checked = muted, onCheckedChange = { model.muteChat(key, false, it) })
+                Switch(checked = muted, onCheckedChange = null)
             }
             DangerRow(Icons.Filled.Share, stringResource(R.string.profile_share), HoloAccent) {
                 confirmShare = true

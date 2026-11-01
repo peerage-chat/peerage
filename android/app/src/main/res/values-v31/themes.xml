@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ рисует системную заставку сам. Без этих полей он брал белый фон и значок
+         приложения в круге; нужен знак акцентом на фоне приложения (app-ui.md → «Загрузка»).
+         Остальное — как в values/themes.xml. -->
+    <style name="Theme.App" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#08090b</item>
+        <item name="android:windowBackground">#08090b</item>
+        <item name="android:navigationBarColor">#08090b</item>
+        <item name="android:windowSplashScreenBackground">#08090b</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#08090b</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_fg</item>
+    </style>
+</resources>

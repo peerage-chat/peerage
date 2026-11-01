@@ -2,6 +2,8 @@ package chat.peerage
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -17,6 +19,16 @@ import androidx.compose.ui.unit.sp
  * Семантические псевдонимы из [Theme.kt] (HoloAccent/ScreenPad/…) теперь бэкаются
  * отсюда — старые экраны не трогаем, мигрируем по ходу.
  */
+/**
+ * Golos Text (OFL, `docs/licenses/golos-text-OFL.txt`) — шрифт всего приложения: рисовался под
+ * кириллицу. Три начертания файлами, а не вариативный шрифт: minSdk 24, оси до API 26 не работают.
+ */
+val Golos = FontFamily(
+    androidx.compose.ui.text.font.Font(R.font.golos_regular, FontWeight.Normal),
+    androidx.compose.ui.text.font.Font(R.font.golos_medium, FontWeight.Medium),
+    androidx.compose.ui.text.font.Font(R.font.golos_bold, FontWeight.Bold),
+)
+
 object Tokens {
     object Colors {
         // ── Бренд/акцент ──────────────────────────────────────────────────────
@@ -26,13 +38,15 @@ object Tokens {
         val accentBadge = Color(0x2233B5E5) // фон бейджа (акцент @13%)
 
         // ── Поверхности ───────────────────────────────────────────────────────
-        // Три слоя с ЗАМЕТНЫМ шагом: фон → карточка → элемент на карточке. Раньше
-        // bg/surface различались на 4% яркости, и экран читался плоским.
-        val bg = Color(0xFF0F0F11) // фон экрана (под карточками)
-        val surface = Color(0xFF1A1A1D) // карточка-контейнер: список, панели
-        val surfaceHi = Color(0xFF232327) // элемент НА карточке (кнопка, поле)
-        val rowPinned = Color(0xFF1F1F23) // закреплённая строка списка — ступень над surface
-        val divider = Color(0xFF26262B) // разделитель ВНУТРИ карточки
+        // Язык «лист» (app-ui.md): фон → панель со скруглённым верхом → группа строк на
+        // панели. Шаг яркости заметный — иначе экран читается одним фоном.
+        val bg = Color(0xFF08090B) // фон экрана, шапки
+        val panel = Color(0xFF16171B) // лист под шапкой: список, лента чата
+        val group = Color(0xFF1C1D22) // группа строк, поле, кнопка — ступень на панели
+        val surface = panel // старое имя: экраны до перевода на «лист»
+        val surfaceHi = group
+        val rowPinned = group // закреплённая строка — ступень над панелью
+        val divider = Color(0xFF222328) // разделитель внутри группы, от аватара
         val border = Color(0xFF333333)
         val callBg = Color(0xFF131418) // фон экрана звонка (темнее и тайлов, и фона приложения)
         val tile = Color(0xFF1A1D21) // тайлы звонка, поля ввода, невыбранные чипы
@@ -40,8 +54,11 @@ object Tokens {
 
         // ── Текст/иконки ──────────────────────────────────────────────────────
         val onDark = Color.White
-        val secondary = Color(0xFF82828C) // вторичный текст: превью чата, подписи
-        val tertiary = Color(0xFF6F6F78) // время, счётчики — тише вторичного
+
+        // Оба серых держат 4.5:1 и на ступени group (#1C1D22): прежние #82828C/#6F6F78
+        // проваливали контраст на новых слоях (проверка 2026-11-01).
+        val secondary = Color(0xFF9A9AA4) // вторичный текст: превью чата, подписи
+        val tertiary = Color(0xFF8E8E98) // время, подсказки в полях — тише вторичного
         val iconMuted = Color(0xFF5A5F66) // иконка-заглушка (превью)
         val iconChrome = Color(0xFFE6E7EA) // иконки chrome-чипов
         val onOnline = Color(0xFF0A1F0A) // текст на зелёном (мини-аватар)
@@ -49,7 +66,8 @@ object Tokens {
         // ── Статусы ───────────────────────────────────────────────────────────
         val online = Color(0xFF8BC34A)
         val verified = Color(0xFF4CAF50)
-        val error = Color(0xFFE53935)
+        val error = Color(0xFFFF6B6B) // ТЕКСТ и знак ошибки/опасного действия (6:1 на group)
+        val errorFill = Color(0xFFE53935) // ЗАЛИВКА: отклонить звонок, запись голосового
         val warn = Color(0xFFE6A23C)
         val offlineDot = Color(0xFF555555)
 
@@ -59,7 +77,7 @@ object Tokens {
         val iconDangerMuted = Color(0xFFFF8A8A) // иконка выключенного
 
         // ── Чат ───────────────────────────────────────────────────────────────
-        val bubbleIn = Color(0xFF1E1E22) // входящий — тот же слой, что карточки списка
+        val bubbleIn = Color(0xFF23242A) // входящий — на ступень светлее панели
         val bubbleOut = Color(0xFF1F4657) // исходящий — приглушённый акцент
         val labelScrim = Color(0x0FFFFFFF) // подложка ярлыка даты/системного события
         val folderSelected = Color(0xFF1C3A47)
@@ -99,7 +117,7 @@ object Tokens {
         // Группы и комнаты
         val groupAvatar = Color(0xFF0D2A0D) // фон аватара группы/комнаты
         val roomBanner = Color(0xFF12331A) // баннер «в комнате идёт звонок»
-        val destructive = Color(0xFFE0563B) // «удалить участника», «выйти из группы»
+        val destructive = error // «удалить участника», «выйти из группы» — тот же красный текста
 
         // Предупреждения
         val noticeBg = Color(0xFF3A2F12) // плашка-предупреждение (очередь разрослась)
@@ -166,6 +184,8 @@ object Tokens {
 
         // Семантические (используются Theme.kt / списками).
         val screen = l // 16 — отступ контента экрана
+        val panel = 10.dp // от края панели до групп (концентричность радиусов 28/18)
+        val panelText = l // от края панели до подписи над группой: по вертикали с текстом в группе
         val formGap = m // 12 — зазор в формах
         val rowV = 9.dp // намеренная плотность ряда списка (Telegram-density), вне сетки
         val series = 3.dp // зазор между сообщениями ОДНОЙ серии (между сериями — s)
@@ -201,7 +221,12 @@ object Tokens {
         val avatar = 14.dp // «квадрат со скруглением» — кэп пропорции (см. SquareAvatar)
         val bubble = 18.dp // пузырь сообщения (внешние углы серии)
         val pill = 18.dp // пилюли панели управления
-        val card = 20.dp // карточка-контейнер (список чатов, секции, панели)
+        val field = 16.dp // поле ввода, поиск
+        val group = 18.dp // группа строк на панели: 28 = 18 + отступ панели 10 (концентрично)
+        val card = group // старое имя карточки-секции
+        val panel = 28.dp // верх панели «листа», шторки
+        val inner = 8.dp // плитка/иконка внутри группы
+        val thumb = 4.dp // миниатюра в сетке медиа
     }
 
     /**
@@ -260,22 +285,25 @@ object Tokens {
         val photoBubble = 240.dp // снимок, который сам себе пузырь (и шапка над ним)
         val photoInBubble = 220.dp // снимок внутри пузыря с подписью
         val metaReserve = 44.dp // место справа у вложения под время в углу пузыря
-        val touch = 44.dp // минимальная зона касания иконки без плашки
+        val touch = 48.dp // минимальная зона касания (Android): плашка может быть меньше, зона — нет
     }
 
     /**
-     * ЗАКРЫТАЯ шкала шрифтов: семь ступеней, и ничего между ними. Литерал `N.sp` в экране —
-     * хардкод; размер берётся отсюда, межстрочный интервал задаёт тема (см. [Text.base]).
-     * Промежуточные размеры схлопнуты (2026-10-27): 10 → caption, 12.5 → small,
-     * 13.5 → body, 14 → body (вторичный текст, чипы) или label (основной), 16 → label,
-     * 17-22 → title, 24-25 → big, 44 → huge.
+     * ЗАКРЫТАЯ шкала шрифтов (app-ui.md → «Шрифт»): 11 время · 12 мета · 13 подписи · 14 превью ·
+     * 15 сообщения · 16 имена и строки · 20 шторка · 22 экран · 24 профиль; 26/28 — звонок, крупные
+     * числа и заголовок экрана-шага. Литерал `N.sp` в экране — хардкод; межстрочный интервал
+     * задаёт тема (см. [Text.base]).
      */
     object Font {
         val caption = 11.sp // подписи, caps-метки секций, время, счётчики
         val small = 12.sp // мелкие подписи, бейджи
         val body = 13.sp // вторичный текст, чипы, имена в тайлах
-        val label = 15.sp // основной текст: строки, сообщения, поля ввода, кнопки
-        val title = 19.sp // заголовки экранов и листов, имя в профиле
+        val preview = 14.sp // превью последнего сообщения в списке
+        val label = 15.sp // основной текст: сообщения, поля ввода, кнопки
+        val name = 16.sp // имена в списке, строки групп
+        val sheet = 20.sp // заголовок шторки
+        val title = 22.sp // заголовок экрана
+        val profile = 24.sp // имя в профиле
         val big = 26.sp // имя во входящем звонке, эмодзи в панели
         val huge = 28.sp // крупные числа (трафик, обратный отсчёт)
 
@@ -300,6 +328,7 @@ object Tokens {
          * текст в бейдже съезжал с центра.
          */
         val base = TextStyle(
+            fontFamily = Golos,
             fontSize = Font.label,
             lineHeight = Font.lineHeight,
             letterSpacing = 0.sp,

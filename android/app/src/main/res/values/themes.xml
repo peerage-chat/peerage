@@ -2,11 +2,11 @@
 <resources>
     <!-- Тёмная тема приложения. Compose задаёт цвета контента сам; XML-тема нужна
          Activity (фон окна, системные полосы, без ActionBar).
-         Значения — зеркало Tokens.Colors.bg (#0F0F11): системные полосы должны
+         Значения — зеркало Tokens.Colors.bg (#08090B): системные полосы должны
          сливаться с фоном экрана, иначе окно выглядит вставленным в чужую рамку. -->
     <style name="Theme.App" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#0f0f11</item>
-        <item name="android:windowBackground">#0f0f11</item>
-        <item name="android:navigationBarColor">#0f0f11</item>
+        <item name="android:statusBarColor">#08090b</item>
+        <item name="android:windowBackground">#08090b</item>
+        <item name="android:navigationBarColor">#08090b</item>
     </style>
 </resources>

@@ -53,6 +53,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import chat.peerage.ui.PhotoOr
 import chat.peerage.ui.initialOf
 import chat.peerage.ui.rememberPermissionRunner
+import chat.peerage.ui.switchRow
 
 /**
  * Экран активного звонка-комнаты (Discord-style сетка). Дизайн — docs/design/call-ui.md.
@@ -216,7 +217,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
         Text(stringResource(R.string.call_audio_output), color = HoloSecondary, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(Tokens.Space.s))
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { model.toggleSpeaker() }
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).switchRow(model.speakerOn) { model.toggleSpeaker() }
                 .background(Tokens.Colors.tile).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -230,7 +231,7 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
             Text(stringResource(R.string.call_speaker), color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
             Switch(
                 checked = model.speakerOn,
-                onCheckedChange = { model.toggleSpeaker() },
+                onCheckedChange = null,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
                     checkedTrackColor = HoloAccent,
@@ -242,14 +243,14 @@ private fun CallSettings(model: AppModel, onClose: () -> Unit) {
 
         Spacer(Modifier.height(Tokens.Space.m))
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { model.toggleTechInfo() }
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).switchRow(model.showTechInfo) { model.toggleTechInfo() }
                 .background(Tokens.Colors.tile).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(stringResource(R.string.call_tech_info), color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
             Switch(
                 checked = model.showTechInfo,
-                onCheckedChange = { model.toggleTechInfo() },
+                onCheckedChange = null,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
                     checkedTrackColor = HoloAccent,
@@ -659,7 +660,7 @@ private fun ControlBar(model: AppModel) {
                 runWithPerm(arrayOf(Manifest.permission.CAMERA), R.string.perm_denied_camera) { model.toggleVideo() }
             }
         }
-        CtlButton(Icons.AutoMirrored.Filled.Logout, stringResource(R.string.call_btn_leave), HoloError) { model.leaveRoom() }
+        CtlButton(Icons.AutoMirrored.Filled.Logout, stringResource(R.string.call_btn_leave), Tokens.Colors.errorFill) { model.leaveRoom() }
     }
 }
 

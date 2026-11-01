@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import chat.peerage.ui.switchRow
 import kotlin.math.roundToInt
 
 /**
@@ -188,13 +189,13 @@ private fun DevChip(icon: ImageVector, label: String, selected: Boolean, onClick
 private fun FxToggle(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.tile)
-            .clickable { onChange(!on) }.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
+            .switchRow(on, onChange = onChange).padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
         Switch(
             checked = on,
-            onCheckedChange = onChange,
+            onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = Tokens.Colors.accent,

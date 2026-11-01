@@ -331,7 +331,7 @@ internal fun IncomingCallOverlay(model: AppModel, ic: IncomingRoomCall) {
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.l),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CallButton(Icons.Filled.Close, stringResource(R.string.call_invite_btn_decline), HoloError) { model.declineDmCall() }
+                CallButton(Icons.Filled.Close, stringResource(R.string.call_invite_btn_decline), Tokens.Colors.errorFill) { model.declineDmCall() }
                 PresetButton(if (micOn) Icons.Filled.Mic else Icons.Filled.MicOff, micOn, stringResource(R.string.call_btn_mic)) { micOn = !micOn }
                 PresetButton(if (videoOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff, videoOn, stringResource(R.string.call_btn_video)) { videoOn = !videoOn }
                 CallButton(Icons.AutoMirrored.Filled.Login, stringResource(R.string.call_invite_btn_join), HoloOnline) {

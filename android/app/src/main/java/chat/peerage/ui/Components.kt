@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,6 +34,7 @@ import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
@@ -50,21 +52,27 @@ import kotlin.math.abs
 // ── Общие элементы ──────────────────────────────────────────────────────────
 
 /**
- * Иконка-кнопка топ-бара: плашка на слое карточки, 38dp с иконкой 20dp.
+ * Иконка-кнопка топ-бара: плашка на слое панели, 38dp с иконкой 20dp.
  * Фон обязателен — без него иконка на фоне экрана не отличается от подписи и не
  * читается как нажимаемая (правило «контролы отличаются от контента»).
+ * Нажимается вся зона 48dp вокруг плашки: на Android меньше — промахи пальцем.
  */
 @Composable
 internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Colors.iconBar, onClick: () -> Unit) {
     Box(
-        Modifier.padding(horizontal = Tokens.Space.xs)
-            .size(Tokens.Size.barButton)
+        Modifier.size(Tokens.Size.touch)
             .clip(RoundedCornerShape(Tokens.Radius.button))
-            .background(Tokens.Colors.surface)
-            .clickable { onClick() },
+            .clickable(role = Role.Button, onClickLabel = desc) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
+        Box(
+            Modifier.size(Tokens.Size.barButton)
+                .clip(RoundedCornerShape(Tokens.Radius.button))
+                .background(Tokens.Colors.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
+        }
     }
 }
 
@@ -346,6 +354,7 @@ internal fun CardRow(
     onClick: (() -> Unit)? = null,
     divider: Boolean = true,
     inset: Dp = Tokens.Size.cardRow,
+    modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
     if (divider) {
@@ -356,7 +365,7 @@ internal fun CardRow(
         )
     }
     Row(
-        Modifier.fillMaxWidth()
+        modifier.fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .heightIn(min = Tokens.Size.cardRow)
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
@@ -364,6 +373,14 @@ internal fun CardRow(
         content = content,
     )
 }
+
+/**
+ * Строка с переключателем нажимается ЦЕЛИКОМ и озвучивается как переключатель с текстом строки
+ * в имени. Сам `Switch` в ней — только картинка (`onCheckedChange = null`): иначе у строки две
+ * цели нажатия, а TalkBack читает «Переключатель, вкл» без названия (проверка 2026-11-01).
+ */
+internal fun Modifier.switchRow(checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit): Modifier =
+    toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
 
 /**
  * Пилюля выбора варианта (разрешение, fps, устройство звука, «авто»). Одна на все

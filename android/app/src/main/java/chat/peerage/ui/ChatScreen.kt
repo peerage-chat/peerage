@@ -804,7 +804,7 @@ internal fun MessageInput(
             }
             Box(
                 Modifier.clip(RoundedCornerShape(Tokens.Radius.button))
-                    .background(if (recording) HoloError else HoloAccent)
+                    .background(if (recording) Tokens.Colors.errorFill else HoloAccent)
                     .size(Tokens.Size.inputField).then(btnMod),
                 contentAlignment = Alignment.Center,
             ) {

@@ -584,7 +584,7 @@ private fun SettingSwitchRow(
     divider: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    CardRow(divider = divider) {
+    CardRow(divider = divider, modifier = Modifier.switchRow(checked, enabled, onCheckedChange)) {
         Icon(icon, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconM))
         Spacer(Modifier.width(Tokens.Space.m))
         Column(Modifier.weight(1f)) {
@@ -593,7 +593,7 @@ private fun SettingSwitchRow(
                 Text(value, color = valueColor, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = Tokens.Space.xxs))
             }
         }
-        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, enabled = enabled, onCheckedChange = null)
     }
 }
 
