@@ -32,12 +32,9 @@ CSS += """.ob{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 2
 .wg{display:grid;grid-template-columns:1fr 1fr;grid-auto-flow:column;grid-template-rows:repeat(12,auto);column-gap:12px;background:#1C1D22;border-radius:18px;padding:10px 16px}
 .w{display:flex;align-items:baseline;gap:10px;min-height:36px;align-items:center;font-size:16px;font-weight:500;color:#ECEDEF}
 .w i{font-style:normal;width:20px;text-align:right;font-size:12px;font-weight:400;color:#7A7A84;font-variant-numeric:tabular-nums}
-.cells{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.c{display:flex;align-items:center;gap:6px;min-height:40px;padding:0 10px;border-radius:12px;background:#1C1D22;font-size:15px;color:#ECEDEF;box-sizing:border-box}
-.c i{font-style:normal;font-size:11px;color:#7A7A84;width:16px;font-variant-numeric:tabular-nums}
-.c.on{box-shadow:inset 0 0 0 1.5px #33B5E5}
-.c.bad{box-shadow:inset 0 0 0 1.5px #FF6B6B;color:#FF8A8A}
-.c.e{color:#5A5B63}
+.w u{text-decoration:none;flex:1;min-width:0;align-self:stretch;display:flex;align-items:center;border-bottom:1px solid #2E2F36}
+.w u.on{border-bottom:1.5px solid #33B5E5}
+.w u.bad{border-bottom:1.5px solid #FF6B6B;color:#FF8A8A}
 .kb{background:#1A1B1F;padding:6px 4px 10px;display:flex;flex-direction:column;gap:8px}
 .sug{display:flex;gap:4px;padding:2px 4px}
 .sug button{flex:1;min-height:40px;border:none;border-radius:10px;background:#26272D;color:#ECEDEF;font-family:inherit;font-size:15px}
@@ -156,7 +153,22 @@ keyi = page("Первый запуск: копия ключа", screen(
     "Показать 24 слова", "Позже — напоминание останется на главной"))
 
 # ---------- 4. Фраза ----------
-grid = '<div class="wg">' + ''.join(f'<div class="w"><i>{i + 1}</i>{w}</div>' for i, w in enumerate(WORDS)) + '</div>'
+def phrase_grid(slots):
+    """Сетка 24 слов: и показ, и ввод — одна раскладка, чтобы запись на бумаге
+    переносилась ячейка в ячейку. slots[i] = слово (показ) или (текст, состояние) для
+    ввода: '' пусто, 'on' курсор, 'bad' нет в списке, 'ok' введено."""
+    out = []
+    for i, s in enumerate(slots):
+        if isinstance(s, tuple):
+            text, st = s
+            cr = '<span class="cr"></span>' if st == "on" else ''
+            cls = st if st in ("on", "bad") else ''
+            s = f'<u class="{cls}">{text}{cr}</u>'
+        out.append(f'<div class="w"><i>{i + 1}</i>{s}</div>')
+    return '<div class="wg">' + ''.join(out) + '</div>'
+
+
+grid = phrase_grid(WORDS)
 phrase = page("Первый запуск: 24 слова", screen(
     "", 2, heading("24 слова", "Записать по порядку. Скриншот и запись экрана заблокированы."),
     SP16 + grid + FILL,
@@ -197,17 +209,8 @@ perms_b = page("Первый запуск: разрешения по одном�
     "Разрешить", "Не сейчас"))
 
 # ---------- 7. Восстановление · ввод ----------
-filled = WORDS[:7]
-cells = ''
-for i in range(24):
-    if i < 7:
-        cls = "c bad" if i == 4 else "c"
-        w = "tisue" if i == 4 else filled[i]
-        cells += f'<div class="{cls}"><i>{i + 1}</i>{w}</div>'
-    elif i == 7:
-        cells += f'<div class="c on"><i>{i + 1}</i>har<span class="cr"></span></div>'
-    else:
-        cells += f'<div class="c e"><i>{i + 1}</i></div>'
+slots = [(w, "ok") for w in WORDS[:7]] + [("har", "on")] + [("", "")] * 16
+slots[4] = ("tisue", "bad")
 keys = ''.join('<div class="kr">' + ''.join(f'<div class="k">{ch}</div>' for ch in row) + '</div>'
                for row in ["qwertyuiop", "asdfghjkl"])
 keys += '<div class="kr"><div class="k w2">⇧</div>' + ''.join(f'<div class="k">{ch}</div>' for ch in "zxcvbnm") + '<div class="k w2">⌫</div></div>'
@@ -215,16 +218,17 @@ keys += '<div class="kr"><div class="k w2">?123</div><div class="k sp"></div><di
 kb = ('<div class="kb"><div class="sug"><button class="b">harbor</button><button>hard</button><button>harvest</button></div>'
       + keys + '</div>')
 restore = page("Восстановление: ввод слов",
-               top(None) + '<div class="ob">' + '<div class="obt" style="font-size:24px;line-height:30px;margin-top:0;">Восстановление</div>'
-               + '<div class="obs">24 слова по порядку. Список подскажет слово по первым буквам.</div>'
-               + f'<div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 8px;"><span class="cap" style="color:#FF8A8A;padding:0;">№5 — нет такого слова</span><button class="pill" style="display:flex;align-items:center;gap:6px;">{ic(PASTE, 16, "#7FD0EE")}Вставить</button></div>'
-               + f'<div class="cells">{cells}</div>' + FILL + '</div>' + kb)
+               top(None) + '<div class="ob">'
+               + f'<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;"><div class="obt" style="font-size:24px;line-height:30px;margin:0;">Восстановление</div><button class="pill" style="display:flex;align-items:center;gap:6px;">{ic(PASTE, 16, "#7FD0EE")}Вставить</button></div>'
+               + '<div class="obs" style="margin:6px 0 4px;">24 слова в том порядке, в каком записаны.</div>'
+               + '<div class="cap" style="color:#FF8A8A;padding:0 0 8px;">№5 — нет такого слова</div>'
+               + phrase_grid(slots) + FILL + '</div>' + kb)
 
 # ---------- 8. Восстановление · фраза не сходится ----------
-cells2 = ''.join(f'<div class="c"><i>{i + 1}</i>{w}</div>' for i, w in enumerate(WORDS[:14] + ["pilot", "ozone"] + WORDS[16:]))
+swapped = [(w, "ok") for w in WORDS[:14] + ["pilot", "ozone"] + WORDS[16:]]
 mismatch = page("Восстановление: фраза не сходится", screen(
-    "", None, heading("Восстановление", "24 слова по порядку."),
-    SP16 + f'<div class="cells">{cells2}</div>' + SP16
+    "", None, heading("Восстановление", "24 слова в том порядке, в каком записаны."),
+    SP16 + phrase_grid(swapped) + SP16
     + f'<div class="warn" style="background:#2E1A1D;color:#FFB4B4;">{ic(WARN, 20, "#FF8A8A", NF)}<div>Все слова из списка, но фраза не сходится. Чаще всего два слова переставлены местами или одно записано с ошибкой.</div></div>'
     + FILL, "Восстановить"))
 
@@ -285,7 +289,7 @@ rows = [
      ("Phrase.dc.html", phrase, "4 · 24 слова, экран защищён"),
      ("Check.dc.html", check, "5 · ВОПРОС: проверка трёх слов (выбор из 4)"),
      ("Perms.dc.html", perms, "6 · А: разрешения одним экраном (+ автозапуск на MIUI)")],
-    [("Restore.dc.html", restore, "Восст. 1 · 24 ячейки, подсказка по буквам, «Вставить»"),
+    [("Restore.dc.html", restore, "Восст. 1 · Та же сетка, что при записи; подсказка по буквам"),
      ("Mismatch.dc.html", mismatch, "Восст. 2 · Слова верны, сумма не сходится"),
      ("Restored.dc.html", restored, "Восст. 3 · Личность есть → перенести переписку?"),
      ("BackupPass.dc.html", bkpass, "Восст. 4 · Файл копии + пароль"),
