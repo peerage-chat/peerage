@@ -184,10 +184,10 @@ contacts = page("Контакты с полосой", '<div style="display: flex
                                                      ("Л", "#7B3F7A", "Лена", "не в сети", False)])
                 + '</div>')
 
-items = [("Main.dc.html", a, "А · Полоса над списком (как в контактах)"),
-         ("Rows.dc.html", b, "Б · Строки прямо в списке чатов, с меткой"),
-         ("Tab.dc.html", c, "В · Вкладка «Запросы» (видна, пока есть)"),
-         ("Screen.dc.html", screen, "Экран «Запросы и приглашения» (из полосы А)"),
+items = [("Main.dc.html", a, "А · Полоса над списком — отвергнут"),
+         ("Rows.dc.html", b, "Б ✓ · Строки прямо в списке чатов, с меткой"),
+         ("Tab.dc.html", c, "В ✓ · Вкладка «Запросы» (видна, пока есть)"),
+         ("Screen.dc.html", screen, "Экран списка — не нужен (его роль у вкладки В)"),
          ("Contacts.dc.html", contacts, "Контакты: та же полоса")]
 boards, order = {}, []
 for i, (name, html, title) in enumerate(items):
