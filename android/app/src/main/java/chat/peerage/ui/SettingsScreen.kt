@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -118,38 +117,70 @@ internal fun SettingsSecurityScreen(
 }
 
 /**
- * Приватность: тумблеров нет намеренно. Отчёты о прочтении и индикатор набора мы не
- * отправляем ВООБЩЕ — переключатель подразумевал бы, что сигнал есть и его можно
- * выключить. Показываем факт, а не иллюзию выбора; появится сигнал — появится тумблер.
+ * Приватность (макет `settings/Privacy`): что раскрывается по выбору, что не отправляется
+ * вовсе и что видят контакты. Отчёты о прочтении и набор взаимны — подпись говорит, что
+ * значит выключенное. «Заблокированные» появятся с их экраном (5.2).
  */
 @Composable
-internal fun SettingsPrivacyScreen() {
+internal fun SettingsPrivacyScreen(model: AppModel) {
+    val p = model.privacy
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
     ) {
-        Spacer(Modifier.height(Tokens.Space.m))
+        SectionTitle(stringResource(R.string.privacy_optional))
         CardSection {
-            Row(Modifier.padding(Tokens.Space.m)) {
-                Icon(
-                    Icons.Filled.VisibilityOff,
-                    null,
-                    tint = HoloOnline,
-                    modifier = Modifier.size(Tokens.Size.iconM),
-                )
+            PrivacySwitch(
+                stringResource(R.string.privacy_read),
+                stringResource(if (p.readReceipts) R.string.privacy_read_on else R.string.privacy_read_off),
+                p.readReceipts,
+                divider = false,
+            ) { model.setReadReceipts(it) }
+            PrivacySwitch(
+                stringResource(R.string.privacy_typing),
+                stringResource(if (p.typing) R.string.privacy_typing_on else R.string.privacy_typing_off),
+                p.typing,
+            ) { model.setTypingIndicator(it) }
+        }
+        SectionTitle(stringResource(R.string.privacy_not_sent))
+        CardSection {
+            PrivacyFact(TablerIcons.Check, Tokens.Colors.online, R.string.privacy_not_sent_what, R.string.privacy_not_sent_sub, divider = false)
+        }
+        SectionTitle(stringResource(R.string.privacy_seen))
+        CardSection {
+            PrivacyFact(TablerIcons.InfoCircle, Tokens.Colors.fieldIcon, R.string.privacy_online, R.string.privacy_online_sub, divider = false)
+            PrivacyFact(TablerIcons.InfoCircle, Tokens.Colors.fieldIcon, R.string.privacy_profile, R.string.privacy_profile_sub)
+        }
+    }
+}
+
+/** Переключатель «Приватности»: название и что значит текущее положение. */
+@Composable
+private fun PrivacySwitch(title: String, sub: String, checked: Boolean, divider: Boolean = true, onChange: (Boolean) -> Unit) {
+    CardRow(divider = divider, inset = Tokens.Space.l, modifier = Modifier.switchRow(checked, onChange = onChange)) {
+        Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
+            Text(title, color = Color.White, fontSize = Tokens.Font.name)
+            Text(sub, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body, modifier = Modifier.padding(top = Tokens.Space.xxs))
+        }
+        Spacer(Modifier.width(Tokens.Space.m))
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+/** Строка-факт «Приватности»: значок, что и короткое пояснение. Не нажимается. */
+@Composable
+private fun PrivacyFact(icon: ImageVector, tint: Color, title: Int, sub: Int, divider: Boolean = true) {
+    CardRow(divider = divider, inset = Tokens.Space.l + Tokens.Size.iconRow + Tokens.Space.m) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(icon, null, tint = tint, modifier = Modifier.padding(top = Tokens.Space.xxs).size(Tokens.Size.iconRow))
                 Spacer(Modifier.width(Tokens.Space.m))
-                Column {
-                    Text(stringResource(R.string.settings_privacy_none), color = Color.White, fontSize = Tokens.Font.label)
+                Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
+                    Text(stringResource(title), color = Color.White, fontSize = Tokens.Font.name)
                     Text(
-                        stringResource(R.string.settings_privacy_none_desc),
-                        color = Tokens.Colors.secondary,
-                        fontSize = Tokens.Font.small,
-                        modifier = Modifier.padding(top = Tokens.Space.xs),
-                    )
-                    Text(
-                        stringResource(R.string.settings_privacy_presence),
-                        color = Tokens.Colors.secondary,
-                        fontSize = Tokens.Font.small,
-                        modifier = Modifier.padding(top = Tokens.Space.s),
+                        stringResource(sub),
+                        color = Tokens.Colors.tertiary,
+                        fontSize = Tokens.Font.body,
+                        modifier = Modifier.padding(top = Tokens.Space.xxs),
                     )
                 }
             }

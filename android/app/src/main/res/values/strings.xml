@@ -642,9 +642,6 @@
 
     <!-- Settings (M4) -->
     <string name="settings_privacy">Privacy</string>
-    <string name="settings_privacy_none">No metadata is revealed</string>
-    <string name="settings_privacy_none_desc">Read receipts and typing indicators are never sent — there is nothing here to switch off.</string>
-    <string name="settings_privacy_presence">Contacts do see your online status: it follows from the keepalive that delivery relies on.</string>
     <string name="settings_key_backup">Key backup</string>
     <string name="settings_key_backup_done">Done</string>
     <string name="settings_key_backup_todo">Not done — your identity rests on 24 words</string>
@@ -935,4 +932,22 @@
         <item quantity="one">%d note deleted</item>
         <item quantity="other">%d notes deleted</item>
     </plurals>
+    <string name="status_typing">typing…</string>
+    <string name="status_read">read</string>
+    <string name="act_read">Read</string>
+    <string name="privacy_optional">Optional</string>
+    <string name="privacy_read">Read receipts</string>
+    <string name="privacy_read_off">Off — receipts from others are hidden too</string>
+    <string name="privacy_read_on">On — work with those who have them on too</string>
+    <string name="privacy_typing">Typing indicator</string>
+    <string name="privacy_typing_off">Off — others\' typing is hidden too</string>
+    <string name="privacy_typing_on">On — works with those who have it on too</string>
+    <string name="privacy_not_sent">Never sent</string>
+    <string name="privacy_not_sent_what">Phone number, email, contact list</string>
+    <string name="privacy_not_sent_sub">Not in the app and not on the network</string>
+    <string name="privacy_seen">Contacts see</string>
+    <string name="privacy_online">Online status</string>
+    <string name="privacy_online_sub">Follows from the keepalive that delivery relies on</string>
+    <string name="privacy_profile">Name and avatar</string>
+    <string name="privacy_profile_sub">Contacts only, never the network</string>
 </resources>

@@ -544,7 +544,7 @@ private fun CompactShell(model: AppModel) {
                                         onKeyFlow = openKeyFlow,
                                         vaultLevel = VaultKeyManager.level(java.io.File(dataDir)),
                                     )
-                                    Screen.SettingsPrivacy -> SettingsPrivacyScreen()
+                                    Screen.SettingsPrivacy -> SettingsPrivacyScreen(model)
                                     Screen.SettingsMedia -> SettingsMediaScreen(model)
                                     Screen.SettingsNotifications -> SettingsNotificationsScreen(model)
                                     Screen.SettingsAbout -> SettingsAboutScreen()

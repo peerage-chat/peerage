@@ -144,11 +144,15 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                         Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(Tokens.Size.iconXs))
                     }
                 }
-                Text(
-                    stringResource(if (online) R.string.status_in_network else R.string.status_offline),
-                    color = if (online) HoloOnline else HoloSecondary,
-                    fontSize = Tokens.Font.caption,
-                )
+                if (key != null && isTyping(model, key)) {
+                    Text(stringResource(R.string.status_typing), color = Tokens.Colors.accent, fontSize = Tokens.Font.caption)
+                } else {
+                    Text(
+                        stringResource(if (online) R.string.status_in_network else R.string.status_offline),
+                        color = if (online) HoloOnline else HoloSecondary,
+                        fontSize = Tokens.Font.caption,
+                    )
+                }
             }
         }
         if (key != null) {
@@ -294,7 +298,11 @@ internal fun ChatScreen(model: AppModel) {
         }
         MessageInput(
             value = input,
-            onChange = { input = it },
+            onChange = {
+                // Набор — только когда текст растёт: стирание и вставка правки не «печатают».
+                if (it.length > input.length && model.editTarget == null) model.typing(key)
+                input = it
+            },
             onPickFile = { filePicker.launch(arrayOf("*/*")) },
             onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
             onCamera = openCamera,
@@ -1789,6 +1797,22 @@ internal fun MetaOnPhoto(content: @Composable () -> Unit) {
     ) { content() }
 }
 
+/** Собеседник печатает: последнее «печатаю» ещё не истекло. Перерисовывается сам, когда
+ *  срок выходит, — модели таймер не нужен. */
+@Composable
+internal fun isTyping(model: AppModel, peer: String): Boolean {
+    val until = model.typingUntil[peer] ?: 0L
+    var now by remember(until) { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(until) {
+        val left = until - System.currentTimeMillis()
+        if (left > 0) {
+            kotlinx.coroutines.delay(left)
+            now = System.currentTimeMillis()
+        }
+    }
+    return now < until
+}
+
 /** Статус доставки исходящего сообщения — честно, без приукрашивания.
  *
  *  `queued` (получатель офлайн, сообщение ждёт в очереди) намеренно отличается от
@@ -1800,6 +1824,8 @@ internal fun MetaOnPhoto(content: @Composable () -> Unit) {
 internal fun StatusTick(status: String) {
     val tint = Tokens.Colors.quoteTextOnBubble
     when (status) {
+        // Прочитано — те же ✓✓ цветом акцента: отличие только в цвете (как и в списке чатов).
+        "read" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_read), tint = Tokens.Colors.accent, modifier = Modifier.size(Tokens.Size.iconXs))
         "delivered" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_delivered), tint = tint, modifier = Modifier.size(Tokens.Size.iconXs))
         "sent" -> Icon(Icons.Filled.Done, stringResource(R.string.status_sent), tint = tint, modifier = Modifier.size(Tokens.Size.iconXs))
         "pending" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_sending), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(Tokens.Size.iconXs))

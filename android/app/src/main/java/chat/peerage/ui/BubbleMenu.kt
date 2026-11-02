@@ -194,6 +194,7 @@ private fun BubbleMenuItems(model: AppModel, t: BubbleActions, close: () -> Unit
 private fun statusLine(mine: Boolean, status: String, time: Long): String {
     val word = when {
         !mine -> R.string.act_received
+        status == "read" -> R.string.act_read
         status == "delivered" -> R.string.act_delivered
         status == "sent" -> R.string.act_sent
         status == "pending" -> R.string.act_sending

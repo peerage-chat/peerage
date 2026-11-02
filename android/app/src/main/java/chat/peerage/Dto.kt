@@ -377,6 +377,16 @@ internal sealed interface EngineEvent {
     @SerialName("undelivered")
     data class Undelivered(val peer: String, val id: Long) : EngineEvent
 
+    /** Собеседник прочитал наши сообщения: у этих id статус теперь «read» (2.10). */
+    @Serializable
+    @SerialName("read")
+    data class Read(val peer: String, val ids: List<Long>) : EngineEvent
+
+    /** Собеседник печатает (2.10). Гаснет сам — см. [AppModel.typingUntil]. */
+    @Serializable
+    @SerialName("typing")
+    data class Typing(val peer: String) : EngineEvent
+
     /** Своё сообщение выброшено из досылки (срок, сброс очереди) — «не доставлено». */
     @Serializable
     @SerialName("failed")
@@ -486,6 +496,13 @@ internal fun parseEvent(json: String): EngineEvent =
     runCatching { EngineJson.decodeFromString<EngineEvent>(json) }.getOrDefault(EngineEvent.Unknown)
 
 /** Разобрать список; битый ответ — пустой список, а не падение UI. */
+/** Переключатели «Приватности» (2.10): оба по умолчанию выключены, взаимны. */
+@Serializable
+data class PrivacyDto(
+    @SerialName("read_receipts") val readReceipts: Boolean = false,
+    val typing: Boolean = false,
+)
+
 internal inline fun <reified T> decodeList(json: String): List<T> =
     runCatching { EngineJson.decodeFromString<List<T>>(json) }.getOrDefault(emptyList())
 

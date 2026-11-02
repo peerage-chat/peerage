@@ -307,9 +307,10 @@ private fun ChatListRow(
                         Modifier.heightIn(min = Tokens.Size.badge),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        val typing = !row.group && isTyping(model, row.id)
                         Text(
-                            chatPreview(model, row),
-                            color = Tokens.Colors.secondary,
+                            if (typing) stringResource(R.string.status_typing) else chatPreview(model, row),
+                            color = if (typing) Tokens.Colors.accent else Tokens.Colors.secondary,
                             fontSize = Tokens.Font.preview,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -339,14 +340,20 @@ private fun ChatRowBadge(row: ChatRowUi) {
             CountBadge(badgeCount(row.unread), muted = row.muted)
         }
         row.unread > 0 -> CountBadge(badgeCount(row.unread), muted = row.muted)
-        // Те же значки, что в пузыре чата: часы → одна галочка → две. Один и тот же
-        // факт не должен выглядеть в списке иначе, чем внутри переписки.
+        // Те же значки, что в пузыре чата: часы → одна галочка → две, прочитанное —
+        // акцентом. Один и тот же факт не должен выглядеть в списке иначе, чем в ленте.
         s != null && s.lastMine && !s.lastSystem && s.lastKind != "deleted" &&
             s.lastKind != "call" && s.lastKind != "video_call" -> when (s.lastStatus) {
+            "read" -> Icon(
+                Icons.Filled.DoneAll,
+                stringResource(R.string.status_read),
+                tint = HoloAccent,
+                modifier = Modifier.size(Tokens.Size.iconXs),
+            )
             "delivered" -> Icon(
                 Icons.Filled.DoneAll,
                 stringResource(R.string.status_delivered),
-                tint = HoloAccent,
+                tint = Tokens.Colors.tertiary,
                 modifier = Modifier.size(Tokens.Size.iconXs),
             )
             "sent" -> Icon(

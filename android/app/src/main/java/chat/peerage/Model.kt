@@ -37,6 +37,9 @@ enum class Recovery {
 
 enum class RecoverResult { OK, BAD_PHRASE, FAILED }
 
+/** Сколько показывать «печатает…» после последнего сигнала (отправитель — раз в 3 с). */
+internal const val TYPING_SHOWN_MS = 5_000L
+
 class AppModel private constructor() {
     companion object {
         /**
@@ -960,6 +963,19 @@ class AppModel private constructor() {
     /** Приложение на переднем плане? Ставит MainActivity (onStart/onStop). В фоне
      *  poll/ticker троттлятся — меньше пробуждений CPU при удержанном wakelock. */
     @Volatile var foreground = true
+        set(v) {
+            field = v
+            // Вернулись к открытому чату — он снова на экране, значит прочитан.
+            if (v) currentChat?.let { k -> ops.execute { Native.markRead(sessionPtr, k) } }
+        }
+
+    /** Отчёты о прочтении и набор (2.10): переключатели «Приватности». */
+    var privacy by mutableStateOf(PrivacyDto())
+        private set
+
+    /** Собеседник печатает: ключ → до какого момента (мс) показывать. Последнее
+     *  «печатаю» живёт [TYPING_SHOWN_MS]; отправитель повторяет его раз в 3 с. */
+    val typingUntil = mutableStateMapOf<String, Long>()
     var incomingCall by mutableStateOf<IncomingRoomCall?>(null)
     var dmCallPeer by mutableStateOf<String?>(null)
     var videoActive by mutableStateOf(false)
@@ -1089,6 +1105,7 @@ class AppModel private constructor() {
         loadFolders()
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
+        privacy = decodeOrNull<PrivacyDto>(Native.privacy(sessionPtr)) ?: PrivacyDto()
         contactCode = Native.myContactCode(sessionPtr)
         // Расшифрованные копии вложений, оставшиеся от прошлого запуска (просмотр,
         // «открыть», «поделиться»): держать их дольше нужного незачем.
@@ -1357,6 +1374,8 @@ class AppModel private constructor() {
         messages[chatKey(key, group = false)] = list.toMutableStateList()
         atChatStart -= key // хвост перечитан — выше снова может что-то быть
         detached.remove(chatKey(key, group = false))
+        // Переписка на экране — прочитана (отметка уйдёт, только если отчёты включены).
+        if (currentChat == key && foreground) Native.markRead(sessionPtr, key)
         // Байты вложений НЕ читаем заранее: `blob()` возьмёт их при показе, то есть
         // только для видимых пузырей. Раньше вход в чат тянул с диска всю страницу,
         // включая вложения, до которых человек не долистает.
@@ -1980,7 +1999,7 @@ class AppModel private constructor() {
         // Что меняет ПОСЛЕДНЕЕ сообщение чата или его статус — меняет и строку в
         // списке. Флаг, а не пересчёт на месте: он гасится один раз за пачку.
         when (ev) {
-            is EngineEvent.MessageEv, is EngineEvent.Ack,
+            is EngineEvent.MessageEv, is EngineEvent.Ack, is EngineEvent.Read,
             is EngineEvent.Retracted, is EngineEvent.GroupRetracted, is EngineEvent.MessageEdited,
             EngineEvent.GroupsChanged,
             is EngineEvent.Undelivered, is EngineEvent.Failed,
@@ -2011,6 +2030,12 @@ class AppModel private constructor() {
                 // Звонок — только пропущенный: строка звонка приходит заново на каждое
                 // изменение исхода, а «missed» у неё бывает один раз.
                 val counts = if (m.isCall) m.text == "missed" else !m.system
+                if (!ev.group && !m.mine) {
+                    typingUntil.remove(ev.chat) // сообщение пришло — набор окончен
+                    if (currentChat == ev.chat && foreground && counts) {
+                        ops.execute { Native.markRead(sessionPtr, ev.chat) }
+                    }
+                }
                 if (!m.mine && counts) {
                     if (ev.group) {
                         if (currentGroup != ev.chat) {
@@ -2030,6 +2055,8 @@ class AppModel private constructor() {
                 if (at >= 0) list!![at] = list[at].retracted()
             }
             is EngineEvent.Ack -> updateStatus(ev.peer, ev.id, "delivered")
+            is EngineEvent.Read -> ev.ids.forEach { updateStatus(ev.peer, it, "read") }
+            is EngineEvent.Typing -> typingUntil[ev.peer] = System.currentTimeMillis() + TYPING_SHOWN_MS
             // Ретраи в памяти выдохлись, сообщение ждёт в очереди движка и уйдёт,
             // когда собеседник появится.
             is EngineEvent.Undelivered -> updateStatus(ev.peer, ev.id, "queued")
@@ -2195,7 +2222,22 @@ class AppModel private constructor() {
     private fun updateStatus(peer: String, id: Long, status: String) {
         val l = messages[chatKey(peer, group = false)] ?: return
         val idx = l.indexOfFirst { it.id == id && it.mine }
-        if (idx >= 0) l[idx] = l[idx].copy(status = status)
+        // «Прочитано» — последнее слово: запоздалый Ack его не откатывает (как в движке).
+        if (idx >= 0 && l[idx].status != "read") l[idx] = l[idx].copy(status = status)
+    }
+
+    /** Поле ввода личного чата растёт: «печатаю» (выключено, офлайн, частота — решает движок). */
+    fun typing(key: String) = ops.execute { Native.typing(sessionPtr, key) }
+
+    fun setReadReceipts(on: Boolean) = ops.execute {
+        Native.setReadReceipts(sessionPtr, on)
+        privacy = privacy.copy(readReceipts = on)
+    }
+
+    fun setTypingIndicator(on: Boolean) = ops.execute {
+        Native.setTypingIndicator(sessionPtr, on)
+        privacy = privacy.copy(typing = on)
+        if (!on) typingUntil.clear()
     }
 
     // ── DM-звонки (через комнату) ─────────────────────────────────────────────

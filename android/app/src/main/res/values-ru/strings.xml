@@ -670,9 +670,6 @@
 
     <!-- Настройки (M4) -->
     <string name="settings_privacy">Конфиденциальность</string>
-    <string name="settings_privacy_none">Метаданные не раскрываем</string>
-    <string name="settings_privacy_none_desc">Отчёты о прочтении и индикатор набора не отправляются вовсе — здесь нечего выключать.</string>
-    <string name="settings_privacy_presence">Статус «в сети» контакты видят: он следует из keepalive, которым держится доставка.</string>
     <string name="settings_key_backup">Резервная копия ключа</string>
     <string name="settings_key_backup_done">Сделана</string>
     <string name="settings_key_backup_todo">Не сделана — личность держится на 24 словах</string>
@@ -991,4 +988,22 @@
         <item quantity="many">%d заметок удалено</item>
         <item quantity="other">%d заметки удалены</item>
     </plurals>
+    <string name="status_typing">печатает…</string>
+    <string name="status_read">прочитано</string>
+    <string name="act_read">Прочитано</string>
+    <string name="privacy_optional">По выбору</string>
+    <string name="privacy_read">Отчёты о прочтении</string>
+    <string name="privacy_read_off">Выключены — чужие отчёты тоже не видны</string>
+    <string name="privacy_read_on">Включены — работают с теми, у кого тоже включены</string>
+    <string name="privacy_typing">Индикатор набора</string>
+    <string name="privacy_typing_off">Выключен — чужой набор тоже не виден</string>
+    <string name="privacy_typing_on">Включён — работает с теми, у кого тоже включён</string>
+    <string name="privacy_not_sent">Не отправляется</string>
+    <string name="privacy_not_sent_what">Номер телефона, почта, список контактов</string>
+    <string name="privacy_not_sent_sub">Их нет ни в приложении, ни в сети</string>
+    <string name="privacy_seen">Видят контакты</string>
+    <string name="privacy_online">Статус «в сети»</string>
+    <string name="privacy_online_sub">Следует из keepalive, на котором держится доставка</string>
+    <string name="privacy_profile">Имя и аватар</string>
+    <string name="privacy_profile_sub">Только контактам, не в сеть</string>
 </resources>
