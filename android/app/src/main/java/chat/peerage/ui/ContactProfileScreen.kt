@@ -1,7 +1,6 @@
 package chat.peerage.ui
 
 import android.Manifest
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,21 +8,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Block
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.GppMaybe
-import androidx.compose.material.icons.filled.Message
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.NotificationsOff
-import androidx.compose.material.icons.filled.Photo
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -41,17 +24,20 @@ import chat.peerage.*
 import chat.peerage.R
 
 /**
- * Профиль контакта (макет `docs/design/mockups/contact-profile.html`).
+ * Профиль контакта — «витрина» (макет `prof/Main`, app-ui.md → «Профиль контакта и
+ * группы»): на фоне аватар, имя, статус, ключ и плитки Написать · Звонок · Видео · Звук;
+ * на панели — сверка ключа, медиа, общие группы, «Поделиться» и опасное внизу.
  *
- * Это КАРТОЧКА для чтения и сверки, а не форма: переименование и удаление живут в
- * меню, диагностика — в «Сети». Главное на экране — карточка верификации: набор
- * знаков, который сверяют глазами с экраном собеседника.
+ * Сверка — отдельным экраном ([KeyVerifyScreen]): развёрнутая прямо здесь, она занимала
+ * пол-экрана ради действия, которое делают один раз за знакомство.
  */
 @Composable
 internal fun ContactProfileScreen(
     model: AppModel,
+    onBack: () -> Unit,
     onMessage: () -> Unit,
-    onScanQr: () -> Unit,
+    onVerify: () -> Unit,
+    onOpenGroup: (String) -> Unit,
     onDeleted: () -> Unit,
 ) {
     val key = model.currentChat ?: return
@@ -59,10 +45,8 @@ internal fun ContactProfileScreen(
     val ctx = LocalContext.current
     val online = model.online[key] == true
     var renaming by remember(key) { mutableStateOf(false) }
-    var confirmDelete by remember(key) { mutableStateOf(false) }
-    var confirmBlock by remember(key) { mutableStateOf(false) }
-    var confirmShare by remember(key) { mutableStateOf(false) }
-    var confirmClear by remember(key) { mutableStateOf(false) }
+    var confirm by remember(key) { mutableStateOf<ProfileDanger?>(null) }
+    var commonOpen by remember(key) { mutableStateOf(false) }
     // Флаг чата приходит из сводки — она же кормит список на главной, так что
     // «без звука» здесь и значок на главной не разъедутся.
     val muted = model.chatSummaries[model.chatKey(key, false)]?.muted == true
@@ -77,296 +61,195 @@ internal fun ContactProfileScreen(
         model.groups.forEach { model.loadGroupMembers(it.gid) }
     }
     val files = model.storageChats.firstOrNull { it.first == key }?.second ?: 0L
-    val commonGroups = model.groupMemberKeys.count { (_, members) -> key in members }
+    val common = model.groups.filter { key in model.groupMemberKeys[it.gid].orEmpty() }
+    val runWithPerm = rememberPermissionRunner()
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        // ── Шапка ────────────────────────────────────────────────────────────
-        Column(
-            Modifier.fillMaxWidth().padding(top = Tokens.Space.xxl, bottom = Tokens.Space.l),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
+    ShowcaseScreen(
+        onBack = onBack,
+        onEdit = { renaming = true },
+        editDesc = stringResource(R.string.profile_rename),
+        header = {
             SquareAvatar(
                 c.displayName,
-                size = Tokens.Size.avatarBig,
-                online = online,
+                size = Tokens.Size.avatarHero,
                 avatarBytes = model.contactAvatars[c.avatarId],
                 circle = true, // собеседник — человек
-                ring = HoloBg,
             )
-            Row(
-                Modifier.padding(top = Tokens.Space.m),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(c.displayName, color = Color.White, fontSize = Tokens.Font.title, fontWeight = FontWeight.Medium)
-                if (c.verified) {
-                    Spacer(Modifier.width(Tokens.Space.s))
-                    Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(Tokens.Size.iconS))
-                }
-            }
+            ShowcaseName(c.displayName)
             Text(
-                stringResource(if (online) R.string.status_online else R.string.status_offline),
-                color = if (online) HoloOnline else HoloSecondary,
+                stringResource(if (online) R.string.status_in_network else R.string.status_offline),
+                color = if (online) Tokens.Colors.online else Tokens.Colors.tertiary,
                 fontSize = Tokens.Font.body,
             )
-        }
-
-        // Ключ — строкой в карточке, сокращённо и в одну строку. Целиком он занимал
-        // две строки моноширинного текста прямо под именем и читался как ошибка
-        // вёрстки. Сверяют собеседника всё равно не по нему, а по отпечатку ниже
-        // (знаки + слова); ключ нужен, чтобы его СКОПИРОВАТЬ — тап это и делает.
-        CardSection {
-            CardRow(onClick = { copyToClipboard(ctx, c.key, "key") }, divider = false, inset = 0.dp) {
-                Column(Modifier.weight(1f)) {
-                    FieldLabel(stringResource(R.string.me_pubkey_label))
-                    Text(
-                        c.key.take(10) + "…" + c.key.takeLast(6),
-                        color = Color.White,
-                        fontSize = Tokens.Font.small,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                    )
-                }
-                Icon(
-                    Icons.Filled.ContentCopy,
-                    stringResource(R.string.me_copy_key),
-                    tint = HoloAccent,
-                    modifier = Modifier.size(Tokens.Size.iconS),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(Tokens.Space.s))
-
-        // ── Действия. Кнопки «Видео» нет: камеру включают уже внутри звонка. ──
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-        ) {
-            ActionTile(Icons.Filled.Message, R.string.profile_message, Modifier.weight(1f), onMessage)
+            // Ключ — сокращённо и моноширинно; нажатие копирует целиком. Сверяют не по
+            // нему, а набором знаков, — он нужен, чтобы его передать.
+            Text(
+                c.key.take(10) + "…" + c.key.takeLast(6),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.small,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                modifier = Modifier.clip(RoundedCornerShape(Tokens.Radius.inner))
+                    .clickable { copyToClipboard(ctx, c.key, "key") }
+                    .padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.xxs),
+            )
+        },
+        actions = {
+            ShowAction(TablerIcons.Message, stringResource(R.string.profile_write), primary = true, onClick = onMessage)
             // Микрофон спрашиваем так же, как кнопка звонка в шапке чата: без него
             // звонок уходил немым, и человек не понимал почему.
-            val runWithPerm = rememberPermissionRunner()
-            ActionTile(Icons.Filled.Call, R.string.profile_call, Modifier.weight(1f)) {
+            ShowAction(TablerIcons.Phone, stringResource(R.string.profile_call)) {
                 runWithPerm(arrayOf(Manifest.permission.RECORD_AUDIO), R.string.perm_denied_mic) { model.callDm(key) }
             }
-        }
-
-        // ── Карточка верификации ─────────────────────────────────────────────
-        // Свёрнута по умолчанию: развёрнутая сверка (предупреждение + сетка знаков +
-        // слова + две кнопки) занимала пол-экрана и отодвигала всё остальное вниз,
-        // хотя сверяются один раз за знакомство. Статус при этом виден всегда —
-        // именно он и есть то, ради чего сюда заходят.
-        Spacer(Modifier.height(Tokens.Space.m))
-        var verifyOpen by remember(key) { mutableStateOf(false) }
+            ShowAction(TablerIcons.Video, stringResource(R.string.profile_video)) {
+                runWithPerm(
+                    arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA),
+                    R.string.perm_denied_camera,
+                ) { model.callDm(key, video = true) }
+            }
+            // «Без звука» — локальная пометка чата: собеседник о ней не узнаёт.
+            ShowAction(
+                if (muted) TablerIcons.BellOff else TablerIcons.Bell,
+                stringResource(if (muted) R.string.profile_sound_off else R.string.profile_sound),
+            ) { model.muteChat(key, false, !muted) }
+        },
+    ) {
         CardSection {
-            CardRow(onClick = { verifyOpen = !verifyOpen }, divider = false, inset = 0.dp) {
-                Icon(
-                    // Не сверен — знак вопроса, а не «запрет»: тот же значок стоит у
-                    // «Заблокировать» ниже, и непроверенный читался заблокированным.
-                    if (c.verified) Icons.Filled.Verified else Icons.Filled.GppMaybe,
-                    null,
-                    tint = if (c.verified) HoloVerified else WarnColor,
-                    modifier = Modifier.size(Tokens.Size.iconM),
-                )
-                Spacer(Modifier.width(Tokens.Space.s))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        stringResource(if (c.verified) R.string.info_verified else R.string.info_not_verified),
-                        color = if (c.verified) HoloVerified else WarnColor,
-                        fontSize = Tokens.Font.label,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        stringResource(
-                            if (c.verified) R.string.profile_verify_done else R.string.profile_verify_todo,
-                        ),
-                        color = HoloSecondary,
-                        fontSize = Tokens.Font.small,
-                        modifier = Modifier.padding(top = Tokens.Space.xxs),
-                    )
-                }
-                Icon(
-                    if (verifyOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    null,
-                    tint = Tokens.Colors.secondary,
-                    modifier = Modifier.size(Tokens.Size.iconM),
-                )
-            }
-            AnimatedVisibility(verifyOpen) {
-                Column(
-                    Modifier.padding(
-                        start = Tokens.Space.l,
-                        end = Tokens.Space.l,
-                        bottom = Tokens.Space.l,
-                    ),
-                ) {
-                    Text(
-                        stringResource(
-                            if (c.verified) R.string.profile_verified_hint else R.string.profile_unverified_hint,
-                            c.displayName,
-                        ),
-                        color = HoloSecondary,
-                        fontSize = Tokens.Font.small,
-                    )
-                    FingerprintGrid(model.visualFingerprint(key), Modifier.padding(top = Tokens.Space.l))
-                    // Слова — тот же отпечаток, но их удобно диктовать голосом.
-                    Text(
-                        c.fingerprint,
-                        color = HoloAccent,
-                        fontSize = Tokens.Font.small,
-                        modifier = Modifier.padding(top = Tokens.Space.m),
-                    )
-                    Spacer(Modifier.height(Tokens.Space.l))
-                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                        AccentButton(
-                            stringResource(if (c.verified) R.string.profile_recheck else R.string.profile_scan_qr),
-                            Modifier.weight(1f),
-                        ) { onScanQr() }
-                        OutlineButton(
-                            stringResource(if (c.verified) R.string.info_unmark else R.string.info_mark),
-                            Modifier.weight(1f),
-                            tint = if (c.verified) Tokens.Colors.secondary else HoloAccent,
-                        ) { model.toggleVerified(key) }
-                    }
-                }
-            }
+            NavRow(
+                if (c.verified) TablerIcons.ShieldCheck else TablerIcons.AlertTriangle,
+                stringResource(if (c.verified) R.string.profile_key_ok else R.string.profile_key_todo),
+                sub = stringResource(if (c.verified) R.string.profile_key_ok_sub else R.string.profile_key_todo_sub),
+                iconTint = if (c.verified) Tokens.Colors.online else Tokens.Colors.warn,
+                iconBg = if (c.verified) Tokens.Colors.verifiedTile else Tokens.Colors.warnTile,
+                divider = false,
+                onClick = onVerify,
+            )
         }
-
-        // ── Общее ────────────────────────────────────────────────────────────
-        SectionTitle(stringResource(R.string.profile_common))
         CardSection {
-            InfoRow(TablerIcons.Users, stringResource(R.string.profile_common_groups), "$commonGroups", divider = false)
-            InfoRow(Icons.Filled.Photo, stringResource(R.string.profile_attachments), "$files")
+            // Экран медиа и ряд превью — шаг 3.2; пока строка только считает.
+            NavRow(TablerIcons.Photo, stringResource(R.string.profile_media), value = "$files", divider = false, onClick = null)
+            NavRow(
+                TablerIcons.Users,
+                stringResource(R.string.profile_common_groups),
+                value = "${common.size}",
+                onClick = if (common.isNotEmpty()) ({ commonOpen = true }) else null,
+            )
+            NavRow(TablerIcons.Share, stringResource(R.string.profile_share)) { confirm = ProfileDanger.Share }
         }
-
-        // ── Опасное — внизу и с подтверждением ───────────────────────────────
-        SectionTitle(stringResource(R.string.profile_manage))
         CardSection {
-            DangerRow(TablerIcons.Pencil, stringResource(R.string.profile_rename), HoloAccent, divider = false) {
-                renaming = true
-            }
-            // «Без звука» — локальная пометка чата: собеседник о ней не узнаёт,
-            // поэтому она и живёт здесь, а не в общих настройках уведомлений.
-            CardRow(modifier = Modifier.switchRow(muted) { model.muteChat(key, false, it) }) {
-                Icon(
-                    if (muted) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
-                    null,
-                    tint = Tokens.Colors.secondary,
-                    modifier = Modifier.size(Tokens.Size.iconM),
-                )
-                Spacer(Modifier.width(Tokens.Space.m))
-                Text(
-                    stringResource(R.string.profile_mute),
-                    color = Color.White,
-                    fontSize = Tokens.Font.label,
-                    modifier = Modifier.weight(1f),
-                )
-                Switch(checked = muted, onCheckedChange = null)
-            }
-            DangerRow(Icons.Filled.Share, stringResource(R.string.profile_share), HoloAccent) {
-                confirmShare = true
-            }
+            DangerTextRow(stringResource(R.string.profile_clear_history), divider = false) { confirm = ProfileDanger.Clear }
+            DangerTextRow(stringResource(R.string.profile_block)) { confirm = ProfileDanger.Block }
+            DangerTextRow(stringResource(R.string.info_delete)) { confirm = ProfileDanger.Delete }
         }
-        // Блокировка и удаление — в СВОЕЙ карточке: их отделяет от остального не
-        // заголовок, а разрыв, иначе «удалить» стоит вплотную к «переименовать».
-        CardSection {
-            DangerRow(Icons.Filled.DeleteSweep, stringResource(R.string.profile_clear_history), HoloError, divider = false) {
-                confirmClear = true
-            }
-            DangerRow(Icons.Filled.Block, stringResource(R.string.profile_block), HoloError) {
-                confirmBlock = true
-            }
-            DangerRow(Icons.Filled.Delete, stringResource(R.string.info_delete), HoloError) {
-                confirmDelete = true
-            }
-        }
-        Spacer(Modifier.height(Tokens.Space.l))
     }
 
     if (renaming) RenameDialog(model, key, c.displayName) { renaming = false }
 
-    if (confirmBlock) {
-        AlertDialog(
-            onDismissRequest = { confirmBlock = false },
-            title = { Text(stringResource(R.string.profile_block)) },
-            text = { Text(stringResource(R.string.profile_block_confirm, c.displayName)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    model.blockRequest(key)
-                    confirmBlock = false
-                }) { Text(stringResource(R.string.profile_block), color = HoloError) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmBlock = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
+    if (commonOpen) {
+        ActionSheet(stringResource(R.string.profile_common_groups), "", onClose = { commonOpen = false }) {
+            common.forEach { g ->
+                PlateButton(g.name, TablerIcons.Users, Modifier.fillMaxWidth()) {
+                    commonOpen = false
+                    onOpenGroup(g.gid)
                 }
-            },
-        )
+            }
+        }
     }
 
-    // Делимся ЧИСТЫМ ключом, без имени и пояснений: получатель вставляет строку
-    // в «Добавить контакт» как есть. Имя ушло в заголовок системного листа.
-    //
-    // Спрашиваем, потому что раздаётся чужая личность: после этого третий человек
-    // сможет постучаться к собеседнику, и отозвать это уже нельзя.
-    if (confirmShare) {
-        AlertDialog(
-            onDismissRequest = { confirmShare = false },
-            title = { Text(stringResource(R.string.profile_share)) },
-            text = { Text(stringResource(R.string.profile_share_confirm, c.displayName)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmShare = false
-                    shareText(ctx, c.key)
-                }) { Text(stringResource(R.string.profile_share_ok), color = HoloAccent) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmShare = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
+    when (confirm) {
+        // Делимся ЧИСТЫМ ключом, без имени и пояснений: получатель вставляет строку в
+        // «Добавить контакт» как есть. Спрашиваем, потому что раздаётся чужая личность.
+        ProfileDanger.Share -> ConfirmSheet(
+            title = stringResource(R.string.profile_share),
+            text = stringResource(R.string.profile_share_confirm, c.displayName),
+            ok = stringResource(R.string.profile_share_ok),
+            onOk = { shareText(ctx, c.key) },
+            onClose = { confirm = null },
         )
+        // Стирается только У СЕБЯ — это и сказано: у собеседника переписка останется.
+        ProfileDanger.Clear -> ConfirmSheet(
+            title = stringResource(R.string.chat_clear_title),
+            text = stringResource(R.string.profile_clear_history_confirm),
+            ok = stringResource(R.string.profile_clear_history_ok),
+            onOk = { model.clearHistory(key) },
+            onClose = { confirm = null },
+        )
+        ProfileDanger.Block -> ConfirmSheet(
+            title = stringResource(R.string.chat_block_title),
+            text = stringResource(R.string.profile_block_confirm, c.displayName),
+            ok = stringResource(R.string.profile_block),
+            onOk = { model.blockRequest(key) },
+            onClose = { confirm = null },
+        )
+        ProfileDanger.Delete -> ConfirmSheet(
+            title = stringResource(R.string.profile_delete_title),
+            text = stringResource(R.string.profile_delete_confirm),
+            ok = stringResource(R.string.folder_delete_ok),
+            onOk = {
+                model.remove(key)
+                onDeleted()
+            },
+            onClose = { confirm = null },
+        )
+        null -> {}
     }
+}
 
-    // Стирается только У СЕБЯ — это и сказано в подтверждении: человек должен знать,
-    // что у собеседника переписка останется.
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text(stringResource(R.string.profile_clear_history)) },
-            text = { Text(stringResource(R.string.profile_clear_history_confirm)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    model.clearHistory(key)
-                    confirmClear = false
-                }) { Text(stringResource(R.string.profile_clear_history_ok), color = HoloError) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClear = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
-        )
-    }
+/** Что из профиля контакта требует подтверждения шторкой. */
+private enum class ProfileDanger { Share, Clear, Block, Delete }
 
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text(stringResource(R.string.info_delete)) },
-            text = { Text(stringResource(R.string.profile_delete_confirm)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    model.remove(key)
-                    confirmDelete = false
-                    onDeleted()
-                }) { Text(stringResource(R.string.folder_delete_ok), color = HoloError) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
+/**
+ * Сверка ключа (из строки профиля). Набор знаков и слова, которые сверяют глазами или
+ * голосом с экраном собеседника; «Сканировать код» и отметка «сверен». Набор на пару,
+ * шторка результата и дата сверки — шаг 3.6 (макет `security/`).
+ */
+@Composable
+internal fun KeyVerifyScreen(model: AppModel, onScanQr: () -> Unit) {
+    val key = model.currentChat ?: return
+    val c = model.contacts.firstOrNull { it.key == key } ?: return
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(top = Tokens.Space.panel, bottom = Tokens.Space.xxl),
+    ) {
+        CardSection {
+            Column(Modifier.padding(Tokens.Space.l)) {
+                Text(
+                    stringResource(if (c.verified) R.string.profile_key_ok else R.string.profile_key_todo),
+                    color = if (c.verified) Tokens.Colors.online else Tokens.Colors.warn,
+                    fontSize = Tokens.Font.name,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    stringResource(
+                        if (c.verified) R.string.profile_verified_hint else R.string.profile_unverified_hint,
+                        c.displayName,
+                    ),
+                    color = Tokens.Colors.secondary,
+                    fontSize = Tokens.Font.body,
+                    modifier = Modifier.padding(top = Tokens.Space.xs),
+                )
+                FingerprintGrid(model.visualFingerprint(key), Modifier.padding(top = Tokens.Space.l))
+                // Слова — тот же отпечаток, но их удобно диктовать голосом.
+                Text(
+                    c.fingerprint,
+                    color = Tokens.Colors.accent,
+                    fontSize = Tokens.Font.body,
+                    modifier = Modifier.padding(top = Tokens.Space.m),
+                )
+                Spacer(Modifier.height(Tokens.Space.l))
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                    AccentButton(
+                        stringResource(if (c.verified) R.string.profile_recheck else R.string.profile_scan_qr),
+                        Modifier.weight(1f),
+                    ) { onScanQr() }
+                    OutlineButton(
+                        stringResource(if (c.verified) R.string.info_unmark else R.string.info_mark),
+                        Modifier.weight(1f),
+                        tint = if (c.verified) Tokens.Colors.secondary else Tokens.Colors.accent,
+                    ) { model.toggleVerified(key) }
                 }
-            },
-        )
+            }
+        }
     }
 }
 
@@ -404,42 +287,4 @@ private fun RenameDialog(model: AppModel, key: String, current: String, onClose:
             }
         },
     )
-}
-
-@Composable
-private fun ActionTile(icon: ImageVector, labelRes: Int, modifier: Modifier, onClick: () -> Unit) {
-    Column(
-        modifier.clip(RoundedCornerShape(Tokens.Radius.tile)).background(HoloSurface)
-            .clickable { onClick() }.padding(vertical = Tokens.Space.m),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
-        Spacer(Modifier.height(Tokens.Space.xs))
-        Text(stringResource(labelRes), color = HoloAccent, fontSize = Tokens.Font.small)
-    }
-}
-
-@Composable
-private fun InfoRow(icon: ImageVector, label: String, value: String, divider: Boolean = true) {
-    CardRow(divider = divider) {
-        Icon(icon, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconM))
-        Spacer(Modifier.width(Tokens.Space.m))
-        Text(label, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
-        Text(value, color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
-    }
-}
-
-@Composable
-private fun DangerRow(
-    icon: ImageVector,
-    label: String,
-    tint: Color,
-    divider: Boolean = true,
-    onClick: () -> Unit,
-) {
-    CardRow(onClick = onClick, divider = divider) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
-        Spacer(Modifier.width(Tokens.Space.m))
-        Text(label, color = tint, fontSize = Tokens.Font.label)
-    }
 }

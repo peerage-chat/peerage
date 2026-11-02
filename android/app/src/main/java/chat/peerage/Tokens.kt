@@ -71,6 +71,8 @@ object Tokens {
         // ── Статусы ───────────────────────────────────────────────────────────
         val online = Color(0xFF8BC34A)
         val verified = Color(0xFF4CAF50)
+        val verifiedTile = Color(0xFF1E3A24) // плитка «Ключ сверен» в профиле (`prof/`)
+        val warnTile = Color(0xFF3A3020) // плитка «Ключ не сверен» — тот же тон, что warn, приглушённый
         val error = Color(0xFFFF6B6B) // ТЕКСТ и знак ошибки/опасного действия (6:1 на group)
         val errorFill = Color(0xFFE53935) // ЗАЛИВКА: отклонить звонок, запись голосового
         val warn = Color(0xFFE6A23C)
@@ -277,6 +279,8 @@ object Tokens {
         val ctlButtonH = 48.dp
         val callButton = 56.dp // сквиркул отклонить/принять/пресет
         val avatarBig = 88.dp
+        val avatarHero = 96.dp // аватар «витрины» профиля (`prof/`)
+        val showAction = 64.dp // плитка действия под витриной: Написать · Звонок · …
 
         // ЗАКРЫТАЯ шкала иконок, как у шрифтов: литерал `Modifier.size(N.dp)` у Icon —
         // хардкод. Было 20 разных размеров от 11 до 56 dp.

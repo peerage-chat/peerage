@@ -163,6 +163,8 @@ data class Group(
     val admin: Boolean = false,
     /** Группа восстановлена из копии: история есть, членства нет — только чтение. */
     val archived: Boolean = false,
+    /** Ключ админа (hex): метка «админ» в участниках. */
+    val adminKey: String = "",
 )
 
 /**

@@ -369,26 +369,37 @@ internal fun NavRow(
     label: String,
     value: String = "",
     divider: Boolean = true,
-    onClick: () -> Unit,
+    /** Вторая строка под названием (состояние: «Ключ сверен» → как и когда). */
+    sub: String? = null,
+    iconTint: Color = Tokens.Colors.iconBar,
+    iconBg: Color = Tokens.Colors.raised,
+    labelColor: Color = Color.White,
+    /** null — строка только показывает (раздел появится позже или нажимать нечего). */
+    onClick: (() -> Unit)?,
 ) {
     if (divider) {
         HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.divider, modifier = Modifier.padding(start = NavRowInset))
     }
     Row(
         Modifier.fillMaxWidth()
-            .clickable(role = Role.Button) { onClick() }
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button) { onClick() } else Modifier)
             .heightIn(min = Tokens.Size.navRow)
             .padding(start = Tokens.Space.l, end = Tokens.Space.l, top = Tokens.Space.s, bottom = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
         Box(
-            Modifier.size(Tokens.Size.rowIcon).clip(RoundedCornerShape(Tokens.Radius.inner)).background(Tokens.Colors.raised),
+            Modifier.size(Tokens.Size.rowIcon).clip(RoundedCornerShape(Tokens.Radius.inner)).background(iconBg),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, null, tint = Tokens.Colors.iconBar, modifier = Modifier.size(Tokens.Size.iconRow))
+            Icon(icon, null, tint = iconTint, modifier = Modifier.size(Tokens.Size.iconRow))
         }
-        Text(label, color = Color.White, fontSize = Tokens.Font.name, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(label, color = labelColor, fontSize = Tokens.Font.name)
+            if (sub != null) {
+                Text(sub, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body, modifier = Modifier.padding(top = Tokens.Space.xxs))
+            }
+        }
         if (value.isNotEmpty()) Text(value, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.preview, maxLines = 1)
     }
 }
@@ -504,12 +515,14 @@ internal fun ActionSheet(title: String, text: String, onClose: () -> Unit, butto
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = Tokens.Space.xs).semantics { heading() },
             )
-            Text(
-                text,
-                color = Tokens.Colors.tertiary,
-                fontSize = Tokens.Font.label,
-                modifier = Modifier.padding(horizontal = Tokens.Space.xs),
-            )
+            if (text.isNotEmpty()) {
+                Text(
+                    text,
+                    color = Tokens.Colors.tertiary,
+                    fontSize = Tokens.Font.label,
+                    modifier = Modifier.padding(horizontal = Tokens.Space.xs),
+                )
+            }
             buttons()
         }
     }

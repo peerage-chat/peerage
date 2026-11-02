@@ -2573,7 +2573,7 @@ class AppModel private constructor() {
 
     private fun refreshGroupsNow() {
         val list = decodeList<GroupRowDto>(Native.groupList(sessionPtr))
-            .map { Group(it.gid, it.name, it.members, it.admin, it.archived) }
+            .map { Group(it.gid, it.name, it.members, it.admin, it.archived, it.adminKey) }
         groups.replaceWith(list)
     }
 

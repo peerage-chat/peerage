@@ -521,3 +521,14 @@ val TablerIcons.X: ImageVector by lazy {
 val TablerIcons.UserPlus: ImageVector by lazy {
     tabler("user-plus", "M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0", "M16 19h6", "M19 16v6", "M6 21v-2a4 4 0 0 1 4 -4h4")
 }
+
+/** «Медиа и файлы» в профиле. */
+val TablerIcons.Photo: ImageVector by lazy {
+    tabler(
+        "photo",
+        "M15 8h.01",
+        "M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12z",
+        "M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5",
+        "M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3",
+    )
+}

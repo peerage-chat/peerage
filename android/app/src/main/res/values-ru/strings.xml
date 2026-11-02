@@ -162,10 +162,6 @@
     <string name="add_error">Неверный ключ</string>
     <string name="label_name">Имя</string>
     <string name="qr_cd">QR код публичного ключа</string>
-    <string name="me_pubkey_label">Публичный ключ</string>
-    <string name="me_copy_key">Скопировать код</string>
-    <string name="info_verified">Проверен</string>
-    <string name="info_not_verified">Не проверен</string>
     <string name="info_unmark">Снять</string>
     <string name="info_mark">Пометить</string>
     <string name="info_delete">Удалить контакт</string>
@@ -198,7 +194,6 @@
     <!-- ── Группы ──────────────────────────────────────────────────────── -->
     <string name="group_default_name">Группа</string>
     <string name="group_member_fallback">Участник</string>
-    <string name="group_members_header">Участники</string>
     <string name="group_add_header">Добавить контакт</string>
     <string name="group_remove_member">Удалить</string>
     <string name="group_you_removed">Вас удалили из группы</string>
@@ -547,21 +542,15 @@
     <string name="folder_delete_ok">Удалить</string>
     <string name="common_save">Сохранить</string>
     <string name="folder_edit_title">Папка</string>
-    <string name="profile_message">Сообщение</string>
     <string name="profile_call">Звонок</string>
     <string name="profile_verified_hint">Ключи сверены лично. Если набор ниже совпадает с тем, что видит %1$s, — связь идёт напрямую, без посредника.</string>
-    <string name="profile_unverified_hint">Переписка зашифрована, но никто не подтвердил, что на том конце именно этот человек. Сверьте набор при встрече или по видеосвязи.</string>
+    <string name="profile_unverified_hint">Переписка зашифрована, но не подтверждено, что на том конце именно этот человек. Набор сверяют при встрече или по видеосвязи.</string>
     <string name="profile_recheck">Сверить заново</string>
     <string name="profile_scan_qr">Сканировать QR</string>
-    <string name="profile_common">Общее</string>
     <string name="profile_common_groups">Общие группы</string>
-    <string name="profile_attachments">Вложения</string>
-    <string name="profile_mute">Без звука</string>
     <string name="profile_share">Поделиться контактом</string>
-    <string name="profile_share_confirm">Вы передадите ключ %1$s другому человеку. Он сможет написать напрямую. Отозвать это уже нельзя.</string>
+    <string name="profile_share_confirm">Ключ %1$s достанется другому человеку: тот сможет написать напрямую. Отозвать это нельзя.</string>
     <string name="profile_share_ok">Поделиться</string>
-    <string name="profile_verify_done">Отпечаток сверен</string>
-    <string name="profile_verify_todo">Отпечаток ещё не сверен</string>
     <string name="net_diagnostics">Диагностика</string>
     <string name="net_bench_row">Замер скорости</string>
     <string name="net_bench_row_desc">Скорость меша до выбранного контакта</string>
@@ -569,7 +558,6 @@
     <string name="net_bench_confirm_title">Запустить замер?</string>
     <string name="net_bench_confirm">Контакту %1$s уйдёт около 30 МБ тестовых данных по мешу. За это платит и он — трафиком и батареей.</string>
     <string name="net_bench_start">Запустить</string>
-    <string name="profile_manage">Управление</string>
     <string name="profile_rename">Изменить имя</string>
     <string name="profile_block">Заблокировать</string>
     <string name="profile_block_confirm">Сообщения от %1$s будут тихо отбрасываться, ещё до расшифровки.</string>
@@ -1006,4 +994,31 @@
     <string name="privacy_online_sub">Следует из keepalive, на котором держится доставка</string>
     <string name="privacy_profile">Имя и аватар</string>
     <string name="privacy_profile_sub">Только контактам, не в сеть</string>
+    <string name="profile_write">Написать</string>
+    <string name="profile_video">Видео</string>
+    <string name="profile_sound">Звук</string>
+    <string name="profile_sound_off">Без звука</string>
+    <string name="profile_key_ok">Ключ сверен</string>
+    <string name="profile_key_ok_sub">Набор знаков совпал</string>
+    <string name="profile_key_todo">Ключ не сверен</string>
+    <string name="profile_key_todo_sub">Сверка — по коду или набору знаков</string>
+    <string name="profile_media">Медиа и файлы</string>
+    <string name="profile_delete_title">Удалить контакт?</string>
+    <string name="verify_title">Сверка ключа</string>
+    <string name="group_add">Добавить</string>
+    <string name="group_search">Поиск</string>
+    <string name="group_online_n">%1$d в сети</string>
+    <string name="group_members_title">Участники · %1$d</string>
+    <string name="group_add_member">Добавить участника</string>
+    <string name="group_all_members">Все участники (%1$d)</string>
+    <string name="group_you_mark">(вы)</string>
+    <string name="group_admin_mark">админ</string>
+    <string name="group_member_profile">Профиль</string>
+    <string name="group_remove_from">Удалить из группы</string>
+    <plurals name="group_members_n">
+        <item quantity="one">%1$d участник</item>
+        <item quantity="few">%1$d участника</item>
+        <item quantity="many">%1$d участников</item>
+        <item quantity="other">%1$d участника</item>
+    </plurals>
 </resources>

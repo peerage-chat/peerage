@@ -215,6 +215,11 @@ internal fun CenterMessage(text: String, modifier: Modifier = Modifier) {
 }
 
 internal enum class Screen {
+    /** Профиль группы — «витрина» (3.1). */
+    GroupInfo,
+
+    /** Сверка ключа контакта (из его профиля). */
+    Verify,
     Contacts,
     Chat,
     Add,
@@ -382,11 +387,14 @@ private fun CompactShell(model: AppModel) {
                                     stringResource(if (keyWordsFirst) R.string.key_flow_title else R.string.backup_check),
                                     onBack = goBack,
                                 )
-                                Screen.Info -> TopBar(stringResource(R.string.common_contact), onBack = goBack)
+                                // «Витрина» рисует свою шапку на фоне и едет вместе со списком.
+                                Screen.Info, Screen.GroupInfo -> {}
+                                Screen.Verify -> TopBar(stringResource(R.string.verify_title), onBack = goBack)
                                 Screen.GroupChat -> GroupChatTopBar(
                                     model,
                                     onBack = goBack,
-                                    onInfo = { screen = Screen.AddMember },
+                                    onInfo = { screen = Screen.GroupInfo },
+                                    onInvite = { screen = Screen.AddMember },
                                 )
                                 Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = goBack)
                                 Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = goBack)
@@ -423,10 +431,15 @@ private fun CompactShell(model: AppModel) {
                             // «Лист» (app-ui.md): под шапкой — панель со скруглённым верхом во всю
                             // высоту, содержимое экрана на ней; у чата на листе — закреплённое,
                             // лента и поле ввода.
+                            val showcase = s == Screen.Info || s == Screen.GroupInfo
                             Box(
-                                Modifier.weight(1f)
-                                    .clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
-                                    .background(Tokens.Colors.panel),
+                                if (showcase) {
+                                    Modifier.weight(1f)
+                                } else {
+                                    Modifier.weight(1f)
+                                        .clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
+                                        .background(Tokens.Colors.panel)
+                                },
                             ) {
                                 when (s) {
                                     Screen.Contacts -> Column {
@@ -506,12 +519,36 @@ private fun CompactShell(model: AppModel) {
                                     Screen.KeyFlow -> KeyFlowScreen(model, keyWordsFirst, onDone = goBack)
                                     Screen.Info -> ContactProfileScreen(
                                         model,
+                                        onBack = goBack,
                                         onMessage = { screen = Screen.Chat },
-                                        onScanQr = {
-                                            verifyingPeer = model.currentChat
-                                            screen = Screen.Scanner
+                                        onVerify = { screen = Screen.Verify },
+                                        onOpenGroup = {
+                                            model.openGroup(it)
+                                            screen = Screen.GroupChat
                                         },
                                         onDeleted = { screen = Screen.Contacts },
+                                    )
+                                    Screen.Verify -> KeyVerifyScreen(model) {
+                                        verifyingPeer = model.currentChat
+                                        screen = Screen.Scanner
+                                    }
+                                    Screen.GroupInfo -> GroupProfileScreen(
+                                        model,
+                                        onBack = goBack,
+                                        onAdd = { screen = Screen.AddMember },
+                                        onSearch = {
+                                            model.currentGroup?.let { model.openChatSearch(ChatTarget(it, group = true)) }
+                                            screen = Screen.GroupChat
+                                        },
+                                        onMessage = {
+                                            model.openChat(it)
+                                            screen = Screen.Chat
+                                        },
+                                        onProfile = {
+                                            model.openChat(it)
+                                            screen = Screen.Info
+                                        },
+                                        onLeft = { screen = Screen.Contacts },
                                     )
                                     Screen.GroupChat -> GroupChatScreen(model) { key ->
                                         // «@я» — свой профиль; контакт — его карточка; с

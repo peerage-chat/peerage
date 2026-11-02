@@ -244,7 +244,7 @@ private fun GroupFeed(model: AppModel, msgs: List<Message>, listState: LazyListS
 /** Шапка группового чата: аватар группы · имя · «N уч · M в сети» (тап → инфо) ·
  *  войти/выйти из комнаты · меню. */
 @Composable
-internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit) {
+internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, onInvite: () -> Unit) {
     var confirmLeave by remember { mutableStateOf(false) }
     if (model.selection.isNotEmpty()) {
         SelectionTopBar(model, group = true)
@@ -303,7 +303,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
             Box {
                 var menu by remember { mutableStateOf(false) }
                 BarIcon(TablerIcons.DotsVertical, stringResource(R.string.common_more), tint = Color.White) { menu = true }
-                GroupMenu(model, gid, menu, onClose = { menu = false }, onInfo = onInfo) { confirmLeave = true }
+                GroupMenu(model, gid, menu, onClose = { menu = false }, onInfo = onInfo, onInvite = onInvite) { confirmLeave = true }
             }
         }
     }
@@ -325,7 +325,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
  * 3.1 (витрина группы). Поиск и «Медиа и файлы» — вместе с их экранами (2.9, 3.2).
  */
 @Composable
-private fun GroupMenu(model: AppModel, gid: String, open: Boolean, onClose: () -> Unit, onInfo: () -> Unit, onLeave: () -> Unit) {
+private fun GroupMenu(model: AppModel, gid: String, open: Boolean, onClose: () -> Unit, onInfo: () -> Unit, onInvite: () -> Unit, onLeave: () -> Unit) {
     val muted = model.chatSummaries[model.chatKey(gid, group = true)]?.muted == true
     PopMenu(open, onClose) {
         PopMenuItem(TablerIcons.Search, stringResource(R.string.chat_menu_search)) {
@@ -337,9 +337,12 @@ private fun GroupMenu(model: AppModel, gid: String, open: Boolean, onClose: () -
             stringResource(R.string.chat_menu_mute),
             trailing = { Switch(checked = muted, onCheckedChange = null) },
         ) { model.muteChat(gid, group = true, muted = !muted) }
-        PopMenuItem(TablerIcons.UserPlus, stringResource(R.string.chat_menu_invite)) {
-            onClose()
-            onInfo()
+        // Приглашать в MLS-группу может только админ — остальным пункт ни к чему.
+        if (model.isGroupAdmin(gid)) {
+            PopMenuItem(TablerIcons.UserPlus, stringResource(R.string.chat_menu_invite)) {
+                onClose()
+                onInvite()
+            }
         }
         PopMenuItem(TablerIcons.InfoCircle, stringResource(R.string.chat_menu_group_info)) {
             onClose()
@@ -417,47 +420,14 @@ internal fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
     }
 }
 
-/**
- * Управление группой: участники (с отзывом для админа, ADR-004), приглашение и выход.
- *
- * Отзыв и выход — с подтверждением: оба необратимы (вернуть можно только новым
- * приглашением), а строки стоят вплотную к безобидным. Себя админ отозвать не может —
- * для этого есть «Выйти». В приглашение не попадают те, кто уже в группе.
- */
+/** «Пригласить» (из «⋮» и профиля группы): контакты, которых в группе ещё нет. Порядок шагов
+ *  создания группы и метка «приглашён» — 3.4. */
 @Composable
 internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
     val gid = model.currentGroup ?: return
-    val isAdmin = model.isGroupAdmin(gid)
-    val me = model.me?.pubkey
     val memberKeys = model.groupMemberKeys[gid] ?: emptyList()
     val invitable = model.contacts.filter { it.key !in memberKeys }
-    var confirmRemove by remember { mutableStateOf<String?>(null) }
-    var confirmLeave by remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize()) {
-        if (memberKeys.isNotEmpty()) {
-            item { SectionTitle(stringResource(R.string.group_members_header)) }
-            itemsIndexed(memberKeys, key = { _, k -> "m_$k" }) { i, key ->
-                CardBlock(first = i == 0, last = i == memberKeys.lastIndex) {
-                    CardRow(divider = i > 0, inset = MemberRowInset) {
-                        MemberAvatar(model, key)
-                        Spacer(Modifier.width(Tokens.Space.m))
-                        Text(
-                            groupSenderName(model, key),
-                            color = Color.White,
-                            fontSize = Tokens.Font.label,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (isAdmin && key != me) {
-                            TextButton(onClick = { confirmRemove = key }) {
-                                Text(stringResource(R.string.group_remove_member), color = Tokens.Colors.destructive)
-                            }
-                        }
-                    }
-                }
-            }
-        }
         item { SectionTitle(stringResource(R.string.group_add_header)) }
         if (invitable.isEmpty()) {
             item {
@@ -494,36 +464,6 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
                 }
             }
         }
-        item {
-            // Выход — своей карточкой и с разрывом: он не должен стоять вплотную к
-            // списку, где каждый тап — приглашение.
-            Spacer(Modifier.height(Tokens.Space.l))
-            CardSection {
-                CardRow(onClick = { confirmLeave = true }, divider = false) {
-                    Text(stringResource(R.string.group_leave), color = Tokens.Colors.destructive, fontSize = Tokens.Font.label)
-                }
-            }
-            Spacer(Modifier.height(Tokens.Space.l))
-        }
-    }
-
-    confirmRemove?.let { key ->
-        ConfirmSheet(
-            title = stringResource(R.string.group_remove_title),
-            text = stringResource(R.string.group_remove_confirm, model.peerName(key)),
-            ok = stringResource(R.string.group_remove_member),
-            onOk = { model.removeGroupMember(gid, key) },
-            onClose = { confirmRemove = null },
-        )
-    }
-    if (confirmLeave) {
-        ConfirmSheet(
-            title = stringResource(R.string.group_leave),
-            text = stringResource(R.string.group_leave_confirm),
-            ok = stringResource(R.string.group_leave_ok),
-            onOk = { model.leaveGroup(gid) },
-            onClose = { confirmLeave = false },
-        )
     }
 }
 

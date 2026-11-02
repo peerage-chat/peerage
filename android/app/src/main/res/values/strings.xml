@@ -164,10 +164,6 @@
     <string name="add_error">Invalid key</string>
     <string name="label_name">Name</string>
     <string name="qr_cd">Public key QR code</string>
-    <string name="me_pubkey_label">Public key</string>
-    <string name="me_copy_key">Copy code</string>
-    <string name="info_verified">Verified</string>
-    <string name="info_not_verified">Not verified</string>
     <string name="info_unmark">Unmark</string>
     <string name="info_mark">Mark</string>
     <string name="info_delete">Delete contact</string>
@@ -200,7 +196,6 @@
     <!-- ── Groups ──────────────────────────────────────────────────────── -->
     <string name="group_default_name">Group</string>
     <string name="group_member_fallback">Member</string>
-    <string name="group_members_header">Members</string>
     <string name="group_add_header">Add contact</string>
     <string name="group_remove_member">Remove</string>
     <string name="group_you_removed">You were removed from the group</string>
@@ -527,21 +522,15 @@
     <string name="folder_delete_ok">Delete</string>
     <string name="common_save">Save</string>
     <string name="folder_edit_title">Folder</string>
-    <string name="profile_message">Message</string>
     <string name="profile_call">Call</string>
     <string name="profile_verified_hint">Keys were checked in person. If the set below matches what %1$s sees, the connection is direct — nobody in between.</string>
     <string name="profile_unverified_hint">Messages are encrypted, but nobody has confirmed the person on the other end. Compare the set in person or over video.</string>
     <string name="profile_recheck">Verify again</string>
     <string name="profile_scan_qr">Scan QR</string>
-    <string name="profile_common">Common</string>
     <string name="profile_common_groups">Common groups</string>
-    <string name="profile_attachments">Attachments</string>
-    <string name="profile_mute">Mute</string>
     <string name="profile_share">Share contact</string>
-    <string name="profile_share_confirm">You are about to pass %1$s’s key to someone else. They will be able to reach %1$s directly. This cannot be taken back.</string>
+    <string name="profile_share_confirm">The key of %1$s goes to another person, who can then write directly. This cannot be undone.</string>
     <string name="profile_share_ok">Share</string>
-    <string name="profile_verify_done">Fingerprint checked</string>
-    <string name="profile_verify_todo">Fingerprint not checked yet</string>
     <string name="net_diagnostics">Diagnostics</string>
     <string name="net_bench_row">Throughput test</string>
     <string name="net_bench_row_desc">Measures mesh speed to a contact</string>
@@ -549,7 +538,6 @@
     <string name="net_bench_confirm_title">Run the test?</string>
     <string name="net_bench_confirm">About 30 MB of test data will be sent to %1$s over the mesh. Their traffic and battery pay for it too.</string>
     <string name="net_bench_start">Run</string>
-    <string name="profile_manage">Manage</string>
     <string name="profile_rename">Change name</string>
     <string name="profile_block">Block</string>
     <string name="profile_block_confirm">Messages from %1$s will be dropped silently, before decryption.</string>
@@ -950,4 +938,29 @@
     <string name="privacy_online_sub">Follows from the keepalive that delivery relies on</string>
     <string name="privacy_profile">Name and avatar</string>
     <string name="privacy_profile_sub">Contacts only, never the network</string>
+    <string name="profile_write">Message</string>
+    <string name="profile_video">Video</string>
+    <string name="profile_sound">Sound</string>
+    <string name="profile_sound_off">Muted</string>
+    <string name="profile_key_ok">Key verified</string>
+    <string name="profile_key_ok_sub">Symbols matched</string>
+    <string name="profile_key_todo">Key not verified</string>
+    <string name="profile_key_todo_sub">Verify by code or by symbols</string>
+    <string name="profile_media">Media and files</string>
+    <string name="profile_delete_title">Delete contact?</string>
+    <string name="verify_title">Key verification</string>
+    <string name="group_add">Add</string>
+    <string name="group_search">Search</string>
+    <string name="group_online_n">%1$d online</string>
+    <string name="group_members_title">Members · %1$d</string>
+    <string name="group_add_member">Add member</string>
+    <string name="group_all_members">All members (%1$d)</string>
+    <string name="group_you_mark">(you)</string>
+    <string name="group_admin_mark">admin</string>
+    <string name="group_member_profile">Profile</string>
+    <string name="group_remove_from">Remove from group</string>
+    <plurals name="group_members_n">
+        <item quantity="one">%1$d member</item>
+        <item quantity="other">%1$d members</item>
+    </plurals>
 </resources>
