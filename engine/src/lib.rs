@@ -13,6 +13,7 @@ pub mod blobs;
 pub mod dto;
 pub mod groups;
 pub mod net;
+pub mod receipts;
 pub mod room_call;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -427,6 +428,8 @@ pub struct Engine {
     /// адреса. Отличается от «нет связи» — это осознанное состояние, и UI обязан
     /// его показывать.
     offline: AtomicBool,
+    /// Отчёты о прочтении и набор: переключатели и отправленное (2.10).
+    receipts: Mutex<receipts::Receipts>,
     /// Чем поднимать новый узел при смене адреса. По умолчанию — настоящий
     /// Yggdrasil; тесты подставляют loopback, иначе ротацию нельзя прогнать без
     /// реальной сети.
@@ -3539,6 +3542,7 @@ fn handle_event(
             // не доехало — досылаем сейчас.
             if online {
                 engine.announce_rotation_to(&peer);
+                engine.resend_read_mark(&peer);
             }
         }
         Event::Text {
@@ -3655,6 +3659,8 @@ fn handle_event(
                 push_reactions(engine, Chat::Dm(&peer), target, &author);
             }
         }
+        Event::Read { peer, upto } => engine.on_read(&peer, upto),
+        Event::Typing { peer } => engine.on_typing(&peer),
         Event::Retract { peer, target } => {
             // Отзываем ЕГО сообщение (автор — он): отозвать наше собственное он не может.
             let n = engine
@@ -4520,6 +4526,7 @@ impl Engine {
             rotate_pending: Mutex::new(std::collections::HashSet::new()),
             transport_factory: Mutex::new(None),
             offline: AtomicBool::new(false),
+            receipts: Mutex::new(receipts::Receipts::load(&dir)),
         });
         engine.load_rotate_pending();
 

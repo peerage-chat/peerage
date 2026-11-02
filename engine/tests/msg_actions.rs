@@ -727,3 +727,100 @@ fn chat_search_pages_and_jumps_to_a_hit() {
         "сегодня — день с сообщениями: {days}"
     );
 }
+
+/// Статус своего сообщения по id.
+fn status_of(e: &Engine, peer: &[u8; 32], id: u64) -> String {
+    history(e, peer)
+        .iter()
+        .find(|m| m["id"].as_u64() == Some(id) && m["mine"] == true)
+        .and_then(|m| m["status"].as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Выбрать из очереди событий движка события одного типа (остальные выбрасываются).
+fn drain(e: &Engine, ty: &str) -> Vec<serde_json::Value> {
+    std::iter::from_fn(|| e.poll_event())
+        .filter_map(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .filter(|v| v["type"] == ty)
+        .collect()
+}
+
+/// Отчёты о прочтении (2.10, шаг 7c): по выбору, выключены по умолчанию и взаимны —
+/// отметка уходит, только если включил читающий, и принимается, только если включил
+/// получатель. ✓✓ «доставлено» становится «прочитано» у обоих концов одинаково.
+#[test]
+fn read_receipts_are_opt_in_and_mutual() {
+    let (a, b, a_key, b_key) = pair("read", 71, 72);
+    let first = a.send_text(&b_key, "прочтёшь?").unwrap() as u64;
+    assert!(wait(10, || status_of(&a, &b_key, first) == "delivered"));
+    let settle = || std::thread::sleep(Duration::from_millis(600));
+
+    // Выключено у обоих: прочтение не уходит.
+    b.mark_read(&a_key);
+    settle();
+    assert_eq!(status_of(&a, &b_key, first), "delivered");
+
+    // Включил только читающий — Аня чужих отчётов не видит, пока не включит свои.
+    b.set_read_receipts(true);
+    b.mark_read(&a_key);
+    settle();
+    assert_eq!(status_of(&a, &b_key, first), "delivered");
+
+    // Включили оба — «прочитано», и клиенту приходят id, что сменили статус.
+    a.set_read_receipts(true);
+    drain(&a, "read");
+    b.mark_read(&a_key);
+    assert!(wait(10, || status_of(&a, &b_key, first) == "read"));
+    let ev = drain(&a, "read");
+    assert_eq!(ev.len(), 1);
+    assert_eq!(ev[0]["peer"], hex::encode(b_key));
+    assert_eq!(ev[0]["ids"], serde_json::json!([first]));
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&a.privacy_json()).unwrap()["read_receipts"]
+            == true
+    );
+
+    // Читающий выключил — новое так и остаётся «доставлено».
+    b.set_read_receipts(false);
+    let second = a.send_text(&b_key, "а это?").unwrap() as u64;
+    assert!(wait(10, || status_of(&a, &b_key, second) == "delivered"));
+    b.mark_read(&a_key);
+    settle();
+    assert_eq!(status_of(&a, &b_key, second), "delivered");
+}
+
+/// Индикатор набора (2.10): эфемерный, по выбору и взаимный; частые вызовы
+/// отправитель сжимает в один пакет на несколько секунд.
+#[test]
+fn typing_is_opt_in_mutual_and_throttled() {
+    let (a, b, a_key, b_key) = pair("typing", 73, 74);
+    let _ = a.send_text(&b_key, "привет").unwrap();
+    assert!(
+        wait(10, || !history(&b, &a_key).is_empty()),
+        "сессия поднялась"
+    );
+    let settle = || std::thread::sleep(Duration::from_millis(600));
+
+    b.typing(&a_key);
+    settle();
+    assert!(drain(&a, "typing").is_empty(), "по умолчанию выключено");
+
+    b.set_typing_indicator(true);
+    b.typing(&a_key);
+    settle();
+    assert!(
+        drain(&a, "typing").is_empty(),
+        "у получателя выключено — не видит"
+    );
+
+    a.set_typing_indicator(true);
+    std::thread::sleep(Duration::from_secs(3)); // окно сжатия после прошлой отправки
+    for _ in 0..5 {
+        b.typing(&a_key);
+    }
+    settle();
+    let ev = drain(&a, "typing");
+    assert_eq!(ev.len(), 1, "пять нажатий — один пакет");
+    assert_eq!(ev[0]["peer"], hex::encode(b_key));
+}

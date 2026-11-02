@@ -352,6 +352,19 @@ object Native {
     ): Int
 
     external fun setVerified(sessionPtr: Long, keyHex: String, verified: Boolean)
+
+    /** Личный чат на экране: «прочитано до последнего входящего» (уходит, если отчёты включены). */
+    external fun markRead(sessionPtr: Long, keyHex: String)
+
+    /** Поле ввода личного чата изменилось — «печатаю» (частоту режет движок). */
+    external fun typing(sessionPtr: Long, keyHex: String)
+
+    /** Переключатели приватности: JSON `{read_receipts, typing}`. */
+    external fun privacy(sessionPtr: Long): String
+
+    external fun setReadReceipts(sessionPtr: Long, on: Boolean)
+
+    external fun setTypingIndicator(sessionPtr: Long, on: Boolean)
     external fun renameContact(sessionPtr: Long, keyHex: String, name: String)
     external fun removeContact(sessionPtr: Long, keyHex: String)
 

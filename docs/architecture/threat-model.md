@@ -129,6 +129,10 @@ understand them before trusting the system with sensitive conversations.
   * **the bucket as a class** — the bucket itself (256 B vs 4 KiB vs 25 KiB) separates
     control / application / blob body. Full uniformity at one size was rejected: padding
     a presence beacon (every 2 s) to 4 KiB is ×40 traffic and battery.
+  * **moments of activity** — read receipts and the typing indicator (step 7c, UI 2.10)
+    sit in the CONTROL bucket and look like an ack by size, but their timing tells A1
+    (and the contact, by design) when the user was reading or typing. This is why both
+    are opt-in, off by default and mutual, and exist only in 1:1 chats.
 - **N8. Incoming traffic cannot be cut at the application layer.** The ingress budget
   (`peerage_core::budget::Tier`) drops packets of a blocked or flooding peer BEFORE
   decryption, so no CPU, battery or storage is spent. But **the bytes have already reached

@@ -127,6 +127,10 @@ pub enum Event {
     /// Пир поставил, заменил или снял (`emoji` пустой) реакцию. `target_mine` уже
     /// перевёрнут: true — реакция на НАШЕ сообщение. Эмодзи проверен.
     React { peer: PeerKey, target: u64, target_mine: bool, emoji: String, at: i64 },
+    /// Пир прочитал наши сообщения до id `upto` включительно (2.10).
+    Read { peer: PeerKey, upto: u64 },
+    /// Пир сейчас печатает (2.10, эфемерно).
+    Typing { peer: PeerKey },
     /// Входящее медиа-сообщение (M2): ссылка на блоб-вложение по хэшу.
     Media {
         peer: PeerKey,
@@ -1119,6 +1123,18 @@ impl Messenger {
         })
     }
 
+    /// Отметка «прочитано до `upto`» (2.10). Без Ack и очереди: потерянную
+    /// перекроет следующая, а движок досылает последнюю, когда пир вернётся.
+    pub fn send_read(&self, peer: &PeerKey, upto: u64) -> Result<(), MessengerError> {
+        self.shared.send(peer, &Payload::Read { upto })
+    }
+
+    /// «Печатаю» (2.10). Без сессии не ждёт рукопожатия: устаревший набор хуже,
+    /// чем никакого.
+    pub fn send_typing(&self, peer: &PeerKey) -> Result<(), MessengerError> {
+        self.shared.send_with(peer, &Payload::Typing, false)
+    }
+
     /// Объявить контакту смену своего АДРЕСА (ADR-007). Надёжно, как текст:
     /// контакт, отсутствовавший в момент смены, обязан узнать новый адрес по
     /// возвращении — иначе связь с ним рвётся навсегда.
@@ -1686,6 +1702,8 @@ fn receive_loop(shared: Arc<Shared>) {
                 }
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
+            Payload::Read { upto } => shared.emit(Event::Read { peer: peer_id, upto }),
+            Payload::Typing => shared.emit(Event::Typing { peer: peer_id }),
             Payload::Media {
                 id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
                 fwd_anon, reply_to, reply_mine,

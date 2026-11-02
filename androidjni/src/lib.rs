@@ -1432,6 +1432,80 @@ pub extern "system" fn Java_chat_peerage_Native_setVerified<'local>(
     });
 }
 
+/// Личный чат на экране — отметка «прочитано до последнего входящего» (2.10;
+/// уходит, только если отчёты включены).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_markRead<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
+            e.mark_read(&key);
+        }
+    });
+}
+
+/// Поле ввода личного чата изменилось — «печатаю» (2.10; частоту режет движок).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_typing<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
+            e.typing(&key);
+        }
+    });
+}
+
+/// Переключатели приватности: JSON `{read_receipts, typing}`.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_privacy<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        ret(&env, &e.privacy_json())
+    })
+}
+
+/// Отчёты о прочтении: вкл/выкл (взаимно).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_setReadReceipts<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    on: jboolean,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        e.set_read_receipts(on != JNI_FALSE);
+    });
+}
+
+/// Индикатор набора: вкл/выкл (взаимно).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_setTypingIndicator<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    on: jboolean,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        e.set_typing_indicator(on != JNI_FALSE);
+    });
+}
+
 /// Переименовать контакт.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_renameContact<'local>(

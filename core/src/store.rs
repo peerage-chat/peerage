@@ -1147,12 +1147,47 @@ impl MessageStore {
     }
 
     /// Статус доставки — только у СВОИХ сообщений (у чужих его не бывает).
+    /// «Прочитано» — последнее слово: запоздавший Ack (повтор после потерянного
+    /// подтверждения) не откатывает его к «доставлено».
     pub fn set_status(&self, chat: Chat, id: u64, status: &str) -> Result<bool, StoreError> {
         let n = db::lock(&self.db).execute(
-            "UPDATE chat_messages SET status=?1 WHERE chat=?2 AND scope=?3 AND id=?4 AND mine=1",
+            "UPDATE chat_messages SET status=?1 WHERE chat=?2 AND scope=?3 AND id=?4 AND mine=1 AND status<>'read'",
             rusqlite::params![status, chat.id(), chat.scope(), id as i64],
         )?;
         Ok(n > 0)
+    }
+
+    /// Собеседник прочитал наши сообщения до id `upto` (2.10): «доставлено» →
+    /// «прочитано». Только доставленные — ждущее в очереди он ещё не видел, хотя id
+    /// у него может быть меньше. Звонки и системные строки не читаются. Возвращает
+    /// id, что сменили статус, по возрастанию.
+    pub fn mark_read(&self, chat: Chat, upto: u64) -> Result<Vec<u64>, StoreError> {
+        const WHERE: &str = "chat=?1 AND scope=?2 AND mine=1 AND id<=?3 AND status='delivered'              AND system=0 AND kind NOT IN ('call', 'video_call')";
+        let upto = upto.min(i64::MAX as u64) as i64;
+        let conn = db::lock(&self.db);
+        let ids = conn
+            .prepare(&format!("SELECT id FROM chat_messages WHERE {WHERE} ORDER BY id"))?
+            .query_map(rusqlite::params![chat.id(), chat.scope(), upto], |r| r.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        conn.execute(
+            &format!("UPDATE chat_messages SET status='read' WHERE {WHERE}"),
+            rusqlite::params![chat.id(), chat.scope(), upto],
+        )?;
+        Ok(ids.into_iter().map(|i| i as u64).collect())
+    }
+
+    /// Самое позднее (по id) входящее сообщение человека — до него и читаем.
+    /// Звонки и системные строки не в счёт: их id выдаём мы сами, не собеседник.
+    pub fn last_incoming_id(&self, chat: Chat) -> Option<u64> {
+        db::lock(&self.db)
+            .query_row(
+                "SELECT max(id) FROM chat_messages WHERE chat=?1 AND scope=?2 AND mine=0                  AND system=0 AND kind NOT IN ('call', 'video_call')",
+                rusqlite::params![chat.id(), chat.scope()],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .ok()
+            .flatten()
+            .map(|i| i as u64)
     }
 
     /// Есть ли уже такое сообщение — для дедупа повторной доставки (офлайн-досылка
@@ -2123,6 +2158,39 @@ mod tests {
         assert_eq!(h[0].sender, me_hex);
         assert_eq!(h[1].text, "yo");
         assert!(!h[1].mine);
+    }
+
+    /// Отметка «прочитано до id N» (2.10): только свои, только уже доставленные —
+    /// ждущее в очереди собеседник ещё не видел, даже если его id меньше. Запоздалый
+    /// Ack не откатывает «прочитано» обратно к «доставлено».
+    #[test]
+    fn read_mark_covers_delivered_own_messages_up_to_it() {
+        let peer = key();
+        let store = MessageStore::open(db());
+        let (me, him) = (hex::encode(key()), hex::encode(peer));
+        let chat = Chat::Dm(&peer);
+        let put = |id: u64, mine: bool, status: &str, kind: &str| {
+            let sender = if mine { me.clone() } else { him.clone() };
+            store.append(chat, &StoredMessage { id, sender, text: "x".into(), mine, time: id as i64, status: status.into(), kind: kind.into(), ..Default::default() }).unwrap();
+        };
+        put(1, true, "delivered", "text");
+        put(2, true, "queued", "text");
+        put(3, true, "delivered", "text");
+        put(4, false, "", "text");
+        put(5, true, "delivered", "text");
+        put(6, true, "delivered", "call");
+        put(7, false, "", "call");
+
+        assert_eq!(store.mark_read(chat, 3).unwrap(), vec![1, 3]);
+        assert_eq!(store.mark_read(chat, 3).unwrap(), Vec::<u64>::new(), "повтор ничего не меняет");
+        assert!(!store.set_status(chat, 1, "delivered").unwrap());
+        let st: Vec<_> = store.history(chat, None, 50).into_iter().map(|m| (m.id, m.status)).collect();
+        assert_eq!(&st[..5], &[(1, "read".into()), (2, "queued".into()), (3, "read".into()), (4, "".into()), (5, "delivered".into())]);
+        assert_eq!(store.mark_read(chat, 99).unwrap(), vec![5], "звонок не «читается»");
+
+        // Последнее входящее — то, до чего читаем мы сами; строка звонка не в счёт.
+        assert_eq!(store.last_incoming_id(chat), Some(4));
+        assert_eq!(store.last_incoming_id(Chat::Dm(&key())), None);
     }
 
     #[test]
