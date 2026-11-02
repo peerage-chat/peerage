@@ -146,7 +146,9 @@ internal fun ContactsScreen(
             .thenBy { it.title.lowercase() },
     )
 
-    Column(Modifier.fillMaxSize()) {
+    // Полосы над списком (очередь, копии) — первым элементом списка: уезжают вместе с
+    // чатами, а не занимают экран постоянно. Шапка и вкладки остаются на месте.
+    val strips: @Composable () -> Unit = {
         QueueStrip(model, nav.openOutbox)
         BackupStripView(model, nav)
         // Счётчик пиров переехал в шапку (PeerIndicator). Здесь — только бенч-замер
@@ -159,54 +161,58 @@ internal fun ContactsScreen(
                 modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
             )
         }
-        when {
-            model.contacts.isEmpty() && model.groups.isEmpty() &&
-                model.contactRequests.isEmpty() && model.groupInvites.isEmpty() -> HomeEmpty(nav)
-            else -> LazyColumn(Modifier.fillMaxSize()) {
-                items(requests, key = { "req_${it.key}" }) { r ->
-                    RequestRow(
-                        title = r.shortKey,
-                        tag = stringResource(R.string.req_tag),
-                        preview = r.preview.ifBlank { stringResource(R.string.req_no_message) },
-                        time = r.time,
-                        group = false,
-                        first = r == requests.first(),
-                    ) { nav.openRequest(r.key) }
-                }
-                items(invites, key = { "ginv_${it.gid}" }) { inv ->
-                    RequestRow(
-                        title = inv.name.ifBlank { stringResource(R.string.group_default_name) },
-                        tag = stringResource(R.string.invite_tag),
-                        preview = stringResource(R.string.group_invite_from, model.peerName(inv.inviter)),
-                        time = 0,
-                        group = true,
-                        first = requests.isEmpty() && inv == invites.first(),
-                    ) { nav.openInvite(inv.gid) }
-                }
-                // Один список прямо на панели: личные чаты и группы вперемешку,
-                // закреплённые сверху (на ступень светлее).
-                itemsIndexed(rows, key = { _, r -> (if (r.group) "g_" else "c_") + r.id }) { i, r ->
-                    ChatListRow(
-                        model = model,
-                        row = r,
-                        first = i == 0 && requests.isEmpty() && invites.isEmpty(),
-                        // Граница между закреплёнными и остальными — разделитель во
-                        // всю ширину: он и разделяет группы, и не оставляет дыры.
-                        fullDivider = i > 0 && rows[i - 1].pinned && !r.pinned,
-                        onClick = { if (r.group) nav.openGroup(r.id) else nav.openDm(r.id) },
-                    )
-                }
-                // Папка, в которую ничего не попало, — словами, а не пустым экраном:
-                // пустота читается как «список не загрузился».
-                if (rows.isEmpty() && requests.isEmpty() && invites.isEmpty()) {
-                    item(key = "empty") {
-                        Box(Modifier.fillParentMaxHeight(0.6f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Text(stringResource(R.string.folder_empty), color = HoloSecondary, fontSize = Tokens.Font.body)
-                        }
+    }
+    when {
+        model.contacts.isEmpty() && model.groups.isEmpty() &&
+            model.contactRequests.isEmpty() && model.groupInvites.isEmpty() -> Column(Modifier.fillMaxSize()) {
+            strips()
+            HomeEmpty(nav)
+        }
+        else -> LazyColumn(Modifier.fillMaxSize()) {
+            item(key = "strips") { Column { strips() } }
+            items(requests, key = { "req_${it.key}" }) { r ->
+                RequestRow(
+                    title = r.shortKey,
+                    tag = stringResource(R.string.req_tag),
+                    preview = r.preview.ifBlank { stringResource(R.string.req_no_message) },
+                    time = r.time,
+                    group = false,
+                    first = r == requests.first(),
+                ) { nav.openRequest(r.key) }
+            }
+            items(invites, key = { "ginv_${it.gid}" }) { inv ->
+                RequestRow(
+                    title = inv.name.ifBlank { stringResource(R.string.group_default_name) },
+                    tag = stringResource(R.string.invite_tag),
+                    preview = stringResource(R.string.group_invite_from, model.peerName(inv.inviter)),
+                    time = 0,
+                    group = true,
+                    first = requests.isEmpty() && inv == invites.first(),
+                ) { nav.openInvite(inv.gid) }
+            }
+            // Один список прямо на панели: личные чаты и группы вперемешку,
+            // закреплённые сверху (на ступень светлее).
+            itemsIndexed(rows, key = { _, r -> (if (r.group) "g_" else "c_") + r.id }) { i, r ->
+                ChatListRow(
+                    model = model,
+                    row = r,
+                    first = i == 0 && requests.isEmpty() && invites.isEmpty(),
+                    // Граница между закреплёнными и остальными — разделитель во
+                    // всю ширину: он и разделяет группы, и не оставляет дыры.
+                    fullDivider = i > 0 && rows[i - 1].pinned && !r.pinned,
+                    onClick = { if (r.group) nav.openGroup(r.id) else nav.openDm(r.id) },
+                )
+            }
+            // Папка, в которую ничего не попало, — словами, а не пустым экраном:
+            // пустота читается как «список не загрузился».
+            if (rows.isEmpty() && requests.isEmpty() && invites.isEmpty()) {
+                item(key = "empty") {
+                    Box(Modifier.fillParentMaxHeight(0.6f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text(stringResource(R.string.folder_empty), color = HoloSecondary, fontSize = Tokens.Font.body)
                     }
                 }
-                item(key = "tail") { Spacer(Modifier.height(Tokens.Size.fabClearance)) } // место под FAB
             }
+            item(key = "tail") { Spacer(Modifier.height(Tokens.Size.fabClearance)) } // место под FAB
         }
     }
 }
