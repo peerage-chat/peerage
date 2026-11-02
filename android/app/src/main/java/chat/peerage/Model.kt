@@ -1471,6 +1471,10 @@ class AppModel private constructor() {
     /** Своё ли это сообщение: сравнение автора с собственным ключом. */
     fun isMine(ref: MsgRef): Boolean = ref.sender == me?.pubkey
 
+    /** Уже отозвано «у всех» — отзывать нечего, остаётся «удалить у себя». */
+    fun isRetracted(key: String, group: Boolean, ref: MsgRef): Boolean =
+        messages[chatKey(key, group)].orEmpty().any { it.id == ref.id && it.sender == ref.sender && it.deleted }
+
     /** Начать пересылку выделенного в личном чате или «Сохранённом». */
     fun beginForward(chatKey: String, group: Boolean = false) {
         val refs = selection.map { it.id to it.sender }
@@ -1681,6 +1685,8 @@ class AppModel private constructor() {
                 Native.retractMessages(sessionPtr, key, json)
                 reloadHistory(key)
             }
+            // Своё отозванное могло быть последним в чате — строка списка тоже меняется.
+            markSummariesDirty()
         }
     }
 
@@ -1958,9 +1964,9 @@ class AppModel private constructor() {
         // списке. Флаг, а не пересчёт на месте: он гасится один раз за пачку.
         when (ev) {
             is EngineEvent.MessageEv, is EngineEvent.Ack,
-            is EngineEvent.Retracted, is EngineEvent.MessageEdited,
+            is EngineEvent.Retracted, is EngineEvent.GroupRetracted, is EngineEvent.MessageEdited,
             EngineEvent.GroupsChanged,
-            is EngineEvent.Undelivered,
+            is EngineEvent.Undelivered, is EngineEvent.Failed,
             -> markSummariesDirty()
             else -> {}
         }
@@ -1992,7 +1998,9 @@ class AppModel private constructor() {
             // Собеседник отозвал своё сообщение: движок уже удалил его из истории,
             // здесь убираем из открытой ленты, чтобы не ждать перезахода в чат.
             is EngineEvent.Retracted -> {
-                messages[chatKey(ev.peer, group = false)]?.removeAll { it.id == ev.id && !it.mine }
+                val list = messages[chatKey(ev.peer, group = false)]
+                val at = list?.indexOfFirst { it.id == ev.id && !it.mine } ?: -1
+                if (at >= 0) list!![at] = list[at].retracted()
             }
             is EngineEvent.Ack -> updateStatus(ev.peer, ev.id, "delivered")
             // Ретраи в памяти выдохлись, сообщение ждёт в очереди движка и уйдёт,

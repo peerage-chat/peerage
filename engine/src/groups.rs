@@ -562,7 +562,7 @@ impl GroupManager {
             let _ = self
                 .messages
                 .lock_safe()
-                .delete_many(Chat::Group(gid), &gone);
+                .retract_many(Chat::Group(gid), &gone);
             // Отправка двигает MLS-ратчет — состояние обязано лечь на диск.
             self.save_group(gid);
         }
@@ -944,7 +944,7 @@ impl GroupManager {
                     } else {
                         self.messages
                             .lock_safe()
-                            .delete_many(Chat::Group(&gid), &[(target, who)])
+                            .retract_many(Chat::Group(&gid), &[(target, who)])
                             .unwrap_or(0)
                     };
                     GroupOutcome {

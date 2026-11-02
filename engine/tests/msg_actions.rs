@@ -108,23 +108,30 @@ fn reply_keeps_the_reference_and_flips_the_author_side() {
 }
 
 #[test]
-fn retract_removes_the_message_on_both_sides() {
+fn retract_leaves_a_deleted_row_on_both_sides() {
     let (a, b, a_key, b_key) = pair("retract", 23, 24);
 
     let id1 = a.send_text(&b_key, "это останется").unwrap() as u64;
     let id2 = a.send_text(&b_key, "а это я заберу").unwrap() as u64;
     assert!(wait(10, || history(&b, &a_key).len() == 2), "оба дошли");
 
+    // «Удалить у всех» оставляет на месте строку «Сообщение удалено» — и у
+    // собеседника, и у себя; текста в ней нет ни у кого.
+    let deleted = |h: Vec<serde_json::Value>| {
+        h.iter()
+            .any(|m| m["id"].as_u64() == Some(id2) && m["kind"] == "deleted" && m["text"] == "")
+    };
     assert_eq!(a.retract_messages(&b_key, &[id2]), 1);
     assert!(
-        wait(10, || history(&b, &a_key).len() == 1),
-        "отозванное исчезло у собеседника"
+        wait(10, || deleted(history(&b, &a_key))),
+        "у собеседника — строка на месте отозванного"
     );
-    assert_eq!(history(&b, &a_key)[0]["text"], "это останется");
+    let theirs = history(&b, &a_key);
+    assert_eq!(theirs.len(), 2);
+    assert_eq!(theirs[0]["text"], "это останется");
 
-    // И у себя тоже — «удалил у всех» не должно оставлять его в своей истории.
     let mine = history(&a, &b_key);
-    assert_eq!(mine.len(), 1);
+    assert!(deleted(mine.clone()), "и у себя");
     assert_eq!(mine[0]["id"].as_u64(), Some(id1));
 }
 

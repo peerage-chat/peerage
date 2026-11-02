@@ -60,6 +60,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -76,6 +77,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -462,6 +464,7 @@ internal fun QuoteBlock(
             Text(
                 src?.let {
                     when {
+                        it.deleted -> stringResource(R.string.chat_reply_gone)
                         it.text.isNotEmpty() -> model.plainText(it)
                         // С миниатюрой имя файла лишнее — картинка уже сказала, что это.
                         hasThumb -> quoteKind(it.kind)
@@ -472,6 +475,42 @@ internal fun QuoteBlock(
                 fontSize = Tokens.Font.small,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * «Сообщение удалено» на месте отозванного «у всех» (макет `special/Deleted`): тихая пилюля
+ * без времени и статуса — содержимого нет, и говорить о нём нечего. Долгое нажатие сразу
+ * ведёт к «удалить у себя»: остальные действия с пустой строкой бессмысленны.
+ */
+@Composable
+private fun DeletedRow(model: AppModel, m: Message, group: Boolean) {
+    val chatId = if (group) model.currentGroup else model.currentChat
+    val shape = RoundedCornerShape(Tokens.Radius.bubble)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
+        // Входящие группы стоят правее колонки аватаров — и надгробие с ними.
+        if (group && !m.mine) Spacer(Modifier.width(Tokens.Size.avatarSeries + Tokens.Space.s))
+        Row(
+            Modifier.clip(shape)
+                .background(Tokens.Colors.group)
+                .border(1.dp, Tokens.Colors.raised, shape)
+                .combinedClickable(onClick = {}, onLongClick = {
+                    if (chatId != null) {
+                        model.bubbleActions = BubbleActions(m, ChatTarget(chatId, group), Rect.Zero, shape)
+                    }
+                })
+                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.bubbleV),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(TablerIcons.Ban, null, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconXs))
+            Spacer(Modifier.width(Tokens.Space.xs))
+            Text(
+                stringResource(R.string.msg_deleted),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.preview,
+                fontStyle = FontStyle.Italic,
             )
         }
     }
@@ -881,7 +920,9 @@ internal fun MessageRow(
     group: Boolean = false,
     animate: Boolean = false,
 ) {
-    val selecting = model.selection.isNotEmpty() && !m.system
+    // Системную строку и «Сообщение удалено» не выбирают: переслать или скопировать
+    // в них нечего.
+    val selecting = model.selection.isNotEmpty() && !m.system && !m.deleted
     // Выбор — у всего ряда (app-ui.md → «Действия»): заливка во всю ширину и кружок у
     // ведущего края. Не обводка пузыря: обводкой отмечено упоминание меня.
     val selected = selecting && MsgRef(m.id, m.sender) in model.selection
@@ -903,7 +944,7 @@ internal fun MessageRow(
             SelectCheck(selected)
             Spacer(Modifier.width(Tokens.Space.m))
         }
-        if (selecting || m.system || m.id == 0L) {
+        if (selecting || m.system || m.deleted || m.id == 0L) {
             Box(Modifier.weight(1f)) { MessageRowContent(model, m, pos, group, animate) }
         } else {
             SwipeToReply(Modifier.weight(1f), onReply = { model.startReply(m) }) {
@@ -997,6 +1038,7 @@ private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group:
                 }
             }
         }
+        m.deleted -> DeletedRow(model, m, group)
         // Входящее в группе: аватар — ТОЛЬКО у нижнего сообщения блока, у остальных
         // на его месте распорка, чтобы левый край блока не гулял. Имя автора — на
         // первом сообщении блока, внутри пузыря.

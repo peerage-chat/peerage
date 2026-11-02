@@ -101,7 +101,13 @@ data class Message(
     val row: Long = 0,
     /** Упоминания поверх участков [text] (только группы), см. [Mention]. */
     val mentions: List<Mention> = emptyList(),
-)
+) {
+    /** Отозвано «у всех»: на месте — строка «Сообщение удалено», содержимого нет. */
+    val deleted: Boolean get() = kind == "deleted"
+
+    /** То же надгробие, что кладёт движок: время, автор и место в ленте остаются. */
+    fun retracted(): Message = Message(id, "", mine, time, status, kind = "deleted", sender = sender, row = row)
+}
 
 /**
  * Упоминание: участок текста `[at, at+len)` и ключ того, кого упомянули. Смещения в

@@ -698,6 +698,8 @@
     <string name="chat_delete_for_me">Delete for me</string>
     <string name="chat_delete_for_all">Delete for everyone</string>
     <string name="chat_reply_you">You</string>
+    <string name="delete_note_retracted">Already deleted for everyone. The line can be removed on this device only.</string>
+    <string name="msg_deleted">Message deleted</string>
     <string name="chat_reply_gone">message deleted</string>
 
 

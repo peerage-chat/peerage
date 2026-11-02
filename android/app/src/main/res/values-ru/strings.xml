@@ -728,6 +728,8 @@
     <string name="chat_delete_for_me">Удалить у себя</string>
     <string name="chat_delete_for_all">Удалить у всех</string>
     <string name="chat_reply_you">Вы</string>
+    <string name="delete_note_retracted">Уже удалено у всех. Строку можно убрать только на этом устройстве.</string>
+    <string name="msg_deleted">Сообщение удалено</string>
     <string name="chat_reply_gone">сообщение удалено</string>
 
 

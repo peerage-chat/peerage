@@ -1040,6 +1040,33 @@ impl MessageStore {
         Ok(n)
     }
 
+    /// Отозвать «у всех»: строка остаётся на месте надгробием («Сообщение удалено»,
+    /// `kind = "deleted"`), содержимое стирается — текст, вложение, цитата, пересылка.
+    /// Время и автор остаются: по ним строка стоит в ленте. Строка не удаляется ещё и
+    /// затем, чтобы досылка того же id не вернула отозванное ([`Self::append`] не
+    /// перезаписывает). Закреп снимается. Возвращает, сколько строк стало надгробиями.
+    pub fn retract_many(&self, chat: Chat, refs: &[(u64, String)]) -> Result<usize, StoreError> {
+        let mut conn = db::lock(&self.db);
+        let tx = conn.transaction()?;
+        let mut n = 0;
+        for (id, sender) in refs {
+            let params = rusqlite::params![chat.id(), chat.scope(), sender, *id as i64];
+            n += tx.execute(
+                "UPDATE chat_messages SET kind='deleted', text='', blob_id='', mime='', name='',
+                     size=0, duration_ms=0, width=0, height=0, thumb_id='', downloaded=0,
+                     reply_to=0, reply_sender='', fwd_from='', fwd_anon=0, edited_at=0, mentions=''
+                 WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4 AND kind != 'deleted'",
+                params,
+            )?;
+            tx.execute(
+                "DELETE FROM pinned WHERE chat=?1 AND scope=?2 AND sender=?3 AND msg_id=?4",
+                params,
+            )?;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
     /// Вложения всех чатов. Нужна экрану «Хранилище», чтобы показать, ЧТО занимает
     /// место и в каком чате, а не только общую цифру.
     pub fn attachments(&self) -> Vec<Attachment> {
@@ -1097,6 +1124,7 @@ impl MessageStore {
     /// Меняется ТОЛЬКО текст (и упоминания поверх него — их участки привязаны к
     /// старому тексту и без замены указывали бы не туда): тип, вложение и время
     /// остаются прежними — правка это исправление слов, а не подмена содержимого.
+    /// Отозванное не правится: правка, догнавшая отзыв, не должна вернуть текст.
     pub fn edit_text(
         &self,
         chat: Chat,
@@ -1108,7 +1136,7 @@ impl MessageStore {
     ) -> Result<bool, StoreError> {
         let n = db::lock(&self.db).execute(
             "UPDATE chat_messages SET text=?1, edited_at=?2, mentions=?7
-             WHERE chat=?3 AND scope=?4 AND sender=?5 AND id=?6",
+             WHERE chat=?3 AND scope=?4 AND sender=?5 AND id=?6 AND kind != 'deleted'",
             rusqlite::params![
                 text, at, chat.id(), chat.scope(), sender, id as i64, mentions_json(mentions),
             ],
@@ -2063,6 +2091,37 @@ mod tests {
         // Тот же id от ДРУГОГО автора — другое сообщение.
         let other = StoredMessage { id: 7, sender: hex::encode(key()), text: "чужое".into(), ..Default::default() };
         assert!(store.append(Chat::Dm(&peer), &other).is_ok());
+    }
+
+    /// Отозванное «у всех» оставляет строку на месте: содержимое стёрто, правка и
+    /// повторная доставка его не воскрешают, закреп снят, поиск его не находит.
+    #[test]
+    fn retract_leaves_a_tombstone() {
+        let peer = key();
+        let store = MessageStore::open(db());
+        let author = hex::encode(peer);
+        let chat = Chat::Dm(&peer);
+        let photo = StoredMessage {
+            id: 7, sender: author.clone(), text: "подпись".into(), time: 10, kind: "image".into(),
+            blob_id: "ab".into(), thumb_id: "cd".into(), reply_to: 3, reply_sender: author.clone(),
+            ..Default::default()
+        };
+        store.append(chat, &photo).unwrap();
+        store.pin(chat, 7, &author, 11, &author).unwrap();
+
+        assert_eq!(store.retract_many(chat, &[(7, author.clone()), (99, author.clone())]).unwrap(), 1);
+        let h = store.history(chat, None, 10);
+        assert_eq!(h.len(), 1, "строка осталась");
+        let t = &h[0];
+        assert_eq!((t.kind.as_str(), t.text.as_str(), t.blob_id.as_str(), t.thumb_id.as_str()), ("deleted", "", "", ""));
+        assert_eq!((t.time, t.reply_to), (10, 0), "место в ленте то же, цитаты нет");
+        assert!(store.pinned(chat).is_empty(), "закреп снят");
+        assert!(store.search("подпись", None, 10).is_empty());
+
+        assert!(!store.edit_text(chat, &author, 7, "воскрес", &[], 12).unwrap(), "правка не возвращает текст");
+        let again = StoredMessage { id: 7, sender: author.clone(), text: "подпись".into(), ..Default::default() };
+        assert!(matches!(store.append(chat, &again), Err(StoreError::Duplicate)), "досылка не воскрешает");
+        assert_eq!(store.history(chat, None, 10)[0].text, "");
     }
 
     /// R-043: не записалось в базу — кэш контактов не меняется (иначе память и

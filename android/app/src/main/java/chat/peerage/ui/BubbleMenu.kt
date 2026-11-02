@@ -60,9 +60,17 @@ import kotlin.math.roundToInt
 internal fun BubbleMenuHost(model: AppModel) {
     var deleting by remember { mutableStateOf<BubbleActions?>(null) }
     model.bubbleActions?.let { t ->
-        BubbleMenuOverlay(model, t) {
-            model.bubbleActions = null
-            deleting = t
+        if (t.msg.deleted) {
+            // У «Сообщение удалено» одно действие — убрать у себя: меню не нужно.
+            LaunchedEffect(t) {
+                model.bubbleActions = null
+                deleting = t
+            }
+        } else {
+            BubbleMenuOverlay(model, t) {
+                model.bubbleActions = null
+                deleting = t
+            }
         }
     }
     deleting?.let { t ->
@@ -220,10 +228,17 @@ private fun NearBubble(bounds: Rect, mine: Boolean, content: @Composable () -> U
  */
 @Composable
 internal fun DeleteSheet(model: AppModel, key: String, group: Boolean, refs: List<MsgRef>, onClose: () -> Unit) {
-    val allMine = refs.all { model.isMine(it) }
+    // «У всех» — только своё и ещё не отозванное.
+    val retracted = refs.any { model.isRetracted(key, group, it) }
+    val allMine = !retracted && refs.all { model.isMine(it) }
+    val note = when {
+        retracted -> R.string.delete_note_retracted
+        allMine -> R.string.delete_note_all
+        else -> R.string.chat_delete_note_foreign
+    }
     ActionSheet(
         pluralStringResource(R.plurals.delete_title, refs.size, refs.size),
-        stringResource(if (allMine) R.string.delete_note_all else R.string.chat_delete_note_foreign),
+        stringResource(note),
         onClose,
     ) {
         if (allMine) {

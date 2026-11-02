@@ -427,6 +427,15 @@ fn group_reply_and_retract() {
         !ctx.gm_a.history_json(&ctx.gid).contains("во сколько"),
         "и у автора тоже"
     );
+    // На месте отозванного — строка «Сообщение удалено» у обоих.
+    for gm in [&ctx.gm_a, &ctx.gm_b] {
+        let h: serde_json::Value = serde_json::from_str(&gm.history_json(&ctx.gid)).unwrap();
+        assert!(h
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["id"].as_u64() == Some(target) && m["kind"] == "deleted"));
+    }
 }
 
 /// Упоминание — ссылка «участок + ключ»: доходит до участника, хранится у обоих,

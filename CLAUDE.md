@@ -13,6 +13,9 @@ Android Jetpack Compose. GPL-3.0. Цель — v1.0 (на гранты не по
 - **`docs/design/call-ui.md`** — экраны звонка. Эталон — макеты юзера; `*-ui.md` вторичен.
 - **`docs/BRAND.md`** — имя продукта: что от него зависит, что заморожено (метки протокола);
   сменить — `scripts/rebrand.py`. Видимое имя в коде — только `R.string.app_name`.
+- **`docs/architecture/engine-changelog.md`** — журнал изменений движка (контракт, схема,
+  поведение). **Любая правка `core`/`messenger`/`engine`/`androidjni`/`ygg`, меняющая
+  контракт или поведение, — с записью там в том же коммите**, с причиной (план/ADR/R-NNN/баг).
 - `docs/SUBSYSTEMS.md`, `docs/adr/` — крейты и архитектурные решения. `docs/v1.0-scope.md`,
   `docs/completion-plan.md` — скоуп и последовательность.
 

@@ -948,7 +948,8 @@ impl Engine {
     }
 
     /// Отозвать СВОИ сообщения у собеседника («удалить у всех»): просьба уходит
-    /// надёжно (доедет и после офлайна), локально сообщения удаляются сразу.
+    /// надёжно (доедет и после офлайна), локально сообщение сразу становится строкой
+    /// «Сообщение удалено» ([`MessageStore::retract_many`]).
     ///
     /// Возвращает число отозванных. Чужие сообщения молча пропускаются: отзывать
     /// чужое нельзя — это не «удалить», а «переписать чужую историю».
@@ -963,8 +964,9 @@ impl Engine {
         for id in ids {
             self.messenger.forget(key, *id);
         }
-        let refs: Vec<(u64, bool)> = ids.iter().map(|id| (*id, true)).collect();
-        self.delete_messages(key, &refs);
+        let me = self.me_hex();
+        let refs: Vec<(u64, String)> = ids.iter().map(|id| (*id, me.clone())).collect();
+        let _ = self.messages.lock_safe().retract_many(Chat::Dm(key), &refs);
         sent
     }
 
@@ -3411,11 +3413,11 @@ fn handle_event(
             );
         }
         Event::Retract { peer, target } => {
-            // Удаляем ЕГО сообщение (mine=false): отозвать наше собственное он не может.
+            // Отзываем ЕГО сообщение (автор — он): отозвать наше собственное он не может.
             let n = engine
                 .messages
                 .lock_safe()
-                .delete_many(Chat::Dm(&peer), &[(target, hex::encode(peer))])
+                .retract_many(Chat::Dm(&peer), &[(target, hex::encode(peer))])
                 .unwrap_or(0);
             if n > 0 {
                 push_event(
@@ -3607,7 +3609,7 @@ fn handle_event(
                 }
             }
             if out.retracted {
-                // Строка исчезла из истории — UI обязан перечитать её целиком, иначе
+                // Строка стала «Сообщение удалено» — UI обязан перечитать историю, иначе
                 // отозванное останется на экране до перезахода в чат.
                 if let Some(gid) = &out.gid {
                     push_event(
