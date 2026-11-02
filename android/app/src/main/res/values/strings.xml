@@ -175,7 +175,7 @@
     <!-- ── Chat ────────────────────────────────────────────────────────── -->
     <string name="chat_default_title">Chat</string>
     <string name="chat_e2e_banner">Messages are end-to-end encrypted</string>
-    <string name="chat_input_hint">Message…</string>
+    <string name="chat_input_hint">Message</string>
     <string name="chat_voice">Voice</string>
     <string name="chat_file">File</string>
     <string name="chat_recording">Recording…</string>
@@ -697,6 +697,7 @@
     <string name="chat_delete_note_foreign">Messages from others can only be removed on your side — rewriting someone else\'s history is not possible.</string>
     <string name="chat_delete_for_me">Delete for me</string>
     <string name="chat_delete_for_all">Delete for everyone</string>
+    <string name="chat_reply_to">Reply to %1$s</string>
     <string name="chat_reply_you">You</string>
     <string name="delete_note_retracted">Already deleted for everyone. The line can be removed on this device only.</string>
     <string name="msg_deleted">Message deleted</string>

@@ -1053,37 +1053,43 @@ internal fun AccentRule(modifier: Modifier = Modifier.height(Tokens.Size.rule)) 
 }
 
 /**
- * Полоска над полем ввода: «Ответ …» или «Редактирование …». Один режим ввода за раз,
- * поэтому и полоска одна — раньше у ответа была карточка с крестиком 20dp, у правки
- * — голая строка с кнопкой 38dp, и одно и то же место выглядело двумя разными.
+ * Плашка над полем ввода (макеты `chatact/Reply`, `chatact/Edit`): значок режима, кому или
+ * что, и ×. Режим ввода один за раз, поэтому и плашка одна. Низ почти прямой: плашка
+ * прилегает к полю и читается его шапкой, а не отдельной карточкой.
  */
 @Composable
-internal fun InputStrip(title: String, body: String, onCancel: () -> Unit) {
+internal fun InputStrip(icon: ImageVector, title: String, body: String, onCancel: () -> Unit) {
+    val r = Tokens.Radius
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs)
-            .clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface)
+        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m)
+            .clip(RoundedCornerShape(topStart = r.field, topEnd = r.field, bottomStart = r.badge, bottomEnd = r.badge))
+            .background(Tokens.Colors.group)
             .padding(start = Tokens.Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AccentRule()
-        Column(Modifier.weight(1f).padding(horizontal = Tokens.Space.s)) {
-            Text(title, color = HoloAccent, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium, maxLines = 1)
+        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconS))
+        Column(Modifier.weight(1f).padding(start = Tokens.Space.m, end = Tokens.Space.xs)) {
             Text(
-                body,
-                color = HoloSecondary,
-                fontSize = Tokens.Font.small,
+                title,
+                color = HoloAccent,
+                fontSize = Tokens.Font.body,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            Text(body, color = Tokens.Colors.secondary, fontSize = Tokens.Font.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel), tint = HoloSecondary, onClick = onCancel)
+        Box(
+            Modifier.size(Tokens.Size.touch).clip(CircleShape).clickable(role = Role.Button, onClick = onCancel),
+            contentAlignment = Alignment.Center,
+        ) { Icon(TablerIcons.X, stringResource(R.string.common_cancel), tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconS)) }
     }
 }
 
-/** Полоска «Редактирование»: уходит правка, а не новое сообщение. */
+/** Плашка «Изменение»: уйдёт правка, а не новое сообщение. */
 @Composable
 internal fun EditStrip(text: String, onCancel: () -> Unit) =
-    InputStrip(stringResource(R.string.chat_editing), text, onCancel)
+    InputStrip(TablerIcons.Pencil, stringResource(R.string.chat_editing), text, onCancel)
 
 /**
  * Снекбар «Отменить» (макет `shared/Undo`): кольцо-отсчёт с секундами, что сделано, «Отменить».

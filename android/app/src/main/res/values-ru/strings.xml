@@ -173,7 +173,7 @@
     <!-- ── Чат ─────────────────────────────────────────────────────────── -->
     <string name="chat_default_title">Чат</string>
     <string name="chat_e2e_banner">Сообщения защищены сквозным шифрованием</string>
-    <string name="chat_input_hint">Сообщение…</string>
+    <string name="chat_input_hint">Сообщение</string>
     <string name="chat_voice">Голосовое</string>
     <string name="chat_file">Файл</string>
     <string name="chat_recording">Запись…</string>
@@ -727,6 +727,7 @@
     <string name="chat_delete_note_foreign">Чужие сообщения можно убрать только у себя — переписывать чужую историю нельзя.</string>
     <string name="chat_delete_for_me">Удалить у себя</string>
     <string name="chat_delete_for_all">Удалить у всех</string>
+    <string name="chat_reply_to">Ответ · %1$s</string>
     <string name="chat_reply_you">Вы</string>
     <string name="delete_note_retracted">Уже удалено у всех. Строку можно убрать только на этом устройстве.</string>
     <string name="msg_deleted">Сообщение удалено</string>
@@ -754,7 +755,7 @@
     <string name="pin_remove">Открепить</string>
     <string name="pin_attachment">Вложение</string>
     <string name="chat_edit">Изменить</string>
-    <string name="chat_editing">Редактирование</string>
+    <string name="chat_editing">Изменение</string>
     <string name="chat_edited">изм.</string>
 
     <!-- ── Список чатов (редизайн) ──────────────────────────────────────── -->

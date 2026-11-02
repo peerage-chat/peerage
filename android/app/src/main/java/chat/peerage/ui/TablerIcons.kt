@@ -457,6 +457,18 @@ val TablerIcons.AlertCircle: ImageVector by lazy {
     tabler("alert-circle", "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0", "M12 8v4", "M12 16h.01")
 }
 
+val TablerIcons.Paperclip: ImageVector by lazy {
+    tabler("paperclip", "M20 11l-8 8a5 5 0 0 1 -7 -7l8 -8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1 -3 -3l7 -7")
+}
+
+val TablerIcons.MoodSmile: ImageVector by lazy {
+    tabler("mood-smile", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0", "M8.5 14.5a4.5 4.5 0 0 0 7 0", "M9 9.5h.01", "M15 9.5h.01")
+}
+
+val TablerIcons.Send: ImageVector by lazy {
+    tabler("send", "M4 12l16 -8l-6 16l-3 -7z", "M11 13l9 -9")
+}
+
 val TablerIcons.X: ImageVector by lazy {
     tabler("x", "M18 6l-12 12", "M6 6l12 12")
 }

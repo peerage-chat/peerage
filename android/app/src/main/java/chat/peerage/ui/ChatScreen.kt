@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
@@ -533,7 +532,11 @@ internal fun ReplyStrip(model: AppModel, m: Message) {
     // Кому отвечаем: своё — «Вы», чужое — имя автора по его ключу. В личном чате это
     // собеседник, в группе — конкретный участник.
     InputStrip(
-        if (m.mine) stringResource(R.string.chat_reply_you) else groupSenderName(model, m.sender),
+        TablerIcons.Reply,
+        stringResource(
+            R.string.chat_reply_to,
+            if (m.mine) stringResource(R.string.chat_reply_you) else groupSenderName(model, m.sender),
+        ),
         if (m.text.isNotEmpty()) model.plainText(m) else m.name.ifEmpty { quoteKind(m.kind) },
         onCancel = model::cancelReply,
     )
@@ -694,6 +697,10 @@ internal fun MessageInput(
         attachOpen = false
     }
 
+    // Правка: вложить нечего (меняются только слова), отправка становится «Сохранить».
+    val editing = model?.editTarget != null
+    // Плашка прилегает к полю (зазор 2 dp), без неё — обычный отступ сверху.
+    val stripShown = replyStrip != null && (editing || model?.replyTarget != null)
     Column(Modifier.fillMaxWidth()) {
         // Цитата видна ровно там, где человек печатает ответ: иначе легко забыть,
         // что сообщение уйдёт ответом, и получить «ответ» не на то.
@@ -773,24 +780,43 @@ internal fun MessageInput(
             )
         }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier.fillMaxWidth().padding(
+                start = Tokens.Space.m,
+                end = Tokens.Space.m,
+                top = if (stripShown) Tokens.Space.xxs else Tokens.Space.s,
+                bottom = Tokens.Space.m,
+            ),
+            verticalAlignment = Alignment.Bottom,
         ) {
-            // Поле ввода: скрепка и эмодзи ВНУТРИ. Скругление такое же, как у кнопок
-            // и карточек — пилюля выбивалась из общего языка форм.
+            // Поле ввода (макет `chatact/Main`): скрепка и эмодзи ВНУТРИ, ступень group.
             Row(
-                Modifier.weight(1f).clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloSurface),
+                Modifier.weight(1f).heightIn(min = Tokens.Size.composer)
+                    .clip(RoundedCornerShape(Tokens.Radius.field)).background(Tokens.Colors.group),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Скрепка выдвигает лист вложений из этой же строки; эмодзи ведёт
-                // себя так же. Активная подсвечена акцентом, повторный тап закрывает.
-                PillIcon(
-                    Icons.Filled.AttachFile,
-                    stringResource(R.string.cd_attach),
-                    tint = if (attachOpen) HoloAccent else HoloSecondary,
-                ) {
-                    attachOpen = !attachOpen
-                    if (attachOpen) emojiOpen = false
+                val emojiIcon = @Composable {
+                    // Скрепка и эмодзи ведут себя одинаково: обе выдвигают панель из этой же
+                    // строки, поэтому активная подсвечена акцентом и закрывается повторным тапом.
+                    PillIcon(
+                        TablerIcons.MoodSmile,
+                        stringResource(R.string.cd_emoji),
+                        tint = if (emojiOpen) HoloAccent else Tokens.Colors.secondary,
+                    ) {
+                        emojiOpen = !emojiOpen
+                        if (emojiOpen) attachOpen = false
+                    }
+                }
+                if (editing) {
+                    emojiIcon()
+                } else {
+                    PillIcon(
+                        TablerIcons.Paperclip,
+                        stringResource(R.string.cd_attach),
+                        tint = if (attachOpen) HoloAccent else Tokens.Colors.secondary,
+                    ) {
+                        attachOpen = !attachOpen
+                        if (attachOpen) emojiOpen = false
+                    }
                 }
                 BasicTextField(
                     value = field,
@@ -804,7 +830,7 @@ internal fun MessageInput(
                             if (value.isEmpty()) {
                                 Text(
                                     stringResource(if (recording) R.string.chat_recording else R.string.chat_input_hint),
-                                    color = if (recording) HoloError else HoloSecondary,
+                                    color = if (recording) HoloError else Tokens.Colors.tertiary,
                                     fontSize = Tokens.Font.label,
                                 )
                             }
@@ -812,16 +838,7 @@ internal fun MessageInput(
                         }
                     },
                 )
-                // Скрепка и эмодзи ведут себя одинаково: обе выдвигают панель из этой же
-                // строки, поэтому активная подсвечена акцентом и закрывается повторным тапом.
-                PillIcon(
-                    Icons.Filled.EmojiEmotions,
-                    stringResource(R.string.cd_emoji),
-                    tint = if (emojiOpen) HoloAccent else HoloSecondary,
-                ) {
-                    emojiOpen = !emojiOpen
-                    if (emojiOpen) attachOpen = false
-                }
+                if (!editing) emojiIcon()
             }
             Spacer(Modifier.width(Tokens.Space.s))
             // Отправка (есть текст) / голосовое удержанием (поле пустое).
@@ -852,22 +869,30 @@ internal fun MessageInput(
                 }
             }
             Box(
-                Modifier.clip(RoundedCornerShape(Tokens.Radius.button))
+                Modifier.clip(RoundedCornerShape(Tokens.Radius.field))
                     .background(if (recording) Tokens.Colors.errorFill else HoloAccent)
-                    .size(Tokens.Size.inputField).then(btnMod),
+                    .size(Tokens.Size.composer).then(btnMod),
                 contentAlignment = Alignment.Center,
             ) {
                 val send = hasText || hasPicked
                 val tint = if (recording) Color.White else HoloAccentDark
                 SwapIcon(
                     send,
-                    { Icon(Icons.Filled.Mic, stringResource(R.string.chat_voice), tint = tint, modifier = Modifier.size(Tokens.Size.iconM)) },
                     {
                         Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            stringResource(R.string.common_send),
+                            TablerIcons.Microphone,
+                            stringResource(R.string.chat_voice),
                             tint = tint,
-                            modifier = Modifier.size(Tokens.Size.iconM),
+                            modifier = Modifier.size(Tokens.Size.iconS),
+                        )
+                    },
+                    {
+                        // Правка уходит «Сохранить» (✓), а не новой отправкой.
+                        Icon(
+                            if (editing) TablerIcons.Check else TablerIcons.Send,
+                            stringResource(if (editing) R.string.common_save else R.string.common_send),
+                            tint = tint,
+                            modifier = Modifier.size(Tokens.Size.iconS),
                         )
                     },
                 )
@@ -896,13 +921,13 @@ internal fun graphemeStart(text: String, end: Int): Int {
     return if (prev == java.text.BreakIterator.DONE) 0 else prev
 }
 
-/** Иконка внутри поля-пилюли (44px касание). */
+/** Иконка внутри поля ввода: касание во всю высоту поля и 48 dp в ширину. */
 @Composable
 internal fun PillIcon(icon: ImageVector, desc: String, tint: Color = HoloSecondary, onClick: () -> Unit) {
     Box(
-        Modifier.size(Tokens.Size.touch).clip(CircleShape).clickable { onClick() },
+        Modifier.width(Tokens.Size.touch).height(Tokens.Size.composer).clickable(role = Role.Button) { onClick() },
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconM)) }
+    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconS)) }
 }
 
 /**
@@ -926,10 +951,12 @@ internal fun MessageRow(
     // Выбор — у всего ряда (app-ui.md → «Действия»): заливка во всю ширину и кружок у
     // ведущего края. Не обводка пузыря: обводкой отмечено упоминание меня.
     val selected = selecting && MsgRef(m.id, m.sender) in model.selection
+    // Правимое сообщение подсвечено так же (макет `chatact/Edit`): видно, что именно меняется.
+    val editingThis = model.editTarget?.let { it.id == m.id && it.sender == m.sender } == true
     val press = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth()
-            .background(if (selected) Tokens.Colors.selectedRow else Color.Transparent)
+            .background(if (selected || editingThis) Tokens.Colors.selectedRow else Color.Transparent)
             .then(
                 if (selecting) {
                     Modifier.toggleable(selected, press, indication = null, role = Role.Checkbox) { model.toggleSelect(m) }
