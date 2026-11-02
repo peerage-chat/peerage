@@ -214,8 +214,13 @@
     <string name="group_invite_join">Вступить</string>
     <string name="cd_join_call">Войти в звонок</string>
     <string name="cd_leave_call">Выйти из звонка</string>
-    <string name="group_system_membership">%1$s обновил(а) состав группы</string>
-    <string name="group_system_event">%1$s %2$s</string>
+    <string name="group_system_membership">Состав группы изменён · %1$s</string>
+    <string name="group_sys_created">Группа создана · %1$s</string>
+    <string name="group_sys_joined">%1$s в группе · приглашение: %2$s</string>
+    <string name="group_sys_joined_plain">%1$s в группе</string>
+    <string name="group_sys_left">%1$s больше не в группе</string>
+    <string name="group_sys_renamed">Новое название: «%1$s»</string>
+    <string name="group_sys_admin">%1$s — теперь администратор</string>
     <string name="create_label_name">Название</string>
     <string name="create_btn">Создать</string>
     <string name="create_hint">Вы станете администратором. Добавляйте участников из контактов внутри группы.</string>

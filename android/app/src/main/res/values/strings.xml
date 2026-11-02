@@ -216,8 +216,13 @@
     <string name="group_invite_join">Join</string>
     <string name="cd_join_call">Join call</string>
     <string name="cd_leave_call">Leave call</string>
-    <string name="group_system_membership">%1$s updated the group</string>
-    <string name="group_system_event">%1$s %2$s</string>
+    <string name="group_system_membership">Group members changed · %1$s</string>
+    <string name="group_sys_created">Group created · %1$s</string>
+    <string name="group_sys_joined">%1$s joined · invited by %2$s</string>
+    <string name="group_sys_joined_plain">%1$s joined</string>
+    <string name="group_sys_left">%1$s is no longer in the group</string>
+    <string name="group_sys_renamed">New name: “%1$s”</string>
+    <string name="group_sys_admin">%1$s is now an admin</string>
     <string name="create_label_name">Name</string>
     <string name="create_btn">Create</string>
     <string name="create_hint">You\'ll become the admin. Add members from contacts inside the group.</string>

@@ -215,6 +215,26 @@ impl GroupManager {
         }
     }
 
+    /// Системная строка группы (журнал движка, 2.8а): вид, о ком, параметр. Слова
+    /// строки собирает клиент — здесь только факт. id — время в мс: события одного
+    /// человека не должны затирать друг друга.
+    fn put_event(&mut self, gid: &[u8], kind: &str, who: [u8; 32], param: String) {
+        let me = self.identity.public_key_bytes();
+        self.put(
+            gid,
+            &StoredMessage {
+                id: now_ms(),
+                mine: who == me,
+                time: now(),
+                sender: hex::encode(who),
+                kind: kind.into(),
+                text: param,
+                system: true,
+                ..Default::default()
+            },
+        );
+    }
+
     /// Строки, записанные с прошлого вызова, — для событий `message`.
     pub fn take_fresh(&mut self) -> Vec<(Vec<u8>, StoredMessage)> {
         std::mem::take(&mut self.fresh)
@@ -291,6 +311,7 @@ impl GroupManager {
         let me = self.identity.public_key_bytes();
         self.remember_admin(&id, me);
         self.save_group(&id);
+        self.put_event(&id, "created", me, String::new());
         Some(id)
     }
 
@@ -675,19 +696,7 @@ impl GroupManager {
         if e.chat.remove_member(peer).is_err() {
             return false;
         }
-        // Системная строка «участник удалён» (актор — удалённый). id — время в мс:
-        // системные строки одного участника не должны затирать друг друга.
-        self.put(
-            gid,
-            &StoredMessage {
-                id: now_ms(),
-                mine: true,
-                time: now(),
-                sender: hex::encode(peer),
-                system: true,
-                ..Default::default()
-            },
-        );
+        self.put_event(gid, "left", peer, String::new());
         self.save_group(gid); // Commit сдвинул эпоху — персистим (инвариант MLS).
         true
     }
@@ -851,18 +860,25 @@ impl GroupManager {
         let id = gid.to_vec();
         let _ = self.meta.remove_sent_invite(&peer, gid);
         let resync = self.resyncing.remove(&peer);
+        // Перевыпуск отставшего — один коммит Remove+Add: остальным это смена эпохи,
+        // а не «вышел и вошёл».
         let added = self
             .groups
             .get_mut(&id)
             .map(|e| {
                 if resync {
-                    let _ = e.chat.remove_member(peer); // снять устаревший leaf
+                    e.chat.readd_member(peer, key_package).is_ok()
+                } else {
+                    e.chat.add_member(peer, key_package).is_ok()
                 }
-                e.chat.add_member(peer, key_package).is_ok()
             })
             .unwrap_or(false);
         if added {
             self.save_group(&id);
+            if !resync {
+                let me = hex::encode(self.identity.public_key_bytes());
+                self.put_event(&id, "joined", peer, me);
+            }
             // Догоняем нового участника настоящим именем группы (иначе у него дефолт).
             // Welcome уже ушёл в add_member (раньше в очереди) → имя применится после
             // вступления. Идемпотентно и для уже состоящих участников.
@@ -1056,19 +1072,18 @@ impl GroupManager {
                         ..Default::default()
                     }
                 }
-                Some(Ok(Inbound::Membership { actor })) => {
-                    let actor_hex = hex::encode(actor);
-                    self.put(
-                        &gid,
-                        &StoredMessage {
-                            id: now_ms(),
-                            mine: false,
-                            time: now(),
-                            sender: actor_hex.clone(),
-                            system: true,
-                            ..Default::default()
-                        },
-                    );
+                Some(Ok(Inbound::Membership {
+                    actor,
+                    added,
+                    removed,
+                })) => {
+                    // Добавил тот, кто сделал коммит; убранный — о нём и строка.
+                    for who in added {
+                        self.put_event(&gid, "joined", who, hex::encode(actor));
+                    }
+                    for who in removed {
+                        self.put_event(&gid, "left", who, String::new());
+                    }
                     GroupOutcome {
                         gid: Some(gid.clone()),
                         ..Default::default()
@@ -1181,6 +1196,9 @@ impl GroupManager {
                     },
                 );
                 self.save_group(&id);
+                // Welcome шлёт тот, кто добавил: он и пригласил.
+                let me = self.identity.public_key_bytes();
+                self.put_event(&id, "joined", me, hex::encode(peer));
                 return GroupOutcome {
                     gid: Some(id),
                     joined: true,

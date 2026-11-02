@@ -1030,25 +1030,7 @@ private fun SwipeToReply(modifier: Modifier, onReply: () -> Unit, content: @Comp
 @Composable
 private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group: Boolean, animate: Boolean) {
     when {
-        m.system -> {
-            val who = groupSenderName(model, m.sender)
-            val text = if (m.text.isBlank()) {
-                stringResource(R.string.group_system_membership, who)
-            } else {
-                stringResource(R.string.group_system_event, who, m.text)
-            }
-            // Ярлык того же вида, что разделитель даты: оба комментируют ленту
-            // со стороны, а не участвуют в разговоре.
-            Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.s), horizontalArrangement = Arrangement.Center) {
-                Box(
-                    Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
-                        .background(Tokens.Colors.labelScrim)
-                        .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xxs),
-                ) {
-                    Text(text, color = HoloSecondary, fontSize = Tokens.Font.caption)
-                }
-            }
-        }
+        m.system -> SystemRow(model, m)
         m.deleted -> DeletedRow(model, m, group)
         // Входящее в группе: аватар — ТОЛЬКО у нижнего сообщения блока, у остальных
         // на его месте распорка, чтобы левый край блока не гулял. Имя автора — на

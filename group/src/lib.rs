@@ -49,8 +49,10 @@ fn mls<E: std::fmt::Display>(e: E) -> GroupError {
 pub enum Incoming {
     /// Прикладное сообщение: отправитель (identity = ed25519-pubkey) + расшифрованные байты.
     Message { sender: Vec<u8>, body: Vec<u8> },
-    /// Применено изменение состава группы (Commit). actor — кто его применил.
-    MembershipChanged { actor: Vec<u8> },
+    /// Применено изменение состава группы (Commit). actor — кто его применил;
+    /// added / removed — кого коммит добавил и кого убрал (ключи из credential).
+    /// Ключ, который и убран, и добавлен (перевыпуск), сюда не попадает.
+    MembershipChanged { actor: Vec<u8>, added: Vec<Vec<u8>>, removed: Vec<Vec<u8>> },
     /// Нас удалили из группы (обработали Commit, где нашего leaf-а больше нет).
     /// Верхний слой должен вычистить локальное состояние группы.
     SelfRemoved,
@@ -196,6 +198,39 @@ impl Member {
         ))
     }
 
+    /// Перевыпустить участника (ADR-004, resync): убрать его устаревший leaf и
+    /// добавить по свежему KeyPackage ОДНИМ коммитом. Остальные видят смену эпохи,
+    /// а не «вышел и вошёл». Привязка KeyPackage к пиру — как в [`Self::add`].
+    pub fn swap(
+        &mut self,
+        key_package: &[u8],
+        expected_identity: &[u8; 32],
+    ) -> Result<(Vec<u8>, Vec<u8>), GroupError> {
+        let kp_in = KeyPackageIn::tls_deserialize_exact(key_package).map_err(mls)?;
+        let kp = kp_in
+            .validate(self.provider.crypto(), ProtocolVersion::Mls10)
+            .map_err(mls)?;
+        let leaf = kp.leaf_node();
+        let identity = leaf.credential().serialized_content();
+        let sig_key = leaf.signature_key().as_slice();
+        if identity != expected_identity || sig_key != expected_identity {
+            return Err(GroupError::IdentityMismatch);
+        }
+        let idx = self.leaf_index_of(expected_identity).ok_or(GroupError::NotMember)?;
+        let group = self.group.as_mut().ok_or(GroupError::NoGroup)?;
+        if idx == group.own_leaf_index() {
+            return Err(GroupError::CannotRemoveSelf);
+        }
+        let out = group
+            .swap_members(&self.provider, &self.signer, &[idx], &[kp])
+            .map_err(mls)?;
+        group.merge_pending_commit(&self.provider).map_err(mls)?;
+        Ok((
+            out.commit.tls_serialize_detached().map_err(mls)?,
+            out.welcome.tls_serialize_detached().map_err(mls)?,
+        ))
+    }
+
     /// Leaf-индекс участника по его ed25519-идентичности (credential). None, если
     /// такого участника в группе нет.
     fn leaf_index_of(&self, identity: &[u8; 32]) -> Option<LeafNodeIndex> {
@@ -286,13 +321,28 @@ impl Member {
             ProcessedMessageContent::StagedCommitMessage(staged) => {
                 // Различаем ДО merge: удалили нас / сменился состав / только ротация.
                 let self_removed = staged.self_removed();
-                let roster_changed = staged.add_proposals().next().is_some()
-                    || staged.remove_proposals().next().is_some();
+                let mut added: Vec<Vec<u8>> = staged
+                    .add_proposals()
+                    .map(|p| {
+                        let kp = p.add_proposal().key_package();
+                        kp.leaf_node().credential().serialized_content().to_vec()
+                    })
+                    .collect();
+                // Убранных читаем из ТЕКУЩЕГО дерева: после слияния их leaf уже пуст.
+                let mut removed: Vec<Vec<u8>> = staged
+                    .remove_proposals()
+                    .filter_map(|p| group.member(p.remove_proposal().removed()))
+                    .map(|c| c.serialized_content().to_vec())
+                    .collect();
+                // Перевыпуск (тот же ключ убран и добавлен) — не смена состава.
+                let both: Vec<Vec<u8>> = added.iter().filter(|k| removed.contains(k)).cloned().collect();
+                added.retain(|k| !both.contains(k));
+                removed.retain(|k| !both.contains(k));
                 group.merge_staged_commit(&self.provider, *staged).map_err(mls)?;
                 if self_removed {
                     Ok(Incoming::SelfRemoved)
-                } else if roster_changed {
-                    Ok(Incoming::MembershipChanged { actor: sender })
+                } else if !added.is_empty() || !removed.is_empty() {
+                    Ok(Incoming::MembershipChanged { actor: sender, added, removed })
                 } else {
                     Ok(Incoming::Rekeyed)
                 }
@@ -455,6 +505,65 @@ mod tests {
         let ct = a.encrypt(b"after kick").unwrap();
         assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"after kick"));
         assert!(c.process(&ct).is_err());
+    }
+
+    #[test]
+    fn membership_commit_names_who_was_added_and_removed() {
+        // Коммит сообщает не «что-то изменилось», а кого добавили и кого убрали:
+        // из этого остальные пишут строки «в группе» / «больше не в группе».
+        let mut a = Member::new(&id(1)).unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        let mut c = Member::new(&id(3)).unwrap();
+        a.create_group().unwrap();
+        let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
+        b.join(&w).unwrap();
+
+        let (commit, w) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
+        match b.process(&commit).unwrap() {
+            Incoming::MembershipChanged { actor, added, removed } => {
+                assert_eq!(actor, id(1).public_key_bytes());
+                assert_eq!(added, vec![id(3).public_key_bytes().to_vec()]);
+                assert!(removed.is_empty());
+            }
+            _ => panic!("ожидалась смена состава"),
+        }
+        c.join(&w).unwrap();
+
+        let commit = a.remove(&id(3).public_key_bytes()).unwrap();
+        match b.process(&commit).unwrap() {
+            Incoming::MembershipChanged { added, removed, .. } => {
+                assert!(added.is_empty());
+                assert_eq!(removed, vec![id(3).public_key_bytes().to_vec()]);
+            }
+            _ => panic!("ожидалась смена состава"),
+        }
+    }
+
+    #[test]
+    fn swap_reissues_member_without_roster_change_for_others() {
+        // Перевыпуск отставшего (ADR-004) — один коммит Remove+Add того же ключа:
+        // у остальных это не «вышел и вошёл», а просто новая эпоха.
+        let mut a = Member::new(&id(1)).unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        let mut c = Member::new(&id(3)).unwrap();
+        a.create_group().unwrap();
+        let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
+        b.join(&w).unwrap();
+        let (commit, w) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
+        b.process(&commit).unwrap();
+        c.join(&w).unwrap();
+
+        // C отстал: заново — со свежим KeyPackage.
+        let mut c2 = Member::new(&id(3)).unwrap();
+        let (commit, welcome) = a.swap(&c2.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
+        assert!(matches!(b.process(&commit).unwrap(), Incoming::Rekeyed));
+        c2.join(&welcome).unwrap();
+        assert_eq!(a.member_count(), 3);
+        assert_eq!(b.member_count(), 3);
+
+        let ct = a.encrypt(b"after swap").unwrap();
+        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"after swap"));
+        assert!(matches!(c2.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"after swap"));
     }
 
     #[test]

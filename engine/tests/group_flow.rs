@@ -545,7 +545,7 @@ fn group_retract_ignores_foreign_messages() {
     assert!(got);
 
     let hist_b: serde_json::Value = serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
-    let foreign = hist_b.as_array().unwrap()[0]["id"].as_u64().unwrap();
+    let foreign = first_message(&hist_b)["id"].as_u64().unwrap();
     assert_eq!(
         ctx.gm_b.retract(&ctx.gid, &[foreign]),
         0,
@@ -900,6 +900,14 @@ fn only_admin_can_pin_in_a_group() {
     }));
 }
 
+/// Первое обычное сообщение истории — мимо системных строк («Группа создана» и т.п.).
+fn first_message(hist: &serde_json::Value) -> serde_json::Value {
+    hist.as_array()
+        .and_then(|a| a.iter().find(|m| m["system"] != true))
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// Есть ли в истории группы у `gm` текст `text`?
 fn has_text(gm: &GroupManager, gid: &[u8], text: &str) -> bool {
     let h: serde_json::Value = serde_json::from_str(&gm.history_json(gid)).unwrap_or_default();
@@ -1040,7 +1048,7 @@ fn group_reactions_reach_members_with_mls_author() {
     );
     assert!(got);
     let hist: serde_json::Value = serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
-    let msg = &hist.as_array().unwrap()[0];
+    let msg = &first_message(&hist);
     let (target, author) = (
         msg["id"].as_u64().unwrap(),
         msg["sender"].as_str().unwrap().to_string(),
@@ -1055,7 +1063,7 @@ fn group_reactions_reach_members_with_mls_author() {
         &ctx.b_rx,
         |a, _| {
             let h: serde_json::Value = serde_json::from_str(&a.history_json(&ctx.gid)).unwrap();
-            h[0]["reactions"][0]["who"][0] == b_hex.as_str()
+            first_message(&h)["reactions"][0]["who"][0] == b_hex.as_str()
         },
     );
     assert!(reached, "реакция участника дошла до автора, кто — из MLS");
@@ -1069,8 +1077,70 @@ fn group_reactions_reach_members_with_mls_author() {
         &ctx.b_rx,
         |a, _| {
             let h: serde_json::Value = serde_json::from_str(&a.history_json(&ctx.gid)).unwrap();
-            h[0].get("reactions").is_none()
+            first_message(&h).get("reactions").is_none()
         },
     );
     assert!(cleared);
+}
+
+/// Системные строки группы: (вид, о ком, параметр) по порядку.
+fn system_rows(gm: &GroupManager, gid: &[u8]) -> Vec<(String, String, String)> {
+    let h: serde_json::Value = serde_json::from_str(&gm.history_json(gid)).unwrap_or_default();
+    h.as_array()
+        .map(|a| {
+            a.iter()
+                .filter(|m| m["system"] == true)
+                .map(|m| {
+                    let f = |k: &str| m[k].as_str().unwrap_or_default().to_string();
+                    (f("kind"), f("sender"), f("text"))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 2.8а: строка говорит, что произошло и с кем. У админа — «создана» и «вступил,
+/// пригласил я»; у вступившего — «вступил я, пригласил админ». Перевыпуск
+/// отставшего строк не добавляет; удаление — «больше не в группе».
+#[test]
+fn group_system_rows_say_what_happened_and_to_whom() {
+    let mut c = setup_and_join(0);
+    let gid = c.gid.clone();
+    let a = hex::encode(id(10).public_key_bytes());
+    let b = hex::encode(c.b_key);
+    let row = |k: &str, who: &str, p: &str| (k.to_string(), who.to_string(), p.to_string());
+
+    assert_eq!(
+        system_rows(&c.gm_a, &gid),
+        vec![row("created", &a, ""), row("joined", &b, &a)]
+    );
+    assert_eq!(system_rows(&c.gm_b, &gid), vec![row("joined", &b, &a)]);
+
+    // Перевыпуск отставшего — не событие для ленты.
+    c.gm_a.on_resync_request(c.b_key, &gid);
+    pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, _| false);
+    assert_eq!(
+        system_rows(&c.gm_a, &gid).len(),
+        2,
+        "resync без строк у админа"
+    );
+    assert_eq!(
+        system_rows(&c.gm_b, &gid).len(),
+        1,
+        "resync без строк у участника"
+    );
+    assert!(c.gm_a.send_text(&gid, "после resync"));
+    assert!(pump_until(
+        &mut c.gm_a,
+        &c.a_rx,
+        &mut c.gm_b,
+        &c.b_rx,
+        |_, b| { has_text(b, &gid, "после resync") }
+    ));
+
+    assert!(c.gm_a.remove_member(&gid, c.b_key));
+    assert_eq!(
+        system_rows(&c.gm_a, &gid).last(),
+        Some(&row("left", &b, ""))
+    );
 }

@@ -154,7 +154,7 @@ pub enum Inbound {
     /// Имя группы (служебное): верхний слой обновляет название, без показа в чате.
     Name { name: String },
     /// Изменён состав группы (применён Commit), его применил actor.
-    Membership { actor: PeerKey },
+    Membership { actor: PeerKey, added: Vec<PeerKey>, removed: Vec<PeerKey> },
     /// Нас удалили из группы (ADR-004) — верхний слой забывает группу локально.
     SelfRemoved,
     /// Мы отстали (пропущен Commit / удалён секрет эпохи) — верхний слой должен
@@ -240,6 +240,19 @@ impl GroupChat {
             let _ = self.messenger.send_group(&pk, &commit);
         }
         let _ = self.messenger.send_group(&new_peer, &welcome);
+        Ok(())
+    }
+
+    /// Перевыпустить отставшего участника (ADR-004, resync) одним коммитом: Commit —
+    /// остальным, Welcome — ему. Остальные видят смену эпохи, а не «вышел и вошёл».
+    pub fn readd_member(&mut self, peer: PeerKey, key_package: &[u8]) -> Result<(), GroupChatError> {
+        let (commit, welcome) = self.member.swap(key_package, &peer)?;
+        for pk in self.others() {
+            if pk != peer {
+                let _ = self.messenger.send_group(&pk, &commit);
+            }
+        }
+        let _ = self.messenger.send_group(&peer, &welcome);
         Ok(())
     }
 
@@ -416,8 +429,12 @@ impl GroupChat {
                     },
                 })
             }
-            Ok(Incoming::MembershipChanged { actor }) => {
-                Ok(Inbound::Membership { actor: to_key(actor) })
+            Ok(Incoming::MembershipChanged { actor, added, removed }) => {
+                Ok(Inbound::Membership {
+                    actor: to_key(actor),
+                    added: added.into_iter().map(to_key).collect(),
+                    removed: removed.into_iter().map(to_key).collect(),
+                })
             }
             Ok(Incoming::SelfRemoved) => Ok(Inbound::SelfRemoved),
             // Ротация ключа и служебное — молча.

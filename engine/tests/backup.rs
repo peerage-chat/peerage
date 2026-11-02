@@ -330,12 +330,13 @@ fn group_history_survives_backup_as_an_archive() {
 
     let file = tmpdir("gfile").join("groups.peerage");
     let out = a.backup_export(&file, all(), "пароль").unwrap();
-    assert_eq!(out.group_messages, 1, "групповое сообщение попало в копию");
+    // Строка «Группа создана» + сообщение: системные строки — часть истории.
+    assert_eq!(out.group_messages, 2, "история группы попала в копию");
 
     // Чистое устройство: ни группы, ни истории.
     let b = start(&net, id(88), tmpdir("gdst"));
     let got = b.backup_import(&file, "пароль").unwrap();
-    assert_eq!(got.group_messages, 1);
+    assert_eq!(got.group_messages, 2);
 
     let hist = b.group_history_json(&gid);
     assert!(

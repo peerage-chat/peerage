@@ -394,6 +394,9 @@ private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose:
 @Composable
 private fun chatPreview(model: AppModel, row: ChatRowUi): String {
     val s = row.summary ?: return stringResource(R.string.chats_preview_empty)
+    // Системная строка — та же, что в ленте. Автором её не подписываем: она и так
+    // говорит о ком-то в третьем лице.
+    if (s.lastSystem) return groupSystemLine(model, s.lastKind, s.lastSender, s.lastText).text
     val body = when {
         s.lastKind == "deleted" -> stringResource(R.string.msg_deleted)
         s.lastText.isNotBlank() -> Mentions.plain(s.lastText, s.lastMentions, model::mentionName)
@@ -403,9 +406,6 @@ private fun chatPreview(model: AppModel, row: ChatRowUi): String {
         s.lastKind == "file" -> stringResource(R.string.chats_preview_file)
         else -> stringResource(R.string.chats_preview_empty)
     }.replace('\n', ' ')
-    // Системную строку («Артём добавил Веру») подписывать автором незачем — она и
-    // так говорит о ком-то в третьем лице.
-    if (s.lastSystem) return body
     val who = when {
         s.lastMine -> stringResource(R.string.chats_preview_you)
         row.group -> model.peerName(s.lastSender) + ":"
