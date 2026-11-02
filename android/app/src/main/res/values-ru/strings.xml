@@ -786,6 +786,17 @@
     <string name="select_hint">Нажатие на сообщение добавляет его к выбранным</string>
     <string name="act_save">В «Сохранённое»</string>
     <string name="act_select">Выбрать</string>
+    <string name="react_title">Реакции</string>
+    <string name="react_all">Все %1$d</string>
+    <string name="react_hint">Нажатие на свою реакцию снимает её</string>
+    <string name="react_with">Реакция %1$s</string>
+    <string name="react_more">Другая реакция</string>
+    <plurals name="react_chip">
+        <item quantity="one">%1$s, %2$d реакция</item>
+        <item quantity="few">%1$s, %2$d реакции</item>
+        <item quantity="many">%1$s, %2$d реакций</item>
+        <item quantity="other">%1$s, %2$d реакции</item>
+    </plurals>
     <string name="act_status">%1$s · %2$s</string>
     <string name="act_delivered">Доставлено</string>
     <string name="act_sent">Отправлено</string>

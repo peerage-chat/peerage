@@ -562,6 +562,18 @@ class AppModel private constructor() {
             .map { it.toModel() }
     }
 
+    /** Моя реакция на сообщение (null — не ставил). */
+    fun myReaction(msg: Message): String? = me?.pubkey?.let { k -> msg.reactions.firstOrNull { k in it.who }?.emoji }
+
+    /**
+     * Реакция на сообщение: у человека одна — та же снимает, другая заменяет. Решает
+     * клиент, движок хранит последнее слово; набор вернётся событием `reactions`.
+     */
+    fun react(chat: ChatTarget, msg: Message, emoji: String) {
+        val next = if (myReaction(msg) == emoji) "" else emoji
+        ops.execute { Native.react(sessionPtr, chat.id, chat.group, msg.id, msg.sender, next) }
+    }
+
     /** Закрепить/открепить выделенное сообщение. */
     fun setPinned(chat: String, group: Boolean, msg: Message, on: Boolean) = ops.execute {
         Native.pinMessage(sessionPtr, chat, group, msg.id, msg.sender, on)
@@ -2049,6 +2061,10 @@ class AppModel private constructor() {
             is EngineEvent.PinsChanged -> refreshPins(ev.chat, groups.any { it.gid == ev.chat })
             // Правка приходит и на свои сообщения (эхо движка), и на чужие: меняем
             // текст на месте, чтобы не перечитывать всю ленту.
+            is EngineEvent.Reactions -> messages[chatKey(ev.chat, ev.group)]?.let { list ->
+                val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
+                if (i >= 0) list[i] = list[i].copy(reactions = ev.reactions)
+            }
             is EngineEvent.MessageEdited -> {
                 val stamp = System.currentTimeMillis() / 1000
                 messages[chatKey(ev.chat, group = false)]?.let { list ->

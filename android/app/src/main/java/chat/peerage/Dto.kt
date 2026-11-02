@@ -83,6 +83,7 @@ internal data class MessageDto(
     @SerialName("thumb_id") val thumbId: String = "",
     val downloaded: Boolean = false,
     val mentions: List<Mention> = emptyList(),
+    val reactions: List<Reaction> = emptyList(),
 )
 
 /**
@@ -321,6 +322,7 @@ internal fun MessageDto.toModel() = Message(
     thumbId = thumbId,
     downloaded = downloaded,
     mentions = mentions,
+    reactions = reactions,
 )
 
 // ── События ─────────────────────────────────────────────────────────────────
@@ -391,6 +393,17 @@ internal sealed interface EngineEvent {
     @Serializable
     @SerialName("pins_changed")
     data class PinsChanged(val chat: String) : EngineEvent
+
+    /** Реакции под сообщением `(id, sender)` изменились: новый набор целиком. */
+    @Serializable
+    @SerialName("reactions")
+    data class Reactions(
+        val chat: String,
+        val group: Boolean = false,
+        val id: Long,
+        val sender: String,
+        val reactions: List<Reaction> = emptyList(),
+    ) : EngineEvent
 
     /** Сообщение исправлено автором — заменить текст в ленте на месте. */
     @Serializable

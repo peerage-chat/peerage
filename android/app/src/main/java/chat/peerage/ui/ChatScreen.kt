@@ -1290,6 +1290,7 @@ internal fun MessageBubble(
                     if (photoBubble) MetaOnPhoto { meta() } else meta()
                 }
             }
+            if (m.reactions.isNotEmpty() && chatId != null) ReactionChips(model, m, ChatTarget(chatId, group))
             if (failed) FailedLine { chatId?.let { model.retry(it, m) } }
         }
     }

@@ -126,13 +126,13 @@ internal val EmojiSet: List<EmojiCategory> = listOf(
  *
  * @param recent последние использованные символы (первым — самый свежий)
  * @param onPick вставить символ в текущую позицию курсора
- * @param onBackspace удалить один символ перед курсором
+ * @param onBackspace удалить один символ перед курсором; null — забоя нет (выбор реакции)
  */
 @Composable
 internal fun EmojiPanel(
     recent: List<String>,
     onPick: (String) -> Unit,
-    onBackspace: () -> Unit,
+    onBackspace: (() -> Unit)?,
     onClose: () -> Unit = {},
 ) {
     var category by remember { mutableStateOf(0) }
@@ -216,16 +216,18 @@ internal fun EmojiPanel(
                 }
             }
             // Забой: системная клавиатура сейчас скрыта, а эмодзи ставят подряд и промахиваются.
-            Box(
-                Modifier.size(44.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { onBackspace() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Backspace,
-                    stringResource(R.string.emoji_backspace),
-                    tint = HoloSecondary,
-                    modifier = Modifier.size(Tokens.Size.iconM),
-                )
+            if (onBackspace != null) {
+                Box(
+                    Modifier.size(44.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { onBackspace() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Backspace,
+                        stringResource(R.string.emoji_backspace),
+                        tint = HoloSecondary,
+                        modifier = Modifier.size(Tokens.Size.iconM),
+                    )
+                }
             }
         }
     }

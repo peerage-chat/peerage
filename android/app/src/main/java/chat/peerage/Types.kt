@@ -101,6 +101,8 @@ data class Message(
     val row: Long = 0,
     /** Упоминания поверх участков [text] (только группы), см. [Mention]. */
     val mentions: List<Mention> = emptyList(),
+    /** Реакции под сообщением: эмодзи по первому появлению, у каждого — кто поставил. */
+    val reactions: List<Reaction> = emptyList(),
 ) {
     /** Отозвано «у всех»: на месте — строка «Сообщение удалено», содержимого нет. */
     val deleted: Boolean get() = kind == "deleted"
@@ -117,6 +119,10 @@ data class Message(
  */
 @kotlinx.serialization.Serializable
 data class Mention(val at: Int, val len: Int, val key: String)
+
+/** Реакция под сообщением: эмодзи и кто её поставил (ключи, по порядку постановки). */
+@kotlinx.serialization.Serializable
+data class Reaction(val emoji: String, val who: List<String>)
 
 /** Чат как адресат пересылки: личный (ключ собеседника) или группа (gid). */
 data class ChatTarget(val id: String, val group: Boolean, val title: String = "")

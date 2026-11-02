@@ -280,6 +280,19 @@ object Native {
         mentionsJson: String,
     ): Int
 
+    /**
+     * Поставить, заменить или снять (`emoji` пустой) свою реакцию на сообщение
+     * `(msgId, senderHex)`. Новый набор приходит событием `reactions`.
+     */
+    external fun react(
+        sessionPtr: Long,
+        chatHex: String,
+        isGroup: Boolean,
+        msgId: Long,
+        senderHex: String,
+        emoji: String,
+    ): Boolean
+
     /** Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми. */
     external fun pinned(sessionPtr: Long, chatHex: String, isGroup: Boolean): String
 

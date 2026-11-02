@@ -51,7 +51,8 @@ import kotlin.math.roundToInt
  * Меню у пузыря (app-ui.md → «Действия», макет `chatact/ActMenu`): фон затемнён, пузырь
  * остаётся ярким на своём месте, под ним (не влезает — над ним) меню со статусом сверху.
  * Живёт над всем экраном, у корня: пузырь сообщает, где он, через [AppModel.bubbleActions].
- * Полоса реакций над пузырём — вместе с реакциями (шаг 2.7).
+ * Над пузырём — полоса реакций (кроме «Сохранённого»); «+» в ней открывает полную панель
+ * эмодзи, тоже после того как меню закрылось.
  *
  * Удаление из меню — одного сообщения, без режима выбора: шторка держится здесь же, после
  * того как меню закрылось.
@@ -59,6 +60,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun BubbleMenuHost(model: AppModel) {
     var deleting by remember { mutableStateOf<BubbleActions?>(null) }
+    var picking by remember { mutableStateOf<BubbleActions?>(null) }
     model.bubbleActions?.let { t ->
         if (t.msg.deleted) {
             // У «Сообщение удалено» одно действие — убрать у себя: меню не нужно.
@@ -67,11 +69,25 @@ internal fun BubbleMenuHost(model: AppModel) {
                 deleting = t
             }
         } else {
-            BubbleMenuOverlay(model, t) {
-                model.bubbleActions = null
-                deleting = t
-            }
+            BubbleMenuOverlay(
+                model,
+                t,
+                onDelete = {
+                    model.bubbleActions = null
+                    deleting = t
+                },
+                onMoreReactions = {
+                    model.bubbleActions = null
+                    picking = t
+                },
+            )
         }
+    }
+    picking?.let { t ->
+        ReactionPicker(model, onPick = { e ->
+            picking = null
+            model.react(t.chat, t.msg, e)
+        }, onClose = { picking = null })
     }
     deleting?.let { t ->
         DeleteSheet(model, t.chat.id, t.chat.group, listOf(MsgRef(t.msg.id, t.msg.sender))) { deleting = null }
@@ -79,7 +95,7 @@ internal fun BubbleMenuHost(model: AppModel) {
 }
 
 @Composable
-private fun BubbleMenuOverlay(model: AppModel, t: BubbleActions, onDelete: () -> Unit) {
+private fun BubbleMenuOverlay(model: AppModel, t: BubbleActions, onDelete: () -> Unit, onMoreReactions: () -> Unit) {
     val close = { model.bubbleActions = null }
     BackHandler(onBack = close)
     // Появление — короткое проявление и чуть заметный рост меню от пузыря: меню пришло
@@ -99,15 +115,31 @@ private fun BubbleMenuOverlay(model: AppModel, t: BubbleActions, onDelete: () ->
             }
             .pointerInput(t) { detectTapGestures { close() } },
     ) {
-        NearBubble(t.bounds, t.msg.mine) {
-            MenuSurface(
-                Modifier.graphicsLayer {
-                    val s = 0.92f + 0.08f * shown.value
-                    scaleX = s
-                    scaleY = s
-                    transformOrigin = TransformOrigin(if (t.msg.mine) 1f else 0f, 0f)
-                },
-            ) { BubbleMenuItems(model, t, close, onDelete) }
+        val grow = { originY: Float ->
+            Modifier.graphicsLayer {
+                val s = 0.92f + 0.08f * shown.value
+                scaleX = s
+                scaleY = s
+                transformOrigin = TransformOrigin(if (t.msg.mine) 1f else 0f, originY)
+            }
+        }
+        val strip: (@Composable () -> Unit)? = if (canReact(model, t.chat)) {
+            {
+                ReactionStrip(
+                    model.myReaction(t.msg),
+                    onPick = { e ->
+                        close()
+                        model.react(t.chat, t.msg, e)
+                    },
+                    onMore = onMoreReactions,
+                    modifier = grow(1f),
+                )
+            }
+        } else {
+            null
+        }
+        NearBubble(t.bounds, t.msg.mine, strip) {
+            MenuSurface(grow(0f)) { BubbleMenuItems(model, t, close, onDelete) }
         }
     }
 }
@@ -192,31 +224,55 @@ private fun shortWhen(time: Long): String {
 }
 
 /**
- * Раскладка меню у пузыря: по ведущему краю пузыря (свой — справа, чужой — слева), под ним;
- * не влезает снизу — над ним; не влезает нигде (пузырь во весь экран) — у нижнего края.
+ * Раскладка у пузыря: всё по ведущему краю пузыря (свой — справа, чужой — слева). Полоса
+ * реакций — над пузырём (не влезает — под ним). Меню — под пузырём и полосой; не влезает
+ * снизу — над ними; не влезает нигде (пузырь во весь экран) — у нижнего края.
  */
 @Composable
-private fun NearBubble(bounds: Rect, mine: Boolean, content: @Composable () -> Unit) {
+private fun NearBubble(bounds: Rect, mine: Boolean, strip: (@Composable () -> Unit)?, menu: @Composable () -> Unit) {
     val density = LocalDensity.current
     val insetTop = WindowInsets.systemBars.getTop(density)
     val insetBottom = WindowInsets.systemBars.getBottom(density)
     val gap = with(density) { Tokens.Space.s.roundToPx() }
+    val stripGap = with(density) { Tokens.Space.m.roundToPx() }
     val edge = with(density) { Tokens.Space.m.roundToPx() }
-    Layout(content, Modifier.fillMaxSize()) { ms, c ->
-        val p = ms.first().measure(c.copy(minWidth = 0, minHeight = 0))
+    Layout({
+        menu()
+        strip?.invoke()
+    }, Modifier.fillMaxSize()) { ms, c ->
+        val loose = c.copy(minWidth = 0, minHeight = 0)
+        val p = ms[0].measure(loose)
+        val s = ms.getOrNull(1)?.measure(loose)
         layout(c.maxWidth, c.maxHeight) {
-            val maxX = (c.maxWidth - p.width - edge).coerceAtLeast(edge)
-            val x = (if (mine) bounds.right.roundToInt() - p.width else bounds.left.roundToInt()).coerceIn(edge, maxX)
+            val xOf = { w: Int ->
+                val maxX = (c.maxWidth - w - edge).coerceAtLeast(edge)
+                (if (mine) bounds.right.roundToInt() - w else bounds.left.roundToInt()).coerceIn(edge, maxX)
+            }
             val minY = insetTop + edge
-            val maxY = (c.maxHeight - insetBottom - edge - p.height).coerceAtLeast(minY)
-            val below = bounds.bottom.roundToInt() + gap
-            val above = bounds.top.roundToInt() - gap - p.height
+            val bottomY = c.maxHeight - insetBottom - edge
+            var top = bounds.top.roundToInt()
+            var bottom = bounds.bottom.roundToInt()
+            if (s != null) {
+                val above = top - stripGap - s.height
+                val below = bottom + stripGap
+                val y = when {
+                    above >= minY -> above
+                    below + s.height <= bottomY -> below
+                    else -> minY
+                }
+                s.place(xOf(s.width), y)
+                top = minOf(top, y)
+                bottom = maxOf(bottom, y + s.height)
+            }
+            val maxY = (bottomY - p.height).coerceAtLeast(minY)
+            val below = bottom + gap
+            val above = top - gap - p.height
             val y = when {
                 below <= maxY -> below
                 above >= minY -> above
                 else -> maxY
             }
-            p.place(x, y)
+            p.place(xOf(p.width), y)
         }
     }
 }
