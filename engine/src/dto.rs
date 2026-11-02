@@ -154,6 +154,12 @@ pub enum UiEvent {
         peer: String,
         id: u64,
     },
+    /// Своё сообщение выброшено из досылки (срок, сброс очереди) — «не доставлено»,
+    /// его можно повторить.
+    Failed {
+        peer: String,
+        id: u64,
+    },
     ContactRequest {
         peer: String,
         new: bool,

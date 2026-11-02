@@ -375,7 +375,7 @@
         <item quantity="one">%d message waiting</item>
         <item quantity="other">%d messages waiting</item>
     </plurals>
-    <string name="outbox_lead_hint">They will go out as soon as the recipient comes online. There is no server to hold them for us — so the queue is never trimmed by age or size.</string>
+    <string name="outbox_lead_hint">They go out as soon as the recipient comes online. There is no server to hold them, so the queue to contacts is never trimmed by age or size.</string>
     <string name="outbox_warn_title">The queue has grown</string>
     <string name="outbox_warn_hint">Over a thousand undelivered — usually that means the other side has been away for a while. They take up space on this device.</string>
     <string name="outbox_warn_off">Stop reminding me</string>
@@ -388,24 +388,24 @@
     <string name="outbox_open_chat">Open chat</string>
     <string name="outbox_clear_one">Clear queue</string>
     <string name="outbox_clear_one_title">Clear the queue for %1$s?</string>
-    <string name="outbox_clear_one_body">These are YOUR messages that have not reached them. There will be nothing left to restore or resend — no copy exists anywhere.</string>
+    <string name="outbox_clear_one_body">These messages stop being sent. They stay in the chat marked “Not delivered”, and each can be sent again with “Retry”.</string>
     <string name="outbox_sum_count">Messages</string>
     <string name="outbox_sum_bytes">Size</string>
     <string name="outbox_sum_oldest">Oldest</string>
     <string name="outbox_clear_ok">Clear</string>
     <string name="outbox_clear_all">Clear everything</string>
-    <string name="outbox_clear_all_hint">Deletes YOUR messages that have not reached anyone yet. This cannot be undone.</string>
+    <string name="outbox_clear_all_hint">Undelivered messages stop being sent and stay in their chats marked “Not delivered”.</string>
     <string name="outbox_clear_all_title">Clear the whole queue?</string>
     <plurals name="outbox_clear_all_body">
-        <item quantity="one">%d recipient is waiting. Everything not yet delivered will be gone for good.</item>
-        <item quantity="other">%d recipients are waiting. Everything not yet delivered will be gone for good.</item>
+        <item quantity="one">%d recipient is waiting. Undelivered messages stay in their chats marked “Not delivered”.</item>
+        <item quantity="other">%d recipients are waiting. Undelivered messages stay in their chats marked “Not delivered”.</item>
     </plurals>
     <string name="outbox_more">and %1$d more</string>
     <plurals name="outbox_clear_all_final">
-        <item quantity="one">%d message will be lost</item>
-        <item quantity="other">%d messages will be lost</item>
+        <item quantity="one">%d message will not be delivered</item>
+        <item quantity="other">%d messages will not be delivered</item>
     </plurals>
-    <string name="outbox_hold_hint">There is no undo. Hold the button to confirm.</string>
+    <string name="outbox_hold_hint">Sending again works one message at a time, in each chat. Hold the button to confirm.</string>
     <string name="common_hold">Hold…</string>
     <string name="common_next">Next</string>
     <plurals name="ago_days">
@@ -747,6 +747,7 @@
     <string name="act_today">today, %1$s</string>
     <string name="act_yesterday">yesterday, %1$s</string>
     <string name="act_on_day">%1$s, %2$s</string>
+    <string name="act_retry">Retry</string>
     <string name="act_received">Received</string>
     <string name="delete_note_all">“For everyone” asks the others to delete them too. Messages already read or saved can’t be recalled.</string>
     <plurals name="delete_title">

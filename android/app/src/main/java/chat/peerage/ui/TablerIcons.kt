@@ -453,6 +453,10 @@ val TablerIcons.CircleCheck: ImageVector by lazy {
     tabler("circle-check", "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0", "M9 12l2 2l4 -4")
 }
 
+val TablerIcons.AlertCircle: ImageVector by lazy {
+    tabler("alert-circle", "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0", "M12 8v4", "M12 16h.01")
+}
+
 val TablerIcons.X: ImageVector by lazy {
     tabler("x", "M18 6l-12 12", "M6 6l12 12")
 }

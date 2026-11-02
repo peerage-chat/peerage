@@ -225,3 +225,46 @@ fn group_message_survives_member_offline() {
     a.shutdown();
     b2.shutdown();
 }
+
+/// 2.4: сброшенное из очереди своё сообщение — «не доставлено», а не вечное «в очереди»;
+/// «Повторить» возвращает его в очередь с тем же id, и оно доходит.
+#[test]
+fn cleared_message_fails_then_retry_delivers() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(87), id(88));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let b_dir = tmpdir("b");
+    let (a, b1, _) = pair(&net, (a_id, tmpdir("a")), (b_id.clone(), b_dir.clone()));
+
+    b1.shutdown();
+    drop(b1);
+    let late = a.send_text(&b_key, "late").unwrap() as u64;
+    assert!(a.clear_outbox_for(&b_key) >= 1, "очередь сброшена");
+    let status = || find(&a, &b_key, "late").and_then(|m| m["status"].as_str().map(str::to_string));
+    assert_eq!(
+        status().as_deref(),
+        Some("failed"),
+        "сброшенное — не доставлено"
+    );
+
+    let b2 = start(&net, b_id, b_dir);
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        find(&b2, &a_key, "late").is_none(),
+        "сброшенное не досылается"
+    );
+
+    assert!(a.retry_message(&b_key, late), "повтор принят");
+    assert_ne!(status().as_deref(), Some("failed"));
+    assert!(
+        wait(15, || find(&b2, &a_key, "late").is_some()),
+        "после повтора дошло"
+    );
+    assert!(
+        wait(10, || status().as_deref() == Some("delivered")),
+        "и подтверждено"
+    );
+    assert!(!a.retry_message(&b_key, late), "повторять уже нечего");
+    a.shutdown();
+    b2.shutdown();
+}

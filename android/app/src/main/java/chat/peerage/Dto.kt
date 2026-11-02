@@ -366,6 +366,11 @@ internal sealed interface EngineEvent {
     @SerialName("undelivered")
     data class Undelivered(val peer: String, val id: Long) : EngineEvent
 
+    /** Своё сообщение выброшено из досылки (срок, сброс очереди) — «не доставлено». */
+    @Serializable
+    @SerialName("failed")
+    data class Failed(val peer: String, val id: Long) : EngineEvent
+
     @Serializable
     @SerialName("contact_request")
     data class ContactRequestEv(val peer: String, val new: Boolean = false) : EngineEvent

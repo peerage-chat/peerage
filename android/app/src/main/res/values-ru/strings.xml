@@ -377,7 +377,7 @@
         <item quantity="many">%d сообщений ждут</item>
         <item quantity="other">%d сообщения ждут</item>
     </plurals>
-    <string name="outbox_lead_hint">Они уйдут, как только получатель появится в сети. Сервера, который подержит их за нас, нет — поэтому очередь не чистится ни по сроку, ни по объёму.</string>
+    <string name="outbox_lead_hint">Они уйдут, как только получатель появится в сети. Сервера, который подержал бы их, нет — поэтому очередь к контактам не чистится ни по сроку, ни по объёму.</string>
     <string name="outbox_warn_title">Очередь разрослась</string>
     <string name="outbox_warn_hint">Больше тысячи неотправленных — обычно так бывает, если собеседник давно не появлялся. Место они занимают на этом устройстве.</string>
     <string name="outbox_warn_off">Не напоминать об этом</string>
@@ -390,28 +390,28 @@
     <string name="outbox_open_chat">Открыть чат</string>
     <string name="outbox_clear_one">Очистить</string>
     <string name="outbox_clear_one_title">Очистить очередь %1$s?</string>
-    <string name="outbox_clear_one_body">Это ВАШИ сообщения, которые он ещё не получил. Восстановить или отправить заново будет нечем — копии нигде нет.</string>
+    <string name="outbox_clear_one_body">Эти сообщения перестанут отправляться. В чате они останутся с пометкой «Не доставлено» — каждое можно отправить заново кнопкой «Повторить».</string>
     <string name="outbox_sum_count">Сообщений</string>
     <string name="outbox_sum_bytes">Объём</string>
     <string name="outbox_sum_oldest">Самое старое</string>
     <string name="outbox_clear_ok">Очистить</string>
     <string name="outbox_clear_all">Очистить всё</string>
-    <string name="outbox_clear_all_hint">Удаляются ВАШИ сообщения, которые ещё не дошли ни до кого. Отменить нельзя.</string>
+    <string name="outbox_clear_all_hint">Недоставленное перестанет отправляться и останется в чатах с пометкой «Не доставлено».</string>
     <string name="outbox_clear_all_title">Очистить всю очередь?</string>
     <plurals name="outbox_clear_all_body">
-        <item quantity="one">Доставки ждёт %d получатель. Всё недоставленное пропадёт безвозвратно.</item>
-        <item quantity="few">Доставки ждут %d получателя. Всё недоставленное пропадёт безвозвратно.</item>
-        <item quantity="many">Доставки ждут %d получателей. Всё недоставленное пропадёт безвозвратно.</item>
-        <item quantity="other">Доставки ждут %d получателя. Всё недоставленное пропадёт безвозвратно.</item>
+        <item quantity="one">Доставки ждёт %d получатель. Недоставленное останется в чатах с пометкой «Не доставлено».</item>
+        <item quantity="few">Доставки ждут %d получателя. Недоставленное останется в чатах с пометкой «Не доставлено».</item>
+        <item quantity="many">Доставки ждут %d получателей. Недоставленное останется в чатах с пометкой «Не доставлено».</item>
+        <item quantity="other">Доставки ждут %d получателя. Недоставленное останется в чатах с пометкой «Не доставлено».</item>
     </plurals>
     <string name="outbox_more">и ещё %1$d</string>
     <plurals name="outbox_clear_all_final">
-        <item quantity="one">%d сообщение будет потеряно</item>
-        <item quantity="few">%d сообщения будут потеряны</item>
-        <item quantity="many">%d сообщений будут потеряны</item>
-        <item quantity="other">%d сообщения будут потеряны</item>
+        <item quantity="one">%d сообщение не будет доставлено</item>
+        <item quantity="few">%d сообщения не будут доставлены</item>
+        <item quantity="many">%d сообщений не будут доставлены</item>
+        <item quantity="other">%d сообщения не будут доставлены</item>
     </plurals>
-    <string name="outbox_hold_hint">Отмены не будет. Удерживайте кнопку, чтобы подтвердить.</string>
+    <string name="outbox_hold_hint">Отправить заново можно только по одному сообщению, в каждом чате. Удерживайте кнопку, чтобы подтвердить.</string>
     <string name="common_hold">Удерживайте…</string>
     <string name="common_next">Далее</string>
     <plurals name="ago_days">
@@ -779,6 +779,7 @@
     <string name="act_today">сегодня, %1$s</string>
     <string name="act_yesterday">вчера, %1$s</string>
     <string name="act_on_day">%1$s, %2$s</string>
+    <string name="act_retry">Повторить</string>
     <string name="act_received">Получено</string>
     <string name="delete_note_all">«У всех» — просьба удалить их и у остальных. Если сообщения уже прочитаны или сохранены, это не отменить.</string>
     <plurals name="delete_title">

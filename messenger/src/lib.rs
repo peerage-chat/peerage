@@ -851,6 +851,21 @@ impl Messenger {
         }
     }
 
+    /// Перестать досылать `id` пиру `peer`, НЕ трогая офлайн-очередь: там запись уже
+    /// помечена выброшенной и ждёт «Повторить» ([`Self::resume`]).
+    pub fn hold(&self, peer: &PeerKey, id: u64) {
+        let mut pending = self.shared.pending.lock().unwrap();
+        if pending.get(&id).is_some_and(|p| p.peer == *peer) {
+            pending.remove(&id);
+        }
+    }
+
+    /// Дотянуть очередь пира заново — после того как в неё вернули выброшенное.
+    pub fn resume(&self, peer: &PeerKey) {
+        self.shared.track(peer);
+        self.shared.pump(peer);
+    }
+
     /// С кем держим связь: пробы офлайн-пиров с backoff, keepalive онлайн-пиров,
     /// ответ на их Ping. Кто выпал из набора (удалён, заблокирован, исключён из
     /// группы), тот перестаёт получать от нас что-либо служебное сразу.

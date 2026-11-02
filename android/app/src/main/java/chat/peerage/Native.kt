@@ -232,6 +232,9 @@ object Native {
     /** Сбросить очередь недоставленного пиру (явное действие). Возвращает удалённых. */
     external fun clearOutboxFor(sessionPtr: Long, keyHex: String): Int
 
+    /** «Повторить» не доставленное: вернуть в очередь с тем же id. false — нечего повторять. */
+    external fun retryMessage(sessionPtr: Long, keyHex: String, id: Long): Boolean
+
     /** Очистить историю личного чата у себя: сообщения, закрепы, очередь отправки. */
     external fun clearDmHistory(sessionPtr: Long, keyHex: String)
 

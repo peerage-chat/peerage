@@ -1230,6 +1230,22 @@ pub extern "system" fn Java_chat_peerage_Native_clearOutboxFor<'local>(
     })
 }
 
+/// «Повторить» не доставленное сообщение: вернуть его в очередь с тем же id.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_retryMessage<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+    id: jlong,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let key = parse_key(&jstr(&mut env, &key_hex));
+        if key.is_some_and(|k| e.retry_message(&k, id as u64)) { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
 /// Очистить историю личного чата у себя (сообщения, закрепы, очередь отправки).
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_clearDmHistory<'local>(

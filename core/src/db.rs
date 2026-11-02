@@ -121,7 +121,10 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             msg_id       INTEGER NOT NULL,
             payload_type TEXT    NOT NULL,
             payload      BLOB    NOT NULL,
-            created_at   INTEGER NOT NULL
+            created_at   INTEGER NOT NULL,
+            -- 1 — выброшено из досылки (срок, сброс пользователем), но сообщение
+            -- можно «Повторить»: запись с тем же msg_id вернётся в очередь.
+            failed       INTEGER NOT NULL DEFAULT 0
         );
 
         -- Гейт контактов (замена TOFU-автодобавления): первое сообщение незнакомца
@@ -238,6 +241,9 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             requested  INTEGER NOT NULL
         );
     ")?;
+    // Колонки, появившиеся после первых установок: на старой базе ALTER добавит их
+    // один раз, на новой (колонка уже в CREATE) — тихо ничего не сделает.
+    let _ = conn.execute("ALTER TABLE outbox ADD COLUMN failed INTEGER NOT NULL DEFAULT 0", []);
     // Полнотекстовый индекс переписки. `content='chat_messages'` — индекс без копии
     // текста: сами строки остаются в основной таблице, FTS хранит только словарь.
     // Всё в `let _`: на сборке SQLite без FTS5 поиск обязан деградировать до LIKE,

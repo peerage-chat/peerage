@@ -7,6 +7,12 @@
 //! и то, что нужно движку и UI: сроки по тиру, статистика, ручной сброс.
 //!
 //! Хранит непрозрачные `(payload_type, payload)` — кодирование выбирает мессенджер.
+//!
+//! Выброшенное из досылки (срок по тиру, сброс пользователем) не стирается, если это
+//! своё сообщение переписки: запись помечается `failed` и больше не уходит, но
+//! «Повторить» возвращает её в очередь с тем же `msg_id` — получатель дедуплицирует,
+//! а вложение не нужно собирать заново. Тело записи мало: у вложения это ссылка на
+//! блоб и миниатюра, сами байты живут отдельно.
 
 use crate::budget::Tier;
 use crate::db::{self, Db};
@@ -70,7 +76,7 @@ impl OutboxStore {
         let conn = db::lock(&self.db);
         let mut stmt = conn.prepare(
             "SELECT id, peer, msg_id, payload_type, payload, created_at FROM outbox
-             WHERE peer = ?1 ORDER BY id LIMIT ?2",
+             WHERE peer = ?1 AND failed = 0 ORDER BY id LIMIT ?2",
         )?;
         let rows = stmt
             .query_map(rusqlite::params![peer.as_slice(), limit as i64], |row| {
@@ -91,7 +97,7 @@ impl OutboxStore {
     /// Кому вообще что-то ждёт — с них начинается досылка на старте.
     pub fn peers(&self) -> Result<Vec<[u8; 32]>, StoreError> {
         let conn = db::lock(&self.db);
-        let mut stmt = conn.prepare("SELECT DISTINCT peer FROM outbox")?;
+        let mut stmt = conn.prepare("SELECT DISTINCT peer FROM outbox WHERE failed = 0")?;
         let rows = stmt
             .query_map([], |row| row.get::<_, Vec<u8>>(0))?
             .filter_map(|r| r.ok().and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok()))
@@ -115,8 +121,8 @@ impl OutboxStore {
         const COLS: &str = "SELECT id, peer, msg_id, payload_type, payload, created_at FROM outbox";
         match peer {
             Some(p) => {
-                let mut stmt =
-                    conn.prepare(&format!("{COLS} WHERE peer = ?1 ORDER BY created_at, id"))?;
+                let mut stmt = conn
+                    .prepare(&format!("{COLS} WHERE peer = ?1 AND failed = 0 ORDER BY created_at, id"))?;
                 let rows = stmt
                     .query_map(rusqlite::params![p.as_slice()], map)?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -124,7 +130,7 @@ impl OutboxStore {
             }
             None => {
                 let mut stmt =
-                    conn.prepare(&format!("{COLS} ORDER BY created_at, id"))?;
+                    conn.prepare(&format!("{COLS} WHERE failed = 0 ORDER BY created_at, id"))?;
                 let rows = stmt.query_map([], map)?.collect::<Result<Vec<_>, _>>()?;
                 Ok(rows)
             }
@@ -137,6 +143,22 @@ impl OutboxStore {
         Ok(())
     }
 
+    /// Выбросить запись из досылки, оставив её для «Повторить».
+    pub fn mark_failed(&self, id: i64) -> Result<(), StoreError> {
+        db::lock(&self.db).execute("UPDATE outbox SET failed = 1 WHERE id = ?1", rusqlite::params![id])?;
+        Ok(())
+    }
+
+    /// «Повторить»: вернуть выброшенную запись в очередь. Срок по тиру считается
+    /// заново — с момента повтора. false — такой выброшенной записи нет.
+    pub fn retry(&self, peer: &[u8; 32], msg_id: u64, now: i64) -> Result<bool, StoreError> {
+        let n = db::lock(&self.db).execute(
+            "UPDATE outbox SET failed = 0, created_at = ?3 WHERE peer = ?1 AND msg_id = ?2 AND failed = 1",
+            rusqlite::params![peer.as_slice(), msg_id as i64, now],
+        )?;
+        Ok(n > 0)
+    }
+
     /// Убрать запись по (peer, msg_id) — вызывается на Ack доставки.
     pub fn remove_by_msg(&self, peer: &[u8; 32], msg_id: u64) -> Result<(), StoreError> {
         db::lock(&self.db).execute(
@@ -146,9 +168,8 @@ impl OutboxStore {
         Ok(())
     }
 
-    /// Удалить всю очередь пира — например, когда пользователь сам решил её сбросить
-    /// по предупреждению о разросшейся очереди. Возвращает число удалённых.
-    /// (Автоматического вытеснения НЕТ: свои сообщения не выбрасываем молча.)
+    /// Стереть все записи пира, и ждущие, и выброшенные, — вместе с перепиской
+    /// («Очистить историю»). Возвращает число удалённых.
     pub fn clear_peer(&self, peer: &[u8; 32]) -> Result<usize, StoreError> {
         let n = db::lock(&self.db).execute(
             "DELETE FROM outbox WHERE peer = ?1",
@@ -160,7 +181,7 @@ impl OutboxStore {
     /// Число ожидающих записей (метрика/тесты).
     pub fn count(&self) -> Result<i64, StoreError> {
         let n = db::lock(&self.db)
-            .query_row("SELECT COUNT(*) FROM outbox", [], |r| r.get(0))?;
+            .query_row("SELECT COUNT(*) FROM outbox WHERE failed = 0", [], |r| r.get(0))?;
         Ok(n)
     }
 }
@@ -231,10 +252,28 @@ impl OutboxManager {
         out
     }
 
-    /// Сбросить очередь ВСЕМ. Явное действие с двойным подтверждением в UI.
-    pub fn clear_all(&self) -> usize {
-        let peers: Vec<[u8; 32]> = self.per_peer().into_iter().map(|(p, ..)| p).collect();
-        peers.iter().map(|p| self.clear_peer(p)).sum()
+    /// Что ждёт досылки — всем (`None`) или одному пиру: это и выбрасывает «Сбросить».
+    pub fn waiting(&self, peer: Option<&[u8; 32]>) -> Vec<OutboxEntry> {
+        match peer {
+            Some(p) => self.store.pending_for(p),
+            None => self.store.pending_all(),
+        }
+        .unwrap_or_default()
+    }
+
+    /// Выбросить запись из досылки, оставив для «Повторить» (своё сообщение переписки).
+    pub fn fail(&self, id: i64) {
+        let _ = self.store.mark_failed(id);
+    }
+
+    /// Стереть запись насовсем (служебный пакет: повторять его вручную незачем).
+    pub fn remove(&self, id: i64) {
+        let _ = self.store.remove(id);
+    }
+
+    /// «Повторить»: вернуть выброшенное в очередь. false — повторять нечего.
+    pub fn retry(&self, peer: &[u8; 32], msg_id: u64, now: i64) -> bool {
+        self.store.retry(peer, msg_id, now).unwrap_or(false)
     }
 
     /// Число ожидающих записей (диагностика).
@@ -242,27 +281,25 @@ impl OutboxManager {
         self.store.count().unwrap_or(-1)
     }
 
-    /// Сбросить очередь пира по явному решению пользователя. Возвращает удалённых.
+    /// Стереть всё пира вместе с перепиской («Очистить историю»). Возвращает удалённых.
     pub fn clear_peer(&self, peer: &[u8; 32]) -> usize {
         self.store.clear_peer(peer).unwrap_or(0)
     }
 
-    /// Старт приложения, ДО того как мессенджер начнёт досылку: выбросить то, чему
-    /// вышел срок. TTL — per-peer по тиру: контакту бессрочно, незнакомцу сутки,
-    /// заблокированному ничего. Возвращает число выброшенных.
-    pub fn prune_expired(&self, now: i64) -> usize {
-        let Ok(entries) = self.store.pending_all() else { return 0 };
-        let mut dropped = 0;
-        for e in entries {
-            let tier = (self.tier_of)(&e.peer);
-            // Заблокированному не досылаем вообще — это решение пользователя, а не срок.
-            let expired = tier.is_blocked()
-                || tier.outbox_ttl_secs().is_some_and(|ttl| now.saturating_sub(e.created_at) > ttl);
-            if expired && self.store.remove(e.id).is_ok() {
-                dropped += 1;
-            }
-        }
-        dropped
+    /// Старт приложения, ДО того как мессенджер начнёт досылку: что пора выбросить по
+    /// сроку. TTL — per-peer по тиру: контакту бессрочно, незнакомцу сутки,
+    /// заблокированному ничего. Выбрасывает движок ([`Self::fail`] / [`Self::remove`]):
+    /// только он знает, своё ли это сообщение переписки.
+    pub fn expired(&self, now: i64) -> Vec<OutboxEntry> {
+        self.waiting(None)
+            .into_iter()
+            .filter(|e| {
+                let tier = (self.tier_of)(&e.peer);
+                // Заблокированному не досылаем вообще — это решение пользователя, а не срок.
+                tier.is_blocked()
+                    || tier.outbox_ttl_secs().is_some_and(|ttl| now.saturating_sub(e.created_at) > ttl)
+            })
+            .collect()
     }
 }
 
@@ -353,6 +390,25 @@ mod tests {
         assert_eq!(s.pending_for(&peer(2)).unwrap().len(), 1);
     }
 
+    /// Выброшенное не досылается и не считается ждущим, но «Повторить» возвращает его
+    /// в очередь с тем же msg_id — ровно один раз.
+    #[test]
+    fn failed_rows_leave_the_queue_until_retried() {
+        let s = store();
+        let row = s.enqueue(&peer(1), 7, "text", b"a", 1).unwrap();
+        s.enqueue(&peer(1), 8, "text", b"b", 2).unwrap();
+        s.mark_failed(row).unwrap();
+        let head: Vec<u64> = s.head_for(&peer(1), 10).unwrap().iter().map(|e| e.msg_id).collect();
+        assert_eq!(head, vec![8], "выброшенное не уходит");
+        assert_eq!(s.count().unwrap(), 1);
+        assert!(!s.retry(&peer(1), 8, 50).unwrap(), "ждущее повторять нечего");
+        assert!(s.retry(&peer(1), 7, 50).unwrap());
+        let back = s.pending_for(&peer(1)).unwrap();
+        assert_eq!(back.iter().map(|e| e.msg_id).collect::<Vec<_>>(), vec![8, 7], "срок — с повтора");
+        assert!(!s.retry(&peer(1), 7, 60).unwrap(), "второй раз — нечего");
+        assert_eq!(s.clear_peer(&peer(1)).unwrap(), 2);
+    }
+
     /// Окно в полёте — голова очереди пира по порядку постановки, не больше `limit`.
     #[test]
     fn head_for_is_ordered_and_limited() {
@@ -381,8 +437,8 @@ mod tests {
         let now = ttl + 1000;
         s.enqueue(&peer(1), 2, "payload", b"fresh", now - 10).unwrap();
         let m = mgr_with_tier(s, Tier::Stranger);
-        assert_eq!(m.prune_expired(now), 1);
-        assert_eq!(m.pending_count(), 1);
+        let old: Vec<u64> = m.expired(now).iter().map(|e| e.msg_id).collect();
+        assert_eq!(old, vec![1]);
     }
 
     /// M3: срок хранения — из бюджета тира. Контакту НЕ истекает (сервера, который
@@ -395,8 +451,7 @@ mod tests {
             let s = store();
             s.enqueue(&peer(1), 1, "payload", b"msg", 0).unwrap();
             let m = mgr_with_tier(s, tier);
-            m.prune_expired(age);
-            m.pending_count() == 1
+            m.expired(age).is_empty()
         };
         assert!(kept_after(Tier::Verified, month), "сверенному храним бессрочно");
         assert!(kept_after(Tier::Contact, month), "контакт вернулся через месяц — сообщение ждёт");

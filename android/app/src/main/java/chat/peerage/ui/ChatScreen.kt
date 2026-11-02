@@ -20,6 +20,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -1066,6 +1067,9 @@ internal fun MessageBubble(
         label = "bubble",
     )
     val selecting = model.selection.isNotEmpty()
+    // Не доставлено (выброшено из очереди или не легло в неё): красная обводка и строка
+    // «Повторить» под пузырём. Только в личном чате — у групп статуса доставки нет.
+    val failed = m.mine && m.status == "failed" && !group && chatId != null
     // Где пузырь лежит в окне — для меню у него. Не состояние: прокрутка двигает пузырь
     // каждый кадр, а читается место только в момент долгого нажатия.
     val place = remember { BubblePlace() }
@@ -1091,144 +1095,151 @@ internal fun MessageBubble(
             },
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
-        // Карточка «скачать» превращается в готовое вложение — это подмена
-        // содержимого прямо под пальцем, поэтому переход плавный.
-        val pending = m.blobId.isNotEmpty() && m.kind != "text" &&
-            if (needsBytes) !m.downloaded && blobBytes == null else !ready
-        // Фото без подписи — САМО себе пузырь: рамка вокруг картинки не несёт
-        // смысла, только съедает 10dp с каждой стороны и делает снимок меньше.
-        // Подпись возвращает подложку — под текстом она нужна. А вот цитата и
-        // пометка пересылки НЕ возвращают: они уходят шапкой НАД картинкой, на
-        // своей подложке, и сама картинка остаётся голой (так в Telegram).
-        val photoBubble = (m.kind == "image" || m.kind == "video") && !pending && m.text.isEmpty()
-        // Шапка над фото: пометка пересылки и цитата ответа.
-        val photoHeader = photoBubble &&
-            (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
-        Box(
-            Modifier.widthIn(max = Tokens.Size.bubbleMax)
-                .onGloballyPositioned { place.rect = it.boundsInRoot() }
-                .clip(bubbleShape(m.mine, pos))
-                .then(
-                    if (photoBubble) Modifier else Modifier.background(if (m.mine) BubbleOut else BubbleIn),
-                )
-                .then(
-                    // Фото без подписи — само себе пузырь: обводка картинки по его форме.
-                    if (photoBubble) Modifier.imageOutline(bubbleShape(m.mine, pos)) else Modifier,
-                )
-                // Длинный тап — меню у пузыря; в режиме выбора короткий тап переключает,
-                // а не открывает вложение (иначе выбор был бы ловушкой).
-                .combinedClickable(
-                    onLongClick = onLong,
-                    onClick = { if (selecting) model.toggleSelect(m) },
-                )
-                .then(
-                    if (photoBubble) Modifier else Modifier.padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
-                ),
-        ) {
-            Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
-                Column {
-                    // Ответ рисуется ССЫЛКОЙ в локальную историю (ADR-006): текст цитаты
-                    // не копируется в сообщение, поэтому удаление оригинала не оставляет
-                    // расходящегося дубля.
-                    //
-                    // У фото шапка живёт на СВОЕЙ подложке шириной со снимок: подложка
-                    // нужна тексту цитаты, а не картинке.
-                    val head: @Composable () -> Unit = {
-                        ForwardMark(model, m.fwdFrom, m.fwdAnon)
-                        if (m.replyTo != 0L) {
-                            // Ключ строки — пара «автор + id»: id посеян временем
-                            // отправителя и у обеих сторон может совпасть.
-                            val src = model.chat(chatId, group).firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
-                            QuoteBlock(
+        Column(horizontalAlignment = if (m.mine) Alignment.End else Alignment.Start) {
+            // Карточка «скачать» превращается в готовое вложение — это подмена
+            // содержимого прямо под пальцем, поэтому переход плавный.
+            val pending = m.blobId.isNotEmpty() && m.kind != "text" &&
+                if (needsBytes) !m.downloaded && blobBytes == null else !ready
+            // Фото без подписи — САМО себе пузырь: рамка вокруг картинки не несёт
+            // смысла, только съедает 10dp с каждой стороны и делает снимок меньше.
+            // Подпись возвращает подложку — под текстом она нужна. А вот цитата и
+            // пометка пересылки НЕ возвращают: они уходят шапкой НАД картинкой, на
+            // своей подложке, и сама картинка остаётся голой (так в Telegram).
+            val photoBubble = (m.kind == "image" || m.kind == "video") && !pending && m.text.isEmpty()
+            // Шапка над фото: пометка пересылки и цитата ответа.
+            val photoHeader = photoBubble &&
+                (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
+            Box(
+                Modifier.widthIn(max = Tokens.Size.bubbleMax)
+                    .onGloballyPositioned { place.rect = it.boundsInRoot() }
+                    .clip(bubbleShape(m.mine, pos))
+                    .then(
+                        if (photoBubble) Modifier else Modifier.background(if (m.mine) BubbleOut else BubbleIn),
+                    )
+                    .then(
+                        when {
+                            failed -> Modifier.border(1.dp, Tokens.Colors.failEdge, bubbleShape(m.mine, pos))
+                            // Фото без подписи — само себе пузырь: обводка картинки по его форме.
+                            photoBubble -> Modifier.imageOutline(bubbleShape(m.mine, pos))
+                            else -> Modifier
+                        },
+                    )
+                    // Длинный тап — меню у пузыря; в режиме выбора короткий тап переключает,
+                    // а не открывает вложение (иначе выбор был бы ловушкой).
+                    .combinedClickable(
+                        onLongClick = onLong,
+                        onClick = { if (selecting) model.toggleSelect(m) },
+                    )
+                    .then(
+                        if (photoBubble) Modifier else Modifier.padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
+                    ),
+            ) {
+                Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
+                    Column {
+                        // Ответ рисуется ССЫЛКОЙ в локальную историю (ADR-006): текст цитаты
+                        // не копируется в сообщение, поэтому удаление оригинала не оставляет
+                        // расходящегося дубля.
+                        //
+                        // У фото шапка живёт на СВОЕЙ подложке шириной со снимок: подложка
+                        // нужна тексту цитаты, а не картинке.
+                        val head: @Composable () -> Unit = {
+                            ForwardMark(model, m.fwdFrom, m.fwdAnon)
+                            if (m.replyTo != 0L) {
+                                // Ключ строки — пара «автор + id»: id посеян временем
+                                // отправителя и у обеих сторон может совпасть.
+                                val src = model.chat(chatId, group).firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
+                                QuoteBlock(
+                                    model,
+                                    src,
+                                    m.replySender == model.me?.pubkey,
+                                    // Над фото плашка тянется во всю ширину шапки: узкая
+                                    // посреди широкой полосы читается обрывком.
+                                    modifier = if (photoHeader) Modifier.fillMaxWidth() else Modifier,
+                                )
+                            }
+                            // Имя автора — под цитатой и пометкой пересылки: сначала «на
+                            // что отвечают», потом «кто говорит».
+                            if (senderName != null) {
+                                Text(
+                                    senderName,
+                                    color = senderColor,
+                                    fontSize = Tokens.Font.small,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        if (photoHeader) {
+                            Column(
+                                Modifier.width(PhotoBubbleSize)
+                                    .background(if (m.mine) BubbleOut else BubbleIn)
+                                    .padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
+                            ) { head() }
+                        } else if (!photoBubble) {
+                            head()
+                        }
+                        when {
+                            isPending -> PendingAttachmentCard(
                                 model,
-                                src,
-                                m.replySender == model.me?.pubkey,
-                                // Над фото плашка тянется во всю ширину шапки: узкая
-                                // посреди широкой полосы читается обрывком.
-                                modifier = if (photoHeader) Modifier.fillMaxWidth() else Modifier,
-                            )
-                        }
-                        // Имя автора — под цитатой и пометкой пересылки: сначала «на
-                        // что отвечают», потом «кто говорит».
-                        if (senderName != null) {
-                            Text(
-                                senderName,
-                                color = senderColor,
-                                fontSize = Tokens.Font.small,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    if (photoHeader) {
-                        Column(
-                            Modifier.width(PhotoBubbleSize)
-                                .background(if (m.mine) BubbleOut else BubbleIn)
-                                .padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
-                        ) { head() }
-                    } else if (!photoBubble) {
-                        head()
-                    }
-                    when {
-                        isPending -> PendingAttachmentCard(
-                            model,
-                            m.kind,
-                            m.name,
-                            m.size,
-                            m.durationMs,
-                            m.thumbId,
-                            m.blobId,
-                        ) {
-                            // Просим у автора: в личном чате это собеседник, в группе —
-                            // тот, кто прислал (вложение лежит у него).
-                            val from = if (group) m.sender else model.currentChat
-                            from?.let { model.downloadMedia(it, m.blobId) }
-                        }
-                        else -> when (m.kind) {
-                            // В режиме выделения тап по вложению переключает выбор,
-                            // а не открывает файл: иначе выбор был бы ловушкой.
-                            "image" -> ImageAttachment(
-                                blobBytes,
-                                onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
-                                bare = photoBubble,
-                                onLongClick = onLong,
-                                cacheKey = m.blobId,
-                            )
-                            // Видео — тот же кадр, что и фото, плюс метка
-                            // длительности: тап открывает просмотрщик, а не отдаёт
-                            // файл наружу системному плееру.
-                            "video" -> VideoAttachment(
-                                model.blob(m.thumbId),
-                                ready,
+                                m.kind,
+                                m.name,
+                                m.size,
                                 m.durationMs,
-                                onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
-                                bare = photoBubble,
-                                onLongClick = onLong,
-                                cacheKey = m.thumbId,
-                            )
-                            "voice" -> VoiceAttachment(blobBytes, m.blobId, m.durationMs)
-                            "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready, onLongClick = onLong)
-                            // Текст обтекает мету: она едет в конец последней строки
-                            // и переносится сама, если та её не вмещает.
-                            else -> BubbleText(bubbleText(model, m)) { meta() }
+                                m.thumbId,
+                                m.blobId,
+                            ) {
+                                // Просим у автора: в личном чате это собеседник, в группе —
+                                // тот, кто прислал (вложение лежит у него).
+                                val from = if (group) m.sender else model.currentChat
+                                from?.let { model.downloadMedia(it, m.blobId) }
+                            }
+                            else -> when (m.kind) {
+                                // В режиме выделения тап по вложению переключает выбор,
+                                // а не открывает файл: иначе выбор был бы ловушкой.
+                                "image" -> ImageAttachment(
+                                    blobBytes,
+                                    onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
+                                    bare = photoBubble,
+                                    onLongClick = onLong,
+                                    cacheKey = m.blobId,
+                                )
+                                // Видео — тот же кадр, что и фото, плюс метка
+                                // длительности: тап открывает просмотрщик, а не отдаёт
+                                // файл наружу системному плееру.
+                                "video" -> VideoAttachment(
+                                    model.blob(m.thumbId),
+                                    ready,
+                                    m.durationMs,
+                                    onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
+                                    bare = photoBubble,
+                                    onLongClick = onLong,
+                                    cacheKey = m.thumbId,
+                                )
+                                "voice" -> VoiceAttachment(blobBytes, m.blobId, m.durationMs)
+                                "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready, onLongClick = onLong)
+                                // Текст обтекает мету: она едет в конец последней строки
+                                // и переносится сама, если та её не вмещает.
+                                else -> BubbleText(bubbleText(model, m)) { meta() }
+                            }
                         }
-                    }
-                    // Подпись к вложению — в том же пузыре, под содержимым. Она пришла
-                    // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
-                    if (m.kind != "text" && m.text.isNotEmpty()) {
-                        BubbleText(m.text, modifier = Modifier.padding(top = Tokens.Space.s)) { meta() }
+                        // Подпись к вложению — в том же пузыре, под содержимым. Она пришла
+                        // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
+                        if (m.kind != "text" && m.text.isNotEmpty()) {
+                            BubbleText(m.text, modifier = Modifier.padding(top = Tokens.Space.s)) { meta() }
+                        }
                     }
                 }
+                // Мета всегда в правом нижнем углу ПУЗЫРЯ: место под неё уже оставлено
+                // в тексте, а прижимать её к концу строки нельзя — у пузыря шире текста
+                // (метка «Переслано», имя автора) она повисла бы посередине.
+                // На голом фото — на затемнении: снимок бывает светлым, и белое время
+                // на нём иначе теряется.
+                Box(Modifier.align(Alignment.BottomEnd)) {
+                    if (photoBubble) MetaOnPhoto { meta() } else meta()
+                }
             }
-            // Мета всегда в правом нижнем углу ПУЗЫРЯ: место под неё уже оставлено
-            // в тексте, а прижимать её к концу строки нельзя — у пузыря шире текста
-            // (метка «Переслано», имя автора) она повисла бы посередине.
-            // На голом фото — на затемнении: снимок бывает светлым, и белое время
-            // на нём иначе теряется.
-            Box(Modifier.align(Alignment.BottomEnd)) {
-                if (photoBubble) MetaOnPhoto { meta() } else meta()
-            }
+            if (failed) FailedLine { chatId?.let { model.retry(it, m) } }
         }
     }
     if (viewer) {
@@ -1278,6 +1289,21 @@ internal fun MessageBubble(
                 model.jumpTo = target.id
             },
         )
+    }
+}
+
+/** «Не доставлено · Повторить» под пузырём (макет `special/Statuses`). */
+@Composable
+private fun FailedLine(onRetry: () -> Unit) {
+    Row(
+        Modifier.padding(top = Tokens.Space.xxs, end = Tokens.Space.xs)
+            .clip(RoundedCornerShape(Tokens.Radius.chip))
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.act_retry)) { onRetry() }
+            .padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.xxs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(R.string.act_failed) + " · ", color = Tokens.Colors.failText, fontSize = Tokens.Font.small)
+        Text(stringResource(R.string.act_retry), color = Tokens.Colors.accentSoft, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -1632,12 +1658,6 @@ internal fun fmtDuration(ms: Int): String {
     return "%d:%02d".format(s / 60, s % 60)
 }
 
-/** Статус доставки исходящего сообщения — честно, без приукрашивания.
- *
- *  `queued` (получатель офлайн, сообщение ждёт в очереди) намеренно отличается от
- *  `pending` (уходит прямо сейчас) НЕ только иконкой, но и подписью: раньше оба
- *  рисовались одинаковыми часами, и «ждёт неделю» выглядело как «сейчас отправится».
- *  Галочка `sent` — доставка НЕ подтверждена; ✓✓ ставится только по Ack. */
 /**
  * Мета сообщения: «изм.», время и — у своих — галочка доставки. Один компонент на
  * все ленты (личные чаты, группы, заметки): это подпись под одним и тем же фактом,
@@ -1681,6 +1701,13 @@ internal fun MetaOnPhoto(content: @Composable () -> Unit) {
     ) { content() }
 }
 
+/** Статус доставки исходящего сообщения — честно, без приукрашивания.
+ *
+ *  `queued` (получатель офлайн, сообщение ждёт в очереди) намеренно отличается от
+ *  `pending` (уходит прямо сейчас) НЕ только иконкой, но и подписью: раньше оба
+ *  рисовались одинаковыми часами, и «ждёт неделю» выглядело как «сейчас отправится».
+ *  Галочка `sent` — доставка НЕ подтверждена; ✓✓ ставится только по Ack.
+ *  `failed` — выброшено из досылки; в ленте к нему строка «Повторить». */
 @Composable
 internal fun StatusTick(status: String) {
     val tint = Tokens.Colors.quoteTextOnBubble
@@ -1697,6 +1724,11 @@ internal fun StatusTick(status: String) {
             tint = tint.copy(alpha = 0.7f),
             modifier = Modifier.size(Tokens.Size.iconXs),
         )
-        "failed" -> Text("!", color = HoloError, fontSize = Tokens.Font.caption, fontWeight = FontWeight.Bold)
+        "failed" -> Icon(
+            TablerIcons.AlertCircle,
+            stringResource(R.string.act_failed),
+            tint = Tokens.Colors.failText,
+            modifier = Modifier.size(Tokens.Size.iconXs),
+        )
     }
 }

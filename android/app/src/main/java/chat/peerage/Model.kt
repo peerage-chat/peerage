@@ -1998,6 +1998,7 @@ class AppModel private constructor() {
             // Ретраи в памяти выдохлись, сообщение ждёт в очереди движка и уйдёт,
             // когда собеседник появится.
             is EngineEvent.Undelivered -> updateStatus(ev.peer, ev.id, "queued")
+            is EngineEvent.Failed -> updateStatus(ev.peer, ev.id, "failed")
             is EngineEvent.RoomInvite -> {
                 // Стабильная комната: если мы УЖЕ в этой комнате с этим пиром, он
                 // просто перезашёл — остаёмся в звонке, его возврат отразит presence.
@@ -2135,6 +2136,21 @@ class AppModel private constructor() {
             // Событие, которого этот клиент ещё не знает: молча пропускаем.
             EngineEvent.Unknown -> Unit
         }
+    }
+
+    /**
+     * «Повторить» не доставленное. Выброшенное из очереди (срок, сброс) возвращается в
+     * неё с тем же id; не попавшее даже в очередь (сбой базы, локальный id < 0) уходит
+     * заново, а прежняя строка убирается.
+     */
+    fun retry(key: String, m: Message) {
+        if (m.id < 0) {
+            messages[chatKey(key, group = false)]?.removeAll { it.id == m.id && it.mine }
+            send(key, m.text)
+            return
+        }
+        updateStatus(key, m.id, "pending")
+        ops.execute { if (!Native.retryMessage(sessionPtr, key, m.id)) loadHistory(key) }
     }
 
     private fun updateStatus(peer: String, id: Long, status: String) {

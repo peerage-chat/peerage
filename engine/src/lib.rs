@@ -1795,12 +1795,57 @@ impl Engine {
 
     /// Сбросить очередь ВСЕМ (двойное подтверждение — на стороне UI).
     pub fn clear_outbox_all(&self) -> usize {
-        self.outbox.lock_safe().clear_all()
+        let entries = self.outbox.lock_safe().waiting(None);
+        self.give_up(entries)
     }
 
     /// Сбросить очередь недоставленного конкретному пиру (явное действие пользователя).
     pub fn clear_outbox_for(&self, key: &[u8; 32]) -> usize {
-        self.outbox.lock_safe().clear_peer(key)
+        let entries = self.outbox.lock_safe().waiting(Some(key));
+        self.give_up(entries)
+    }
+
+    /// Выбросить записи из досылки. Своё сообщение переписки становится «не
+    /// доставлено» (запись остаётся для «Повторить»), служебный пакет — стирается:
+    /// раньше выброшенное навсегда оставалось в чате «в очереди». Возвращает число.
+    fn give_up(&self, entries: Vec<peerage_core::outbox::OutboxEntry>) -> usize {
+        let n = entries.len();
+        for e in entries {
+            self.messenger.hold(&e.peer, e.msg_id);
+            let failed = self
+                .messages
+                .lock_safe()
+                .set_status(Chat::Dm(&e.peer), e.msg_id, "failed")
+                .unwrap_or(false);
+            if failed {
+                self.outbox.lock_safe().fail(e.id);
+                push_event(
+                    self,
+                    dto::UiEvent::Failed {
+                        peer: hex::encode(e.peer),
+                        id: e.msg_id,
+                    },
+                );
+            } else {
+                self.outbox.lock_safe().remove(e.id);
+            }
+        }
+        n
+    }
+
+    /// «Повторить» не доставленное: запись возвращается в очередь с тем же id —
+    /// получатель отбросит дубль, если первая копия всё же дошла. false — повторять
+    /// нечего (уже доставлено или стёрто).
+    pub fn retry_message(&self, key: &[u8; 32], id: u64) -> bool {
+        if !self.outbox.lock_safe().retry(key, id, now()) {
+            return false;
+        }
+        let _ = self
+            .messages
+            .lock_safe()
+            .set_status(Chat::Dm(key), id, "pending");
+        self.messenger.resume(key);
+        true
     }
 
     /// Очистить историю личного чата У СЕБЯ: сообщения, закрепы и то, что ещё ждёт
@@ -4225,7 +4270,8 @@ impl Engine {
         engine.refresh_transports();
         // Офлайн-очередь: сперва выбросить просроченное по тиру (тиры уже залиты),
         // потом отдать её мессенджеру — он и дошлёт оставшееся.
-        let dropped = engine.outbox.lock_safe().prune_expired(now());
+        let expired = engine.outbox.lock_safe().expired(now());
+        let dropped = engine.give_up(expired);
         log::info!(
             "outbox: выброшено просроченных {dropped}, ждёт {}",
             engine.outbox.lock_safe().pending_count()
