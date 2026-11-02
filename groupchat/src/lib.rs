@@ -73,6 +73,10 @@ enum AppMsg {
     /// повесить своё сообщение в шапку всем остальным.
     #[serde(rename = "pin")]
     Pin { target: u64, sender: String, on: bool },
+    /// Реакция на сообщение группы (пустой `emoji` — снять). Ставит её отправитель
+    /// пакета — кто, берётся из MLS; `at` — его время в мс (позднее побеждает).
+    #[serde(rename = "react")]
+    React { target: u64, sender: String, emoji: String, at: i64 },
     /// Служебное: имя группы. Админ шлёт его новому участнику после add, чтобы тот
     /// увидел настоящее название, а не дефолт (в UI не показывается как сообщение).
     #[serde(rename = "name")]
@@ -143,6 +147,8 @@ pub enum Inbound {
     Edit { sender: PeerKey, target: u64, text: String, mentions: Vec<Mention> },
     /// Закрепить/открепить сообщение (`actor` — кто это сделал).
     Pin { actor: PeerKey, target: u64, sender: String, on: bool },
+    /// Реакция `actor` на сообщение `(sender, target)`; эмодзи уже проверен.
+    React { actor: PeerKey, target: u64, sender: String, emoji: String, at: i64 },
     /// Медиа-сообщение (M2): отправитель + ссылка на блоб с метаданными карточки.
     Media { sender: PeerKey, media: MediaBody },
     /// Имя группы (служебное): верхний слой обновляет название, без показа в чате.
@@ -331,6 +337,11 @@ impl GroupChat {
         self.send_app(&AppMsg::Pin { target, sender: sender.to_string(), on })
     }
 
+    /// Поставить, заменить или снять (пустой `emoji`) реакцию у всех участников.
+    pub fn send_react(&mut self, target: u64, sender: &str, emoji: &str, at: i64) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::React { target, sender: sender.to_string(), emoji: emoji.to_string(), at })
+    }
+
     /// Разослать имя группы участникам (служебное). Админ зовёт после добавления
     /// участника — тот увидит настоящее название вместо дефолта.
     pub fn send_name(&mut self, name: &str) -> Result<(), GroupChatError> {
@@ -377,6 +388,14 @@ impl GroupChat {
                     }
                     Ok(AppMsg::Pin { target, sender: who, on }) => {
                         Inbound::Pin { actor: sender, target, sender: who, on }
+                    }
+                    // Кривую реакцию (пропатченный клиент) не показываем.
+                    Ok(AppMsg::React { target, sender: who, emoji, at }) => {
+                        if emoji.is_empty() || peerage_core::protocol::reaction_ok(&emoji) {
+                            Inbound::React { actor: sender, target, sender: who, emoji, at }
+                        } else {
+                            Inbound::None
+                        }
                     }
                     Ok(AppMsg::Media(media)) => {
                         // Режем и на приёме: отправитель мог быть пропатчен.

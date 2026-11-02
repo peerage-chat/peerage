@@ -1024,3 +1024,53 @@ fn one_person_invited_into_two_groups() {
     });
     assert!(joined_second, "и во вторую тоже");
 }
+
+/// Реакция в группе доходит до участника, а «кто поставил» берётся из MLS: в
+/// наборе у получателя стоит ключ отправителя пакета.
+#[test]
+fn group_reactions_reach_members_with_mls_author() {
+    let mut ctx = setup_and_join(0);
+    assert!(ctx.gm_a.send_text(&ctx.gid, "шашлык беру на себя"));
+    let got = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |_, b| b.history_json(&ctx.gid).contains("шашлык"),
+    );
+    assert!(got);
+    let hist: serde_json::Value = serde_json::from_str(&ctx.gm_b.history_json(&ctx.gid)).unwrap();
+    let msg = &hist.as_array().unwrap()[0];
+    let (target, author) = (
+        msg["id"].as_u64().unwrap(),
+        msg["sender"].as_str().unwrap().to_string(),
+    );
+
+    assert!(ctx.gm_b.react(&ctx.gid, target, &author, "👍", 10));
+    let b_hex = hex::encode(ctx.b_key);
+    let reached = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |a, _| {
+            let h: serde_json::Value = serde_json::from_str(&a.history_json(&ctx.gid)).unwrap();
+            h[0]["reactions"][0]["who"][0] == b_hex.as_str()
+        },
+    );
+    assert!(reached, "реакция участника дошла до автора, кто — из MLS");
+
+    // Снятие тоже доезжает.
+    assert!(ctx.gm_b.react(&ctx.gid, target, &author, "", 11));
+    let cleared = pump_until(
+        &mut ctx.gm_a,
+        &ctx.a_rx,
+        &mut ctx.gm_b,
+        &ctx.b_rx,
+        |a, _| {
+            let h: serde_json::Value = serde_json::from_str(&a.history_json(&ctx.gid)).unwrap();
+            h[0].get("reactions").is_none()
+        },
+    );
+    assert!(cleared);
+}

@@ -171,6 +171,14 @@ pub enum UiEvent {
     PinsChanged {
         chat: String,
     },
+    /// Реакции под сообщением `(id, автор)` изменились: новый набор целиком.
+    Reactions {
+        chat: String,
+        group: bool,
+        id: u64,
+        sender: String,
+        reactions: Vec<peerage_core::store::Reaction>,
+    },
     /// Сообщение исправлено автором: текст в ленте надо заменить на месте (вместе с
     /// упоминаниями — их участки привязаны к тексту).
     MessageEdited {

@@ -170,6 +170,20 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         --   msg_id + sender — ссылка на сообщение (ADR-006)
         --   pinned_at — когда закрепили (шапка показывает последнее)
         --   by — hex того, кто закрепил
+        -- Реакции: у человека одна на сообщение (ключ — до who). Пустой emoji — снятая
+        -- реакция: строка остаётся с её временем, чтобы опоздавшая постановка не
+        -- вернула снятое. Сообщение — пара «автор + id» (ADR-006).
+        CREATE TABLE IF NOT EXISTS reactions (
+            chat       BLOB    NOT NULL,
+            scope      INTEGER NOT NULL DEFAULT 0,
+            msg_id     INTEGER NOT NULL,
+            msg_sender TEXT    NOT NULL,
+            who        TEXT    NOT NULL,
+            emoji      TEXT    NOT NULL,
+            at         INTEGER NOT NULL,
+            PRIMARY KEY (chat, scope, msg_id, msg_sender, who)
+        );
+
         CREATE TABLE IF NOT EXISTS pinned (
             chat      BLOB    NOT NULL,
             scope     INTEGER NOT NULL DEFAULT 0,

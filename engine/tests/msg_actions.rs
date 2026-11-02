@@ -620,3 +620,45 @@ fn two_notes_in_one_second_are_both_kept() {
         .collect();
     assert_eq!(texts, ["первая", "вторая", "третья"]);
 }
+
+/// Реакции в личном чате: доходят до собеседника, другая заменяет, пустая снимает —
+/// и у обоих набор один и тот же; на чужое сообщение реагировать можно.
+#[test]
+fn reactions_travel_replace_and_clear() {
+    let (a, b, a_key, b_key) = pair("react", 61, 62);
+    let id1 = a.send_text(&b_key, "едем в субботу?").unwrap() as u64;
+    assert!(
+        wait(10, || !history(&b, &a_key).is_empty()),
+        "сообщение дошло"
+    );
+    let author = hex::encode(a_key);
+    let reactions = |e: &Engine, peer: &[u8; 32]| history(e, peer)[0]["reactions"].clone();
+
+    // Боб реагирует на сообщение Ани — у Ани появляется его реакция.
+    assert!(b.react(peerage_engine::ChatKey::Dm(a_key), id1, &author, "👍"));
+    assert!(wait(10, || reactions(&a, &b_key)[0]["emoji"] == "👍"));
+    assert_eq!(reactions(&a, &b_key)[0]["who"][0], hex::encode(b_key));
+
+    // Аня ставит свою на своё — набор из двух, у обоих одинаковый.
+    assert!(a.react(peerage_engine::ChatKey::Dm(b_key), id1, &author, "👍"));
+    assert!(wait(10, || reactions(&b, &a_key)[0]["who"]
+        .as_array()
+        .map(|w| w.len())
+        == Some(2)));
+
+    // Боб меняет на другую — замена, а не вторая реакция.
+    assert!(b.react(peerage_engine::ChatKey::Dm(a_key), id1, &author, "❤️"));
+    assert!(wait(10, || reactions(&a, &b_key)
+        .as_array()
+        .map(|r| r.len())
+        == Some(2)));
+    // Аня снимает свою — у Боба остаётся только его.
+    assert!(a.react(peerage_engine::ChatKey::Dm(b_key), id1, &author, ""));
+    assert!(wait(10, || {
+        let r = reactions(&b, &a_key);
+        r.as_array().map(|r| r.len()) == Some(1) && r[0]["emoji"] == "❤️"
+    }));
+
+    // Кривая реакция отклоняется на входе.
+    assert!(!a.react(peerage_engine::ChatKey::Dm(b_key), id1, &author, "a b"));
+}

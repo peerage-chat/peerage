@@ -94,6 +94,11 @@ pub enum Payload {
     /// зрения ОТПРАВИТЕЛЯ и переворачивается на приёме, как у ответа. `on = false` —
     /// открепить. Бакет CONTROL: по размеру неотличимо от ack.
     Pin { id: u64, target: u64, target_mine: bool, on: bool },
+    /// Реакция на сообщение: у человека одна на сообщение, пустой `emoji` — снять.
+    /// `target` + `target_mine` — ссылка, как у закрепа (переворачивается на приёме).
+    /// `at` — время отправителя в мс: из двух его изменений побеждает позднее, и
+    /// опоздавший пакет не возвращает старое. Бакет CONTROL: неотличимо от ack.
+    React { id: u64, target: u64, target_mine: bool, emoji: String, at: i64 },
     /// Медиа-сообщение чата (M2): ссылка на блоб по контент-хэшу. Байты получатель
     /// сам запрашивает блоб-каналом (pull по хэшу), сообщение несёт лишь
     /// ссылку → тот же надёжный путь, что и `Text` (id + `Ack`, ретраи, офлайн-очередь,
@@ -306,6 +311,7 @@ impl Payload {
             | Payload::Retract { id, .. }
             | Payload::Edit { id, .. }
             | Payload::Pin { id, .. }
+            | Payload::React { id, .. }
             | Payload::Media { id, .. }
             | Payload::RoomInvite { id, .. }
             | Payload::RoomDecline { id, .. }
@@ -357,6 +363,20 @@ pub enum ProtocolError {
 /// обязана умещаться в бакет APP (4 КБ) — иначе медиа-сообщение вылезет в следующий
 /// бакет и станет отличимым от текстового по размеру.
 pub const MAX_CAPTION: usize = 1024;
+
+/// Потолок реакции в БАЙТАХ: хватает на семейный эмодзи из ZWJ-цепочки дважды, а
+/// реакция остаётся в бакете CONTROL.
+pub const MAX_REACTION: usize = 64;
+
+/// Годится ли строка в реакцию: непустая, не длиннее [`MAX_REACTION`], без пробелов и
+/// управляющих символов. Проверяется и на отправке, и на приёме — отправитель мог
+/// быть пропатчен. Что именно это эмодзи, не проверяем: таблица эмодзи меняется
+/// каждый год, а вред от «реакции буквой» — только вид.
+pub fn reaction_ok(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= MAX_REACTION
+        && !s.chars().any(|c| c.is_whitespace() || c.is_control())
+}
 
 pub const CONTROL_BUCKET: usize = 256;
 pub const APP_BUCKET: usize = 4096;
@@ -587,6 +607,29 @@ mod tests {
             ctl.iter().all(|s| *s == ctl[0]),
             "звонок должен быть неотличим от ack/ping/присутствия, получено {ctl:?}"
         );
+    }
+
+    /// Реакция — надёжная (id для Ack и дедупа) и мелкая: самый длинный допустимый
+    /// эмодзи всё равно неотличим по размеру от ack, как и закреп.
+    #[test]
+    fn reaction_is_reliable_and_hides_in_control_bucket() {
+        let longest = "👨‍👩‍👧‍👦".repeat(2);
+        assert!(longest.len() <= MAX_REACTION);
+        let p = Payload::React { id: 9, target: 3, target_mine: true, emoji: longest, at: i64::MAX };
+        assert_eq!(roundtrip(&p), p);
+        assert_eq!(p.reliable_id(), Some(9));
+        assert_eq!(wire(&p), wire(&Payload::Ack { id: 1 }));
+    }
+
+    #[test]
+    fn reaction_ok_accepts_emoji_and_rejects_junk() {
+        for ok in ["👍", "❤️", "👨‍👩‍👧‍👦", "🇷🇺"] {
+            assert!(reaction_ok(ok), "{ok}");
+        }
+        let too_long = "😀".repeat(MAX_REACTION / 4 + 1);
+        for bad in ["", " ", "a b", "\u{0}", "line\n", too_long.as_str()] {
+            assert!(!reaction_ok(bad), "{bad:?}");
+        }
     }
 
     /// Зарезервированное поле proof-of-transit (ADR-008) обязано умещаться в тот же

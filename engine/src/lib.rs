@@ -100,6 +100,14 @@ pub(crate) enum GroupCmd {
         sender: String,
         on: bool,
     },
+    /// Своя реакция на сообщение группы (пустой `emoji` — снять).
+    React {
+        gid: Vec<u8>,
+        id: u64,
+        sender: String,
+        emoji: String,
+        at: i64,
+    },
     /// Удалить сообщения только у себя: пары `(id, автор-hex)`.
     DeleteLocal {
         gid: Vec<u8>,
@@ -448,6 +456,23 @@ pub fn now() -> i64 {
         .unwrap_or(0)
 }
 
+/// Время своей реакции, мс: строго растёт в пределах процесса. Два быстрых нажатия
+/// в одну миллисекунду иначе дали бы равные `at`, и второе молча проиграло бы.
+pub(crate) fn react_clock() -> i64 {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static LAST: AtomicI64 = AtomicI64::new(0);
+    let wall = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let prev = LAST.fetch_max(wall, Ordering::SeqCst);
+    if prev >= wall {
+        LAST.fetch_add(1, Ordering::SeqCst) + 1
+    } else {
+        wall
+    }
+}
+
 /// hex(32 байта) → ключ. Кодек-хелпер (строка↔ключ); экспортируется для androidjni.
 pub fn parse_key(s: &str) -> Option<[u8; 32]> {
     hex::decode(s.trim()).ok()?.as_slice().try_into().ok()
@@ -662,6 +687,47 @@ impl Engine {
                     id,
                     sender: sender.to_string(),
                     on,
+                }))
+                .is_ok(),
+        }
+    }
+
+    /// Поставить, заменить или снять (пустой `emoji`) свою реакцию на сообщение
+    /// `(id, sender)`. Одна реакция от человека: что повтор снимает, решает клиент.
+    /// Кривой эмодзи отклоняется здесь, на входе.
+    pub fn react(&self, chat: ChatKey, id: u64, sender: &str, emoji: &str) -> bool {
+        if !emoji.is_empty() && !peerage_core::protocol::reaction_ok(emoji) {
+            return false;
+        }
+        let at = react_clock();
+        match &chat {
+            ChatKey::Dm(peer) => {
+                let mine = sender == self.me_hex();
+                if self
+                    .messenger
+                    .send_react(peer, id, mine, emoji, at)
+                    .is_err()
+                {
+                    return false;
+                }
+                let changed = self
+                    .messages
+                    .lock_safe()
+                    .react(chat.as_chat(), id, sender, &self.me_hex(), emoji, at)
+                    .unwrap_or(false);
+                if changed {
+                    push_reactions(self, chat.as_chat(), id, sender);
+                }
+                true
+            }
+            ChatKey::Group(gid) => self
+                .jobs
+                .send(Job::Cmd(GroupCmd::React {
+                    gid: gid.clone(),
+                    id,
+                    sender: sender.to_string(),
+                    emoji: emoji.to_string(),
+                    at,
                 }))
                 .is_ok(),
         }
@@ -2983,6 +3049,21 @@ fn record_request(
     );
 }
 
+/// Новый набор реакций одного сообщения — клиенту, чтобы поправить его на месте.
+fn push_reactions(engine: &Engine, chat: Chat, id: u64, sender: &str) {
+    let reactions = engine.messages.lock_safe().reactions(chat, id, sender);
+    push_event(
+        engine,
+        dto::UiEvent::Reactions {
+            chat: hex::encode(chat.id()),
+            group: chat.scope() == 1,
+            id,
+            sender: sender.to_string(),
+            reactions,
+        },
+    );
+}
+
 /// Положить событие в очередь для клиента. Принимает ТИП, а не свободный JSON:
 /// форма события фиксируется `dto::UiEvent` и проверяется компилятором.
 fn push_event(engine: &Engine, ev: dto::UiEvent) {
@@ -3412,6 +3493,31 @@ fn handle_event(
                 },
             );
         }
+        Event::React {
+            peer,
+            target,
+            target_mine,
+            emoji,
+            at,
+        } => {
+            // Ссылка на сообщение — «автор + id», как у закрепа; ставит — собеседник.
+            let author = engine.author_hex(&peer, target_mine);
+            let changed = engine
+                .messages
+                .lock_safe()
+                .react(
+                    Chat::Dm(&peer),
+                    target,
+                    &author,
+                    &hex::encode(peer),
+                    &emoji,
+                    at,
+                )
+                .unwrap_or(false);
+            if changed {
+                push_reactions(engine, Chat::Dm(&peer), target, &author);
+            }
+        }
         Event::Retract { peer, target } => {
             // Отзываем ЕГО сообщение (автор — он): отозвать наше собственное он не может.
             let n = engine
@@ -3633,6 +3739,9 @@ fn handle_event(
                         },
                     );
                 }
+            }
+            if let (Some(gid), Some((id, sender))) = (&out.gid, &out.reacted) {
+                push_reactions(engine, Chat::Group(gid), *id, sender);
             }
             if out.pinned {
                 // Шапка чата живёт отдельно от ленты — событие своё.
@@ -3987,6 +4096,17 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                         mentions,
                     },
                 );
+            }
+        }
+        GroupCmd::React {
+            gid,
+            id,
+            sender,
+            emoji,
+            at,
+        } => {
+            if groups.react(&gid, id, &sender, &emoji, at) {
+                push_reactions(engine, Chat::Group(&gid), id, &sender);
             }
         }
         GroupCmd::Pin {

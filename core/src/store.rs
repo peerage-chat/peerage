@@ -869,6 +869,33 @@ pub struct StoredMessage {
     /// записи игнорируется, на другом устройстве он свой.
     #[serde(default)]
     pub row: i64,
+    /// Реакции под сообщением. Только на чтение: живут в своей таблице, сюда их
+    /// кладёт [`MessageStore::history`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<Reaction>,
+}
+
+/// Одна реакция под сообщением и кто её поставил (hex, по порядку постановки).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reaction {
+    pub emoji: String,
+    pub who: Vec<String>,
+}
+
+/// Сгруппировать строки `(id, автор, кто, эмодзи)` (уже по времени) по сообщениям;
+/// эмодзи — в порядке первого появления.
+fn group_reactions(
+    rows: impl Iterator<Item = (u64, String, String, String)>,
+) -> std::collections::HashMap<(u64, String), Vec<Reaction>> {
+    let mut out: std::collections::HashMap<(u64, String), Vec<Reaction>> = Default::default();
+    for (id, sender, who, emoji) in rows {
+        let list = out.entry((id, sender)).or_default();
+        match list.iter_mut().find(|r| r.emoji == emoji) {
+            Some(r) => r.who.push(who),
+            None => list.push(Reaction { emoji, who: vec![who] }),
+        }
+    }
+    out
 }
 
 /// Колонки истории в порядке, который ждёт [`read_msg`]. Один список на все
@@ -1014,11 +1041,7 @@ impl MessageStore {
 
     /// Удалить одно сообщение (нужно «Сохранённому»: заметку выкидывают точечно).
     pub fn delete_one(&self, chat: Chat, sender: &str, id: u64) -> Result<(), StoreError> {
-        db::lock(&self.db).execute(
-            "DELETE FROM chat_messages WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4",
-            rusqlite::params![chat.id(), chat.scope(), sender, id as i64],
-        )?;
-        Ok(())
+        self.delete_many(chat, &[(id, sender.to_string())]).map(|_| ())
     }
 
     /// Удалить несколько сообщений одним махом: `(id, hex автора)`. Возвращает,
@@ -1031,10 +1054,9 @@ impl MessageStore {
         let tx = conn.transaction()?;
         let mut n = 0;
         for (id, sender) in refs {
-            n += tx.execute(
-                "DELETE FROM chat_messages WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4",
-                rusqlite::params![chat.id(), chat.scope(), sender, *id as i64],
-            )?;
+            let params = rusqlite::params![chat.id(), chat.scope(), sender, *id as i64];
+            n += tx.execute("DELETE FROM chat_messages WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4", params)?;
+            tx.execute("DELETE FROM reactions WHERE chat=?1 AND scope=?2 AND msg_sender=?3 AND msg_id=?4", params)?;
         }
         tx.commit()?;
         Ok(n)
@@ -1060,6 +1082,10 @@ impl MessageStore {
             )?;
             tx.execute(
                 "DELETE FROM pinned WHERE chat=?1 AND scope=?2 AND sender=?3 AND msg_id=?4",
+                params,
+            )?;
+            tx.execute(
+                "DELETE FROM reactions WHERE chat=?1 AND scope=?2 AND msg_sender=?3 AND msg_id=?4",
                 params,
             )?;
         }
@@ -1433,14 +1459,52 @@ impl MessageStore {
             .and_then(|rows| rows.collect())
             .unwrap_or_default();
         rows.reverse(); // наружу — как в чате: старые сверху
+        // Реакции страницы — одним запросом по чату, а не по запросу на сообщение.
+        let mut by_msg = reactions_query(&conn, chat, None);
+        for m in &mut rows {
+            if let Some(r) = by_msg.remove(&(m.id, m.sender.clone())) {
+                m.reactions = r;
+            }
+        }
         rows
     }
 
-    pub fn clear(&self, chat: Chat) -> Result<(), StoreError> {
-        db::lock(&self.db).execute(
-            "DELETE FROM chat_messages WHERE chat=?1 AND scope=?2",
-            rusqlite::params![chat.id(), chat.scope()],
+    /// Поставить, заменить или снять (`emoji` пустой) реакцию `who` на сообщение.
+    /// Из двух изменений одного человека побеждает более позднее по `at` — опоздавший
+    /// пакет старое не возвращает. true — набор реакций сообщения изменился.
+    pub fn react(
+        &self,
+        chat: Chat,
+        msg_id: u64,
+        msg_sender: &str,
+        who: &str,
+        emoji: &str,
+        at: i64,
+    ) -> Result<bool, StoreError> {
+        let n = db::lock(&self.db).execute(
+            "INSERT INTO reactions (chat, scope, msg_id, msg_sender, who, emoji, at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(chat, scope, msg_id, msg_sender, who)
+             DO UPDATE SET emoji = excluded.emoji, at = excluded.at
+             WHERE excluded.at > reactions.at AND excluded.emoji != reactions.emoji",
+            rusqlite::params![chat.id(), chat.scope(), msg_id as i64, msg_sender, who, emoji, at],
         )?;
+        Ok(n > 0)
+    }
+
+    /// Реакции одного сообщения — новый набор для события после изменения.
+    pub fn reactions(&self, chat: Chat, msg_id: u64, msg_sender: &str) -> Vec<Reaction> {
+        let conn = db::lock(&self.db);
+        reactions_query(&conn, chat, Some((msg_id, msg_sender)))
+            .remove(&(msg_id, msg_sender.to_string()))
+            .unwrap_or_default()
+    }
+
+    pub fn clear(&self, chat: Chat) -> Result<(), StoreError> {
+        let conn = db::lock(&self.db);
+        let params = rusqlite::params![chat.id(), chat.scope()];
+        conn.execute("DELETE FROM chat_messages WHERE chat=?1 AND scope=?2", params)?;
+        conn.execute("DELETE FROM reactions WHERE chat=?1 AND scope=?2", params)?;
         Ok(())
     }
 
@@ -1531,7 +1595,34 @@ fn read_msg_offset(row: &rusqlite::Row, off: usize) -> rusqlite::Result<StoredMe
         fwd_anon: row.get::<_, i64>(off + 21)? != 0,
         edited_at: row.get(off + 22)?,
         mentions: serde_json::from_str(&row.get::<_, String>(off + 23)?).unwrap_or_default(),
+        reactions: Vec::new(),
     })
+}
+
+/// Поставленные реакции чата (или одного сообщения), сгруппированные по сообщениям.
+fn reactions_query(
+    conn: &rusqlite::Connection,
+    chat: Chat,
+    one: Option<(u64, &str)>,
+) -> std::collections::HashMap<(u64, String), Vec<Reaction>> {
+    let (only, id, sender) = match one {
+        Some((id, s)) => (1i64, id as i64, s),
+        None => (0, 0, ""),
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT msg_id, msg_sender, who, emoji FROM reactions
+         WHERE chat=?1 AND scope=?2 AND emoji != '' AND (?3 = 0 OR (msg_id = ?4 AND msg_sender = ?5))
+         ORDER BY at, rowid",
+    ) else {
+        return Default::default();
+    };
+    let rows = stmt.query_map(rusqlite::params![chat.id(), chat.scope(), only, id, sender], |r| {
+        Ok((r.get::<_, i64>(0)? as u64, r.get(1)?, r.get(2)?, r.get(3)?))
+    });
+    match rows {
+        Ok(it) => group_reactions(it.filter_map(|r| r.ok())),
+        Err(_) => Default::default(),
+    }
 }
 
 /// Упоминания в колонку: пустой список — пустая строка, а не `[]`, чтобы у обычных
@@ -2091,6 +2182,34 @@ mod tests {
         // Тот же id от ДРУГОГО автора — другое сообщение.
         let other = StoredMessage { id: 7, sender: hex::encode(key()), text: "чужое".into(), ..Default::default() };
         assert!(store.append(Chat::Dm(&peer), &other).is_ok());
+    }
+
+    /// Реакции: одна на человека, позднее (по `at`) побеждает, снятие — тоже изменение
+    /// и опоздавшая постановка его не отменяет; история отдаёт их сгруппированными.
+    #[test]
+    fn reactions_last_word_wins_and_ride_in_history() {
+        let peer = key();
+        let store = MessageStore::open(db());
+        let (author, me, him) = (hex::encode(peer), "me".to_string(), "him".to_string());
+        let chat = Chat::Dm(&peer);
+        store.append(chat, &StoredMessage { id: 7, sender: author.clone(), text: "м".into(), time: 1, ..Default::default() }).unwrap();
+
+        assert!(store.react(chat, 7, &author, &me, "👍", 10).unwrap());
+        assert!(store.react(chat, 7, &author, &him, "👍", 11).unwrap());
+        assert!(!store.react(chat, 7, &author, &me, "😂", 9).unwrap(), "опоздавшее старше — не меняет");
+        let r = store.reactions(chat, 7, &author);
+        assert_eq!(r, vec![Reaction { emoji: "👍".into(), who: vec![me.clone(), him.clone()] }]);
+
+        assert!(store.react(chat, 7, &author, &me, "❤️", 12).unwrap(), "другая заменяет");
+        assert!(store.react(chat, 7, &author, &him, "", 13).unwrap(), "снятие");
+        assert!(!store.react(chat, 7, &author, &him, "👍", 11).unwrap(), "снятое не воскресает");
+        let h = store.history(chat, None, 10);
+        assert_eq!(h[0].reactions, vec![Reaction { emoji: "❤️".into(), who: vec![me.clone()] }]);
+
+        // Отзыв стирает и реакции: строка-надгробие голая.
+        store.retract_many(chat, &[(7, author.clone())]).unwrap();
+        assert!(store.reactions(chat, 7, &author).is_empty());
+        assert!(store.history(chat, None, 10)[0].reactions.is_empty());
     }
 
     /// Отозванное «у всех» оставляет строку на месте: содержимое стёрто, правка и

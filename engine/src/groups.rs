@@ -620,6 +620,24 @@ impl GroupManager {
         true
     }
 
+    /// Поставить, заменить или снять (пустой `emoji`) свою реакцию. Реагировать может
+    /// любой участник. Двигает MLS-ратчет → save_group. true — набор изменился.
+    pub fn react(&mut self, gid: &[u8], id: u64, sender: &str, emoji: &str, at: i64) -> bool {
+        let Some(e) = self.groups.get_mut(gid) else {
+            return false;
+        };
+        if e.chat.send_react(id, sender, emoji, at).is_err() {
+            return false;
+        }
+        // Рассылка двигает MLS-ратчет — состояние обязано лечь на диск.
+        self.save_group(gid);
+        let me = self.me_hex.clone();
+        self.messages
+            .lock_safe()
+            .react(Chat::Group(gid), id, sender, &me, emoji, at)
+            .unwrap_or(false)
+    }
+
     /// Положить закреп в общее хранилище (свой и входящий путь — один).
     fn apply_pin(&self, gid: &[u8], id: u64, sender: &str, on: bool, by: &str) {
         let store = self.messages.lock_safe();
@@ -934,6 +952,33 @@ impl GroupManager {
                         ..Default::default()
                     }
                 }
+                Some(Ok(Inbound::React {
+                    actor,
+                    target,
+                    sender,
+                    emoji,
+                    at,
+                })) => {
+                    // Кто поставил — из MLS (actor), а не из тела: чужую реакцию за
+                    // другого участника не подделать.
+                    let changed = self
+                        .messages
+                        .lock_safe()
+                        .react(
+                            Chat::Group(&gid),
+                            target,
+                            &sender,
+                            &hex::encode(actor),
+                            &emoji,
+                            at,
+                        )
+                        .unwrap_or(false);
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        reacted: changed.then_some((target, sender)),
+                        ..Default::default()
+                    }
+                }
                 Some(Ok(Inbound::Retract { sender, target })) => {
                     // Автор берётся ИЗ MLS, а не из тела: иначе участник мог бы
                     // стереть чужое сообщение, подставив чужой ключ.
@@ -1241,4 +1286,6 @@ pub struct GroupOutcome {
     pub media: Option<MediaBody>,
     /// Участник отозвал своё сообщение — строка исчезла из истории, UI перечитать.
     pub retracted: bool,
+    /// Реакции под сообщением `(id, автор)` изменились — UI поправить его на месте.
+    pub reacted: Option<(u64, String)>,
 }

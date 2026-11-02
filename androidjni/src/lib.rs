@@ -695,6 +695,35 @@ pub extern "system" fn Java_chat_peerage_Native_pinMessage<'local>(
     })
 }
 
+/// Поставить, заменить или снять (пустой `emoji`) свою реакцию на сообщение
+/// `(msg_id, sender_hex)` в личном чате или группе. true — отправлено.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_react<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    msg_id: jlong,
+    sender_hex: JString<'local>,
+    emoji: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        else {
+            return JNI_FALSE;
+        };
+        let sender = jstr(&mut env, &sender_hex);
+        let emoji = jstr(&mut env, &emoji);
+        if e.react(chat, msg_id as u64, &sender, &emoji) {
+            JNI_TRUE
+        } else {
+            JNI_FALSE
+        }
+    })
+}
+
 /// Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_pinned<'local>(

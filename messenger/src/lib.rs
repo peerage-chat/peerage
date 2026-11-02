@@ -124,6 +124,9 @@ pub enum Event {
     /// Пир закрепил (или открепил) сообщение в общем чате. `target_mine` уже
     /// перевёрнут: true — закреплено НАШЕ сообщение.
     Pin { peer: PeerKey, target: u64, target_mine: bool, on: bool },
+    /// Пир поставил, заменил или снял (`emoji` пустой) реакцию. `target_mine` уже
+    /// перевёрнут: true — реакция на НАШЕ сообщение. Эмодзи проверен.
+    React { peer: PeerKey, target: u64, target_mine: bool, emoji: String, at: i64 },
     /// Входящее медиа-сообщение (M2): ссылка на блоб-вложение по хэшу.
     Media {
         peer: PeerKey,
@@ -1096,6 +1099,26 @@ impl Messenger {
             .send_durable(peer, false, move |id| Payload::Pin { id, target, target_mine, on })
     }
 
+    /// Реакция на сообщение (пустой `emoji` — снять). Надёжно, как закреп: снятая
+    /// у себя реакция обязана сняться и у собеседника, даже если он был офлайн.
+    pub fn send_react(
+        &self,
+        peer: &PeerKey,
+        target: u64,
+        target_mine: bool,
+        emoji: &str,
+        at: i64,
+    ) -> Result<u64, MessengerError> {
+        let emoji = emoji.to_string();
+        self.shared.send_durable(peer, false, move |id| Payload::React {
+            id,
+            target,
+            target_mine,
+            emoji: emoji.clone(),
+            at,
+        })
+    }
+
     /// Объявить контакту смену своего АДРЕСА (ADR-007). Надёжно, как текст:
     /// контакт, отсутствовавший в момент смены, обязан узнать новый адрес по
     /// возвращении — иначе связь с ним рвётся навсегда.
@@ -1653,6 +1676,14 @@ fn receive_loop(shared: Arc<Shared>) {
                 // «Чьё» приходит с точки зрения отправителя и переворачивается, как
                 // у ответа: его «моё» для нас — его сообщение.
                 shared.emit(Event::Pin { peer: peer_id, target, target_mine: !target_mine, on });
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
+            }
+            Payload::React { id, target, target_mine, emoji, at } => {
+                // Кривую реакцию (пропатченный клиент) не показываем, но подтверждаем:
+                // иначе отправитель повторял бы её вечно.
+                if emoji.is_empty() || peerage_core::protocol::reaction_ok(&emoji) {
+                    shared.emit(Event::React { peer: peer_id, target, target_mine: !target_mine, emoji, at });
+                }
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::Media {
