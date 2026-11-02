@@ -380,3 +380,34 @@ fn forged_blob_in_backup_is_rejected() {
     );
     assert_eq!(e.blob_read(&honest_id).as_deref(), Some(&honest[..]));
 }
+
+/// Реакции едут вместе с перепиской: восстановленный чат без них выглядел бы иначе,
+/// чем до копии. Слияние, как у сообщений: повторный импорт ничего не задваивает.
+#[test]
+fn reactions_ride_along_with_their_chat() {
+    let net = LoopbackNet::new();
+    let a_id = id(89);
+    let author = hex::encode(a_id.public_key_bytes());
+    let peer = id(90).public_key_bytes();
+    let a = start(&net, a_id, tmpdir("rsrc"));
+    a.add_contact(&peer, "Аня");
+    let msg = a.send_text(&peer, "едем?").unwrap() as u64;
+    assert!(a.react(peerage_engine::ChatKey::Dm(peer), msg, &author, "👍"));
+
+    let file = tmpdir("rfile").join("copy.peerage");
+    a.backup_export(&file, all(), "пароль").unwrap();
+    let fresh = start(&net, id(91), tmpdir("rdst"));
+    fresh.backup_import(&file, "пароль").unwrap();
+    let hist: serde_json::Value = serde_json::from_str(&fresh.history_json(&peer)).unwrap();
+    let r = &hist[0]["reactions"];
+    assert_eq!(r[0]["emoji"], "👍", "реакция восстановлена: {hist}");
+    assert_eq!(r[0]["who"][0], author.as_str());
+
+    // Повторный импорт того же файла реакцию не задваивает.
+    fresh.backup_import(&file, "пароль").unwrap();
+    let hist: serde_json::Value = serde_json::from_str(&fresh.history_json(&peer)).unwrap();
+    assert_eq!(
+        hist[0]["reactions"][0]["who"].as_array().map(|w| w.len()),
+        Some(1)
+    );
+}

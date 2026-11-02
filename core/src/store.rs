@@ -882,6 +882,18 @@ pub struct Reaction {
     pub who: Vec<String>,
 }
 
+/// Строка таблицы реакций как есть — для копии данных. Пустой `emoji` — снятая.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactionRow {
+    pub chat: Vec<u8>,
+    pub scope: i64,
+    pub msg_id: u64,
+    pub msg_sender: String,
+    pub who: String,
+    pub emoji: String,
+    pub at: i64,
+}
+
 /// Сгруппировать строки `(id, автор, кто, эмодзи)` (уже по времени) по сообщениям;
 /// эмодзи — в порядке первого появления.
 fn group_reactions(
@@ -1536,6 +1548,30 @@ impl MessageStore {
             // Дальше идут MSG_COLS, сдвинутые на две колонки: rowid у них первый.
             let msg = read_msg_offset(row, 2)?;
             Ok((msg.row, chat, scope, msg))
+        })
+        .and_then(|rows| rows.collect())
+        .unwrap_or_default()
+    }
+
+    /// Все строки реакций для копии данных — вместе с надгробиями (снятыми): без них
+    /// восстановление на устройство, где реакция ещё стоит, вернуло бы снятое.
+    pub fn export_reactions(&self) -> Vec<ReactionRow> {
+        let conn = db::lock(&self.db);
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT chat, scope, msg_id, msg_sender, who, emoji, at FROM reactions ORDER BY rowid",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map([], |r| {
+            Ok(ReactionRow {
+                chat: r.get(0)?,
+                scope: r.get(1)?,
+                msg_id: r.get::<_, i64>(2)? as u64,
+                msg_sender: r.get(3)?,
+                who: r.get(4)?,
+                emoji: r.get(5)?,
+                at: r.get(6)?,
+            })
         })
         .and_then(|rows| rows.collect())
         .unwrap_or_default()

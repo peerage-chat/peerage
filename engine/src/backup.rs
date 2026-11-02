@@ -111,6 +111,21 @@ enum Rec {
     Chats {
         items: Vec<ChatRow>,
     },
+    /// Реакции — с той перепиской, к которой относятся; снятые тоже (надгробия).
+    Reactions {
+        items: Vec<ReactRow>,
+    },
+}
+
+#[derive(Serialize, Deserialize)]
+struct ReactRow {
+    chat: String,
+    scope: i64,
+    msg_id: u64,
+    msg_sender: String,
+    who: String,
+    emoji: String,
+    at: i64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -343,6 +358,38 @@ impl Engine {
             }
         }
 
+        // Реакции — по тому же выбору, что их переписка.
+        if parts.messages || parts.notes || parts.groups {
+            let me = self.me_pub;
+            let items: Vec<ReactRow> = self
+                .messages
+                .lock_safe()
+                .export_reactions()
+                .into_iter()
+                .filter(|r| {
+                    if r.scope == 1 {
+                        parts.groups
+                    } else if r.chat.as_slice() == me.as_slice() {
+                        parts.notes
+                    } else {
+                        parts.messages
+                    }
+                })
+                .map(|r| ReactRow {
+                    chat: hex::encode(&r.chat),
+                    scope: r.scope,
+                    msg_id: r.msg_id,
+                    msg_sender: r.msg_sender,
+                    who: r.who,
+                    emoji: r.emoji,
+                    at: r.at,
+                })
+                .collect();
+            if !items.is_empty() {
+                w.json(&Rec::Reactions { items })?;
+            }
+        }
+
         // Имена групп кладём вместе с их перепиской — это часть того же выбора.
         if parts.groups {
             let items: Vec<ChatRow> = self
@@ -481,6 +528,33 @@ impl Engine {
                                     continue;
                                 }
                                 let _ = store.set_chat_title(Chat::Group(&raw), &row.name);
+                            }
+                        }
+                        Rec::Reactions { items: list } => {
+                            // Последнее слово по времени (`react`): импорт — слияние,
+                            // более свежее на этом устройстве копия не перебьёт.
+                            let store = self.messages.lock_safe();
+                            for row in &list {
+                                let Ok(raw) = hex::decode(&row.chat) else {
+                                    continue;
+                                };
+                                let (r, s) = (row.msg_id, row.msg_sender.as_str());
+                                let (who, e, at) = (row.who.as_str(), row.emoji.as_str(), row.at);
+                                // Копия — чужой файл: эмодзи проверяем, как пришедший по сети.
+                                if !e.is_empty() && !peerage_core::protocol::reaction_ok(e) {
+                                    continue;
+                                }
+                                if row.scope == 1 {
+                                    let _ = store.react(Chat::Group(&raw), r, s, who, e, at);
+                                    continue;
+                                }
+                                let Ok(peer) = <[u8; 32]>::try_from(raw.as_slice()) else {
+                                    continue;
+                                };
+                                // Заметки переадресуются на текущее «я», как и сами сообщения.
+                                let is_note = peer == me || Some(peer) == src_me;
+                                let peer = if is_note { me } else { peer };
+                                let _ = store.react(Chat::Dm(&peer), r, s, who, e, at);
                             }
                         }
                         Rec::Calls { items: list } => {

@@ -66,7 +66,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.HorizontalAlignmentLine
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -1059,13 +1061,17 @@ private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group:
             val who = groupSenderName(model, m.sender)
             val avatarBottom = pos == BlockPos.Solo || pos == BlockPos.Last
             if (avatarBottom) {
-                SquareAvatar(
-                    who,
-                    size = Tokens.Size.avatarSeries,
-                    online = model.online[m.sender] == true,
-                    circle = true,
-                    ring = Tokens.Colors.panel, // лента — на листе
-                )
+                // Низ аватара — по низу пузыря, а не ряда: чипы реакций и «Не доставлено»
+                // под пузырём его не тянут вниз.
+                Box(Modifier.alignBy { it.measuredHeight }) {
+                    SquareAvatar(
+                        who,
+                        size = Tokens.Size.avatarSeries,
+                        online = model.online[m.sender] == true,
+                        circle = true,
+                        ring = Tokens.Colors.panel, // лента — на листе
+                    )
+                }
             } else {
                 Spacer(Modifier.width(Tokens.Size.avatarSeries))
             }
@@ -1078,6 +1084,7 @@ private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group:
                 senderName = if (pos == BlockPos.Solo || pos == BlockPos.First) who else null,
                 senderColor = nameColor(m.sender),
                 group = true,
+                modifier = Modifier.alignBy(BubbleBottom),
             )
         }
         // Своё сообщение в группе — тоже групповое: его вложение открывается из ленты
@@ -1099,6 +1106,7 @@ internal fun MessageBubble(
     /** Пузырь в группе. Явно, а не по `currentChat`: в группе тот пуст, и всё, что
      *  ищет «свой чат», — просмотрщик, докачка, цитата — молча искало в никуда. */
     group: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     // Чат пузыря: gid группы или ключ собеседника.
     val chatId = if (group) model.currentGroup else model.currentChat
@@ -1139,7 +1147,7 @@ internal fun MessageBubble(
         MsgMeta(m.time, m.mine && m.status.isNotEmpty(), m.editedAt > 0, m.status)
     }
     Row(
-        Modifier.fillMaxWidth().padding(bottom = blockGap(pos))
+        modifier.fillMaxWidth().padding(bottom = blockGap(pos))
             .graphicsLayer {
                 alpha = appear
                 translationY = (1f - appear) * 24f
@@ -1161,7 +1169,8 @@ internal fun MessageBubble(
             val photoHeader = photoBubble &&
                 (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
             Box(
-                Modifier.widthIn(max = Tokens.Size.bubbleMax)
+                Modifier.markBubbleBottom()
+                    .widthIn(max = Tokens.Size.bubbleMax)
                     .onGloballyPositioned { place.rect = it.boundsInRoot() }
                     .clip(bubbleShape(m.mine, pos))
                     .then(
@@ -1357,6 +1366,14 @@ private fun FailedLine(onRetry: () -> Unit) {
         Text(stringResource(R.string.act_failed) + " · ", color = Tokens.Colors.failText, fontSize = Tokens.Font.small)
         Text(stringResource(R.string.act_retry), color = Tokens.Colors.accentSoft, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium)
     }
+}
+
+/** Низ самого пузыря в ряду сообщения — без того, что висит под ним (реакции, «Не доставлено»). */
+private val BubbleBottom = HorizontalAlignmentLine(::maxOf)
+
+private fun Modifier.markBubbleBottom() = layout { m, c ->
+    val p = m.measure(c)
+    layout(p.width, p.height, mapOf(BubbleBottom to p.height)) { p.place(0, 0) }
 }
 
 /** Место пузыря в окне; обновляется раскладкой, читается по долгому нажатию. */
