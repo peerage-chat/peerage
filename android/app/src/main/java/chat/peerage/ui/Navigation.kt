@@ -126,9 +126,9 @@ internal fun FolderTabs(
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                .padding(horizontal = Tokens.Space.l),
+                .padding(horizontal = Tokens.Space.xl),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.l),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xl),
         ) {
             Folders.forEach { (key, _, labelRes) ->
                 FolderTab(
@@ -148,9 +148,12 @@ internal fun FolderTabs(
                 FolderTab(f.name, f.id == activeFilter, 0) { onFilter(f.id) }
             }
             val create = stringResource(R.string.folder_create)
+            // «+» — такая же вкладка (макет `requests/Tab`): поля как у подписи, а не
+            // квадрат касания — иначе он отъезжает от последней папки.
             Box(
-                Modifier.size(Tokens.Size.touch)
-                    .clickable(role = Role.Button, onClickLabel = create) { onManage() },
+                Modifier.heightIn(min = Tokens.Size.touch)
+                    .clickable(role = Role.Button, onClickLabel = create) { onManage() }
+                    .padding(horizontal = Tokens.Space.xs),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(TablerIcons.Plus, create, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconS))
@@ -177,10 +180,10 @@ private fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () 
         Row(
             Modifier.padding(horizontal = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs + Tokens.Space.xxs),
         ) {
             Text(label, color = fg, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium, maxLines = 1)
-            if (badge > 0) CountBadge(badgeCount(badge))
+            if (badge > 0) CountBadge(badgeCount(badge), compact = true)
         }
         // Ширину линия берёт у таба (matchParentSize): внутри горизонтальной прокрутки
         // ширина не ограничена, и fillMaxWidth дал бы линию нулевой длины.

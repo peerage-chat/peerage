@@ -130,9 +130,11 @@ internal fun TopBar(
  * Текст центрируется по высоте самой строкой (`Tokens.Text.base`), а не отступами.
  */
 @Composable
-internal fun CountBadge(text: String, muted: Boolean = false) {
+internal fun CountBadge(text: String, muted: Boolean = false, compact: Boolean = false) {
+    // compact — счётчик у подписи вкладки: мельче строчного, чтобы не перерастать текст.
+    val size = if (compact) Tokens.Size.badgeTab else Tokens.Size.badge
     Box(
-        Modifier.height(Tokens.Size.badge).widthIn(min = Tokens.Size.badge)
+        Modifier.height(size).widthIn(min = size)
             .clip(RoundedCornerShape(percent = 50))
             .background(if (muted) Tokens.Colors.unreadMuted else HoloAccent)
             .padding(horizontal = Tokens.Space.xs + Tokens.Space.xxs),
@@ -142,7 +144,7 @@ internal fun CountBadge(text: String, muted: Boolean = false) {
             text,
             style = Tokens.Text.meta,
             color = if (muted) Tokens.Colors.unreadMutedText else HoloAccentDark,
-            fontSize = Tokens.Font.small,
+            fontSize = if (compact) Tokens.Font.caption else Tokens.Font.small,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
