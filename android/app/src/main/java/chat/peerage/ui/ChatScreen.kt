@@ -24,7 +24,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
@@ -256,25 +255,9 @@ internal fun ChatScreen(model: AppModel) {
         }
     }
 
-    // Голосовые (M2): held-to-record. RECORD_AUDIO спрашиваем при первой попытке.
-    val recorder = remember { VoiceRecorder(ctx) }
-    DisposableEffect(recorder) { onDispose { recorder.cancel() } }
-    var recording by remember { mutableStateOf(false) }
-    val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-    val startVoice = {
-        if (ctx.hasPermission(Manifest.permission.RECORD_AUDIO)) {
-            recording = recorder.start()
-        } else {
-            micPerm.launch(Manifest.permission.RECORD_AUDIO)
-        }
-    }
-    val stopVoice = {
-        if (recording) {
-            recording = false
-            recorder.stop()?.let { bytes ->
-                scope.launch(Dispatchers.IO) { model.sendMedia(key, bytes, "audio/mp4", "voice.m4a") }
-            }
-        }
+    // Голосовые (M2): удержание, замок, отмена — VoiceSession.
+    val voice = rememberVoiceSession { bytes ->
+        scope.launch(Dispatchers.IO) { model.sendMedia(key, bytes, "audio/mp4", "voice.m4a") }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -331,9 +314,7 @@ internal fun ChatScreen(model: AppModel) {
                     )
                 }
             },
-            recording = recording,
-            onVoiceStart = startVoice,
-            onVoiceStop = stopVoice,
+            voice = voice,
             model = model,
             replyStrip = {
                 model.editTarget?.let {
@@ -659,9 +640,8 @@ internal fun MessageInput(
     onPickAudio: () -> Unit = {},
     onCamera: () -> Unit = {},
     onSendAttachments: (List<GalleryItem>, String) -> Unit = { _, _ -> },
-    recording: Boolean = false,
-    onVoiceStart: () -> Unit = {},
-    onVoiceStop: () -> Unit = {},
+    /** Запись голосовых; null — микрофона в этом поле нет. */
+    voice: VoiceSession? = null,
     model: AppModel? = null,
     /** Полоска «отвечаем на …» над полем: экран решает, чья цель ответа. */
     replyStrip: (@Composable () -> Unit)? = null,
@@ -779,12 +759,18 @@ internal fun MessageInput(
                 onClose = { emojiOpen = false },
             )
         }
+        // Зафиксированная замком запись занимает всю строку: корзина, волна, отправка.
+        if (voice != null && (voice.phase == VoicePhase.Locked || voice.phase == VoicePhase.Stopped)) {
+            VoiceLockedRow(voice)
+            return@Column
+        }
+        val holding = voice?.phase == VoicePhase.Holding
         Row(
             Modifier.fillMaxWidth().padding(
                 start = Tokens.Space.m,
                 end = Tokens.Space.m,
                 top = if (stripShown) Tokens.Space.xxs else Tokens.Space.s,
-                bottom = Tokens.Space.m,
+                bottom = Tokens.Space.l, // выросшая кнопка записи (76 dp) должна влезть
             ),
             verticalAlignment = Alignment.Bottom,
         ) {
@@ -794,6 +780,10 @@ internal fun MessageInput(
                     .clip(RoundedCornerShape(Tokens.Radius.field)).background(Tokens.Colors.group),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (voice != null && holding) {
+                    VoiceHoldField(voice)
+                    return@Row
+                }
                 val emojiIcon = @Composable {
                     // Скрепка и эмодзи ведут себя одинаково: обе выдвигают панель из этой же
                     // строки, поэтому активная подсвечена акцентом и закрывается повторным тапом.
@@ -829,8 +819,8 @@ internal fun MessageInput(
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (value.isEmpty()) {
                                 Text(
-                                    stringResource(if (recording) R.string.chat_recording else R.string.chat_input_hint),
-                                    color = if (recording) HoloError else Tokens.Colors.tertiary,
+                                    stringResource(R.string.chat_input_hint),
+                                    color = Tokens.Colors.tertiary,
                                     fontSize = Tokens.Font.label,
                                 )
                             }
@@ -844,38 +834,21 @@ internal fun MessageInput(
             // Отправка (есть текст) / голосовое удержанием (поле пустое).
             val hasText = value.isNotBlank()
             val hasPicked = picked.isNotEmpty()
-            val btnMod = if (hasText || hasPicked) {
-                Modifier.clickable {
-                    if (hasPicked) {
-                        // Текст поля становится ПОДПИСЬЮ вложения, а не отдельным
-                        // сообщением: иначе фото с подписью — это два пакета, и
-                        // наблюдатель узнаёт их по характерной паре (M5).
-                        onSendAttachments(picked, value.trim())
-                        picked = emptyList()
-                        attachOpen = false
-                        setField(TextFieldValue(""))
-                    } else if (hasText) {
-                        onSend()
-                    }
+            val send = hasText || hasPicked
+            ComposerButton(voice, record = !send, onClick = {
+                if (hasPicked) {
+                    // Текст поля становится ПОДПИСЬЮ вложения, а не отдельным
+                    // сообщением: иначе фото с подписью — это два пакета, и
+                    // наблюдатель узнаёт их по характерной паре (M5).
+                    onSendAttachments(picked, value.trim())
+                    picked = emptyList()
+                    attachOpen = false
+                    setField(TextFieldValue(""))
+                } else if (hasText) {
+                    onSend()
                 }
-            } else {
-                // Held-to-record: запись на нажатии, отправка на отпускании.
-                Modifier.pointerInput(Unit) {
-                    detectTapGestures(onPress = {
-                        onVoiceStart()
-                        tryAwaitRelease()
-                        onVoiceStop()
-                    })
-                }
-            }
-            Box(
-                Modifier.clip(RoundedCornerShape(Tokens.Radius.field))
-                    .background(if (recording) Tokens.Colors.errorFill else HoloAccent)
-                    .size(Tokens.Size.composer).then(btnMod),
-                contentAlignment = Alignment.Center,
-            ) {
-                val send = hasText || hasPicked
-                val tint = if (recording) Color.White else HoloAccentDark
+            }) {
+                val tint = HoloAccentDark
                 SwapIcon(
                     send,
                     {

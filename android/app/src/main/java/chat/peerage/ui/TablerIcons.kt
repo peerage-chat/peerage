@@ -469,6 +469,18 @@ val TablerIcons.Send: ImageVector by lazy {
     tabler("send", "M4 12l16 -8l-6 16l-3 -7z", "M11 13l9 -9")
 }
 
+val TablerIcons.Lock: ImageVector by lazy {
+    tabler("lock", "M8 11h8a2 2 0 0 1 2 2v5a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-5a2 2 0 0 1 2 -2z", "M9 11v-3a3 3 0 0 1 6 0v3")
+}
+
+val TablerIcons.ChevronUp: ImageVector by lazy { tabler("chevron-up", "M7 14l5 -5l5 5") }
+
+val TablerIcons.ChevronLeft: ImageVector by lazy { tabler("chevron-left", "M15 6l-6 6l6 6") }
+
+val TablerIcons.PlayerStop: ImageVector by lazy {
+    tabler("player-stop", "M9 7h6a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-6a2 2 0 0 1 -2 -2v-6a2 2 0 0 1 2 -2z")
+}
+
 val TablerIcons.X: ImageVector by lazy {
     tabler("x", "M18 6l-12 12", "M6 6l12 12")
 }

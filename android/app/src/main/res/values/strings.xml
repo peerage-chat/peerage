@@ -176,9 +176,11 @@
     <string name="chat_default_title">Chat</string>
     <string name="chat_e2e_banner">Messages are end-to-end encrypted</string>
     <string name="chat_input_hint">Message</string>
+    <string name="voice_cancel_hint">Slide left to cancel</string>
+    <string name="voice_delete">Delete recording</string>
+    <string name="voice_stop">Stop recording</string>
     <string name="chat_voice">Voice</string>
     <string name="chat_file">File</string>
-    <string name="chat_recording">Recording…</string>
     <string name="chat_download">Download</string>
     <string name="chat_downloading">Downloading…</string>
     <string name="attach_file">File</string>

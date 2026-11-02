@@ -105,26 +105,10 @@ private fun GroupChatContent(model: AppModel) {
             camUri.value?.let { camera.launch(it) }
         }
     }
-    // Голосовые в группе: held-to-record.
-    val recorder = remember { VoiceRecorder(ctx) }
-    DisposableEffect(recorder) { onDispose { recorder.cancel() } }
-    var recording by remember { mutableStateOf(false) }
-    val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-    val startVoice = {
-        if (ctx.hasPermission(Manifest.permission.RECORD_AUDIO)) {
-            recording = recorder.start()
-        } else {
-            micPerm.launch(Manifest.permission.RECORD_AUDIO)
-        }
-    }
-    val stopVoice = {
-        if (recording) {
-            recording = false
-            recorder.stop()?.let { bytes ->
-                scope.launch(Dispatchers.IO) {
-                    model.sendMediaWithMeta(gid, bytes, "audio/mp4", "voice.m4a", MediaMeta(), group = true)
-                }
-            }
+    // Голосовые в группе: удержание, замок, отмена — VoiceSession.
+    val voice = rememberVoiceSession { bytes ->
+        scope.launch(Dispatchers.IO) {
+            model.sendMediaWithMeta(gid, bytes, "audio/mp4", "voice.m4a", MediaMeta(), group = true)
         }
     }
 
@@ -214,9 +198,7 @@ private fun GroupChatContent(model: AppModel) {
                             )
                         }
                     },
-                    recording = recording,
-                    onVoiceStart = startVoice,
-                    onVoiceStop = stopVoice,
+                    voice = voice,
                     model = model,
                     mentionCandidates = mentionCandidates,
                     onMentionPicked = { key, name -> picked = picked + (key to name) },

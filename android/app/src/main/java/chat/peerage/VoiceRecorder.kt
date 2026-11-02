@@ -55,6 +55,12 @@ class VoiceRecorder(private val ctx: Context) {
         return bytes?.takeIf { it.isNotEmpty() }
     }
 
+    /** Громкость с прошлого вызова, 0..1 — для волны. Корень: тихая речь иначе почти не видна. */
+    fun level(): Float {
+        val amp = rec?.let { runCatching { it.maxAmplitude }.getOrDefault(0) } ?: 0
+        return kotlin.math.sqrt(amp / 32767f).coerceIn(0f, 1f)
+    }
+
     /** Бросить запись без отправки: экран ушёл, пока палец держал кнопку. Жест при
      *  этом отменяется, и [stop] не позовёт никто — без этого микрофон оставался
      *  занят до убийства процесса. */

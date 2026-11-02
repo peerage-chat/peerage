@@ -174,9 +174,11 @@
     <string name="chat_default_title">Чат</string>
     <string name="chat_e2e_banner">Сообщения защищены сквозным шифрованием</string>
     <string name="chat_input_hint">Сообщение</string>
+    <string name="voice_cancel_hint">Влево — отмена</string>
+    <string name="voice_delete">Удалить запись</string>
+    <string name="voice_stop">Остановить запись</string>
     <string name="chat_voice">Голосовое</string>
     <string name="chat_file">Файл</string>
-    <string name="chat_recording">Запись…</string>
     <string name="chat_download">Скачать</string>
     <string name="chat_downloading">Загрузка…</string>
     <string name="attach_file">Файл</string>
