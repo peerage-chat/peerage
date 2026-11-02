@@ -498,14 +498,14 @@ internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
 }
 
 /** Отступ разделителя у строки участника: поле карточки + аватар + зазор. */
-private val MemberRowInset = Tokens.Space.m + Tokens.Size.avatarSeries + Tokens.Space.m
+private val MemberRowInset = Tokens.Space.m + Tokens.Size.avatarMember + Tokens.Space.m
 
 /** Аватар участника с точкой присутствия — тот же круг, что у человека везде. */
 @Composable
 private fun MemberAvatar(model: AppModel, key: String) {
     SquareAvatar(
         groupSenderName(model, key),
-        size = Tokens.Size.avatarSeries,
+        size = Tokens.Size.avatarMember,
         online = model.online[key] == true,
         avatarBytes = model.peerAvatar(key),
         circle = true,

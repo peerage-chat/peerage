@@ -289,7 +289,9 @@ object Tokens {
         val rowIcon = 36.dp // плитка иконки в строке группы
         val navRow = 56.dp // строка-раздел в группе «Профиля» и категорий
         val avatarHead = 38.dp // аватар в шапке чата
-        val avatarSeries = 26.dp // аватар у последнего сообщения серии
+        val avatarSeries = 30.dp // аватар у последнего сообщения серии (макет `screens/GroupChat`)
+        val avatarMention = 32.dp // аватар в подсказке «@» над полем (макет `chatact/Mention`)
+        val avatarMember = 36.dp // аватар в строке участника группы (макет `prof/GroupB`)
         val tabLine = 2.dp // линия акцента под выбранной папкой
         val badge = 22.dp // бейдж-счётчик: высота и минимальная ширина
         val barButton = 38.dp // кнопка-плашка шапки (BarIcon) и индикатор пиров

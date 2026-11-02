@@ -623,7 +623,7 @@ private fun MentionSuggestions(candidates: List<Pair<String, String>>, onPick: (
                         .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SquareAvatar(name, size = Tokens.Size.avatarSeries)
+                    SquareAvatar(name, size = Tokens.Size.avatarMention)
                     Spacer(Modifier.width(Tokens.Space.m))
                     Text(
                         name,
@@ -1068,6 +1068,7 @@ private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group:
                         who,
                         size = Tokens.Size.avatarSeries,
                         online = model.online[m.sender] == true,
+                        avatarBytes = model.peerAvatar(m.sender),
                         circle = true,
                         ring = Tokens.Colors.panel, // лента — на листе
                     )
