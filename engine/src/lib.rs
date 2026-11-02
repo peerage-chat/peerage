@@ -283,6 +283,9 @@ struct GroupRowJson {
     members: usize,
     #[serde(default)]
     admin: bool,
+    /// Ключ админа (hex; пусто — неизвестен, у архивных всегда пусто).
+    #[serde(default)]
+    admin_key: String,
     /// Мы НЕ состоим в группе: история из копии, отправка недоступна.
     #[serde(default)]
     archived: bool,
@@ -2433,6 +2436,7 @@ impl Engine {
                     name,
                     members: 0,
                     admin: false,
+                    admin_key: String::new(),
                     archived: true,
                 });
             }

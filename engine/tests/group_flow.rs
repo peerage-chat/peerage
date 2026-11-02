@@ -321,6 +321,30 @@ fn group_name_propagates_to_joiner() {
     );
 }
 
+/// Ключ админа в списке групп (UI 3.1 — метка «админ» в участниках): у обоих — создатель.
+#[test]
+fn admin_key_is_listed_for_every_member() {
+    let ctx = setup_and_join(0);
+    let admin_of = |gm: &GroupManager| -> String {
+        let v: serde_json::Value = serde_json::from_str(&gm.list_json()).unwrap();
+        v.as_array()
+            .unwrap()
+            .iter()
+            .find(|g| g["gid"] == hex::encode(&ctx.gid))
+            .unwrap()["admin_key"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    };
+    let a_key = id(10).public_key_bytes(); // setup_and_join: A — id(10)
+    assert_eq!(admin_of(&ctx.gm_a), hex::encode(a_key), "у админа — он сам");
+    assert_eq!(
+        admin_of(&ctx.gm_b),
+        hex::encode(a_key),
+        "у участника — пригласивший админ"
+    );
+}
+
 /// Тот же путь под потерями — доказывает, что надёжный invite-хендшейк дожимает
 /// приглашение сквозь дропы (регрессия против «инвайт не срабатывает»).
 #[test]

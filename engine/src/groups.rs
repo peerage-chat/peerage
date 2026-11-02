@@ -41,6 +41,8 @@ struct GroupRow {
     name: String,
     members: usize,
     admin: bool,
+    /// Ключ админа группы (hex; пусто — неизвестен): метка «админ» у участника.
+    admin_key: String,
 }
 
 /// Карточка приглашения в группу для клиента.
@@ -789,6 +791,7 @@ impl GroupManager {
                 name: e.name.clone(),
                 members: e.chat.member_count(),
                 admin: e.admin,
+                admin_key: self.admin_keys.get(id).map(hex::encode).unwrap_or_default(),
             })
             .collect::<Vec<GroupRow>>();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
