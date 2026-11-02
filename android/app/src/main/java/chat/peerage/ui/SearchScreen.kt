@@ -102,7 +102,9 @@ internal fun SearchScreen(
                     // говорил только «где-то тут было».
                     ListRow(onClick = {
                         if (hit.group) onOpenGroup(hit.chat) else onOpenDm(hit.chat)
-                        model.jumpTo = hit.id // после открытия: открытие сбрасывает цель
+                        // После открытия: открытие сбрасывает цель и читает хвост, а окно
+                        // вокруг находки встаёт следом в той же очереди.
+                        model.showAt(ChatTarget(hit.chat, hit.group), hit.time, hit.row, MsgRef(hit.id, hit.sender))
                     }) {
                         Icon(
                             Icons.AutoMirrored.Filled.Message,

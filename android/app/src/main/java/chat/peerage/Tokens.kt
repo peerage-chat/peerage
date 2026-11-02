@@ -97,6 +97,10 @@ object Tokens {
         val callAnswered = Color(0xFFA5D6A7) // значок отвеченного входящего звонка в ленте
         val callAnsweredBg = Color(0xFF1E3322) // его круг
         val onBubbleButton = Color(0x14FFFFFF) // кнопка на пузыре («Позвонить» у звонка), белый @8%
+        val fieldIcon = Color(0xFF9AA3AD) // иконки в поле поиска и строках-уточнениях
+        val snippet = Color(0xFFB8B8C0) // текст находки в списке поиска
+        val faint = Color(0xFF4A4B52) // приглушённое: день без сообщений, «ничего не найдено»
+        val searchMark = Color(0x4D33B5E5) // подсветка совпадения в пузыре (акцент @30%)
         val chipText = Color(0xFFC4C7CC) // светлый вторичный: число в чипе реакции, вкладка шторки, имя в системной строке
         val dim = Color(0x99000000) // затемнение под меню у пузыря (чёрный @60%)
 
@@ -351,6 +355,14 @@ object Tokens {
         val avatarList = 40.dp // аватар в строке шторки-списка (кто поставил реакцию)
         val callRowMin = 220.dp // минимальная ширина звонка в ленте (макет `special/Calls`)
         val callBadge = 36.dp // круг значка звонка и кнопка «Позвонить» на нём
+        val searchField = 44.dp // поле поиска в шапке чата (`chatsearch/`)
+        val searchClear = 32.dp // «очистить» внутри поля
+        val searchChip = 34.dp // чип-фильтр над находками
+        val avatarHit = 36.dp // аватар находки в списке поиска
+        val dayCell = 44.dp // клетка дня календаря «Перейти к дате»
+        val dayDot = 40.dp // круг дня (выбранный — акцентом)
+        val jumpDown = 46.dp // кнопка «вниз» над лентой (`special/Unread`)
+        val sheetList = 400.dp // предельная высота списка в шторке (выбор участника)
         val systemLine = 300.dp // предельная ширина системной строки группы (макет `special/GroupSystem`)
         val phraseRow = 36.dp // строка слова в сетке 24 слов
         val phraseNum = 20.dp // колонка номера слова в сетке

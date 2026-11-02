@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -86,6 +87,9 @@ private fun GroupChatContent(model: AppModel) {
     FollowNewest(listState, msgs)
     JumpToMessage(model, listState, msgs)
     PagingOlder(listState, gid) { model.loadOlder(gid, {}, group = true) }
+    val chat = ChatTarget(gid, group = true)
+    PagingNewer(model, listState, chat)
+    val search = model.chatSearch?.takeIf { it.chat == chat }
 
     // Вложения в группе — тот же лист, что в DM (движок пушит блоб всем участникам).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -125,38 +129,22 @@ private fun GroupChatContent(model: AppModel) {
                 RoomBanner(model, presenceMembers) { join(gid) }
             }
 
-            PinnedBar(model, gid, group = true, canUnpin = isAdmin)
-            LazyColumn(
-                state = listState,
-                reverseLayout = true,
-                // Поля по бокам даёт ряд сообщения: заливка выбора идёт во всю ширину листа.
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            ) {
-                // От свежего к старому; i — индекс в хронологии (см. ChatScreen).
-                // Ключ — пара «автор + id»: состояние пузыря (просмотрщик, голосовое) и
-                // позиция прокрутки держатся за сообщение, а не за место в ленте.
-                items(msgs.size, key = { j -> msgs[msgs.size - 1 - j].let { "${it.sender}:${it.id}" } }) { j ->
-                    val i = msgs.size - 1 - j
-                    val m = msgs[i]
-                    val prev = msgs.getOrNull(i - 1)
-                    val next = msgs.getOrNull(i + 1)
-                    Column {
-                        if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
-                        // Склейка блоков. Системная строка — разделитель: у неё нет
-                        // отправителя, поэтому соседние сообщения в один блок не сходятся.
-                        val who = { g: Message -> if (g.system) null else g.sender }
-                        val pos = blockPos(
-                            withPrev = prev != null && !m.system &&
-                                continuesBlock(who(prev), prev.time, m.sender, m.time),
-                            withNext = next != null && !m.system && !next.system &&
-                                continuesBlock(m.sender, m.time, next.sender, next.time),
-                        )
-                        MessageRow(model, m, pos, group = true)
+            if (search == null) PinnedBar(model, gid, group = true, canUnpin = isAdmin)
+            if (search != null && search.coversFeed) {
+                ChatSearchPanel(model, search, Modifier.weight(1f))
+            } else {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    CompositionLocalProvider(LocalSearchMarks provides searchMarks(search)) {
+                        GroupFeed(model, msgs, listState)
                     }
+                    JumpDownButton(model, listState, chat, Modifier.align(Alignment.BottomEnd))
                 }
             }
             ForwardSheet(model)
-            if (archived) {
+            if (search != null) {
+                ChatSearchBar(model, search)
+                ChatSearchSheets(model, search)
+            } else if (archived) {
                 // Группа из резервной копии: история есть, MLS-состояния нет (ADR-004).
                 // Показать поле ввода значило бы обещать отправку, которой не будет.
                 Text(
@@ -219,6 +207,40 @@ private fun GroupChatContent(model: AppModel) {
     }
 }
 
+/** Лента группы: привязана к низу, как в личном чате; системные строки разрывают серии. */
+@Composable
+private fun GroupFeed(model: AppModel, msgs: List<Message>, listState: LazyListState) {
+    LazyColumn(
+        state = listState,
+        reverseLayout = true,
+        // Поля по бокам даёт ряд сообщения: заливка выбора идёт во всю ширину листа.
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        // От свежего к старому; i — индекс в хронологии (см. ChatScreen).
+        // Ключ — пара «автор + id»: состояние пузыря (просмотрщик, голосовое) и
+        // позиция прокрутки держатся за сообщение, а не за место в ленте.
+        items(msgs.size, key = { j -> msgs[msgs.size - 1 - j].let { "${it.sender}:${it.id}" } }) { j ->
+            val i = msgs.size - 1 - j
+            val m = msgs[i]
+            val prev = msgs.getOrNull(i - 1)
+            val next = msgs.getOrNull(i + 1)
+            Column {
+                if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
+                // Склейка блоков. Системная строка — разделитель: у неё нет
+                // отправителя, поэтому соседние сообщения в один блок не сходятся.
+                val who = { g: Message -> if (g.system) null else g.sender }
+                val pos = blockPos(
+                    withPrev = prev != null && !m.system &&
+                        continuesBlock(who(prev), prev.time, m.sender, m.time),
+                    withNext = next != null && !m.system && !next.system &&
+                        continuesBlock(m.sender, m.time, next.sender, next.time),
+                )
+                MessageRow(model, m, pos, group = true)
+            }
+        }
+    }
+}
+
 /** Шапка группового чата: аватар группы · имя · «N уч · M в сети» (тап → инфо) ·
  *  войти/выйти из комнаты · меню. */
 @Composable
@@ -226,6 +248,10 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
     var confirmLeave by remember { mutableStateOf(false) }
     if (model.selection.isNotEmpty()) {
         SelectionTopBar(model, group = true)
+        return
+    }
+    model.chatSearch?.takeIf { it.chat.group && it.chat.id == model.currentGroup }?.let {
+        ChatSearchTopBar(model, it)
         return
     }
     val gid = model.currentGroup
@@ -302,6 +328,10 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
 private fun GroupMenu(model: AppModel, gid: String, open: Boolean, onClose: () -> Unit, onInfo: () -> Unit, onLeave: () -> Unit) {
     val muted = model.chatSummaries[model.chatKey(gid, group = true)]?.muted == true
     PopMenu(open, onClose) {
+        PopMenuItem(TablerIcons.Search, stringResource(R.string.chat_menu_search)) {
+            onClose()
+            model.openChatSearch(ChatTarget(gid, group = true))
+        }
         PopMenuItem(
             TablerIcons.BellOff,
             stringResource(R.string.chat_menu_mute),

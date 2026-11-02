@@ -9,6 +9,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -987,13 +988,21 @@ internal fun FollowNewest(listState: LazyListState, msgs: List<Message>) {
 internal fun JumpToMessage(model: AppModel, listState: LazyListState, msgs: List<Message>) {
     val target = model.jumpTo
     LaunchedEffect(target, msgs.size) {
-        if (target == 0L) return@LaunchedEffect
-        val i = msgs.indexOfFirst { it.id == target }
+        val t = target ?: return@LaunchedEffect
+        val i = msgs.indexOfFirst { it.id == t.id && it.sender == t.sender }
         if (i >= 0) {
             // Сначала доехать, потом гасить: смена цели перезапускает эффект и
             // оборвала бы прокрутку на полпути.
-            listState.animateScrollToItem(msgs.size - 1 - i) // лента перевёрнута: индекс от конца
-            model.jumpTo = 0L
+            val index = msgs.size - 1 - i // лента перевёрнута: индекс от конца
+            listState.animateScrollToItem(index)
+            // Цель — на трети высоты от низа: виден и контекст над ней, и следующее под ней.
+            // Отступ считаем от того места, где она на деле встала: у краёв истории
+            // прокрутка до элемента упирается и ставит его не к низу.
+            listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.let { item ->
+                val want = listState.layoutInfo.viewportSize.height / 3
+                listState.animateScrollBy((item.offset - want).toFloat())
+            }
+            model.jumpTo = null
         }
     }
 }

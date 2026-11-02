@@ -589,6 +589,7 @@ class AppModel private constructor() {
         val text: String,
         val mine: Boolean,
         val time: Long,
+        val row: Long,
     )
 
     /** Результаты поиска по сообщениям (свежие первыми). */
@@ -1355,6 +1356,7 @@ class AppModel private constructor() {
             .toMutableList()
         messages[chatKey(key, group = false)] = list.toMutableStateList()
         atChatStart -= key // хвост перечитан — выше снова может что-то быть
+        detached.remove(chatKey(key, group = false))
         // Байты вложений НЕ читаем заранее: `blob()` возьмёт их при показе, то есть
         // только для видимых пузырей. Раньше вход в чат тянул с диска всю страницу,
         // включая вложения, до которых человек не долистает.
@@ -1552,6 +1554,8 @@ class AppModel private constructor() {
         val reply = replyTarget
         replyTarget = null
         ops.execute {
+            // Своё ложится в хвост: лента-окно посреди переписки сначала к нему возвращается.
+            if (detached[chatKey(key, group = false)] == true) loadHistory(key)
             val now = System.currentTimeMillis() / 1000
             val id = Native.sendTextReply(
                 sessionPtr,
@@ -1625,7 +1629,8 @@ class AppModel private constructor() {
         replyTarget = null
         editTarget = null
         bubbleActions = null
-        jumpTo = 0L // недостигнутая цель прошлого чата не должна сработать в новом
+        jumpTo = null // недостигнутая цель прошлого чата не должна сработать в новом
+        chatSearch = null
     }
 
     fun clearSelection() {
@@ -1993,7 +1998,14 @@ class AppModel private constructor() {
                 // Миниатюра — отдельный мелкий блоб: подтянем, если уже есть. Байты
                 // самого вложения лента возьмёт при показе.
                 m.thumbId.takeIf { it.isNotEmpty() }?.let { cacheBlob(it) }
-                upsert(if (ev.group) groupLog(ev.chat) else log(ev.chat), m)
+                val feed = if (ev.group) groupLog(ev.chat) else log(ev.chat)
+                when {
+                    // Лента открыта окном посреди переписки: новое легло бы под окно через
+                    // дыру. Чужое принесёт подгрузка вниз, своё — возвращает к хвосту.
+                    detached[chatKey(ev.chat, ev.group)] != true || feed.any { it.id == m.id && it.sender == m.sender } ->
+                        upsert(feed, m)
+                    m.mine -> toTail(ChatTarget(ev.chat, ev.group))
+                }
                 // Своё и системные строки (кто вошёл/вышел) непрочитанным не считаем:
                 // счётчик обещает сообщения, за которыми стоит человек.
                 // Звонок — только пропущенный: строка звонка приходит заново на каждое
@@ -2671,6 +2683,7 @@ class AppModel private constructor() {
             }
         messages[chatKey(gid, group = true)] = list.toMutableStateList()
         atChatStart -= "g:$gid"
+        detached.remove(chatKey(gid, group = true))
         // Байты вложений и миниатюры подтянет `blob()` при показе — заранее
         // читать всю страницу с диска незачем.
     }
@@ -2710,10 +2723,86 @@ class AppModel private constructor() {
 
     // ── Действия с групповым сообщением (ADR-006) ────────────────────────────
 
-    /** id сообщения, к которому просят прокрутить ленту («показать в чате» из
-     *  просмотрщика). Лента сама гасит его после прокрутки — иначе повторный вход
+    /** Сообщение, к которому просят прокрутить ленту (находка поиска, «показать в
+     *  чате» из просмотрщика, переход к дате). Пара «автор + id»: один id бывает у
+     *  разных авторов. Лента сама гасит цель после прокрутки — иначе повторный вход
      *  в чат снова уезжал бы к старому вложению. */
-    var jumpTo by mutableStateOf(0L)
+    var jumpTo by mutableStateOf<MsgRef?>(null)
+
+    /** Поиск в открытом чате (2.9); null — не открыт. */
+    var chatSearch by mutableStateOf<ChatSearch?>(null)
+
+    /**
+     * Ленты, открытые окном посреди переписки (переход к находке или к дате), а не с
+     * хвоста: ниже окна ещё есть история. Новые сообщения в такую ленту не дописываются
+     * — между ними и окном была бы дыра; их приносит подгрузка вниз ([loadNewer]),
+     * а своё отправленное возвращает ленту к хвосту. Ключ — [chatKey].
+     */
+    internal val detached = mutableStateMapOf<String, Boolean>()
+
+    /** Ленты с идущей подгрузкой вниз — прокрутка не запускает её пачкой. */
+    private val loadingNewer = mutableSetOf<String>()
+
+    /** Где пометка «дошли до начала переписки» у этого чата ([atChatStart]). */
+    private fun startMark(chat: ChatTarget) = if (chat.group) "g:${chat.id}" else chat.id
+
+    /** Страница истории из движка — как модель: у группы `downloaded` уточняется по
+     *  наличию блоба (своё и скачанное до появления флага). */
+    private fun pageOf(json: String, group: Boolean): List<Message> =
+        decodeList<MessageDto>(json).map { it.toModel() }.map {
+            if (group && !it.downloaded && it.blobId.isNotEmpty() && Native.blobExists(sessionPtr, it.blobId)) {
+                it.copy(downloaded = true)
+            } else {
+                it
+            }
+        }
+
+    /**
+     * Показать в ленте место переписки: сообщение [target] (находка) или, без него, первое
+     * сообщение не раньше [time] (`row = 0` — переход к дате). Уже в ленте — только
+     * прокрутка; иначе лента открывается окном вокруг места.
+     */
+    fun showAt(chat: ChatTarget, time: Long, row: Long, target: MsgRef? = null) = ops.execute {
+        val key = chatKey(chat.id, chat.group)
+        val list = messages[key]
+        if (target != null && list?.any { it.id == target.id && it.sender == target.sender } == true) {
+            jumpTo = target
+            return@execute
+        }
+        val page = pageOf(Native.historyAround(sessionPtr, chat.id, chat.group, time, row), chat.group)
+        messages[key] = page.toMutableStateList()
+        atChatStart -= startMark(chat)
+        // Окно могло дотянуться до хвоста — тогда лента обычная, и новые дописываются.
+        val bottom = page.lastOrNull()
+        val more = bottom != null &&
+            decodeList<MessageDto>(Native.historyAfter(sessionPtr, chat.id, chat.group, bottom.time, bottom.row)).isNotEmpty()
+        if (more) detached[key] = true else detached.remove(key)
+        jumpTo = target ?: page.firstOrNull { it.time >= time }?.let { MsgRef(it.id, it.sender) }
+            ?: bottom?.let { MsgRef(it.id, it.sender) }
+    }
+
+    /** Подгрузить страницу НИЖЕ окна (лента открыта посреди переписки). Пустая — дошли
+     *  до хвоста: лента снова обычная. */
+    fun loadNewer(chat: ChatTarget) {
+        val key = chatKey(chat.id, chat.group)
+        val list = messages[key]
+        val bottom = list?.lastOrNull { it.row != 0L }
+        if (detached[key] != true || bottom == null || !loadingNewer.add(key)) return
+        ops.execute {
+            try {
+                val page = pageOf(Native.historyAfter(sessionPtr, chat.id, chat.group, bottom.time, bottom.row), chat.group)
+                if (page.isEmpty()) detached.remove(key) else list.addAll(withoutShown(list, page))
+            } finally {
+                loadingNewer -= key
+            }
+        }
+    }
+
+    /** Вернуть ленту к хвосту переписки и встать на последнее сообщение. */
+    fun toTail(chat: ChatTarget) = ops.execute {
+        if (chat.group) loadGroupHistory(chat.id) else loadHistory(chat.id)
+        jumpTo = messages[chatKey(chat.id, chat.group)]?.lastOrNull()?.let { MsgRef(it.id, it.sender) }
+    }
 
     // ── Диагностика: тест пропускной способности ─────────────────────────────
 

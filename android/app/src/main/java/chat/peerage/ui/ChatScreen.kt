@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -97,6 +98,10 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
     // профиль не нужны, а нужен выход из режима и действия над выбранным.
     if (model.selection.isNotEmpty()) {
         SelectionTopBar(model)
+        return
+    }
+    model.chatSearch?.takeIf { !it.chat.group && it.chat.id == model.currentChat }?.let {
+        ChatSearchTopBar(model, it)
         return
     }
     val key = model.currentChat
@@ -189,13 +194,17 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
 private enum class ChatDanger { Clear, Block }
 
 /**
- * «⋮» личного чата (app-ui.md → «Чат», макет `shared/Main`). Поиск и «Медиа и файлы» встанут
- * сюда вместе со своими экранами (шаги 2.9 и 3.2).
+ * «⋮» личного чата (app-ui.md → «Чат», макет `shared/Main`). «Медиа и файлы» встанут сюда
+ * вместе со своим экраном (шаг 3.2).
  */
 @Composable
 private fun ChatMenu(model: AppModel, key: String, open: Boolean, onClose: () -> Unit, onProfile: () -> Unit, onDanger: (ChatDanger) -> Unit) {
     val muted = model.chatSummaries[model.chatKey(key, group = false)]?.muted == true
     PopMenu(open, onClose) {
+        PopMenuItem(TablerIcons.Search, stringResource(R.string.chat_menu_search)) {
+            onClose()
+            model.openChatSearch(ChatTarget(key, group = false))
+        }
         PopMenuItem(
             TablerIcons.BellOff,
             stringResource(R.string.chat_menu_mute),
@@ -230,6 +239,9 @@ internal fun ChatScreen(model: AppModel) {
     FollowNewest(listState, msgs)
     JumpToMessage(model, listState, msgs)
     PagingOlder(listState, key) { model.loadOlder(key, {}) }
+    val chat = ChatTarget(key, group = false)
+    PagingNewer(model, listState, chat)
+    val search = model.chatSearch?.takeIf { it.chat == chat }
     // Правка начинается с ТЕКУЩЕГО текста: человек исправляет, а не набирает заново.
     LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
     LaunchedEffect(key) { model.refreshPins(key, group = false) }
@@ -263,38 +275,23 @@ internal fun ChatScreen(model: AppModel) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        PinnedBar(model, key, group = false, canUnpin = true)
-        LazyColumn(
-            state = listState,
-            reverseLayout = true,
-            // Поля по бокам даёт ряд сообщения: заливка выбора идёт во всю ширину листа.
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-        ) {
-            // Порядок элементов — от свежего к старому; i — индекс в хронологии.
-            // Ключ — пара «автор + id»: состояние пузыря (просмотрщик, голосовое) и
-            // позиция прокрутки держатся за сообщение, а не за место в ленте.
-            items(msgs.size, key = { j -> msgs[msgs.size - 1 - j].let { "${it.sender}:${it.id}" } }) { j ->
-                val i = msgs.size - 1 - j
-                val m = msgs[i]
-                val prev = msgs.getOrNull(i - 1)
-                val next = msgs.getOrNull(i + 1)
-                // Одна колонка на элемент: дата над пузырём должна остаться НАД ним и
-                // в перевёрнутой ленте.
-                Column {
-                    if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
-                    // Склейка блоков: в DM «отправитель» — это сторона (я/собеседник).
-                    val side = { msg: Message -> if (msg.mine) "me" else "peer" }
-                    val pos = blockPos(
-                        withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time),
-                        withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time),
-                    )
-                    MessageRow(model, m, pos, animate = m.id > appearFrom)
+        if (search == null) PinnedBar(model, key, group = false, canUnpin = true)
+        if (search != null && search.coversFeed) {
+            ChatSearchPanel(model, search, Modifier.weight(1f))
+        } else {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                CompositionLocalProvider(LocalSearchMarks provides searchMarks(search)) {
+                    DmFeed(model, msgs, listState, appearFrom)
                 }
+                JumpDownButton(model, listState, chat, Modifier.align(Alignment.BottomEnd))
             }
-            // Последний элемент = верх ленты: баннер над самой старой перепиской.
-            item { E2EBanner() }
         }
         ForwardSheet(model)
+        if (search != null) {
+            ChatSearchBar(model, search)
+            ChatSearchSheets(model, search)
+            return@Column
+        }
         MessageInput(
             value = input,
             onChange = { input = it },
@@ -325,6 +322,41 @@ internal fun ChatScreen(model: AppModel) {
                 }
             },
         )
+    }
+}
+
+/** Лента личного чата: привязана к низу (`reverseLayout`), элемент 0 — самое свежее. */
+@Composable
+private fun DmFeed(model: AppModel, msgs: List<Message>, listState: LazyListState, appearFrom: Long) {
+    LazyColumn(
+        state = listState,
+        reverseLayout = true,
+        // Поля по бокам даёт ряд сообщения: заливка выбора идёт во всю ширину листа.
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        // Порядок элементов — от свежего к старому; i — индекс в хронологии.
+        // Ключ — пара «автор + id»: состояние пузыря (просмотрщик, голосовое) и
+        // позиция прокрутки держатся за сообщение, а не за место в ленте.
+        items(msgs.size, key = { j -> msgs[msgs.size - 1 - j].let { "${it.sender}:${it.id}" } }) { j ->
+            val i = msgs.size - 1 - j
+            val m = msgs[i]
+            val prev = msgs.getOrNull(i - 1)
+            val next = msgs.getOrNull(i + 1)
+            // Одна колонка на элемент: дата над пузырём должна остаться НАД ним и
+            // в перевёрнутой ленте.
+            Column {
+                if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
+                // Склейка блоков: в DM «отправитель» — это сторона (я/собеседник).
+                val side = { msg: Message -> if (msg.mine) "me" else "peer" }
+                val pos = blockPos(
+                    withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time),
+                    withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time),
+                )
+                MessageRow(model, m, pos, animate = m.id > appearFrom)
+            }
+        }
+        // Последний элемент = верх ленты: баннер над самой старой перепиской.
+        item { E2EBanner() }
     }
 }
 
@@ -1264,13 +1296,16 @@ internal fun MessageBubble(
                                 "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready, onLongClick = onLong)
                                 // Текст обтекает мету: она едет в конец последней строки
                                 // и переносится сама, если та её не вмещает.
-                                else -> BubbleText(bubbleText(model, m)) { meta() }
+                                else -> BubbleText(bubbleText(model, m).marked(LocalSearchMarks.current, m)) { meta() }
                             }
                         }
                         // Подпись к вложению — в том же пузыре, под содержимым. Она пришла
                         // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
                         if (m.kind != "text" && m.text.isNotEmpty()) {
-                            BubbleText(m.text, modifier = Modifier.padding(top = Tokens.Space.s)) { meta() }
+                            BubbleText(
+                                AnnotatedString(m.text).marked(LocalSearchMarks.current, m),
+                                modifier = Modifier.padding(top = Tokens.Space.s),
+                            ) { meta() }
                         }
                     }
                 }
@@ -1331,7 +1366,7 @@ internal fun MessageBubble(
             },
             onShowInChat = { target ->
                 viewer = false
-                model.jumpTo = target.id
+                model.jumpTo = MsgRef(target.id, target.sender)
             },
         )
     }

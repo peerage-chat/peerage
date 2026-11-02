@@ -475,6 +475,26 @@ val TablerIcons.Lock: ImageVector by lazy {
 
 val TablerIcons.ChevronUp: ImageVector by lazy { tabler("chevron-up", "M7 14l5 -5l5 5") }
 
+val TablerIcons.ChevronDown: ImageVector by lazy { tabler("chevron-down", "M7 10l5 5l5 -5") }
+
+val TablerIcons.Calendar: ImageVector by lazy {
+    tabler(
+        "calendar",
+        "M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12z",
+        "M16 3v4",
+        "M8 3v4",
+        "M4 11h16",
+    )
+}
+
+/** «Списком» в поиске: строки с маркерами. */
+val TablerIcons.ListLines: ImageVector by lazy {
+    tabler("list", "M9 6l11 0", "M9 12l11 0", "M9 18l11 0", "M5 6l0 .01", "M5 12l0 .01", "M5 18l0 .01")
+}
+
+/** «В ленте» в поиске: строки вразбежку, как пузыри (макет `chatsearch/List`). */
+val TablerIcons.FeedLines: ImageVector by lazy { tabler("feed", "M4 6h10", "M10 12h10", "M4 18h10") }
+
 val TablerIcons.ChevronLeft: ImageVector by lazy { tabler("chevron-left", "M15 6l-6 6l6 6") }
 
 val TablerIcons.PlayerStop: ImageVector by lazy {

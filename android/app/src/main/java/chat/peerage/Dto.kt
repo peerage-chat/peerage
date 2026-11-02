@@ -111,6 +111,15 @@ internal data class SearchHitDto(
     val mine: Boolean = false,
     val time: Long = 0,
     val kind: String = "text",
+    /** Строка в базе: курсор окна истории вокруг находки. */
+    val row: Long = 0,
+)
+
+/** Страница поиска в чате: всего находок и эта страница (свежие первыми). */
+@Serializable
+internal data class SearchPageDto(
+    val total: Int = 0,
+    val hits: List<MessageDto> = emptyList(),
 )
 
 @Serializable
