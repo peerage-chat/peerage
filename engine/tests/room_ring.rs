@@ -263,3 +263,66 @@ fn answering_a_call_during_own_ring_marks_the_right_call() {
     );
     assert_eq!(with_c["outcome"], "unanswered", "C не отвечал");
 }
+
+/// Строка звонка в ленте личного чата (2.8б): у обоих — с видом звонка и исходом;
+/// исход и длительность меняются на месте, вслед за журналом.
+fn call_row(e: &Engine, peer: &[u8; 32]) -> serde_json::Value {
+    json(&e.history_json(peer))
+        .as_array()
+        .and_then(|a| {
+            a.iter()
+                .find(|m| m["kind"] == "call" || m["kind"] == "video_call")
+                .cloned()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn dm_calls_show_up_in_the_chat_feed() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(91), id(92));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a-feed"));
+    let b = start(&net, b_id, tmpdir("b-feed"));
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+
+    a.room_invite_dm(b_key, true, true);
+    let mine = call_row(&a, &b_key);
+    assert_eq!(mine["kind"], "video_call", "видеозвонок: {mine}");
+    assert_eq!(mine["mine"], true);
+    assert_eq!(mine["text"], "unanswered", "пока не ответили — без ответа");
+
+    assert!(next_room_invite(&b, 8).is_some(), "звонок дошёл");
+    let theirs = call_row(&b, &a_key);
+    assert_eq!(theirs["kind"], "video_call");
+    assert_eq!(theirs["mine"], false);
+    assert_eq!(theirs["text"], "missed", "до ответа — пропущенный");
+
+    let room = b.room_join_dm(a_key, true, true);
+    assert_eq!(
+        call_row(&b, &a_key)["text"],
+        "answered",
+        "ответили — на месте"
+    );
+    assert!(
+        wait(10, || call_row(&a, &b_key)["text"] == "answered"),
+        "у звонящего тоже отвечен"
+    );
+    std::thread::sleep(Duration::from_millis(1200));
+    b.room_leave(room);
+    let row = call_row(&b, &a_key);
+    assert!(
+        row["duration_ms"].as_i64().unwrap_or(0) >= 1000,
+        "длительность разговора: {row}"
+    );
+    assert_eq!(
+        json(&b.history_json(&a_key)).as_array().map(|a| a.len()),
+        Some(1),
+        "одна строка на звонок, а не по строке на каждое изменение"
+    );
+
+    // Слова исхода — служебные: поиск по переписке их не находит.
+    let hits = json(&b.search_json("answered", None, 10));
+    assert_eq!(hits.as_array().map(|a| a.len()), Some(0), "{hits}");
+}

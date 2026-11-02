@@ -1266,6 +1266,7 @@ impl MessageStore {
             "SELECT m.chat, m.scope, {MSG_COLS} FROM messages_fts f
              JOIN chat_messages m ON m.rowid = f.rowid
              WHERE messages_fts MATCH ?1 AND (?2 < 0 OR (m.chat = ?3 AND m.scope = ?2))
+               AND m.kind NOT IN ('call', 'video_call')
              ORDER BY m.time DESC LIMIT ?4"
         );
         let rows = conn.prepare(&fts_sql).and_then(|mut stmt| {
@@ -1290,6 +1291,7 @@ impl MessageStore {
         let like_sql = format!(
             "SELECT m.chat, m.scope, {MSG_COLS} FROM chat_messages m
              WHERE m.text LIKE ?1 ESCAPE '\\' AND (?2 < 0 OR (m.chat = ?3 AND m.scope = ?2))
+               AND m.kind NOT IN ('call', 'video_call')
              ORDER BY m.time DESC LIMIT ?4"
         );
         let mut stmt = match conn.prepare(&like_sql) {
@@ -1577,6 +1579,27 @@ impl MessageStore {
         .unwrap_or_default()
     }
 
+    /// Строка звонка в ленте (журнал движка, 2.8б): вставить или обновить исход и
+    /// длительность — звонок меняется по ходу, а строка в чате одна. Возвращает её rowid.
+    pub fn upsert_call(&self, chat: Chat, m: &StoredMessage) -> Result<i64, StoreError> {
+        let conn = db::lock(&self.db);
+        conn.execute(
+            "INSERT INTO chat_messages (chat, scope, id, sender, mine, text, time, kind, duration_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(chat, scope, sender, id)
+             DO UPDATE SET text = excluded.text, duration_ms = excluded.duration_ms",
+            rusqlite::params![
+                chat.id(), chat.scope(), m.id as i64, &m.sender, m.mine as i64, &m.text, m.time,
+                &m.kind, m.duration_ms,
+            ],
+        )?;
+        Ok(conn.query_row(
+            "SELECT rowid FROM chat_messages WHERE chat=?1 AND scope=?2 AND sender=?3 AND id=?4",
+            rusqlite::params![chat.id(), chat.scope(), &m.sender, m.id as i64],
+            |r| r.get(0),
+        )?)
+    }
+
     /// Вставить сообщение из копии, НЕ трогая уже существующее (`INSERT OR IGNORE`).
     ///
     /// Восстановление — слияние, а не замена: то, что пришло после снятия копии,
@@ -1692,6 +1715,24 @@ pub struct CallRecord {
     pub outcome: String,
     pub started: i64,
     pub duration: i64,
+    /// Видеозвонок (по приглашению: звали с видео).
+    pub video: bool,
+}
+
+const CALL_COLS: &str = "id, peer, gid, incoming, outcome, started, duration, video";
+
+fn read_call(r: &rusqlite::Row) -> rusqlite::Result<CallRecord> {
+    let peer: Vec<u8> = r.get(1)?;
+    Ok(CallRecord {
+        id: r.get(0)?,
+        peer: <[u8; 32]>::try_from(peer.as_slice()).unwrap_or([0u8; 32]),
+        gid: r.get(2)?,
+        incoming: r.get::<_, i64>(3)? != 0,
+        outcome: r.get(4)?,
+        started: r.get(5)?,
+        duration: r.get(6)?,
+        video: r.get::<_, i64>(7)? != 0,
+    })
 }
 
 /// Журнал звонков. ЛОКАЛЬНЫЙ: никуда не отправляется и ни с кем не синхронизируется.
@@ -1706,11 +1747,11 @@ impl CallStore {
 
     /// Завести запись о начавшемся звонке. Возвращает её id — по нему исход и
     /// длительность дописываются позже, когда звонок закончится.
-    pub fn start(&self, peer: &[u8; 32], gid: &[u8], incoming: bool, outcome: &str, now: i64) -> i64 {
+    pub fn start(&self, peer: &[u8; 32], gid: &[u8], incoming: bool, video: bool, outcome: &str, now: i64) -> i64 {
         let conn = db::lock(&self.db);
         let ok = conn.execute(
-            "INSERT INTO calls (peer, gid, incoming, outcome, started) VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![peer.as_slice(), gid, incoming as i64, outcome, now],
+            "INSERT INTO calls (peer, gid, incoming, outcome, started, video) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![peer.as_slice(), gid, incoming as i64, outcome, now, video as i64],
         );
         if ok.is_err() {
             return -1;
@@ -1736,24 +1777,19 @@ impl CallStore {
     /// Последние записи, свежие первыми.
     pub fn list(&self, limit: usize) -> Vec<CallRecord> {
         let conn = db::lock(&self.db);
-        let Ok(mut stmt) = conn.prepare(
-            "SELECT id, peer, gid, incoming, outcome, started, duration              FROM calls ORDER BY started DESC LIMIT ?1",
-        ) else {
+        let Ok(mut stmt) = conn.prepare(&format!("SELECT {CALL_COLS} FROM calls ORDER BY started DESC LIMIT ?1"))
+        else {
             return Vec::new();
         };
-        let rows = stmt.query_map([limit as i64], |r| {
-            let peer: Vec<u8> = r.get(1)?;
-            Ok(CallRecord {
-                id: r.get(0)?,
-                peer: <[u8; 32]>::try_from(peer.as_slice()).unwrap_or([0u8; 32]),
-                gid: r.get(2)?,
-                incoming: r.get::<_, i64>(3)? != 0,
-                outcome: r.get(4)?,
-                started: r.get(5)?,
-                duration: r.get(6)?,
-            })
-        });
+        let rows = stmt.query_map([limit as i64], read_call);
         rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    /// Одна запись по id — после её изменения, чтобы обновить строку в ленте.
+    pub fn get(&self, id: i64) -> Option<CallRecord> {
+        let conn = db::lock(&self.db);
+        conn.query_row(&format!("SELECT {CALL_COLS} FROM calls WHERE id = ?1"), [id], read_call)
+            .ok()
     }
 
     /// Сколько записей всего (оценка объёма копии).
@@ -1779,10 +1815,11 @@ impl CallStore {
             return false;
         }
         conn.execute(
-            "INSERT INTO calls (peer, gid, incoming, outcome, started, duration)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO calls (peer, gid, incoming, outcome, started, duration, video)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 c.peer.as_slice(), &c.gid, c.incoming as i64, &c.outcome, c.started, c.duration,
+                c.video as i64,
             ],
         )
         .is_ok()

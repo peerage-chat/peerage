@@ -217,6 +217,17 @@
     <string name="cd_join_call">Join call</string>
     <string name="cd_leave_call">Leave call</string>
     <string name="group_system_membership">Group members changed · %1$s</string>
+    <string name="chat_call_in">Incoming call</string>
+    <string name="chat_call_in_video">Incoming video call</string>
+    <string name="chat_call_out">Outgoing call</string>
+    <string name="chat_call_out_video">Outgoing video call</string>
+    <string name="chat_call_missed">Missed call</string>
+    <string name="chat_call_missed_video">Missed video call</string>
+    <string name="chat_call_declined">Declined call</string>
+    <string name="chat_call_declined_video">Declined video call</string>
+    <string name="chat_call_unanswered">Outgoing · no answer</string>
+    <string name="chat_call_meta">%1$s · %2$s</string>
+    <string name="chat_call_back">Call back</string>
     <string name="group_sys_created">Group created · %1$s</string>
     <string name="group_sys_joined">%1$s joined · invited by %2$s</string>
     <string name="group_sys_joined_plain">%1$s joined</string>

@@ -104,6 +104,9 @@ data class Message(
     /** Реакции под сообщением: эмодзи по первому появлению, у каждого — кто поставил. */
     val reactions: List<Reaction> = emptyList(),
 ) {
+    /** Звонок в ленте личного чата (строку ведёт движок): исход в [text]. */
+    val isCall: Boolean get() = kind == "call" || kind == "video_call"
+
     /** Отозвано «у всех»: на месте — строка «Сообщение удалено», содержимого нет. */
     val deleted: Boolean get() = kind == "deleted"
 

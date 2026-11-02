@@ -2450,7 +2450,7 @@ impl Engine {
         // Пишем сразу как «не дозвонился»: исход поднимется до answered, когда
         // собеседник появится в комнате. Иначе оборванная попытка не попала бы в
         // журнал вовсе — а именно её чаще всего и ищут.
-        self.begin_call(&peer, &room_id, false, "unanswered");
+        self.begin_call(&peer, &room_id, false, video, "unanswered");
         if let Ok(id) = self
             .messenger
             .send_room_invite(&peer, &room_id, audio, video)
@@ -2482,10 +2482,16 @@ impl Engine {
 
     /// Пометить текущий ВХОДЯЩИЙ звонок отклонённым и закрыть его.
     fn decline_incoming(&self) {
-        let mut ac = self.active_call.lock_safe();
-        if let Some(c) = ac.as_ref().filter(|c| c.incoming) {
-            self.calls.lock_safe().set_outcome(c.id, "declined");
-            *ac = None;
+        let id = {
+            let mut ac = self.active_call.lock_safe();
+            let id = ac.as_ref().filter(|c| c.incoming).map(|c| c.id);
+            if id.is_some() {
+                *ac = None;
+            }
+            id
+        };
+        if let Some(id) = id {
+            self.call_outcome(id, "declined");
         }
     }
 
@@ -2495,7 +2501,7 @@ impl Engine {
         // Входящий, который мы приняли: запись уже заведена на RoomInvite. Комнату
         // сверяем — активным может быть и другой звонок (R-034).
         if !self.answer_call(&room_id) {
-            self.begin_call(&peer, &room_id, true, "answered");
+            self.begin_call(&peer, &room_id, true, video, "answered");
         }
         let flags = av_flags(audio, video);
         {
@@ -2574,11 +2580,11 @@ impl Engine {
     }
 
     /// Начать запись о звонке (одна активная за раз — звонков параллельно не бывает).
-    fn begin_call(&self, peer: &[u8; 32], gid: &[u8], incoming: bool, outcome: &str) {
+    fn begin_call(&self, peer: &[u8; 32], gid: &[u8], incoming: bool, video: bool, outcome: &str) {
         let id = self
             .calls
             .lock_safe()
-            .start(peer, gid, incoming, outcome, now());
+            .start(peer, gid, incoming, video, outcome, now());
         if id >= 0 {
             *self.active_call.lock_safe() = Some(ActiveCall {
                 id,
@@ -2586,18 +2592,72 @@ impl Engine {
                 incoming,
                 room: gid.to_vec(),
             });
+            self.sync_call_row(id);
+        }
+    }
+
+    /// Сменить исход звонка — и его строку в ленте.
+    fn call_outcome(&self, id: i64, outcome: &str) {
+        self.calls.lock_safe().set_outcome(id, outcome);
+        self.sync_call_row(id);
+    }
+
+    /// Закрыть звонок длительностью — и его строку в ленте.
+    fn call_finish(&self, id: i64, secs: i64) {
+        self.calls.lock_safe().finish(id, secs);
+        self.sync_call_row(id);
+    }
+
+    /// Строка личного звонка в ленте (журнал движка, 2.8б): отражение записи журнала
+    /// в чате с этим человеком. Звонки комнаты группы в ленту не идут. Каждый вызов
+    /// заменяет строку на месте — у клиента и в базе она одна на звонок.
+    fn sync_call_row(&self, id: i64) {
+        let Some(c) = self.calls.lock_safe().get(id) else {
+            return;
+        };
+        if c.gid != peerage_core::dm_room_id(&self.me_pub, &c.peer) {
+            return;
+        }
+        let msg = StoredMessage {
+            id: id as u64,
+            sender: if c.incoming {
+                hex::encode(c.peer)
+            } else {
+                self.me_hex()
+            },
+            mine: !c.incoming,
+            text: c.outcome,
+            time: c.started,
+            kind: if c.video { "video_call" } else { "call" }.into(),
+            duration_ms: (c.duration.max(0) * 1000).min(u32::MAX as i64) as u32,
+            ..Default::default()
+        };
+        let row = self
+            .messages
+            .lock_safe()
+            .upsert_call(Chat::Dm(&c.peer), &msg);
+        if let Ok(row) = row {
+            push_event(
+                self,
+                dto::UiEvent::Message {
+                    chat: hex::encode(c.peer),
+                    group: false,
+                    msg: StoredMessage { row, ..msg },
+                },
+            );
         }
     }
 
     /// Пропущенный входящий, пока идёт другой разговор: отдельная строка журнала,
     /// активная запись не трогается.
-    fn record_missed(&self, peer: &[u8; 32], gid: &[u8]) {
+    fn record_missed(&self, peer: &[u8; 32], gid: &[u8], video: bool) {
         let id = self
             .calls
             .lock_safe()
-            .start(peer, gid, true, "missed", now());
+            .start(peer, gid, true, video, "missed", now());
         if id >= 0 {
             self.missed_calls.lock_safe().insert(gid.to_vec(), id);
+            self.sync_call_row(id);
         }
     }
 
@@ -2608,24 +2668,29 @@ impl Engine {
     /// не было.
     fn answer_call(&self, room: &[u8]) -> bool {
         let mut ac = self.active_call.lock_safe();
-        if let Some(c) = ac.as_ref().filter(|c| c.incoming && c.room == room) {
-            self.calls.lock_safe().set_outcome(c.id, "answered");
+        if let Some(id) = ac
+            .as_ref()
+            .filter(|c| c.incoming && c.room == room)
+            .map(|c| c.id)
+        {
+            drop(ac);
+            self.call_outcome(id, "answered");
             return true;
         }
         let Some(id) = self.missed_calls.lock_safe().remove(room) else {
             return false;
         };
-        let calls = self.calls.lock_safe();
-        if let Some(prev) = ac.take() {
-            calls.finish(prev.id, prev.since.elapsed().as_secs() as i64);
-        }
-        calls.set_outcome(id, "answered");
-        *ac = Some(ActiveCall {
+        let prev = ac.replace(ActiveCall {
             id,
             since: Instant::now(),
             incoming: true,
             room: room.to_vec(),
         });
+        drop(ac);
+        if let Some(prev) = prev {
+            self.call_finish(prev.id, prev.since.elapsed().as_secs() as i64);
+        }
+        self.call_outcome(id, "answered");
         true
     }
 
@@ -2634,9 +2699,7 @@ impl Engine {
         let Some(c) = self.active_call.lock_safe().take() else {
             return;
         };
-        self.calls
-            .lock_safe()
-            .finish(c.id, c.since.elapsed().as_secs() as i64);
+        self.call_finish(c.id, c.since.elapsed().as_secs() as i64);
     }
 
     /// Заметка себе («Сохранённое»). Хранится как обычное сообщение в чате с самим
@@ -2698,6 +2761,7 @@ impl Engine {
                 outcome: c.outcome,
                 started: c.started,
                 duration: c.duration,
+                video: c.video,
             })
             .collect();
         serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
@@ -3668,11 +3732,11 @@ fn handle_event(
             // запись он не заменяет — иначе длительность разговора досталась бы
             // пропущенному, а у самого разговора остался бы ноль (R-049).
             if !engine.rooms.lock_safe().joined.is_empty() {
-                engine.record_missed(&peer, &room_id);
+                engine.record_missed(&peer, &room_id, video);
             } else {
                 // Заводим сразу как пропущенный: если пользователь ответит, исход
                 // поднимется в room_join(_dm), если откажется — в room_decline_*.
-                engine.begin_call(&peer, &room_id, true, "missed");
+                engine.begin_call(&peer, &room_id, true, video, "missed");
             }
             push_event(
                 engine,
@@ -3988,13 +4052,16 @@ fn handle_event(
             // состоялся. Без этого «позвонил и поговорил» осталось бы в журнале
             // как «не дозвонился».
             if !left {
-                if let Some(c) = engine
+                let id = engine
                     .active_call
                     .lock_safe()
                     .as_ref()
-                    .filter(|c| c.room == gid)
-                {
-                    engine.calls.lock_safe().set_outcome(c.id, "answered");
+                    // Только СВОЙ исходящий: у входящего звонящий в комнате с самого
+                    // начала, и его маячок не значит, что мы ответили.
+                    .filter(|c| c.room == gid && !c.incoming)
+                    .map(|c| c.id);
+                if let Some(id) = id {
+                    engine.call_outcome(id, "answered");
                 }
             }
             push_event(

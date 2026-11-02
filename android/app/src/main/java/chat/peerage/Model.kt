@@ -1996,7 +1996,10 @@ class AppModel private constructor() {
                 upsert(if (ev.group) groupLog(ev.chat) else log(ev.chat), m)
                 // Своё и системные строки (кто вошёл/вышел) непрочитанным не считаем:
                 // счётчик обещает сообщения, за которыми стоит человек.
-                if (!m.mine && !m.system) {
+                // Звонок — только пропущенный: строка звонка приходит заново на каждое
+                // изменение исхода, а «missed» у неё бывает один раз.
+                val counts = if (m.isCall) m.text == "missed" else !m.system
+                if (!m.mine && counts) {
                     if (ev.group) {
                         if (currentGroup != ev.chat) {
                             groupUnread[ev.chat] = (groupUnread[ev.chat] ?: 0) + 1

@@ -94,6 +94,9 @@ object Tokens {
         val checkEdge = Color(0xFF6B6C74) // кружок выбора, пока не отмечен
         val failEdge = Color(0xFF6B2A2E) // обводка не доставленного пузыря
         val failText = Color(0xFFFF8A8A) // «Не доставлено» под пузырём и знак в мете
+        val callAnswered = Color(0xFFA5D6A7) // значок отвеченного входящего звонка в ленте
+        val callAnsweredBg = Color(0xFF1E3322) // его круг
+        val onBubbleButton = Color(0x14FFFFFF) // кнопка на пузыре («Позвонить» у звонка), белый @8%
         val chipText = Color(0xFFC4C7CC) // светлый вторичный: число в чипе реакции, вкладка шторки, имя в системной строке
         val dim = Color(0x99000000) // затемнение под меню у пузыря (чёрный @60%)
 
@@ -345,6 +348,8 @@ object Tokens {
         val reactChip = 28.dp // чип реакции под пузырём (минимальная высота)
         val reactTab = 36.dp // вкладка эмодзи в шторке «Реакции»
         val avatarList = 40.dp // аватар в строке шторки-списка (кто поставил реакцию)
+        val callRowMin = 220.dp // минимальная ширина звонка в ленте (макет `special/Calls`)
+        val callBadge = 36.dp // круг значка звонка и кнопка «Позвонить» на нём
         val systemLine = 300.dp // предельная ширина системной строки группы (макет `special/GroupSystem`)
         val phraseRow = 36.dp // строка слова в сетке 24 слов
         val phraseNum = 20.dp // колонка номера слова в сетке

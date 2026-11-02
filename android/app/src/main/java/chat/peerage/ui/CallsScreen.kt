@@ -196,5 +196,5 @@ private fun FilterChip(label: String, on: Boolean, onClick: () -> Unit) {
 }
 
 /** «4:07» / «1:02:15» — час с лишним в комнате не должен читаться как «62:15». */
-private fun fmtCallDuration(sec: Long): String =
+internal fun fmtCallDuration(sec: Long): String =
     if (sec >= 3600) "%d:%02d:%02d".format(sec / 3600, sec % 3600 / 60, sec % 60) else "%d:%02d".format(sec / 60, sec % 60)

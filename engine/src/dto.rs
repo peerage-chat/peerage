@@ -112,6 +112,8 @@ pub struct CallEntry {
     pub outcome: String,
     pub started: i64,
     pub duration: i64,
+    /// Звали с видео.
+    pub video: bool,
 }
 
 // ── События (Event: движок → клиент) ────────────────────────────────────────

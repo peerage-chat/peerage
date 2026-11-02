@@ -157,6 +157,9 @@ struct CallRow {
     outcome: String,
     started: i64,
     duration: i64,
+    /// Видеозвонок; в копиях до 2.8б поля нет — значит голосовой.
+    #[serde(default)]
+    video: bool,
 }
 
 fn err_json(msg: &str) -> String {
@@ -421,6 +424,7 @@ impl Engine {
                     outcome: c.outcome,
                     started: c.started,
                     duration: c.duration,
+                    video: c.video,
                 })
                 .collect();
             stats.calls = rows.len() as u64;
@@ -574,6 +578,7 @@ impl Engine {
                                     outcome: row.outcome.clone(),
                                     started: row.started,
                                     duration: row.duration,
+                                    video: row.video,
                                 };
                                 if store.import_row(&rec) {
                                     stats.calls += 1;

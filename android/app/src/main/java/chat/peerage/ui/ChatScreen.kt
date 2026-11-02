@@ -931,7 +931,7 @@ internal fun MessageRow(
 ) {
     // Системную строку и «Сообщение удалено» не выбирают: переслать или скопировать
     // в них нечего.
-    val selecting = model.selection.isNotEmpty() && !m.system && !m.deleted
+    val selecting = model.selection.isNotEmpty() && !m.system && !m.deleted && !m.isCall
     // Выбор — у всего ряда (app-ui.md → «Действия»): заливка во всю ширину и кружок у
     // ведущего края. Не обводка пузыря: обводкой отмечено упоминание меня.
     val selected = selecting && MsgRef(m.id, m.sender) in model.selection
@@ -955,7 +955,7 @@ internal fun MessageRow(
             SelectCheck(selected)
             Spacer(Modifier.width(Tokens.Space.m))
         }
-        if (selecting || m.system || m.deleted || m.id == 0L) {
+        if (selecting || m.system || m.deleted || m.isCall || m.id == 0L) {
             Box(Modifier.weight(1f)) { MessageRowContent(model, m, pos, group, animate) }
         } else {
             SwipeToReply(Modifier.weight(1f), onReply = { model.startReply(m) }) {
@@ -1031,6 +1031,7 @@ private fun SwipeToReply(modifier: Modifier, onReply: () -> Unit, content: @Comp
 private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group: Boolean, animate: Boolean) {
     when {
         m.system -> SystemRow(model, m)
+        m.isCall -> model.currentChat?.let { CallRow(model, m, it) }
         m.deleted -> DeletedRow(model, m, group)
         // Входящее в группе: аватар — ТОЛЬКО у нижнего сообщения блока, у остальных
         // на его месте распорка, чтобы левый край блока не гулял. Имя автора — на

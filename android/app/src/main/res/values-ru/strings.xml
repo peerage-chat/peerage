@@ -215,6 +215,17 @@
     <string name="cd_join_call">Войти в звонок</string>
     <string name="cd_leave_call">Выйти из звонка</string>
     <string name="group_system_membership">Состав группы изменён · %1$s</string>
+    <string name="chat_call_in">Входящий звонок</string>
+    <string name="chat_call_in_video">Входящий видеозвонок</string>
+    <string name="chat_call_out">Исходящий звонок</string>
+    <string name="chat_call_out_video">Исходящий видеозвонок</string>
+    <string name="chat_call_missed">Пропущенный звонок</string>
+    <string name="chat_call_missed_video">Пропущенный видеозвонок</string>
+    <string name="chat_call_declined">Отклонённый звонок</string>
+    <string name="chat_call_declined_video">Отклонённый видеозвонок</string>
+    <string name="chat_call_unanswered">Исходящий · без ответа</string>
+    <string name="chat_call_meta">%1$s · %2$s</string>
+    <string name="chat_call_back">Позвонить</string>
     <string name="group_sys_created">Группа создана · %1$s</string>
     <string name="group_sys_joined">%1$s в группе · приглашение: %2$s</string>
     <string name="group_sys_joined_plain">%1$s в группе</string>

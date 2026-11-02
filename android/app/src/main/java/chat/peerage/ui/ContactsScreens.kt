@@ -335,7 +335,8 @@ private fun ChatRowBadge(row: ChatRowUi) {
         row.unread > 0 -> CountBadge(badgeCount(row.unread), muted = row.muted)
         // Те же значки, что в пузыре чата: часы → одна галочка → две. Один и тот же
         // факт не должен выглядеть в списке иначе, чем внутри переписки.
-        s != null && s.lastMine && !s.lastSystem && s.lastKind != "deleted" -> when (s.lastStatus) {
+        s != null && s.lastMine && !s.lastSystem && s.lastKind != "deleted" &&
+            s.lastKind != "call" && s.lastKind != "video_call" -> when (s.lastStatus) {
             "delivered" -> Icon(
                 Icons.Filled.DoneAll,
                 stringResource(R.string.status_delivered),
@@ -399,6 +400,9 @@ private fun chatPreview(model: AppModel, row: ChatRowUi): String {
     if (s.lastSystem) return groupSystemLine(model, s.lastKind, s.lastSender, s.lastText).text
     val body = when {
         s.lastKind == "deleted" -> stringResource(R.string.msg_deleted)
+        // Звонок: исход в тексте — служебное слово, показываем его по-человечески.
+        s.lastKind == "call" || s.lastKind == "video_call" ->
+            return callTitle(s.lastKind == "video_call", s.lastMine, s.lastText)
         s.lastText.isNotBlank() -> Mentions.plain(s.lastText, s.lastMentions, model::mentionName)
         s.lastKind == "image" -> stringResource(R.string.chats_preview_photo)
         s.lastKind == "video" -> stringResource(R.string.chats_preview_video)
