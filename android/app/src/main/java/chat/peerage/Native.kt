@@ -309,6 +309,27 @@ object Native {
     /** Выключить/включить звук чата (тоже локально). */
     external fun setChatMuted(sessionPtr: Long, chatHex: String, isGroup: Boolean, muted: Boolean)
 
+    /** Поиск в одном чате: слова по отдельности, имя файла, отправитель (`senderHex`
+     *  пустой — все), листание. JSON `{total, hits: [{chat, group, ...сообщение}]}`. */
+    external fun searchChat(
+        sessionPtr: Long,
+        chatHex: String,
+        isGroup: Boolean,
+        query: String,
+        senderHex: String,
+        offset: Int,
+        limit: Int,
+    ): String
+
+    /** Окно истории вокруг `time`/`row` (переход к находке; `row = 0` — к дате). */
+    external fun historyAround(sessionPtr: Long, chatHex: String, isGroup: Boolean, time: Long, row: Long): String
+
+    /** Страница НИЖЕ показанной: курсор — `time`/`row` самого нижнего сообщения. */
+    external fun historyAfter(sessionPtr: Long, chatHex: String, isGroup: Boolean, time: Long, row: Long): String
+
+    /** Дни с сообщениями в `[from, to)` по местному времени: JSON `["ГГГГ-ММ-ДД"]`. */
+    external fun messageDays(sessionPtr: Long, chatHex: String, isGroup: Boolean, from: Long, to: Long, offset: Long): String
+
     /** Хвост переписки с пиром (последняя страница) как JSON-массив. */
     external fun history(sessionPtr: Long, keyHex: String): String
 

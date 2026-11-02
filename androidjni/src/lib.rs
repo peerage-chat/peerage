@@ -606,6 +606,92 @@ pub extern "system" fn Java_chat_peerage_Native_historyPage<'local>(
     })
 }
 
+/// Поиск в одном чате (2.9): `{total, hits}`. `sender_hex` пустой — от всех.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_searchChat<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    query: JString<'local>,
+    sender_hex: JString<'local>,
+    offset: jint,
+    limit: jint,
+) -> jstring {
+    let empty = r#"{"total":0,"hits":[]}"#;
+    jni_safe!(ret(&env, empty), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, empty) };
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0) else {
+            return ret(&env, empty);
+        };
+        let q = jstr(&mut env, &query);
+        let sender = jstr(&mut env, &sender_hex);
+        ret(&env, &e.search_page_json(&chat, &q, &sender, offset.max(0) as usize, limit.max(0) as usize))
+    })
+}
+
+/// Окно истории вокруг места `(time, row)`: переход к находке или к дате.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_historyAround<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    time: jlong,
+    row: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0) else {
+            return ret(&env, "[]");
+        };
+        ret(&env, &e.history_around_json(&chat, time, row))
+    })
+}
+
+/// Страница истории НИЖЕ показанной: курсор — `time`/`row` самого нижнего сообщения.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_historyAfter<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    time: jlong,
+    row: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0) else {
+            return ret(&env, "[]");
+        };
+        ret(&env, &e.history_after_json(&chat, time, row))
+    })
+}
+
+/// Дни с сообщениями в `[from, to)` по местному времени (`offset` — секунды от UTC).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_messageDays<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    from: jlong,
+    to: jlong,
+    offset: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0) else {
+            return ret(&env, "[]");
+        };
+        ret(&env, &e.message_days_json(&chat, from, to, offset))
+    })
+}
+
 /// Переслать сообщения в другой чат. `src_group`/`dst_group` — «это группа?»,
 /// идентификатор в hex (ключ пира или gid). Возвращает, сколько ушло.
 #[no_mangle]

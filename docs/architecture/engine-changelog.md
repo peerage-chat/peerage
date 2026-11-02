@@ -30,6 +30,37 @@
 
 ---
 
+## 2026-11-02 · Поиск в чате: слова, счётчик, отправитель, окна истории · UI 2.9а
+
+**Причина:** app-ui.md → «Поиск в чате», макеты `chatsearch/`; план, шаг 2.9 (сводка «Что
+нужно от движка»). Было: `MessageStore::search` — FTS5 только по `text`, весь запрос одной
+фразой, лимит 100 без счётчика; история листалась только вверх от хвоста — к находке
+посреди переписки ленту не открыть.
+
+- **Схема:** индекс `messages_fts` (только текст) и его триггеры убраны; новый
+  `chat_search` — FTS5 по `text` и `name` (имя файла), внешнее содержимое
+  `chat_messages`, триггеры `chat_search_ai/ad/au`. При первом создании наполняется из
+  истории (`rebuild`) — старая переписка находится сразу.
+- **Хранилище:** `SearchQuery {text, chat, sender, offset, limit}` →
+  `MessageStore::search_page` → `SearchPage {total, hits}`; `search(query, chat, limit)`
+  остался обёрткой (общий поиск). `history_after(chat, (time, row), limit)`,
+  `history_around(chat, (time, row), limit)`, `message_days(chat, from, to, offset)`.
+- **Поведение поиска** (и общего тоже): слова запроса ищутся по отдельности, все сразу,
+  началом слова; у слов от 5 букв отброшена последняя гласная/«й»/«ь» («сарай» находит
+  «сарая») — дешёвый шаг вместо морфологии. Ищутся текст и имя файла. Системные строки
+  групп больше не находятся (как и звонки).
+- **Контракт:** `Engine::search_page_json(chat, query, sender, offset, limit)` →
+  `{total, hits: [{chat, group, …сообщение}]}`; `history_around_json(chat, time, row)`
+  (`row = 0` — первое не раньше `time`, `(0, 0)` — начало); `history_after_json(chat, time,
+  row)`; `message_days_json(chat, from, to, offset)` → `["ГГГГ-ММ-ДД"]`. JNI:
+  `Native.searchChat`, `historyAround`, `historyAfter`, `messageDays`.
+- **Совместимость:** по сети ничего; база мигрирует сама (перестройка индекса при первом
+  запуске — один раз).
+- **Тесты:** `store::chat_search_takes_words_apart_and_counts`,
+  `history_windows_around_and_after_a_message`, `message_days_follow_the_local_offset`,
+  `search_index_is_rebuilt_from_existing_history`; через движок —
+  `msg_actions::chat_search_pages_and_jumps_to_a_hit`.
+
 ## 2026-11-02 · Звонки в ленте личного чата · 82769ee (UI 2.8б)
 
 **Причина:** app-ui.md → «Чат», макет `special/Calls`; план, шаг 2.8. Звонки жили только в

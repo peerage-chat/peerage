@@ -910,6 +910,122 @@ fn group_reactions(
     out
 }
 
+/// Запрос [`MessageStore::search_page`].
+#[derive(Default)]
+pub struct SearchQuery<'a> {
+    /// Слова через пробел; находка содержит каждое.
+    pub text: &'a str,
+    /// Только этот чат; `None` — все.
+    pub chat: Option<Chat<'a>>,
+    /// Только сообщения этого отправителя (hex ключа).
+    pub sender: Option<&'a str>,
+    /// Сколько свежих находок пропустить (листание за пределы страницы).
+    pub offset: usize,
+    pub limit: usize,
+}
+
+/// Страница находок: всего совпадений и сами находки `(чат, scope, сообщение)`,
+/// свежие первыми.
+#[derive(Default)]
+pub struct SearchPage {
+    pub total: usize,
+    pub hits: Vec<(Vec<u8>, i64, StoredMessage)>,
+}
+
+/// Слово запроса без окончания: у слов от пяти букв отбрасывается последняя гласная,
+/// «й» или «ь», и дальше оно ищется началом слова — «сарай» находит «сарая», «книгу» —
+/// «книга». Не морфология, а дешёвый шаг к ней: короткие слова не трогаем, чтобы «дом»
+/// не стал «до».
+fn search_stem(word: &str) -> &str {
+    const ENDINGS: &str = "аеёиоуыэюяйьaeiouy";
+    let mut chars = word.char_indices().rev();
+    match (chars.next(), word.chars().count()) {
+        (Some((at, last)), n) if n >= 5 && ENDINGS.contains(last.to_lowercase().next().unwrap_or(last)) => {
+            &word[..at]
+        }
+        _ => word,
+    }
+}
+
+/// Счётчик и страница по готовому `FROM … WHERE …` — один путь для FTS и LIKE.
+fn search_run(
+    conn: &rusqlite::Connection,
+    from_where: &str,
+    params: &[&dyn rusqlite::ToSql],
+    q: &SearchQuery,
+) -> rusqlite::Result<SearchPage> {
+    let total: i64 = conn.query_row(&format!("SELECT count(*) {from_where}"), params, |r| r.get(0))?;
+    let sql = format!(
+        "SELECT m.chat, m.scope, {MSG_COLS} {from_where}
+         ORDER BY m.time DESC, m.rowid DESC LIMIT {} OFFSET {}",
+        q.limit, q.offset
+    );
+    let hits = conn
+        .prepare(&sql)?
+        .query_map(params, |row| Ok((row.get(0)?, row.get(1)?, read_msg_offset(row, 2)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(SearchPage { total: total as usize, hits })
+}
+
+/// В какую сторону от курсора листать историю.
+#[derive(Clone, Copy)]
+enum Side {
+    /// Строго выше курсора; `None` — от хвоста.
+    Older,
+    /// С курсора включительно и ниже.
+    Newer,
+}
+
+/// Строки чата по одну сторону курсора `(time, row)`, наружу — старые сверху.
+/// Курсор двойной, потому что время не уникально: сообщения одной секунды при
+/// курсоре только по времени либо потерялись бы, либо пришли дважды.
+fn page_rows(
+    conn: &rusqlite::Connection,
+    chat: Chat,
+    side: Side,
+    cursor: Option<(i64, i64)>,
+    limit: usize,
+) -> Vec<StoredMessage> {
+    let (cmp, order) = match side {
+        Side::Older => ("<", "DESC"),
+        Side::Newer => (">=", "ASC"),
+    };
+    let sql = format!(
+        "SELECT {MSG_COLS} FROM chat_messages m
+         WHERE m.chat=?1 AND m.scope=?2 AND (?3 = 0 OR (m.time, m.rowid) {cmp} (?4, ?5))
+         ORDER BY m.time {order}, m.rowid {order} LIMIT ?6"
+    );
+    let (has_cursor, t, r) = match cursor {
+        Some((t, r)) => (1i64, t, r),
+        None => (0i64, 0, 0),
+    };
+    let mut rows: Vec<StoredMessage> = conn
+        .prepare(&sql)
+        .and_then(|mut stmt| {
+            stmt.query_map(
+                rusqlite::params![chat.id(), chat.scope(), has_cursor, t, r, limit as i64],
+                read_msg,
+            )?
+            .collect()
+        })
+        .unwrap_or_default();
+    if let Side::Older = side {
+        rows.reverse();
+    }
+    rows
+}
+
+/// Реакции страницы — одним запросом по чату, а не по запросу на сообщение.
+fn with_reactions(conn: &rusqlite::Connection, chat: Chat, mut rows: Vec<StoredMessage>) -> Vec<StoredMessage> {
+    let mut by_msg = reactions_query(conn, chat, None);
+    for m in &mut rows {
+        if let Some(r) = by_msg.remove(&(m.id, m.sender.clone())) {
+            m.reactions = r;
+        }
+    }
+    rows
+}
+
 /// Колонки истории в порядке, который ждёт [`read_msg`]. Один список на все
 /// запросы: разъехавшийся порядок здесь — это молча перепутанные поля.
 const MSG_COLS: &str = "m.rowid, m.id, m.sender, m.mine, m.text, m.time, m.status, m.kind,
@@ -1236,76 +1352,75 @@ impl MessageStore {
         Ok(())
     }
 
-    /// Поиск по тексту переписки. `chat = None` — по всем чатам; свежие первыми.
-    ///
-    /// Возвращает пары «где нашлось + сама строка», потому что результат по всем
-    /// чатам бесполезен без чата: клиенту нужно и показать, откуда сообщение, и
-    /// открыть его.
-    ///
-    /// Идёт через FTS5, а при его отсутствии — через `LIKE`. Деградация тихая и
-    /// намеренная: поиск, который «иногда не собирается», хуже медленного поиска.
+    /// Поиск по переписке, свежие первыми (общий поиск: первая страница без фильтров).
     pub fn search(
         &self,
         query: &str,
         chat: Option<Chat>,
         limit: usize,
     ) -> Vec<(Vec<u8>, i64, StoredMessage)> {
-        let q = query.trim();
-        if q.is_empty() {
-            return Vec::new();
+        self.search_page(&SearchQuery { text: query, chat, limit, ..Default::default() }).hits
+    }
+
+    /// Страница находок и их общее число (app-ui.md → «Поиск в чате»). Каждое слово
+    /// запроса ищется отдельно, началом слова — «прив» находит «привет», — в тексте или
+    /// имени файла; находка содержит все слова (окончание длинного слова отброшено —
+    /// [`search_stem`]). Звонки и системные строки — не текст переписки, их нет.
+    pub fn search_page(&self, q: &SearchQuery) -> SearchPage {
+        let words: Vec<&str> = q.text.split_whitespace().map(search_stem).collect();
+        if words.is_empty() || q.limit == 0 {
+            return SearchPage::default();
         }
         let conn = db::lock(&self.db);
-        let (chat_id, scope) = match chat {
+        let (chat_id, scope) = match q.chat {
             Some(c) => (c.id().to_vec(), c.scope()),
             None => (Vec::new(), -1),
         };
-        // FTS5-запрос: слово целиком в кавычках + префиксный поиск, чтобы «прив»
-        // находило «привет». Кавычки внутри удваиваем — иначе ввод ломает синтаксис.
-        let fts_query = format!("\"{}\"*", q.replace('"', "\"\""));
-        let fts_sql = format!(
-            "SELECT m.chat, m.scope, {MSG_COLS} FROM messages_fts f
-             JOIN chat_messages m ON m.rowid = f.rowid
-             WHERE messages_fts MATCH ?1 AND (?2 < 0 OR (m.chat = ?3 AND m.scope = ?2))
-               AND m.kind NOT IN ('call', 'video_call')
-             ORDER BY m.time DESC LIMIT ?4"
+        let sender = q.sender.unwrap_or("");
+        // ?1 — запрос FTS (в LIKE не нужен), ?2-?4 — чат и отправитель, дальше — слова LIKE.
+        let common = "(?2 < 0 OR (m.chat = ?3 AND m.scope = ?2)) AND (?4 = '' OR m.sender = ?4)
+             AND m.system = 0 AND m.kind NOT IN ('call', 'video_call')";
+        // FTS5: слово в кавычках (кавычки внутри удвоены — ввод не ломает синтаксис) и `*`
+        // — началом слова; пробел между ними — «и».
+        let fts: Vec<String> = words.iter().map(|w| format!("\"{}\"*", w.replace('"', "\"\""))).collect();
+        let fts_from = format!(
+            "FROM chat_search f JOIN chat_messages m ON m.rowid = f.rowid
+             WHERE chat_search MATCH ?1 AND {common}"
         );
-        let rows = conn.prepare(&fts_sql).and_then(|mut stmt| {
-            stmt.query_map(
-                rusqlite::params![fts_query, scope, chat_id, limit as i64],
-                |row| {
-                    let c: Vec<u8> = row.get(0)?;
-                    let s: i64 = row.get(1)?;
-                    Ok((c, s, read_msg_offset(row, 2)?))
-                },
-            )
-            .and_then(|it| it.collect::<rusqlite::Result<Vec<_>>>())
-        });
-        // FTS может отсутствовать в сборке SQLite — тогда молча идём в LIKE.
-        if let Ok(found) = rows {
-            return found;
+        let base: [&dyn rusqlite::ToSql; 4] = [&fts.join(" "), &scope, &chat_id, &sender];
+        if let Ok(page) = search_run(&conn, &fts_from, &base, q) {
+            return page;
         }
-
-        // Фолбэк без FTS: подстрока. `%` и `_` в запросе экранируем, иначе «100%»
+        // Фолбэк без FTS: подстрока каждого слова. `%` и `_` экранируем, иначе «100%»
         // превратилось бы в «что угодно».
-        let like = format!("%{}%", q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
-        let like_sql = format!(
-            "SELECT m.chat, m.scope, {MSG_COLS} FROM chat_messages m
-             WHERE m.text LIKE ?1 ESCAPE '\\' AND (?2 < 0 OR (m.chat = ?3 AND m.scope = ?2))
-               AND m.kind NOT IN ('call', 'video_call')
-             ORDER BY m.time DESC LIMIT ?4"
-        );
-        let mut stmt = match conn.prepare(&like_sql) {
+        let likes: Vec<String> = words
+            .iter()
+            .map(|w| format!("%{}%", w.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")))
+            .collect();
+        let each: Vec<String> = (0..likes.len())
+            .map(|n| format!("(m.text LIKE ?{0} ESCAPE '\\' OR m.name LIKE ?{0} ESCAPE '\\')", n + 5))
+            .collect();
+        let like_from = format!("FROM chat_messages m WHERE {common} AND {}", each.join(" AND "));
+        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&"", &scope, &chat_id, &sender];
+        params.extend(likes.iter().map(|l| l as &dyn rusqlite::ToSql));
+        search_run(&conn, &like_from, &params, q).unwrap_or_default()
+    }
+
+    /// Дни, в которые в чате есть сообщения, в промежутке `[from, to)` (секунды):
+    /// `ГГГГ-ММ-ДД` по местному времени — `offset` секунд от UTC (календарь «Перейти к
+    /// дате»; один сдвиг на месяц — переход на летнее время внутри месяца не учтён).
+    pub fn message_days(&self, chat: Chat, from: i64, to: i64, offset: i64) -> Vec<String> {
+        let conn = db::lock(&self.db);
+        let mut stmt = match conn.prepare(
+            "SELECT DISTINCT date(m.time + ?5, 'unixepoch') FROM chat_messages m
+             WHERE m.chat = ?1 AND m.scope = ?2 AND m.time >= ?3 AND m.time < ?4 ORDER BY 1",
+        ) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
-        let out = stmt
-            .query_map(rusqlite::params![like, scope, chat_id, limit as i64], |row| {
-                let c: Vec<u8> = row.get(0)?;
-                let s: i64 = row.get(1)?;
-                Ok((c, s, read_msg_offset(row, 2)?))
-            })
-            .and_then(|it| it.collect::<rusqlite::Result<Vec<_>>>());
-        out.unwrap_or_default()
+        stmt.query_map(rusqlite::params![chat.id(), chat.scope(), from, to, offset], |r| r.get(0))
+            .and_then(|it| it.collect())
+            .unwrap_or_default()
     }
 
     /// Запомнить название чата (для групп — имя группы).
@@ -1452,35 +1567,29 @@ impl MessageStore {
     /// курсоре только по времени либо потерялись бы, либо пришли дважды.
     pub fn history(&self, chat: Chat, before: Option<(i64, i64)>, limit: usize) -> Vec<StoredMessage> {
         let conn = db::lock(&self.db);
-        let sql = format!(
-            "SELECT {MSG_COLS} FROM chat_messages m
-             WHERE m.chat=?1 AND m.scope=?2 AND (?3 = 0 OR (m.time, m.rowid) < (?4, ?5))
-             ORDER BY m.time DESC, m.rowid DESC LIMIT ?6"
-        );
-        let mut stmt = match conn.prepare(&sql) {
-            Ok(s) => s,
-            Err(_) => return vec![],
-        };
-        let (has_cursor, t, r) = match before {
-            Some((t, r)) => (1i64, t, r),
-            None => (0i64, 0, 0),
-        };
-        let mut rows: Vec<StoredMessage> = stmt
-            .query_map(
-                rusqlite::params![chat.id(), chat.scope(), has_cursor, t, r, limit as i64],
-                read_msg,
-            )
-            .and_then(|rows| rows.collect())
-            .unwrap_or_default();
-        rows.reverse(); // наружу — как в чате: старые сверху
-        // Реакции страницы — одним запросом по чату, а не по запросу на сообщение.
-        let mut by_msg = reactions_query(&conn, chat, None);
-        for m in &mut rows {
-            if let Some(r) = by_msg.remove(&(m.id, m.sender.clone())) {
-                m.reactions = r;
-            }
-        }
-        rows
+        let rows = page_rows(&conn, chat, Side::Older, before, limit);
+        with_reactions(&conn, chat, rows)
+    }
+
+    /// Страница НИЖЕ показанной: курсор — `(time, row)` самого нижнего сообщения.
+    /// Нужна, когда лента открыта не с хвоста (переход к находке или к дате).
+    pub fn history_after(&self, chat: Chat, after: (i64, i64), limit: usize) -> Vec<StoredMessage> {
+        let conn = db::lock(&self.db);
+        // rowid целый: «строго после (t, r)» — то же, что «с (t, r + 1)».
+        let rows = page_rows(&conn, chat, Side::Newer, Some((after.0, after.1 + 1)), limit);
+        with_reactions(&conn, chat, rows)
+    }
+
+    /// Окно истории вокруг места `at = (time, row)`: половина страницы до него и
+    /// остальное — с него и ниже. `row = 0` — «первое сообщение не раньше `time`»
+    /// (переход к дате), `(0, 0)` — начало переписки.
+    pub fn history_around(&self, chat: Chat, at: (i64, i64), limit: usize) -> Vec<StoredMessage> {
+        let conn = db::lock(&self.db);
+        // У начала переписки «до» короче половины — остаток добирается снизу.
+        let mut rows = page_rows(&conn, chat, Side::Older, Some(at), limit / 2);
+        let rest = limit - rows.len();
+        rows.extend(page_rows(&conn, chat, Side::Newer, Some(at), rest));
+        with_reactions(&conn, chat, rows)
     }
 
     /// Поставить, заменить или снять (`emoji` пустой) реакцию `who` на сообщение.
@@ -2128,6 +2237,151 @@ mod tests {
         // строку истории.
         store.delete_many(Chat::Dm(&other), &[(3, me_hex.clone())]).unwrap();
         assert_eq!(store.search("встреч", None, 50).len(), 1);
+    }
+
+    /// Поиск в чате (2.9): слова по отдельности, имя файла, отправитель, счётчик и
+    /// листание; звонки и системные строки не находятся.
+    #[test]
+    fn chat_search_takes_words_apart_and_counts() {
+        let (me, peer) = (key(), key());
+        let store = MessageStore::open(db());
+        let (me_hex, peer_hex) = (hex::encode(me), hex::encode(peer));
+        let chat = Chat::Dm(&peer);
+        let put = |id: u64, sender: &str, text: &str, time: i64, extra: StoredMessage| {
+            store
+                .append(chat, &StoredMessage {
+                    id,
+                    sender: sender.into(),
+                    text: text.into(),
+                    mine: sender == me_hex,
+                    time,
+                    ..extra
+                })
+                .unwrap();
+        };
+        put(1, &peer_hex, "ключ оставлю у соседки", 10, StoredMessage::default());
+        put(2, &me_hex, "А второй ключ от сарая у кого?", 20, StoredMessage::default());
+        put(3, &peer_hex, "", 30, StoredMessage {
+            kind: "file".into(),
+            name: "Ключи от сарая.pdf".into(),
+            ..Default::default()
+        });
+        put(4, &peer_hex, "answered", 40, StoredMessage { kind: "call".into(), ..Default::default() });
+        put(5, &peer_hex, "ключ", 50, StoredMessage { system: true, ..Default::default() });
+
+        let q = |text, sender, offset, limit| {
+            store.search_page(&SearchQuery { text, chat: Some(chat), sender, offset, limit })
+        };
+        let both = q("сарай ключ", None, 0, 10);
+        assert_eq!(both.total, 2, "оба слова, в любом порядке; имя файла тоже ищется");
+        assert_eq!(both.hits[0].2.id, 3, "свежие первыми");
+        assert_eq!(both.hits[1].2.id, 2);
+
+        let all = q("ключ", None, 0, 10);
+        assert_eq!(all.total, 3, "звонок и системная строка — не переписка");
+
+        let page = q("ключ", None, 1, 1);
+        assert_eq!((page.total, page.hits.len()), (3, 1), "счётчик — по всем, страница — по limit");
+        assert_eq!(page.hits[0].2.id, 2, "offset пропускает свежие");
+
+        let mine = q("ключ", Some(me_hex.as_str()), 0, 10);
+        assert_eq!((mine.total, mine.hits[0].2.id), (1, 2), "только мои");
+        assert_eq!(q("ключ", Some(peer_hex.as_str()), 0, 10).total, 2);
+        assert_eq!(q("  ", None, 0, 10).total, 0);
+        assert_eq!(q("ключи", None, 0, 10).total, 3, "окончание длинного слова не мешает");
+        assert_eq!(search_stem("дом"), "дом", "короткое слово не режется");
+    }
+
+    /// Окна истории для перехода к находке: «вокруг» места и «после» нижнего.
+    #[test]
+    fn history_windows_around_and_after_a_message() {
+        let (me, peer) = (key(), key());
+        let store = MessageStore::open(db());
+        let me_hex = hex::encode(me);
+        let chat = Chat::Dm(&peer);
+        for id in 1..=10u64 {
+            store
+                .append(chat, &StoredMessage {
+                    id,
+                    sender: me_hex.clone(),
+                    text: format!("m{id}"),
+                    mine: true,
+                    time: 100 + (id as i64 / 2), // по два сообщения на секунду
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let ids = |v: &[StoredMessage]| v.iter().map(|m| m.id).collect::<Vec<_>>();
+        let all = store.history(chat, None, 50);
+        let at = all.iter().find(|m| m.id == 6).unwrap();
+        let around = store.history_around(chat, (at.time, at.row), 4);
+        assert_eq!(ids(&around), vec![4, 5, 6, 7], "половина до, остальное — с места");
+
+        let last = around.last().unwrap();
+        let after = store.history_after(chat, (last.time, last.row), 2);
+        assert_eq!(ids(&after), vec![8, 9], "строго ниже, сообщения одной секунды не теряются");
+
+        let day = store.history_around(chat, (103, 0), 2);
+        assert_eq!(ids(&day), vec![5, 6], "row = 0 — первое не раньше времени");
+        assert_eq!(ids(&store.history_around(chat, (0, 0), 2)), vec![1, 2], "начало переписки");
+    }
+
+    /// Календарь «Перейти к дате»: дни с сообщениями по местному времени.
+    #[test]
+    fn message_days_follow_the_local_offset() {
+        let (me, peer) = (key(), key());
+        let store = MessageStore::open(db());
+        let chat = Chat::Dm(&peer);
+        let day = 86_400;
+        // 1 октября 2026, 22:30 UTC — в UTC+3 это уже 2 октября.
+        let t = 1_790_893_800;
+        for (id, time) in [(1u64, t), (2, t + 2 * day)] {
+            store
+                .append(chat, &StoredMessage {
+                    id,
+                    sender: hex::encode(me),
+                    text: "x".into(),
+                    mine: true,
+                    time,
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        assert_eq!(store.message_days(chat, t - day, t + 3 * day, 0), vec!["2026-10-01", "2026-10-03"]);
+        assert_eq!(
+            store.message_days(chat, t - day, t + 3 * day, 3 * 3600),
+            vec!["2026-10-02", "2026-10-04"]
+        );
+        assert!(store.message_days(chat, t + day, t + 2 * day, 0).is_empty(), "промежуток полуоткрытый");
+    }
+
+    /// Старая база: строки, лёгшие до нового индекса, находятся после миграции.
+    #[test]
+    fn search_index_is_rebuilt_from_existing_history() {
+        let (me, peer) = (key(), key());
+        let d = db();
+        let store = MessageStore::open(d.clone());
+        store
+            .append(Chat::Dm(&peer), &StoredMessage {
+                id: 1,
+                sender: hex::encode(me),
+                text: "старое сообщение".into(),
+                mine: true,
+                time: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        {
+            // База до 2.9: индекс был другой, нового нет.
+            let conn = db::lock(&d);
+            conn.execute_batch(
+                "DROP TRIGGER chat_search_ai; DROP TRIGGER chat_search_ad; DROP TRIGGER chat_search_au;
+                 DROP TABLE chat_search;",
+            )
+            .unwrap();
+            db::migrate(&conn).unwrap();
+        }
+        assert_eq!(store.search("старое", None, 10).len(), 1);
     }
 
     /// Репутация копится только у контактов и переживает переоткрытие.

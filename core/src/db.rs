@@ -53,7 +53,7 @@ pub fn lock(db: &Db) -> MutexGuard<'_, Connection> {
     db.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS contacts (
             key          BLOB PRIMARY KEY,
@@ -260,27 +260,46 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     // один раз, на новой (колонка уже в CREATE) — тихо ничего не сделает.
     let _ = conn.execute("ALTER TABLE outbox ADD COLUMN failed INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE calls ADD COLUMN video INTEGER NOT NULL DEFAULT 0", []);
-    // Полнотекстовый индекс переписки. `content='chat_messages'` — индекс без копии
-    // текста: сами строки остаются в основной таблице, FTS хранит только словарь.
-    // Всё в `let _`: на сборке SQLite без FTS5 поиск обязан деградировать до LIKE,
-    // а не ронять запуск приложения (см. `MessageStore::search`).
+    // Полнотекстовый индекс переписки: текст и имя файла вложения (поиск в чате, 2.9).
+    // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
+    // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5
+    // поиск обязан деградировать до LIKE, а не ронять запуск (см. `MessageStore::search_page`).
+    //
+    // Прежний индекс `messages_fts` знал только текст: убираем его с триггерами, а новый
+    // при первом создании наполняем из истории (`rebuild`) — иначе старая переписка
+    // осталась бы ненайденной.
+    let fresh: bool = conn
+        .query_row(
+            "SELECT count(*) = 0 FROM sqlite_master WHERE name = 'chat_search'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
     let _ = conn.execute_batch(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
-             USING fts5(text, content='chat_messages', content_rowid='rowid');
+        "DROP TRIGGER IF EXISTS chat_messages_ai;
+         DROP TRIGGER IF EXISTS chat_messages_ad;
+         DROP TRIGGER IF EXISTS chat_messages_au;
+         DROP TABLE IF EXISTS messages_fts;
 
-         CREATE TRIGGER IF NOT EXISTS chat_messages_ai AFTER INSERT ON chat_messages BEGIN
-             INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+         CREATE VIRTUAL TABLE IF NOT EXISTS chat_search
+             USING fts5(text, name, content='chat_messages', content_rowid='rowid');
+
+         CREATE TRIGGER IF NOT EXISTS chat_search_ai AFTER INSERT ON chat_messages BEGIN
+             INSERT INTO chat_search(rowid, text, name) VALUES (new.rowid, new.text, new.name);
          END;
-         CREATE TRIGGER IF NOT EXISTS chat_messages_ad AFTER DELETE ON chat_messages BEGIN
-             INSERT INTO messages_fts(messages_fts, rowid, text)
-             VALUES ('delete', old.rowid, old.text);
+         CREATE TRIGGER IF NOT EXISTS chat_search_ad AFTER DELETE ON chat_messages BEGIN
+             INSERT INTO chat_search(chat_search, rowid, text, name)
+             VALUES ('delete', old.rowid, old.text, old.name);
          END;
-         CREATE TRIGGER IF NOT EXISTS chat_messages_au AFTER UPDATE ON chat_messages BEGIN
-             INSERT INTO messages_fts(messages_fts, rowid, text)
-             VALUES ('delete', old.rowid, old.text);
-             INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+         CREATE TRIGGER IF NOT EXISTS chat_search_au AFTER UPDATE ON chat_messages BEGIN
+             INSERT INTO chat_search(chat_search, rowid, text, name)
+             VALUES ('delete', old.rowid, old.text, old.name);
+             INSERT INTO chat_search(rowid, text, name) VALUES (new.rowid, new.text, new.name);
          END;",
     );
+    if fresh {
+        let _ = conn.execute("INSERT INTO chat_search(chat_search) VALUES ('rebuild')", []);
+    }
     Ok(())
 }
 

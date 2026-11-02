@@ -244,6 +244,13 @@ impl ChatKey {
     }
 }
 
+/// Страница поиска в чате: всего совпадений и находки этой страницы.
+#[derive(serde::Serialize)]
+struct SearchPageJson {
+    total: usize,
+    hits: Vec<SearchHit>,
+}
+
 /// Находка поиска: сама строка истории плюс чат, в котором она лежит.
 #[derive(serde::Serialize)]
 struct SearchHit {
@@ -747,6 +754,72 @@ impl Engine {
             })
             .collect();
         serde_json::to_string(&hits).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Поиск в одном чате (2.9): слова по отдельности, имя файла, отправитель
+    /// (`sender` hex, пустой — все), листание `offset`/`limit` и общее число находок.
+    /// JSON `{total, hits: [{chat, group, ...сообщение}]}`, свежие первыми.
+    pub fn search_page_json(
+        &self,
+        chat: &ChatKey,
+        query: &str,
+        sender: &str,
+        offset: usize,
+        limit: usize,
+    ) -> String {
+        let page = self
+            .messages
+            .lock_safe()
+            .search_page(&peerage_core::store::SearchQuery {
+                text: query,
+                chat: Some(chat.as_chat()),
+                sender: Some(sender.trim()).filter(|s| !s.is_empty()),
+                offset,
+                limit,
+            });
+        let json = SearchPageJson {
+            total: page.total,
+            hits: page
+                .hits
+                .into_iter()
+                .map(|(chat, scope, msg)| SearchHit {
+                    chat: hex::encode(chat),
+                    group: scope == 1,
+                    msg,
+                })
+                .collect(),
+        };
+        serde_json::to_string(&json).unwrap_or_else(|_| r#"{"total":0,"hits":[]}"#.into())
+    }
+
+    /// Окно истории вокруг места `(time, row)` — переход к находке или к дате
+    /// (`row = 0` — первое сообщение не раньше `time`; `(0, 0)` — начало). Старые сверху.
+    pub fn history_around_json(&self, chat: &ChatKey, time: i64, row: i64) -> String {
+        let page =
+            self.messages
+                .lock_safe()
+                .history_around(chat.as_chat(), (time, row), HISTORY_PAGE);
+        serde_json::to_string(&page).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Страница НИЖЕ показанной, когда лента открыта не с хвоста: курсор — `time`/`row`
+    /// самого нижнего сообщения. Пустая — дошли до хвоста.
+    pub fn history_after_json(&self, chat: &ChatKey, time: i64, row: i64) -> String {
+        let page =
+            self.messages
+                .lock_safe()
+                .history_after(chat.as_chat(), (time, row), HISTORY_PAGE);
+        serde_json::to_string(&page).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Дни с сообщениями в `[from, to)` (секунды) по местному времени (`offset` секунд
+    /// от UTC): JSON `["ГГГГ-ММ-ДД", …]` — календарь «Перейти к дате».
+    pub fn message_days_json(&self, chat: &ChatKey, from: i64, to: i64, offset: i64) -> String {
+        let days = self
+            .messages
+            .lock_safe()
+            .message_days(chat.as_chat(), from, to, offset);
+        serde_json::to_string(&days).unwrap_or_else(|_| "[]".into())
     }
 
     /// Сводка по всем чатам для списка на главной: последнее сообщение, время,

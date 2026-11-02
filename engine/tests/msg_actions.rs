@@ -662,3 +662,68 @@ fn reactions_travel_replace_and_clear() {
     // Кривая реакция отклоняется на входе.
     assert!(!a.react(peerage_engine::ChatKey::Dm(b_key), id1, &author, "a b"));
 }
+
+/// Поиск в чате (2.9) через JSON-границу движка: счётчик и листание, фильтр
+/// отправителя, затем переход к находке — окно истории вокруг неё и дни месяца.
+#[test]
+fn chat_search_pages_and_jumps_to_a_hit() {
+    let (a, b, a_key, b_key) = pair("chatsearch", 91, 92);
+    let chat = peerage_engine::ChatKey::Dm(b_key);
+    a.send_text(&b_key, "ключ у соседки");
+    a.send_text(&b_key, "второй ключ под горшком");
+    b.send_text(&a_key, "ключи заберу вечером");
+    assert!(
+        wait(10, || history(&a, &b_key).len() == 3),
+        "все три в переписке"
+    );
+
+    let page: serde_json::Value =
+        serde_json::from_str(&a.search_page_json(&chat, "ключ", "", 0, 2)).unwrap();
+    assert_eq!(page["total"], 3, "{page}");
+    assert_eq!(
+        page["hits"].as_array().unwrap().len(),
+        2,
+        "страница по limit"
+    );
+
+    let theirs: serde_json::Value =
+        serde_json::from_str(&a.search_page_json(&chat, "ключ", &hex::encode(b_key), 0, 10))
+            .unwrap();
+    assert_eq!(theirs["total"], 1, "только от собеседника: {theirs}");
+
+    let both: serde_json::Value =
+        serde_json::from_str(&a.search_page_json(&chat, "горшк ключ", "", 0, 10)).unwrap();
+    assert_eq!(both["total"], 1, "слова по отдельности");
+
+    // Переход к находке: окно вокруг неё содержит её саму.
+    let hit = &both["hits"][0];
+    let (t, r) = (hit["time"].as_i64().unwrap(), hit["row"].as_i64().unwrap());
+    let around: serde_json::Value =
+        serde_json::from_str(&a.history_around_json(&chat, t, r)).unwrap();
+    assert!(
+        around
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["row"] == hit["row"]),
+        "{around}"
+    );
+    let after: serde_json::Value =
+        serde_json::from_str(&a.history_after_json(&chat, t, r)).unwrap();
+    assert!(
+        after
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|m| m["row"] != hit["row"]),
+        "строго ниже"
+    );
+
+    let days: serde_json::Value =
+        serde_json::from_str(&a.message_days_json(&chat, t - 86_400, t + 86_400, 0)).unwrap();
+    assert_eq!(
+        days.as_array().unwrap().len(),
+        1,
+        "сегодня — день с сообщениями: {days}"
+    );
+}
