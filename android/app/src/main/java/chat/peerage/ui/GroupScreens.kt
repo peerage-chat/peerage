@@ -182,22 +182,7 @@ private fun GroupChatContent(model: AppModel) {
                     onPickFile = { filePicker.launch(arrayOf("*/*")) },
                     onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
                     onCamera = openCamera,
-                    onSendAttachments = { list, caption ->
-                        // Подпись — только на первом вложении, как в DM: серия из пяти
-                        // фото с одной подписью на каждом читалась бы как спам.
-                        list.forEachIndexed { i, g ->
-                            sendUriAttachment(
-                                ctx,
-                                model,
-                                gid,
-                                g.uri,
-                                scope,
-                                if (g.isVideo) "video.mp4" else "photo.jpg",
-                                caption = if (i == 0) caption else "",
-                                group = true,
-                            )
-                        }
-                    },
+                    onSendAttachments = { list, caption -> sendGallery(ctx, model, gid, list, scope, caption, group = true) },
                     voice = voice,
                     model = model,
                     mentionCandidates = mentionCandidates,

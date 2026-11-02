@@ -299,21 +299,7 @@ internal fun ChatScreen(model: AppModel) {
             onPickFile = { filePicker.launch(arrayOf("*/*")) },
             onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
             onCamera = openCamera,
-            onSendAttachments = { list, caption ->
-                // Подпись прикрепляем к ПЕРВОМУ вложению: серия из пяти фото с одной
-                // подписью на каждом читалась бы как спам.
-                list.forEachIndexed { i, g ->
-                    sendUriAttachment(
-                        ctx,
-                        model,
-                        key,
-                        g.uri,
-                        scope,
-                        if (g.isVideo) "video.mp4" else "photo.jpg",
-                        caption = if (i == 0) caption else "",
-                    )
-                }
-            },
+            onSendAttachments = { list, caption -> sendGallery(ctx, model, key, list, scope, caption) },
             voice = voice,
             model = model,
             replyStrip = {
@@ -358,24 +344,57 @@ internal fun sendUriAttachment(
     caption: String = "",
     group: Boolean = false,
 ) {
+    scope.launch(Dispatchers.IO) { sendUriNow(ctx, model, key, uri, fallbackName, caption, group) }
+}
+
+/**
+ * Снимки из шторки «Прикрепить» — по одному и в порядке выбора: номер на плитке обещает
+ * порядок в ленте. Параллельная отправка его не держала — меньший файл обгонял. Подпись —
+ * у первого: серия из пяти фото с одной подписью на каждом читалась бы как спам.
+ */
+internal fun sendGallery(
+    ctx: android.content.Context,
+    model: AppModel,
+    key: String,
+    items: List<GalleryItem>,
+    scope: kotlinx.coroutines.CoroutineScope,
+    caption: String,
+    group: Boolean = false,
+) {
     scope.launch(Dispatchers.IO) {
-        val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
-        val name = displayName(ctx, uri) ?: fallbackName
-        // Картинки идут через память: им нужен scrub (EXIF/GPS), а он требует всего
-        // файла целиком. Весят они немного, так что это допустимо.
-        if (mime.startsWith("image/")) {
-            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
-            val meta = MediaMeta.extract(ctx, uri, mime, bytes)
-            model.sendMediaWithMeta(key, bytes, mime, name, meta, caption, group)
-            return@launch
+        items.forEachIndexed { i, g ->
+            val fallback = if (g.isVideo) "video.mp4" else "photo.jpg"
+            sendUriNow(ctx, model, key, g.uri, fallback, if (i == 0) caption else "", group)
         }
-        // Всё остальное — ПОТОКОМ: сначала переливаем content:// в кэш-файл по 64 КБ,
-        // потом движок считает манифест и отдаёт чанки с диска. Видео на гигабайт не
-        // должно стоить гигабайта RAM только потому, что его выбрали в пикере.
-        val cached = cacheFromUri(ctx, uri, name) ?: return@launch
-        val meta = MediaMeta.extract(ctx, uri, mime, ByteArray(0))
-        model.sendMediaFile(key, cached.absolutePath, mime, name, meta, caption, group)
     }
+}
+
+/** Отправить одно вложение по content:// — блокирует поток, звать с IO. */
+private fun sendUriNow(
+    ctx: android.content.Context,
+    model: AppModel,
+    key: String,
+    uri: android.net.Uri,
+    fallbackName: String,
+    caption: String,
+    group: Boolean,
+) {
+    val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+    val name = displayName(ctx, uri) ?: fallbackName
+    // Картинки идут через память: им нужен scrub (EXIF/GPS), а он требует всего
+    // файла целиком. Весят они немного, так что это допустимо.
+    if (mime.startsWith("image/")) {
+        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return
+        val meta = MediaMeta.extract(ctx, uri, mime, bytes)
+        model.sendMediaWithMeta(key, bytes, mime, name, meta, caption, group)
+        return
+    }
+    // Всё остальное — ПОТОКОМ: сначала переливаем content:// в кэш-файл по 64 КБ,
+    // потом движок считает манифест и отдаёт чанки с диска. Видео на гигабайт не
+    // должно стоить гигабайта RAM только потому, что его выбрали в пикере.
+    val cached = cacheFromUri(ctx, uri, name) ?: return
+    val meta = MediaMeta.extract(ctx, uri, mime, ByteArray(0))
+    model.sendMediaFile(key, cached.absolutePath, mime, name, meta, caption, group)
 }
 
 /** Перелить content:// в файл кэша порциями. Возвращает файл или null. */
@@ -672,7 +691,7 @@ internal fun MessageInput(
     var attachOpen by remember { mutableStateOf(false) }
     var picked by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     // Открытую панель «назад» закрывает, а не уводит из чата.
-    BackHandler(enabled = emojiOpen || attachOpen) {
+    BackHandler(enabled = emojiOpen) {
         emojiOpen = false
         attachOpen = false
     }
@@ -710,23 +729,37 @@ internal fun MessageInput(
             fadeIn(tween(Tokens.Anim.normal))
         val panelExit = shrinkVertically(tween(Tokens.Anim.normal), shrinkTowards = Alignment.Bottom) +
             fadeOut(tween(Tokens.Anim.fast))
-        AnimatedVisibility(
-            visible = attachOpen,
-            enter = panelEnter,
-            exit = panelExit,
-        ) {
+        if (attachOpen) {
+            // Отправка из шторки: текст поля — подпись к первому вложению. Подпись не
+            // отдельным сообщением: фото с подписью иначе — два пакета, и наблюдатель
+            // узнаёт их по характерной паре (M5).
+            val close = {
+                attachOpen = false
+                picked = emptyList()
+            }
             AttachSheet(
                 selected = picked,
                 onToggle = { g ->
-                    picked = if (picked.any { it.uri == g.uri }) {
-                        picked.filterNot { it.uri == g.uri }
-                    } else {
-                        picked + g
-                    }
+                    picked = if (picked.any { it.uri == g.uri }) picked.filterNot { it.uri == g.uri } else picked + g
                 },
-                onCamera = onCamera,
-                onPickFile = onPickFile,
-                onPickAudio = onPickAudio,
+                onCamera = {
+                    close()
+                    onCamera()
+                },
+                onPickFile = {
+                    close()
+                    onPickFile()
+                },
+                onPickAudio = {
+                    close()
+                    onPickAudio()
+                },
+                onSend = {
+                    onSendAttachments(picked, value.trim())
+                    close()
+                    setField(TextFieldValue(""))
+                },
+                onClose = close,
             )
         }
         AnimatedVisibility(
@@ -832,22 +865,8 @@ internal fun MessageInput(
             }
             Spacer(Modifier.width(Tokens.Space.s))
             // Отправка (есть текст) / голосовое удержанием (поле пустое).
-            val hasText = value.isNotBlank()
-            val hasPicked = picked.isNotEmpty()
-            val send = hasText || hasPicked
-            ComposerButton(voice, record = !send, onClick = {
-                if (hasPicked) {
-                    // Текст поля становится ПОДПИСЬЮ вложения, а не отдельным
-                    // сообщением: иначе фото с подписью — это два пакета, и
-                    // наблюдатель узнаёт их по характерной паре (M5).
-                    onSendAttachments(picked, value.trim())
-                    picked = emptyList()
-                    attachOpen = false
-                    setField(TextFieldValue(""))
-                } else if (hasText) {
-                    onSend()
-                }
-            }) {
+            val send = value.isNotBlank()
+            ComposerButton(voice, record = !send, onClick = { if (send) onSend() }) {
                 val tint = HoloAccentDark
                 SwapIcon(
                     send,
@@ -869,16 +888,6 @@ internal fun MessageInput(
                         )
                     },
                 )
-                // Счётчик того, сколько файлов уйдёт этим нажатием.
-                if (hasPicked) {
-                    Text(
-                        "${picked.size}",
-                        color = HoloAccentDark,
-                        fontSize = Tokens.Font.caption,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(top = Tokens.Space.xxs, end = Tokens.Space.xs),
-                    )
-                }
             }
         }
     }

@@ -481,6 +481,19 @@ val TablerIcons.PlayerStop: ImageVector by lazy {
     tabler("player-stop", "M9 7h6a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-6a2 2 0 0 1 -2 -2v-6a2 2 0 0 1 2 -2z")
 }
 
+val TablerIcons.File: ImageVector by lazy {
+    tabler("file", "M14 3h-7a2 2 0 0 0 -2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-11z", "M14 3v5h5")
+}
+
+val TablerIcons.Music: ImageVector by lazy {
+    tabler(
+        "music",
+        "M4.5 17a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0",
+        "M14.5 15a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0",
+        "M9.5 17v-11l10 -2v11",
+    )
+}
+
 val TablerIcons.X: ImageVector by lazy {
     tabler("x", "M18 6l-12 12", "M6 6l12 12")
 }

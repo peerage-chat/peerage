@@ -366,8 +366,19 @@
     <string name="emoji_cat_objects">Предметы</string>
     <string name="emoji_cat_symbols">Символы</string>
     <string name="attach_audio">Аудио</string>
+    <plurals name="attach_send_photos">
+        <item quantity="one">Отправить %1$d фото · %2$s</item>
+        <item quantity="few">Отправить %1$d фото · %2$s</item>
+        <item quantity="many">Отправить %1$d фото · %2$s</item>
+        <item quantity="other">Отправить %1$d фото · %2$s</item>
+    </plurals>
+    <plurals name="attach_send_items">
+        <item quantity="one">Отправить %1$d вложение · %2$s</item>
+        <item quantity="few">Отправить %1$d вложения · %2$s</item>
+        <item quantity="many">Отправить %1$d вложений · %2$s</item>
+        <item quantity="other">Отправить %1$d вложения · %2$s</item>
+    </plurals>
     <string name="attach_camera">Камера</string>
-    <string name="attach_selected">Выбрано %1$d · %2$s</string>
     <string name="attach_need_gallery">Чтобы показывать здесь последние снимки, нужен доступ к галерее. Файл при этом можно отправить через пикер выше.</string>
     <string name="attach_allow">Разрешить</string>
     <string name="attach_gallery_denied">Доступ к галерее не выдан</string>
