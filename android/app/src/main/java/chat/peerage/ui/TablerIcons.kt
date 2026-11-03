@@ -563,3 +563,5 @@ val TablerIcons.Volume: ImageVector by lazy {
 }
 
 val TablerIcons.VolumeOff: ImageVector by lazy { tabler("volume-off", "M4 10v4h4l5 4v-12l-5 4z", "M16 9l6 6", "M22 9l-6 6") }
+
+val TablerIcons.Crown: ImageVector by lazy { tabler("crown", "M12 6l4 6l5 -4l-2 10h-14l-2 -10l5 4z") }

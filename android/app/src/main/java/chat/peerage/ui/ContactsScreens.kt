@@ -117,7 +117,7 @@ internal fun ContactsScreen(
                 val s = model.chatSummaries[model.chatKey(g.gid, true)]
                 add(
                     ChatRowUi(
-                        id = g.gid, group = true, title = g.name,
+                        id = g.gid, group = true, title = g.name, avatar = model.groupPhoto(g.gid),
                         unread = model.groupUnread[g.gid] ?: 0,
                         mentioned = model.groupMentioned[g.gid] == true,
                         muted = s?.muted ?: false, pinnedAt = s?.pinnedAt ?: 0, summary = s,

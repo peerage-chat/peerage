@@ -138,6 +138,8 @@ internal data class GroupRowDto(
     val admin: Boolean = false,
     /** Ключ админа группы (hex; пусто — неизвестен). */
     @SerialName("admin_key") val adminKey: String = "",
+    /** Фото группы: hex блоба (пусто — нет). */
+    val photo: String = "",
     /** Мы не состоим в группе: история из копии, писать нельзя. */
     val archived: Boolean = false,
 )

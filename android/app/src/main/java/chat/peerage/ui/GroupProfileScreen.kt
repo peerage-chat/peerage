@@ -39,6 +39,7 @@ internal fun GroupProfileScreen(
     onMessage: (String) -> Unit,
     onProfile: (String) -> Unit,
     onLeft: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     val gid = model.currentGroup ?: return
     val g = model.groups.firstOrNull { it.gid == gid } ?: return
@@ -48,6 +49,7 @@ internal fun GroupProfileScreen(
     var sheetFor by remember(gid) { mutableStateOf<String?>(null) }
     var confirmRemove by remember(gid) { mutableStateOf<String?>(null) }
     var confirmLeave by remember(gid) { mutableStateOf(false) }
+    var confirmTransfer by remember(gid) { mutableStateOf<String?>(null) }
     LaunchedEffect(gid) {
         model.loadGroupMembers(gid)
         model.refreshChatSummaries()
@@ -71,10 +73,11 @@ internal fun GroupProfileScreen(
 
     ShowcaseScreen(
         onBack = onBack,
-        onEdit = null,
-        editDesc = "",
+        // Название и фото меняет только админ: остальным их не примут.
+        onEdit = if (isAdmin && !g.archived) onEdit else null,
+        editDesc = stringResource(R.string.group_edit_desc),
         header = {
-            SquareAvatar(g.name, size = Tokens.Size.avatarHero)
+            SquareAvatar(g.name, size = Tokens.Size.avatarHero, avatarBytes = model.groupPhoto(gid))
             ShowcaseName(g.name)
             Row {
                 Text(
@@ -156,6 +159,16 @@ internal fun GroupProfileScreen(
             onMessage = { onMessage(k) },
             onProfile = { onProfile(k) },
             onRemove = { confirmRemove = k },
+            onTransfer = { confirmTransfer = k },
+        )
+    }
+    confirmTransfer?.let { k ->
+        ConfirmSheet(
+            title = stringResource(R.string.group_transfer_title),
+            text = stringResource(R.string.group_transfer_text, model.peerName(k)),
+            ok = stringResource(R.string.group_transfer_ok),
+            onOk = { model.transferAdmin(gid, k) },
+            onClose = { confirmTransfer = null },
         )
     }
     confirmRemove?.let { k ->
@@ -168,16 +181,7 @@ internal fun GroupProfileScreen(
         )
     }
     if (confirmLeave) {
-        ConfirmSheet(
-            title = stringResource(R.string.group_leave),
-            text = stringResource(R.string.group_leave_confirm),
-            ok = stringResource(R.string.group_leave_ok),
-            onOk = {
-                model.leaveGroup(gid)
-                onLeft()
-            },
-            onClose = { confirmLeave = false },
-        )
+        LeaveGroupSheet(model, gid, onLeft = onLeft, onClose = { confirmLeave = false })
     }
 }
 
@@ -254,6 +258,7 @@ private fun MemberSheet(
     onMessage: () -> Unit,
     onProfile: () -> Unit,
     onRemove: () -> Unit,
+    onTransfer: () -> Unit,
 ) {
     val name = model.peerName(key)
     // Незнакомцу из группы написать нельзя: гейт контактов пропустит только запрос.
@@ -288,7 +293,11 @@ private fun MemberSheet(
                     }
                 }
                 if (admin) {
-                    if (contact) HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.group)
+                    PopMenuItem(TablerIcons.Crown, stringResource(R.string.group_transfer)) {
+                        onClose()
+                        onTransfer()
+                    }
+                    HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.group)
                     PopMenuItem(TablerIcons.Trash, stringResource(R.string.group_remove_from), danger = true) {
                         onClose()
                         onRemove()

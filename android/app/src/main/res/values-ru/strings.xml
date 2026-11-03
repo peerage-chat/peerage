@@ -258,6 +258,7 @@
     <string name="group_sys_left">%1$s больше не в группе</string>
     <string name="group_sys_renamed">Новое название: «%1$s»</string>
     <string name="group_sys_admin">%1$s — теперь администратор</string>
+    <string name="group_sys_admin_you">%1$s — теперь администратор</string>
     <string name="create_btn">Создать</string>
     <string name="addmember_empty">Нет контактов для приглашения.</string>
 
@@ -1053,4 +1054,19 @@
         <item quantity="many">%1$d выбрано</item>
         <item quantity="other">%1$d выбрано</item>
     </plurals>
+    <!-- Права админа группы (3.5) -->
+    <string name="group_edit_title">Группа</string>
+    <string name="group_edit_desc">Изменить группу</string>
+    <string name="group_edit_photo">Сменить фото группы</string>
+    <string name="group_edit_name">Название</string>
+    <string name="group_edit_caption">Только админ. Новое название и фото получат все участники.</string>
+    <string name="group_transfer">Передать права админа</string>
+    <string name="group_transfer_title">Передать права админа?</string>
+    <string name="group_transfer_text">%1$s сможет удалять участников, закреплять сообщения, менять название и фото. Этот телефон станет обычным участником.</string>
+    <string name="group_transfer_ok">Передать</string>
+    <string name="group_leave_admin_title">Выйти из «%1$s»?</string>
+    <string name="group_leave_admin_text">Этот телефон — админ группы. Без админа в группе никто не сможет удалять участников и закреплять сообщения, а выход участников станет только локальным: снять их с группы будет некому. Права можно передать перед выходом.</string>
+    <string name="group_leave_transfer">Передать права и выйти</string>
+    <string name="group_leave_no_transfer">Выйти без передачи</string>
+    <string name="group_sys_photo">Новое фото группы</string>
 </resources>

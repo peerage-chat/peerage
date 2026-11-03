@@ -2165,6 +2165,7 @@ class AppModel private constructor() {
                     }
                 }
                 if (contacts.any { it.avatarId == ev.id }) refreshContactsNow()
+                if (groups.any { it.photo == ev.id }) refreshGroupsNow()
                 // Байты в память — только тому, что рисуется из памяти (фото,
                 // голосовое, аватар). Докачанное видео на гигабайт сюда не читаем.
                 if (ev.size <= INLINE_BLOB_MAX) reads.execute { cacheBlob(ev.id) }
@@ -2564,8 +2565,14 @@ class AppModel private constructor() {
 
     private fun refreshGroupsNow() {
         val list = decodeList<GroupRowDto>(Native.groupList(sessionPtr))
-            .map { Group(it.gid, it.name, it.members, it.admin, it.archived, it.adminKey) }
+            .map { Group(it.gid, it.name, it.members, it.admin, it.archived, it.adminKey, it.photo) }
         groups.replaceWith(list)
+        // Фото групп — в тот же кэш, что аватары контактов: ключ — контент-адрес блоба.
+        list.forEach { g ->
+            if (g.photo.isNotEmpty() && !contactAvatars.containsKey(g.photo)) {
+                Native.blobRead(sessionPtr, g.photo).takeIf { it.isNotEmpty() }?.let { contactAvatars[g.photo] = it }
+            }
+        }
     }
 
     // ── Сводка чатов для главной ────────────────────────────────────────────
@@ -2702,6 +2709,9 @@ class AppModel private constructor() {
     fun setGroupPhoto(gid: String, content: ByteArray, mime: String) = ops.execute {
         Native.groupSetPhoto(sessionPtr, gid, content, mime)
     }
+
+    /** Байты фото группы; null — фото нет или блоб ещё не докачан (тогда буква). */
+    fun groupPhoto(gid: String): ByteArray? = groups.firstOrNull { it.gid == gid }?.photo?.let { contactAvatars[it] }
 
     /** Переименовать группу (только админ); список обновит `groups_changed`. */
     fun renameGroup(gid: String, name: String) = ops.execute { Native.groupRename(sessionPtr, gid, name.trim()) }

@@ -327,6 +327,9 @@ object Tokens {
         val avatarChip = 28.dp // аватар в чипе выбранного человека
         val avatarSheet = 48.dp // аватар в шапке шторки человека
         val groupDraftAvatar = 72.dp // аватар группы на шаге «название»
+        val groupEditAvatar = 104.dp // фото группы на правке (`people/GroupEdit`)
+        val groupEditBadge = 36.dp // значок камеры на нём
+        val badgeRing = 3.dp // кольцо фона вокруг значка поверх аватара
         val tabLine = 2.dp // линия акцента под выбранной папкой
         val badge = 22.dp // бейдж-счётчик: высота и минимальная ширина
         val badgeTab = 20.dp // счётчик у подписи вкладки (макет `requests/Tab`)

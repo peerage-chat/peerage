@@ -32,6 +32,7 @@ import chat.peerage.R
 import chat.peerage.Tokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 
 /** Сторона аватара в пикселях: с запасом на самый крупный показ (96dp на xxxhdpi). */
@@ -43,14 +44,21 @@ private const val AVATAR_PX = 512
  * готовился одинаково. Возвращает «открыть выбор».
  */
 @Composable
-internal fun rememberAvatarPicker(model: AppModel): () -> Unit {
+internal fun rememberAvatarPicker(model: AppModel): () -> Unit = rememberImagePicker { model.setSelfAvatar(it, "image/jpeg") }
+
+/**
+ * Картинка-аватар из системного Photo Picker: квадрат [AVATAR_PX], JPEG без метаданных.
+ * Тем же путём готовится и фото группы. [onJpeg] — на главном потоке.
+ */
+@Composable
+internal fun rememberImagePicker(onJpeg: (ByteArray) -> Unit): () -> Unit {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         scope.launch(Dispatchers.IO) {
             val jpeg = avatarJpeg(ctx, uri) ?: return@launch
-            model.setSelfAvatar(jpeg, "image/jpeg")
+            withContext(Dispatchers.Main) { onJpeg(jpeg) }
         }
     }
     return { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }

@@ -165,6 +165,8 @@ data class Group(
     val archived: Boolean = false,
     /** Ключ админа (hex): метка «админ» в участниках. */
     val adminKey: String = "",
+    /** Фото группы: hex блоба (пусто — нет); байты — [AppModel.groupPhoto]. */
+    val photo: String = "",
 )
 
 /**

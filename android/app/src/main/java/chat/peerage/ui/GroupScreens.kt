@@ -271,8 +271,13 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
                 .padding(horizontal = Tokens.Space.xs, vertical = Tokens.Space.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SquareAvatar(name, size = Tokens.Size.avatarHead, bg = Tokens.Colors.groupAvatar) {
-                Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
+            val photo = gid?.let { model.groupPhoto(it) }
+            if (photo != null) {
+                SquareAvatar(name, size = Tokens.Size.avatarHead, avatarBytes = photo)
+            } else {
+                SquareAvatar(name, size = Tokens.Size.avatarHead, bg = Tokens.Colors.groupAvatar) {
+                    Icon(Icons.Filled.Group, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
+                }
             }
             Spacer(Modifier.width(Tokens.Space.m))
             Column(Modifier.weight(1f)) {
@@ -308,13 +313,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
     }
     // Выход уводит из чата сам: модель забывает группу, и навигация уходит с её экранов.
     if (confirmLeave && gid != null) {
-        ConfirmSheet(
-            title = stringResource(R.string.group_leave),
-            text = stringResource(R.string.group_leave_confirm),
-            ok = stringResource(R.string.group_leave_ok),
-            onOk = { model.leaveGroup(gid) },
-            onClose = { confirmLeave = false },
-        )
+        LeaveGroupSheet(model, gid, onLeft = {}, onClose = { confirmLeave = false })
     }
 }
 

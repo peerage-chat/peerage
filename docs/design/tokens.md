@@ -289,6 +289,7 @@
 | `avatarChip` | 28 | аватар в чипе выбранного человека |
 | `avatarSheet` | 48 | аватар в шапке шторки человека (`people/Member`) |
 | `groupDraftAvatar` | 72 | аватар группы на шаге «название» (`people/GroupName`) |
+| `groupEditAvatar` / `groupEditBadge` / `badgeRing` | 104 / 36 / 3 | аватар на правке группы, значок камеры на нём и его обводка цветом фона (`people/GroupEdit`) |
 | `tabBar` | 40 | высота полосы табов-папок |
 | `tab` | 34 | сама вкладка-папка |
 | `inputField` | 42 | минимальная высота кнопок-плашек |

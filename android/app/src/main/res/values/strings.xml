@@ -258,6 +258,7 @@
     <string name="group_sys_left">%1$s is no longer in the group</string>
     <string name="group_sys_renamed">New name: “%1$s”</string>
     <string name="group_sys_admin">%1$s is now an admin</string>
+    <string name="group_sys_admin_you">%1$s are now an admin</string>
     <string name="create_btn">Create</string>
     <string name="addmember_empty">No contacts to invite.</string>
 
@@ -993,4 +994,19 @@
         <item quantity="one">%1$d selected</item>
         <item quantity="other">%1$d selected</item>
     </plurals>
+    <!-- Права админа группы (3.5) -->
+    <string name="group_edit_title">Group</string>
+    <string name="group_edit_desc">Edit group</string>
+    <string name="group_edit_photo">Change group photo</string>
+    <string name="group_edit_name">Name</string>
+    <string name="group_edit_caption">Admin only. All members get the new name and photo.</string>
+    <string name="group_transfer">Transfer admin rights</string>
+    <string name="group_transfer_title">Transfer admin rights?</string>
+    <string name="group_transfer_text">%1$s will remove members, pin messages and change the name and photo. This phone becomes a regular member.</string>
+    <string name="group_transfer_ok">Transfer</string>
+    <string name="group_leave_admin_title">Leave “%1$s”?</string>
+    <string name="group_leave_admin_text">This phone is the group admin. Without an admin, nobody can remove members or pin messages, and members who leave stay listed: nobody can take them off the group. Rights can be transferred before leaving.</string>
+    <string name="group_leave_transfer">Transfer rights and leave</string>
+    <string name="group_leave_no_transfer">Leave without transfer</string>
+    <string name="group_sys_photo">New group photo</string>
 </resources>

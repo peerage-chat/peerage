@@ -221,6 +221,9 @@ internal enum class Screen {
     /** Профиль группы — «витрина» (3.1). */
     GroupInfo,
 
+    /** Правка группы: название и фото, только админ (3.5). */
+    GroupEdit,
+
     /** Сверка ключа контакта (из его профиля). */
     Verify,
     Contacts,
@@ -408,6 +411,8 @@ private fun CompactShell(model: AppModel) {
                                 )
                                 // «Витрина» рисует свою шапку на фоне и едет вместе со списком.
                                 Screen.Info, Screen.GroupInfo -> {}
+                                // Правка рисует свою шапку: «Готово» в ней — часть формы.
+                                Screen.GroupEdit -> {}
                                 Screen.Verify -> TopBar(stringResource(R.string.verify_title), onBack = goBack)
                                 Screen.GroupChat -> GroupChatTopBar(
                                     model,
@@ -577,9 +582,11 @@ private fun CompactShell(model: AppModel) {
                                         verifyingPeer = model.currentChat
                                         screen = Screen.Scanner
                                     }
+                                    Screen.GroupEdit -> GroupEditScreen(model, onBack = goBack)
                                     Screen.GroupInfo -> GroupProfileScreen(
                                         model,
                                         onBack = goBack,
+                                        onEdit = { screen = Screen.GroupEdit },
                                         onAdd = {
                                             invitePick.clear()
                                             screen = Screen.AddMember

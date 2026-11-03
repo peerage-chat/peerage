@@ -54,7 +54,9 @@ internal fun groupSystemLine(model: AppModel, kind: String, sender: String, para
         }
         "left" -> fill(stringResource(R.string.group_sys_left), who)
         "renamed" -> fill(stringResource(R.string.group_sys_renamed), param)
-        "admin" -> fill(stringResource(R.string.group_sys_admin), who)
+        // «You» в английском требует своего глагола.
+        "admin" -> fill(stringResource(if (sender == model.me?.pubkey) R.string.group_sys_admin_you else R.string.group_sys_admin), who)
+        "photo" -> fill(stringResource(R.string.group_sys_photo))
         // Строки до 2.8а знали только «состав изменился» и кто сделал коммит.
         else -> fill(stringResource(R.string.group_system_membership), who)
     }
