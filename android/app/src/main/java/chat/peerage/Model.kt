@@ -2678,17 +2678,31 @@ class AppModel private constructor() {
     }
 
     /** Выйти из группы (ADR-004). Локально забываем сразу; движок просит админа отозвать. */
-    fun leaveGroup(gid: String) {
+    /** Выйти из группы; [heir] — кому админ передаёт права перед уходом (null — без передачи). */
+    fun leaveGroup(gid: String, heir: String? = null) {
         if (currentGroup == gid) currentGroup = null
         // Сидим в звонке этой группы — выходим и из него: иначе маячок продолжал бы
         // объявлять нас в комнате группы, из которой мы ушли.
         if (currentRoom == gid) leaveRoom()
-        ops.execute { Native.groupLeave(sessionPtr, gid) }
+        ops.execute {
+            if (heir != null) {
+                Native.groupTransferAdmin(sessionPtr, gid, heir, true)
+            } else {
+                Native.groupLeave(sessionPtr, gid)
+            }
+        }
     }
 
-    /** Создать группу (fire-and-forget). Появится в списке по событию
-     *  `groups_changed` (см. applyEvent → refreshGroupsNow). */
-    /** Создать группу и позвать [invite] (hex-ключи) — одной командой движка. */
+    /** Передать права админа участнику [peerHex] (шаг 7j). */
+    fun transferAdmin(gid: String, peerHex: String) = ops.execute {
+        Native.groupTransferAdmin(sessionPtr, gid, peerHex, false)
+    }
+
+    /** Переименовать группу (только админ); список обновит `groups_changed`. */
+    fun renameGroup(gid: String, name: String) = ops.execute { Native.groupRename(sessionPtr, gid, name.trim()) }
+
+    /** Создать группу и позвать [invite] (hex-ключи) — одной командой движка. Появится в
+     *  списке по событию `groups_changed`. */
     fun createGroup(name: String, invite: List<String> = emptyList()) = ops.execute {
         Native.groupCreate(
             sessionPtr,

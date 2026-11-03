@@ -77,10 +77,19 @@ enum AppMsg {
     /// пакета — кто, берётся из MLS; `at` — его время в мс (позднее побеждает).
     #[serde(rename = "react")]
     React { target: u64, sender: String, emoji: String, at: i64 },
-    /// Служебное: имя группы. Админ шлёт его новому участнику после add, чтобы тот
-    /// увидел настоящее название, а не дефолт (в UI не показывается как сообщение).
+    /// Служебное: имя группы. Админ шлёт его новому участнику после add и при
+    /// переименовании. Принимает верхний слой — только от админа (автор из MLS).
     #[serde(rename = "name")]
     Name { name: String },
+    /// Передача прав админа (шаг 7j): новый админ — `key` (hex). Шлёт только текущий
+    /// админ; проверяет верхний слой по автору из MLS. `leaving` — админ уходит из
+    /// группы: новый админ сам отзывает его (отзывать некому, кроме админа).
+    #[serde(rename = "admin")]
+    Admin {
+        key: String,
+        #[serde(default)]
+        leaving: bool,
+    },
 }
 
 /// Медиа-вложение группового сообщения: ссылка на блоб плюс всё, что нужно
@@ -151,8 +160,10 @@ pub enum Inbound {
     React { actor: PeerKey, target: u64, sender: String, emoji: String, at: i64 },
     /// Медиа-сообщение (M2): отправитель + ссылка на блоб с метаданными карточки.
     Media { sender: PeerKey, media: MediaBody },
-    /// Имя группы (служебное): верхний слой обновляет название, без показа в чате.
-    Name { name: String },
+    /// Имя группы (служебное) от `actor`: верхний слой принимает его только от админа.
+    Name { actor: PeerKey, name: String },
+    /// `actor` передаёт права админа `key`; `leaving` — и уходит из группы.
+    Admin { actor: PeerKey, key: PeerKey, leaving: bool },
     /// Изменён состав группы (применён Commit), его применил actor.
     Membership { actor: PeerKey, added: Vec<PeerKey>, removed: Vec<PeerKey> },
     /// Нас удалили из группы (ADR-004) — верхний слой забывает группу локально.
@@ -361,6 +372,11 @@ impl GroupChat {
         self.send_app(&AppMsg::Name { name: name.to_string() })
     }
 
+    /// Передать права админа `key` (шаг 7j); `leaving` — и уйти из группы.
+    pub fn send_admin(&mut self, key: &PeerKey, leaving: bool) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::Admin { key: hex::encode(key), leaving })
+    }
+
     /// Зашифровать прикладное тело (JSON) MLS и разослать участникам.
     fn send_app(&mut self, msg: &AppMsg) -> Result<(), GroupChatError> {
         let body = serde_json::to_vec(msg).unwrap_or_default();
@@ -415,7 +431,15 @@ impl GroupChat {
                         let caption = truncate_caption(&media.caption);
                         Inbound::Media { sender, media: MediaBody { caption, ..media } }
                     }
-                    Ok(AppMsg::Name { name }) => Inbound::Name { name },
+                    Ok(AppMsg::Name { name }) => Inbound::Name { actor: sender, name },
+                    // Кривой ключ (пропатченный клиент) — не передача.
+                    Ok(AppMsg::Admin { key, leaving }) => match hex::decode(&key)
+                        .ok()
+                        .and_then(|k| <[u8; 32]>::try_from(k.as_slice()).ok())
+                    {
+                        Some(key) => Inbound::Admin { actor: sender, key, leaving },
+                        None => Inbound::None,
+                    },
                     // Сырое UTF-8 — сообщение клиента до M2: id у него нет.
                     Err(_) => Inbound::Message {
                         sender,

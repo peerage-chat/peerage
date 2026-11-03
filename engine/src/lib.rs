@@ -125,6 +125,17 @@ pub(crate) enum GroupCmd {
         gid: Vec<u8>,
         peer: [u8; 32],
     },
+    /// Передать права админа (шаг 7j); `leaving` — и выйти из группы.
+    TransferAdmin {
+        gid: Vec<u8>,
+        peer: [u8; 32],
+        leaving: bool,
+    },
+    /// Переименовать группу (только админ).
+    Rename {
+        gid: Vec<u8>,
+        name: String,
+    },
     /// Ротация ключа группы (PCS, ADR-004).
     Rekey {
         gid: Vec<u8>,
@@ -2321,6 +2332,22 @@ impl Engine {
             .send(Job::Cmd(GroupCmd::RemoveMember { gid, peer }));
     }
 
+    /// Передать права админа участнику (шаг 7j); `leaving` — и выйти из группы.
+    /// Fire-and-forget: итог — `groups_changed`.
+    pub fn group_transfer_admin(&self, gid: Vec<u8>, peer: [u8; 32], leaving: bool) {
+        let _ = self
+            .jobs
+            .send(Job::Cmd(GroupCmd::TransferAdmin { gid, peer, leaving }));
+    }
+
+    /// Переименовать группу (только админ). Fire-and-forget: итог — `groups_changed`.
+    pub fn group_rename(&self, gid: Vec<u8>, name: &str) {
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::Rename {
+            gid,
+            name: name.to_string(),
+        }));
+    }
+
     /// Ротация ключа группы (PCS, ADR-004). Fire-and-forget.
     pub fn group_rekey(&self, gid: Vec<u8>) {
         let _ = self.jobs.send(Job::Cmd(GroupCmd::Rekey { gid }));
@@ -3969,7 +3996,7 @@ fn handle_event(
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
             if out.renamed {
-                // Имя группы пришло от админа — обновляем кэш списка и уведомляем UI.
+                // Имя или админ сменились (от админа) — обновляем кэш списка и UI.
                 refresh_group_cache(engine, groups);
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
@@ -4378,6 +4405,21 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
             if groups.remove_member(&gid, peer) {
                 refresh_group_cache(engine, groups);
                 engine.sync_room_members(); // SEC-2: отозванного убрать и из звонка
+                push_event(engine, dto::UiEvent::GroupsChanged);
+            }
+        }
+        GroupCmd::TransferAdmin { gid, peer, leaving } => {
+            if groups.transfer_admin(&gid, peer, leaving) {
+                refresh_group_cache(engine, groups);
+                if leaving {
+                    engine.sync_room_members();
+                }
+                push_event(engine, dto::UiEvent::GroupsChanged);
+            }
+        }
+        GroupCmd::Rename { gid, name } => {
+            if groups.rename(&gid, &name) {
+                refresh_group_cache(engine, groups);
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }

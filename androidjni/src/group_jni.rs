@@ -280,6 +280,42 @@ pub extern "system" fn Java_chat_peerage_Native_groupRemoveMember<'local>(
     });
 }
 
+/// Передать права админа участнику (шаг 7j); `leaving` — и выйти. Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_groupTransferAdmin<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    peer_hex: JString<'local>,
+    leaving: jboolean,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let (Some(gid), Some(peer)) = (
+            hex::decode(jstr(&mut env, &gid_hex).trim()).ok(),
+            parse_key(&jstr(&mut env, &peer_hex)),
+        ) else { return };
+        e.group_transfer_admin(gid, peer, leaving != JNI_FALSE);
+    });
+}
+
+/// Переименовать группу (только админ). Fire-and-forget.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_groupRename<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    name: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        e.group_rename(gid, &jstr(&mut env, &name));
+    });
+}
+
 /// Ротация ключа группы (PCS, ADR-004). Fire-and-forget.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_groupRekey<'local>(

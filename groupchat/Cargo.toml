@@ -15,6 +15,7 @@ peerage-messenger = { path = "../messenger" }
 thiserror.workspace = true
 serde = { workspace = true }
 serde_json = "1"
+hex.workspace = true
 
 [dev-dependencies]
 peerage-ygg = { path = "../transport" }

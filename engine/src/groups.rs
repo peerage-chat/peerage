@@ -1066,27 +1066,39 @@ impl GroupManager {
                         ..Default::default()
                     }
                 }
-                // Служебное: админ прислал имя группы — обновляем название (не сообщение).
-                Some(Ok(Inbound::Name { name })) => {
-                    let changed = if let Some(e) = self.groups.get_mut(&gid) {
-                        let diff = e.name != name;
-                        e.name = name;
-                        diff
-                    } else {
-                        false
-                    };
+                // Служебное: имя группы — обновляем название (не сообщение). Только от
+                // админа: иначе любой участник переименует группу всем.
+                Some(Ok(Inbound::Name { actor, name })) => {
+                    let changed =
+                        name_change_ok(self.admin_key(&gid), actor) && self.set_name(&gid, &name);
                     if changed {
-                        let name = self
-                            .groups
-                            .get(&gid)
-                            .map(|e| e.name.clone())
-                            .unwrap_or_default();
-                        self.remember_title(&gid, &name);
-                        self.save_group(&gid); // персист имени в index.json
+                        self.put_event(&gid, "renamed", actor, name);
                     }
                     GroupOutcome {
                         gid: Some(gid.clone()),
                         renamed: changed,
+                        ..Default::default()
+                    }
+                }
+                Some(Ok(Inbound::Admin {
+                    actor,
+                    key,
+                    leaving,
+                })) => {
+                    let me = self.identity.public_key_bytes();
+                    let mut members = self.members(&gid);
+                    members.push(me); // ростер MLS — без себя
+                    let ok = admin_change_ok(self.admin_key(&gid), actor, key, &members);
+                    if ok {
+                        self.set_admin(&gid, key);
+                        // Старый админ ушёл: отозвать его теперь может только новый.
+                        if leaving && key == me {
+                            self.remove_member(&gid, actor);
+                        }
+                    }
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        renamed: ok,
                         ..Default::default()
                     }
                 }
@@ -1262,6 +1274,72 @@ impl GroupManager {
         self.resyncing.insert(peer); // on_key_reply сделает Remove+Add, не просто Add
     }
 
+    /// Сменить имя группы у себя. true — имя действительно другое.
+    fn set_name(&mut self, gid: &[u8], name: &str) -> bool {
+        let Some(e) = self.groups.get_mut(gid) else {
+            return false;
+        };
+        if e.name == name {
+            return false;
+        }
+        e.name = name.to_string();
+        self.remember_title(gid, name);
+        self.save_group(gid);
+        true
+    }
+
+    /// Записать нового админа у себя: ключ, своя роль, строка в ленте.
+    fn set_admin(&mut self, gid: &[u8], key: [u8; 32]) {
+        let me = self.identity.public_key_bytes();
+        self.remember_admin(gid, key);
+        if let Some(e) = self.groups.get_mut(gid) {
+            e.admin = key == me;
+        }
+        self.save_group(gid);
+        self.put_event(gid, "admin", key, String::new());
+    }
+
+    /// Переименовать группу (шаг 7j): только админ; имя уходит всем участникам.
+    pub fn rename(&mut self, gid: &[u8], name: &str) -> bool {
+        let name = name.trim();
+        if name.is_empty() || !self.groups.get(gid).is_some_and(|e| e.admin) {
+            return false;
+        }
+        if !self.set_name(gid, name) {
+            return false;
+        }
+        if let Some(e) = self.groups.get_mut(gid) {
+            let _ = e.chat.send_name(name);
+        }
+        let me = self.identity.public_key_bytes();
+        self.put_event(gid, "renamed", me, name.to_string());
+        true
+    }
+
+    /// Передать права админа участнику `key` (шаг 7j). `leaving` — и выйти: группу
+    /// забываем сразу, а из ростера нас отзовёт уже новый админ по тому же сообщению.
+    pub fn transfer_admin(&mut self, gid: &[u8], key: [u8; 32], leaving: bool) -> bool {
+        let me = self.identity.public_key_bytes();
+        let ok = self
+            .groups
+            .get(gid)
+            .is_some_and(|e| e.admin && key != me && e.chat.members().contains(&key));
+        if !ok {
+            return false;
+        }
+        if let Some(e) = self.groups.get_mut(gid) {
+            if e.chat.send_admin(&key, leaving).is_err() {
+                return false;
+            }
+        }
+        if leaving {
+            self.delete_group(gid);
+        } else {
+            self.set_admin(gid, key);
+        }
+        true
+    }
+
     /// Выйти из группы (ADR-004): просим админа отозвать нас (Remove+смена эпохи —
     /// настоящий криптографический выход) и локально забываем группу. Если админ
     /// офлайн — остаётся мягкий локальный выход (нас отзовут при его доступности).
@@ -1305,6 +1383,23 @@ impl GroupManager {
     }
 }
 
+/// Принять имя группы от `actor`: только от админа. Админ неизвестен (группа старше
+/// записи админа) — проверить не по чему, принимаем как раньше.
+fn name_change_ok(admin: Option<[u8; 32]>, actor: [u8; 32]) -> bool {
+    admin.is_none_or(|a| a == actor)
+}
+
+/// Принять передачу прав: шлёт текущий админ, новый — другой и действующий участник.
+/// Админ неизвестен — передавать нечего: права не возникают из сообщения.
+fn admin_change_ok(
+    admin: Option<[u8; 32]>,
+    actor: [u8; 32],
+    key: [u8; 32],
+    members: &[[u8; 32]],
+) -> bool {
+    admin == Some(actor) && key != actor && members.contains(&key)
+}
+
 /// Результат обработки группового сообщения для уведомления UI.
 #[derive(Default)]
 pub struct GroupOutcome {
@@ -1316,7 +1411,7 @@ pub struct GroupOutcome {
     pub joined: bool,
     /// Нас отозвали из группы (ADR-004) — UI должен убрать группу и уведомить.
     pub removed: bool,
-    /// Имя группы изменилось (пришло от админа) — UI обновить название в списке.
+    /// Имя группы или её админ изменились (пришло от админа) — UI обновить список.
     pub renamed: bool,
     /// Медиа-сообщение (M2): ссылка на блоб + метаданные карточки. Пусто → не медиа.
     pub media: Option<MediaBody>,
@@ -1324,4 +1419,45 @@ pub struct GroupOutcome {
     pub retracted: bool,
     /// Реакции под сообщением `(id, автор)` изменились — UI поправить его на месте.
     pub reacted: Option<(u64, String)>,
+}
+
+#[cfg(test)]
+mod rights_tests {
+    use super::{admin_change_ok, name_change_ok};
+
+    const A: [u8; 32] = [1; 32];
+    const B: [u8; 32] = [2; 32];
+    const C: [u8; 32] = [3; 32];
+
+    #[test]
+    fn name_only_from_admin() {
+        assert!(name_change_ok(Some(A), A));
+        assert!(
+            !name_change_ok(Some(A), B),
+            "участник не переименует группу"
+        );
+        assert!(name_change_ok(None, B), "админ неизвестен — как раньше");
+    }
+
+    #[test]
+    fn admin_transfer_only_from_admin_to_member() {
+        let members = [A, B];
+        assert!(admin_change_ok(Some(A), A, B, &members));
+        assert!(
+            !admin_change_ok(Some(A), B, B, &members),
+            "участник не назначит себя"
+        );
+        assert!(
+            !admin_change_ok(Some(A), A, C, &members),
+            "только действующему участнику"
+        );
+        assert!(
+            !admin_change_ok(Some(A), A, A, &members),
+            "себе — не передача"
+        );
+        assert!(
+            !admin_change_ok(None, A, B, &members),
+            "без известного админа прав нет"
+        );
+    }
 }

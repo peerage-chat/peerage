@@ -1168,3 +1168,82 @@ fn group_system_rows_say_what_happened_and_to_whom() {
         Some(&row("left", &b, ""))
     );
 }
+
+/// Ключ админа группы `gid` в списке групп менеджера (пусто — неизвестен).
+fn admin_in_list(gm: &GroupManager, gid: &[u8]) -> String {
+    let v: serde_json::Value = serde_json::from_str(&gm.list_json()).unwrap();
+    v.as_array()
+        .and_then(|a| a.iter().find(|g| g["gid"] == hex::encode(gid)))
+        .and_then(|g| g["admin_key"].as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Шаг 7j: админ передаёт права — у обоих новый админ; отзывать может уже он, а
+/// бывший админ — нет.
+#[test]
+fn admin_transfer_moves_rights() {
+    let mut c = setup_and_join(0);
+    let (gid, b_key) = (c.gid.clone(), c.b_key);
+    let a_key = id(10).public_key_bytes();
+    assert!(
+        c.gm_a.transfer_admin(&gid, b_key, false),
+        "A передал права B"
+    );
+    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |a, b| {
+        admin_in_list(a, &gid) == hex::encode(b_key) && admin_in_list(b, &gid) == hex::encode(b_key)
+    });
+    assert!(ok, "у обоих админ — B");
+    assert!(
+        !c.gm_a.remove_member(&gid, b_key),
+        "бывший админ больше не отзывает"
+    );
+    assert!(!c.gm_a.rename(&gid, "чужое"), "и не переименовывает");
+    assert!(c.gm_b.remove_member(&gid, a_key), "новый админ отзывает");
+    let gone = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |a, b| {
+        !b.members(&gid).contains(&a_key) && !a.group_ids().contains(&gid)
+    });
+    assert!(gone, "A отозван новым админом");
+}
+
+/// Шаг 7j: админ уходит с передачей — у себя забывает группу сразу, новый админ
+/// отзывает его из ростера по тому же сообщению.
+#[test]
+fn admin_leaves_with_transfer() {
+    let mut c = setup_and_join(0);
+    let (gid, b_key) = (c.gid.clone(), c.b_key);
+    let a_key = id(10).public_key_bytes();
+    assert!(
+        c.gm_a.transfer_admin(&gid, b_key, true),
+        "A передал права и вышел"
+    );
+    assert!(!c.gm_a.group_ids().contains(&gid), "A забыл группу сразу");
+    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, b| {
+        admin_in_list(b, &gid) == hex::encode(b_key) && !b.members(&gid).contains(&a_key)
+    });
+    assert!(ok, "B стал админом и отозвал A");
+}
+
+/// Шаг 7j: название меняет только админ, и оно доходит до участников.
+#[test]
+fn rename_only_by_admin() {
+    let mut c = setup_and_join(0);
+    let gid = c.gid.clone();
+    let name_of = |gm: &GroupManager| -> String {
+        let v: serde_json::Value = serde_json::from_str(&gm.list_json()).unwrap();
+        v.as_array()
+            .and_then(|a| a.iter().find(|g| g["gid"] == hex::encode(&gid)))
+            .and_then(|g| g["name"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    assert!(
+        !c.gm_b.rename(&gid, "захват"),
+        "участник не переименовывает"
+    );
+    assert!(c.gm_a.rename(&gid, "Дача"), "админ переименовал");
+    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, b| {
+        name_of(b) == "Дача"
+    });
+    assert!(ok, "новое название дошло до участника");
+}

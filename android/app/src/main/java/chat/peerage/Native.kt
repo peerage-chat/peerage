@@ -458,6 +458,12 @@ object Native {
     /** Отозвать участника группы по hex-ключу (ADR-004, только админ). */
     external fun groupRemoveMember(sessionPtr: Long, gid: String, peerHex: String)
 
+    /** Передать права админа участнику (шаг 7j); [leaving] — и выйти из группы. */
+    external fun groupTransferAdmin(sessionPtr: Long, gid: String, peerHex: String, leaving: Boolean)
+
+    /** Переименовать группу (только админ). Итог — событие `groups_changed`. */
+    external fun groupRename(sessionPtr: Long, gid: String, name: String)
+
     /** Ротация ключа группы (PCS, ADR-004). */
     external fun groupRekey(sessionPtr: Long, gid: String)
 
