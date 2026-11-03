@@ -38,6 +38,7 @@ internal fun ContactProfileScreen(
     onMessage: () -> Unit,
     onVerify: () -> Unit,
     onOpenGroup: (String) -> Unit,
+    onMedia: () -> Unit,
     onDeleted: () -> Unit,
 ) {
     val key = model.currentChat ?: return
@@ -51,16 +52,12 @@ internal fun ContactProfileScreen(
     // «без звука» здесь и значок на главной не разъедутся.
     val muted = model.chatSummaries[model.chatKey(key, false)]?.muted == true
 
-    // Сколько вложений от этого чата лежит на диске — цифра уже посчитана движком
-    // для «Хранилища», второй раз считать незачем.
     // Составы групп грузятся, только когда группу открывают, — без подгрузки здесь
     // «общих групп» было 0 у любого, с кем не заходили в общий чат в этой сессии.
     LaunchedEffect(key) {
-        model.refreshStorage()
         model.refreshChatSummaries()
         model.groups.forEach { model.loadGroupMembers(it.gid) }
     }
-    val files = model.storageChats.firstOrNull { it.first == key }?.second ?: 0L
     val common = model.groups.filter { key in model.groupMemberKeys[it.gid].orEmpty() }
     val runWithPerm = rememberPermissionRunner()
 
@@ -126,8 +123,7 @@ internal fun ContactProfileScreen(
             )
         }
         CardSection {
-            // Экран медиа и ряд превью — шаг 3.2; пока строка только считает.
-            NavRow(TablerIcons.Photo, stringResource(R.string.profile_media), value = "$files", divider = false, onClick = null)
+            ProfileMediaEntry(model, ChatTarget(key, group = false), onMedia)
             NavRow(
                 TablerIcons.Users,
                 stringResource(R.string.profile_common_groups),

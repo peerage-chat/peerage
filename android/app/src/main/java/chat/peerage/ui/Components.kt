@@ -95,6 +95,8 @@ internal fun TopBar(
     onMenu: (() -> Unit)? = null,
     /** Своё содержимое слева вместо «назад»/«меню» — например, аватар-кнопка «Я». */
     leading: (@Composable () -> Unit)? = null,
+    /** Подпись под заголовком (чат и счёт у «Медиа и файлы»). */
+    subtitle: String? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     // Шапка на фоне экрана, а не на акцентной плашке: цветная полоса сверху делила
@@ -109,15 +111,19 @@ internal fun TopBar(
             onBack != null -> BarIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
             else -> Spacer(Modifier.width(Tokens.Space.m))
         }
-        Text(
-            title,
-            color = Color.White,
-            fontSize = Tokens.Font.title,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                color = Color.White,
+                fontSize = Tokens.Font.title,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) {
+                Text(subtitle, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
         actions()
     }
 }

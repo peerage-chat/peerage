@@ -41,7 +41,7 @@ internal enum class VoicePhase { Idle, Holding, Locked, Stopped }
  * идёт без пальца: корзина, стоп, отправка. Один экземпляр на экран чата.
  */
 @Stable
-internal class VoiceSession(private val recorder: VoiceRecorder, private val onSend: (ByteArray) -> Unit) {
+internal class VoiceSession(private val recorder: VoiceRecorder, private val onSend: (ByteArray, Int) -> Unit) {
     var phase by mutableStateOf(VoicePhase.Idle)
         private set
     var elapsedMs by mutableLongStateOf(0L)
@@ -70,19 +70,24 @@ internal class VoiceSession(private val recorder: VoiceRecorder, private val onS
     /** Стоп в зафиксированной записи: байты готовы, уйдут по «Отправить». */
     fun stop() {
         if (phase != VoicePhase.Locked) return
+        elapsedMs = System.currentTimeMillis() - startedAt
         stopped = recorder.stop()
         phase = if (stopped != null) VoicePhase.Stopped else VoicePhase.Idle
     }
 
     /** Отпустили кнопку или нажали «Отправить». Случайный тап (короче [MIN_MS]) — не запись. */
     fun send() {
+        if (phase == VoicePhase.Holding || phase == VoicePhase.Locked) elapsedMs = System.currentTimeMillis() - startedAt
         val bytes = when (phase) {
             VoicePhase.Holding, VoicePhase.Locked -> recorder.stop().takeIf { elapsedMs >= MIN_MS }
             VoicePhase.Stopped -> stopped
             VoicePhase.Idle -> null
         }
+        // Длительность едет в сообщении: иначе пузырь и «Медиа и файлы» знали бы её
+        // только после первого проигрывания.
+        val duration = elapsedMs.toInt()
         reset()
-        bytes?.let(onSend)
+        bytes?.let { onSend(it, duration) }
     }
 
     fun cancel() {
@@ -111,10 +116,10 @@ internal class VoiceSession(private val recorder: VoiceRecorder, private val onS
 
 /** Сеанс записи экрана: разрешение на микрофон спрашивается при первой попытке. */
 @Composable
-internal fun rememberVoiceSession(onSend: (ByteArray) -> Unit): VoiceSession {
+internal fun rememberVoiceSession(onSend: (ByteArray, Int) -> Unit): VoiceSession {
     val ctx = LocalContext.current
     val latest by rememberUpdatedState(onSend)
-    val session = remember { VoiceSession(VoiceRecorder(ctx)) { latest(it) } }
+    val session = remember { VoiceSession(VoiceRecorder(ctx)) { bytes, ms -> latest(bytes, ms) } }
     // Экран ушёл посреди записи — микрофон отпускаем, ничего не отправляем.
     DisposableEffect(session) { onDispose { session.cancel() } }
     val recording = session.phase == VoicePhase.Holding || session.phase == VoicePhase.Locked

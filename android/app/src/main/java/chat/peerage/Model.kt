@@ -707,6 +707,7 @@ class AppModel private constructor() {
         showTechInfo = prefs.getBoolean("tech_info", false)
         recentEmoji = prefs.getString("recent_emoji", "")?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
         warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
+        mediaColumns = prefs.getInt("media_columns", 3).takeIf { it in MEDIA_COLUMNS } ?: 3
         val w = prefs.getInt("video_w", VideoQuality.default.width)
         val h = prefs.getInt("video_h", VideoQuality.default.height)
         val fps = prefs.getInt("video_fps", VideoQuality.default.fps)
@@ -1732,16 +1733,6 @@ class AppModel private constructor() {
      *  возвращает в ленту неотправленное из офлайн-очереди (его в БД нет). Ручная
      *  чистка на месте оставляла в ленте старые копии — сообщения задваивались. */
     private fun reloadHistory(key: String) = loadHistory(key)
-
-    /** Отправить вложение (M2): движок чистит картинку (scrub), шлёт блоб + медиа-
-     *  сообщение. Хэш блоба считается от ОЧИЩЕННЫХ байт в движке, поэтому своё
-     *  сообщение подтягиваем перечитыванием истории из стора (там верный blob_id). */
-    fun sendMedia(key: String, content: ByteArray, mime: String, name: String) = ops.execute {
-        if (Native.sendMedia(sessionPtr, key, content, mime, name) >= 0 && currentChat == key) {
-            loadHistory(key)
-        }
-        markSummariesDirty()
-    }
 
     /** Отправить вложение с метаданными для карточки (длительность/кадр/превью).
      *  Их извлекает клиент — движок медиа не декодирует. */
@@ -2773,6 +2764,13 @@ class AppModel private constructor() {
 
     /** Поиск в открытом чате (2.9); null — не открыт. */
     var chatSearch by mutableStateOf<ChatSearch?>(null)
+
+    /** Открытый экран «Медиа и файлы» (3.2); null — не открыт. */
+    var mediaBrowse by mutableStateOf<MediaBrowse?>(null)
+
+    /** Столбцов в сетке «Медиа» — 2, 3 или 5 (щипок; запоминается). */
+    var mediaColumns by mutableStateOf(3)
+        internal set
 
     /**
      * Ленты, открытые окном посреди переписки (переход к находке или к дате), а не с

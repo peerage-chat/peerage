@@ -91,7 +91,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit) {
+internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit, onMedia: () -> Unit) {
     // Заблокированный перестаёт быть контактом — в его чате делать нечего.
     var confirm by remember { mutableStateOf<ChatDanger?>(null) }
     // Выделение забирает верхнюю панель целиком: пока что-то выбрано, «назад» и
@@ -167,7 +167,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
             Box {
                 var menu by remember { mutableStateOf(false) }
                 BarIcon(TablerIcons.DotsVertical, stringResource(R.string.common_more), tint = Color.White) { menu = true }
-                ChatMenu(model, key, menu, onClose = { menu = false }, onProfile = onProfile) { confirm = it }
+                ChatMenu(model, key, menu, onClose = { menu = false }, onProfile = onProfile, onMedia = onMedia) { confirm = it }
             }
         }
     }
@@ -197,17 +197,26 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
 /** Опасные пункты «⋮» личного чата — каждый через шторку-подтверждение. */
 private enum class ChatDanger { Clear, Block }
 
-/**
- * «⋮» личного чата (app-ui.md → «Чат», макет `shared/Main`). «Медиа и файлы» встанут сюда
- * вместе со своим экраном (шаг 3.2).
- */
+/** «⋮» личного чата (app-ui.md → «Чат», макет `shared/Main`). */
 @Composable
-private fun ChatMenu(model: AppModel, key: String, open: Boolean, onClose: () -> Unit, onProfile: () -> Unit, onDanger: (ChatDanger) -> Unit) {
+private fun ChatMenu(
+    model: AppModel,
+    key: String,
+    open: Boolean,
+    onClose: () -> Unit,
+    onProfile: () -> Unit,
+    onMedia: () -> Unit,
+    onDanger: (ChatDanger) -> Unit,
+) {
     val muted = model.chatSummaries[model.chatKey(key, group = false)]?.muted == true
     PopMenu(open, onClose) {
         PopMenuItem(TablerIcons.Search, stringResource(R.string.chat_menu_search)) {
             onClose()
             model.openChatSearch(ChatTarget(key, group = false))
+        }
+        PopMenuItem(TablerIcons.Photo, stringResource(R.string.profile_media)) {
+            onClose()
+            onMedia()
         }
         PopMenuItem(
             TablerIcons.BellOff,
@@ -231,7 +240,7 @@ private fun ChatMenu(model: AppModel, key: String, open: Boolean, onClose: () ->
 }
 
 @Composable
-internal fun ChatScreen(model: AppModel) {
+internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
     val key = model.currentChat ?: return
     val msgs = model.chat(key)
     var input by remember(key) { mutableStateOf("") }
@@ -274,14 +283,14 @@ internal fun ChatScreen(model: AppModel) {
     }
 
     // Голосовые (M2): удержание, замок, отмена — VoiceSession.
-    val voice = rememberVoiceSession { bytes ->
-        scope.launch(Dispatchers.IO) { model.sendMedia(key, bytes, "audio/mp4", "voice.m4a") }
+    val voice = rememberVoiceSession { bytes, ms ->
+        scope.launch(Dispatchers.IO) { model.sendMediaWithMeta(key, bytes, "audio/mp4", "voice.m4a", MediaMeta(durationMs = ms)) }
     }
 
     Column(Modifier.fillMaxSize()) {
         if (search == null) PinnedBar(model, key, group = false, canUnpin = true)
         if (search != null && search.coversFeed) {
-            ChatSearchPanel(model, search, Modifier.weight(1f))
+            ChatSearchPanel(model, search, Modifier.weight(1f), onMedia)
         } else {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 CompositionLocalProvider(LocalSearchMarks provides searchMarks(search)) {
@@ -1648,7 +1657,7 @@ internal fun VoiceAttachment(bytes: ByteArray?, blobId: String, knownDurationMs:
 }
 
 /** Открыть скачанный блоб системным приложением через FileProvider. */
-private fun openWithSystem(ctx: android.content.Context, f: java.io.File) {
+internal fun openWithSystem(ctx: android.content.Context, f: java.io.File) {
     runCatching {
         val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
         val mime = ctx.contentResolver.getType(uri) ?: "*/*"

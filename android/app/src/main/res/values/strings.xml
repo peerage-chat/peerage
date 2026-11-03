@@ -963,4 +963,17 @@
         <item quantity="one">%1$d member</item>
         <item quantity="other">%1$d members</item>
     </plurals>
+    <string name="media_tab_media">Media</string>
+    <string name="media_tab_files">Files</string>
+    <string name="media_tab_voice">Voice</string>
+    <string name="media_tab_links">Links</string>
+    <string name="media_density">Density</string>
+    <string name="media_you">you</string>
+    <string name="media_play">Play</string>
+    <string name="media_pause">Pause</string>
+    <string name="media_empty_media">No photos or videos</string>
+    <string name="media_empty_files">No files</string>
+    <string name="media_empty_voice">No voice messages</string>
+    <string name="media_empty_links">No links</string>
+    <string name="search_media_photos">Photos and videos</string>
 </resources>

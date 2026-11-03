@@ -71,6 +71,8 @@ import chat.peerage.AppModel
 import chat.peerage.ChatSearch
 import chat.peerage.ChatTarget
 import chat.peerage.HoloBg
+import chat.peerage.MediaCounts
+import chat.peerage.MediaTab
 import chat.peerage.Message
 import chat.peerage.MsgRef
 import chat.peerage.R
@@ -79,6 +81,7 @@ import chat.peerage.Tokens
 import chat.peerage.goToHit
 import chat.peerage.messageDays
 import chat.peerage.moreChatHits
+import chat.peerage.refreshMediaCounts
 import chat.peerage.runChatSearch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -236,10 +239,10 @@ private fun senderName(model: AppModel, key: String): String =
 
 /** Что встаёт на место ленты: уточнения (пустой запрос), находки списком или «ничего не найдено». */
 @Composable
-internal fun ChatSearchPanel(model: AppModel, s: ChatSearch, modifier: Modifier = Modifier) {
+internal fun ChatSearchPanel(model: AppModel, s: ChatSearch, modifier: Modifier = Modifier, onMedia: (MediaTab) -> Unit) {
     Column(modifier.fillMaxWidth()) {
         when {
-            s.query.isBlank() -> SearchStart(s)
+            s.query.isBlank() -> SearchStart(model, s, onMedia)
             s.settled && s.total == 0 -> {
                 SearchChips(model, s)
                 SearchNothing(model, s)
@@ -252,9 +255,14 @@ internal fun ChatSearchPanel(model: AppModel, s: ChatSearch, modifier: Modifier 
     }
 }
 
-/** Пустой запрос (макет `chatsearch/Main`): «Уточнить» и пояснение, что запрос никуда не уходит. */
+/**
+ * Пустой запрос (макет `chatsearch/Main`): «Уточнить», разделы «Медиа и файлы» со счётом
+ * (ведут на свой экран сразу на нужной вкладке) и пояснение, что запрос никуда не уходит.
+ */
 @Composable
-private fun SearchStart(s: ChatSearch) {
+private fun SearchStart(model: AppModel, s: ChatSearch, onMedia: (MediaTab) -> Unit) {
+    var counts by remember(s.chat) { mutableStateOf<MediaCounts?>(null) }
+    LaunchedEffect(s.chat) { model.refreshMediaCounts(s.chat) { counts = it } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = Tokens.Space.xs)) {
         SectionTitle(stringResource(R.string.search_refine))
         CardSection {
@@ -265,6 +273,17 @@ private fun SearchStart(s: ChatSearch) {
             }
             OptionRow(TablerIcons.Calendar, stringResource(R.string.search_go_date), stringResource(R.string.search_go_date_sub), divider = s.chat.group) {
                 s.sheet = SearchSheet.Date
+            }
+        }
+        SectionTitle(stringResource(R.string.profile_media))
+        CardSection {
+            listOf(
+                Triple(MediaTab.Media, TablerIcons.Photo, R.string.search_media_photos),
+                Triple(MediaTab.Files, TablerIcons.File, R.string.media_tab_files),
+                Triple(MediaTab.Links, TablerIcons.Link, R.string.media_tab_links),
+                Triple(MediaTab.Voice, TablerIcons.Microphone, R.string.media_tab_voice),
+            ).forEachIndexed { i, (tab, icon, label) ->
+                OptionRow(icon, stringResource(label), sub = null, value = counts?.of(tab)?.toString(), divider = i > 0) { onMedia(tab) }
             }
         }
         Text(
@@ -278,7 +297,7 @@ private fun SearchStart(s: ChatSearch) {
 
 /** Строка-уточнение: иконка без плашки, название с пояснением, шеврон. */
 @Composable
-private fun OptionRow(icon: ImageVector, label: String, sub: String, divider: Boolean, onClick: () -> Unit) {
+private fun OptionRow(icon: ImageVector, label: String, sub: String?, value: String? = null, divider: Boolean, onClick: () -> Unit) {
     if (divider) {
         HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.divider, modifier = Modifier.padding(start = OptionInset))
     }
@@ -292,8 +311,9 @@ private fun OptionRow(icon: ImageVector, label: String, sub: String, divider: Bo
         Icon(icon, null, tint = Tokens.Colors.fieldIcon, modifier = Modifier.size(Tokens.Size.iconRow))
         Column(Modifier.weight(1f)) {
             Text(label, color = Color.White, fontSize = Tokens.Font.name)
-            Text(sub, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body)
+            if (sub != null) Text(sub, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body)
         }
+        if (value != null) Text(value, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.label)
         Icon(TablerIcons.ChevronRight, null, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconS))
     }
 }

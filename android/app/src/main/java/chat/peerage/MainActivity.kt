@@ -215,6 +215,9 @@ internal fun CenterMessage(text: String, modifier: Modifier = Modifier) {
 }
 
 internal enum class Screen {
+    /** «Медиа и файлы» чата (3.2). */
+    Media,
+
     /** Профиль группы — «витрина» (3.1). */
     GroupInfo,
 
@@ -340,6 +343,12 @@ private fun CompactShell(model: AppModel) {
 
     val navigate: (Screen) -> Unit = { dest -> screen = dest }
 
+    // «Медиа и файлы» открываются из «⋮» чата, профиля и пустого поиска — сразу на нужной вкладке.
+    val openMedia: (ChatTarget, MediaTab) -> Unit = { chat, tab ->
+        model.openMedia(chat, tab)
+        screen = Screen.Media
+    }
+
     // Выдвижной панели больше нет: разделы и профиль живут на своём экране «Я»
     // (Screen.Me), который открывается аватаром в шапке. Панель делала две работы
     // сразу — показывала профиль и раздавала разделы, — и профилю в её шапке было
@@ -375,7 +384,9 @@ private fun CompactShell(model: AppModel) {
                                     model,
                                     onBack = goBack,
                                     onProfile = { screen = Screen.Info },
+                                    onMedia = { model.currentChat?.let { openMedia(ChatTarget(it, group = false), MediaTab.Media) } },
                                 )
+                                Screen.Media -> MediaFilesTopBar(model, onBack = goBack)
                                 Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = goBack)
                                 Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = goBack) {
                                     BarIcon(TablerIcons.Pencil, stringResource(R.string.cd_edit_profile)) { screen = Screen.EditProfile }
@@ -395,6 +406,7 @@ private fun CompactShell(model: AppModel) {
                                     onBack = goBack,
                                     onInfo = { screen = Screen.GroupInfo },
                                     onInvite = { screen = Screen.AddMember },
+                                    onMedia = { model.currentGroup?.let { openMedia(ChatTarget(it, group = true), MediaTab.Media) } },
                                 )
                                 Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = goBack)
                                 Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = goBack)
@@ -479,7 +491,20 @@ private fun CompactShell(model: AppModel) {
                                             ),
                                         )
                                     }
-                                    Screen.Chat -> ChatScreen(model)
+                                    Screen.Chat -> ChatScreen(model) { tab ->
+                                        model.currentChat?.let { openMedia(ChatTarget(it, group = false), tab) }
+                                    }
+                                    Screen.Media -> MediaFilesScreen(model) { ref ->
+                                        val chat = model.mediaBrowse?.chat ?: return@MediaFilesScreen
+                                        if (chat.group) {
+                                            model.openGroup(chat.id)
+                                            screen = Screen.GroupChat
+                                        } else {
+                                            model.openChat(chat.id)
+                                            screen = Screen.Chat
+                                        }
+                                        model.jumpTo = ref
+                                    }
                                     Screen.Add -> AddScreen(
                                         model,
                                         scannedKey = scanResult,
@@ -526,6 +551,7 @@ private fun CompactShell(model: AppModel) {
                                             model.openGroup(it)
                                             screen = Screen.GroupChat
                                         },
+                                        onMedia = { model.currentChat?.let { openMedia(ChatTarget(it, group = false), MediaTab.Media) } },
                                         onDeleted = { screen = Screen.Contacts },
                                     )
                                     Screen.Verify -> KeyVerifyScreen(model) {
@@ -536,6 +562,7 @@ private fun CompactShell(model: AppModel) {
                                         model,
                                         onBack = goBack,
                                         onAdd = { screen = Screen.AddMember },
+                                        onMedia = { model.currentGroup?.let { openMedia(ChatTarget(it, group = true), MediaTab.Media) } },
                                         onSearch = {
                                             model.currentGroup?.let { model.openChatSearch(ChatTarget(it, group = true)) }
                                             screen = Screen.GroupChat
@@ -550,7 +577,9 @@ private fun CompactShell(model: AppModel) {
                                         },
                                         onLeft = { screen = Screen.Contacts },
                                     )
-                                    Screen.GroupChat -> GroupChatScreen(model) { key ->
+                                    Screen.GroupChat -> GroupChatScreen(model, onMedia = { tab ->
+                                        model.currentGroup?.let { openMedia(ChatTarget(it, group = true), tab) }
+                                    }) { key ->
                                         // «@я» — свой профиль; контакт — его карточка; с
                                         // незнакомцем из группы открывать нечего.
                                         when {

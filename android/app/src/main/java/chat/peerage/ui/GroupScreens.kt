@@ -44,15 +44,15 @@ import kotlinx.coroutines.launch
 
 /** Лента группы. `onOpenPeer` — тап по «@имени»: открыть того, кого упомянули. */
 @Composable
-internal fun GroupChatScreen(model: AppModel, onOpenPeer: (String) -> Unit = {}) {
+internal fun GroupChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit, onOpenPeer: (String) -> Unit = {}) {
     // В режиме выделения тап по пузырю переключает выбор — и по «@» тоже, иначе
     // упоминание было бы дырой, через которую выделение внезапно уводит из чата.
     val onMention = { key: String -> if (model.selection.isEmpty()) onOpenPeer(key) }
-    CompositionLocalProvider(LocalMentionClick provides onMention) { GroupChatContent(model) }
+    CompositionLocalProvider(LocalMentionClick provides onMention) { GroupChatContent(model, onMedia) }
 }
 
 @Composable
-private fun GroupChatContent(model: AppModel) {
+private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
     val gid = model.currentGroup ?: return
     val msgs = model.chat(gid, group = true)
     val archived = model.groups.firstOrNull { it.gid == gid }?.archived == true
@@ -110,9 +110,9 @@ private fun GroupChatContent(model: AppModel) {
         }
     }
     // Голосовые в группе: удержание, замок, отмена — VoiceSession.
-    val voice = rememberVoiceSession { bytes ->
+    val voice = rememberVoiceSession { bytes, ms ->
         scope.launch(Dispatchers.IO) {
-            model.sendMediaWithMeta(gid, bytes, "audio/mp4", "voice.m4a", MediaMeta(), group = true)
+            model.sendMediaWithMeta(gid, bytes, "audio/mp4", "voice.m4a", MediaMeta(durationMs = ms), group = true)
         }
     }
 
@@ -131,7 +131,7 @@ private fun GroupChatContent(model: AppModel) {
 
             if (search == null) PinnedBar(model, gid, group = true, canUnpin = isAdmin)
             if (search != null && search.coversFeed) {
-                ChatSearchPanel(model, search, Modifier.weight(1f))
+                ChatSearchPanel(model, search, Modifier.weight(1f), onMedia)
             } else {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     CompositionLocalProvider(LocalSearchMarks provides searchMarks(search)) {
@@ -244,7 +244,7 @@ private fun GroupFeed(model: AppModel, msgs: List<Message>, listState: LazyListS
 /** Шапка группового чата: аватар группы · имя · «N уч · M в сети» (тап → инфо) ·
  *  войти/выйти из комнаты · меню. */
 @Composable
-internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, onInvite: () -> Unit) {
+internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> Unit, onInvite: () -> Unit, onMedia: () -> Unit) {
     var confirmLeave by remember { mutableStateOf(false) }
     if (model.selection.isNotEmpty()) {
         SelectionTopBar(model, group = true)
@@ -303,7 +303,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
             Box {
                 var menu by remember { mutableStateOf(false) }
                 BarIcon(TablerIcons.DotsVertical, stringResource(R.string.common_more), tint = Color.White) { menu = true }
-                GroupMenu(model, gid, menu, onClose = { menu = false }, onInfo = onInfo, onInvite = onInvite) { confirmLeave = true }
+                GroupMenu(model, gid, menu, onClose = { menu = false }, onInfo = onInfo, onInvite = onInvite, onMedia = onMedia) { confirmLeave = true }
             }
         }
     }
@@ -325,12 +325,25 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
  * 3.1 (витрина группы). Поиск и «Медиа и файлы» — вместе с их экранами (2.9, 3.2).
  */
 @Composable
-private fun GroupMenu(model: AppModel, gid: String, open: Boolean, onClose: () -> Unit, onInfo: () -> Unit, onInvite: () -> Unit, onLeave: () -> Unit) {
+private fun GroupMenu(
+    model: AppModel,
+    gid: String,
+    open: Boolean,
+    onClose: () -> Unit,
+    onInfo: () -> Unit,
+    onInvite: () -> Unit,
+    onMedia: () -> Unit,
+    onLeave: () -> Unit,
+) {
     val muted = model.chatSummaries[model.chatKey(gid, group = true)]?.muted == true
     PopMenu(open, onClose) {
         PopMenuItem(TablerIcons.Search, stringResource(R.string.chat_menu_search)) {
             onClose()
             model.openChatSearch(ChatTarget(gid, group = true))
+        }
+        PopMenuItem(TablerIcons.Photo, stringResource(R.string.profile_media)) {
+            onClose()
+            onMedia()
         }
         PopMenuItem(
             TablerIcons.BellOff,

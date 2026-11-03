@@ -165,7 +165,7 @@ internal fun FolderTabs(
 
 /** Один таб: подпись (и счётчик у «Все»), у выбранного — белый текст и линия акцента снизу. */
 @Composable
-private fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () -> Unit) {
+internal fun FolderTab(label: String, selected: Boolean, badge: Int, onClick: () -> Unit) {
     // Цвет переезжает плавно — резкая смена читается как перерисовка экрана.
     val fg by animateColorAsState(
         if (selected) Color.White else Tokens.Colors.tertiary,

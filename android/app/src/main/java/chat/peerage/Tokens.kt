@@ -163,6 +163,18 @@ object Tokens {
         val scanScrim = Color(0x99000000) // затемнение вокруг рамки сканера QR
         val kindVideo = Color(0xFF7E57C2) // видео в разбивке «Хранилища»
         val trackIdle = Color(0xFF2A2D31) // неактивная дорожка слайдера, погасшая ячейка индикатора
+        val waveIdle = Color(0xFF5A5D66) // непроигранная часть волны голосового («Медиа и файлы»)
+
+        // Плитка файла по виду («Медиа и файлы» → Файлы): фон и буквы расширения.
+        val filePdf = Color(0xFF4A2626)
+        val filePdfText = Color(0xFFFFB4A8)
+        val fileArchive = Color(0xFF3A3320)
+        val fileArchiveText = Color(0xFFF2D58A)
+        val fileSheet = Color(0xFF1F3A2A)
+        val fileSheetText = Color(0xFF9FE0B0)
+        val fileDoc = Color(0xFF26304A)
+        val fileDocText = Color(0xFFA8C0FF)
+        val fileOther = Color(0xFF2A2B31) // буквы — chipText
 
         // Палитры: цвет выбирается детерминированно по хэшу, поэтому у одного
         // человека он одинаков на всех экранах (и у отпечатка — на всех устройствах).
@@ -245,6 +257,8 @@ object Tokens {
      */
     object Radius {
         val badge = 6.dp // бейджи, счётчики, срез стыка серии
+        val gridTile = 6.dp // плитка сетки «Медиа и файлы»
+        val mediaTile = 12.dp // плитка файла и домена ссылки
         val bubbleTail = 6.dp // срезанный угол на СТЫКЕ сообщений одной серии
         val chip = 10.dp // чипы, ярлыки даты, плашка цитаты
         val tile = 14.dp // тайлы звонка
@@ -324,6 +338,10 @@ object Tokens {
         val waveH = 24.dp // высота волны записи
         val waveBar = 3.dp // ширина столбика волны
         val waveMin = 4.dp // тишина — столбик не пропадает совсем
+        val mediaTile = 44.dp // плитка файла, кнопка голосового, буква домена («Медиа и файлы»)
+        val mediaFileRow = 64.dp // строка файла
+        val mediaVoiceRow = 72.dp // строка голосового
+        val mediaWave = 22.dp // высота волны в строке голосового
         val attachGrid = 360.dp // сетка снимков в шторке «Прикрепить»: три ряда и край четвёртого
         val metaSlot = 46.dp // ширина правой колонки строки (время + значок)
 
@@ -391,6 +409,8 @@ object Tokens {
         val profile = 24.sp // имя в профиле
         val big = 26.sp // имя во входящем звонке, эмодзи в панели
         val huge = 28.sp // крупные числа (трафик, обратный отсчёт)
+        val tileLetter = 18.sp // буква домена на плитке ссылки
+        val tileTracking = 0.3.sp // разрядка расширения на плитке файла
 
         // Эмодзи-реакции: рисунок, а не текст — своя шкала рядом с подписями.
         val emojiChip = 15.sp // в чипе под пузырём (число рядом — body)

@@ -25,8 +25,7 @@ private const val MEMBERS_SHOWN = 5
  * медиа, участники (себя первым, админа меткой) и «Выйти из группы».
  *
  * Отступления от макета до своих шагов: строка «Уведомления» с режимом чата — вместе с
- * режимами (notifications.md), «Изменить» (название и фото) — шаг 3.5, ряд превью медиа и
- * его экран — 3.2. «Добавить» видит только админ: приглашать в MLS-группу может он один.
+ * режимами (notifications.md), «Изменить» (название и фото) — шаг 3.5. «Добавить» видит только админ: приглашать в MLS-группу может он один.
  */
 @Composable
 internal fun GroupProfileScreen(
@@ -34,6 +33,7 @@ internal fun GroupProfileScreen(
     onBack: () -> Unit,
     onAdd: () -> Unit,
     onSearch: () -> Unit,
+    onMedia: () -> Unit,
     onMessage: (String) -> Unit,
     onProfile: (String) -> Unit,
     onLeft: () -> Unit,
@@ -48,11 +48,9 @@ internal fun GroupProfileScreen(
     var confirmLeave by remember(gid) { mutableStateOf(false) }
     LaunchedEffect(gid) {
         model.loadGroupMembers(gid)
-        model.refreshStorage()
         model.refreshChatSummaries()
     }
     val muted = model.chatSummaries[model.chatKey(gid, true)]?.muted == true
-    val files = model.storageChats.firstOrNull { it.first == gid }?.second ?: 0L
     val selfOnline = !model.offline
     fun online(k: String) = if (k == me) selfOnline else model.online[k] == true
 
@@ -96,7 +94,7 @@ internal fun GroupProfileScreen(
         },
     ) {
         CardSection {
-            NavRow(TablerIcons.Photo, stringResource(R.string.profile_media), value = "$files", divider = false, onClick = null)
+            ProfileMediaEntry(model, ChatTarget(gid, group = true), onMedia)
         }
         Column {
             // Подпись группы стоит вплотную к ней (макет): общий зазор между группами её

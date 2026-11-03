@@ -1021,4 +1021,17 @@
         <item quantity="many">%1$d участников</item>
         <item quantity="other">%1$d участника</item>
     </plurals>
+    <string name="media_tab_media">Медиа</string>
+    <string name="media_tab_files">Файлы</string>
+    <string name="media_tab_voice">Голосовые</string>
+    <string name="media_tab_links">Ссылки</string>
+    <string name="media_density">Плотность</string>
+    <string name="media_you">вы</string>
+    <string name="media_play">Слушать</string>
+    <string name="media_pause">Пауза</string>
+    <string name="media_empty_media">Фото и видео нет</string>
+    <string name="media_empty_files">Файлов нет</string>
+    <string name="media_empty_voice">Голосовых нет</string>
+    <string name="media_empty_links">Ссылок нет</string>
+    <string name="search_media_photos">Фото и видео</string>
 </resources>

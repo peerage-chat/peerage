@@ -532,3 +532,24 @@ val TablerIcons.Photo: ImageVector by lazy {
         "M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3",
     )
 }
+
+val TablerIcons.Download: ImageVector by lazy { tabler("download", "M12 4v11", "M7 10l5 5l5 -5", "M5 20h14") }
+
+val TablerIcons.LayoutGrid: ImageVector by lazy {
+    tabler(
+        "layout-grid",
+        "M4 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z",
+        "M14 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z",
+        "M4 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z",
+        "M14 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z",
+    )
+}
+
+val TablerIcons.Link: ImageVector by lazy {
+    tabler(
+        "link",
+        "M9 15l6 -6",
+        "M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464",
+        "M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463",
+    )
+}
