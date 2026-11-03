@@ -13,6 +13,7 @@ Cargo.lock.bak
 /ygg/**/*.h
 /ygg/**/*.so
 /ygg/**/*.dll
+/ygg/libygg/windows-amd64/
 ygg/bin/
 
 # Android / Gradle
