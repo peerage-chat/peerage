@@ -819,6 +819,21 @@ impl GroupManager {
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
+    /// Кого позвали в группу и кто ещё не вступил — метка «приглашён · ждёт ответа»
+    /// (UI 3.4). JSON-массив hex-ключей; участники сюда не попадают, даже если их
+    /// перевыпускают (resync держит их в `invites`, пока не придёт KeyPackage).
+    pub fn invited_json(&self, gid: &[u8]) -> String {
+        let members = self.members(gid);
+        let mut arr: Vec<String> = self
+            .invites
+            .iter()
+            .filter(|(peer, g)| g.as_slice() == gid && !members.contains(peer))
+            .map(|(peer, _)| hex::encode(peer))
+            .collect();
+        arr.sort();
+        serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
+    }
+
     /// Ключи участников группы (для маячка присутствия комнаты).
     pub fn members(&self, gid: &[u8]) -> Vec<[u8; 32]> {
         self.groups

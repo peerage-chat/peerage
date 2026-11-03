@@ -2688,8 +2688,19 @@ class AppModel private constructor() {
 
     /** Создать группу (fire-and-forget). Появится в списке по событию
      *  `groups_changed` (см. applyEvent → refreshGroupsNow). */
-    fun createGroup(name: String) = ops.execute {
-        Native.groupCreate(sessionPtr, name.ifBlank { appContext?.getString(R.string.group_default_name) ?: "Group" })
+    /** Создать группу и позвать [invite] (hex-ключи) — одной командой движка. */
+    fun createGroup(name: String, invite: List<String> = emptyList()) = ops.execute {
+        Native.groupCreate(
+            sessionPtr,
+            name.ifBlank { appContext?.getString(R.string.group_default_name) ?: "Group" },
+            org.json.JSONArray(invite).toString(),
+        )
+    }
+
+    /** Позванные в группу и ещё не вступившие (метка «приглашён»). [done] — на главном потоке. */
+    fun groupInvited(gid: String, done: (Set<String>) -> Unit) = reads.execute {
+        val keys = decodeOrNull<List<String>>(Native.groupInvited(sessionPtr, gid)).orEmpty().toSet()
+        android.os.Handler(android.os.Looper.getMainLooper()).post { done(keys) }
     }
 
     fun openGroup(gid: String) {

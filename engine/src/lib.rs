@@ -55,8 +55,10 @@ impl<T> LockRecover<T> for Mutex<T> {
 /// Команда группового актора (исполняется в потоке event_pump, т.к. GroupChat !Send).
 /// Все команды — fire-and-forget. Read-данные UI читает из кэша [`Engine::group_cache`].
 pub(crate) enum GroupCmd {
+    /// Создать группу и сразу позвать `invite` (мастер новой группы: сначала люди).
     Create {
         name: String,
+        invite: Vec<[u8; 32]>,
     },
     Invite {
         gid: Vec<u8>,
@@ -373,6 +375,8 @@ struct GroupCache {
     /// Ростер MLS — он живёт в потоке актора, поэтому его снапшот кэшируется.
     /// Истории здесь нет: она в общей базе, и читается напрямую (ADR-009).
     members: HashMap<Vec<u8>, String>,
+    /// Позванные и ещё не вступившие, по группам (JSON hex-ключей) — метка «приглашён».
+    invited: HashMap<Vec<u8>, String>,
     /// Входящие приглашения в группы (JSON) — для синхронного чтения из UI.
     invites: String,
 }
@@ -2181,11 +2185,28 @@ impl Engine {
     // — Группы (MLS) — мутации fire-and-forget через актора, чтение из кэша —
     /// Создать группу. Возвращает true, если команда принята актором.
     pub fn group_create(&self, name: &str) -> bool {
+        self.group_create_inviting(name, Vec::new())
+    }
+
+    /// Создать группу и разослать приглашения `invite` одной командой: мастер новой
+    /// группы выбирает людей до названия, и gid клиенту для этого не нужен.
+    pub fn group_create_inviting(&self, name: &str, invite: Vec<[u8; 32]>) -> bool {
         self.jobs
             .send(Job::Cmd(GroupCmd::Create {
                 name: name.to_string(),
+                invite,
             }))
             .is_ok()
+    }
+
+    /// Позванные в группу и ещё не вступившие: JSON hex-ключей (из кэша).
+    pub fn group_invited_json(&self, gid: &[u8]) -> String {
+        self.group_cache
+            .lock_safe()
+            .invited
+            .get(gid)
+            .cloned()
+            .unwrap_or_else(|| "[]".into())
     }
 
     pub fn group_invite(&self, gid: Vec<u8>, peer: [u8; 32]) {
@@ -4215,6 +4236,14 @@ fn refresh_group_cache(engine: &Arc<Engine>, groups: &GroupManager) {
                 (g, m)
             })
             .collect();
+        cache.invited = groups
+            .group_ids()
+            .into_iter()
+            .map(|g| {
+                let m = groups.invited_json(&g);
+                (g, m)
+            })
+            .collect();
     }
     engine.refresh_targets(); // состав групп мог смениться
 }
@@ -4222,13 +4251,20 @@ fn refresh_group_cache(engine: &Arc<Engine>, groups: &GroupManager) {
 /// Исполнить групповую команду (в потоке event_pump). Fire-and-forget.
 fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
     match cmd {
-        GroupCmd::Create { name } => {
-            if groups.create(&name).is_some() {
+        GroupCmd::Create { name, invite } => {
+            if let Some(gid) = groups.create(&name) {
+                for peer in invite {
+                    groups.invite(&gid, peer);
+                }
                 refresh_group_cache(engine, groups);
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }
-        GroupCmd::Invite { gid, peer } => groups.invite(&gid, peer),
+        GroupCmd::Invite { gid, peer } => {
+            groups.invite(&gid, peer);
+            // «приглашён» на экране «Пригласить» — из кэша.
+            refresh_group_cache(engine, groups);
+        }
         GroupCmd::AcceptInvite { gid } => {
             // KeyPackage ушёл пригласившему; вступление завершится по Welcome (joined).
             // Карточка остаётся до этого момента в состоянии «ждём ответа»: пригласивший

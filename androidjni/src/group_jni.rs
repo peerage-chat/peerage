@@ -9,17 +9,21 @@ use peerage_engine::parse_key;
 
 use crate::{engine, jni_safe, jstr, ret};
 
-/// Создать группу. Fire-and-forget: результат — через событие `groups_changed`.
+/// Создать группу и позвать `invite_json` (JSON-массив hex-ключей; кривые ключи
+/// пропускаются). Fire-and-forget: результат — через событие `groups_changed`.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_groupCreate<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
     name: JString<'local>,
+    invite_json: JString<'local>,
 ) -> jboolean {
     jni_safe!(JNI_FALSE, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
-        if e.group_create(&jstr(&mut env, &name)) { JNI_TRUE } else { JNI_FALSE }
+        let keys: Vec<String> = serde_json::from_str(&jstr(&mut env, &invite_json)).unwrap_or_default();
+        let invite = keys.iter().filter_map(|k| parse_key(k)).collect();
+        if e.group_create_inviting(&jstr(&mut env, &name), invite) { JNI_TRUE } else { JNI_FALSE }
     })
 }
 
@@ -363,6 +367,21 @@ pub extern "system" fn Java_chat_peerage_Native_groupMembers<'local>(
         let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
         let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
         ret(&env, &e.group_members_json(&gid))
+    })
+}
+
+/// Позванные в группу и ещё не вступившие (hex): JSON-массив. Снапшот движка.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_groupInvited<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "[]") };
+        ret(&env, &e.group_invited_json(&gid))
     })
 }
 

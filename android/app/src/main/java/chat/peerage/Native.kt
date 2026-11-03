@@ -401,11 +401,15 @@ object Native {
     external fun reconnectPeers(sessionPtr: Long)
 
     // ── Группы (MLS) ──────────────────────────────────────────────────────
-    /** Создать группу (fire-and-forget). Результат — через событие `groups_changed`. */
-    external fun groupCreate(sessionPtr: Long, name: String): Boolean
+    /** Создать группу и позвать [inviteJson] (JSON hex-ключей) — fire-and-forget.
+     *  Результат — через событие `groups_changed`. */
+    external fun groupCreate(sessionPtr: Long, name: String, inviteJson: String): Boolean
 
     /** Пригласить контакт в группу (по hex-ключу) — карточкой-сообщением. */
     external fun groupInvite(sessionPtr: Long, gid: String, peerHex: String)
+
+    /** Позванные в группу и ещё не вступившие: JSON hex-ключей (метка «приглашён»). */
+    external fun groupInvited(sessionPtr: Long, gid: String): String
 
     /** Входящие приглашения в группы: JSON [{gid, name, inviter}]. */
     external fun groupInvites(sessionPtr: Long): String
