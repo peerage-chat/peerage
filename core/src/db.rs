@@ -68,7 +68,11 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             -- ADR-007: адрес контакта отделён от личности. Пусто = эпоха 0, адрес
             -- совпадает с ключом личности.
             transport_key   TEXT    NOT NULL DEFAULT '',
-            transport_epoch INTEGER NOT NULL DEFAULT 0
+            transport_epoch INTEGER NOT NULL DEFAULT 0,
+            -- Когда и как сверен ключ (unix-секунды; 'code' | 'set'). Пусто — не
+            -- сверен или сверен до того, как это стали хранить.
+            verified_at     INTEGER NOT NULL DEFAULT 0,
+            verified_how    TEXT    NOT NULL DEFAULT ''
         );
 
         -- Вся переписка одной таблицей: личные чаты, «Сохранённое» и группы. Раньше
@@ -263,6 +267,8 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE outbox ADD COLUMN failed INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE calls ADD COLUMN video INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE group_meta ADD COLUMN photo TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN verified_at INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN verified_how TEXT NOT NULL DEFAULT ''", []);
     // Полнотекстовый индекс переписки: текст и имя файла вложения (поиск в чате, 2.9).
     // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
     // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5

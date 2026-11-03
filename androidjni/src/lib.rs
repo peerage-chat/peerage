@@ -1326,10 +1326,10 @@ pub extern "system" fn Java_chat_peerage_Native_clearCallLog<'local>(
     })
 }
 
-/// Визуальный отпечаток ключа (hex, 12 байт) — сверка глазами по сетке знаков.
-/// Пустой `key_hex` — свой отпечаток.
+/// Набор для сверки с контактом (JSON `{glyphs, words}`), одинаковый у обоих. Битый
+/// ключ — "".
 #[no_mangle]
-pub extern "system" fn Java_chat_peerage_Native_visualFingerprint<'local>(
+pub extern "system" fn Java_chat_peerage_Native_pairFingerprint<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
@@ -1337,12 +1337,25 @@ pub extern "system" fn Java_chat_peerage_Native_visualFingerprint<'local>(
 ) -> jstring {
     jni_safe!(ret(&env, ""), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
-        let hex_str = jstr(&mut env, &key_hex);
-        let out = match parse_key(&hex_str) {
-            Some(key) => e.visual_fingerprint(&key),
-            None => e.visual_fingerprint_self(),
-        };
-        ret(&env, &out)
+        let out = parse_key(&jstr(&mut env, &key_hex)).map(|k| e.pair_fingerprint_json(&k));
+        ret(&env, &out.unwrap_or_default())
+    })
+}
+
+/// Сверка по отсканированному коду: "match" | "mismatch" | "invalid".
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_verifyByCode<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+    code: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "invalid"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "invalid") };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "invalid") };
+        let out = e.verify_by_code(&key, &jstr(&mut env, &code));
+        ret(&env, out)
     })
 }
 
@@ -1456,7 +1469,8 @@ pub extern "system" fn Java_chat_peerage_Native_listContacts<'local>(
     })
 }
 
-/// Пометить контакт проверенным/непроверенным.
+/// Отметить контакт сверенным по набору (true) или снять отметку (false). По коду —
+/// `verifyByCode`.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_setVerified<'local>(
     mut env: JNIEnv<'local>,
@@ -1468,7 +1482,7 @@ pub extern "system" fn Java_chat_peerage_Native_setVerified<'local>(
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
         if let Some(key) = parse_key(&jstr(&mut env, &key_hex)) {
-            e.set_verified(&key, verified != JNI_FALSE);
+            e.set_verified(&key, (verified != JNI_FALSE).then_some(peerage_core::store::VerifyHow::Set));
         }
     });
 }

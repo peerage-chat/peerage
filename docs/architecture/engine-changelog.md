@@ -30,6 +30,28 @@
 
 ---
 
+## 2026-11-03 · Сверка ключа: один набор на пару, когда и как сверен · (UI 3.6)
+
+**Причина:** app-ui.md «Сверка ключа», макеты `security/Pair`, `Verified`, `Match`: у каждого
+телефона был свой отпечаток (по одному ключу), и подсказка «набор совпадает с тем, что видит
+собеседник» была неверна; дата и способ сверки не хранились.
+
+- **Контракт:** `identity::pair_fingerprint(a, b)` → `PairFingerprint { glyphs: [u8;12], words: [8] }`
+  (SHA-256 с доменом `peerage:pair-fingerprint:v1` от двух ключей, упорядоченных по байтам; слова —
+  из следующих 88 бит). Удалены `identity::visual_fingerprint`, `VISUAL_FP_VERSION`, движковые
+  `visual_fingerprint(_self)` и JNI `visualFingerprint`. Новое: движок `pair_fingerprint_json(peer)`
+  → `{glyphs, words}`, JNI `pairFingerprint`; `verify_by_code(key, code)` → `"match" | "mismatch" |
+  "invalid"` (разбор кода — общий с `add_contact_code`, сверяется только личность), JNI
+  `verifyByCode`. `set_verified(key, Option<VerifyHow>)` (было `bool`); JNI `setVerified(true)` —
+  «по набору». В `contacts_json` — поля `verified_at`, `verified_how` (`"code" | "set" | null`).
+- **Схема:** `contacts.verified_at INTEGER`, `contacts.verified_how TEXT` (CREATE + ALTER на старой
+  базе). Флаг, дата и способ меняются только вместе (`ContactStore::set_verified`); из резервной
+  копии не переносятся, как и сама отметка.
+- **Поведение:** сравнение кода при сверке переехало из Kotlin в движок; отметка не по коду
+  ставится «по набору». Старые отметки остаются, но без даты и способа.
+- **Тесты:** `identity::pair_fingerprint_is_same_on_both_sides`, `…_is_domain_separated`;
+  `store::contacts_verified_flag`, `imported_contact_comes_unverified`; `engine/tests/verify.rs`.
+
 ## 2026-11-03 · Группа сохраняется после служебных отправок · 84021e5 (баг, журнал полировки)
 
 **Причина:** баг из живого прогона 3.5 (docs/BUGS.md, 2026-11-03): после перезапуска первое

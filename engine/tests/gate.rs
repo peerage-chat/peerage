@@ -226,7 +226,7 @@ fn verifying_a_contact_raises_its_budget_at_once() {
     let a_raw = net.endpoint(a_key);
     let b = start(&net, b_id, tmpdir("b-verify"));
     b.add_contact(&a_key, "A");
-    b.set_verified(&a_key, true);
+    b.set_verified(&a_key, Some(peerage_core::store::VerifyHow::Set));
 
     for _ in 0..100 {
         a_raw.write(&b_key, &[0x01; 64]).unwrap();

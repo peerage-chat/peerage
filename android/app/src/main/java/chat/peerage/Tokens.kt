@@ -73,6 +73,11 @@ object Tokens {
         val verified = Color(0xFF4CAF50)
         val verifiedTile = Color(0xFF1E3A24) // плитка «Ключ сверен» в профиле (`prof/`)
         val warnTile = Color(0xFF3A3020) // плитка «Ключ не сверен» — тот же тон, что warn, приглушённый
+        val stateWarn = Color(0xFF2A2116) // плашка «Ключ не сверен» на экране сверки (`security/Pair`)
+        val stateWarnText = Color(0xFFF2C98A) // её заголовок и щит
+        val stateOk = Color(0xFF17261A) // плашка «Ключ сверен» (`security/Verified`)
+        val errorSoft = Color(0xFFFFB4B4) // заголовок «Ключ не совпал» (`security/Mismatch`)
+        val glyphTile = Color(0xFF23242A) // плитка знака набора сверки — ступень над group
         val error = Color(0xFFFF6B6B) // ТЕКСТ и знак ошибки/опасного действия (6:1 на group)
         val errorFill = Color(0xFFE53935) // ЗАЛИВКА: отклонить звонок, запись голосового
         val warn = Color(0xFFE6A23C)
@@ -266,6 +271,7 @@ object Tokens {
         val mediaTile = 12.dp // плитка файла и домена ссылки
         val bubbleTail = 6.dp // срезанный угол на СТЫКЕ сообщений одной серии
         val chip = 10.dp // чипы, ярлыки даты, плашка цитаты
+        val glyphTile = 12.dp // плитка знака набора сверки (`security/Pair`)
         val tile = 14.dp // тайлы звонка
         val preview = 14.dp // область превью шаринга
         val button = 14.dp // кнопки, поле ввода, иконка-плашка

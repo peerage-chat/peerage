@@ -312,6 +312,9 @@ private fun CompactShell(model: AppModel) {
     }
     // Ключ контакта, которого пришли СВЕРЯТЬ сканером (null — обычное добавление).
     var verifyingPeer by remember { mutableStateOf<String?>(null) }
+
+    /** Итог сканирования при сверке ("match" | "mismatch" | "invalid") — шторка на экране сверки. */
+    var verifyResult by remember { mutableStateOf<String?>(null) }
     val ctx = LocalContext.current
     // ADR-004: нас отозвали из открытой группы (currentGroup → null) — уходим на список.
     LaunchedEffect(model.currentGroup) {
@@ -541,24 +544,12 @@ private fun CompactShell(model: AppModel) {
                                             scanResult = key
                                             screen = Screen.Add
                                         } else {
-                                            // Сверка: сканируем QR собеседника и сравниваем с
-                                            // ключом, который у нас записан. Совпало — метим
-                                            // проверенным; не совпало — ГРОМКО говорим об этом,
-                                            // это ровно тот случай, ради которого сверка и нужна.
+                                            // Сверка: личность из кода сравнивает движок; итог —
+                                            // шторкой на экране сверки. Не совпало — ровно тот
+                                            // случай, ради которого сверка и нужна.
                                             verifyingPeer = null
-                                            // Сверяем только личность: код обмена несёт ещё адрес
-                                            // («:…») и самоназвание («#…»), а они меняются.
-                                            val identity = key.trim().substringBefore('#').substringBefore(':')
-                                            val ok = identity.equals(target, ignoreCase = true)
-                                            if (ok && model.contacts.firstOrNull { it.key == target }?.verified != true) {
-                                                model.toggleVerified(target)
-                                            }
-                                            android.widget.Toast.makeText(
-                                                ctx,
-                                                ctx.getString(if (ok) R.string.verify_match else R.string.verify_mismatch),
-                                                if (ok) android.widget.Toast.LENGTH_SHORT else android.widget.Toast.LENGTH_LONG,
-                                            ).show()
-                                            screen = Screen.Info
+                                            model.verifyByCode(target, key) { verifyResult = it }
+                                            nav.back() // сканер открыт с экрана сверки — туда и вернуться
                                         }
                                     }
                                     Screen.Me -> ProfileScreen(model, navigate)
@@ -578,9 +569,20 @@ private fun CompactShell(model: AppModel) {
                                         onMedia = { model.currentChat?.let { openMedia(ChatTarget(it, group = false), MediaTab.Media) } },
                                         onDeleted = { screen = Screen.Contacts },
                                     )
-                                    Screen.Verify -> KeyVerifyScreen(model) {
-                                        verifyingPeer = model.currentChat
-                                        screen = Screen.Scanner
+                                    Screen.Verify -> {
+                                        val scan = {
+                                            verifyingPeer = model.currentChat
+                                            screen = Screen.Scanner
+                                        }
+                                        KeyVerifyScreen(model, onScan = scan, onMyCode = { screen = Screen.MyCode })
+                                        verifyResult?.let { r ->
+                                            VerifyResultSheet(
+                                                r,
+                                                onMyCode = { screen = Screen.MyCode },
+                                                onScanAgain = scan,
+                                                onClose = { verifyResult = null },
+                                            )
+                                        }
                                     }
                                     Screen.GroupEdit -> GroupEditScreen(model, onBack = goBack)
                                     Screen.GroupInfo -> GroupProfileScreen(

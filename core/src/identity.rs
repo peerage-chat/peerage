@@ -302,30 +302,42 @@ pub fn fingerprint_words(public_key: &[u8; 32]) -> [&'static str; FINGERPRINT_WO
 /// Сколько знаков в визуальном отпечатке (сетка 6×2 в UI).
 pub const VISUAL_FP_LEN: usize = 12;
 
-/// Версия НАБОРА знаков и правила отображения. Сверка идёт глазами по картинке,
+/// Версия НАБОРА знаков и правила вывода. Сверка идёт глазами по картинке,
 /// поэтому смена набора обязана менять и сам отпечаток: иначе двое с разными
-/// версиями приложения увидят разные картинки для одного ключа и решат, что их
-/// подслушивают. Домен-сепаратор ниже включает версию — бампнули набор, старые
-/// сверки честно инвалидируются.
-pub const VISUAL_FP_VERSION: u8 = 1;
+/// версиями приложения увидят разные картинки для одной пары и решат, что их
+/// подслушивают. Версия входит в домен ниже — бампнули набор, старые сверки
+/// честно инвалидируются.
+pub const PAIR_FP_VERSION: u8 = 1;
 
-/// Визуальный отпечаток публичного ключа: 12 байт = 12 знаков по 8 бит = 96 бит
-/// энтропии (столько же, сколько у 8 слов BIP39 с их 88 битами, и заметно больше,
-/// чем у коротких «эмодзи-хешей» на 4-6 символов).
+/// Набор для сверки ключей двух людей: 12 знаков + 8 слов BIP39.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairFingerprint {
+    /// 12 байт = 12 знаков по 8 бит (форма × цвет) = 96 бит.
+    pub glyphs: [u8; VISUAL_FP_LEN],
+    /// 88 бит словами — для голоса и при дальтонизме; независимы от знаков.
+    pub words: [&'static str; FINGERPRINT_WORDS],
+}
+
+/// Один набор на пару (app-ui.md, «Сверка ключа»): хэш двух ключей личности,
+/// упорядоченных по байтам, — у обоих телефонов одинаковый, и сверяют одну картинку,
+/// а не «мой блок с твоим». Подмена любого из ключей посредником меняет набор.
 ///
-/// НЕ секрет — выводится из ПУБЛИЧНОГО ключа и служит для сверки «та ли это связь».
-/// Не путать с сид-фразой (она восстанавливает личность и секретна).
-pub fn visual_fingerprint(public_key: &[u8; 32]) -> [u8; VISUAL_FP_LEN] {
-    // Домен-сепаратор с версией: тот же ключ в другой роли (или в другой версии
-    // набора) обязан давать другой отпечаток.
+/// НЕ секрет — выводится из ПУБЛИЧНЫХ ключей. Не путать с сид-фразой.
+pub fn pair_fingerprint(a: &[u8; 32], b: &[u8; 32]) -> PairFingerprint {
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
     let mut hasher = Sha256::new();
-    hasher.update(b"peerage:visual-fingerprint:v");
-    hasher.update([VISUAL_FP_VERSION]);
-    hasher.update(public_key);
+    hasher.update(b"peerage:pair-fingerprint:v");
+    hasher.update([PAIR_FP_VERSION]);
+    hasher.update(lo);
+    hasher.update(hi);
     let hash = hasher.finalize();
-    let mut out = [0u8; VISUAL_FP_LEN];
-    out.copy_from_slice(&hash[..VISUAL_FP_LEN]);
-    out
+    let mut glyphs = [0u8; VISUAL_FP_LEN];
+    glyphs.copy_from_slice(&hash[..VISUAL_FP_LEN]);
+    // Слова — из следующих 11 байт: не повторяют биты знаков.
+    let tail = &hash[VISUAL_FP_LEN..];
+    let wordlist = bip39::Language::English.word_list();
+    let words = std::array::from_fn(|i| wordlist[extract_11_bits(tail, i) as usize]);
+    PairFingerprint { glyphs, words }
 }
 
 /// Извлечь 11-битный индекс №`word_index` из big-endian битового потока.
@@ -435,24 +447,29 @@ mod tests {
         assert!(!verify_transport_rotate(&alice.public_key_bytes(), 3, &tk, &broken));
     }
 
+    /// Набор на пару одинаков на обоих телефонах (порядок ключей не важен) и
+    /// меняется с любым из двух ключей.
     #[test]
-    fn visual_fingerprint_is_stable_and_key_dependent() {
-        let a = Identity::generate();
-        let b = Identity::generate();
-        let fa = visual_fingerprint(&a.public_key_bytes());
-        assert_eq!(fa, visual_fingerprint(&a.public_key_bytes()), "детерминирован");
-        assert_ne!(fa, visual_fingerprint(&b.public_key_bytes()), "зависит от ключа");
-        assert_eq!(fa.len(), VISUAL_FP_LEN);
+    fn pair_fingerprint_is_same_on_both_sides() {
+        let (a, b, c) = (Identity::generate(), Identity::generate(), Identity::generate());
+        let (pa, pb, pc) = (a.public_key_bytes(), b.public_key_bytes(), c.public_key_bytes());
+        let ab = pair_fingerprint(&pa, &pb);
+        assert_eq!(ab, pair_fingerprint(&pb, &pa), "у обоих одно и то же");
+        assert_ne!(ab.glyphs, pair_fingerprint(&pa, &pc).glyphs, "другой собеседник — другой набор");
+        assert_ne!(ab.words, pair_fingerprint(&pc, &pb).words);
+        assert_eq!(ab.glyphs.len(), VISUAL_FP_LEN);
+        assert_eq!(ab.words.len(), FINGERPRINT_WORDS);
     }
 
-    /// Отпечаток обязан отличаться от «просто SHA-256 ключа»: домен-сепаратор
-    /// с версией — то, что позволит сменить набор знаков, не сломав доверие молча.
+    /// Свой домен: набор пары — не «SHA-256 двух ключей подряд», иначе тот же хэш
+    /// в другой роли дал бы ту же картинку.
     #[test]
-    fn visual_fingerprint_is_domain_separated() {
-        let id = Identity::generate();
-        let pk = id.public_key_bytes();
-        let plain = Sha256::digest(pk);
-        assert_ne!(&visual_fingerprint(&pk)[..], &plain[..VISUAL_FP_LEN]);
+    fn pair_fingerprint_is_domain_separated() {
+        let (a, b) = (Identity::generate(), Identity::generate());
+        let (pa, pb) = (a.public_key_bytes(), b.public_key_bytes());
+        let (lo, hi) = if pa <= pb { (pa, pb) } else { (pb, pa) };
+        let plain = Sha256::new().chain_update(lo).chain_update(hi).finalize();
+        assert_ne!(&pair_fingerprint(&pa, &pb).glyphs[..], &plain[..VISUAL_FP_LEN]);
     }
 
     #[test]

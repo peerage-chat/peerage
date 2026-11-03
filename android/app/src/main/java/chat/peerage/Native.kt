@@ -118,8 +118,11 @@ object Native {
     /** Очистить журнал звонков. */
     external fun clearCallLog(sessionPtr: Long)
 
-    /** Визуальный отпечаток ключа (hex, 12 байт). Пустой ключ — свой отпечаток. */
-    external fun visualFingerprint(sessionPtr: Long, keyHex: String): String
+    /** Набор сверки с контактом: JSON `{glyphs, words}`, одинаковый у обоих; битый ключ — "". */
+    external fun pairFingerprint(sessionPtr: Long, keyHex: String): String
+
+    /** Сверка по отсканированному коду: "match" (отмечен «по коду») | "mismatch" | "invalid". */
+    external fun verifyByCode(sessionPtr: Long, keyHex: String, code: String): String
 
     /** Очередь отправки по получателям (JSON-массив). */
     external fun outboxByPeer(sessionPtr: Long): String
@@ -357,6 +360,7 @@ object Native {
         hideAuthor: Boolean,
     ): Int
 
+    /** Отметить сверенным по набору (true) или снять отметку; по коду — [verifyByCode]. */
     external fun setVerified(sessionPtr: Long, keyHex: String, verified: Boolean)
 
     /** Личный чат на экране: «прочитано до последнего входящего» (уходит, если отчёты включены). */

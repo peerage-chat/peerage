@@ -572,6 +572,7 @@ internal fun GhostButton(text: String, color: Color = Tokens.Colors.accent, modi
 /**
  * Кнопка-плашка на панели: ступень над группой, иконка + подпись, 48 dp. Нажатие сжимает её
  * до 0.96 — отклик пальцу (app-ui.md → «Отделка»); у строк вместо этого подсветка.
+ * [primary] — главное действие экрана или шторки: заливка акцентом.
  */
 @Composable
 internal fun PlateButton(
@@ -579,15 +580,25 @@ internal fun PlateButton(
     icon: ImageVector? = null,
     modifier: Modifier = Modifier,
     danger: Boolean = false,
+    primary: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val fg = if (danger) Tokens.Colors.iconDangerMuted else Color.White
+    val fg = when {
+        primary -> Tokens.Colors.accentDark
+        danger -> Tokens.Colors.iconDangerMuted
+        else -> Color.White
+    }
+    val bg = when {
+        primary -> Tokens.Colors.accent
+        danger -> Tokens.Colors.dangerPlate
+        else -> Tokens.Colors.raised
+    }
     val press = remember { MutableInteractionSource() }
     Row(
         modifier.pressScale(press)
             .heightIn(min = Tokens.Size.touch)
             .clip(RoundedCornerShape(Tokens.Radius.button))
-            .background(if (danger) Tokens.Colors.dangerPlate else Tokens.Colors.raised)
+            .background(bg)
             .clickable(interactionSource = press, indication = null, role = Role.Button) { onClick() }
             .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,

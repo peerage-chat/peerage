@@ -45,6 +45,8 @@ internal data class ContactDto(
     val fingerprint: String = "",
     val added: Long = 0,
     val verified: Boolean = false,
+    @SerialName("verified_at") val verifiedAt: Long = 0,
+    @SerialName("verified_how") val verifiedHow: String? = null,
     @SerialName("profile_name") val profileName: String = "",
     @SerialName("avatar_id") val avatarId: String = "",
     val helpful: Long = 0,
@@ -304,6 +306,8 @@ internal fun ContactDto.toModel() = Contact(
     localName = name,
     fingerprint = fingerprint,
     verified = verified,
+    verifiedAt = verifiedAt,
+    verifiedHow = verifiedHow.orEmpty(),
     profileName = profileName,
     avatarId = avatarId,
 )

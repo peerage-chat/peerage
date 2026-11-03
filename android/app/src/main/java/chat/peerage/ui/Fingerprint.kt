@@ -32,10 +32,13 @@ import kotlin.math.sin
  * вариантов, то есть ровно 8 бит на знак и 96 бит на все 12. Форма — основной
  * различитель (её видно и в чёрно-белом), цвет — вторичный.
  *
- * Само правило вывода байтов живёт в ядре (`peerage_core::identity::visual_fingerprint`)
- * и версионировано: сменим набор — бампнём версию, и старые сверки честно
- * инвалидируются, а не начнут молча расходиться.
+ * Само правило вывода байтов живёт в ядре (`peerage_core::identity::pair_fingerprint`,
+ * один набор на пару) и версионировано: сменим набор — бампнём версию, и старые сверки
+ * честно инвалидируются, а не начнут молча расходиться.
  */
+
+/** Доля плитки под знак (макет `security/Pair`: знак 26 в плитке ~50). */
+private const val GlyphFill = 0.52f
 
 /** Палитра знаков — [Tokens.Colors.fingerprintGlyphs]. */
 private val GlyphColors = Tokens.Colors.fingerprintGlyphs
@@ -67,10 +70,10 @@ internal fun FingerprintGrid(hex: String, modifier: Modifier = Modifier) {
 @Composable
 private fun GlyphCell(byte: Int, modifier: Modifier = Modifier) {
     Box(
-        modifier.aspectRatio(1f).clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloBg),
+        modifier.aspectRatio(1f).clip(RoundedCornerShape(Tokens.Radius.glyphTile)).background(Tokens.Colors.glyphTile),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.fillMaxSize(0.62f)) { drawGlyph(byte) }
+        Canvas(Modifier.fillMaxSize(GlyphFill)) { drawGlyph(byte) }
     }
 }
 

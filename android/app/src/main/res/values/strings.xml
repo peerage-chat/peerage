@@ -164,8 +164,6 @@
     <string name="add_error">Invalid key</string>
     <string name="label_name">Name</string>
     <string name="qr_cd">Public key QR code</string>
-    <string name="info_unmark">Unmark</string>
-    <string name="info_mark">Mark</string>
     <string name="info_delete">Delete contact</string>
 
     <!-- ── Chat ────────────────────────────────────────────────────────── -->
@@ -521,10 +519,8 @@
     <string name="common_save">Save</string>
     <string name="folder_edit_title">Folder</string>
     <string name="profile_call">Call</string>
-    <string name="profile_verified_hint">Keys were checked in person. If the set below matches what %1$s sees, the connection is direct — nobody in between.</string>
-    <string name="profile_unverified_hint">Messages are encrypted, but nobody has confirmed the person on the other end. Compare the set in person or over video.</string>
+    <string name="profile_unverified_hint">Chats are encrypted, but it is not confirmed that %1$s is on the other end.</string>
     <string name="profile_recheck">Verify again</string>
-    <string name="profile_scan_qr">Scan QR</string>
     <string name="profile_common_groups">Common groups</string>
     <string name="profile_share">Share contact</string>
     <string name="profile_share_confirm">The key of %1$s goes to another person, who can then write directly. This cannot be undone.</string>
@@ -544,8 +540,6 @@
     <string name="profile_clear_history_confirm">The conversation will be deleted from this device, including messages not yet sent. The other person keeps their copy.</string>
     <string name="profile_clear_history_ok">Clear</string>
     <string name="title_verify_qr">Verify key</string>
-    <string name="verify_match">Keys match — contact verified</string>
-    <string name="verify_mismatch">Keys DO NOT match. Someone may be in between — do not trust this conversation until you check again.</string>
     <string name="calls_all">All</string>
     <string name="calls_missed">Missed</string>
     <string name="calls_room_gone">Deleted group</string>
@@ -941,7 +935,7 @@
     <string name="profile_sound">Sound</string>
     <string name="profile_sound_off">Muted</string>
     <string name="profile_key_ok">Key verified</string>
-    <string name="profile_key_ok_sub">Symbols matched</string>
+    <string name="profile_key_ok_sub">No one in between</string>
     <string name="profile_key_todo">Key not verified</string>
     <string name="profile_key_todo_sub">Verify by code or by symbols</string>
     <string name="profile_media">Media and files</string>
@@ -1009,4 +1003,25 @@
     <string name="group_leave_transfer">Transfer rights and leave</string>
     <string name="group_leave_no_transfer">Leave without transfer</string>
     <string name="group_sys_photo">New group photo</string>
+    <!-- Key verification (3.6, security/ mockups) -->
+    <string name="verify_ok_text">%1$s. No one is in between.</string>
+    <string name="verify_ok_text_plain">No one is in between.</string>
+    <string name="verify_how_code">%1$s, by code</string>
+    <string name="verify_how_set">%1$s, by the set</string>
+    <string name="verify_pair_title">%1$s and this phone</string>
+    <string name="verify_pair_same">same on both</string>
+    <string name="verify_pair_caption">%1$s sees the same set on their verification screen. If it matches, the keys are genuine. It can also be checked by voice on a video call: read the words aloud.</string>
+    <string name="verify_scan">Scan code</string>
+    <string name="verify_my_code">My code</string>
+    <string name="verify_mark_set">The set matches — mark verified</string>
+    <string name="verify_unmark">Remove mark</string>
+    <string name="verify_match_title">Key matches</string>
+    <string name="verify_match_text">The mark is on this phone only. For it to appear on the other phone too, that phone needs to scan this phone’s code.</string>
+    <string name="verify_show_code">Show my code</string>
+    <string name="verify_mismatch_title">Key does not match</string>
+    <string name="verify_mismatch_text">The code on that phone belongs to a different key. Either it is someone else’s code, or someone is between the phones. Do not trust this chat until the key matches.</string>
+    <string name="verify_invalid_title">Not a contact code</string>
+    <string name="verify_invalid_text">The scanned QR has no key. Use the code from the “My code” screen on that phone.</string>
+    <string name="verify_scan_again">Scan again</string>
+    <string name="verify_got_it">Got it</string>
 </resources>

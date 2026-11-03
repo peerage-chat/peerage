@@ -162,8 +162,6 @@
     <string name="add_error">Неверный ключ</string>
     <string name="label_name">Имя</string>
     <string name="qr_cd">QR код публичного ключа</string>
-    <string name="info_unmark">Снять</string>
-    <string name="info_mark">Пометить</string>
     <string name="info_delete">Удалить контакт</string>
 
     <!-- ── Чат ─────────────────────────────────────────────────────────── -->
@@ -541,10 +539,8 @@
     <string name="common_save">Сохранить</string>
     <string name="folder_edit_title">Папка</string>
     <string name="profile_call">Звонок</string>
-    <string name="profile_verified_hint">Ключи сверены лично. Если набор ниже совпадает с тем, что видит %1$s, — связь идёт напрямую, без посредника.</string>
-    <string name="profile_unverified_hint">Переписка зашифрована, но не подтверждено, что на том конце именно этот человек. Набор сверяют при встрече или по видеосвязи.</string>
+    <string name="profile_unverified_hint">Переписка зашифрована, но не подтверждено, что на том конце именно %1$s.</string>
     <string name="profile_recheck">Сверить заново</string>
-    <string name="profile_scan_qr">Сканировать QR</string>
     <string name="profile_common_groups">Общие группы</string>
     <string name="profile_share">Поделиться контактом</string>
     <string name="profile_share_confirm">Ключ %1$s достанется другому человеку: тот сможет написать напрямую. Отозвать это нельзя.</string>
@@ -564,8 +560,6 @@
     <string name="profile_clear_history_confirm">Переписка будет удалена с этого устройства вместе с ещё не отправленными сообщениями. У собеседника она останется.</string>
     <string name="profile_clear_history_ok">Очистить</string>
     <string name="title_verify_qr">Сверка ключа</string>
-    <string name="verify_match">Ключи совпали — контакт проверен</string>
-    <string name="verify_mismatch">Ключи НЕ совпали. Возможно, между вами кто-то есть — не доверяйте переписке, пока не сверитесь заново.</string>
     <string name="calls_all">Все</string>
     <string name="calls_missed">Пропущенные</string>
     <string name="calls_room_gone">Удалённая группа</string>
@@ -997,7 +991,7 @@
     <string name="profile_sound">Звук</string>
     <string name="profile_sound_off">Без звука</string>
     <string name="profile_key_ok">Ключ сверен</string>
-    <string name="profile_key_ok_sub">Набор знаков совпал</string>
+    <string name="profile_key_ok_sub">Связь без посредника</string>
     <string name="profile_key_todo">Ключ не сверен</string>
     <string name="profile_key_todo_sub">Сверка — по коду или набору знаков</string>
     <string name="profile_media">Медиа и файлы</string>
@@ -1069,4 +1063,25 @@
     <string name="group_leave_transfer">Передать права и выйти</string>
     <string name="group_leave_no_transfer">Выйти без передачи</string>
     <string name="group_sys_photo">Новое фото группы</string>
+    <!-- Сверка ключа (3.6, макет security/) -->
+    <string name="verify_ok_text">%1$s. Связь идёт без посредника.</string>
+    <string name="verify_ok_text_plain">Связь идёт без посредника.</string>
+    <string name="verify_how_code">%1$s, по коду</string>
+    <string name="verify_how_set">%1$s, по набору</string>
+    <string name="verify_pair_title">%1$s и этот телефон</string>
+    <string name="verify_pair_same">одинаково у обоих</string>
+    <string name="verify_pair_caption">Тот же набор %1$s видит у себя на экране сверки. Совпало — ключи настоящие. Можно сверить голосом по видеосвязи: прочитать слова.</string>
+    <string name="verify_scan">Сканировать код</string>
+    <string name="verify_my_code">Свой код</string>
+    <string name="verify_mark_set">Набор совпал — отметить сверенным</string>
+    <string name="verify_unmark">Снять отметку</string>
+    <string name="verify_match_title">Ключ совпал</string>
+    <string name="verify_match_text">Отметка стоит только на этом телефоне. Чтобы она появилась и на том, там нужно отсканировать код этого телефона.</string>
+    <string name="verify_show_code">Показать свой код</string>
+    <string name="verify_mismatch_title">Ключ не совпал</string>
+    <string name="verify_mismatch_text">Код на том телефоне принадлежит другому ключу. Это либо код другого человека, либо между телефонами посредник. Переписке с этим контактом не доверять, пока ключ не совпадёт.</string>
+    <string name="verify_invalid_title">Это не код контакта</string>
+    <string name="verify_invalid_text">В отсканированном QR нет ключа. Нужен код с экрана «Мой код» на том телефоне.</string>
+    <string name="verify_scan_again">Сканировать ещё раз</string>
+    <string name="verify_got_it">Понятно</string>
 </resources>

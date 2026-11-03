@@ -27,7 +27,7 @@ use peerage_core::budget::Tier;
 pub use peerage_core::mention::Mention;
 use peerage_core::settings::AudioSettings;
 use peerage_core::store::{
-    Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage,
+    Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage, VerifyHow,
 };
 use peerage_core::{vault, Identity};
 /// Реэкспорт: медиа-вложение группового сообщения — часть контракта движка
@@ -528,6 +528,15 @@ const CODE_NAME_MAX: usize = 64;
 /// Самоназвание из хвоста кода обмена (`#<hex UTF-8>`). Кривой хвост — не повод
 /// отказать в добавлении: ключ разобран отдельно, имя просто не берём. Управляющие
 /// символы выбрасываем — им не место в имени.
+/// Разобрать код обмена: части `личность[:эпоха:адрес:подпись]` и самоназвание из хвоста.
+fn split_code(code: &str) -> (Vec<&str>, Option<String>) {
+    let (body, name) = match code.trim().split_once('#') {
+        Some((c, tail)) => (c, code_name(tail)),
+        None => (code.trim(), None),
+    };
+    (body.split(':').collect(), name)
+}
+
 fn code_name(tail: &str) -> Option<String> {
     let bytes = hex::decode(tail.trim()).ok()?;
     let name: String = String::from_utf8(bytes)
@@ -559,14 +568,11 @@ impl Engine {
         self.me_pub
     }
 
-    /// Визуальный отпечаток ключа для сверки глазами: 12 байт в hex.
-    /// Пусто, если ключ не разобрать. Свой — [`visual_fingerprint_self`].
-    pub fn visual_fingerprint(&self, key: &[u8; 32]) -> String {
-        hex::encode(peerage_core::identity::visual_fingerprint(key))
-    }
-
-    pub fn visual_fingerprint_self(&self) -> String {
-        hex::encode(peerage_core::identity::visual_fingerprint(&self.me_pub))
+    /// Набор для сверки с [peer]: `{"glyphs": hex 12 байт, "words": [8 слов]}` —
+    /// одинаковый на обоих телефонах пары.
+    pub fn pair_fingerprint_json(&self, peer: &[u8; 32]) -> String {
+        let fp = peerage_core::identity::pair_fingerprint(&self.me_pub, peer);
+        serde_json::json!({ "glyphs": hex::encode(fp.glyphs), "words": fp.words }).to_string()
     }
 
     /// Секретная сид-фраза (24 слова BIP39) — по запросу пользователя (онбординг M4
@@ -1511,11 +1517,7 @@ impl Engine {
     /// принимаем только с верной подписью — тем же путём, что и объявление о смене
     /// адреса.
     pub fn add_contact_code(&self, code: &str, name: &str) -> &'static str {
-        let (code, self_name) = match code.trim().split_once('#') {
-            Some((c, tail)) => (c, code_name(tail)),
-            None => (code.trim(), None),
-        };
-        let parts: Vec<&str> = code.split(':').collect();
+        let (parts, self_name) = split_code(code);
         let Some(ik) = parse_key(parts[0]) else {
             return "error";
         };
@@ -1865,10 +1867,30 @@ impl Engine {
         serde_json::to_string(&page).unwrap_or_else(|_| "[]".into())
     }
 
-    pub fn set_verified(&self, key: &[u8; 32], verified: bool) {
-        let _ = self.contacts.lock_safe().set_verified(key, verified);
+    /// Отметить сверенным ([how] — каким способом, сейчас) или снять отметку (`None`).
+    pub fn set_verified(&self, key: &[u8; 32], how: Option<VerifyHow>) {
+        let _ = self
+            .contacts
+            .lock_safe()
+            .set_verified(key, how.map(|h| (h, now())));
         // Сверка — смена доверия: тир Verified щедрее и по приёму, и по очереди.
         self.refresh_budgets();
+    }
+
+    /// Сверка по коду: личность из отсканированного кода совпала с записанным ключом
+    /// контакта — отметить «по коду» (`"match"`); другая — `"mismatch"`, отметку не
+    /// трогаем; не код Peerage — `"invalid"`. Сверяется только личность: адрес и
+    /// самоназвание в коде меняются.
+    pub fn verify_by_code(&self, key: &[u8; 32], code: &str) -> &'static str {
+        let (parts, _) = split_code(code);
+        match parse_key(parts[0]) {
+            None => "invalid",
+            Some(ik) if ik != *key => "mismatch",
+            Some(_) => {
+                self.set_verified(key, Some(VerifyHow::Code));
+                "match"
+            }
+        }
     }
 
     pub fn rename_contact(&self, key: &[u8; 32], name: &str) {

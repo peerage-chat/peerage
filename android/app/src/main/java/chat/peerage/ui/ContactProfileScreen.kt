@@ -4,10 +4,8 @@ import android.Manifest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,7 +16,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
@@ -115,7 +112,11 @@ internal fun ContactProfileScreen(
             NavRow(
                 if (c.verified) TablerIcons.ShieldCheck else TablerIcons.AlertTriangle,
                 stringResource(if (c.verified) R.string.profile_key_ok else R.string.profile_key_todo),
-                sub = stringResource(if (c.verified) R.string.profile_key_ok_sub else R.string.profile_key_todo_sub),
+                sub = if (c.verified) {
+                    verifiedLine(c) ?: stringResource(R.string.profile_key_ok_sub)
+                } else {
+                    stringResource(R.string.profile_key_todo_sub)
+                },
                 iconTint = if (c.verified) Tokens.Colors.online else Tokens.Colors.warn,
                 iconBg = if (c.verified) Tokens.Colors.verifiedTile else Tokens.Colors.warnTile,
                 divider = false,
@@ -193,61 +194,6 @@ internal fun ContactProfileScreen(
 
 /** Что из профиля контакта требует подтверждения шторкой. */
 private enum class ProfileDanger { Share, Clear, Block, Delete }
-
-/**
- * Сверка ключа (из строки профиля). Набор знаков и слова, которые сверяют глазами или
- * голосом с экраном собеседника; «Сканировать код» и отметка «сверен». Набор на пару,
- * шторка результата и дата сверки — шаг 3.6 (макет `security/`).
- */
-@Composable
-internal fun KeyVerifyScreen(model: AppModel, onScanQr: () -> Unit) {
-    val key = model.currentChat ?: return
-    val c = model.contacts.firstOrNull { it.key == key } ?: return
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(top = Tokens.Space.panel, bottom = Tokens.Space.xxl),
-    ) {
-        CardSection {
-            Column(Modifier.padding(Tokens.Space.l)) {
-                Text(
-                    stringResource(if (c.verified) R.string.profile_key_ok else R.string.profile_key_todo),
-                    color = if (c.verified) Tokens.Colors.online else Tokens.Colors.warn,
-                    fontSize = Tokens.Font.name,
-                    fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    stringResource(
-                        if (c.verified) R.string.profile_verified_hint else R.string.profile_unverified_hint,
-                        c.displayName,
-                    ),
-                    color = Tokens.Colors.secondary,
-                    fontSize = Tokens.Font.body,
-                    modifier = Modifier.padding(top = Tokens.Space.xs),
-                )
-                FingerprintGrid(model.visualFingerprint(key), Modifier.padding(top = Tokens.Space.l))
-                // Слова — тот же отпечаток, но их удобно диктовать голосом.
-                Text(
-                    c.fingerprint,
-                    color = Tokens.Colors.accent,
-                    fontSize = Tokens.Font.body,
-                    modifier = Modifier.padding(top = Tokens.Space.m),
-                )
-                Spacer(Modifier.height(Tokens.Space.l))
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                    AccentButton(
-                        stringResource(if (c.verified) R.string.profile_recheck else R.string.profile_scan_qr),
-                        Modifier.weight(1f),
-                    ) { onScanQr() }
-                    OutlineButton(
-                        stringResource(if (c.verified) R.string.info_unmark else R.string.info_mark),
-                        Modifier.weight(1f),
-                        tint = if (c.verified) Tokens.Colors.secondary else Tokens.Colors.accent,
-                    ) { model.toggleVerified(key) }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun RenameDialog(model: AppModel, key: String, current: String, onClose: () -> Unit) {

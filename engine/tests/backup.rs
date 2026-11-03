@@ -130,7 +130,7 @@ fn restore_does_not_grant_verification() {
     let peer = id(98).public_key_bytes();
     let a = start(&net, id(97), tmpdir("ver-src"));
     fill(&a, &peer);
-    a.set_verified(&peer, true); // у источника контакт сверен вживую
+    a.set_verified(&peer, Some(peerage_core::store::VerifyHow::Set)); // у источника контакт сверен вживую
 
     let file = tmpdir("ver").join("copy.peerage");
     a.backup_export(&file, all(), "пк").unwrap();

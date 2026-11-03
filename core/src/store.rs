@@ -91,6 +91,13 @@ pub struct Contact {
     pub added: i64,
     #[serde(default)]
     pub verified: bool,
+    /// Когда сверен (unix-секунды); 0 — не сверен или сверен до того, как дату стали
+    /// хранить. Меняется только вместе с `verified` — через [`ContactStore::set_verified`].
+    #[serde(default)]
+    pub verified_at: i64,
+    /// Как сверен; `None` — не сверен (или до того, как способ стали хранить).
+    #[serde(default)]
+    pub verified_how: Option<VerifyHow>,
     /// Самоназвание контакта (M2): как он назвал СЕБЯ. Приоритет отображения:
     /// локальное `name` → `profile_name` → hex. Приходит в `ProfileUpdate`.
     #[serde(default)]
@@ -113,6 +120,33 @@ pub struct Contact {
     /// Номер эпохи адреса. Растёт строго — старое объявление не переиграет новое.
     #[serde(default)]
     pub transport_epoch: u32,
+}
+
+/// Способ сверки ключа — показывается в «Сверен: 1 ноября, по коду».
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VerifyHow {
+    /// Отсканирован код собеседника, личность в нём совпала с записанной.
+    Code,
+    /// Набор знаков на пару совпал на двух экранах — отметили вручную.
+    Set,
+}
+
+impl VerifyHow {
+    fn as_str(self) -> &'static str {
+        match self {
+            VerifyHow::Code => "code",
+            VerifyHow::Set => "set",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "code" => Some(VerifyHow::Code),
+            "set" => Some(VerifyHow::Set),
+            _ => None,
+        }
+    }
 }
 
 impl Contact {
@@ -151,7 +185,7 @@ impl ContactStore {
         let conn = db::lock(&self.db);
         let mut stmt = conn.prepare(
             "SELECT key, name, fingerprint, added, verified, profile_name, avatar_id, helpful, \
-             transport_key, transport_epoch FROM contacts",
+             transport_key, transport_epoch, verified_at, verified_how FROM contacts",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -165,10 +199,12 @@ impl ContactStore {
                 row.get::<_, i64>(7)?,
                 row.get::<_, String>(8)?,
                 row.get::<_, i64>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, String>(11)?,
             ))
         })?;
         for row in rows {
-            let (kb, name, fp, added, ver, profile_name, avatar_id, helpful, tk, tepoch) = row?;
+            let (kb, name, fp, added, ver, profile_name, avatar_id, helpful, tk, tepoch, vat, vhow) = row?;
             if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
                 self.cache.insert(key, Contact {
                     key: hex::encode(key),
@@ -176,6 +212,8 @@ impl ContactStore {
                     fingerprint: fp,
                     added,
                     verified: ver != 0,
+                    verified_at: vat,
+                    verified_how: VerifyHow::parse(&vhow),
                     profile_name,
                     avatar_id,
                     helpful: helpful.max(0) as u32,
@@ -197,6 +235,8 @@ impl ContactStore {
             fingerprint: crate::identity::fingerprint_words(key).join(" "),
             added,
             verified: false,
+            verified_at: 0,
+            verified_how: None,
             profile_name: String::new(),
             avatar_id: String::new(),
             helpful: 0,
@@ -247,6 +287,8 @@ impl ContactStore {
         )?;
         self.cache.insert(key, Contact {
             verified: false,
+            verified_at: 0,
+            verified_how: None,
             transport_key: String::new(),
             transport_epoch: 0,
             ..c.clone()
@@ -269,13 +311,18 @@ impl ContactStore {
     // Все изменения ниже — сначала в базу, потом в кэш: не записалось — кэш не
     // трогаем, иначе память и диск разошлись бы до перезапуска (R-043).
 
-    pub fn set_verified(&mut self, key: &[u8; 32], verified: bool) -> Result<bool, StoreError> {
+    /// Отметить сверенным (`Some` — как и когда) или снять отметку (`None`). Флаг,
+    /// дата и способ меняются только вместе: «сверен без даты» заново не появится.
+    pub fn set_verified(&mut self, key: &[u8; 32], how: Option<(VerifyHow, i64)>) -> Result<bool, StoreError> {
         let Some(c) = self.cache.get_mut(key) else { return Ok(false) };
+        let (at, how_s) = how.map_or((0, ""), |(h, at)| (at, h.as_str()));
         db::lock(&self.db).execute(
-            "UPDATE contacts SET verified=?1 WHERE key=?2",
-            rusqlite::params![verified as i64, key.as_slice()],
+            "UPDATE contacts SET verified=?1, verified_at=?2, verified_how=?3 WHERE key=?4",
+            rusqlite::params![how.is_some() as i64, at, how_s, key.as_slice()],
         )?;
-        c.verified = verified;
+        c.verified = how.is_some();
+        c.verified_at = at;
+        c.verified_how = how.map(|(h, _)| h);
         Ok(true)
     }
 
@@ -2158,11 +2205,43 @@ mod tests {
         let mut store = ContactStore::open(shared.clone()).unwrap();
         store.add(&k, "Eve", 0).unwrap();
         assert!(!store.get(&k).unwrap().verified);
-        assert!(store.set_verified(&k, true).unwrap());
-        assert!(store.get(&k).unwrap().verified);
+        assert!(store.set_verified(&k, Some((VerifyHow::Code, 1_700))).unwrap());
+        let c = store.get(&k).unwrap();
+        assert_eq!((c.verified, c.verified_at, c.verified_how), (true, 1_700, Some(VerifyHow::Code)));
 
-        let s2 = ContactStore::open(shared).unwrap();
-        assert!(s2.get(&k).unwrap().verified);
+        // Когда и как — переживают перезапуск.
+        let mut s2 = ContactStore::open(shared).unwrap();
+        let c = s2.get(&k).unwrap();
+        assert_eq!((c.verified, c.verified_at, c.verified_how), (true, 1_700, Some(VerifyHow::Code)));
+
+        // Снять отметку — снять и «когда/как»: сверен без даты не бывает.
+        assert!(s2.set_verified(&k, None).unwrap());
+        let c = s2.get(&k).unwrap();
+        assert_eq!((c.verified, c.verified_at, c.verified_how), (false, 0, None));
+    }
+
+    /// Из копии отметка не переносится — и «когда/как» тоже (решение 2026-08-01).
+    #[test]
+    fn imported_contact_comes_unverified() {
+        let k = key();
+        let mut store = ContactStore::open(db()).unwrap();
+        let c = Contact {
+            key: hex::encode(k),
+            name: "Ева".into(),
+            fingerprint: String::new(),
+            added: 1,
+            verified: true,
+            verified_at: 5,
+            verified_how: Some(VerifyHow::Set),
+            profile_name: String::new(),
+            avatar_id: String::new(),
+            helpful: 0,
+            transport_key: String::new(),
+            transport_epoch: 0,
+        };
+        assert!(store.import_contact(&c).unwrap());
+        let got = store.get(&k).unwrap();
+        assert_eq!((got.verified, got.verified_at, got.verified_how), (false, 0, None));
     }
 
     #[test]
@@ -2788,7 +2867,7 @@ mod tests {
         store.add(&k, "Аня", 1).unwrap();
         crate::db::lock(&shared).execute_batch("PRAGMA query_only = ON;").unwrap();
         assert!(store.rename(&k, "Боря").is_err());
-        assert!(store.set_verified(&k, true).is_err());
+        assert!(store.set_verified(&k, Some((VerifyHow::Set, 1))).is_err());
         assert!(store.set_profile(&k, "Борис", "ab").is_err());
         assert!(store.bump_helpful(&k).is_err());
         assert!(store.remove(&k).is_err());

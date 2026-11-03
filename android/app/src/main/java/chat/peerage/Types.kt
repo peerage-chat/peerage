@@ -35,6 +35,10 @@ data class Contact(
     val localName: String,
     val fingerprint: String,
     val verified: Boolean,
+    /** Когда сверен (unix-секунды); 0 — не сверен или сверен до того, как дату стали хранить. */
+    val verifiedAt: Long = 0,
+    /** Как сверен: "code" | "set"; пусто — неизвестно. */
+    val verifiedHow: String = "",
     /** Самоназвание контакта (M2): как он назвал себя (ProfileUpdate). */
     val profileName: String = "",
     /** hex-хэш аватара контакта (M2); байты — через [AppModel.contactAvatars]. */
@@ -154,6 +158,9 @@ data class BubbleActions(
 data class MsgRef(val id: Long, val sender: String)
 
 /** Идентичность пользователя (своя «визитка»). */
+/** Набор сверки на пару: 12 знаков (hex) и 8 слов — одинаковые на обоих телефонах. */
+data class PairFingerprint(val glyphs: String, val words: List<String>)
+
 data class Me(val pubkey: String, val address: String, val fingerprint: String)
 
 data class Group(

@@ -604,27 +604,29 @@ class AppModel private constructor() {
     /** Журнал звонков (свежие первыми). */
     val callLog = mutableStateListOf<CallEntry>()
 
-    /** Визуальные отпечатки ключей (hex). Снапшот-состояние: первый запрос из UI
-     *  ставит расчёт в [ops], сетка дорисуется, когда он придёт. Раньше JNI звался
-     *  прямо из композиции (инвариант 4). */
-    private val fingerprints = mutableStateMapOf<String, String>()
+    /** Наборы сверки по ключу контакта. Снапшот-состояние: первый запрос из UI ставит
+     *  расчёт в [ops], сетка дорисуется, когда он придёт (инвариант 4: не JNI из композиции). */
+    private val pairFingerprints = mutableStateMapOf<String, PairFingerprint>()
 
-    /** Ключи, чей отпечаток уже считается. НЕ снапшот-состояние: функцию зовёт
-     *  композиция, а писать в состояние из композиции, пока его же пишет фоновый
-     *  поток, — «Unsupported concurrent change during composition» и падение. */
-    private val fingerprintsRequested = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** Ключи, чей набор уже считается. НЕ снапшот-состояние: функцию зовёт композиция,
+     *  а писать в состояние из композиции, пока его же пишет фоновый поток, —
+     *  «Unsupported concurrent change during composition» и падение. */
+    private val pairFingerprintsRequested = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    /** Отпечаток для сверки глазами. Пустой ключ — свой. Считает движок (одна
-     *  реализация на все клиенты), UI только рисует. Пока не посчитан — "". */
-    fun visualFingerprint(key: String = ""): String {
-        fingerprints[key]?.let { return it }
-        if (sessionPtr != 0L && fingerprintsRequested.add(key)) {
+    /** Набор сверки с [key]: один на пару, считает движок. Пока не посчитан — null. */
+    fun pairFingerprint(key: String): PairFingerprint? {
+        pairFingerprints[key]?.let { return it }
+        if (sessionPtr != 0L && pairFingerprintsRequested.add(key)) {
             ops.execute {
-                val fp = runCatching { Native.visualFingerprint(sessionPtr, key) }.getOrDefault("")
-                onMain { fingerprints[key] = fp }
+                val fp = runCatching {
+                    val o = JSONObject(Native.pairFingerprint(sessionPtr, key))
+                    val w = o.getJSONArray("words")
+                    PairFingerprint(o.getString("glyphs"), List(w.length()) { w.getString(it) })
+                }.getOrNull() ?: return@execute
+                onMain { pairFingerprints[key] = fp }
             }
         }
-        return ""
+        return null
     }
 
     // ── Пользовательские папки ──────────────────────────────────────────────
@@ -1907,10 +1909,17 @@ class AppModel private constructor() {
         addStatus = r
     }
 
-    fun toggleVerified(key: String) = ops.execute {
-        val c = contacts.firstOrNull { it.key == key } ?: return@execute
-        Native.setVerified(sessionPtr, key, !c.verified)
+    /** Отметить сверенным «по набору» ([on]) или снять отметку. */
+    fun setVerified(key: String, on: Boolean) = ops.execute {
+        Native.setVerified(sessionPtr, key, on)
         refreshContactsNow()
+    }
+
+    /** Сверка по отсканированному [code]: итог ("match" | "mismatch" | "invalid") — в [done]. */
+    fun verifyByCode(key: String, code: String, done: (String) -> Unit) = ops.execute {
+        val r = Native.verifyByCode(sessionPtr, key, code)
+        refreshContactsNow()
+        onMain { done(r) }
     }
 
     fun rename(key: String, name: String) = ops.execute {

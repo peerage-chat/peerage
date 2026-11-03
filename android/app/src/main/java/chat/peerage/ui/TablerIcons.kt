@@ -254,6 +254,20 @@ val TablerIcons.ShieldCheck: ImageVector by lazy {
     )
 }
 
+// Щиты экрана сверки (макет `security/`): галочка и вопрос ВНУТРИ щита.
+val TablerIcons.ShieldTick: ImageVector by lazy {
+    tabler("shield-tick", "M12 3l7 3v6c0 4.5 -3 7.5 -7 9c-4 -1.5 -7 -4.5 -7 -9V6z", "M9 12l2 2l4 -4")
+}
+
+val TablerIcons.ShieldQuestion: ImageVector by lazy {
+    tabler(
+        "shield-question",
+        "M12 3l7 3v6c0 4.5 -3 7.5 -7 9c-4 -1.5 -7 -4.5 -7 -9V6z",
+        "M10 9.5a2 2 0 1 1 2.5 2c-.4 .2 -.5 .6 -.5 1",
+        "M12 15.5h.01",
+    )
+}
+
 val TablerIcons.Check: ImageVector by lazy {
     tabler(
         "check",
