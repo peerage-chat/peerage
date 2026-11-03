@@ -138,6 +138,7 @@ object Tokens {
 
         // Группы и комнаты
         val groupAvatar = Color(0xFF0D2A0D) // фон аватара группы/комнаты
+        val disabledText = Color(0xFF7A7A84) // имя в строке, которую не выбрать («уже в группе»)
         val roomBanner = Color(0xFF12331A) // баннер «в комнате идёт звонок»
         val destructive = error // «удалить участника», «выйти из группы» — тот же красный текста
 
@@ -321,6 +322,11 @@ object Tokens {
         val avatarSeries = 30.dp // аватар у последнего сообщения серии (макет `screens/GroupChat`)
         val avatarMention = 32.dp // аватар в подсказке «@» над полем (макет `chatact/Mention`)
         val avatarMember = 36.dp // аватар в строке участника группы (макет `prof/GroupB`)
+        val avatarPick = 40.dp // аватар в строке выбора людей (макеты `people/`)
+        val personRow = 60.dp // строка выбора людей (минимальная высота)
+        val avatarChip = 28.dp // аватар в чипе выбранного человека
+        val avatarSheet = 48.dp // аватар в шапке шторки человека
+        val groupDraftAvatar = 72.dp // аватар группы на шаге «название»
         val tabLine = 2.dp // линия акцента под выбранной папкой
         val badge = 22.dp // бейдж-счётчик: высота и минимальная ширина
         val badgeTab = 20.dp // счётчик у подписи вкладки (макет `requests/Tab`)
@@ -414,6 +420,7 @@ object Tokens {
         val label = 15.sp // основной текст: сообщения, поля ввода, кнопки
         val name = 16.sp // имена в списке, строки групп
         val sheet = 20.sp // заголовок шторки
+        val sheetName = 18.sp // имя в шапке шторки человека (участник группы)
         val title = 22.sp // заголовок экрана
         val profile = 24.sp // имя в профиле
         val big = 26.sp // имя во входящем звонке, эмодзи в панели

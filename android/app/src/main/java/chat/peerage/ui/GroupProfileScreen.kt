@@ -3,6 +3,7 @@ package chat.peerage.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,6 +14,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 
@@ -145,30 +147,16 @@ internal fun GroupProfileScreen(
     }
 
     sheetFor?.let { k ->
-        val contact = model.contacts.any { it.key == k }
-        ActionSheet(
-            model.peerName(k),
-            stringResource(if (online(k)) R.string.status_in_network else R.string.status_offline),
+        MemberSheet(
+            model,
+            k,
+            online(k),
+            admin = isAdmin,
             onClose = { sheetFor = null },
-        ) {
-            // Незнакомцу из группы написать нельзя: гейт контактов пропустит только запрос.
-            if (contact) {
-                PlateButton(stringResource(R.string.profile_write), TablerIcons.Message, Modifier.fillMaxWidth()) {
-                    sheetFor = null
-                    onMessage(k)
-                }
-                PlateButton(stringResource(R.string.group_member_profile), TablerIcons.User, Modifier.fillMaxWidth()) {
-                    sheetFor = null
-                    onProfile(k)
-                }
-            }
-            if (isAdmin) {
-                PlateButton(stringResource(R.string.group_remove_from), TablerIcons.Trash, Modifier.fillMaxWidth(), danger = true) {
-                    sheetFor = null
-                    confirmRemove = k
-                }
-            }
-        }
+            onMessage = { onMessage(k) },
+            onProfile = { onProfile(k) },
+            onRemove = { confirmRemove = k },
+        )
     }
     confirmRemove?.let { k ->
         ConfirmSheet(
@@ -246,6 +234,75 @@ private fun MemberRow(
                     .clip(RoundedCornerShape(Tokens.Radius.inner))
                     .background(Tokens.Colors.accentMuted)
                     .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xxs),
+            )
+        }
+    }
+}
+
+/**
+ * Шторка участника (макет `people/Member`): аватар, имя, «в сети · в контактах»; меню —
+ * Написать · Профиль, админу ещё «Удалить из группы» с пояснением про смену ключей.
+ * «Передать права админа» — шаг 3.5.
+ */
+@Composable
+private fun MemberSheet(
+    model: AppModel,
+    key: String,
+    online: Boolean,
+    admin: Boolean,
+    onClose: () -> Unit,
+    onMessage: () -> Unit,
+    onProfile: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val name = model.peerName(key)
+    // Незнакомцу из группы написать нельзя: гейт контактов пропустит только запрос.
+    val contact = model.contacts.any { it.key == key }
+    SheetFrame(onClose) {
+        Row(
+            Modifier.padding(horizontal = Tokens.Space.xs).padding(top = Tokens.Space.s - Tokens.Space.xxs),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+        ) {
+            SquareAvatar(name, size = Tokens.Size.avatarSheet, avatarBytes = model.peerAvatar(key), circle = true)
+            Column {
+                Text(name, color = Color.White, fontSize = Tokens.Font.sheetName, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    stringResource(if (online) R.string.status_in_network else R.string.status_offline) + " · " +
+                        stringResource(if (contact) R.string.group_member_in_contacts else R.string.group_member_not_contact),
+                    color = Tokens.Colors.tertiary,
+                    fontSize = Tokens.Font.body,
+                )
+            }
+        }
+        if (contact || admin) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.group)).background(Tokens.Colors.raised)) {
+                if (contact) {
+                    PopMenuItem(TablerIcons.Message, stringResource(R.string.profile_write)) {
+                        onClose()
+                        onMessage()
+                    }
+                    PopMenuItem(TablerIcons.User, stringResource(R.string.group_member_profile)) {
+                        onClose()
+                        onProfile()
+                    }
+                }
+                if (admin) {
+                    if (contact) HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.group)
+                    PopMenuItem(TablerIcons.Trash, stringResource(R.string.group_remove_from), danger = true) {
+                        onClose()
+                        onRemove()
+                    }
+                }
+            }
+        }
+        if (admin) {
+            Text(
+                stringResource(R.string.group_remove_hint),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.body,
+                lineHeight = Tokens.Font.lineHeight,
+                modifier = Modifier.padding(horizontal = Tokens.Space.xs),
             )
         }
     }

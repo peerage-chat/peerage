@@ -500,6 +500,30 @@ internal fun ConfirmSheet(title: String, text: String, ok: String, onOk: () -> U
 /** Шторка-решение: заголовок, пояснение и кнопки [buttons] столбиком (опасная — первой). */
 @Composable
 internal fun ActionSheet(title: String, text: String, onClose: () -> Unit, buttons: @Composable ColumnScope.() -> Unit) {
+    SheetFrame(onClose) {
+        Text(
+            title,
+            color = Color.White,
+            fontSize = Tokens.Font.sheet,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = Tokens.Space.xs).semantics { heading() },
+        )
+        if (text.isNotEmpty()) {
+            Text(
+                text,
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.label,
+                modifier = Modifier.padding(horizontal = Tokens.Space.xs),
+            )
+        }
+        buttons()
+    }
+}
+
+/** Рамка шторки: ступень group, ручка, поля и столбик с зазором m. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SheetFrame(onClose: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     ModalBottomSheet(
         onDismissRequest = onClose,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -513,24 +537,8 @@ internal fun ActionSheet(title: String, text: String, onClose: () -> Unit, butto
             Modifier.fillMaxWidth().navigationBarsPadding()
                 .padding(start = Tokens.Space.l, end = Tokens.Space.l, bottom = Tokens.Space.xl),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
-        ) {
-            Text(
-                title,
-                color = Color.White,
-                fontSize = Tokens.Font.sheet,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = Tokens.Space.xs).semantics { heading() },
-            )
-            if (text.isNotEmpty()) {
-                Text(
-                    text,
-                    color = Tokens.Colors.tertiary,
-                    fontSize = Tokens.Font.label,
-                    modifier = Modifier.padding(horizontal = Tokens.Space.xs),
-                )
-            }
-            buttons()
-        }
+            content = content,
+        )
     }
 }
 

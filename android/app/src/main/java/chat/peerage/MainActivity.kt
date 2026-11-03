@@ -229,7 +229,12 @@ internal enum class Screen {
     Me,
     Info,
     GroupChat,
+
+    /** Новая группа, шаг 1 — участники (3.4). */
     CreateGroup,
+
+    /** Новая группа, шаг 2 — название. */
+    CreateGroupName,
     AddMember,
     MyCode,
     Request,
@@ -294,6 +299,9 @@ private fun CompactShell(model: AppModel) {
     // Открытая карточка запроса (ключ) и приглашения (gid).
     var requestKey by remember { mutableStateOf("") }
     var inviteGid by remember { mutableStateOf("") }
+    // Черновик мастера новой группы и выбор на «Пригласить»: живут между шагами и шапкой.
+    var groupDraft by remember { mutableStateOf(GroupDraft()) }
+    val invitePick = remember { mutableStateListOf<String>() }
     var keyWordsFirst by remember { mutableStateOf(true) }
     val openKeyFlow: (Boolean) -> Unit = {
         keyWordsFirst = it
@@ -405,12 +413,20 @@ private fun CompactShell(model: AppModel) {
                                     model,
                                     onBack = goBack,
                                     onInfo = { screen = Screen.GroupInfo },
-                                    onInvite = { screen = Screen.AddMember },
+                                    onInvite = {
+                                        invitePick.clear()
+                                        screen = Screen.AddMember
+                                    },
                                     onMedia = { model.currentGroup?.let { openMedia(ChatTarget(it, group = true), MediaTab.Media) } },
                                 )
-                                Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = goBack)
+                                Screen.CreateGroup -> TopBar(stringResource(R.string.title_new_group), onBack = goBack) {
+                                    PickedCount(groupDraft.picked.size)
+                                }
+                                Screen.CreateGroupName -> TopBar(stringResource(R.string.title_new_group), onBack = goBack)
                                 Screen.NewChat -> TopBar(stringResource(R.string.newchat_title), onBack = goBack)
-                                Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = goBack)
+                                Screen.AddMember -> TopBar(stringResource(R.string.title_add_member), onBack = goBack) {
+                                    PickedCount(invitePick.size)
+                                }
                                 Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = goBack)
                                 Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = goBack)
                                 Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = goBack)
@@ -485,7 +501,10 @@ private fun CompactShell(model: AppModel) {
                                                 openOutbox = { screen = Screen.Outbox },
                                                 myCode = { screen = Screen.MyCode },
                                                 scan = { screen = Screen.Scanner },
-                                                newGroup = { screen = Screen.CreateGroup },
+                                                newGroup = {
+                                                    groupDraft = GroupDraft()
+                                                    screen = Screen.CreateGroup
+                                                },
                                                 keyFlow = openKeyFlow,
                                                 dataBackup = { screen = Screen.Backup },
                                             ),
@@ -561,7 +580,10 @@ private fun CompactShell(model: AppModel) {
                                     Screen.GroupInfo -> GroupProfileScreen(
                                         model,
                                         onBack = goBack,
-                                        onAdd = { screen = Screen.AddMember },
+                                        onAdd = {
+                                            invitePick.clear()
+                                            screen = Screen.AddMember
+                                        },
                                         onMedia = { model.currentGroup?.let { openMedia(ChatTarget(it, group = true), MediaTab.Media) } },
                                         onSearch = {
                                             model.currentGroup?.let { model.openChatSearch(ChatTarget(it, group = true)) }
@@ -590,10 +612,14 @@ private fun CompactShell(model: AppModel) {
                                             }
                                         }
                                     }
-                                    Screen.CreateGroup -> CreateGroupScreen(model) { screen = Screen.Contacts }
+                                    Screen.CreateGroup -> GroupPickScreen(model, groupDraft) { screen = Screen.CreateGroupName }
+                                    Screen.CreateGroupName -> GroupNameScreen(model, groupDraft) { screen = Screen.Contacts }
                                     Screen.NewChat -> NewChatScreen(
                                         model,
-                                        onNewGroup = { screen = Screen.CreateGroup },
+                                        onNewGroup = {
+                                            groupDraft = GroupDraft()
+                                            screen = Screen.CreateGroup
+                                        },
                                         onAddContact = { screen = Screen.Add },
                                         // Выбор собеседника завершает «Новый чат»: назад из
                                         // чата — на главную, а не обратно в выбор.
@@ -602,7 +628,7 @@ private fun CompactShell(model: AppModel) {
                                             nav.replace(Screen.Chat)
                                         },
                                     )
-                                    Screen.AddMember -> AddMemberScreen(model) { screen = Screen.GroupChat }
+                                    Screen.AddMember -> GroupInviteScreen(model, invitePick, onDone = goBack)
                                     Screen.SettingsSecurity -> SettingsSecurityScreen(
                                         model,
                                         onVaultLevel = { screen = Screen.VaultLevel },

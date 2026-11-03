@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -412,88 +411,6 @@ internal fun RoomBanner(model: AppModel, members: List<RoomMember>, onJoin: () -
 /** Сетка участников комнаты (2 колонки). Тап по тайлу → onFocus(key).
  *  [inRoom] — мы сейчас в комнате (показываем себя + model.roomMembers).
  *  [presenceMembers] — участники по маячкам когда мы ещё не зашли. */
-
-@Composable
-internal fun CreateGroupScreen(model: AppModel, onDone: () -> Unit) {
-    var name by remember { mutableStateOf("") }
-    Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
-        FieldLabel(stringResource(R.string.create_label_name))
-        TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-        // Без имени группа в списке и в приглашении была бы безымянной строкой —
-        // кнопка ждёт хотя бы одну букву.
-        AccentButton(stringResource(R.string.create_btn), enabled = name.isNotBlank()) {
-            model.createGroup(name.trim())
-            onDone()
-        }
-        Text(
-            stringResource(R.string.create_hint),
-            color = HoloSecondary,
-            fontSize = Tokens.Font.caption,
-        )
-    }
-}
-
-/** «Пригласить» (из «⋮» и профиля группы): контакты, которых в группе ещё нет. Порядок шагов
- *  создания группы и метка «приглашён» — 3.4. */
-@Composable
-internal fun AddMemberScreen(model: AppModel, onDone: () -> Unit) {
-    val gid = model.currentGroup ?: return
-    val memberKeys = model.groupMemberKeys[gid] ?: emptyList()
-    val invitable = model.contacts.filter { it.key !in memberKeys }
-    LazyColumn(Modifier.fillMaxSize()) {
-        item { SectionTitle(stringResource(R.string.group_add_header)) }
-        if (invitable.isEmpty()) {
-            item {
-                Text(
-                    stringResource(R.string.addmember_empty),
-                    color = HoloSecondary,
-                    fontSize = Tokens.Font.body,
-                    modifier = Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
-                )
-            }
-        } else {
-            itemsIndexed(invitable, key = { _, c -> "c_${c.key}" }) { i, c ->
-                CardBlock(first = i == 0, last = i == invitable.lastIndex) {
-                    CardRow(
-                        onClick = {
-                            model.inviteToGroup(gid, c.key)
-                            onDone()
-                        },
-                        divider = i > 0,
-                        inset = MemberRowInset,
-                    ) {
-                        MemberAvatar(model, c.key)
-                        Spacer(Modifier.width(Tokens.Space.m))
-                        Text(
-                            c.displayName,
-                            color = Color.White,
-                            fontSize = Tokens.Font.label,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Icon(TablerIcons.Plus, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconS))
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** Отступ разделителя у строки участника: поле карточки + аватар + зазор. */
-private val MemberRowInset = Tokens.Space.m + Tokens.Size.avatarMember + Tokens.Space.m
-
-/** Аватар участника с точкой присутствия — тот же круг, что у человека везде. */
-@Composable
-private fun MemberAvatar(model: AppModel, key: String) {
-    SquareAvatar(
-        groupSenderName(model, key),
-        size = Tokens.Size.avatarMember,
-        online = model.online[key] == true,
-        avatarBytes = model.peerAvatar(key),
-        circle = true,
-    )
-}
 
 // ── Входящий звонок (полный экран, Telegram-style) ──────────────────────────
 // Активный звонок — см. RoomCallScreen.kt (сетка участников).

@@ -124,7 +124,7 @@
     <!-- ── Top bars ────────────────────────────────────────────────────── -->
     <string name="title_add_contact">Add contact</string>
     <string name="title_new_group">New group</string>
-    <string name="title_add_member">Add member</string>
+    <string name="title_add_member">Invite</string>
     <string name="title_scan_qr">Scan QR</string>
     <string name="title_search">Search</string>
     <string name="newchat_title">New chat</string>
@@ -196,7 +196,6 @@
     <!-- ── Groups ──────────────────────────────────────────────────────── -->
     <string name="group_default_name">Group</string>
     <string name="group_member_fallback">Member</string>
-    <string name="group_add_header">Add contact</string>
     <string name="group_remove_member">Remove</string>
     <string name="group_you_removed">You were removed from the group</string>
     <string name="download_no_space">Not enough free space on the phone to download the file</string>
@@ -259,9 +258,7 @@
     <string name="group_sys_left">%1$s is no longer in the group</string>
     <string name="group_sys_renamed">New name: “%1$s”</string>
     <string name="group_sys_admin">%1$s is now an admin</string>
-    <string name="create_label_name">Name</string>
     <string name="create_btn">Create</string>
-    <string name="create_hint">You\'ll become the admin. Add members from contacts inside the group.</string>
     <string name="addmember_empty">No contacts to invite.</string>
 
     <!-- ── Search ──────────────────────────────────────────────────────── -->
@@ -744,7 +741,7 @@
     <string name="chat_reply_gone">message deleted</string>
 
 
-    <string name="group_invite_waiting">Accepted. Joining completes when the inviter is online.</string>
+    <string name="group_invite_waiting">awaiting reply</string>
     <string name="backup_part_groups">Group chats</string>
     <plurals name="backup_n_group_messages">
         <item quantity="one">%d message</item>
@@ -976,4 +973,24 @@
     <string name="media_empty_voice">No voice messages</string>
     <string name="media_empty_links">No links</string>
     <string name="search_media_photos">Photos and videos</string>
+    <!-- Люди в группе (3.4) -->
+    <string name="group_member_in_contacts">in contacts</string>
+    <string name="group_member_not_contact">not in contacts</string>
+    <string name="group_remove_hint">A removed member stops decrypting new messages at once: the group changes keys.</string>
+    <string name="contacts_search_hint">Search contacts</string>
+    <string name="group_name_hint">Group name</string>
+    <string name="group_members_count">Members · %1$d</string>
+    <string name="group_creator_admin">creator — admin</string>
+    <string name="group_gets_invite">gets an invite</string>
+    <string name="group_create_caption">Members get an invite and decide whether to join. Only the admin removes members and pins messages; any member can invite.</string>
+    <string name="group_in_group">already in the group</string>
+    <string name="group_invite_sent">invite sent</string>
+    <string name="group_invite_caption">Invites go to contacts only. Each gets a Join / Decline card and enters the group after accepting.</string>
+    <string name="group_invite_btn">Invite</string>
+    <string name="group_invite_btn_n">Invite · %1$d</string>
+    <string name="common_remove">Remove</string>
+    <plurals name="people_picked">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
 </resources>

@@ -120,7 +120,7 @@
     <!-- ── Шапки экранов ───────────────────────────────────────────────── -->
     <string name="title_add_contact">Добавить контакт</string>
     <string name="title_new_group">Новая группа</string>
-    <string name="title_add_member">Добавить участника</string>
+    <string name="title_add_member">Пригласить</string>
     <string name="title_scan_qr">Сканировать QR</string>
     <string name="title_search">Поиск</string>
     <string name="newchat_title">Новый чат</string>
@@ -194,7 +194,6 @@
     <!-- ── Группы ──────────────────────────────────────────────────────── -->
     <string name="group_default_name">Группа</string>
     <string name="group_member_fallback">Участник</string>
-    <string name="group_add_header">Добавить контакт</string>
     <string name="group_remove_member">Удалить</string>
     <string name="group_you_removed">Вас удалили из группы</string>
     <string name="download_no_space">Не хватает места на телефоне, чтобы скачать файл</string>
@@ -259,9 +258,7 @@
     <string name="group_sys_left">%1$s больше не в группе</string>
     <string name="group_sys_renamed">Новое название: «%1$s»</string>
     <string name="group_sys_admin">%1$s — теперь администратор</string>
-    <string name="create_label_name">Название</string>
     <string name="create_btn">Создать</string>
-    <string name="create_hint">Вы станете администратором. Добавляйте участников из контактов внутри группы.</string>
     <string name="addmember_empty">Нет контактов для приглашения.</string>
 
     <!-- ── Поиск ───────────────────────────────────────────────────────── -->
@@ -780,7 +777,7 @@
     <string name="chat_reply_gone">сообщение удалено</string>
 
 
-    <string name="group_invite_waiting">Согласие отправлено. Вступление — когда пригласивший появится в сети.</string>
+    <string name="group_invite_waiting">ждёт ответа</string>
     <string name="backup_part_groups">Групповые чаты</string>
     <plurals name="backup_n_group_messages">
         <item quantity="one">%d сообщение</item>
@@ -1034,4 +1031,26 @@
     <string name="media_empty_voice">Голосовых нет</string>
     <string name="media_empty_links">Ссылок нет</string>
     <string name="search_media_photos">Фото и видео</string>
+    <!-- Люди в группе (3.4) -->
+    <string name="group_member_in_contacts">в контактах</string>
+    <string name="group_member_not_contact">не в контактах</string>
+    <string name="group_remove_hint">Удалённый участник перестаёт расшифровывать новые сообщения сразу: группа меняет ключи.</string>
+    <string name="contacts_search_hint">Поиск по контактам</string>
+    <string name="group_name_hint">Название группы</string>
+    <string name="group_members_count">Участники · %1$d</string>
+    <string name="group_creator_admin">создатель — админ</string>
+    <string name="group_gets_invite">получит приглашение</string>
+    <string name="group_create_caption">Участники получат приглашение и сами решат, вступать ли. Удалять участников и закреплять сообщения может только админ; приглашать — любой участник.</string>
+    <string name="group_in_group">уже в группе</string>
+    <string name="group_invite_sent">приглашение отправлено</string>
+    <string name="group_invite_caption">Приглашают только из контактов. Каждый получит карточку «Вступить / Отклонить» и войдёт в группу, когда примет.</string>
+    <string name="group_invite_btn">Пригласить</string>
+    <string name="group_invite_btn_n">Пригласить · %1$d</string>
+    <string name="common_remove">Убрать</string>
+    <plurals name="people_picked">
+        <item quantity="one">%1$d выбран</item>
+        <item quantity="few">%1$d выбрано</item>
+        <item quantity="many">%1$d выбрано</item>
+        <item quantity="other">%1$d выбрано</item>
+    </plurals>
 </resources>
