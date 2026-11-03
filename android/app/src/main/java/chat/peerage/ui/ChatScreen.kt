@@ -1290,13 +1290,17 @@ internal fun MessageBubble(
                             else -> when (m.kind) {
                                 // В режиме выделения тап по вложению переключает выбор,
                                 // а не открывает файл: иначе выбор был бы ловушкой.
-                                "image" -> ImageAttachment(
-                                    blobBytes,
-                                    onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
-                                    bare = photoBubble,
-                                    onLongClick = onLong,
-                                    cacheKey = m.blobId,
-                                )
+                                // Снимок помечен местом на экране: просмотрщик, закрываясь
+                                // протяжкой, уводит его обратно сюда.
+                                "image" -> Box(Modifier.mediaSpot(MsgRef(m.id, m.sender))) {
+                                    ImageAttachment(
+                                        blobBytes,
+                                        onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
+                                        bare = photoBubble,
+                                        onLongClick = onLong,
+                                        cacheKey = m.blobId,
+                                    )
+                                }
                                 // Видео — тот же кадр, что и фото, плюс метка
                                 // длительности: тап открывает просмотрщик, а не отдаёт
                                 // файл наружу системному плееру.
@@ -1339,52 +1343,17 @@ internal fun MessageBubble(
             if (failed) FailedLine { chatId?.let { model.retry(it, m) } }
         }
     }
-    if (viewer) {
-        // Листаем по вложениям ЭТОГО чата, а не показываем одно: список берётся из
-        // уже загруженной ленты (полная история медиа — задача #45).
-        val chat = chatId.orEmpty()
-        val me = stringResource(R.string.chat_reply_you)
-        val peer = model.contacts.firstOrNull { it.key == chat }?.displayName
-            ?: stringResource(R.string.chat_default_title)
-        val feed = model.chat(chat, group)
-        // Имена авторов считаем здесь: в группе их много, а в ViewerItem едет строка.
-        val names = feed.map { it.sender }.distinct().associateWith { groupSenderName(model, it) }
-        val items = remember(chat, group, feed.size) {
-            feed.filter { (it.kind == "image" || it.kind == "video") && it.blobId.isNotEmpty() }
-                .map {
-                    val author = when {
-                        it.mine -> me
-                        group -> names[it.sender].orEmpty()
-                        else -> peer
-                    }
-                    ViewerItem(it.id, it.sender, author, it.time, it.mime, it.name, it.blobId)
-                }
-        }
-        val start = items.indexOfFirst { it.id == m.id && it.sender == m.sender }
+    if (viewer && chatId != null) {
+        // Листается всё медиа чата (просмотрщик сам спросит движок); лента — затравка,
+        // пока список едет.
         MediaViewer(
             model,
-            items,
-            start.coerceAtLeast(0),
+            ChatTarget(chatId, group),
+            model.chat(chatId, group),
+            MsgRef(m.id, m.sender),
             onClose = { viewer = false },
-            // Действия — над тем, что СЕЙЧАС на экране, а не над сообщением, с которого
-            // просмотрщик открыли: пролистав к другому фото и нажав «Удалить», человек
-            // удалял первое.
-            //
-            // Пересылка идёт через выделение — тот же путь, что из панели чата, чтобы
-            // «переслать» везде означало ровно одно.
-            onForward = { shown ->
-                viewer = false
-                model.selection = setOf(MsgRef(shown.id, shown.sender))
-                model.beginForward(chat, group)
-            },
-            onDelete = { shown ->
-                model.selection = setOf(MsgRef(shown.id, shown.sender))
-                model.deleteSelected(chat, group)
-            },
-            onShowInChat = { target ->
-                viewer = false
-                model.jumpTo = MsgRef(target.id, target.sender)
-            },
+            onReply = { model.startReply(it) },
+            onShowInChat = { model.jumpTo = MsgRef(it.id, it.sender) },
         )
     }
 }

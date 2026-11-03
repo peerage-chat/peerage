@@ -108,6 +108,19 @@ fun AppModel.mediaPreview(chat: ChatTarget, count: Int, done: (List<Message>) ->
     done(page.items.map { it.toModel() })
 }
 
+/** Сколько фото и видео чата листает просмотрщик за раз — с запасом на любую переписку. */
+private const val VIEWER_MEDIA_MAX = 5000
+
+/** Все фото и видео чата для просмотрщика, от старых к новым: «N из M» — по всему чату,
+ *  а не по подгруженной ленте. [done] — на главном потоке. */
+fun AppModel.viewerMedia(chat: ChatTarget, done: (List<Message>) -> Unit) = reads.execute {
+    val page = decodeOrNull<MediaPageDto>(
+        Native.mediaPage(sessionPtr, chat.id, chat.group, MediaTab.Media.wire, 0, VIEWER_MEDIA_MAX),
+    ) ?: MediaPageDto()
+    val list = page.items.map { it.toModel() }.reversed()
+    android.os.Handler(android.os.Looper.getMainLooper()).post { done(list) }
+}
+
 /** Сменить плотность сетки и запомнить её. */
 fun AppModel.setMediaColumns(n: Int) {
     if (n !in MEDIA_COLUMNS) return

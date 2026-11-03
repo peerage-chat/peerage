@@ -266,7 +266,7 @@ private fun MediaGrid(model: AppModel, b: MediaBrowse, list: MediaList, onShowIn
     val locale = LocalContext.current.resources.configuration.locales[0]
     val groups = remember(list.items.size, locale) { byMonth(list.items.toList(), locale) }
     val state = rememberLazyGridState()
-    var viewerAt by remember { mutableStateOf<Int?>(null) }
+    var viewerAt by remember { mutableStateOf<MsgRef?>(null) }
     val cols = model.mediaColumns
     LoadMoreAt({ state.lastIndex() }, list.items.size + groups.size) { model.moreMedia(b, MediaTab.Media) }
     LazyVerticalGrid(
@@ -283,12 +283,30 @@ private fun MediaGrid(model: AppModel, b: MediaBrowse, list: MediaList, onShowIn
             }
             items(g.items, key = { "${it.sender}:${it.id}" }) { m ->
                 MediaTile(model, b.chat, m, cols, onLong = { onShowInChat(MsgRef(m.id, m.sender)) }) {
-                    viewerAt = list.items.indexOf(m)
+                    viewerAt = MsgRef(m.id, m.sender)
                 }
             }
         }
     }
-    viewerAt?.let { at -> MediaFilesViewer(model, b, list, at, onClose = { viewerAt = null }, onShowInChat) }
+    viewerAt?.let { at ->
+        // Ответ — в ленте чата: туда и уходим, плашка ответа встаёт уже там.
+        MediaViewer(
+            model,
+            b.chat,
+            list.items.toList(),
+            at,
+            onClose = { viewerAt = null },
+            onReply = { m ->
+                onShowInChat(MsgRef(m.id, m.sender))
+                model.startReply(m)
+            },
+            onShowInChat = { m -> onShowInChat(MsgRef(m.id, m.sender)) },
+            onDeleted = { ref ->
+                list.items.removeAll { it.id == ref.id && it.sender == ref.sender }
+                list.total = (list.total - 1).coerceAtLeast(0)
+            },
+        )
+    }
 }
 
 /** Плитка сетки: миниатюра; у видео — длительность; нескачанное — кнопка загрузки и размер. */
@@ -308,7 +326,9 @@ private fun MediaTile(model: AppModel, chat: ChatTarget, m: Message, cols: Int, 
     val shape = RoundedCornerShape(Tokens.Radius.gridTile)
     val progress = model.downloads[m.blobId]
     Box(
-        Modifier.aspectRatio(1f).clip(shape).background(Tokens.Colors.tile).imageOutline(shape)
+        // Клетка — место возврата просмотрщика: протяжкой вниз снимок уходит сюда же.
+        Modifier.aspectRatio(1f).mediaSpot(MsgRef(m.id, m.sender))
+            .clip(shape).background(Tokens.Colors.tile).imageOutline(shape)
             .combinedClickable(onLongClick = onLong) {
                 if (ok) {
                     onOpen()
@@ -354,45 +374,6 @@ private fun DownloadState(progress: Float?, tint: Color, size: androidx.compose.
             CircularProgressIndicator(progress = { progress }, color = tint, modifier = Modifier.size(size), strokeWidth = 2.dp)
         else -> Icon(TablerIcons.Download, stringResource(R.string.chat_download), tint = tint, modifier = Modifier.size(size))
     }
-}
-
-/** Просмотрщик по загруженной части вкладки «Медиа» — листается вся история, а не лента. */
-@Composable
-private fun MediaFilesViewer(
-    model: AppModel,
-    b: MediaBrowse,
-    list: MediaList,
-    start: Int,
-    onClose: () -> Unit,
-    onShowInChat: (MsgRef) -> Unit,
-) {
-    val you = stringResource(R.string.chat_reply_you)
-    val shown = list.items.filter { ready(model, it) }
-    val items = shown.map {
-        ViewerItem(it.id, it.sender, if (it.mine) you else model.peerName(it.sender), it.time, it.mime, it.name, it.blobId)
-    }
-    val at = shown.indexOfFirst { it == list.items.getOrNull(start) }.coerceAtLeast(0)
-    MediaViewer(
-        model,
-        items,
-        at,
-        onClose = onClose,
-        onForward = { item ->
-            onClose()
-            model.selection = setOf(MsgRef(item.id, item.sender))
-            model.beginForward(b.chat.id, b.chat.group)
-        },
-        onDelete = { item ->
-            model.selection = setOf(MsgRef(item.id, item.sender))
-            model.deleteSelected(b.chat.id, b.chat.group)
-            list.items.removeAll { it.id == item.id && it.sender == item.sender }
-            list.total = (list.total - 1).coerceAtLeast(0)
-        },
-        onShowInChat = { item ->
-            onClose()
-            onShowInChat(MsgRef(item.id, item.sender))
-        },
-    )
 }
 
 // ── Файлы, голосовые, ссылки: строки ────────────────────────────────────────

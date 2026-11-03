@@ -114,7 +114,7 @@ object Tokens {
         val mediaScrim = Color(0x8C000000) // плашка поверх кадра: длительность, время (чёрный @55%)
         val playScrim = Color(0x73000000) // круг «play» поверх кадра (чёрный @45%)
         val thumbScrim = Color(0x40000000) // квадрат превью в карточке вложения (чёрный @25%)
-        val trackOnMedia = Color(0x40FFFFFF) // дорожка таймлайна поверх кадра (белый @25%)
+        val trackOnMedia = Color(0x4DFFFFFF) // дорожка таймлайна поверх кадра (белый @25%)
 
         // Упоминание на исходящем пузыре: чистый акцент на bubbleOut почти сливается.
         val mentionOnOut = Color(0xFFB5E6F7)
@@ -163,6 +163,10 @@ object Tokens {
         val scanScrim = Color(0x99000000) // затемнение вокруг рамки сканера QR
         val kindVideo = Color(0xFF7E57C2) // видео в разбивке «Хранилища»
         val trackIdle = Color(0xFF2A2D31) // неактивная дорожка слайдера, погасшая ячейка индикатора
+        val viewerShadeTop = Color(0xB3000000) // затемнение под шапкой просмотрщика (чёрный @70%, в прозрачное)
+        val viewerShadeBottom = Color(0xBF000000) // затемнение под подписью и таймлайном (чёрный @75%)
+        val viewerPlayScrim = Color(0x80000000) // крупная пауза/пуск видео (чёрный @50%)
+        val onMediaSoft = Color(0xBFFFFFFF) // вторая строка шапки просмотрщика (белый @75%)
         val waveIdle = Color(0xFF5A5D66) // непроигранная часть волны голосового («Медиа и файлы»)
 
         // Плитка файла по виду («Медиа и файлы» → Файлы): фон и буквы расширения.
@@ -341,6 +345,11 @@ object Tokens {
         val mediaTile = 44.dp // плитка файла, кнопка голосового, буква домена («Медиа и файлы»)
         val mediaFileRow = 64.dp // строка файла
         val mediaVoiceRow = 72.dp // строка голосового
+        val viewerButton = 44.dp // кнопка хрома просмотрщика (без плашки)
+        val viewerPlay = 64.dp // крупная пауза/пуск видео по центру
+        val viewerPlayIcon = 26.dp // значок в ней
+        val mediaTrack = 4.dp // полоса таймлайна видео
+        val mediaThumb = 14.dp // бегунок на ней
         val mediaWave = 22.dp // высота волны в строке голосового
         val attachGrid = 360.dp // сетка снимков в шторке «Прикрепить»: три ряда и край четвёртого
         val metaSlot = 46.dp // ширина правой колонки строки (время + значок)

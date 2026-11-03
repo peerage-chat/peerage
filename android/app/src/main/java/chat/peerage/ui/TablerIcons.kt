@@ -553,3 +553,13 @@ val TablerIcons.Link: ImageVector by lazy {
         "M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463",
     )
 }
+
+val TablerIcons.PauseBars: ImageVector by lazy { tabler("pause-bars", "M8 5v14", "M16 5v14") }
+
+val TablerIcons.PlayOutline: ImageVector by lazy { tabler("play-outline", "M7 4v16l13 -8z") }
+
+val TablerIcons.Volume: ImageVector by lazy {
+    tabler("volume", "M4 10v4h4l5 4v-12l-5 4z", "M16.5 9a4 4 0 0 1 0 6", "M19 6.5a7.5 7.5 0 0 1 0 11")
+}
+
+val TablerIcons.VolumeOff: ImageVector by lazy { tabler("volume-off", "M4 10v4h4l5 4v-12l-5 4z", "M16 9l6 6", "M22 9l-6 6") }

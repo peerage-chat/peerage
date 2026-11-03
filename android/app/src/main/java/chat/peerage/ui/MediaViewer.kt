@@ -7,13 +7,15 @@ import android.content.Context
 import android.os.Build
 import android.provider.MediaStore
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -25,111 +27,171 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Message
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import chat.peerage.AppModel
+import chat.peerage.ChatTarget
 import chat.peerage.HoloAccent
-import chat.peerage.HoloError
 import chat.peerage.HoloSecondary
+import chat.peerage.Message
+import chat.peerage.MsgRef
 import chat.peerage.R
 import chat.peerage.Tokens
+import chat.peerage.viewerMedia
+import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.min
 
-/** Одно вложение в просмотрщике. Плоская запись, а не сообщение чата: просмотрщик
- *  одинаково открывается из личного чата, группы и «Сохранённого». */
-internal data class ViewerItem(
-    val id: Long,
-    val sender: String,
-    val author: String,
-    val time: Long,
-    val mime: String,
-    val name: String,
-    val blobId: String,
-)
+/** Можно ли показать сообщение в просмотрщике: фото или видео, и оно уже здесь. */
+private fun viewable(model: AppModel, m: Message) =
+    (m.kind == "image" || m.kind == "video") && m.blobId.isNotEmpty() &&
+        (m.downloaded || model.savedBlobs[m.blobId] == true)
+
+private fun Message.isVideo() = kind == "video" || mime.startsWith("video/")
+
+private fun Message.ref() = MsgRef(id, sender)
 
 /**
- * Полноэкранный просмотр вложения — фото и видео.
+ * Где на экране лежат снимки ленты — туда просмотрщик уводит снимок, закрываясь
+ * протяжкой (app-ui.md → «Просмотр»). Экранные координаты: просмотрщик живёт в своём
+ * окне, и общая для двух окон система отсчёта — только экран.
+ */
+internal object MediaSpots {
+    private val spots = HashMap<MsgRef, Rect>()
+
+    fun put(ref: MsgRef, r: Rect) {
+        spots[ref] = r
+    }
+
+    fun remove(ref: MsgRef) {
+        spots.remove(ref)
+    }
+
+    fun get(ref: MsgRef): Rect? = spots[ref]?.takeIf { it.width > 0f && it.height > 0f }
+}
+
+/** Отметить снимок ленты как место возврата просмотрщика. */
+internal fun Modifier.mediaSpot(ref: MsgRef): Modifier = composed {
+    val view = LocalView.current
+    DisposableEffect(ref) { onDispose { MediaSpots.remove(ref) } }
+    onGloballyPositioned {
+        val at = IntArray(2).also { a -> view.getLocationOnScreen(a) }
+        MediaSpots.put(ref, it.boundsInWindow().translate(at[0].toFloat(), at[1].toFloat()))
+    }
+}
+
+/**
+ * Закрытие протяжкой: пока палец тянет, снимок едет за ним и уменьшается, фон гаснет и
+ * сквозь него виден чат; отпустили дальше порога — снимок улетает в свой пузырь (или
+ * гаснет, если пузыря на экране нет), не дотянули — возвращается.
+ */
+private class CloseMotion {
+    var dragY by mutableFloatStateOf(0f)
+    val fly = Animatable(0f)
+
+    /** Куда лететь, в координатах окна просмотрщика; null — пузыря на экране нет. */
+    var target by mutableStateOf<Rect?>(null)
+
+    /** Где снимок текущей страницы при единичном масштабе. */
+    var image by mutableStateOf(Rect.Zero)
+    var height = 1f
+
+    /** 0..1: насколько протянули — от этого уменьшение, скругление и фон. */
+    fun pulled(closeAt: Float) = (dragY / closeAt).coerceIn(0f, 1f)
+
+    fun dragScale() = 1f - (dragY.coerceAtLeast(0f) / height).coerceIn(0f, 1f) * DRAG_SHRINK
+}
+
+/** На сколько снимок уменьшается, если протянуть на всю высоту экрана. */
+private const val DRAG_SHRINK = 0.5f
+
+/**
+ * Полноэкранный просмотр фото и видео (app-ui.md → «Просмотр», макеты `viewer/`).
  *
- * Экран сознательно «голый»: чёрный фон во весь экран, никаких карточек и
- * поверхностей. Здесь единственный предмет — сам снимок, и всё, что не он,
- * соревнуется с ним за внимание. Поэтому хром (шапка и таймлайн) прячется по
- * тапу и сам уходит через пять секунд после последнего касания.
+ * Экран сознательно «голый»: чёрный фон, никаких поверхностей. Хром — шапка сверху,
+ * подпись и таймлайн снизу — лежит на затемнении поверх снимка, прячется по тапу и сам
+ * через пять секунд. Жесты: щипок — до 6×, двойной тап у фото — 1× ↔ 2.5×, вбок —
+ * соседнее вложение, вниз — снимок уходит в свой пузырь ([CloseMotion]).
  *
- * Жесты: щипок — зум, двойной тап у фото — 1× ↔ 2.5×, протяжка вниз — закрыть,
- * протяжка вбок — соседнее вложение чата. Пока снимок увеличен, протяжка двигает
- * его, а не листает и не закрывает: иначе рассмотреть угол было бы невозможно.
- *
- * Список [items] — то, что уже загружено в ленту чата; полная история медиа
- * потребует запроса в движок (задача #45), и тогда счётчик «N из M» будет
- * считать по всему чату, а не по подгруженному куску.
+ * Листается ВСЁ медиа чата (запрос к движку), а не подгруженный кусок ленты: [seed] —
+ * то, что есть сразу, пока список едет, и «N из M» считает по чату.
  */
 @Composable
 internal fun MediaViewer(
     model: AppModel,
-    items: List<ViewerItem>,
-    startIndex: Int,
+    chat: ChatTarget,
+    seed: List<Message>,
+    start: MsgRef,
     onClose: () -> Unit,
-    onForward: (ViewerItem) -> Unit,
-    onDelete: (ViewerItem) -> Unit,
-    onShowInChat: (ViewerItem) -> Unit,
+    onReply: ((Message) -> Unit)?,
+    onShowInChat: (Message) -> Unit,
+    onDeleted: (MsgRef) -> Unit = {},
 ) {
-    if (items.isEmpty()) return
+    var list by remember { mutableStateOf(seed.filter { viewable(model, it) }) }
+    if (list.isEmpty()) return
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val storagePerm = rememberPermissionRunner()
-    val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, items.lastIndex)) { items.size }
-    val item = items[pager.currentPage.coerceIn(0, items.lastIndex)]
-    val video = item.mime.startsWith("video/")
+    val pager = rememberPagerState(list.indexOfFirst { it.ref() == start }.coerceAtLeast(0)) { list.size }
+    val m = list[pager.currentPage.coerceIn(0, list.lastIndex)]
+    val video = m.isVideo()
     // Видео в память не читаем: оно проигрывается и отдаётся файлом (см. [Content]).
-    val bytes = if (video) null else model.blob(item.blobId)
+    val bytes = if (video) null else model.blob(m.blobId)
+
+    // Полный список медиа чата подменяет затравку на той же странице: снимок под
+    // пальцем не меняется, меняется только «N из M».
+    LaunchedEffect(chat) {
+        model.viewerMedia(chat) { full ->
+            val shown = full.filter { viewable(model, it) }
+            val cur = list.getOrNull(pager.currentPage)?.ref()
+            val at = shown.indexOfFirst { it.ref() == cur }
+            if (at >= 0) {
+                list = shown
+                pager.requestScrollToPage(at)
+            }
+        }
+    }
 
     var chrome by remember { mutableStateOf(true) }
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var muted by remember { mutableStateOf(false) }
-    // Смещение «оттягивания» вниз. Фон гаснет вместе с ним — жест виден до того,
-    // как отпустишь палец, и понятно, что произойдёт.
-    var dragY by remember { mutableFloatStateOf(0f) }
-    // Пороги — в dp, а не в пикселях: в пикселях жест на плотном экране требовал
-    // протянуть вдвое дальше, чем на простом.
-    val density = androidx.compose.ui.platform.LocalDensity.current
+    val motion = remember { CloseMotion() }
+    // Пороги — в dp: в пикселях жест на плотном экране требовал протянуть вдвое дальше.
+    val density = LocalDensity.current
     val closeAt = with(density) { CloseDrag.toPx() }
     val fadeOver = with(density) { CloseFade.toPx() }
-    val dim = (1f - (abs(dragY) / fadeOver)).coerceIn(0.35f, 1f)
 
     // Хром уходит сам: пока он на экране, он закрывает часть кадра. Отсчёт
     // перезапускается на каждое переключение и на смену страницы; открытое меню
@@ -142,133 +204,127 @@ internal fun MediaViewer(
     }
 
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false)) {
+        val view = LocalView.current
+        val release: () -> Unit = {
+            if (motion.dragY > closeAt) {
+                // Видео — SurfaceView, слой его не уменьшает: оно просто закрывается.
+                if (video) {
+                    onClose()
+                } else {
+                    motion.target = MediaSpots.get(m.ref())?.let { r ->
+                        val at = IntArray(2).also { view.getLocationOnScreen(it) }
+                        r.translate(-at[0].toFloat(), -at[1].toFloat())
+                    }
+                    scope.launch {
+                        motion.fly.animateTo(1f, tween(Tokens.Anim.normal))
+                        onClose()
+                    }
+                }
+            } else {
+                scope.launch { animate(motion.dragY, 0f, animationSpec = tween(Tokens.Anim.fast)) { v, _ -> motion.dragY = v } }
+            }
+        }
+        val dim = (1f - abs(motion.dragY) / fadeOver).coerceIn(CLOSE_DIM_MIN, 1f) * (1f - motion.fly.value)
         Box(
-            Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)),
+            Modifier.fillMaxSize()
+                .onSizeChanged { motion.height = it.height.toFloat().coerceAtLeast(1f) }
+                .background(Color.Black.copy(alpha = dim)),
             contentAlignment = Alignment.Center,
         ) {
-            HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
-                val it = items[page]
+            HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = motion.dragY == 0f) { page ->
+                val it = list[page]
                 MediaPage(
                     model,
                     it,
-                    if (it.mime.startsWith("video/")) null else model.blob(it.blobId),
+                    if (it.isVideo()) null else model.blob(it.blobId),
                     muted,
                     chrome,
+                    motion = if (page == pager.currentPage) motion else null,
+                    closeAt = closeAt,
                     onChrome = { chrome = !chrome },
                     onDrag = { dy ->
-                        dragY += dy
-                        if (dragY > closeAt) onClose()
+                        if (motion.dragY == 0f && dy > 0f) chrome = false
+                        motion.dragY = (motion.dragY + dy).coerceAtLeast(0f)
                     },
-                    onDragEnd = { dragY = 0f },
+                    onDragEnd = release,
                 )
             }
 
+            val shown = chrome && motion.dragY == 0f && motion.fly.value == 0f
             // Шапка поверх снимка, а не над ним: отдельная полоса откусывала бы
             // высоту у самого изображения ради подписи, которую и так знают.
-            AnimatedVisibility(
-                chrome,
-                Modifier.align(Alignment.TopCenter),
-                enter = fadeIn() + slideInVertically { -it },
-                exit = fadeOut() + slideOutVertically { -it },
-            ) {
-                Row(
-                    Modifier.fillMaxWidth()
-                        .background(Tokens.Colors.mediaScrim)
-                        .statusBarsPadding()
-                        .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
-                    verticalAlignment = Alignment.CenterVertically,
+            AnimatedVisibility(shown, Modifier.align(Alignment.TopCenter), enter = fadeIn(), exit = fadeOut()) {
+                ViewerTop(
+                    author = viewerAuthor(model, chat, m),
+                    sub = if (list.size > 1) {
+                        stringResource(R.string.viewer_of, fmtViewerDate(m.time), pager.currentPage + 1, list.size)
+                    } else {
+                        fmtViewerDate(m.time)
+                    },
+                    onClose = onClose,
+                    onMenu = { menu = true },
                 ) {
-                    BarIcon(Icons.Filled.Close, stringResource(R.string.common_back), onClick = onClose)
-                    Spacer(Modifier.width(Tokens.Space.s))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            item.author,
-                            color = Color.White,
-                            fontSize = Tokens.Font.label,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        // Счётчик — во второй строке, а не третьим элементом ряда:
-                        // ряд из трёх смысловых блоков читается как панель, а не
-                        // как подпись к снимку.
-                        Text(
-                            if (items.size > 1) {
-                                stringResource(
-                                    R.string.viewer_of,
-                                    fmtViewerDate(item.time),
-                                    pager.currentPage + 1,
-                                    items.size,
-                                )
-                            } else {
-                                fmtViewerDate(item.time)
-                            },
-                            color = HoloSecondary,
-                            fontSize = Tokens.Font.small,
-                        )
-                    }
-                    Box {
-                        BarIcon(Icons.Filled.MoreVert, stringResource(R.string.common_more)) { menu = true }
-                        PopMenu(menu, onDismiss = { menu = false }) {
-                            ViewerMenuItem(Icons.Filled.Download, R.string.viewer_save) {
+                    PopMenu(menu, onDismiss = { menu = false }) {
+                        if (onReply != null) {
+                            ViewerMenuItem(TablerIcons.Reply, R.string.chat_reply) {
                                 menu = false
-                                withContent(model, item, bytes) { saveWithPermission(ctx, storagePerm, it, item) }
+                                onReply(m)
+                                onClose()
                             }
-                            ViewerMenuItem(Icons.AutoMirrored.Filled.Send, R.string.forward_action) {
-                                menu = false
-                                onForward(item)
-                            }
-                            ViewerMenuItem(Icons.Filled.Share, R.string.viewer_share) {
-                                menu = false
-                                withContent(model, item, bytes) { shareFile(ctx, it, item.mime, item.name) }
-                            }
-                            ViewerMenuItem(Icons.AutoMirrored.Filled.Message, R.string.viewer_show_in_chat) {
-                                menu = false
-                                onShowInChat(item)
-                            }
-                            PopMenuDivider()
-                            ViewerMenuItem(Icons.Filled.Delete, R.string.viewer_delete, danger = true) {
-                                menu = false
-                                confirmDelete = true
-                            }
+                        }
+                        ViewerMenuItem(TablerIcons.Forward, R.string.forward_action) {
+                            menu = false
+                            // Пересылка — через выделение, как из панели чата: «переслать»
+                            // везде означает одно. Шторку рисует экран под просмотрщиком.
+                            model.selection = setOf(m.ref())
+                            model.beginForward(chat.id, chat.group)
+                            onClose()
+                        }
+                        ViewerMenuItem(TablerIcons.Download, R.string.viewer_save) {
+                            menu = false
+                            withContent(model, m, bytes) { saveWithPermission(ctx, storagePerm, it, m) }
+                        }
+                        ViewerMenuItem(TablerIcons.Share, R.string.viewer_share) {
+                            menu = false
+                            withContent(model, m, bytes) { shareFile(ctx, it, m.mime, m.name) }
+                        }
+                        ViewerMenuItem(TablerIcons.Message, R.string.viewer_show_in_chat) {
+                            menu = false
+                            onShowInChat(m)
+                            onClose()
+                        }
+                        PopMenuDivider()
+                        ViewerMenuItem(TablerIcons.Trash, R.string.viewer_delete, danger = true) {
+                            menu = false
+                            confirmDelete = true
                         }
                     }
                 }
             }
 
-            // Таймлайн прячется вместе с шапкой: это один слой управления,
-            // разнесённый по краям кадра.
-            if (video) {
-                AnimatedVisibility(
-                    chrome,
-                    Modifier.align(Alignment.BottomCenter),
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it },
-                ) {
-                    VideoBar(muted) { muted = it }
+            // Подпись и таймлайн — один нижний слой: прячутся вместе с шапкой.
+            val caption = m.text.trim()
+            if (caption.isNotEmpty() || video) {
+                AnimatedVisibility(shown, Modifier.align(Alignment.BottomCenter), enter = fadeIn(), exit = fadeOut()) {
+                    ViewerBottom(caption, video, muted) { muted = it }
                 }
             }
         }
-    }
 
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text(stringResource(R.string.viewer_delete)) },
-            text = { Text(stringResource(R.string.viewer_delete_confirm)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    onDelete(item)
+        if (confirmDelete) {
+            ConfirmSheet(
+                title = stringResource(R.string.viewer_delete),
+                text = stringResource(R.string.viewer_delete_confirm),
+                ok = stringResource(R.string.folder_delete_ok),
+                onOk = {
+                    model.selection = setOf(m.ref())
+                    model.deleteSelected(chat.id, chat.group)
+                    onDeleted(m.ref())
                     onClose()
-                }) { Text(stringResource(R.string.folder_delete_ok), color = HoloError) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
-        )
+                },
+                onClose = { confirmDelete = false },
+            )
+        }
     }
 }
 
@@ -278,21 +334,63 @@ private val CloseDrag = 80.dp
 /** На какой длине протяжки фон гаснет до предела. */
 private val CloseFade = 320.dp
 
-/** До Android 10 запись в галерею требует разрешения; начиная с неё MediaStore
- *  кладёт файл в свою папку и без него. */
-private fun saveWithPermission(
-    ctx: Context,
-    ask: (Array<String>, Int, () -> Unit) -> Unit,
-    content: Content,
-    item: ViewerItem,
-) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        saveToGallery(ctx, content, item.mime, item.name)
-    } else {
-        ask(
-            arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
-            R.string.perm_denied_storage,
-        ) { saveToGallery(ctx, content, item.mime, item.name) }
+/** Сквозь фон на протяжке виден чат, но не ярче этого. */
+private const val CLOSE_DIM_MIN = 0.35f
+
+/** Автор вложения для шапки: «Вы», участник группы или собеседник. */
+@Composable
+private fun viewerAuthor(model: AppModel, chat: ChatTarget, m: Message): String = when {
+    m.mine -> stringResource(R.string.chat_reply_you)
+    chat.group -> groupSenderName(model, m.sender)
+    else -> model.peerName(m.sender)
+}
+
+/** Шапка (макет `viewer/Main`): закрыть · автор и «дата · N из M» · «⋮» — на затемнении сверху. */
+@Composable
+private fun ViewerTop(author: String, sub: String, onClose: () -> Unit, onMenu: () -> Unit, menu: @Composable () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Tokens.Colors.viewerShadeTop, Color.Transparent)))
+            .statusBarsPadding()
+            .padding(start = Tokens.Space.s, end = Tokens.Space.s, top = Tokens.Space.m + Tokens.Space.xxs, bottom = Tokens.Space.xxxl + Tokens.Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs + Tokens.Space.xxs),
+    ) {
+        ViewerButton(TablerIcons.X, stringResource(R.string.common_back), onClick = onClose)
+        Column(Modifier.weight(1f)) {
+            Text(author, color = Color.White, fontSize = Tokens.Font.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(sub, color = Tokens.Colors.onMediaSoft, fontSize = Tokens.Font.small, style = Tokens.Text.tabular, maxLines = 1)
+        }
+        Box {
+            ViewerButton(TablerIcons.DotsVertical, stringResource(R.string.common_more), onClick = onMenu)
+            menu()
+        }
+    }
+}
+
+/** Кнопка хрома просмотрщика: значок без плашки — плашки спорили бы со снимком. */
+@Composable
+private fun ViewerButton(icon: ImageVector, desc: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(Tokens.Size.viewerButton).clip(RoundedCornerShape(Tokens.Radius.button)).clickable(onClickLabel = desc, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, desc, tint = Color.White, modifier = Modifier.size(Tokens.Size.iconRow))
+    }
+}
+
+/** Низ (макеты `viewer/Main`, `viewer/Video`): подпись к снимку и таймлайн видео на затемнении. */
+@Composable
+private fun ViewerBottom(caption: String, video: Boolean, muted: Boolean, onMute: (Boolean) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Tokens.Colors.viewerShadeBottom)))
+            .navigationBarsPadding()
+            .padding(start = Tokens.Space.l, end = Tokens.Space.l, top = Tokens.Space.hero, bottom = Tokens.Space.xl),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+    ) {
+        if (caption.isNotEmpty()) Text(caption, color = Color.White, fontSize = Tokens.Font.label)
+        if (video) VideoBar(muted, onMute)
     }
 }
 
@@ -308,13 +406,31 @@ private sealed interface Content {
     }
 }
 
+/** До Android 10 запись в галерею требует разрешения; начиная с неё MediaStore
+ *  кладёт файл в свою папку и без него. */
+private fun saveWithPermission(
+    ctx: Context,
+    ask: (Array<String>, Int, () -> Unit) -> Unit,
+    content: Content,
+    m: Message,
+) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        saveToGallery(ctx, content, m.mime, m.name)
+    } else {
+        ask(
+            arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
+            R.string.perm_denied_storage,
+        ) { saveToGallery(ctx, content, m.mime, m.name) }
+    }
+}
+
 /** Достать содержимое вложения и отдать его `use` на главном потоке. */
-private fun withContent(model: AppModel, item: ViewerItem, bytes: ByteArray?, use: (Content) -> Unit) {
-    if (!item.mime.startsWith("video/")) {
+private fun withContent(model: AppModel, m: Message, bytes: ByteArray?, use: (Content) -> Unit) {
+    if (!m.isVideo()) {
         bytes?.let { use(Content.Bytes(it)) }
         return
     }
-    model.exportBlob(item.blobId, "shared", item.name.ifBlank { defaultName(true) }) { f ->
+    model.exportBlob(m.blobId, "shared", m.name.ifBlank { defaultName(true) }) { f ->
         f?.let { use(Content.OnDisk(it)) }
     }
 }
@@ -324,14 +440,16 @@ private fun ViewerMenuItem(icon: ImageVector, labelRes: Int, danger: Boolean = f
     PopMenuItem(icon, stringResource(labelRes), danger = danger, onClick = onClick)
 }
 
-/** Одна страница пейджера: снимок с зумом или видео. */
+/** Одна страница пейджера: снимок с зумом или видео. [motion] — только у текущей. */
 @Composable
 private fun MediaPage(
     model: AppModel,
-    item: ViewerItem,
+    item: Message,
     bytes: ByteArray?,
     muted: Boolean,
     chrome: Boolean,
+    motion: CloseMotion?,
+    closeAt: Float,
     onChrome: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -341,7 +459,8 @@ private fun MediaPage(
     var offY by remember(item.blobId) { mutableFloatStateOf(0f) }
     var box by remember { mutableStateOf(IntSize.Zero) }
     val zoom by animateFloatAsState(scale, label = "zoom")
-    val video = item.mime.startsWith("video/")
+    val video = item.isVideo()
+    val radius = with(LocalDensity.current) { Tokens.Radius.bubble.toPx() }
 
     // Дальше своих краёв снимок не уезжает: без этого его можно утащить за экран
     // и потерять из виду, а вернуть — только сбросом зума.
@@ -433,15 +552,47 @@ private fun MediaPage(
                 // держать ради него оригинал на 48 МБ не за что.
                 val bmp = rememberFullscreenBitmap(bytes, item.blobId)
                 if (bmp != null) {
+                    // Снимок занимает ровно свой прямоугольник, а не весь экран: иначе
+                    // скругление на протяжке легло бы на поля, а не на углы снимка.
                     Image(
                         bmp,
                         null,
-                        Modifier.fillMaxSize().graphicsLayer {
-                            scaleX = zoom
-                            scaleY = zoom
-                            translationX = offX
-                            translationY = offY
-                        },
+                        Modifier.aspectRatio(bmp.width.toFloat() / bmp.height.coerceAtLeast(1))
+                            .then(if (motion != null) Modifier.onGloballyPositioned { motion.image = it.boundsInRoot() } else Modifier)
+                            .graphicsLayer {
+                                var s = zoom
+                                var tx = offX
+                                var ty = offY
+                                var a = 1f
+                                var r = 0f
+                                if (motion != null) {
+                                    val p = motion.fly.value
+                                    val s0 = motion.dragScale()
+                                    val t = motion.target
+                                    val img = motion.image
+                                    r = radius * maxOf(motion.pulled(closeAt), p)
+                                    if (t != null && img.width > 0f && img.height > 0f) {
+                                        // В пузырь: центр к центру, размер — вписать в него.
+                                        val sT = min(t.width / img.width, t.height / img.height)
+                                        s *= lerp(s0, sT, p)
+                                        tx += lerp(0f, t.center.x - img.center.x, p)
+                                        ty += lerp(motion.dragY, t.center.y - img.center.y, p)
+                                    } else {
+                                        s *= s0 * (1f - FADE_SHRINK * p)
+                                        ty += motion.dragY
+                                        a = 1f - p
+                                    }
+                                }
+                                scaleX = s
+                                scaleY = s
+                                translationX = tx
+                                translationY = ty
+                                alpha = a
+                                if (r > 0f) {
+                                    shape = RoundedCornerShape(r / s.coerceAtLeast(0.01f))
+                                    clip = true
+                                }
+                            },
                         contentScale = ContentScale.Fit,
                     )
                 }
@@ -450,6 +601,9 @@ private fun MediaPage(
     }
 }
 
+/** Пузыря на экране нет — снимок гаснет, чуть уменьшаясь. */
+private const val FADE_SHRINK = 0.1f
+
 /** Плеер один на весь просмотрщик: таймлайн лежит в другой ветке дерева, а
  *  управляет тем же воспроизведением. */
 private object Player {
@@ -457,13 +611,17 @@ private object Player {
     var media: android.media.MediaPlayer? = null
 }
 
+/** Как часто опрашивать плеер: VideoView не сообщает о положении сам, а четыре раза в
+ *  секунду хватает, чтобы полоса не дёргалась и не грела процессор. */
+private const val PLAYER_POLL_MS = 250L
+
 /**
  * Видео проигрывается ВНУТРИ приложения, а не отдаётся системному плееру: файл
  * из чата — чужая переписка, и выпускать его в сторонние приложения ради кнопки
  * «play» не за что. Байты кладём в приватный кэш, откуда их никто не читает.
  */
 @Composable
-private fun VideoSurface(model: AppModel, item: ViewerItem, muted: Boolean, chrome: Boolean) {
+private fun VideoSurface(model: AppModel, item: Message, muted: Boolean, chrome: Boolean) {
     // Видео расшифровывается в приватный кэш потоково, по чанку: в память целиком
     // оно не поднимается. Копия живёт, пока открыт просмотр.
     var file by remember(item.blobId) { mutableStateOf<java.io.File?>(null) }
@@ -471,6 +629,13 @@ private fun VideoSurface(model: AppModel, item: ViewerItem, muted: Boolean, chro
         model.exportBlob(item.blobId, "viewer", "${item.blobId.take(16)}-${item.name}") { file = it }
     }
     var mine by remember(item.blobId) { mutableStateOf<android.widget.VideoView?>(null) }
+    var playing by remember(item.blobId) { mutableStateOf(true) }
+    LaunchedEffect(mine) {
+        while (true) {
+            mine?.let { playing = it.isPlaying }
+            kotlinx.coroutines.delay(PLAYER_POLL_MS)
+        }
+    }
     DisposableEffect(file) {
         // Захватить файл ЭТОГО эффекта: при смене null→файл onDispose старого эффекта
         // читал бы уже новый и удалял его до того, как плеер успеет открыть.
@@ -516,37 +681,45 @@ private fun VideoSurface(model: AppModel, item: ViewerItem, muted: Boolean, chro
                 },
                 modifier = Modifier.fillMaxSize(),
             )
-        }
-        // Значок паузы по центру — только когда хром скрыт: с таймлайном на
-        // экране состояние и так видно по его кнопке.
-        if (!chrome && Player.view?.isPlaying == false) {
-            Box(
-                Modifier.size(72.dp).clip(CircleShape).background(Tokens.Colors.playScrim),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(Tokens.Size.iconHero))
+            // Крупная пауза/пуск по центру (макет `viewer/Video`): с хромом — всегда,
+            // без него — пока стоит на паузе, чтобы было видно, что видео не идёт.
+            if (chrome || !playing) {
+                val desc = stringResource(if (playing) R.string.viewer_pause else R.string.viewer_play)
+                Box(
+                    Modifier.size(Tokens.Size.viewerPlay).clip(CircleShape).background(Tokens.Colors.viewerPlayScrim)
+                        .clickable(onClickLabel = desc) {
+                            val v = mine ?: return@clickable
+                            if (v.isPlaying) v.pause() else v.start()
+                            playing = v.isPlaying
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (playing) TablerIcons.PauseBars else TablerIcons.PlayOutline,
+                        desc,
+                        tint = Color.White,
+                        modifier = Modifier.size(Tokens.Size.viewerPlayIcon),
+                    )
+                }
             }
         }
     }
 }
 
-/** Нижняя панель видео: пуск/пауза · полоса с перемоткой · время · звук. */
+/** Таймлайн видео (макет `viewer/Video`): время · полоса с перемоткой · длительность · звук.
+ *  Неизвестная длительность — без полосы. Пуск и пауза — крупной кнопкой по центру. */
 @Composable
 private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
     var position by remember { mutableIntStateOf(0) }
     var duration by remember { mutableIntStateOf(0) }
-    var playing by remember { mutableStateOf(true) }
     var width by remember { mutableIntStateOf(1) }
-    // Положение читаем опросом: VideoView не сообщает о нём сам, а четыре раза в
-    // секунду достаточно, чтобы полоса не дёргалась и не грела процессор.
     LaunchedEffect(Unit) {
         while (true) {
             Player.view?.let {
                 position = it.currentPosition
                 duration = it.duration.coerceAtLeast(0)
-                playing = it.isPlaying
             }
-            kotlinx.coroutines.delay(250)
+            kotlinx.coroutines.delay(PLAYER_POLL_MS)
         }
     }
     val seek = { x: Float ->
@@ -556,64 +729,42 @@ private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
             position = ms
         }
     }
-    Row(
-        Modifier.fillMaxWidth()
-            .background(Tokens.Colors.mediaScrim)
-            .navigationBarsPadding()
-            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-            stringResource(if (playing) R.string.viewer_pause else R.string.viewer_play),
-            tint = Color.White,
-            modifier = Modifier.size(Tokens.Size.iconL).pointerInput(Unit) {
-                detectTapGestures {
-                    val v = Player.view ?: return@detectTapGestures
-                    if (v.isPlaying) v.pause() else v.start()
-                    playing = v.isPlaying
-                }
-            },
-        )
-        Spacer(Modifier.width(Tokens.Space.m))
-        // Область касания намеренно выше самой линии: попадать пальцем в три
-        // пикселя невозможно.
-        Box(
-            Modifier.weight(1f)
-                .height(24.dp)
-                .onSizeChanged { width = it.width.coerceAtLeast(1) }
-                .pointerInput(duration) { detectTapGestures { p -> seek(p.x) } }
-                .pointerInput(duration) {
-                    detectHorizontalDragGestures { change, _ -> seek(change.position.x) }
-                },
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            Box(Modifier.fillMaxWidth().height(3.dp).background(Tokens.Colors.trackOnMedia))
-            if (duration > 0) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.panel)) {
+        Text(fmtDuration(position), color = Color.White, fontSize = Tokens.Font.small, style = Tokens.Text.tabular)
+        if (duration > 0) {
+            // Область касания намеренно выше самой линии: попадать пальцем в четыре
+            // пикселя невозможно.
+            Box(
+                Modifier.weight(1f)
+                    .height(Tokens.Size.iconL)
+                    .onSizeChanged { width = it.width.coerceAtLeast(1) }
+                    .pointerInput(duration) { detectTapGestures { p -> seek(p.x) } }
+                    .pointerInput(duration) { detectHorizontalDragGestures { change, _ -> seek(change.position.x) } },
+                contentAlignment = Alignment.CenterStart,
+            ) {
                 val done = (position.toFloat() / duration).coerceIn(0f, 1f)
-                Box(Modifier.fillMaxWidth(done).height(3.dp).background(HoloAccent))
+                val track = RoundedCornerShape(Tokens.Radius.thumb)
+                Box(Modifier.fillMaxWidth().height(Tokens.Size.mediaTrack).clip(track).background(Tokens.Colors.trackOnMedia))
+                Box(Modifier.fillMaxWidth(done).height(Tokens.Size.mediaTrack).clip(track).background(Color.White))
+                // Бегунок: его положение — доля ширины минус половина бегунка.
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    Box(
+                        Modifier.offset(x = maxWidth * done - Tokens.Size.mediaThumb / 2)
+                            .size(Tokens.Size.mediaThumb).clip(CircleShape).background(Color.White),
+                    )
+                }
             }
+            Text(fmtDuration(duration), color = Color.White, fontSize = Tokens.Font.small, style = Tokens.Text.tabular)
+        } else {
+            Spacer(Modifier.weight(1f))
         }
-        Spacer(Modifier.width(Tokens.Space.m))
-        Text(
-            if (duration > 0) {
-                stringResource(R.string.viewer_progress, fmtDuration(position), fmtDuration(duration))
-            } else {
-                fmtDuration(position)
-            },
-            color = Tokens.Colors.quoteTextOnBubble,
-            fontSize = Tokens.Font.caption,
-            maxLines = 1,
-        )
-        Spacer(Modifier.width(Tokens.Space.s))
-        Icon(
-            if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
-            stringResource(if (muted) R.string.viewer_unmute else R.string.viewer_mute),
-            tint = Color.White,
-            modifier = Modifier.size(Tokens.Size.iconM).pointerInput(Unit) {
-                detectTapGestures { onMute(!muted) }
-            },
-        )
+        val desc = stringResource(if (muted) R.string.viewer_unmute else R.string.viewer_mute)
+        Box(
+            Modifier.size(Tokens.Size.viewerButton).clip(RoundedCornerShape(Tokens.Radius.button)).clickable(onClickLabel = desc) { onMute(!muted) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(if (muted) TablerIcons.VolumeOff else TablerIcons.Volume, desc, tint = Color.White, modifier = Modifier.size(Tokens.Size.iconRow))
+        }
     }
 }
 
