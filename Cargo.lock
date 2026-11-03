@@ -5317,6 +5317,7 @@ dependencies = [
 name = "peerage-groupchat"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "peerage-core",
  "peerage-group",
  "peerage-messenger",
