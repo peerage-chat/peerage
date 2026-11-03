@@ -1274,3 +1274,59 @@ fn photo_only_by_admin_reaches_member() {
     });
     assert!(gone, "и у участника его нет");
 }
+
+/// Инвариант MLS «двинул состояние — сохрани»: служебные отправки админа (имя и фото
+/// новичку при вступлении) двигают храповик отправителя. Без сохранения после
+/// перезапуска админ повторял уже потраченное поколение, и участник молча выбрасывал
+/// следующее сообщение (живой прогон 3.5: переименование не дошло, фото — дошло).
+#[test]
+fn admin_restart_after_join_keeps_next_message() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(31), id(41));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let cfg = Config {
+        retry_interval: Duration::from_millis(40),
+        ..Config::default()
+    };
+    let (a_msgr, a_rx) =
+        Messenger::start_with_transport(a_id.clone(), net.endpoint(a_key), cfg.clone());
+    let (b_msgr, b_rx) = Messenger::start_with_transport(b_id.clone(), net.endpoint(b_key), cfg);
+    let a_msgr = Arc::new(a_msgr);
+    let a_dir = tmpdir("restart-name-a");
+    let mut gm_a = manager(a_id.clone(), a_msgr.clone(), a_dir.clone());
+    let mut gm_b = manager(b_id, Arc::new(b_msgr), tmpdir("restart-name-b"));
+
+    let gid = gm_a.create("дача").expect("группа создана");
+    // Первый перезапуск тратит суточную ротацию ключа (новая эпоха с нуля прятала бы
+    // повтор поколения); на телефоне её к этому моменту уже давно сделали.
+    drop(gm_a);
+    let mut gm_a = manager(a_id.clone(), a_msgr.clone(), a_dir.clone());
+    gm_a.invite(&gid, b_key);
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.invites_json().contains(&hex::encode(&gid))
+    }));
+    assert!(gm_b.accept_invite(&gid));
+    assert!(pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |a, b| {
+        a.members(&gid).contains(&b_key) && b.group_ids().contains(&gid)
+    }));
+    // Имя группы новичку — первое прикладное сообщение админа в эпохе: даём ему дойти
+    // и потратить у B это поколение.
+    let until = Instant::now() + Duration::from_millis(1500);
+    pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, _| {
+        Instant::now() > until
+    });
+
+    drop(gm_a);
+    let mut gm_a = manager(a_id, a_msgr, a_dir);
+    assert!(
+        gm_a.rename(&gid, "дача 2"),
+        "админ переименовал после перезапуска"
+    );
+    let ok = pump_until(&mut gm_a, &a_rx, &mut gm_b, &b_rx, |_, b| {
+        b.list_json().contains("дача 2")
+    });
+    assert!(
+        ok,
+        "новое название дошло: храповик после имени-новичку был сохранён"
+    );
+}

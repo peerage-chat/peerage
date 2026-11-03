@@ -1313,6 +1313,9 @@ impl GroupManager {
             let photo = e.photo.clone();
             let _ = e.chat.send_photo(&photo);
         }
+        // Отправка двинула храповик: без сохранения после перезапуска поколение
+        // повторилось бы, и участник выбросил бы следующее сообщение (инвариант MLS).
+        self.save_group(gid);
     }
 
     /// Сменить фото группы у себя. true — фото действительно другое.
@@ -1336,6 +1339,7 @@ impl GroupManager {
         if let Some(e) = self.groups.get_mut(gid) {
             let _ = e.chat.send_photo(blob);
         }
+        self.save_group(gid); // отправка двинула храповик (инвариант MLS)
         let me = self.identity.public_key_bytes();
         self.put_event(gid, "photo", me, String::new());
         true
@@ -1378,6 +1382,7 @@ impl GroupManager {
         if let Some(e) = self.groups.get_mut(gid) {
             let _ = e.chat.send_name(name);
         }
+        self.save_group(gid); // отправка двинула храповик (инвариант MLS)
         let me = self.identity.public_key_bytes();
         self.put_event(gid, "renamed", me, name.to_string());
         true
