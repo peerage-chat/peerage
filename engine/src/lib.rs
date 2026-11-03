@@ -136,6 +136,11 @@ pub(crate) enum GroupCmd {
         gid: Vec<u8>,
         name: String,
     },
+    /// Фото группы — hex уже сохранённого блоба (пусто — убрать); только админ.
+    SetPhoto {
+        gid: Vec<u8>,
+        blob: String,
+    },
     /// Ротация ключа группы (PCS, ADR-004).
     Rekey {
         gid: Vec<u8>,
@@ -306,6 +311,9 @@ struct GroupRowJson {
     /// Ключ админа (hex; пусто — неизвестен, у архивных всегда пусто).
     #[serde(default)]
     admin_key: String,
+    /// Фото группы: hex блоба (пусто — нет; у архивных всегда пусто).
+    #[serde(default)]
+    photo: String,
     /// Мы НЕ состоим в группе: история из копии, отправка недоступна.
     #[serde(default)]
     archived: bool,
@@ -2139,6 +2147,10 @@ impl Engine {
         let mut keep: std::collections::HashSet<String> =
             self.messages.lock_safe().thumb_ids().into_iter().collect();
         keep.extend(self.self_avatar_id());
+        // Фото групп — как аватары контактов: без них группа осталась бы без лица.
+        let cached = self.group_cache.lock_safe().list.clone();
+        let rows: Vec<GroupRowJson> = serde_json::from_str(&cached).unwrap_or_default();
+        keep.extend(rows.into_iter().map(|r| r.photo).filter(|p| !p.is_empty()));
         keep.extend(
             self.contacts
                 .lock_safe()
@@ -2348,6 +2360,25 @@ impl Engine {
         }));
     }
 
+    /// Фото группы (только админ): scrub (PET) → блоб → рассылка ссылки. Пустое
+    /// содержимое — убрать фото. Возвращает hex блоба (пусто — убрано). Итог —
+    /// `groups_changed`.
+    pub fn group_set_photo(&self, gid: Vec<u8>, content: Vec<u8>, mime: &str) -> String {
+        let blob = if content.is_empty() {
+            String::new()
+        } else {
+            let scrubbed = peerage_blob::scrub::scrub(mime, &content);
+            let id = peerage_blob::blob_id(&scrubbed);
+            self.store_blob(id, &scrubbed);
+            hex::encode(id)
+        };
+        let _ = self.jobs.send(Job::Cmd(GroupCmd::SetPhoto {
+            gid,
+            blob: blob.clone(),
+        }));
+        blob
+    }
+
     /// Ротация ключа группы (PCS, ADR-004). Fire-and-forget.
     pub fn group_rekey(&self, gid: Vec<u8>) {
         let _ = self.jobs.send(Job::Cmd(GroupCmd::Rekey { gid }));
@@ -2523,6 +2554,7 @@ impl Engine {
                     members: 0,
                     admin: false,
                     admin_key: String::new(),
+                    photo: String::new(),
                     archived: true,
                 });
             }
@@ -3995,8 +4027,16 @@ fn handle_event(
                 push_event(engine, dto::UiEvent::GroupInvitesChanged);
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
+            // Новое фото группы: байты — у приславшего админа, по контент-адресу.
+            if let Some((from, blob)) = &out.photo {
+                if !engine.blob_exists(blob) {
+                    if let Ok(h) = hex::decode(blob) {
+                        engine.request_blob(from, &h);
+                    }
+                }
+            }
             if out.renamed {
-                // Имя или админ сменились (от админа) — обновляем кэш списка и UI.
+                // Имя, фото или админ сменились (от админа) — обновляем кэш и UI.
                 refresh_group_cache(engine, groups);
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
@@ -4414,6 +4454,12 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
                 if leaving {
                     engine.sync_room_members();
                 }
+                push_event(engine, dto::UiEvent::GroupsChanged);
+            }
+        }
+        GroupCmd::SetPhoto { gid, blob } => {
+            if groups.set_photo(&gid, &blob) {
+                refresh_group_cache(engine, groups);
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }
         }

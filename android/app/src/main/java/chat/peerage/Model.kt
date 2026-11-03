@@ -2698,6 +2698,11 @@ class AppModel private constructor() {
         Native.groupTransferAdmin(sessionPtr, gid, peerHex, false)
     }
 
+    /** Фото группы (только админ); пустые байты — убрать. Список обновит `groups_changed`. */
+    fun setGroupPhoto(gid: String, content: ByteArray, mime: String) = ops.execute {
+        Native.groupSetPhoto(sessionPtr, gid, content, mime)
+    }
+
     /** Переименовать группу (только админ); список обновит `groups_changed`. */
     fun renameGroup(gid: String, name: String) = ops.execute { Native.groupRename(sessionPtr, gid, name.trim()) }
 

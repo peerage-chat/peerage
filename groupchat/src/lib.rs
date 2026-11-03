@@ -90,6 +90,10 @@ enum AppMsg {
         #[serde(default)]
         leaving: bool,
     },
+    /// Служебное: фото группы — hex блоба (пусто — убрать). Шлёт админ; байты
+    /// участник запрашивает у него по контент-адресу, как аватар контакта.
+    #[serde(rename = "photo")]
+    Photo { blob: String },
 }
 
 /// Медиа-вложение группового сообщения: ссылка на блоб плюс всё, что нужно
@@ -164,6 +168,8 @@ pub enum Inbound {
     Name { actor: PeerKey, name: String },
     /// `actor` передаёт права админа `key`; `leaving` — и уходит из группы.
     Admin { actor: PeerKey, key: PeerKey, leaving: bool },
+    /// Фото группы от `actor`: hex блоба (пусто — убрать); принимается только от админа.
+    Photo { actor: PeerKey, blob: String },
     /// Изменён состав группы (применён Commit), его применил actor.
     Membership { actor: PeerKey, added: Vec<PeerKey>, removed: Vec<PeerKey> },
     /// Нас удалили из группы (ADR-004) — верхний слой забывает группу локально.
@@ -372,6 +378,11 @@ impl GroupChat {
         self.send_app(&AppMsg::Name { name: name.to_string() })
     }
 
+    /// Разослать фото группы: hex блоба (пусто — убрать).
+    pub fn send_photo(&mut self, blob: &str) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::Photo { blob: blob.to_string() })
+    }
+
     /// Передать права админа `key` (шаг 7j); `leaving` — и уйти из группы.
     pub fn send_admin(&mut self, key: &PeerKey, leaving: bool) -> Result<(), GroupChatError> {
         self.send_app(&AppMsg::Admin { key: hex::encode(key), leaving })
@@ -432,6 +443,14 @@ impl GroupChat {
                         Inbound::Media { sender, media: MediaBody { caption, ..media } }
                     }
                     Ok(AppMsg::Name { name }) => Inbound::Name { actor: sender, name },
+                    // Не контент-адрес (пропатченный клиент) — не фото.
+                    Ok(AppMsg::Photo { blob }) => {
+                        if blob.is_empty() || (blob.len() == 64 && hex::decode(&blob).is_ok()) {
+                            Inbound::Photo { actor: sender, blob }
+                        } else {
+                            Inbound::None
+                        }
+                    }
                     // Кривой ключ (пропатченный клиент) — не передача.
                     Ok(AppMsg::Admin { key, leaving }) => match hex::decode(&key)
                         .ok()

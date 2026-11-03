@@ -226,12 +226,14 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         --   admin      — мы админ/секвенсор (создатель)
         --   admin_key  — ключ админа (пусто — неизвестен): права на действия извне
         --   rekeyed_at — последняя ротация своего ключа (катящийся PCS, ADR-004)
+        --   photo      — фото группы: hex блоба (пусто — нет), ставит админ
         CREATE TABLE IF NOT EXISTS group_meta (
             gid        BLOB    PRIMARY KEY,
             name       TEXT    NOT NULL,
             admin      INTEGER NOT NULL DEFAULT 0,
             admin_key  BLOB    NOT NULL DEFAULT x'',
-            rekeyed_at INTEGER NOT NULL DEFAULT 0
+            rekeyed_at INTEGER NOT NULL DEFAULT 0,
+            photo      TEXT    NOT NULL DEFAULT ''
         );
         -- Кого и в какую группу мы позвали: ждём от него KeyPackage с этим gid.
         -- На диске, потому что «Вступить» могут нажать и через сутки, после нашего
@@ -260,6 +262,7 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     // один раз, на новой (колонка уже в CREATE) — тихо ничего не сделает.
     let _ = conn.execute("ALTER TABLE outbox ADD COLUMN failed INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE calls ADD COLUMN video INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE group_meta ADD COLUMN photo TEXT NOT NULL DEFAULT ''", []);
     // Полнотекстовый индекс переписки: текст и имя файла вложения (поиск в чате, 2.9).
     // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
     // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5

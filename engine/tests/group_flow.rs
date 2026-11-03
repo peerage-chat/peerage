@@ -1247,3 +1247,30 @@ fn rename_only_by_admin() {
     });
     assert!(ok, "новое название дошло до участника");
 }
+
+/// Шаг 7j: фото группы ставит только админ; ссылка на блоб доходит до участника.
+#[test]
+fn photo_only_by_admin_reaches_member() {
+    let mut c = setup_and_join(0);
+    let gid = c.gid.clone();
+    let photo_of = |gm: &GroupManager| -> String {
+        let v: serde_json::Value = serde_json::from_str(&gm.list_json()).unwrap();
+        v.as_array()
+            .and_then(|a| a.iter().find(|g| g["gid"] == hex::encode(&gid)))
+            .and_then(|g| g["photo"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let blob = "ab".repeat(32);
+    assert!(!c.gm_b.set_photo(&gid, &blob), "участник не ставит фото");
+    assert!(c.gm_a.set_photo(&gid, &blob), "админ поставил фото");
+    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, b| {
+        photo_of(b) == blob
+    });
+    assert!(ok, "ссылка на фото дошла до участника");
+    assert!(c.gm_a.set_photo(&gid, ""), "админ убрал фото");
+    let gone = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, b| {
+        photo_of(b).is_empty()
+    });
+    assert!(gone, "и у участника его нет");
+}

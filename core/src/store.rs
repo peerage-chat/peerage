@@ -396,6 +396,8 @@ pub struct GroupRecord {
     /// Ключ админа; `None` — неизвестен.
     pub admin_key: Option<[u8; 32]>,
     pub rekeyed_at: i64,
+    /// Фото группы: hex блоба (пусто — нет).
+    pub photo: String,
 }
 
 /// Входящее приглашение в группу.
@@ -420,7 +422,7 @@ impl GroupStore {
 
     pub fn groups(&self) -> Vec<GroupRecord> {
         let conn = db::lock(&self.db);
-        let Ok(mut stmt) = conn.prepare("SELECT gid, name, admin, admin_key, rekeyed_at FROM group_meta") else {
+        let Ok(mut stmt) = conn.prepare("SELECT gid, name, admin, admin_key, rekeyed_at, photo FROM group_meta") else {
             return Vec::new();
         };
         let rows = stmt.query_map([], |r| {
@@ -430,6 +432,7 @@ impl GroupStore {
                 admin: r.get::<_, i64>(2)? != 0,
                 admin_key: <[u8; 32]>::try_from(r.get::<_, Vec<u8>>(3)?.as_slice()).ok(),
                 rekeyed_at: r.get(4)?,
+                photo: r.get(5)?,
             })
         });
         rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
@@ -443,6 +446,13 @@ impl GroupStore {
              ON CONFLICT(gid) DO UPDATE SET name=excluded.name, admin=excluded.admin, admin_key=excluded.admin_key",
             rusqlite::params![gid, name, admin as i64, key],
         )?;
+        Ok(())
+    }
+
+    /// Фото группы (hex блоба; пусто — убрать). Отдельно от [`Self::save_group`]: меняется
+    /// редко и только по сообщению админа.
+    pub fn set_photo(&self, gid: &[u8], photo: &str) -> Result<(), StoreError> {
+        db::lock(&self.db).execute("UPDATE group_meta SET photo=?2 WHERE gid=?1", rusqlite::params![gid, photo])?;
         Ok(())
     }
 
@@ -2668,9 +2678,11 @@ mod tests {
         let g = GroupStore::new(db());
         g.save_group(b"g1", "старое имя", false, Some(&admin)).unwrap();
         g.set_rekeyed(b"g1", 77).unwrap();
+        g.set_photo(b"g1", "ab12").unwrap();
         g.save_group(b"g1", "новое имя", true, Some(&admin)).unwrap();
         let rec = &g.groups()[0];
         assert_eq!((rec.name.as_str(), rec.admin, rec.admin_key, rec.rekeyed_at), ("новое имя", true, Some(admin), 77));
+        assert_eq!(rec.photo, "ab12", "фото пережило перезапись записи группы");
 
         g.add_sent_invite(&peer, b"g1").unwrap();
         g.add_sent_invite(&peer, b"g2").unwrap();

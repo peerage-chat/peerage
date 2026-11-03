@@ -43,6 +43,8 @@ struct GroupRow {
     admin: bool,
     /// Ключ админа группы (hex; пусто — неизвестен): метка «админ» у участника.
     admin_key: String,
+    /// Фото группы: hex блоба (пусто — нет).
+    photo: String,
 }
 
 /// Карточка приглашения в группу для клиента.
@@ -61,6 +63,8 @@ struct Entry {
     /// Мы — админ/секвенсор этой группы (создатель). Только админ вправе отзывать
     /// участников и коммитить ротацию (ADR-004: избегаем одновременных Commit).
     admin: bool,
+    /// Фото группы: hex блоба (пусто — нет).
+    photo: String,
 }
 
 /// Не чаще одного resync-обслуживания на пира+группу за это окно (анти-амплификация).
@@ -278,6 +282,7 @@ impl GroupManager {
                     chat,
                     name: g.name,
                     admin: g.admin,
+                    photo: g.photo,
                 },
             );
         }
@@ -307,6 +312,7 @@ impl GroupManager {
                 chat,
                 name: name.to_string(),
                 admin: true,
+                photo: String::new(),
             },
         );
         self.remember_title(&id, name);
@@ -792,6 +798,7 @@ impl GroupManager {
                 members: e.chat.member_count(),
                 admin: e.admin,
                 admin_key: self.admin_keys.get(id).map(hex::encode).unwrap_or_default(),
+                photo: e.photo.clone(),
             })
             .collect::<Vec<GroupRow>>();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
@@ -897,13 +904,10 @@ impl GroupManager {
                 let me = hex::encode(self.identity.public_key_bytes());
                 self.put_event(&id, "joined", peer, me);
             }
-            // Догоняем нового участника настоящим именем группы (иначе у него дефолт).
-            // Welcome уже ушёл в add_member (раньше в очереди) → имя применится после
-            // вступления. Идемпотентно и для уже состоящих участников.
-            if let Some(e) = self.groups.get_mut(&id) {
-                let name = e.name.clone();
-                let _ = e.chat.send_name(&name);
-            }
+            // Догоняем нового участника настоящим именем и фото группы. Welcome уже
+            // ушёл в add_member (раньше в очереди) → они применятся после вступления.
+            // Идемпотентно и для уже состоящих участников.
+            self.send_card(&id);
         }
         added
     }
@@ -1080,6 +1084,19 @@ impl GroupManager {
                         ..Default::default()
                     }
                 }
+                Some(Ok(Inbound::Photo { actor, blob })) => {
+                    let changed = name_change_ok(self.admin_key(&gid), actor)
+                        && self.set_photo_local(&gid, &blob);
+                    if changed {
+                        self.put_event(&gid, "photo", actor, String::new());
+                    }
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        renamed: changed,
+                        photo: (changed && !blob.is_empty()).then_some((actor, blob)),
+                        ..Default::default()
+                    }
+                }
                 Some(Ok(Inbound::Admin {
                     actor,
                     key,
@@ -1108,8 +1125,14 @@ impl GroupManager {
                     removed,
                 })) => {
                     // Добавил тот, кто сделал коммит; убранный — о нём и строка.
+                    let fresh = !added.is_empty();
                     for who in added {
                         self.put_event(&gid, "joined", who, hex::encode(actor));
+                    }
+                    // Позвал не админ — имя и фото новичку шлёт админ: от других их
+                    // не примут.
+                    if fresh {
+                        self.send_card(&gid);
                     }
                     for who in removed {
                         self.put_event(&gid, "left", who, String::new());
@@ -1223,6 +1246,7 @@ impl GroupManager {
                         chat,
                         name,
                         admin: false,
+                        photo: String::new(),
                     },
                 );
                 self.save_group(&id);
@@ -1272,6 +1296,49 @@ impl GroupManager {
         self.invites.insert((peer, gid.to_vec()));
         let _ = self.meta.add_sent_invite(&peer, gid);
         self.resyncing.insert(peer); // on_key_reply сделает Remove+Add, не просто Add
+    }
+
+    /// Админ рассылает «карточку» группы — имя и фото: новичку, который иначе увидел бы
+    /// дефолт. От не-админа их всё равно не примут, поэтому шлёт только админ.
+    fn send_card(&mut self, gid: &[u8]) {
+        let Some(e) = self.groups.get_mut(gid) else {
+            return;
+        };
+        if !e.admin {
+            return;
+        }
+        let name = e.name.clone();
+        let _ = e.chat.send_name(&name);
+        if !e.photo.is_empty() {
+            let photo = e.photo.clone();
+            let _ = e.chat.send_photo(&photo);
+        }
+    }
+
+    /// Сменить фото группы у себя. true — фото действительно другое.
+    fn set_photo_local(&mut self, gid: &[u8], blob: &str) -> bool {
+        let Some(e) = self.groups.get_mut(gid) else {
+            return false;
+        };
+        if e.photo == blob {
+            return false;
+        }
+        e.photo = blob.to_string();
+        let _ = self.meta.set_photo(gid, blob);
+        true
+    }
+
+    /// Поставить фото группы (hex блоба, пусто — убрать): только админ, уходит всем.
+    pub fn set_photo(&mut self, gid: &[u8], blob: &str) -> bool {
+        if !self.groups.get(gid).is_some_and(|e| e.admin) || !self.set_photo_local(gid, blob) {
+            return false;
+        }
+        if let Some(e) = self.groups.get_mut(gid) {
+            let _ = e.chat.send_photo(blob);
+        }
+        let me = self.identity.public_key_bytes();
+        self.put_event(gid, "photo", me, String::new());
+        true
     }
 
     /// Сменить имя группы у себя. true — имя действительно другое.
@@ -1411,8 +1478,10 @@ pub struct GroupOutcome {
     pub joined: bool,
     /// Нас отозвали из группы (ADR-004) — UI должен убрать группу и уведомить.
     pub removed: bool,
-    /// Имя группы или её админ изменились (пришло от админа) — UI обновить список.
+    /// Имя, фото или админ группы изменились (пришло от админа) — UI обновить список.
     pub renamed: bool,
+    /// Новое фото группы: у кого просить блоб и его hex.
+    pub photo: Option<([u8; 32], String)>,
     /// Медиа-сообщение (M2): ссылка на блоб + метаданные карточки. Пусто → не медиа.
     pub media: Option<MediaBody>,
     /// Участник отозвал своё сообщение — строка исчезла из истории, UI перечитать.

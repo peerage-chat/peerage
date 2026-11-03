@@ -300,6 +300,25 @@ pub extern "system" fn Java_chat_peerage_Native_groupTransferAdmin<'local>(
     });
 }
 
+/// Фото группы (только админ): байты картинки, пусто — убрать. Возвращает hex блоба.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_groupSetPhoto<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    content: JByteArray<'local>,
+    mime: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, ""), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "") };
+        let bytes = env.convert_byte_array(&content).unwrap_or_default();
+        let mime = jstr(&mut env, &mime);
+        ret(&env, &e.group_set_photo(gid, bytes, &mime))
+    })
+}
+
 /// Переименовать группу (только админ). Fire-and-forget.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_groupRename<'local>(

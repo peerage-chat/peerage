@@ -461,6 +461,9 @@ object Native {
     /** Передать права админа участнику (шаг 7j); [leaving] — и выйти из группы. */
     external fun groupTransferAdmin(sessionPtr: Long, gid: String, peerHex: String, leaving: Boolean)
 
+    /** Фото группы (только админ): байты картинки, пусто — убрать. Возвращает hex блоба. */
+    external fun groupSetPhoto(sessionPtr: Long, gid: String, content: ByteArray, mime: String): String
+
     /** Переименовать группу (только админ). Итог — событие `groups_changed`. */
     external fun groupRename(sessionPtr: Long, gid: String, name: String)
 
