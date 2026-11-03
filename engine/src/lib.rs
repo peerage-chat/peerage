@@ -245,6 +245,13 @@ impl ChatKey {
     }
 }
 
+/// Страница «Медиа и файлы» для клиента.
+#[derive(serde::Serialize)]
+struct MediaPageJson {
+    total: usize,
+    items: Vec<StoredMessage>,
+}
+
 /// Страница поиска в чате: всего совпадений и находки этой страницы.
 #[derive(serde::Serialize)]
 struct SearchPageJson {
@@ -816,6 +823,37 @@ impl Engine {
                 .lock_safe()
                 .history_after(chat.as_chat(), (time, row), HISTORY_PAGE);
         serde_json::to_string(&page).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Страница вкладки «Медиа и файлы» (3.2): `tab` — `media` | `files` | `voice` |
+    /// `links`. JSON `{total, items: [сообщение…]}`, свежие первыми; неизвестная
+    /// вкладка — пустая страница.
+    pub fn media_page_json(
+        &self,
+        chat: &ChatKey,
+        tab: &str,
+        offset: usize,
+        limit: usize,
+    ) -> String {
+        let page = match peerage_core::store::MediaTab::parse(tab) {
+            Some(tab) => self
+                .messages
+                .lock_safe()
+                .media_page(chat.as_chat(), tab, offset, limit),
+            None => Default::default(),
+        };
+        let json = MediaPageJson {
+            total: page.total,
+            items: page.items,
+        };
+        serde_json::to_string(&json).unwrap_or_else(|_| r#"{"total":0,"items":[]}"#.into())
+    }
+
+    /// Сколько в каждой вкладке «Медиа и файлы»: JSON `{media, files, voice, links}`.
+    pub fn media_counts_json(&self, chat: &ChatKey) -> String {
+        let [media, files, voice, links] = self.messages.lock_safe().media_counts(chat.as_chat());
+        serde_json::json!({ "media": media, "files": files, "voice": voice, "links": links })
+            .to_string()
     }
 
     /// Дни с сообщениями в `[from, to)` (секунды) по местному времени (`offset` секунд

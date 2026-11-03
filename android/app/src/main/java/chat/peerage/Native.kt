@@ -328,6 +328,12 @@ object Native {
     external fun historyAfter(sessionPtr: Long, chatHex: String, isGroup: Boolean, time: Long, row: Long): String
 
     /** Дни с сообщениями в `[from, to)` по местному времени: JSON `["ГГГГ-ММ-ДД"]`. */
+    /** Страница вкладки «Медиа и файлы»: JSON `{total, items}`, свежие первыми. */
+    external fun mediaPage(sessionPtr: Long, chatHex: String, isGroup: Boolean, tab: String, offset: Int, limit: Int): String
+
+    /** Счётчики вкладок «Медиа и файлы»: JSON `{media, files, voice, links}`. */
+    external fun mediaCounts(sessionPtr: Long, chatHex: String, isGroup: Boolean): String
+
     external fun messageDays(sessionPtr: Long, chatHex: String, isGroup: Boolean, from: Long, to: Long, offset: Long): String
 
     /** Хвост переписки с пиром (последняя страница) как JSON-массив. */

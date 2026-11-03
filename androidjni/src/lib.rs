@@ -692,6 +692,47 @@ pub extern "system" fn Java_chat_peerage_Native_messageDays<'local>(
     })
 }
 
+/// Страница вкладки «Медиа и файлы» (`tab`: media | files | voice | links).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_mediaPage<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    tab: JString<'local>,
+    offset: jint,
+    limit: jint,
+) -> jstring {
+    const EMPTY: &str = r#"{"total":0,"items":[]}"#;
+    jni_safe!(ret(&env, EMPTY), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, EMPTY) };
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0) else {
+            return ret(&env, EMPTY);
+        };
+        let tab = jstr(&mut env, &tab);
+        ret(&env, &e.media_page_json(&chat, &tab, offset.max(0) as usize, limit.max(0) as usize))
+    })
+}
+
+/// Сколько в каждой вкладке «Медиа и файлы»: `{media, files, voice, links}`.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_mediaCounts<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0) else {
+            return ret(&env, "{}");
+        };
+        ret(&env, &e.media_counts_json(&chat))
+    })
+}
+
 /// Переслать сообщения в другой чат. `src_group`/`dst_group` — «это группа?»,
 /// идентификатор в hex (ключ пира или gid). Возвращает, сколько ушло.
 #[no_mangle]

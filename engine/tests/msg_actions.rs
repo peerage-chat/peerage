@@ -824,3 +824,36 @@ fn typing_is_opt_in_mutual_and_throttled() {
     assert_eq!(ev.len(), 1, "пять нажатий — один пакет");
     assert_eq!(ev[0]["peer"], hex::encode(b_key));
 }
+
+/// «Медиа и файлы» (3.2) через JSON-границу движка: счётчики вкладок и страница
+/// ссылок у обеих сторон; неизвестная вкладка — пустая страница, не ошибка.
+#[test]
+fn media_tabs_count_and_page_links() {
+    let (a, b, a_key, b_key) = pair("mediatabs", 93, 94);
+    a.send_text(&b_key, "маршрут https://example.org/route");
+    a.send_text(&b_key, "без ссылки");
+    b.send_text(&a_key, "погода: https://weather.example/x");
+    assert!(
+        wait(10, || history(&a, &b_key).len() == 3),
+        "все три в переписке"
+    );
+
+    let chat = peerage_engine::ChatKey::Dm(b_key);
+    let counts: serde_json::Value = serde_json::from_str(&a.media_counts_json(&chat)).unwrap();
+    assert_eq!(
+        counts,
+        serde_json::json!({"media": 0, "files": 0, "voice": 0, "links": 2})
+    );
+
+    let page: serde_json::Value =
+        serde_json::from_str(&a.media_page_json(&chat, "links", 0, 1)).unwrap();
+    assert_eq!(page["total"], 2, "{page}");
+    assert_eq!(
+        page["items"][0]["text"], "погода: https://weather.example/x",
+        "свежие первыми"
+    );
+
+    let none: serde_json::Value =
+        serde_json::from_str(&a.media_page_json(&chat, "photo", 0, 10)).unwrap();
+    assert_eq!(none["total"], 0);
+}

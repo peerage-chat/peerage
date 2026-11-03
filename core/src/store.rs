@@ -932,6 +932,53 @@ pub struct SearchPage {
     pub hits: Vec<(Vec<u8>, i64, StoredMessage)>,
 }
 
+/// Вкладка экрана «Медиа и файлы» (app-ui.md): какие сообщения чата в неё попадают.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaTab {
+    /// Фото и видео.
+    Media,
+    Files,
+    Voice,
+    /// Сообщения со ссылкой `http(s)://` в тексте или подписи.
+    Links,
+}
+
+impl MediaTab {
+    /// Порядок вкладок на экране — и полей в [`MessageStore::media_counts`].
+    pub const ALL: [MediaTab; 4] = [MediaTab::Media, MediaTab::Files, MediaTab::Voice, MediaTab::Links];
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "media" => Some(MediaTab::Media),
+            "files" => Some(MediaTab::Files),
+            "voice" => Some(MediaTab::Voice),
+            "links" => Some(MediaTab::Links),
+            _ => None,
+        }
+    }
+
+    /// Условие на строку `m`: одно на счётчик и на страницу, чтобы «N» в шапке
+    /// совпадало с тем, что листается.
+    fn filter(self) -> &'static str {
+        match self {
+            MediaTab::Media => "m.kind IN ('image', 'video')",
+            MediaTab::Files => "m.kind = 'file'",
+            MediaTab::Voice => "m.kind = 'voice'",
+            MediaTab::Links => {
+                "m.kind NOT IN ('call', 'video_call', 'deleted')
+                 AND (instr(lower(m.text), 'http://') > 0 OR instr(lower(m.text), 'https://') > 0)"
+            }
+        }
+    }
+}
+
+/// Страница вкладки «Медиа и файлы»: всего в вкладке и сами сообщения, свежие первыми.
+#[derive(Default)]
+pub struct MediaPage {
+    pub total: usize,
+    pub items: Vec<StoredMessage>,
+}
+
 /// Слово запроса без окончания: у слов от пяти букв отбрасывается последняя гласная,
 /// «й» или «ь», и дальше оно ищется началом слова — «сарай» находит «сарая», «книгу» —
 /// «книга». Не морфология, а дешёвый шаг к ней: короткие слова не трогаем, чтобы «дом»
@@ -1455,6 +1502,42 @@ impl MessageStore {
         };
         stmt.query_map(rusqlite::params![chat.id(), chat.scope(), from, to, offset], |r| r.get(0))
             .and_then(|it| it.collect())
+            .unwrap_or_default()
+    }
+
+    /// Страница вкладки «Медиа и файлы» (3.2): сообщения чата одного вида, свежие
+    /// первыми, листание `offset`/`limit`. Системные строки не входят.
+    pub fn media_page(&self, chat: Chat, tab: MediaTab, offset: usize, limit: usize) -> MediaPage {
+        let conn = db::lock(&self.db);
+        let from_where = format!(
+            "FROM chat_messages m WHERE m.chat = ?1 AND m.scope = ?2 AND m.system = 0 AND {}",
+            tab.filter()
+        );
+        let params = rusqlite::params![chat.id(), chat.scope()];
+        let run = || -> rusqlite::Result<MediaPage> {
+            let total: i64 = conn.query_row(&format!("SELECT count(*) {from_where}"), params, |r| r.get(0))?;
+            let sql = format!(
+                "SELECT {MSG_COLS} {from_where} ORDER BY m.time DESC, m.rowid DESC LIMIT {limit} OFFSET {offset}"
+            );
+            let items = conn.prepare(&sql)?.query_map(params, read_msg)?.collect::<rusqlite::Result<_>>()?;
+            Ok(MediaPage { total: total as usize, items })
+        };
+        run().unwrap_or_default()
+    }
+
+    /// Сколько сообщений в каждой вкладке «Медиа и файлы» — в порядке [`MediaTab::ALL`]
+    /// (шапка экрана, строка профиля, разделы пустого поиска).
+    pub fn media_counts(&self, chat: Chat) -> [usize; 4] {
+        let sums: Vec<String> =
+            MediaTab::ALL.iter().map(|t| format!("coalesce(sum({}), 0)", t.filter())).collect();
+        let sql = format!(
+            "SELECT {} FROM chat_messages m WHERE m.chat = ?1 AND m.scope = ?2 AND m.system = 0",
+            sums.join(", ")
+        );
+        db::lock(&self.db)
+            .query_row(&sql, rusqlite::params![chat.id(), chat.scope()], |r| {
+                Ok([0, 1, 2, 3].map(|i| r.get::<_, i64>(i).unwrap_or(0) as usize))
+            })
             .unwrap_or_default()
     }
 
@@ -2421,6 +2504,51 @@ mod tests {
             vec!["2026-10-02", "2026-10-04"]
         );
         assert!(store.message_days(chat, t + day, t + 2 * day, 0).is_empty(), "промежуток полуоткрытый");
+    }
+
+    /// «Медиа и файлы»: вкладки разбирают сообщения чата по видам, свежие первыми;
+    /// удалённое, системное и чужие чаты не входят; счётчики совпадают со страницами.
+    #[test]
+    fn media_tabs_sort_chat_messages_by_kind() {
+        let (me, peer, other) = (key(), key(), key());
+        let store = MessageStore::open(db());
+        let chat = Chat::Dm(&peer);
+        let put = |chat: Chat, id: u64, kind: &str, text: &str, system: bool| {
+            store
+                .append(chat, &StoredMessage {
+                    id,
+                    sender: hex::encode(me),
+                    text: text.into(),
+                    mine: true,
+                    time: id as i64 * 10,
+                    kind: kind.into(),
+                    system,
+                    ..Default::default()
+                })
+                .unwrap();
+        };
+        put(chat, 1, "image", "", false);
+        put(chat, 2, "video", "смотри https://example.org/a", false);
+        put(chat, 3, "file", "", false);
+        put(chat, 4, "voice", "", false);
+        put(chat, 5, "text", "без ссылок, просто http", false);
+        put(chat, 6, "text", "Тут HTTPS://Wiki.org/x и ещё", false);
+        put(chat, 7, "image", "", false);
+        put(chat, 8, "text", "вступил по ссылке https://x.org", true);
+        put(Chat::Dm(&other), 9, "image", "", false);
+        store.retract_many(chat, &[(7, hex::encode(me))]).unwrap();
+
+        let ids = |tab| store.media_page(chat, tab, 0, 10).items.iter().map(|m| m.id).collect::<Vec<_>>();
+        assert_eq!(ids(MediaTab::Media), vec![2, 1]);
+        assert_eq!(ids(MediaTab::Files), vec![3]);
+        assert_eq!(ids(MediaTab::Voice), vec![4]);
+        assert_eq!(ids(MediaTab::Links), vec![6, 2], "ссылка в подписи тоже ссылка; регистр не важен");
+        assert_eq!(store.media_counts(chat), [2, 1, 1, 2]);
+
+        let page = store.media_page(chat, MediaTab::Media, 1, 1);
+        assert_eq!((page.total, page.items.iter().map(|m| m.id).collect::<Vec<_>>()), (2, vec![1]));
+        assert_eq!(MediaTab::parse("links"), Some(MediaTab::Links));
+        assert_eq!(MediaTab::parse("photo"), None);
     }
 
     /// Старая база: строки, лёгшие до нового индекса, находятся после миграции.
