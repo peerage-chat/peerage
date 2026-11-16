@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -301,6 +300,8 @@ private fun CompactShell(model: AppModel) {
     var editFolder by remember { mutableStateOf<String?>(null) }
     // Открытая карточка запроса (ключ) и приглашения (gid).
     var requestKey by remember { mutableStateOf("") }
+    // Поиск на «Контактах»: null — поле закрыто.
+    var contactQuery by remember { mutableStateOf<String?>(null) }
     var inviteGid by remember { mutableStateOf("") }
     // Черновик мастера новой группы и выбор на «Пригласить»: живут между шагами и шапкой.
     var groupDraft by remember { mutableStateOf(GroupDraft()) }
@@ -365,6 +366,9 @@ private fun CompactShell(model: AppModel) {
     // Обычный «назад» по экранам — предиктивный, в ScreenTransitions; здесь только звонок.
     val inCall = model.dmCallPeer != null || model.incomingCall != null
     BackHandler(enabled = inCall) {}
+    // Поиск «Контактов»: «назад» сначала закрывает поле; ушли с экрана — поле закрыто.
+    BackHandler(enabled = contactQuery != null && screen == Screen.ContactList) { contactQuery = null }
+    LaunchedEffect(screen) { if (screen != Screen.ContactList) contactQuery = null }
 
     val navigate: (Screen) -> Unit = { dest -> screen = dest }
 
@@ -453,13 +457,21 @@ private fun CompactShell(model: AppModel) {
                                 Screen.SettingsAbout -> TopBar(stringResource(R.string.settings_cat_about), onBack = goBack)
                                 Screen.Scanner -> TopBar(stringResource(R.string.title_verify_qr), onBack = goBack)
                                 Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
-                                    BarIcon(Icons.Filled.PersonAdd, stringResource(R.string.cd_add_contact)) { screen = Screen.Add }
+                                    BarIcon(TablerIcons.Search, stringResource(R.string.cd_search)) {
+                                        contactQuery = if (contactQuery == null) "" else null
+                                    }
+                                    BarIcon(
+                                        TablerIcons.Plus,
+                                        stringResource(R.string.cd_add_contact),
+                                        tint = Tokens.Colors.accentDark,
+                                        bg = Tokens.Colors.accent,
+                                    ) { screen = Screen.Add }
                                 }
                                 Screen.Calls -> TopBar(stringResource(R.string.menu_calls), onBack = goBack)
                                 Screen.Network -> TopBar(stringResource(R.string.menu_network), onBack = goBack) {
                                     BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
                                 }
-                                Screen.EditProfile -> TopBar(stringResource(R.string.settings_edit_profile), onBack = goBack)
+                                Screen.EditProfile -> {}
                                 Screen.VaultLevel -> TopBar(stringResource(R.string.settings_at_rest), onBack = goBack)
                                 Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
                                 Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = goBack)
@@ -673,7 +685,16 @@ private fun CompactShell(model: AppModel) {
                                     Screen.SettingsMedia -> SettingsMediaScreen(model)
                                     Screen.SettingsNotifications -> SettingsNotificationsScreen(model)
                                     Screen.SettingsAbout -> SettingsAboutScreen()
-                                    Screen.ContactList -> ContactListScreen(model) {
+                                    Screen.ContactList -> ContactListScreen(
+                                        model,
+                                        query = contactQuery,
+                                        onQuery = { contactQuery = it },
+                                        // Запросы живут вкладкой главной — туда и ведёт полоса.
+                                        onRequests = {
+                                            screen = Screen.Contacts
+                                            selectFolder(RequestsFolder)
+                                        },
+                                    ) {
                                         model.openChat(it)
                                         screen = Screen.Chat
                                     }

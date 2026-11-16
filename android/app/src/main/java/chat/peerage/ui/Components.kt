@@ -68,7 +68,14 @@ import kotlin.math.abs
  * Нажимается вся зона 48dp вокруг плашки: на Android меньше — промахи пальцем.
  */
 @Composable
-internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Colors.iconBar, onClick: () -> Unit) {
+internal fun BarIcon(
+    icon: ImageVector,
+    desc: String,
+    tint: Color = Tokens.Colors.iconBar,
+    /** Плашка; акцентная — у главного действия экрана («+» на «Контактах»). */
+    bg: Color = Tokens.Colors.panel,
+    onClick: () -> Unit,
+) {
     val press = remember { MutableInteractionSource() }
     Box(
         Modifier.size(Tokens.Size.touch)
@@ -80,7 +87,7 @@ internal fun BarIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Color
         Box(
             Modifier.size(Tokens.Size.barButton)
                 .clip(RoundedCornerShape(Tokens.Radius.button))
-                .background(Tokens.Colors.panel),
+                .background(bg),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(Tokens.Size.iconRow))

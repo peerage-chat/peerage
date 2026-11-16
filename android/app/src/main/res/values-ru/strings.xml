@@ -651,8 +651,6 @@
     <string name="settings_verified">Проверенные контакты</string>
     <string name="settings_verified_count">%1$d из %2$d сверены лично</string>
     <string name="settings_tap_avatar">Нажмите на аватар, чтобы сменить</string>
-    <string name="settings_your_name">Ваше имя</string>
-    <string name="settings_name_hint">Так вас увидят контакты. Имя уходит только им.</string>
     <string name="settings_edit_profile">Профиль</string>
 
     <string name="settings_app_lock">Блокировка приложения</string>
@@ -1108,4 +1106,10 @@
     <string name="req_lookalike">Имя совпадает с контактом %1$s (ключ %2$s…), ключ другой.</string>
     <string name="req_lookalike_short">Имя совпадает с контактом</string>
     <string name="req_verify_in_person">Сверить ключ лично</string>
+    <!-- Контакты (4.3, макет screens/Contacts) -->
+    <string name="contacts_requests_strip">Запросы в контакты · %1$d</string>
+    <!-- Свой профиль (4.3, макет people/MeEdit) -->
+    <string name="me_edit_name">Имя</string>
+    <string name="me_edit_caption">Имя и фото рассылаются контактам. Каждый контакт может подписать этот телефон у себя по-своему — это имя он увидит вместо присланного.</string>
+    <string name="me_remove_photo">Убрать фото</string>
 </resources>

@@ -9,27 +9,11 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import chat.peerage.AppModel
-import chat.peerage.HoloAccent
-import chat.peerage.HoloAccentDark
-import chat.peerage.HoloBg
-import chat.peerage.R
-import chat.peerage.Tokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,31 +46,6 @@ internal fun rememberImagePicker(onJpeg: (ByteArray) -> Unit): () -> Unit {
         }
     }
     return { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-}
-
-/**
- * Свой аватар, который можно сменить тапом: значок камеры в углу говорит об этом
- * без подписи (так же, как на шаге профиля в онбординге).
- */
-@Composable
-internal fun EditableAvatar(name: String, avatar: ByteArray?, onPick: () -> Unit) {
-    Box(
-        contentAlignment = Alignment.BottomEnd,
-        modifier = Modifier.clickable(onClick = onPick),
-    ) {
-        SquareAvatar(name, size = Tokens.Size.avatarBig, avatarBytes = avatar, circle = true, ring = HoloBg)
-        Box(
-            Modifier.size(34.dp).clip(CircleShape).background(HoloAccent).border(3.dp, HoloBg, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                TablerIcons.Camera,
-                stringResource(R.string.settings_tap_avatar),
-                tint = HoloAccentDark,
-                modifier = Modifier.size(Tokens.Size.iconS),
-            )
-        }
-    }
 }
 
 /**

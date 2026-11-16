@@ -163,6 +163,48 @@ fn profile_change_repropagates_by_new_hash() {
     b.shutdown();
 }
 
+/// «Убрать фото» (UI 4.3): своё фото снято — у контакта аватар тоже пропадает, имя остаётся.
+#[test]
+fn cleared_avatar_reaches_contact() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(13), id(14));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a7"));
+    let b = start(&net, b_id, tmpdir("b7"));
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A-note");
+    let a_hex = hex::encode(a_key);
+    a.set_self_name("Алиса");
+    let id1 = a.set_self_avatar(jpeg_variant(0x21, 0x43), "image/jpeg");
+    await_profile(&b, &a_hex, "Алиса", &id1);
+
+    a.clear_self_avatar();
+    assert!(a.self_avatar().is_none(), "своего фото больше нет");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let cj: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
+        let c = cj
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["key"] == a_hex)
+            .unwrap()
+            .clone();
+        if c["avatar_id"] == "" {
+            assert_eq!(c["profile_name"], "Алиса", "имя на месте");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "аватар у контакта не снялся: {c}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    a.shutdown();
+    b.shutdown();
+}
+
 /// Принятый через гейт контакт НЕ получает плейсхолдер-имя: локальная заметка пустая,
 /// поэтому в UI показывается самоназвание пира (Contact.displayName: local →
 /// profile_name → hex). Раньше это тестировалось на TOFU-автодобавлении по presence;

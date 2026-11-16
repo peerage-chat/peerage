@@ -209,6 +209,12 @@ class AppModel private constructor() {
         selfAvatar = Native.selfAvatar(sessionPtr)
     }
 
+    /** «Убрать фото»: движок разошлёт контактам профиль без аватара. */
+    fun clearSelfAvatar() = ops.execute {
+        Native.clearSelfAvatar(sessionPtr)
+        selfAvatar = null
+    }
+
     /** Задать своё имя (M2): движок сохранит и разошлёт контактам. */
     fun updateSelfName(name: String) = ops.execute {
         Native.setSelfName(sessionPtr, name.trim())

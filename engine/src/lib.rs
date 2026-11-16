@@ -2626,6 +2626,19 @@ impl Engine {
         id_hex
     }
 
+    /// Убрать своё фото: у контактов аватар пропадает со следующим профилем (пустой хэш).
+    /// Блоб не удаляется — он мог уйти и в другие места (контент-адрес, дедуп).
+    pub fn clear_self_avatar(&self) {
+        let mut m = self.load_profile_meta();
+        if m.avatar_id.is_empty() {
+            return;
+        }
+        m.avatar_id.clear();
+        m.avatar_mime.clear();
+        self.save_profile_meta(&m);
+        self.broadcast_profile();
+    }
+
     /// hex-id своего аватара, если задан.
     pub fn self_avatar_id(&self) -> Option<String> {
         let id = self.load_profile_meta().avatar_id;

@@ -71,24 +71,14 @@ internal fun GroupEditScreen(model: AppModel, onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Tokens.Space.panel),
         ) {
-            Box(
-                Modifier.align(Alignment.CenterHorizontally)
-                    .padding(top = Tokens.Space.l, bottom = Tokens.Space.xxl)
-                    .clickable(onClickLabel = stringResource(R.string.group_edit_photo), onClick = pick),
-            ) {
-                SquareAvatar(name.ifBlank { g.name }, size = Tokens.Size.groupEditAvatar, avatarBytes = shown)
-                Box(
-                    Modifier.align(Alignment.BottomEnd)
-                        .offset(x = Tokens.Space.xs, y = Tokens.Space.xs)
-                        .size(Tokens.Size.groupEditBadge)
-                        .clip(CircleShape)
-                        .background(Tokens.Colors.accent)
-                        .border(Tokens.Size.badgeRing, Tokens.Colors.bg, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(TablerIcons.Camera, null, tint = Tokens.Colors.accentDark, modifier = Modifier.size(Tokens.Size.iconS))
-                }
-            }
+            PhotoEditAvatar(
+                name.ifBlank { g.name },
+                shown,
+                circle = false,
+                label = stringResource(R.string.group_edit_photo),
+                onPick = pick,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
             Text(
                 stringResource(R.string.group_edit_name),
                 color = Tokens.Colors.tertiary,
@@ -119,6 +109,38 @@ internal fun GroupEditScreen(model: AppModel, onBack: () -> Unit) {
                 lineHeight = Tokens.Font.lineHeight,
                 modifier = Modifier.padding(start = Tokens.Space.s - Tokens.Space.xxs, top = Tokens.Space.s),
             )
+        }
+    }
+}
+
+/**
+ * Крупный аватар со значком камеры (макеты `people/GroupEdit`, `MeEdit`): тап — выбрать фото.
+ * У группы — квадрат, у человека — круг.
+ */
+@Composable
+internal fun PhotoEditAvatar(
+    name: String,
+    photo: ByteArray?,
+    circle: Boolean,
+    label: String,
+    onPick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier.padding(top = Tokens.Space.l, bottom = Tokens.Space.xxl)
+            .clickable(onClickLabel = label, onClick = onPick),
+    ) {
+        SquareAvatar(name, size = Tokens.Size.groupEditAvatar, avatarBytes = photo, circle = circle)
+        Box(
+            Modifier.align(Alignment.BottomEnd)
+                .offset(x = Tokens.Space.xs, y = Tokens.Space.xs)
+                .size(Tokens.Size.groupEditBadge)
+                .clip(CircleShape)
+                .background(Tokens.Colors.accent)
+                .border(Tokens.Size.badgeRing, Tokens.Colors.bg, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(TablerIcons.Camera, null, tint = Tokens.Colors.accentDark, modifier = Modifier.size(Tokens.Size.iconS))
         }
     }
 }

@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
@@ -33,6 +34,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -563,27 +565,57 @@ private fun SettingInfoRow(label: String, value: String, divider: Boolean = true
     }
 }
 
-/** Редактирование профиля: имя и аватар (то же, что в онбординге). */
+/**
+ * Свой профиль (макет `people/MeEdit`): фото, имя, «Убрать фото»; «Готово» в шапке. Новое фото
+ * и снятие ждут «Готово» — до него контакты видят прежнее, как у правки группы.
+ */
 @Composable
 internal fun EditProfileScreen(model: AppModel, onDone: () -> Unit) {
     var name by remember { mutableStateOf(model.selfName) }
-    val pickAvatar = rememberAvatarPicker(model)
-
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(FormGap),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        EditableAvatar(name.ifBlank { "?" }, model.selfAvatar, pickAvatar)
-        Text(stringResource(R.string.settings_tap_avatar), color = HoloSecondary, fontSize = Tokens.Font.small)
-
-        FieldLabel(stringResource(R.string.settings_your_name))
-        TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors(), singleLine = true)
-        Text(stringResource(R.string.settings_name_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
-
-        AccentButton(stringResource(R.string.common_done)) {
-            model.updateSelfName(name.trim())
-            onDone()
+    var photo by remember { mutableStateOf<ByteArray?>(null) }
+    var removed by remember { mutableStateOf(false) }
+    val pick = rememberImagePicker {
+        photo = it
+        removed = false
+    }
+    val shown = if (removed) null else photo ?: model.selfAvatar
+    Column(Modifier.fillMaxSize().background(Tokens.Colors.bg)) {
+        TopBar(stringResource(R.string.settings_edit_profile), onBack = onDone) {
+            PillButton(stringResource(R.string.common_done), modifier = Modifier.padding(end = Tokens.Space.xs)) {
+                if (name.trim() != model.selfName) model.updateSelfName(name.trim())
+                when {
+                    photo != null -> model.setSelfAvatar(photo!!, "image/jpeg")
+                    removed -> model.clearSelfAvatar()
+                }
+                onDone()
+            }
+        }
+        Column(
+            Modifier.weight(1f).fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
+                .background(Tokens.Colors.panel)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            PhotoEditAvatar(
+                name.ifBlank { "?" },
+                shown,
+                circle = true,
+                label = stringResource(R.string.settings_tap_avatar),
+                onPick = pick,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
+            SectionTitle(stringResource(R.string.me_edit_name), Modifier.padding(top = 0.dp))
+            FormInput(name, "", Modifier.padding(horizontal = Tokens.Space.panel).fillMaxWidth()) { name = it }
+            Caption(stringResource(R.string.me_edit_caption))
+            if (shown != null) {
+                Spacer(Modifier.height(Tokens.Space.l))
+                CardSection {
+                    NavRow(TablerIcons.Trash, stringResource(R.string.me_remove_photo), divider = false) {
+                        photo = null
+                        removed = true
+                    }
+                }
+            }
         }
     }
 }

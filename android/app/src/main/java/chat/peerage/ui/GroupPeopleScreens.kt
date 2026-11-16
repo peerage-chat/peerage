@@ -36,6 +36,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.pluralStringResource
@@ -230,9 +232,12 @@ private fun PickedChips(model: AppModel, keys: MutableList<String>) {
     }
 }
 
-/** Поиск по контактам (макет: плашка во всю ширину над группой). */
+/** Поиск по контактам (макет: плашка во всю ширину над группой). [autoFocus] — поле открыто
+ *  кнопкой, клавиатура сразу. */
 @Composable
-private fun ContactSearch(query: String, onQuery: (String) -> Unit) {
+internal fun ContactSearch(query: String, autoFocus: Boolean = false, onQuery: (String) -> Unit) {
+    val focus = remember { FocusRequester() }
+    if (autoFocus) LaunchedEffect(Unit) { focus.requestFocus() }
     Row(
         Modifier.fillMaxWidth().padding(start = Tokens.Space.panel, end = Tokens.Space.panel, bottom = Tokens.Space.m)
             .heightIn(min = Tokens.Size.composer)
@@ -251,7 +256,7 @@ private fun ContactSearch(query: String, onQuery: (String) -> Unit) {
                 singleLine = true,
                 textStyle = TextStyle(color = Color.White, fontSize = Tokens.Font.label),
                 cursorBrush = SolidColor(Tokens.Colors.accent),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
             )
         }
     }

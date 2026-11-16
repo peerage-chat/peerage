@@ -315,6 +315,19 @@ pub extern "system" fn Java_chat_peerage_Native_setSelfAvatar<'local>(
     })
 }
 
+/// Убрать своё фото (UI 4.3): контакты получат профиль без аватара.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_clearSelfAvatar<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        e.clear_self_avatar();
+    })
+}
+
 /// Байты своего аватара (M2), либо null если не задан.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_selfAvatar<'local>(

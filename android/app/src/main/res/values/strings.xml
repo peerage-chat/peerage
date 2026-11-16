@@ -623,8 +623,6 @@
     <string name="settings_verified">Verified contacts</string>
     <string name="settings_verified_count">%1$d of %2$d verified in person</string>
     <string name="settings_tap_avatar">Tap the avatar to change it</string>
-    <string name="settings_your_name">Your name</string>
-    <string name="settings_name_hint">This is what contacts see. The name goes to them only.</string>
     <string name="settings_edit_profile">Profile</string>
 
     <string name="settings_app_lock">App lock</string>
@@ -1048,4 +1046,10 @@
     <string name="req_lookalike">The name matches the contact %1$s (key %2$s…); the key is different.</string>
     <string name="req_lookalike_short">Name matches a contact</string>
     <string name="req_verify_in_person">Verify the key in person</string>
+    <!-- Контакты (4.3, макет screens/Contacts) -->
+    <string name="contacts_requests_strip">Contact requests · %1$d</string>
+    <!-- Свой профиль (4.3, макет people/MeEdit) -->
+    <string name="me_edit_name">Name</string>
+    <string name="me_edit_caption">The name and photo go out to contacts. Each contact can label this phone differently on their side and sees that label instead.</string>
+    <string name="me_remove_photo">Remove photo</string>
 </resources>

@@ -767,21 +767,146 @@ private fun RowTag(text: String) {
  *  Разделитель начинается под текстом — он отделяет строки, а не рассекает список. */
 private val AvatarRowInset = Tokens.Space.l + Tokens.Size.avatarRow + Tokens.Space.m
 
-/** Полный список контактов (раздел меню «Контакты»). Тап → личный чат.
- *  Добавление — через кнопку в шапке (Root). */
+/**
+ * «Контакты» (макет `screens/Contacts`): полоса запросов, по алфавиту с буквами-разделителями,
+ * у сверенных — щит. Тап → личный чат. [query] не null — над списком поле поиска.
+ */
 @Composable
-internal fun ContactListScreen(model: AppModel, onOpen: (String) -> Unit) {
-    if (model.contacts.isEmpty()) {
+internal fun ContactListScreen(
+    model: AppModel,
+    query: String?,
+    onQuery: (String) -> Unit,
+    onRequests: () -> Unit,
+    onOpen: (String) -> Unit,
+) {
+    if (model.contacts.isEmpty() && model.contactRequests.isEmpty()) {
         EmptyState(Icons.Filled.Group, stringResource(R.string.contacts_empty_title), stringResource(R.string.contacts_empty_hint))
         return
     }
-    // Один контейнер на весь список — как на главной: контакты это такой же
-    // перечень людей, и выглядеть он обязан так же.
+    val shown = remember(model.contacts.toList(), query) { alphabetical(model.contacts, query.orEmpty()) }
     LazyColumn(Modifier.fillMaxSize().padding(top = Tokens.Space.s)) {
-        itemsIndexed(model.contacts, key = { _, c -> c.key }) { i, c ->
-            ContactCardRow(model, c, first = i == 0, last = i == model.contacts.lastIndex) { onOpen(c.key) }
+        if (query != null) item(key = "search") { ContactSearch(query, autoFocus = true, onQuery = onQuery) }
+        if (query == null && model.contactRequests.isNotEmpty()) {
+            item(key = "requests") { RequestsStrip(model.contactRequests, onRequests) }
+        }
+        shown.forEachIndexed { i, c ->
+            val letter = initial(c.displayName)
+            val newLetter = i == 0 || initial(shown[i - 1].displayName) != letter
+            if (newLetter) item(key = "letter_$letter") { LetterHeader(letter) }
+            item(key = c.key) { ContactRow(model, c, divider = !newLetter) { onOpen(c.key) } }
         }
         item { Spacer(Modifier.height(Tokens.Space.l)) }
+    }
+}
+
+/** Контакты по алфавиту языка телефона; [query] — подстрока имени без учёта регистра. */
+private fun alphabetical(contacts: List<Contact>, query: String): List<Contact> {
+    val collator = java.text.Collator.getInstance()
+    return contacts.filter { query.isBlank() || it.displayName.contains(query.trim(), ignoreCase = true) }
+        .sortedWith { a, b -> collator.compare(a.displayName, b.displayName) }
+}
+
+/** Буква раздела: первая буква имени заглавной; цифры и знаки — под «#». */
+private fun initial(name: String): String {
+    val c = name.trim().firstOrNull() ?: return "#"
+    return if (c.isLetter()) c.uppercase() else "#"
+}
+
+@Composable
+private fun LetterHeader(letter: String) {
+    Text(
+        letter,
+        color = Tokens.Colors.accent,
+        fontSize = Tokens.Font.body,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(start = Tokens.Space.xl, end = Tokens.Space.xl, top = Tokens.Space.m + Tokens.Space.xxs, bottom = Tokens.Space.xs),
+    )
+}
+
+/** Строка контакта прямо на панели: аватар со статусом, имя, «в сети», щит у сверенного. */
+@Composable
+private fun ContactRow(model: AppModel, c: Contact, divider: Boolean, onClick: () -> Unit) {
+    val online = model.online[c.key] == true
+    Column {
+        if (divider) {
+            HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.divider, modifier = Modifier.padding(start = ContactRowInset))
+        }
+        Row(
+            Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
+                .heightIn(min = Tokens.Size.contactRow)
+                .padding(horizontal = Tokens.Space.xl),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m + Tokens.Space.xxs),
+        ) {
+            SquareAvatar(
+                c.displayName,
+                size = Tokens.Size.avatarContact,
+                // Точка только «в сети» (макет): «не в сети» и так написано строкой ниже.
+                online = online.takeIf { it },
+                avatarBytes = model.contactAvatars[c.avatarId],
+                circle = true,
+                ring = Tokens.Colors.panel,
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    c.displayName,
+                    color = Tokens.Colors.onDark,
+                    fontSize = Tokens.Font.name,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    stringResource(if (online) R.string.status_online else R.string.status_offline),
+                    color = if (online) HoloOnline else Tokens.Colors.tertiary,
+                    fontSize = Tokens.Font.body,
+                )
+            }
+            if (c.verified) {
+                Icon(
+                    TablerIcons.ShieldCheck,
+                    stringResource(R.string.profile_key_ok),
+                    tint = Tokens.Colors.online,
+                    modifier = Modifier.size(Tokens.Size.iconS),
+                )
+            }
+        }
+    }
+}
+
+/** Разделитель строк контактов начинается под текстом: поле + аватар + зазор. */
+private val ContactRowInset = Tokens.Space.xl + Tokens.Size.avatarContact + Tokens.Space.m + Tokens.Space.xxs
+
+/** «Запросы в контакты · N» и чьи (макет `screens/Contacts`); тап — вкладка «Запросы» главной. */
+@Composable
+private fun RequestsStrip(requests: List<ContactRequest>, onOpen: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .padding(start = Tokens.Space.l, end = Tokens.Space.l, top = Tokens.Space.xs, bottom = Tokens.Space.s - Tokens.Space.xxs)
+            .clip(RoundedCornerShape(Tokens.Radius.field))
+            .background(Tokens.Colors.accentMuted)
+            .clickable(role = Role.Button, onClick = onOpen)
+            .padding(horizontal = Tokens.Space.m + Tokens.Space.xxs, vertical = Tokens.Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+    ) {
+        Icon(TablerIcons.UserPlus, null, tint = Tokens.Colors.accentSoft, modifier = Modifier.size(Tokens.Size.iconRow))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+            Text(
+                stringResource(R.string.contacts_requests_strip, requests.size),
+                color = Tokens.Colors.requestStripText,
+                fontSize = Tokens.Font.preview,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                requests.sortedByDescending { it.time }.joinToString(", ") { it.shownName },
+                color = Tokens.Colors.requestStripSub,
+                fontSize = Tokens.Font.small,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(TablerIcons.ChevronRight, null, tint = Tokens.Colors.requestStripSub, modifier = Modifier.size(Tokens.Size.iconS))
     }
 }
 

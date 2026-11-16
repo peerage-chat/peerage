@@ -117,6 +117,7 @@
 | `labelScrim` | `#FFFFFF @6%` | подложка ярлыка даты и системного события |
 | `unreadMuted` | `#3A3A42` | счётчик непрочитанного у чата без звука |
 | `folderSelected` | `#1C3A47` | фон активной папки |
+| `requestStripText` / `requestStripSub` | `#DFF3FB` / `#9FC6D6` | заголовок полосы «Запросы в контакты» и её строка «чьи» с шевроном (`screens/Contacts`; фон — `accentMuted`, значок — `accentSoft`) |
 | `heldTick` | `#9FC6D6` | часы «ждёт принятия» у сообщения до принятия запроса в контакты (`people/Pending`) |
 
 > Внутри пузыря — полупрозрачный белый, а не наш серый: пузырь цветной, и серый на
@@ -297,6 +298,7 @@
 | `avatarSheet` | 48 | аватар в шапке шторки человека (`people/Member`) |
 | `groupDraftAvatar` | 72 | аватар группы на шаге «название» (`people/GroupName`) |
 | `groupEditAvatar` / `groupEditBadge` / `badgeRing` | 104 / 36 / 3 | аватар на правке группы, значок камеры на нём и его обводка цветом фона (`people/GroupEdit`) |
+| `contactRow` / `avatarContact` | 64 / 44 | строка «Контактов» прямо на панели и её аватар (`screens/Contacts`) |
 | `addCamera` / `addCameraShort` | 300 / 220 | видоискатель «Добавить контакт»; короткий — под ним карточка ошибки (`people/Main`, `Errors`) |
 | `cameraCorner` / `cameraCornerStroke` | 44 / 3 | уголок рамки видоискателя и его толщина |
 | `cameraCornerInset` / `cameraCornerInsetShort` | 56 / 40 | отступ уголков от края видоискателя (обычного / короткого) |

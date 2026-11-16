@@ -52,6 +52,7 @@ object Native {
 
     /** Установить свой аватар (M2): scrub + контент-адресный блоб. Возвращает hex-id. */
     external fun setSelfAvatar(sessionPtr: Long, content: ByteArray, mime: String): String
+    external fun clearSelfAvatar(sessionPtr: Long)
 
     /** Байты своего аватара, либо null если не задан. */
     external fun selfAvatar(sessionPtr: Long): ByteArray?
