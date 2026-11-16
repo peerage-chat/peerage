@@ -251,7 +251,7 @@ private fun WordField(
 
 /** Подсказки над клавиатурой: до трёх слов словаря по набранным буквам, первое — акцентом. */
 @Composable
-private fun WordSuggestions(dict: List<String>, prefix: String, onPick: (String) -> Unit) {
+internal fun WordSuggestions(dict: List<String>, prefix: String, onPick: (String) -> Unit) {
     val hits = remember(dict, prefix) {
         if (prefix.isEmpty()) emptyList() else dict.asSequence().filter { it.startsWith(prefix) }.take(3).toList()
     }

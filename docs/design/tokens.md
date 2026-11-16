@@ -156,6 +156,8 @@
 | `noticeBg` | `#3A2F12` | плашка-предупреждение (очередь разрослась) |
 | `noticeText` | `#F6C453` | текст и знак на ней |
 | `onbAvatarIcon` | `#6B6C74` | фигурка на пустом своём фото в первом запуске (`onboard/Profile`) |
+| `stateBad` | `#2E1A1D` | красная плашка «фраза не сходится» (`onboard/Mismatch`); текст — `errorSoft`, знак — `failText` |
+| `slotLine` | `#2E2F36` | линия пустой ячейки ввода слова (`onboard/Restore`) |
 | `iconBar` | `#D6D6DD` | иконки верхней панели |
 | `unreadMutedText` | `#B9B9C2` | цифра на счётчике чата без звука |
 | `scanScrim` | `#99000000` | затемнение вокруг рамки сканера QR |
@@ -300,6 +302,7 @@
 | `groupEditAvatar` / `groupEditBadge` / `badgeRing` | 104 / 36 / 3 | аватар на правке группы, значок камеры на нём и его обводка цветом фона (`people/GroupEdit`) |
 | `contactRow` / `avatarContact` | 64 / 44 | строка «Контактов» прямо на панели и её аватар (`screens/Contacts`) |
 | `onbProgress` | 4 | полоска «шаг N из 3» первого запуска (`onboard/`) |
+| `phraseNote` | 26 | строка «№N — нет такого слова» над сеткой ввода: место держится, сетка не прыгает |
 | `heroTile` / `iconTile` | 72 / 34 | знак приложения на приветствии и плитка-знак шага (`onboard/Main`, `KeyIntro`), иконка в плитке |
 | `iconAvatar` / `onbBadge` | 40 / 34 | фигурка на пустом своём фото 96 и значок камеры на нём (`onboard/Profile`) |
 | `addCamera` / `addCameraShort` | 300 / 220 | видоискатель «Добавить контакт»; короткий — под ним карточка ошибки (`people/Main`, `Errors`) |
@@ -358,6 +361,7 @@
 | `hero` / `heroLine` | 28 / 34 | заголовок шага первого запуска и его интервал (`onboard/`) |
 | `welcome` / `welcomeLine` | 34 / 40 | имя приложения на приветствии (`onboard/Main`) |
 | `leadLine` | 21 | интервал подзаголовка шага (`label` 15) |
+| `heroSmall` / `heroSmallLine` | 24 / 30 | заголовок шага рядом с пилюлей («Восстановление» + «Вставить») |
 | `tileLetter` | 18 | буква домена на плитке ссылки (`screens/MfLinks`) |
 | `sheetName` | 18 | имя в шапке шторки человека (`people/Member`) |
 | `tileTracking` | 0.3 | разрядка расширения на плитке файла |

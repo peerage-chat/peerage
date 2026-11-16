@@ -396,9 +396,11 @@
     <string name="onb_restore_title">Восстановление</string>
     <string name="onb_restore_sub">24 слова в том порядке, в каком записаны.</string>
     <string name="onb_restore">Восстановить</string>
-    <string name="onb_checking">Проверяем…</string>
-    <string name="onb_bad_phrase">Неверная фраза — проверьте 24 слова</string>
-    <string name="onb_phrase_placeholder">слово1 слово2 слово3 …</string>
+    <string name="onb_restore_paste">Вставить</string>
+    <string name="onb_restore_unknown">№%1$d — нет такого слова</string>
+    <string name="onb_restore_mismatch">Все слова из списка, но фраза не сходится. Чаще всего два слова переставлены местами или одно записано с ошибкой.</string>
+    <string name="onb_restore_failed">Ключ не записался на устройство. Можно повторить.</string>
+    <string name="onb_checking">Проверка…</string>
     <string name="emoji_recent">Недавние</string>
     <string name="emoji_backspace">Стереть</string>
     <string name="emoji_cat_smileys">Смайлы и люди</string>
@@ -868,13 +870,13 @@
     <string name="recovery_sub">Ключ к переписке на этом телефоне недоступен</string>
     <string name="recovery_reason_key_lost">Система сбросила ключ шифрования. Так бывает после смены блокировки экрана или обновления прошивки.</string>
     <string name="recovery_reason_mismatch">Данные зашифрованы другим ключом: пропал файл ключа или данные перенесены с другого устройства.</string>
-    <string name="recovery_body">Прочитать переписку отсюда нельзя. Удалять её не будем, только отложим. Личность можно вернуть по 24 словам.</string>
+    <string name="recovery_body">Переписка на этом телефоне не читается. Она не удаляется, а откладывается. Личность возвращается по 24 словам.</string>
     <string name="recovery_restore">Восстановить по 24 словам</string>
     <string name="recovery_start_over">Начать заново</string>
     <string name="recovery_new_title">Начать заново?</string>
     <string name="recovery_new_sub">Будет создана новая личность</string>
-    <string name="recovery_new_body">Контакты увидят вас как нового человека, им придётся добавить вас заново. Старые данные отложим, а не удалим.</string>
-    <string name="recovery_failed">Не удалось отложить данные. Попробуйте ещё раз</string>
+    <string name="recovery_new_body">Для контактов это новый человек: добавлять придётся заново. Старые данные откладываются, а не удаляются.</string>
+    <string name="recovery_failed">Данные не отложены. Можно повторить.</string>
 
     <!-- Главная и «Профиль» (перепроектирование, 2026-11-01) -->
     <plurals name="net_status_online">

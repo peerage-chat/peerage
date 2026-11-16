@@ -77,7 +77,9 @@ object Tokens {
         val stateWarnText = Color(0xFFF2C98A) // её заголовок и щит
         val stateWarnLink = Color(0xFFFFCC80) // действие на этой плашке («Сверить ключ лично», `android/Request`)
         val stateOk = Color(0xFF17261A) // плашка «Ключ сверен» (`security/Verified`)
-        val errorSoft = Color(0xFFFFB4B4) // заголовок «Ключ не совпал» (`security/Mismatch`)
+        val errorSoft = Color(0xFFFFB4B4) // заголовок «Ключ не совпал» (`security/Mismatch`), текст плашки stateBad
+        val stateBad = Color(0xFF2E1A1D) // красная плашка «фраза не сходится» (`onboard/Mismatch`)
+        val slotLine = Color(0xFF2E2F36) // линия пустой ячейки ввода слова (`onboard/Restore`)
         val heldTick = Color(0xFF9FC6D6) // часы «ждёт принятия» в мете пузыря (`people/Pending`)
         val requestStripText = Color(0xFFDFF3FB) // заголовок полосы «Запросы в контакты» (`screens/Contacts`)
         val requestStripSub = Color(0xFF9FC6D6) // её строка «чьи» и шеврон
@@ -426,6 +428,7 @@ object Tokens {
         val systemLine = 300.dp // предельная ширина системной строки группы (макет `special/GroupSystem`)
         val phraseRow = 36.dp // строка слова в сетке 24 слов
         val phraseNum = 20.dp // колонка номера слова в сетке
+        val phraseNote = 26.dp // строка ошибки «№N — нет такого слова» над сеткой ввода: место держится
         val touch = 48.dp // минимальная зона касания (Android): плашка может быть меньше, зона — нет
         val onbProgress = 4.dp // высота полоски «шаг N из 3» первого запуска
         val heroTile = 72.dp // знак приложения и плитка-знак шага первого запуска
@@ -458,6 +461,8 @@ object Tokens {
         val welcome = 34.sp // имя приложения на приветствии
         val welcomeLine = 40.sp // его интервал
         val leadLine = 21.sp // интервал подзаголовка шага (label 15)
+        val heroSmall = 24.sp // заголовок шага рядом с пилюлей («Восстановление» + «Вставить»)
+        val heroSmallLine = 30.sp // его интервал
         val tileLetter = 18.sp // буква домена на плитке ссылки
         val tileTracking = 0.3.sp // разрядка расширения на плитке файла
 

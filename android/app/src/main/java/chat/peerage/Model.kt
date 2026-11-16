@@ -187,11 +187,21 @@ class AppModel private constructor() {
         android.os.Handler(android.os.Looper.getMainLooper()).post { onDone(result) }
     }
 
-    /** Импорт личности из фразы (M4): валидирует+пишет profile.json на [ops], результат
-     *  на главном потоке. true → успех (вызывающий перезапускает процесс). */
-    fun importIdentity(dataDir: String, phrase: String, onResult: (Boolean) -> Unit) = ops.execute {
-        val ok = Native.importSeedPhrase(dataDir, phrase)
-        android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(ok) }
+    /** Импорт личности из фразы (M4) на [ops], результат на главном потоке. Сумма фразы
+     *  проверяется отдельно — «не сходится» и «не записалось» человеку говорятся по-разному.
+     *  Успех: онбординг пройден и копия ключа есть (фраза только что введена); вызывающий
+     *  перезапускает процесс. commit(), не apply(): тот не успевал на диск до System.exit. */
+    fun importIdentity(dataDir: String, phrase: String, onResult: (RecoverResult) -> Unit) = ops.execute {
+        val result = when {
+            !Native.seedPhraseValid(phrase) -> RecoverResult.BAD_PHRASE
+            !Native.importSeedPhrase(dataDir, phrase) -> RecoverResult.FAILED
+            else -> {
+                appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+                    ?.edit()?.putBoolean("onboarded", true)?.putBoolean("key_backup_done", true)?.commit()
+                RecoverResult.OK
+            }
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(result) }
     }
 
     /** Свой аватар (M2), байты изображения; null = не задан. Читается через [ops]. */

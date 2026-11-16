@@ -23,6 +23,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -32,19 +34,32 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
@@ -112,72 +127,239 @@ internal fun OnboardingFlow(model: AppModel, onFinish: () -> Unit) {
     }
 }
 
-/** Восстановление личности из сид-фразы. Импорт пишет profile.json и перезапускает
- *  процесс — новая личность грузится начисто. */
+/** Восстановление личности по 24 словам при первом запуске. Импорт пишет profile.json и
+ *  перезапускает процесс — личность грузится начисто. */
 @Composable
 private fun ImportKeyStep(model: AppModel, onBack: () -> Unit) {
     val ctx = LocalContext.current
-    var phrase by rememberSaveable { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    SecureFlag()
-    OnbPage(
-        bar = 0,
+    var result by remember { mutableStateOf<RecoverResult?>(null) }
+    PhraseEntryStep(
+        model,
+        busy = busy,
+        mismatch = result == RecoverResult.BAD_PHRASE,
+        error = if (result == RecoverResult.FAILED) stringResource(R.string.onb_restore_failed) else null,
         onBack = onBack,
-        title = stringResource(R.string.onb_restore_title),
-        sub = stringResource(R.string.onb_restore_sub),
-        primary = stringResource(if (busy) R.string.onb_checking else R.string.onb_restore),
-        onPrimary = {
-            if (!busy && phrase.isNotBlank()) {
-                busy = true
-                error = false
-                model.importIdentity(ctx.filesDir.absolutePath, phrase) { ok ->
-                    if (ok) {
-                        // commit() (СИНХРОННЫЙ): apply() не успевает записаться на диск до
-                        // System.exit в relaunchApp → флаг терялся, онбординг повторялся.
-                        ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-                            .edit().putBoolean("onboarded", true).commit()
-                        relaunchApp(ctx)
-                    } else {
-                        busy = false
-                        error = true
-                    }
-                }
-            }
-        },
-        scroll = false,
-    ) {
-        PhraseInput(phrase, error) {
-            phrase = it
-            error = false
+        onEdit = { result = null },
+    ) { phrase ->
+        busy = true
+        result = null
+        model.importIdentity(ctx.filesDir.absolutePath, phrase) { r ->
+            busy = false
+            if (r == RecoverResult.OK) relaunchApp(ctx) else result = r
         }
-        if (error) OnbError(stringResource(R.string.onb_bad_phrase))
     }
 }
 
-/** Поле ввода 24 слов: импорт при первом запуске и экран восстановления. */
+private const val PHRASE_WORDS = 24
+private const val MAX_WORD = 8 // самое длинное слово BIP39 — 8 букв
+
+/** С какого масштаба шрифта 24 слова встают в один столбец (×2.0 — app-ui.md). */
+private const val ONE_COLUMN_FONT = 1.6f
+
+/**
+ * Ввод 24 слов (`onboard/Restore`, `Mismatch`) — та же сетка, что показ ([PhraseGrid]):
+ * переписанное с бумаги вводится ячейка в ячейку. Слова — только из словаря BIP39, подсказка
+ * над клавиатурой по первым буквам. Пробел, вставка в ячейку и «Вставить» раскладывают
+ * текст по словам с этой ячейки (с «Вставить» — с №1). Ошибки разные: «№N — нет такого
+ * слова» — сразу, как ячейку покинули; [mismatch] (сумма не сошлась) — после «Восстановить».
+ */
 @Composable
-private fun ColumnScope.PhraseInput(phrase: String, error: Boolean, onChange: (String) -> Unit) {
-    val shape = RoundedCornerShape(Tokens.Radius.field)
-    Box(
-        Modifier.fillMaxWidth().weight(1f).padding(top = Tokens.Space.l).clip(shape).background(Tokens.Colors.group)
-            .then(if (error) Modifier.border(Tokens.Size.focusRing, Tokens.Colors.error, shape) else Modifier)
-            .padding(Tokens.Space.l),
-    ) {
-        if (phrase.isEmpty()) Text(stringResource(R.string.onb_phrase_placeholder), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.name)
-        BasicTextField(
-            value = phrase,
-            onValueChange = onChange,
-            textStyle = Tokens.Text.base.copy(color = Color.White, fontSize = Tokens.Font.name, lineHeight = Tokens.Font.lineHeightLoose),
-            cursorBrush = SolidColor(Tokens.Colors.accent),
-            // 24 слова — это ключ целиком. Обычная клавиатура запоминает набранное,
-            // подсказывает его потом в других приложениях и может синхронизировать
-            // свой словарь в облако. Тип «пароль» это выключает; маски нет — слова
-            // надо видеть, чтобы сверить с бумагой.
-            keyboardOptions = PasswordKeyboard,
-            modifier = Modifier.fillMaxSize(),
-        )
+private fun PhraseEntryStep(
+    model: AppModel,
+    busy: Boolean,
+    mismatch: Boolean,
+    error: String?,
+    onBack: () -> Unit,
+    onEdit: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
+    SecureFlag()
+    LaunchedEffect(Unit) { model.loadBip39() }
+    // remember, не rememberSaveable: ключ не должен уходить в сохранённое состояние окна
+    // (его хранит система). Поворот активность не пересоздаёт (configChanges в манифесте).
+    val words = remember { mutableStateListOf(*Array(PHRASE_WORDS) { "" }) }
+    val focus = remember { List(PHRASE_WORDS) { FocusRequester() } }
+    var focused by remember { mutableIntStateOf(-1) }
+    val dict = remember(model.bip39) { model.bip39.toHashSet() }
+    val clipboard = LocalClipboardManager.current
+    val allValid = dict.isNotEmpty() && words.all { it in dict }
+    val unknown = words.indices.firstOrNull { words[it].isNotEmpty() && words[it] !in dict && it != focused }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // После последней ячейки — спрятать клавиатуру, не снимая фокус: со снятым фокусом
+    // аппаратный Enter отпускается уже на «Назад» и уводит с экрана.
+    val next: (Int) -> Unit = { i -> if (i + 1 < PHRASE_WORDS) focus[i + 1].requestFocus() else keyboard?.hide() }
+    // Текст в ячейку i: одно слово — на место; с разделителями — по словам дальше.
+    val put: (Int, String) -> Unit = { i, raw ->
+        onEdit()
+        val parts = raw.lowercase().split(Regex("[^a-z]+"))
+        val ws = parts.filter { it.isNotEmpty() }
+        when {
+            parts.size == 1 -> words[i] = parts[0].take(MAX_WORD)
+            ws.isEmpty() -> words[i] = ""
+            else -> {
+                ws.forEachIndexed { k, w -> if (i + k < PHRASE_WORDS) words[i + k] = w.take(MAX_WORD) }
+                next(i + ws.size - 1)
+            }
+        }
     }
+    Column(Modifier.fillMaxSize().background(Tokens.Colors.bg)) {
+        OnbTop(0, onBack)
+        Column(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Tokens.Space.xl),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = Tokens.Space.s),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+            ) {
+                Text(
+                    stringResource(R.string.onb_restore_title),
+                    color = Color.White,
+                    fontSize = Tokens.Font.heroSmall,
+                    lineHeight = Tokens.Font.heroSmallLine,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f).semantics { heading() },
+                )
+                PastePill {
+                    clipboard.getText()?.text?.takeIf { it.isNotBlank() }?.let { text ->
+                        for (k in words.indices) words[k] = ""
+                        put(0, "$text ")
+                    }
+                }
+            }
+            Text(
+                stringResource(R.string.onb_restore_sub),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.label,
+                lineHeight = Tokens.Font.leadLine,
+                modifier = Modifier.padding(top = Tokens.Space.xs + Tokens.Space.xxs, bottom = Tokens.Space.xs),
+            )
+            Box(Modifier.heightIn(min = Tokens.Size.phraseNote).politeLive(), contentAlignment = Alignment.CenterStart) {
+                if (unknown != null) {
+                    Text(stringResource(R.string.onb_restore_unknown, unknown + 1), color = Tokens.Colors.failText, fontSize = Tokens.Font.body)
+                }
+            }
+            PhraseLayout { i ->
+                WordSlot(
+                    value = words[i],
+                    bad = words[i].isNotEmpty() && words[i] !in dict && focused != i,
+                    focusRequester = focus[i],
+                    last = i == PHRASE_WORDS - 1,
+                    onFocus = { has ->
+                        if (has) {
+                            focused = i
+                        } else if (focused == i) {
+                            focused = -1
+                        }
+                    },
+                    onChange = { put(i, it) },
+                    onNext = { next(i) },
+                )
+            }
+            if (mismatch) {
+                Spacer(Modifier.height(Tokens.Space.l))
+                OnbWarn(stringResource(R.string.onb_restore_mismatch), bad = true)
+            }
+            error?.let { OnbError(it) }
+            Spacer(Modifier.height(Tokens.Space.l))
+        }
+        // Пока набирается слово, низ занят клавиатурой и подсказками (макет `onboard/Restore`);
+        // кнопка — когда ячейку покинули или все 24 слова из словаря.
+        if (focused < 0 || allValid) {
+            OnbFooter(
+                stringResource(if (busy) R.string.onb_checking else R.string.onb_restore),
+                { if (allValid && !busy) onSubmit(words.joinToString(" ")) },
+                secondary = null,
+                onSecondary = {},
+                note = null,
+                enabled = allValid && !busy,
+            )
+        }
+        WordSuggestions(model.bip39, if (focused >= 0) words[focused] else "") { w ->
+            val i = focused
+            if (i >= 0) {
+                onEdit()
+                words[i] = w
+                next(i)
+            }
+        }
+    }
+}
+
+/** «Вставить» справа от заголовка: пилюля с иконкой буфера. */
+@Composable
+private fun PastePill(onClick: () -> Unit) {
+    Row(
+        Modifier.heightIn(min = Tokens.Size.pill).clip(RoundedCornerShape(Tokens.Radius.pill)).background(Tokens.Colors.accentMuted)
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = Tokens.Space.m + Tokens.Space.xxs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs + Tokens.Space.xxs),
+    ) {
+        Icon(TablerIcons.Clipboard, null, tint = Tokens.Colors.accentSoft, modifier = Modifier.size(Tokens.Size.iconXs))
+        Text(stringResource(R.string.onb_restore_paste), color = Tokens.Colors.accentSoft, fontSize = Tokens.Font.preview, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Ячейка слова: линия снизу — тихая пустой, акцентом в фокусе, красная у слова не из словаря. */
+@Composable
+private fun RowScope.WordSlot(
+    value: String,
+    bad: Boolean,
+    focusRequester: FocusRequester,
+    last: Boolean,
+    onFocus: (Boolean) -> Unit,
+    onChange: (String) -> Unit,
+    onNext: () -> Unit,
+) {
+    var has by remember { mutableStateOf(false) }
+    // Своё значение с выделением: в ячейку переходят и пробелом, и тапом — стоящее там
+    // слово выделяется целиком, и набор его заменяет, а не дописывается к нему.
+    var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
+    val line = when {
+        has -> Tokens.Colors.accent
+        bad -> Tokens.Colors.error
+        else -> Tokens.Colors.slotLine
+    }
+    val stroke = if (has || bad) Tokens.Size.focusRing else 1.dp
+    BasicTextField(
+        value = field,
+        onValueChange = {
+            val changed = it.text != field.text
+            field = it
+            if (changed) onChange(it.text)
+        },
+        singleLine = true,
+        textStyle = Tokens.Text.base.copy(
+            color = if (bad) Tokens.Colors.failText else Color.White,
+            fontSize = Tokens.Font.name,
+            fontWeight = FontWeight.Medium,
+        ),
+        cursorBrush = SolidColor(Tokens.Colors.accent),
+        // Пароль — чтобы клавиатура не запоминала слова ключа и не подсказывала свои.
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.None,
+            autoCorrect = false,
+            keyboardType = KeyboardType.Password,
+            imeAction = if (last) ImeAction.Done else ImeAction.Next,
+        ),
+        keyboardActions = KeyboardActions(onNext = { onNext() }, onDone = { onNext() }),
+        modifier = Modifier.weight(1f).heightIn(min = Tokens.Size.phraseRow).focusRequester(focusRequester)
+            .onFocusChanged {
+                if (it.isFocused && !has) field = field.copy(selection = TextRange(0, field.text.length))
+                has = it.isFocused
+                onFocus(it.isFocused)
+            }
+            .drawBehind {
+                val w = stroke.toPx()
+                val y = size.height - w / 2
+                drawLine(line, Offset(0f, y), Offset(size.width, y), w)
+            },
+        decorationBox = { inner ->
+            Box(Modifier.fillMaxWidth().heightIn(min = Tokens.Size.phraseRow), contentAlignment = Alignment.CenterStart) { inner() }
+        },
+    )
 }
 
 /** Ошибка под полем: красным, зачитывается без перебивания. */
@@ -200,44 +382,29 @@ private fun OnbError(text: String) {
 internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
     val ctx = LocalContext.current
     var step by rememberSaveable { mutableStateOf(0) } // 0 — выбор, 1 — фраза, 2 — «начать заново?»
-    var phrase by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Int?>(null) }
+    var result by remember { mutableStateOf<RecoverResult?>(null) }
     val back = {
         step = 0
         error = null
+        result = null
     }
     BackHandler(enabled = step != 0 && !busy) { back() }
     when (step) {
-        1 -> {
-            SecureFlag()
-            OnbPage(
-                bar = 0,
-                onBack = back,
-                title = stringResource(R.string.onb_restore_title),
-                sub = stringResource(R.string.onb_restore_sub),
-                primary = stringResource(if (busy) R.string.onb_checking else R.string.onb_restore),
-                onPrimary = {
-                    if (!busy && phrase.isNotBlank()) {
-                        busy = true
-                        error = null
-                        model.recoverFromPhrase(dataDir, phrase) { r ->
-                            busy = false
-                            when (r) {
-                                RecoverResult.OK -> relaunchApp(ctx)
-                                RecoverResult.BAD_PHRASE -> error = R.string.onb_bad_phrase
-                                RecoverResult.FAILED -> error = R.string.recovery_failed
-                            }
-                        }
-                    }
-                },
-                scroll = false,
-            ) {
-                PhraseInput(phrase, error == R.string.onb_bad_phrase) {
-                    phrase = it
-                    error = null
-                }
-                error?.let { OnbError(stringResource(it)) }
+        1 -> PhraseEntryStep(
+            model,
+            busy = busy,
+            mismatch = result == RecoverResult.BAD_PHRASE,
+            error = if (result == RecoverResult.FAILED) stringResource(R.string.recovery_failed) else null,
+            onBack = back,
+            onEdit = { result = null },
+        ) { phrase ->
+            busy = true
+            result = null
+            model.recoverFromPhrase(dataDir, phrase) { r ->
+                busy = false
+                if (r == RecoverResult.OK) relaunchApp(ctx) else result = r
             }
         }
         2 -> OnbPage(
@@ -393,6 +560,7 @@ private fun OnbFooter(
     secondary: String?,
     onSecondary: () -> Unit,
     note: (@Composable () -> Unit)?,
+    enabled: Boolean = true,
 ) {
     Column(
         Modifier.fillMaxWidth().navigationBarsPadding()
@@ -401,7 +569,7 @@ private fun OnbFooter(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         note?.invoke()
-        AccentButton(primary, Modifier.fillMaxWidth().heightIn(min = Tokens.Size.primaryButton), onClick = onPrimary)
+        AccentButton(primary, Modifier.fillMaxWidth().heightIn(min = Tokens.Size.primaryButton), enabled = enabled, onClick = onPrimary)
         if (secondary != null) GhostButton(secondary, modifier = Modifier.fillMaxWidth(), onClick = onSecondary)
     }
 }
@@ -445,16 +613,27 @@ private fun OnbRow(
     }
 }
 
-/** Янтарная плашка: последствие, которое нельзя пропустить глазами. */
+/** Плашка-последствие, которое нельзя пропустить глазами: янтарная, [bad] — красная. */
 @Composable
-private fun OnbWarn(text: String) {
+private fun OnbWarn(text: String, bad: Boolean = false) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.group)).background(Tokens.Colors.stateWarn)
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.group))
+            .background(if (bad) Tokens.Colors.stateBad else Tokens.Colors.stateWarn)
             .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m + Tokens.Space.xxs),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
-        Icon(TablerIcons.AlertTriangle, null, tint = Tokens.Colors.stateWarnText, modifier = Modifier.size(Tokens.Size.iconRow))
-        Text(text, color = Tokens.Colors.stateWarnText, fontSize = Tokens.Font.preview, lineHeight = Tokens.Font.lineHeight)
+        Icon(
+            TablerIcons.AlertTriangle,
+            null,
+            tint = if (bad) Tokens.Colors.failText else Tokens.Colors.stateWarnText,
+            modifier = Modifier.size(Tokens.Size.iconRow),
+        )
+        Text(
+            text,
+            color = if (bad) Tokens.Colors.errorSoft else Tokens.Colors.stateWarnText,
+            fontSize = Tokens.Font.preview,
+            lineHeight = Tokens.Font.lineHeight,
+        )
     }
 }
 
@@ -625,28 +804,41 @@ private fun PhraseStep(model: AppModel, onBack: () -> Unit, onWritten: () -> Uni
     }
 }
 
-/** Сетка 24 слов сид-фразы (макет `onboard/Phrase`): два столбца по 12 — 1–12 слева,
- *  13–24 справа, — каждое пронумеровано. По высоте — по содержимому, без растяжения.
- *  `phrase` = null — ещё грузится (читается через ops). */
+/** Сетка 24 слов сид-фразы (макет `onboard/Phrase`). `phrase` = null — ещё грузится
+ *  (читается через ops). */
 @Composable
 internal fun PhraseGrid(phrase: String?) {
     val words = phrase?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
-    val shape = RoundedCornerShape(Tokens.Radius.group)
-    if (words.size < 24) {
-        Box(Modifier.fillMaxWidth().clip(shape).background(Tokens.Colors.group).padding(Tokens.Space.xl), Alignment.Center) {
+    if (words.size < PHRASE_WORDS) {
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.group)).background(Tokens.Colors.group).padding(Tokens.Space.xl),
+            Alignment.Center,
+        ) {
             Text("…", color = Tokens.Colors.tertiary, fontSize = Tokens.Font.title)
         }
         return
     }
+    PhraseLayout { i -> Text(words[i], color = Color.White, fontSize = Tokens.Font.name, fontWeight = FontWeight.Medium) }
+}
+
+/**
+ * Раскладка 24 слов — одна на показ и ввод, чтобы запись на бумаге переносилась ячейка в
+ * ячейку: два столбца по 12 (1–12 слева, 13–24 справа), номер у каждого; при крупном шрифте —
+ * один столбец. По высоте — по содержимому.
+ */
+@Composable
+private fun PhraseLayout(cell: @Composable RowScope.(Int) -> Unit) {
+    val cols = if (LocalDensity.current.fontScale >= ONE_COLUMN_FONT) 1 else 2
+    val perCol = PHRASE_WORDS / cols
     Row(
-        Modifier.fillMaxWidth().clip(shape).background(Tokens.Colors.group)
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.group)).background(Tokens.Colors.group)
             .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s + Tokens.Space.xxs),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
-        for (col in 0 until 2) {
+        for (col in 0 until cols) {
             Column(Modifier.weight(1f)) {
-                for (row in 0 until 12) {
-                    val i = col * 12 + row
+                for (row in 0 until perCol) {
+                    val i = col * perCol + row
                     Row(
                         Modifier.heightIn(min = Tokens.Size.phraseRow),
                         verticalAlignment = Alignment.CenterVertically,
@@ -660,7 +852,7 @@ internal fun PhraseGrid(phrase: String?) {
                             style = Tokens.Text.meta,
                             modifier = Modifier.width(Tokens.Size.phraseNum),
                         )
-                        Text(words[i], color = Color.White, fontSize = Tokens.Font.name, fontWeight = FontWeight.Medium)
+                        cell(i)
                     }
                 }
             }
