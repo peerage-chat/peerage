@@ -259,7 +259,7 @@ private fun ContactSearch(query: String, onQuery: (String) -> Unit) {
 
 /** Поле формы на панели (макет: `.inp`): плашка, крупный текст, подсказка на месте пустого. */
 @Composable
-private fun FormInput(value: String, hint: String, modifier: Modifier = Modifier, onValue: (String) -> Unit) {
+internal fun FormInput(value: String, hint: String, modifier: Modifier = Modifier, onValue: (String) -> Unit) {
     Box(
         modifier.heightIn(min = Tokens.Size.formField)
             .clip(RoundedCornerShape(Tokens.Radius.field))
@@ -355,7 +355,7 @@ private fun RowTag(text: String, accent: Boolean = false) {
 
 /** Пояснение под группой: последствие одной-двумя фразами. */
 @Composable
-private fun Caption(text: String) {
+internal fun Caption(text: String) {
     Text(
         text,
         color = Tokens.Colors.tertiary,
@@ -367,7 +367,7 @@ private fun Caption(text: String) {
 
 /** Главная кнопка экрана внизу, над системной полосой (макет: `foot`). */
 @Composable
-private fun ScreenFooter(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun ScreenFooter(text: String, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
         Modifier.fillMaxWidth().navigationBarsPadding()
             .padding(start = Tokens.Space.xl, end = Tokens.Space.xl, top = Tokens.Space.m, bottom = Tokens.Space.xxl),

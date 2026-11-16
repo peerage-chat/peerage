@@ -327,7 +327,6 @@ private fun CompactShell(model: AppModel) {
         model.openGroup(gid)
         screen = Screen.GroupChat
     }
-    var scanResult by remember { mutableStateOf<String?>(null) }
     // Папки: единственный источник правды — страница пейджера. Таб и заголовок только
     // читают её (targetPage — куда пейджер движется, поэтому таб переключается сразу,
     // а не после остановки), тап по табу только листает. Раньше таб и страница
@@ -335,6 +334,18 @@ private fun CompactShell(model: AppModel) {
     // действиях опоздавший эффект утаскивал страницу назад посреди жеста.
     val folders = folderKeys(model)
     val folderPager = rememberPagerState { folders.size }
+    // Вкладка «Запросы» появляется и пропадает, а номера страниц за ней сдвигаются. Пейджер
+    // помнит номер, человек — папку: при смене набора страница остаётся на той же папке,
+    // а пропавшая уступает место «Все» (иначе после принятия запроса открывались «Группы»).
+    // SideEffect — до измерения кадра, так что currentPage здесь ещё прежний.
+    val seenFolders = remember { arrayOf(folders) }
+    SideEffect {
+        if (seenFolders[0] != folders) {
+            val was = seenFolders[0].getOrNull(folderPager.currentPage)
+            seenFolders[0] = folders
+            folderPager.requestScrollToPage(folders.indexOf(was).coerceAtLeast(0))
+        }
+    }
     val activeFilter = folders.getOrElse(folderPager.targetPage) { "all" }
     val scope = rememberCoroutineScope()
     val selectFolder: (String) -> Unit = { key ->
@@ -440,10 +451,7 @@ private fun CompactShell(model: AppModel) {
                                 Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = goBack)
                                 Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = goBack)
                                 Screen.SettingsAbout -> TopBar(stringResource(R.string.settings_cat_about), onBack = goBack)
-                                Screen.Scanner -> TopBar(
-                                    stringResource(if (verifyingPeer != null) R.string.title_verify_qr else R.string.title_scan_qr),
-                                    onBack = goBack,
-                                )
+                                Screen.Scanner -> TopBar(stringResource(R.string.title_verify_qr), onBack = goBack)
                                 Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
                                     BarIcon(Icons.Filled.PersonAdd, stringResource(R.string.cd_add_contact)) { screen = Screen.Add }
                                 }
@@ -532,28 +540,29 @@ private fun CompactShell(model: AppModel) {
                                         }
                                         model.jumpTo = ref
                                     }
-                                    Screen.Add -> AddScreen(
+                                    Screen.Add -> AddContactScreen(
                                         model,
-                                        scannedKey = scanResult,
-                                        onScan = { screen = Screen.Scanner },
-                                        onDone = goBack,
+                                        onMyCode = { screen = Screen.MyCode },
+                                        // Запрос ушёл или контакт уже есть — в чат вместо экрана
+                                        // добавления: «назад» из чата ведёт в список, а не к камере.
+                                        onOpenChat = { key ->
+                                            model.openChat(key)
+                                            nav.replace(Screen.Chat)
+                                        },
                                     )
+                                    // Отдельный сканер — только для сверки ключа: добавление
+                                    // сканирует камерой прямо на своём экране.
                                     Screen.Scanner -> QrScannerScreen { key ->
-                                        val target = verifyingPeer
-                                        if (target == null) {
-                                            scanResult = key
-                                            screen = Screen.Add
-                                        } else {
-                                            // Сверка: личность из кода сравнивает движок; итог —
-                                            // шторкой на экране сверки. Не совпало — ровно тот
-                                            // случай, ради которого сверка и нужна.
-                                            verifyingPeer = null
-                                            model.verifyByCode(target, key) { verifyResult = it }
-                                            nav.back() // сканер открыт с экрана сверки — туда и вернуться
-                                        }
+                                        val target = verifyingPeer ?: return@QrScannerScreen
+                                        // Личность из кода сравнивает движок; итог — шторкой на
+                                        // экране сверки. Не совпало — ровно тот случай, ради
+                                        // которого сверка и нужна.
+                                        verifyingPeer = null
+                                        model.verifyByCode(target, key) { verifyResult = it }
+                                        nav.back() // сканер открыт с экрана сверки — туда и вернуться
                                     }
                                     Screen.Me -> ProfileScreen(model, navigate)
-                                    Screen.MyCode -> MyCodeScreen(model) { screen = Screen.Scanner }
+                                    Screen.MyCode -> MyCodeScreen(model) { nav.replace(Screen.Add) }
                                     Screen.Request -> RequestScreen(model, requestKey, onDone = goBack)
                                     Screen.Invite -> InviteScreen(model, inviteGid, onDone = goBack)
                                     Screen.KeyFlow -> KeyFlowScreen(model, keyWordsFirst, onDone = goBack)

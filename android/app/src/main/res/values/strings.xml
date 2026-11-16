@@ -125,7 +125,6 @@
     <string name="title_add_contact">Add contact</string>
     <string name="title_new_group">New group</string>
     <string name="title_add_member">Invite</string>
-    <string name="title_scan_qr">Scan QR</string>
     <string name="title_search">Search</string>
     <string name="newchat_title">New chat</string>
     <string name="newchat_contacts_header">Contacts</string>
@@ -157,11 +156,6 @@
     <string name="req_decline">Decline</string>
     <string name="req_block">Block</string>
     <string name="bench_recv_rate">⏱ receiving: %1$s Mbps</string>
-    <string name="add_label_pubkey">Exchange code or key</string>
-    <string name="add_hint_hex">Paste the code or scan the QR</string>
-    <string name="add_btn">Add</string>
-    <string name="add_known">Contact already exists</string>
-    <string name="add_error">Invalid key</string>
     <string name="label_name">Name</string>
     <string name="qr_cd">Public key QR code</string>
     <string name="info_delete">Delete contact</string>
@@ -1024,4 +1018,29 @@
     <string name="verify_invalid_text">The scanned QR has no key. Use the code from the “My code” screen on that phone.</string>
     <string name="verify_scan_again">Scan again</string>
     <string name="verify_got_it">Got it</string>
+    <!-- Add contact and request (4.1, step 7i, people/Main, Found, Errors, Pending mockups) -->
+    <string name="add_camera_hint">Point at the other person’s code</string>
+    <string name="add_paste">Paste code</string>
+    <string name="add_paste_sub">If the code was sent in a message</string>
+    <string name="add_show_code">Show my code</string>
+    <string name="add_show_code_sub">To scan from another phone</string>
+    <string name="add_caption">Share the code in person or through any messenger: it holds the key, the network address and the name.</string>
+    <string name="add_err_invalid">Not a %1$s code</string>
+    <string name="add_err_invalid_sub">The QR was read, but it has no key. Links and other codes do not open here.</string>
+    <string name="add_err_invalid_paste_sub">The text has no key. Links and other codes do not open here.</string>
+    <string name="add_err_self">This is this phone’s code</string>
+    <string name="add_err_self_sub">This phone cannot be added to its own contacts — use the other person’s code.</string>
+    <string name="add_err_known">%1$s is already in contacts</string>
+    <string name="add_open_chat">Open chat</string>
+    <string name="add_key_start">key %1$s…</string>
+    <string name="add_greeting">Greeting</string>
+    <string name="add_greeting_hint">Who this is and how you know each other</string>
+    <string name="add_greeting_caption">Goes out as a contact request with this profile’s name; the photo follows after acceptance. %1$s decides whether to accept.</string>
+    <string name="add_local_name">Name on this phone</string>
+    <string name="add_local_name_caption">Optional. Visible only on this phone.</string>
+    <string name="add_send">Send request</string>
+    <string name="add_rescan">Scan another</string>
+    <string name="chat_request_sent">request sent</string>
+    <string name="chat_awaiting_banner">Contact request sent. %1$s gets the messages below once the request is accepted.</string>
+    <string name="status_held">awaiting acceptance</string>
 </resources>

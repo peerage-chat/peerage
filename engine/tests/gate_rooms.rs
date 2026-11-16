@@ -136,10 +136,11 @@ fn stranger_cannot_ring_or_invite_to_group() {
     m.send_room_invite(&a_key, &room, true, false).unwrap();
     m.send_group_invite(&a_key, &[7u8; 32], "Бесплатные призы")
         .unwrap();
-    m.send_text(&a_key, "привет").unwrap();
+    // Точка синхронизации: запрос в контакты (7i) пришёл позже звонка и карточки.
+    m.send_contact_request(&a_key, "привет", "").unwrap();
     assert!(
         wait(15, || has_request(&a, &hex::encode(m_key))),
-        "текст незнакомца стал запросом"
+        "запрос незнакомца дошёл"
     );
 
     assert!(!drained_room_invite(&a), "звонок незнакомца не звонит");

@@ -357,13 +357,14 @@ fn contact_code_carries_signed_address() {
     // Кэрол добавляет Алису по коду и сразу знает её текущий адрес.
     let code = a.my_contact_code();
     assert!(code.contains(':'), "после ротации код расширенный: {code}");
-    assert_eq!(c.add_contact_code(&code, "Алиса"), "added");
+    assert_eq!(c.request_contact(&code, "Алиса", ""), "sent");
     assert_eq!(
         transport_of(&c, &a_key),
         hex::encode(alice.transport_public(1))
     );
 
     // Проверяем главное: сообщение доходит с первой попытки, без «а куда слать».
+    // Алиса держит Кэрол в контактах — запрос Кэрол принимается сам и выпускает очередь.
     a.add_contact(&c_key, "Кэрол");
     c.send_text(&a_key, "привет, это Кэрол");
     assert!(

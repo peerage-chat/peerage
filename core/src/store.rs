@@ -120,6 +120,10 @@ pub struct Contact {
     /// Номер эпохи адреса. Растёт строго — старое объявление не переиграет новое.
     #[serde(default)]
     pub transport_epoch: u32,
+    /// Мы послали запрос в контакты и ждём принятия (7i): наши сообщения ему лежат в
+    /// очереди, кроме самого запроса. Снимается его `ContactAccept` или встречным запросом.
+    #[serde(default)]
+    pub awaiting: bool,
 }
 
 /// Способ сверки ключа — показывается в «Сверен: 1 ноября, по коду».
@@ -185,7 +189,7 @@ impl ContactStore {
         let conn = db::lock(&self.db);
         let mut stmt = conn.prepare(
             "SELECT key, name, fingerprint, added, verified, profile_name, avatar_id, helpful, \
-             transport_key, transport_epoch, verified_at, verified_how FROM contacts",
+             transport_key, transport_epoch, verified_at, verified_how, awaiting FROM contacts",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -201,10 +205,11 @@ impl ContactStore {
                 row.get::<_, i64>(9)?,
                 row.get::<_, i64>(10)?,
                 row.get::<_, String>(11)?,
+                row.get::<_, i64>(12)?,
             ))
         })?;
         for row in rows {
-            let (kb, name, fp, added, ver, profile_name, avatar_id, helpful, tk, tepoch, vat, vhow) = row?;
+            let (kb, name, fp, added, ver, profile_name, avatar_id, helpful, tk, tepoch, vat, vhow, awaiting) = row?;
             if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
                 self.cache.insert(key, Contact {
                     key: hex::encode(key),
@@ -219,13 +224,24 @@ impl ContactStore {
                     helpful: helpful.max(0) as u32,
                     transport_key: tk,
                     transport_epoch: tepoch.max(0) as u32,
+                    awaiting: awaiting != 0,
                 });
             }
         }
         Ok(())
     }
 
+    /// Добавить принятый контакт (принял его запрос, тесты, восстановление).
     pub fn add(&mut self, key: &[u8; 32], name: &str, added: i64) -> Result<AddOutcome, StoreError> {
+        self.insert(key, name, added, false)
+    }
+
+    /// Добавить по коду с запросом в контакты (7i): до его принятия — `awaiting`.
+    pub fn add_awaiting(&mut self, key: &[u8; 32], name: &str, added: i64) -> Result<AddOutcome, StoreError> {
+        self.insert(key, name, added, true)
+    }
+
+    fn insert(&mut self, key: &[u8; 32], name: &str, added: i64, awaiting: bool) -> Result<AddOutcome, StoreError> {
         if self.cache.contains_key(key) {
             return Ok(AddOutcome::AlreadyKnown);
         }
@@ -244,11 +260,12 @@ impl ContactStore {
             // объявит смену (ADR-007).
             transport_key: String::new(),
             transport_epoch: 0,
+            awaiting,
         };
         db::lock(&self.db).execute(
-            "INSERT OR IGNORE INTO contacts (key, name, fingerprint, added, verified)
-             VALUES (?1, ?2, ?3, ?4, 0)",
-            rusqlite::params![key.as_slice(), &contact.name, &contact.fingerprint, added],
+            "INSERT OR IGNORE INTO contacts (key, name, fingerprint, added, verified, awaiting)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+            rusqlite::params![key.as_slice(), &contact.name, &contact.fingerprint, added, awaiting as i64],
         )?;
         self.cache.insert(*key, contact);
         Ok(AddOutcome::Added)
@@ -278,11 +295,11 @@ impl ContactStore {
         }
         db::lock(&self.db).execute(
             "INSERT OR IGNORE INTO contacts
-                 (key, name, fingerprint, added, verified, profile_name, avatar_id, helpful)
-             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7)",
+                 (key, name, fingerprint, added, verified, profile_name, avatar_id, helpful, awaiting)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 key.as_slice(), &c.name, &c.fingerprint, c.added,
-                &c.profile_name, &c.avatar_id, c.helpful as i64,
+                &c.profile_name, &c.avatar_id, c.helpful as i64, c.awaiting as i64,
             ],
         )?;
         self.cache.insert(key, Contact {
@@ -323,6 +340,15 @@ impl ContactStore {
         c.verified = how.is_some();
         c.verified_at = at;
         c.verified_how = how.map(|(h, _)| h);
+        Ok(true)
+    }
+
+    /// Пир принял наш запрос (или встречно попросился сам): снять `awaiting`. `true` —
+    /// если и правда ждали, то есть очередь пора выпускать.
+    pub fn mark_accepted(&mut self, key: &[u8; 32]) -> Result<bool, StoreError> {
+        let Some(c) = self.cache.get_mut(key).filter(|c| c.awaiting) else { return Ok(false) };
+        db::lock(&self.db).execute("UPDATE contacts SET awaiting=0 WHERE key=?1", rusqlite::params![key.as_slice()])?;
+        c.awaiting = false;
         Ok(true)
     }
 
@@ -646,28 +672,21 @@ impl WantedStore {
 
 // ---- Гейт контактов: входящие запросы + блок-лист (анти-abuse) --------------
 
-/// Входящий «запрос в контакты» от незнакомца. Первое сообщение приходит НЕ в чат,
-/// а карточкой на одобрение — замена тихого TOFU-автодобавления. `preview` — текст
-/// первого сообщения (или «[image]»/«[file]»/«[voice]» для медиа), чтобы получатель
-/// решал осознанно.
+/// Входящий «запрос в контакты» (шаг 7i): незнакомец добавил нас по коду и прислал
+/// приветствие. Не чат, а карточка на одобрение — замена тихого TOFU-автодобавления.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContactRequest {
     pub key: String,
     pub fingerprint: String,
-    #[serde(default)]
-    pub preview: String,
-    pub time: i64,
-    /// Первое текстовое сообщение целиком — ляжет в чат при одобрении. Наружу (UI)
-    /// не уходит: для решения хватает `preview`.
-    #[serde(skip)]
-    pub first: Option<FirstMessage>,
-}
-
-/// Первое сообщение незнакомца, отложенное до решения по запросу.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FirstMessage {
-    pub id: u64,
-    pub text: String,
+    /// Самоназвание из запроса — «указано отправителем», ничем не подтверждено.
+    pub name: String,
+    /// Приветствие целиком (до `MAX_GREETING` байт, может быть пустым); при одобрении
+    /// ложится в чат первым сообщением.
+    pub greeting: String,
+    /// id запроса у отправителя: под ним приветствие встанет в чат, его же вернёт
+    /// `ContactAccept`.
+    pub request_id: u64,
+    /// Когда пришёл — и время приветствия в чате.
     pub time: i64,
 }
 
@@ -689,30 +708,23 @@ impl GateStore {
     fn load_cache(&mut self) -> Result<(), StoreError> {
         let conn = db::lock(&self.db);
         {
-            let mut stmt =
-                conn.prepare(
-                    "SELECT key, fingerprint, preview, time, first_id, first_text, first_time \
-                     FROM contact_requests",
-                )?;
+            let mut stmt = conn
+                .prepare("SELECT key, fingerprint, name, greeting, request_id, time FROM contact_requests")?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, Vec<u8>>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(5)?,
                 ))
             })?;
             for row in rows {
-                let (kb, fp, preview, time, first_id, first_text, first_time) = row?;
-                // Пустой текст — запрос с медиа или из версии до буфера: в чат класть нечего.
-                let first = (!first_text.is_empty())
-                    .then(|| FirstMessage { id: first_id as u64, text: first_text, time: first_time });
+                let (kb, fingerprint, name, greeting, request_id, time) = row?;
                 if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
                     self.requests.insert(key, ContactRequest {
-                        key: hex::encode(key), fingerprint: fp, preview, time, first,
+                        key: hex::encode(key), fingerprint, name, greeting, request_id: request_id as u64, time,
                     });
                 }
             }
@@ -731,39 +743,32 @@ impl GateStore {
 
     // — Запросы —
 
-    /// Записать/обновить входящий запрос. Первое сообщение сохраняем (превью и, если
-    /// это текст, `first` целиком — для чата после одобрения); повторные до одобрения
-    /// НЕ копим (анти-DoS) — только двигаем `time`. Так на незнакомца приходится не
-    /// больше одного сообщения, а его размер ограничен протоколом.
-    /// Возвращает `true`, если запрос новый (UI показать уведомление).
+    /// Записать входящий запрос. Повторный от того же пира (переотправил, добавил
+    /// заново) НЕ заменяет первый — анти-DoS: на незнакомца приходится одна карточка
+    /// ограниченного размера. Возвращает `true`, если запрос новый (показать в UI).
     pub fn upsert_request(
         &mut self,
         key: &[u8; 32],
-        preview: &str,
-        first: Option<FirstMessage>,
+        name: &str,
+        greeting: &str,
+        request_id: u64,
         time: i64,
     ) -> Result<bool, StoreError> {
-        if let Some(existing) = self.requests.get_mut(key) {
-            existing.time = time;
-            db::lock(&self.db).execute(
-                "UPDATE contact_requests SET time=?1 WHERE key=?2",
-                rusqlite::params![time, key.as_slice()],
-            )?;
+        if self.requests.contains_key(key) {
             return Ok(false);
         }
         let fingerprint = crate::identity::fingerprint_words(key).join(" ");
-        let (first_id, first_text, first_time) = match &first {
-            Some(m) => (m.id as i64, m.text.as_str(), m.time),
-            None => (0, "", 0),
-        };
         db::lock(&self.db).execute(
-            "INSERT OR IGNORE INTO contact_requests \
-             (key, fingerprint, preview, time, first_id, first_text, first_time) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![key.as_slice(), &fingerprint, preview, time, first_id, first_text, first_time],
+            "INSERT OR IGNORE INTO contact_requests (key, fingerprint, name, greeting, request_id, time)              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![key.as_slice(), &fingerprint, name, greeting, request_id as i64, time],
         )?;
         self.requests.insert(*key, ContactRequest {
-            key: hex::encode(key), fingerprint, preview: preview.to_string(), time, first,
+            key: hex::encode(key),
+            fingerprint,
+            name: name.to_string(),
+            greeting: greeting.to_string(),
+            request_id,
+            time,
         });
         Ok(true)
     }
@@ -2220,6 +2225,23 @@ mod tests {
         assert_eq!((c.verified, c.verified_at, c.verified_how), (false, 0, None));
     }
 
+    /// Добавленный по коду ждёт принятия, пока пир не ответит; снятие — один раз и
+    /// переживает перезапуск.
+    #[test]
+    fn awaiting_contact_until_accepted() {
+        let (k, shared) = (key(), db());
+        let mut store = ContactStore::open(shared.clone()).unwrap();
+        store.add_awaiting(&k, "Лена", 1).unwrap();
+        assert!(store.get(&k).unwrap().awaiting);
+        assert!(store.mark_accepted(&k).unwrap(), "ждали — снимаем");
+        assert!(!store.mark_accepted(&k).unwrap(), "второй раз — уже нечего");
+        assert!(!ContactStore::open(shared).unwrap().get(&k).unwrap().awaiting);
+
+        let other = key();
+        store.add(&other, "", 1).unwrap();
+        assert!(!store.get(&other).unwrap().awaiting, "принятый контакт не ждёт");
+    }
+
     /// Из копии отметка не переносится — и «когда/как» тоже (решение 2026-08-01).
     #[test]
     fn imported_contact_comes_unverified() {
@@ -2238,6 +2260,7 @@ mod tests {
             helpful: 0,
             transport_key: String::new(),
             transport_epoch: 0,
+            awaiting: false,
         };
         assert!(store.import_contact(&c).unwrap());
         let got = store.get(&k).unwrap();
@@ -2686,49 +2709,25 @@ mod tests {
         assert_eq!(s2.get(&k).unwrap().helpful, 2, "репутация пережила переоткрытие");
     }
 
+    /// Повторный запрос первый не заменяет (анти-DoS), а запрос переживает перезапуск
+    /// до решения целиком — с именем, приветствием и id.
     #[test]
-    fn gate_request_upsert_keeps_first_preview() {
-        let k = key();
-        let mut g = GateStore::open(db()).unwrap();
-        let first = |text: &str, t| Some(FirstMessage { id: 7, text: text.into(), time: t });
-        assert!(g.upsert_request(&k, "привет", first("привет", 100), 100).unwrap()); // новый
-        assert!(!g.upsert_request(&k, "ещё раз", first("ещё раз", 200), 200).unwrap()); // повтор
-        assert!(g.has_request(&k));
-        let r = g.list_requests();
-        assert_eq!(r.len(), 1);
-        assert_eq!(r[0].preview, "привет"); // первый превью сохранён (анти-DoS)
-        assert_eq!(r[0].first.as_ref().map(|m| m.text.as_str()), Some("привет"), "и первое сообщение");
-        assert_eq!(r[0].time, 200); // время подвинуто
-    }
-
-    #[test]
-    fn gate_request_persists_and_take_removes() {
+    fn gate_request_keeps_first_and_survives_reopen() {
         let k = key();
         let shared = db();
         {
             let mut g = GateStore::open(shared.clone()).unwrap();
-            g.upsert_request(&k, "[image]", None, 1).unwrap();
+            assert!(g.upsert_request(&k, "Лена", "здравствуйте", 7, 100).unwrap(), "новый");
+            assert!(!g.upsert_request(&k, "Спам", "ещё раз", 8, 200).unwrap(), "повтор не заменяет");
         }
         let mut g2 = GateStore::open(shared).unwrap();
-        assert!(g2.has_request(&k));
-        let taken = g2.take_request(&k).unwrap();
-        assert_eq!(taken.preview, "[image]");
-        assert_eq!(taken.first, None, "медиа не откладывается текстом");
-    }
-
-    #[test]
-    fn gate_first_message_survives_reopen() {
-        let k = key();
-        let shared = db();
-        let msg = FirstMessage { id: 1_700_000_000_123, text: "здравствуйте, это Лена".into(), time: 42 };
-        {
-            let mut g = GateStore::open(shared.clone()).unwrap();
-            g.upsert_request(&k, "здравствуйте…", Some(msg.clone()), 42).unwrap();
-        }
-        let mut g2 = GateStore::open(shared).unwrap();
-        assert_eq!(g2.take_request(&k).unwrap().first, Some(msg), "переживает перезапуск до решения");
+        let r = g2.take_request(&k).unwrap();
+        assert_eq!(
+            (r.name.as_str(), r.greeting.as_str(), r.request_id, r.time),
+            ("Лена", "здравствуйте", 7, 100)
+        );
         assert!(!g2.has_request(&k));
-        assert!(g2.take_request(&k).is_none()); // повторный take — пусто
+        assert!(g2.take_request(&k).is_none(), "повторный take — пусто");
     }
 
     #[test]
@@ -2737,7 +2736,7 @@ mod tests {
         let shared = db();
         {
             let mut g = GateStore::open(shared.clone()).unwrap();
-            g.upsert_request(&k, "спам", None, 1).unwrap();
+            g.upsert_request(&k, "", "спам", 1, 1).unwrap();
             g.block(&k, 2).unwrap();
             assert!(g.is_blocked(&k));
             assert!(!g.has_request(&k)); // блок снял запрос

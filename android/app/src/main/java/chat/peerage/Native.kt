@@ -150,9 +150,12 @@ object Native {
     /** Расшифровать блоб в файл потоково (крупное вложение не идёт в память). */
     external fun blobExport(sessionPtr: Long, idHex: String, path: String): Boolean
 
-    /** Добавить контакт по коду обмена: hex личности либо расширенная форма
-     *  `личность:эпоха:адрес:подпись` (ADR-007). Возвращает "added"|"known"|"error". */
-    external fun addContact(sessionPtr: Long, keyHex: String, name: String): String
+    /** Что за код обмена: JSON `{status, key, name}`, status — "ok" | "invalid" | "self" | "known". */
+    external fun inspectCode(sessionPtr: Long, code: String): String
+
+    /** Добавить по коду (hex личности или `личность:эпоха:адрес:подпись#имя`, ADR-007) и
+     *  послать запрос в контакты с приветствием (7i). "sent" | "invalid" | "self" | "known". */
+    external fun requestContact(sessionPtr: Long, code: String, name: String, greeting: String): String
 
     /** Текст в группу ответом на сообщение автора `replySender` (hex; `replyTo = 0` —
      *  не ответ). `mentionsJson` — `[{"at","len","key"}]`, смещения в байтах UTF-8. */

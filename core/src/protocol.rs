@@ -293,6 +293,14 @@ pub enum Payload {
         #[serde(with = "serde_bytes")]
         id: Vec<u8>,
     },
+    /// Запрос в контакты (шаг 7i): приветствие и самоназвание. Шлёт тот, кто добавил по
+    /// коду; пока нет [`Payload::ContactAccept`], остальное ему не уходит — ждёт в
+    /// очереди отправителя. `greeting` — до [`MAX_GREETING`] байт, может быть пустым;
+    /// фото — только после принятия, вместе с профилем. Надёжно (`id` + `Ack`).
+    ContactRequest { id: u64, greeting: String, name: String },
+    /// Запрос `request` принят: приветствие легло в чат, очередь отправителя можно
+    /// выпускать. Отклонение ответа не имеет — не раскрывать, что запрос прочли.
+    ContactAccept { id: u64, request: u64 },
     /// Неизвестный/будущий тип payload — forward-compat (ADR-006). Сообщения версий,
     /// которые этот клиент ещё НЕ понимает (напр. реакции/закрепы/правки — post-1.0),
     /// декодируются СЮДА и молча игнорируются, а не роняют `decode`. Так новые типы
@@ -330,6 +338,8 @@ impl Payload {
             | Payload::GroupKeyRequest { id, .. }
             | Payload::GroupKeyReply { id, .. }
             | Payload::GroupInvite { id, .. }
+            | Payload::ContactRequest { id, .. }
+            | Payload::ContactAccept { id, .. }
             | Payload::TransportRotate { id, .. } => Some(*id),
             _ => None,
         }
@@ -375,6 +385,10 @@ pub enum ProtocolError {
 /// бакет и станет отличимым от текстового по размеру.
 pub const MAX_CAPTION: usize = 1024;
 
+/// Потолок приветствия в запросе в контакты, в БАЙТАХ (~500 символов кириллицей): с
+/// именем запрос обязан умещаться в бакет APP, как текст.
+pub const MAX_GREETING: usize = 1024;
+
 /// Потолок реакции в БАЙТАХ: хватает на семейный эмодзи из ZWJ-цепочки дважды, а
 /// реакция остаётся в бакете CONTROL.
 pub const MAX_REACTION: usize = 64;
@@ -409,6 +423,10 @@ fn bucket_for(payload: &Payload) -> usize {
         | Payload::GroupInvite { .. }
         | Payload::GroupKeyReply { .. }
         | Payload::ProfileUpdate { .. }
+        // Запрос и принятие (7i) — в бакет текста: несут приветствие, а «человек
+        // добавляет контакт» не должно отличаться по размеру от обычного сообщения.
+        | Payload::ContactRequest { .. }
+        | Payload::ContactAccept { .. }
         // Смена адреса (ADR-007) не влезает в CONTROL: одна только подпись 64 Б,
         // плюс ключ — с бакетом 256 Б это несовместимо. Прячем среди прикладных:
         // на проводе объявление неотличимо от обычного текста или картинки, что
@@ -630,6 +648,22 @@ mod tests {
         assert_eq!(roundtrip(&p), p);
         assert_eq!(p.reliable_id(), Some(9));
         assert_eq!(wire(&p), wire(&Payload::Ack { id: 1 }));
+    }
+
+    /// Запрос в контакты и принятие (7i) — надёжные и по размеру неотличимы от текста,
+    /// даже с самым длинным приветствием и именем.
+    #[test]
+    fn contact_request_and_accept_hide_among_text() {
+        let req = Payload::ContactRequest { id: 5, greeting: "я".repeat(MAX_GREETING / 2), name: "Ж".repeat(64) };
+        let acc = Payload::ContactAccept { id: 6, request: u64::MAX };
+        let text = Payload::Text {
+            id: 1, text: "привет".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false,
+        };
+        for p in [&req, &acc] {
+            assert_eq!(&roundtrip(p), p);
+            assert_eq!(wire(p), wire(&text));
+        }
+        assert_eq!((req.reliable_id(), acc.reliable_id()), (Some(5), Some(6)));
     }
 
     /// Отметка о прочтении и набор (2.10) — не надёжные (без id: потеря не страшна,

@@ -154,7 +154,7 @@ private fun BubbleMenuItems(model: AppModel, t: BubbleActions, close: () -> Unit
         f()
     }
     Text(
-        statusLine(m.mine, m.status, m.time),
+        statusLine(m.mine, shownStatus(model, m, t.chat.group), m.time),
         color = Tokens.Colors.tertiary,
         fontSize = Tokens.Font.body,
         modifier = Modifier.padding(start = Tokens.Space.l, end = Tokens.Space.l, top = Tokens.Space.m, bottom = Tokens.Space.m),
@@ -199,6 +199,7 @@ private fun statusLine(mine: Boolean, status: String, time: Long): String {
         status == "sent" -> R.string.act_sent
         status == "pending" -> R.string.act_sending
         status == "queued" -> R.string.act_queued
+        status == "held" -> R.string.status_held
         status == "failed" -> R.string.act_failed
         else -> null
     }

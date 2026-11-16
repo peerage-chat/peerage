@@ -54,6 +54,12 @@ pub fn lock(db: &Db) -> MutexGuard<'_, Connection> {
 }
 
 pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    // 7i: запросом было первое сообщение незнакомца (`first_text`); теперь это свой
+    // payload с приветствием. Старые висящие запросы не переносятся: принять их по
+    // новому протоколу нельзя (до беты формат ломать можно).
+    if conn.prepare("SELECT first_text FROM contact_requests LIMIT 0").is_ok() {
+        conn.execute("DROP TABLE contact_requests", [])?;
+    }
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS contacts (
             key          BLOB PRIMARY KEY,
@@ -72,7 +78,9 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             -- Когда и как сверен ключ (unix-секунды; 'code' | 'set'). Пусто — не
             -- сверен или сверен до того, как это стали хранить.
             verified_at     INTEGER NOT NULL DEFAULT 0,
-            verified_how    TEXT    NOT NULL DEFAULT ''
+            verified_how    TEXT    NOT NULL DEFAULT '',
+            -- 7i: послан запрос в контакты, ждём принятия (очередь к нему держится).
+            awaiting        INTEGER NOT NULL DEFAULT 0
         );
 
         -- Вся переписка одной таблицей: личные чаты, «Сохранённое» и группы. Раньше
@@ -133,16 +141,15 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 
         -- Гейт контактов (замена TOFU-автодобавления): первое сообщение незнакомца
         -- ждёт одобрения здесь, а не сыплется в чат. blocklist — тихий дроп.
+        -- Входящие запросы в контакты (шаг 7i): имя и приветствие из запроса, id
+        -- запроса у отправителя (под ним приветствие встанет в чат).
         CREATE TABLE IF NOT EXISTS contact_requests (
-            key         BLOB PRIMARY KEY,
+            key         BLOB    PRIMARY KEY,
             fingerprint TEXT    NOT NULL,
-            preview     TEXT    NOT NULL DEFAULT '',
-            time        INTEGER NOT NULL,
-            -- Первое сообщение незнакомца целиком: при одобрении оно ложится в чат
-            -- (отправитель уже получил Ack и не перешлёт его).
-            first_id    INTEGER NOT NULL DEFAULT 0,
-            first_text  TEXT    NOT NULL DEFAULT '',
-            first_time  INTEGER NOT NULL DEFAULT 0
+            name        TEXT    NOT NULL DEFAULT '',
+            greeting    TEXT    NOT NULL DEFAULT '',
+            request_id  INTEGER NOT NULL DEFAULT 0,
+            time        INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS blocklist (
             key     BLOB    PRIMARY KEY,
@@ -269,6 +276,7 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE group_meta ADD COLUMN photo TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN verified_at INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN verified_how TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN awaiting INTEGER NOT NULL DEFAULT 0", []);
     // Полнотекстовый индекс переписки: текст и имя файла вложения (поиск в чате, 2.9).
     // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
     // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5

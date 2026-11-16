@@ -53,6 +53,16 @@ internal fun QrScannerScreen(onResult: (String) -> Unit) {
 
 @Composable
 private fun ScannerContent(onResult: (String) -> Unit) {
+    Box(Modifier.fillMaxSize()) {
+        CameraPreview(onResult, Modifier.fillMaxSize())
+        ScanOverlay()
+    }
+}
+
+/** Превью задней камеры с поиском QR. [once] — [onResult] один раз за жизнь превью;
+ *  иначе — на каждый кадр с кодом (повторы отсеивает вызывающий). Разрешение — у вызывающего. */
+@Composable
+internal fun CameraPreview(onResult: (String) -> Unit, modifier: Modifier = Modifier, once: Boolean = true) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -71,7 +81,7 @@ private fun ScannerContent(onResult: (String) -> Unit) {
             .build()
         analysis.setAnalyzer(
             androidx.core.content.ContextCompat.getMainExecutor(ctx),
-            QrAnalyzer(onResult),
+            QrAnalyzer(onResult, once),
         )
         cameraProvider?.unbindAll()
         cameraProvider?.bindToLifecycle(
@@ -85,43 +95,43 @@ private fun ScannerContent(onResult: (String) -> Unit) {
     DisposableEffect(Unit) {
         onDispose { cameraProvider?.unbindAll() }
     }
+    AndroidView(factory = { previewView }, modifier = modifier)
+}
 
-    Box(Modifier.fillMaxSize()) {
-        // Превью камеры
-        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-
-        // Тёмная маска: 4 прямоугольника вокруг прозрачного квадрата-прицела
-        val boxSizePx = with(androidx.compose.ui.platform.LocalDensity.current) { 260.dp.toPx() }
-        Canvas(Modifier.fillMaxSize()) {
-            val l = (size.width - boxSizePx) / 2
-            val t = (size.height - boxSizePx) / 2
-            val r = l + boxSizePx
-            val b = t + boxSizePx
-            val dim = Tokens.Colors.scanScrim
-            drawRect(dim, topLeft = Offset.Zero, size = Size(size.width, t)) // верх
-            drawRect(dim, topLeft = Offset(0f, t), size = Size(l, boxSizePx)) // лево
-            drawRect(dim, topLeft = Offset(r, t), size = Size(size.width - r, boxSizePx)) // право
-            drawRect(dim, topLeft = Offset(0f, b), size = Size(size.width, size.height - b)) // низ
-        }
-
-        // Рамка прицела
-        Box(
-            Modifier.size(260.dp).align(Alignment.Center)
-                .border(2.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.button)),
-        )
-
-        // Подсказка
-        Text(
-            stringResource(R.string.qr_scan_hint),
-            color = Color.White,
-            fontSize = Tokens.Font.label,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Tokens.Space.hero + Tokens.Space.s),
-        )
+/** Маска и рамка полноэкранного сканера (сверка ключа). */
+@Composable
+private fun BoxScope.ScanOverlay() {
+    // Тёмная маска: 4 прямоугольника вокруг прозрачного квадрата-прицела
+    val boxSizePx = with(androidx.compose.ui.platform.LocalDensity.current) { 260.dp.toPx() }
+    Canvas(Modifier.fillMaxSize()) {
+        val l = (size.width - boxSizePx) / 2
+        val t = (size.height - boxSizePx) / 2
+        val r = l + boxSizePx
+        val b = t + boxSizePx
+        val dim = Tokens.Colors.scanScrim
+        drawRect(dim, topLeft = Offset.Zero, size = Size(size.width, t)) // верх
+        drawRect(dim, topLeft = Offset(0f, t), size = Size(l, boxSizePx)) // лево
+        drawRect(dim, topLeft = Offset(r, t), size = Size(size.width - r, boxSizePx)) // право
+        drawRect(dim, topLeft = Offset(0f, b), size = Size(size.width, size.height - b)) // низ
     }
+
+    // Рамка прицела
+    Box(
+        Modifier.size(260.dp).align(Alignment.Center)
+            .border(2.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.button)),
+    )
+
+    // Подсказка
+    Text(
+        stringResource(R.string.qr_scan_hint),
+        color = Color.White,
+        fontSize = Tokens.Font.label,
+        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Tokens.Space.hero + Tokens.Space.s),
+    )
 }
 
 /** Анализатор кадров: ищет QR-код и вызывает [onResult] один раз при успехе. */
-internal class QrAnalyzer(private val onResult: (String) -> Unit) : ImageAnalysis.Analyzer {
+internal class QrAnalyzer(private val onResult: (String) -> Unit, private val once: Boolean = true) : ImageAnalysis.Analyzer {
     private val reader = com.google.zxing.qrcode.QRCodeReader()
 
     @Volatile private var done = false
@@ -153,7 +163,7 @@ internal class QrAnalyzer(private val onResult: (String) -> Unit) : ImageAnalysi
                         com.google.zxing.common.HybridBinarizer(src),
                     ),
                 )
-                done = true
+                done = once
                 onResult(result.text)
             } catch (_: com.google.zxing.NotFoundException) {
                 // нет QR в этом кадре — норма

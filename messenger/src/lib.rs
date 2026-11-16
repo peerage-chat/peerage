@@ -117,6 +117,11 @@ pub enum Event {
         /// «Переслано, автора не называем».
         fwd_anon: bool,
     },
+    /// Запрос в контакты (7i): приветствие (обрезано до `MAX_GREETING` байт) и
+    /// самоназвание отправителя — как есть, чистит движок.
+    ContactRequest { peer: PeerKey, id: u64, greeting: String, name: String },
+    /// Пир принял наш запрос `request`.
+    ContactAccept { peer: PeerKey, request: u64 },
     /// Пир просит удалить своё сообщение `target` («удалить у всех»).
     Retract { peer: PeerKey, target: u64 },
     /// Пир исправил своё сообщение `target` — заменяем текст в истории.
@@ -232,10 +237,15 @@ pub struct MediaMeta {
 /// Обрезать подпись до `MAX_CAPTION` БАЙТ по границе символа: рвать UTF-8 посередине
 /// нельзя, а считать в символах бессмысленно — в бакет мы упираемся байтами.
 pub(crate) fn truncate_caption(s: &str) -> String {
-    if s.len() <= peerage_core::protocol::MAX_CAPTION {
+    truncate_bytes(s, peerage_core::protocol::MAX_CAPTION)
+}
+
+/// Обрезать строку до `max` БАЙТ по границе символа.
+fn truncate_bytes(s: &str, max: usize) -> String {
+    if s.len() <= max {
         return s.to_string();
     }
-    let mut end = peerage_core::protocol::MAX_CAPTION;
+    let mut end = max;
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
@@ -371,6 +381,9 @@ struct Shared {
     pace: Mutex<HashMap<PeerKey, (Instant, usize)>>,
     /// Пиры, кому из очереди осталось что слать сверх темпа: дотягивает maintenance.
     backlog: Mutex<std::collections::HashSet<PeerKey>>,
+    /// Пиры, которым мы послали запрос в контакты и ждём принятия (7i): из их очереди
+    /// уходит только сам запрос, остальное ждёт `ContactAccept`.
+    held: Mutex<std::collections::HashSet<PeerKey>>,
     /// Ретраи и досылка шлют под одним замком. Иначе досылка по Ack из приёмного
     /// потока вклинивается в середину пачки ретраев, и новое сообщение обгоняет
     /// старое, которое как раз переотправляется.
@@ -629,6 +642,7 @@ impl Shared {
         // старое (R-011).
         let outbox = self.outbox.get();
         let head = outbox.and_then(|o| o.head_for(peer, SEND_WINDOW).ok()).unwrap_or_default();
+        let held = self.held.lock().unwrap().contains(peer);
         let mut to_send = Vec::new();
         let mut broken = Vec::new();
         let deferred = {
@@ -636,8 +650,16 @@ impl Shared {
             // (id, None) — должное из `pending`; (id, Some(i)) — head[i].
             let mut cands: Vec<(u64, Option<usize>)> =
                 pending.iter().filter(|(_, p)| p.peer == *peer && p.owed).map(|(id, _)| (*id, None)).collect();
+            // Ждём принятия запроса в контакты (7i): из очереди уходит только он сам,
+            // остальное не занимает ни окна, ни темпа.
+            let sendable = |e: &peerage_core::outbox::OutboxEntry| {
+                !held || matches!(Payload::from_bytes(&e.payload), Ok(Payload::ContactRequest { .. }))
+            };
             cands.extend(
-                head.iter().enumerate().filter(|(_, e)| !pending.contains_key(&e.msg_id)).map(|(i, e)| (e.msg_id, Some(i))),
+                head.iter()
+                    .enumerate()
+                    .filter(|(_, e)| !pending.contains_key(&e.msg_id) && sendable(e))
+                    .map(|(i, e)| (e.msg_id, Some(i))),
             );
             cands.sort_unstable_by_key(|c| c.0);
             let deferred = cands.len() > budget;
@@ -793,6 +815,7 @@ impl Messenger {
             outbox: std::sync::OnceLock::new(),
             pace: Mutex::new(HashMap::new()),
             backlog: Mutex::new(std::collections::HashSet::new()),
+            held: Mutex::new(std::collections::HashSet::new()),
             send_order: Mutex::new(()),
             // Сеем от времени (мс с эпохи), а НЕ с 1: id монотонно растут между
             // перезапусками и не рециклируются. Иначе после рестарта id снова 1..N
@@ -864,6 +887,21 @@ impl Messenger {
         let mut pending = self.shared.pending.lock().unwrap();
         if pending.get(&id).is_some_and(|p| p.peer == *peer) {
             pending.remove(&id);
+        }
+    }
+
+    /// Кому послан запрос в контакты и ещё не принят (7i): их очередь ждёт, кроме
+    /// самого запроса. Выпавший из набора (принял, взаимно добавил) — досылается сразу.
+    pub fn set_held(&self, held: std::collections::HashSet<PeerKey>) {
+        let released: Vec<PeerKey> = {
+            let mut cur = self.shared.held.lock().unwrap();
+            let released = cur.difference(&held).copied().collect();
+            *cur = held;
+            released
+        };
+        for peer in released {
+            self.shared.track(&peer);
+            self.shared.pump(&peer);
         }
     }
 
@@ -1077,6 +1115,19 @@ impl Messenger {
     /// Попросить получателя удалить наше сообщение `target` («удалить у всех»).
     /// Надёжно, как текст: просьба, отправленная в момент, когда собеседник офлайн,
     /// обязана доехать позже — иначе «удалил» означало бы «удалил, если повезло».
+    /// Запрос в контакты (7i). Надёжно и через офлайн-очередь; статус доставки UI не
+    /// нужен — «дошло» здесь значит лишь «ждёт решения», итог приносит `ContactAccept`.
+    pub fn send_contact_request(&self, peer: &PeerKey, greeting: &str, name: &str) -> Result<u64, MessengerError> {
+        let greeting = truncate_bytes(greeting, peerage_core::protocol::MAX_GREETING);
+        let name = name.to_string();
+        self.shared.send_durable(peer, false, move |id| Payload::ContactRequest { id, greeting, name })
+    }
+
+    /// Принять запрос `request` пира.
+    pub fn send_contact_accept(&self, peer: &PeerKey, request: u64) -> Result<u64, MessengerError> {
+        self.shared.send_durable(peer, false, move |id| Payload::ContactAccept { id, request })
+    }
+
     pub fn send_retract(&self, peer: &PeerKey, target: u64) -> Result<u64, MessengerError> {
         self.shared.send_durable(peer, false, move |id| Payload::Retract { id, target })
     }
@@ -1700,6 +1751,15 @@ fn receive_loop(shared: Arc<Shared>) {
                 if emoji.is_empty() || peerage_core::protocol::reaction_ok(&emoji) {
                     shared.emit(Event::React { peer: peer_id, target, target_mine: !target_mine, emoji, at });
                 }
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
+            }
+            Payload::ContactRequest { id, greeting, name } => {
+                let greeting = truncate_bytes(&greeting, peerage_core::protocol::MAX_GREETING);
+                shared.emit(Event::ContactRequest { peer: peer_id, id, greeting, name });
+                let _ = shared.send(&peer_id, &Payload::Ack { id });
+            }
+            Payload::ContactAccept { id, request } => {
+                shared.emit(Event::ContactAccept { peer: peer_id, request });
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::Read { upto } => shared.emit(Event::Read { peer: peer_id, upto }),

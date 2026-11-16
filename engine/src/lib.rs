@@ -27,7 +27,7 @@ use peerage_core::budget::Tier;
 pub use peerage_core::mention::Mention;
 use peerage_core::settings::AudioSettings;
 use peerage_core::store::{
-    Chat, ContactStore, FirstMessage, GateStore, MessageStore, Profile, StoredMessage, VerifyHow,
+    Chat, ContactStore, GateStore, MessageStore, Profile, StoredMessage, VerifyHow,
 };
 use peerage_core::{vault, Identity};
 /// Реэкспорт: медиа-вложение группового сообщения — часть контракта движка
@@ -539,14 +539,28 @@ fn split_code(code: &str) -> (Vec<&str>, Option<String>) {
 
 fn code_name(tail: &str) -> Option<String> {
     let bytes = hex::decode(tail.trim()).ok()?;
-    let name: String = String::from_utf8(bytes)
-        .ok()?
+    let name = clean_name(&String::from_utf8(bytes).ok()?);
+    (!name.is_empty()).then_some(name)
+}
+
+/// Самоназвание из чужих рук (код, запрос в контакты): без управляющих символов, не
+/// длиннее [`CODE_NAME_MAX`] символов.
+fn clean_name(s: &str) -> String {
+    let name: String = s
         .chars()
         .filter(|c| !c.is_control())
         .take(CODE_NAME_MAX)
         .collect();
-    let name = name.trim();
-    (!name.is_empty()).then(|| name.to_string())
+    name.trim().to_string()
+}
+
+/// Обрезать до `max` БАЙТ по границе символа.
+fn clip_bytes(s: &str, max: usize) -> String {
+    let mut end = s.len().min(max);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
 }
 
 // ── Публичный API движка (команды/снапшоты) ─────────────────────────────────
@@ -1512,39 +1526,103 @@ impl Engine {
         code
     }
 
-    /// Добавить контакт по коду обмена: либо голый hex личности (как раньше), либо
-    /// расширенная форма `личность:эпоха:адрес:подпись`. Привязку к адресу
-    /// принимаем только с верной подписью — тем же путём, что и объявление о смене
-    /// адреса.
-    pub fn add_contact_code(&self, code: &str, name: &str) -> &'static str {
-        let (parts, self_name) = split_code(code);
-        let Some(ik) = parse_key(parts[0]) else {
-            return "error";
+    /// Что за код обмена (экран «Добавить контакт»): `{status, key, name}`, где status —
+    /// `"ok"` | `"invalid"` (не код) | `"self"` (код этого телефона) | `"known"` (уже в
+    /// контактах). Ничего не меняет: решение — за [`Self::request_contact`].
+    pub fn inspect_code(&self, code: &str) -> String {
+        let (parts, name) = split_code(code);
+        let key = parse_key(parts[0]);
+        serde_json::json!({
+            "status": self.code_status(key.as_ref()),
+            "key": key.map(hex::encode).unwrap_or_default(),
+            "name": name.unwrap_or_default(),
+        })
+        .to_string()
+    }
+
+    fn code_status(&self, key: Option<&[u8; 32]>) -> &'static str {
+        match key {
+            None => "invalid",
+            Some(k) if *k == self.me_pub => "self",
+            Some(k) if self.contacts.lock_safe().contains(k) => "known",
+            Some(_) => "ok",
+        }
+    }
+
+    /// Добавить по коду обмена и послать запрос в контакты с приветствием (шаг 7i).
+    /// Код — голый hex личности или `личность:эпоха:адрес:подпись` (привязку к адресу
+    /// принимаем только с верной подписью, как объявление о смене адреса), плюс
+    /// `#самоназвание`. `name` — как подписать у себя. До принятия контакт `awaiting`:
+    /// приветствие и всё, что ему напишут, ждёт в очереди. Итог — `"sent"` или статус
+    /// из [`Self::inspect_code`].
+    pub fn request_contact(&self, code: &str, name: &str, greeting: &str) -> &'static str {
+        let (parts, code_name) = split_code(code);
+        let key = parse_key(parts[0]);
+        let status = self.code_status(key.as_ref());
+        let (Some(ik), "ok") = (key, status) else {
+            return status;
         };
-        let outcome = self.add_contact(&ik, name);
-        // Самоназвание из кода — только новому контакту: у знакомого оно уже пришло
-        // профилем, а тот достовернее (пришёл от самого пира, не через третьи руки).
-        if let (Some(n), "added") = (self_name, outcome) {
+        if self
+            .contacts
+            .lock_safe()
+            .add_awaiting(&ik, name.trim(), now())
+            .is_err()
+        {
+            return "invalid";
+        }
+        if let Some(n) = code_name {
             let _ = self.contacts.lock_safe().set_profile(&ik, &n, "");
         }
-        if parts.len() == 4 {
-            let epoch = parts[1].parse::<u32>().unwrap_or(0);
-            let tk = parse_key(parts[2]);
-            let sig = hex::decode(parts[3])
-                .ok()
-                .and_then(|s| <[u8; 64]>::try_from(s.as_slice()).ok());
-            if let (Some(tk), Some(sig)) = (tk, sig) {
-                let applied = self
-                    .contacts
-                    .lock_safe()
-                    .apply_transport_rotate(&ik, epoch, &tk, &sig)
-                    .unwrap_or(false);
-                if applied {
-                    self.refresh_transports();
-                }
+        self.apply_code_address(&ik, &parts);
+        // Сначала держим очередь, потом шлём: иначе написанное сразу следом ушло бы
+        // раньше, чем пир узнал, кто это.
+        self.refresh_budgets();
+        let greeting = clip_bytes(greeting.trim(), peerage_core::protocol::MAX_GREETING);
+        let Ok(id) = self
+            .messenger
+            .send_contact_request(&ik, &greeting, self.self_name().trim())
+        else {
+            return "invalid";
+        };
+        if !greeting.is_empty() {
+            let _ = self.messages.lock_safe().append(
+                Chat::Dm(&ik),
+                &StoredMessage {
+                    id,
+                    text: greeting,
+                    mine: true,
+                    time: now(),
+                    status: "sent".into(),
+                    sender: self.me_hex(),
+                    kind: "text".into(),
+                    ..Default::default()
+                },
+            );
+        }
+        self.messenger.poke(&ik);
+        "sent"
+    }
+
+    /// Привязка к адресу из расширенного кода (`личность:эпоха:адрес:подпись`).
+    fn apply_code_address(&self, ik: &[u8; 32], parts: &[&str]) {
+        if parts.len() != 4 {
+            return;
+        }
+        let epoch = parts[1].parse::<u32>().unwrap_or(0);
+        let tk = parse_key(parts[2]);
+        let sig = hex::decode(parts[3])
+            .ok()
+            .and_then(|s| <[u8; 64]>::try_from(s.as_slice()).ok());
+        if let (Some(tk), Some(sig)) = (tk, sig) {
+            let applied = self
+                .contacts
+                .lock_safe()
+                .apply_transport_rotate(ik, epoch, &tk, &sig)
+                .unwrap_or(false);
+            if applied {
+                self.refresh_transports();
             }
         }
-        outcome
     }
 
     pub fn add_contact(&self, key: &[u8; 32], name: &str) -> &'static str {
@@ -1827,13 +1905,22 @@ impl Engine {
             .iter()
             .filter_map(|h| parse_key(h))
             .collect();
-        let mut targets: std::collections::HashSet<[u8; 32]> = self
-            .contacts
-            .lock_safe()
-            .list()
-            .iter()
-            .filter_map(|c| parse_key(&c.key))
-            .collect();
+        let (mut targets, held): (
+            std::collections::HashSet<[u8; 32]>,
+            std::collections::HashSet<[u8; 32]>,
+        ) = {
+            let contacts = self.contacts.lock_safe();
+            let list = contacts.list();
+            (
+                list.iter().filter_map(|c| parse_key(&c.key)).collect(),
+                // Ждут принятия нашего запроса (7i): очередь к ним держится.
+                list.iter()
+                    .filter(|c| c.awaiting)
+                    .filter_map(|c| parse_key(&c.key))
+                    .collect(),
+            )
+        };
+        self.messenger.set_held(held);
         for roster in self.group_cache.lock_safe().members.values() {
             let keys = serde_json::from_str::<Vec<String>>(roster).unwrap_or_default();
             targets.extend(keys.iter().filter_map(|h| parse_key(h)));
@@ -1912,35 +1999,23 @@ impl Engine {
             .unwrap_or_else(|_| "[]".into())
     }
 
-    /// Одобрить запрос: незнакомец становится контактом, снимаем запрос, шлём ему свой
-    /// профиль и держим коннект. Его первое сообщение ложится в чат — отправитель
-    /// получил на него Ack и второй раз не пришлёт. Дальше всё идёт как обычно.
+    /// Одобрить запрос: незнакомец становится контактом, приветствие ложится в чат
+    /// первым сообщением (под id запроса), назад уходит `ContactAccept` — и его очередь
+    /// к нам выпускается. Свой профиль — с просьбой прислать его: профиль до одобрения
+    /// мы не принимали.
     pub fn accept_contact_request(&self, key: &[u8; 32]) -> bool {
         let Some(req) = self.gate.lock_safe().take_request(key) else {
             return false;
         };
         // Пустое локальное имя → покажется самоназвание пира или hex (см. Contact.displayName).
         let _ = self.contacts.lock_safe().add(key, "", now());
-        if let Some(m) = req.first {
-            let _ = self.messages.lock_safe().append(
-                Chat::Dm(key),
-                &StoredMessage {
-                    id: m.id,
-                    text: m.text,
-                    mine: false,
-                    time: m.time,
-                    status: String::new(),
-                    sender: hex::encode(key),
-                    kind: "text".into(),
-                    ..Default::default()
-                },
-            );
+        if !req.name.is_empty() {
+            let _ = self.contacts.lock_safe().set_profile(key, &req.name, "");
         }
+        put_greeting(self, key, req.request_id, &req.greeting, req.time);
         self.refresh_budgets();
         self.messenger.poke(key);
-        // Свой профиль — и просьба прислать его: профиль, пришедший до одобрения, мы
-        // выбросили (от незнакомцев не принимаем), а сам пир повторил бы его лишь на
-        // следующем коннекте — и до тех пор оставался бы у нас безымянным.
+        let _ = self.messenger.send_contact_accept(key, req.request_id);
         self.send_profile_to(key, true);
         true
     }
@@ -2538,6 +2613,15 @@ impl Engine {
 
     /// Послать свой профиль одному пиру; `ask_back` — попросить его профиль в ответ.
     fn send_profile_to(&self, peer: &[u8; 32], ask_back: bool) {
+        // Ждёт принятия запроса (7i): имя ушло в запросе, фото — только после принятия.
+        if self
+            .contacts
+            .lock_safe()
+            .get(peer)
+            .is_some_and(|c| c.awaiting)
+        {
+            return;
+        }
         let m = self.load_profile_meta();
         let hash = hex::decode(&m.avatar_id).unwrap_or_default();
         let _ = self
@@ -3309,26 +3393,97 @@ fn gate_of(engine: &Engine, peer: &[u8; 32]) -> Gate {
     }
 }
 
-/// Записать входящий запрос от незнакомца и (если новый) уведомить UI. Превью —
-/// короткая выжимка первого сообщения для осознанного решения. Повторные до
-/// одобрения не копим (анти-DoS).
-fn record_request(
+/// Запрос в контакты (7i). От незнакомца — карточка на одобрение; от того, кто уже
+/// у нас в контактах (добавил встречно, переустановил приложение), — принимается сам:
+/// приветствие в чат, `ContactAccept` в ответ. Заблокированный — тишина.
+fn on_contact_request(
     engine: &Arc<Engine>,
     peer: [u8; 32],
-    preview: &str,
-    first: Option<FirstMessage>,
+    id: u64,
+    greeting: String,
+    name: String,
 ) {
-    let preview: String = preview.chars().take(200).collect();
-    let is_new = engine
-        .gate
+    match gate_of(engine, &peer) {
+        Gate::Blocked => {}
+        Gate::Stranger => {
+            let is_new = engine
+                .gate
+                .lock_safe()
+                .upsert_request(&peer, &clean_name(&name), &greeting, id, now())
+                .unwrap_or(false);
+            push_event(
+                engine,
+                dto::UiEvent::ContactRequest {
+                    peer: hex::encode(peer),
+                    new: is_new,
+                },
+            );
+        }
+        Gate::Contact => {
+            // Встречный запрос — тоже согласие: мы его уже добавили и ждали ответа.
+            on_accepted(engine, &peer);
+            put_greeting(engine, &peer, id, &greeting, now());
+            let _ = engine.messenger.send_contact_accept(&peer, id);
+            push_event(engine, dto::UiEvent::ContactsChanged);
+        }
+    }
+}
+
+/// Пир принял наш запрос `request`: очередь к нему выпускается, приветствие — «доставлено».
+fn on_contact_accept(engine: &Arc<Engine>, peer: [u8; 32], request: u64) {
+    if !matches!(gate_of(engine, &peer), Gate::Contact) {
+        return;
+    }
+    on_accepted(engine, &peer);
+    let _ = engine
+        .messages
         .lock_safe()
-        .upsert_request(&peer, &preview, first, now())
-        .unwrap_or(false);
+        .set_status(Chat::Dm(&peer), request, "delivered");
     push_event(
         engine,
-        dto::UiEvent::ContactRequest {
+        dto::UiEvent::Ack {
             peer: hex::encode(peer),
-            new: is_new,
+            id: request,
+        },
+    );
+    push_event(engine, dto::UiEvent::ContactsChanged);
+}
+
+/// Снять «ждёт принятия»: выпустить очередь и отдать профиль, который до того держали.
+fn on_accepted(engine: &Engine, peer: &[u8; 32]) {
+    if engine
+        .contacts
+        .lock_safe()
+        .mark_accepted(peer)
+        .unwrap_or(false)
+    {
+        engine.refresh_targets();
+        engine.send_profile_to(peer, false);
+    }
+}
+
+/// Приветствие из запроса — первым сообщением чата под id запроса (повтор не дублирует).
+fn put_greeting(engine: &Engine, peer: &[u8; 32], id: u64, greeting: &str, time: i64) {
+    let sender = hex::encode(peer);
+    if greeting.is_empty()
+        || engine
+            .messages
+            .lock_safe()
+            .contains(Chat::Dm(peer), &sender, id)
+    {
+        return;
+    }
+    push_dm_message(
+        engine,
+        peer,
+        StoredMessage {
+            id,
+            text: greeting.to_string(),
+            mine: false,
+            time,
+            sender,
+            kind: "text".into(),
+            ..Default::default()
         },
     );
 }
@@ -3700,18 +3855,9 @@ fn handle_event(
         } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
-                Gate::Stranger => {
-                    // Откладываем сам текст. Ответ незнакомцу ссылаться не на что, а
-                    // пометку «переслано» первого сообщения не храним — не стоит
-                    // отдельной схемы.
-                    let first = FirstMessage {
-                        id,
-                        text: text.clone(),
-                        time: now(),
-                    };
-                    record_request(engine, peer, &text, Some(first));
-                    return;
-                }
+                // Писать можно только после принятия запроса в контакты (7i): без него
+                // сообщение незнакомца не ложится ни в чат, ни в запросы.
+                Gate::Stranger => return,
                 Gate::Contact => {}
             }
             // Дедуп повторной доставки: офлайн-досылка со стабильным id приходит дважды.
@@ -3841,15 +3987,7 @@ fn handle_event(
         } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
-                Gate::Stranger => {
-                    record_request(
-                        engine,
-                        peer,
-                        &format!("[{}]", Engine::media_kind(&mime)),
-                        None,
-                    );
-                    return;
-                }
+                Gate::Stranger => return, // как у текста: сначала запрос в контакты
                 Gate::Contact => {}
             }
             let dup = engine
@@ -3906,6 +4044,13 @@ fn handle_event(
                 push_dm_message(engine, &peer, msg);
             }
         }
+        Event::ContactRequest {
+            peer,
+            id,
+            greeting,
+            name,
+        } => on_contact_request(engine, peer, id, greeting, name),
+        Event::ContactAccept { peer, request } => on_contact_accept(engine, peer, request),
         Event::Ack { peer, id } => {
             let _ = engine
                 .messages

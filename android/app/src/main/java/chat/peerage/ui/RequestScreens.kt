@@ -50,7 +50,7 @@ internal fun RequestScreen(model: AppModel, key: String, onDone: () -> Unit) {
             GhostButton(stringResource(R.string.req_decline), modifier = Modifier.fillMaxWidth()) { model.declineRequest(r.key) }
         },
     ) {
-        DecisionHead(r.shortKey, fmtListTime(r.time), group = false)
+        DecisionHead(r.shownName, fmtListTime(r.time), group = false)
         SectionTitle(stringResource(R.string.req_greeting))
         Box(
             Modifier.padding(horizontal = Tokens.Space.panel).fillMaxWidth()
@@ -59,15 +59,15 @@ internal fun RequestScreen(model: AppModel, key: String, onDone: () -> Unit) {
                 .padding(horizontal = Tokens.Space.m + Tokens.Space.xxs, vertical = Tokens.Space.bubbleH),
         ) {
             Text(
-                r.preview.ifBlank { stringResource(R.string.req_no_message) },
-                color = if (r.preview.isBlank()) Tokens.Colors.tertiary else Color.White,
+                r.greeting.ifBlank { stringResource(R.string.req_no_message) },
+                color = if (r.greeting.isBlank()) Tokens.Colors.tertiary else Color.White,
                 fontSize = Tokens.Font.label,
             )
         }
     }
     if (confirmBlock) {
         ConfirmSheet(
-            title = stringResource(R.string.req_block_title, r.shortKey),
+            title = stringResource(R.string.req_block_title, r.shownName),
             text = stringResource(R.string.req_block_text),
             ok = stringResource(R.string.req_block),
             onOk = { model.blockRequest(r.key) },

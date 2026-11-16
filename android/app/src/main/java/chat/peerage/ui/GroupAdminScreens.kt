@@ -58,7 +58,7 @@ internal fun GroupEditScreen(model: AppModel, onBack: () -> Unit) {
     val shown = photo ?: model.groupPhoto(gid)
     Column(Modifier.fillMaxSize().background(Tokens.Colors.bg)) {
         TopBar(stringResource(R.string.group_edit_title), onBack = onBack) {
-            HeaderPill(stringResource(R.string.common_done), enabled = name.isNotBlank()) {
+            PillButton(stringResource(R.string.common_done), enabled = name.isNotBlank(), modifier = Modifier.padding(end = Tokens.Space.xs)) {
                 if (name.trim() != g.name) model.renameGroup(gid, name)
                 photo?.let { model.setGroupPhoto(gid, it, "image/jpeg") }
                 onBack()
@@ -121,23 +121,6 @@ internal fun GroupEditScreen(model: AppModel, onBack: () -> Unit) {
             )
         }
     }
-}
-
-/** Пилюля действия в шапке (макет: `.pill`): «Готово» на правке. */
-@Composable
-private fun HeaderPill(text: String, enabled: Boolean, onClick: () -> Unit) {
-    Text(
-        text,
-        color = if (enabled) Tokens.Colors.accentSoft else Tokens.Colors.tertiary,
-        fontSize = Tokens.Font.preview,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(end = Tokens.Space.xs)
-            .heightIn(min = Tokens.Size.pill)
-            .clip(RoundedCornerShape(Tokens.Radius.pill))
-            .background(if (enabled) Tokens.Colors.accentMuted else Tokens.Colors.raised)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = Tokens.Space.m + Tokens.Space.xxs, vertical = Tokens.Space.s),
-    )
 }
 
 /**

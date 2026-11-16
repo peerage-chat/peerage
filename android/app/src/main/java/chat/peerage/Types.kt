@@ -39,6 +39,8 @@ data class Contact(
     val verifiedAt: Long = 0,
     /** Как сверен: "code" | "set"; пусто — неизвестно. */
     val verifiedHow: String = "",
+    /** Послан запрос в контакты и ещё не принят (7i): наши сообщения ждут у нас. */
+    val awaiting: Boolean = false,
     /** Самоназвание контакта (M2): как он назвал себя (ProfileUpdate). */
     val profileName: String = "",
     /** hex-хэш аватара контакта (M2); байты — через [AppModel.contactAvatars]. */
@@ -55,11 +57,16 @@ data class Contact(
 data class ContactRequest(
     val key: String,
     val fingerprint: String,
-    /** Превью первого сообщения (или «[image]»/«[file]»/«[voice]»). */
-    val preview: String,
+    /** Самоназвание из запроса — «указано отправителем», не проверено. */
+    val name: String,
+    /** Приветствие (шаг 7i): при принятии ляжет в чат первым сообщением. */
+    val greeting: String,
     val time: Long,
 ) {
     val shortKey: String get() = key.take(8)
+
+    /** Как подписать запрос: самоназвание, а без него — начало ключа. */
+    val shownName: String get() = name.ifBlank { shortKey }
 }
 
 data class Message(
@@ -158,6 +165,9 @@ data class BubbleActions(
 data class MsgRef(val id: Long, val sender: String)
 
 /** Идентичность пользователя (своя «визитка»). */
+/** Что за код обмена (экран «Добавить контакт»): status — "ok" | "invalid" | "self" | "known". */
+data class CodeInfo(val status: String, val key: String, val name: String)
+
 /** Набор сверки на пару: 12 знаков (hex) и 8 слов — одинаковые на обоих телефонах. */
 data class PairFingerprint(val glyphs: String, val words: List<String>)
 

@@ -172,9 +172,9 @@ internal fun ContactsScreen(
             item(key = "strips") { Column { strips() } }
             items(requests, key = { "req_${it.key}" }) { r ->
                 RequestRow(
-                    title = r.shortKey,
+                    title = r.shownName,
                     tag = stringResource(R.string.req_tag),
-                    preview = r.preview.ifBlank { stringResource(R.string.req_no_message) },
+                    preview = r.greeting.ifBlank { stringResource(R.string.req_no_message) },
                     time = r.time,
                     group = false,
                     first = r == requests.first(),
@@ -317,7 +317,7 @@ private fun ChatListRow(
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(Modifier.width(Tokens.Space.s))
-                        ChatRowBadge(row)
+                        ChatRowBadge(model, row)
                     }
                 }
             }
@@ -329,7 +329,7 @@ private fun ChatListRow(
 /** Нижний слот правой колонки: счётчик непрочитанного, а если его нет — статус
  *  доставки СВОЕГО последнего сообщения. У чужих там пусто. */
 @Composable
-private fun ChatRowBadge(row: ChatRowUi) {
+private fun ChatRowBadge(model: AppModel, row: ChatRowUi) {
     val s = row.summary
     when {
         // Упоминание меня — отдельный значок «@» перед счётчиком, и всегда акцентный,
@@ -343,7 +343,7 @@ private fun ChatRowBadge(row: ChatRowUi) {
         // Те же значки, что в пузыре чата: часы → одна галочка → две, прочитанное —
         // акцентом. Один и тот же факт не должен выглядеть в списке иначе, чем в ленте.
         s != null && s.lastMine && !s.lastSystem && s.lastKind != "deleted" &&
-            s.lastKind != "call" && s.lastKind != "video_call" -> when (s.lastStatus) {
+            s.lastKind != "call" && s.lastKind != "video_call" -> when (shownStatus(model, row.id, row.group, s.lastStatus)) {
             "read" -> Icon(
                 Icons.Filled.DoneAll,
                 stringResource(R.string.status_read),
@@ -366,6 +366,12 @@ private fun ChatRowBadge(row: ChatRowUi) {
                 Icons.Filled.Schedule,
                 stringResource(R.string.status_sending),
                 tint = Tokens.Colors.tertiary,
+                modifier = Modifier.size(Tokens.Size.iconXs),
+            )
+            "held" -> Icon(
+                TablerIcons.Clock,
+                stringResource(R.string.status_held),
+                tint = Tokens.Colors.heldTick,
                 modifier = Modifier.size(Tokens.Size.iconXs),
             )
             else -> Unit
@@ -809,47 +815,5 @@ internal fun LazyItemScope.ContactCardRow(model: AppModel, c: Contact, first: Bo
                 )
             }
         }
-    }
-}
-
-@Composable
-internal fun AddScreen(
-    model: AppModel,
-    scannedKey: String? = null,
-    onScan: () -> Unit = {},
-    onDone: () -> Unit,
-) {
-    var keyHex by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf("") }
-    // Операция асинхронна; результат приходит в model.addStatus.
-    LaunchedEffect(Unit) { model.addStatus = "" }
-    val st = model.addStatus
-    LaunchedEffect(st) {
-        if (st == "added") {
-            model.addStatus = ""
-            onDone()
-        }
-    }
-    // Получаем ключ из сканера (приходит через Root → scannedKey).
-    LaunchedEffect(scannedKey) { if (scannedKey != null) keyHex = scannedKey }
-    Column(Modifier.padding(ScreenPad), verticalArrangement = Arrangement.spacedBy(FormGap)) {
-        FieldLabel(stringResource(R.string.add_label_pubkey))
-        TextField(
-            keyHex,
-            { keyHex = it },
-            Modifier.fillMaxWidth(),
-            colors = inputColors(),
-            placeholder = { Text(stringResource(R.string.add_hint_hex), color = HoloSecondary) },
-        )
-        AccentButton(stringResource(R.string.title_scan_qr), modifier = Modifier.fillMaxWidth()) { onScan() }
-        FieldLabel(stringResource(R.string.label_name))
-        TextField(name, { name = it }, Modifier.fillMaxWidth(), colors = inputColors())
-        AccentButton(stringResource(R.string.add_btn)) { model.addContact(keyHex.trim(), name.trim()) }
-        val msg = when (st) {
-            "known" -> stringResource(R.string.add_known)
-            "error" -> stringResource(R.string.add_error)
-            else -> ""
-        }
-        if (msg.isNotEmpty()) Text(msg, color = HoloError, fontSize = Tokens.Font.body)
     }
 }

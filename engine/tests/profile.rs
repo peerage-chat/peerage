@@ -175,8 +175,11 @@ fn accepted_contact_keeps_blank_name_so_self_name_shows() {
     let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
     let a = start(&net, a_id, tmpdir("a3"));
     let b = start(&net, b_id, tmpdir("b3"));
-    a.add_contact(&b_key, "B"); // A знает B; B про A узнаёт из запроса
-    a.send_text(&b_key, "постучался"); // незнакомец → запрос у B
+    // A добавляет B по коду (без имени в коде) — у B запрос.
+    assert_eq!(
+        a.request_contact(&hex::encode(b_key), "B", "постучался"),
+        "sent"
+    );
 
     let a_hex = hex::encode(a_key);
     // Ждём запрос и одобряем — A становится контактом с пустым локальным именем.
@@ -220,8 +223,8 @@ fn accepted_contact_keeps_blank_name_so_self_name_shows() {
 }
 
 /// Имена заданы ДО знакомства (обычный случай: имя вводится при первом запуске).
-/// A стучится к B; профиль A, посланный на коннекте, B выбрасывает — A ему ещё
-/// незнакомец. После одобрения B шлёт свой профиль с просьбой ответить — и имена
+/// A шлёт B запрос (код без имени); профиль A до принятия не уходит. После одобрения
+/// B шлёт свой профиль с просьбой ответить, A — свой на `ContactAccept` — и имена
 /// видят обе стороны без переподключения.
 #[test]
 fn names_set_before_contact_reach_both_sides_on_accept() {
@@ -232,8 +235,7 @@ fn names_set_before_contact_reach_both_sides_on_accept() {
     let b = start(&net, b_id, tmpdir("b4"));
     a.set_self_name("Алиса");
     b.set_self_name("Боб");
-    a.add_contact(&b_key, "");
-    a.send_text(&b_key, "привет");
+    assert_eq!(a.request_contact(&hex::encode(b_key), "", "привет"), "sent");
 
     let (a_hex, b_hex) = (hex::encode(a_key), hex::encode(b_key));
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -294,7 +296,7 @@ fn contact_code_carries_self_name() {
         "имя хвостом: {code}"
     );
 
-    assert_eq!(b.add_contact_code(&code, ""), "added");
+    assert_eq!(b.request_contact(&code, "", ""), "sent");
     let cj: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
     let c0 = cj
         .as_array()
@@ -307,8 +309,8 @@ fn contact_code_carries_self_name() {
 
     // Хвост не hex — ключ всё равно добавляется, имя просто не берётся.
     assert_eq!(
-        c.add_contact_code(&format!("{}#не-hex", hex::encode(a_key)), ""),
-        "added"
+        c.request_contact(&format!("{}#не-hex", hex::encode(a_key)), "", ""),
+        "sent"
     );
 
     a.shutdown();

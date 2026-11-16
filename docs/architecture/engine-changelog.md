@@ -30,6 +30,38 @@
 
 ---
 
+## 2026-11-17 · Приветствие = запрос в контакты, очередь держится до принятия · (шаг беты 7i, UI 4.1)
+
+**Причина:** план беты, шаг 7i (решение владельца 2026-11-01): запросом становилось первое
+сообщение незнакомцу, и человек не знал, что пишет запрос. Теперь запрос — отдельное действие
+на экране «Добавить контакт» с приветствием.
+
+- **Контракт:** payload `ContactRequest { id, greeting, name }` и `ContactAccept { id, request }`
+  (`protocol::MAX_GREETING` = 1024 байт; оба — в бакете текста, M5). Мессенджер:
+  `send_contact_request`, `send_contact_accept`, `set_held(peers)` — для этих пиров уходит только
+  запрос, остальное ждёт в очереди; события `Event::ContactRequest { peer, id, greeting, name }`,
+  `Event::ContactAccept { peer, request }`. Движок: `inspect_code(code)` →
+  `{status: "ok"|"invalid"|"self"|"known", key, name}` (ничего не меняет), `request_contact(code,
+  name, greeting)` → `"sent"|"invalid"|"self"|…`; удалён `add_contact_code`. JNI: `inspectCode`,
+  `requestContact`; удалён `addContact`. В `contacts_json` — поле `awaiting`; в
+  `contact_requests_json` — `name`, `greeting` вместо `preview`.
+- **Схема:** `contacts.awaiting INTEGER` (CREATE + ALTER). `contact_requests` пересоздана:
+  `name`, `greeting`, `request_id` вместо `preview`/`first_*`; старая таблица (с `first_text`)
+  удаляется вместе с висящими запросами — по новому протоколу их не принять.
+- **Поведение:** незнакомец без запроса больше не попадает ни в чат, ни в запросы: его текст и
+  медиа отбрасываются. Отправитель до `ContactAccept` держит контакт `awaiting`: сообщения ждут
+  в своей очереди (не тратят чужой бюджет незнакомца), профиль не уходит. Принятие — приветствие
+  первым сообщением чата под id запроса, назад `ContactAccept`, свой профиль; у отправителя
+  приветствие «доставлено», очередь выпускается по порядку. Встречный запрос — оба принимаются
+  сами. Отклонение — молча, ответа нет. Пустое приветствие в чат не ложится.
+- **Совместимость:** ломает провод и базу запросов (до беты можно; `pm clear` не нужен).
+- **Тесты:** `engine/tests/gate.rs` — `request_holds_queue_until_accepted`,
+  `stranger_text_without_request_is_dropped`, `mutual_requests_accept_each_other`,
+  `decline_is_silent`, `block_drops_request_and_silences`, `inspect_code_tells_what_it_is`;
+  `store::awaiting_contact_until_accepted`; payload — круговой тест в `protocol`; `profile.rs`,
+  `rotate.rs`, `gate_rooms.rs` переведены на запрос. Живой прогон на двух эмуляторах — в
+  журнале полировки.
+
 ## 2026-11-03 · Сверка ключа: один набор на пару, когда и как сверен · f4fb1ca (UI 3.6)
 
 **Причина:** app-ui.md «Сверка ключа», макеты `security/Pair`, `Verified`, `Match`: у каждого

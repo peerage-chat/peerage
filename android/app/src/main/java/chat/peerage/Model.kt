@@ -357,9 +357,6 @@ class AppModel private constructor() {
     /** Снапшот стата сети (экран «Сеть»). Обновляется тикером на переднем плане. */
     var netStats by mutableStateOf<NetStats?>(null)
 
-    /** Результат последней попытки добавить контакт ("" | added | known | error). */
-    var addStatus by mutableStateOf("")
-
     // Диагностика: тест пропускной способности меша.
     var benchRecv by mutableStateOf(false) // режим приёмника включён
     var benchRecvMbps by mutableStateOf(0.0) // живая скорость приёма
@@ -1903,10 +1900,20 @@ class AppModel private constructor() {
     var contactCode by mutableStateOf("")
         private set
 
-    fun addContact(key: String, name: String) = ops.execute {
-        val r = Native.addContact(sessionPtr, key, name)
-        if (r == "added") refreshContactsNow()
-        addStatus = r
+    /** Что за код обмена — до решения (экран «Добавить контакт»). */
+    fun inspectCode(code: String, done: (CodeInfo) -> Unit) = ops.execute {
+        val info = runCatching {
+            val o = JSONObject(Native.inspectCode(sessionPtr, code))
+            CodeInfo(o.getString("status"), o.getString("key"), o.getString("name"))
+        }.getOrDefault(CodeInfo("invalid", "", ""))
+        onMain { done(info) }
+    }
+
+    /** Добавить по коду и послать запрос с приветствием (7i); итог ("sent" | статус кода) — в [done]. */
+    fun requestContact(code: String, name: String, greeting: String, done: (String) -> Unit) = ops.execute {
+        val r = Native.requestContact(sessionPtr, code, name.trim(), greeting.trim())
+        if (r == "sent") refreshContactsNow()
+        onMain { done(r) }
     }
 
     /** Отметить сверенным «по набору» ([on]) или снять отметку. */
@@ -1962,7 +1969,7 @@ class AppModel private constructor() {
 
     private fun refreshRequestsNow() {
         val list = decodeList<ContactRequestDto>(Native.contactRequests(sessionPtr))
-            .map { ContactRequest(it.key, it.fingerprint, it.preview, it.time) }
+            .map { ContactRequest(it.key, it.fingerprint, it.name, it.greeting, it.time) }
             .sortedByDescending { it.time }
         contactRequests.replaceWith(list)
     }

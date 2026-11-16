@@ -121,7 +121,6 @@
     <string name="title_add_contact">Добавить контакт</string>
     <string name="title_new_group">Новая группа</string>
     <string name="title_add_member">Пригласить</string>
-    <string name="title_scan_qr">Сканировать QR</string>
     <string name="title_search">Поиск</string>
     <string name="newchat_title">Новый чат</string>
     <string name="newchat_contacts_header">Контакты</string>
@@ -155,11 +154,6 @@
     <string name="req_decline">Отклонить</string>
     <string name="req_block">Заблокировать</string>
     <string name="bench_recv_rate">⏱ приём: %1$s Мбит/с</string>
-    <string name="add_label_pubkey">Код обмена или ключ</string>
-    <string name="add_hint_hex">Вставьте код или отсканируйте QR</string>
-    <string name="add_btn">Добавить</string>
-    <string name="add_known">Контакт уже есть</string>
-    <string name="add_error">Неверный ключ</string>
     <string name="label_name">Имя</string>
     <string name="qr_cd">QR код публичного ключа</string>
     <string name="info_delete">Удалить контакт</string>
@@ -1084,4 +1078,29 @@
     <string name="verify_invalid_text">В отсканированном QR нет ключа. Нужен код с экрана «Мой код» на том телефоне.</string>
     <string name="verify_scan_again">Сканировать ещё раз</string>
     <string name="verify_got_it">Понятно</string>
+    <!-- Добавить контакт и запрос (4.1, шаг 7i, макеты people/Main, Found, Errors, Pending) -->
+    <string name="add_camera_hint">Навести на код собеседника</string>
+    <string name="add_paste">Вставить код</string>
+    <string name="add_paste_sub">Если код прислали сообщением</string>
+    <string name="add_show_code">Показать свой код</string>
+    <string name="add_show_code_sub">Для сканирования с другого телефона</string>
+    <string name="add_caption">Код передаётся лицом к лицу или любым мессенджером: в нём ключ, адрес в сети и имя.</string>
+    <string name="add_err_invalid">Это не код %1$s</string>
+    <string name="add_err_invalid_sub">QR распознан, но в нём нет ключа. Ссылки и другие коды здесь не открываются.</string>
+    <string name="add_err_invalid_paste_sub">В тексте нет ключа. Ссылки и другие коды здесь не открываются.</string>
+    <string name="add_err_self">Это код этого телефона</string>
+    <string name="add_err_self_sub">Себя в контакты не добавить — нужен код собеседника.</string>
+    <string name="add_err_known">%1$s уже в контактах</string>
+    <string name="add_open_chat">Открыть чат</string>
+    <string name="add_key_start">ключ %1$s…</string>
+    <string name="add_greeting">Приветствие</string>
+    <string name="add_greeting_hint">Кто это и откуда знакомы</string>
+    <string name="add_greeting_caption">Уйдёт запросом в контакты вместе с именем этого профиля; фото — после принятия. %1$s решит, принять ли.</string>
+    <string name="add_local_name">Как подписать у себя</string>
+    <string name="add_local_name_caption">Необязательно. Видно только на этом телефоне.</string>
+    <string name="add_send">Отправить запрос</string>
+    <string name="add_rescan">Сканировать другой</string>
+    <string name="chat_request_sent">запрос отправлен</string>
+    <string name="chat_awaiting_banner">Запрос в контакты отправлен. Сообщения ниже %1$s получит, когда примет его.</string>
+    <string name="status_held">ждёт принятия</string>
 </resources>

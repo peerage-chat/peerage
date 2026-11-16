@@ -47,6 +47,7 @@ internal data class ContactDto(
     val verified: Boolean = false,
     @SerialName("verified_at") val verifiedAt: Long = 0,
     @SerialName("verified_how") val verifiedHow: String? = null,
+    val awaiting: Boolean = false,
     @SerialName("profile_name") val profileName: String = "",
     @SerialName("avatar_id") val avatarId: String = "",
     val helpful: Long = 0,
@@ -128,7 +129,8 @@ internal data class SearchPageDto(
 internal data class ContactRequestDto(
     val key: String = "",
     val fingerprint: String = "",
-    val preview: String = "",
+    val name: String = "",
+    val greeting: String = "",
     val time: Long = 0,
 )
 
@@ -308,6 +310,7 @@ internal fun ContactDto.toModel() = Contact(
     verified = verified,
     verifiedAt = verifiedAt,
     verifiedHow = verifiedHow.orEmpty(),
+    awaiting = awaiting,
     profileName = profileName,
     avatarId = avatarId,
 )

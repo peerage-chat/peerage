@@ -1021,22 +1021,37 @@ pub extern "system" fn Java_chat_peerage_Native_blobExport<'local>(
 
 // ── Контакты (TOFU) ─────────────────────────────────────────────────────────
 
-/// Добавить контакт. Возвращает "added" | "known" | "error".
+/// Что за код обмена (экран «Добавить контакт»): JSON `{status, key, name}`, status —
+/// "ok" | "invalid" | "self" | "known". Ничего не меняет.
 #[no_mangle]
-pub extern "system" fn Java_chat_peerage_Native_addContact<'local>(
+pub extern "system" fn Java_chat_peerage_Native_inspectCode<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
-    key_hex: JString<'local>,
-    name: JString<'local>,
+    code: JString<'local>,
 ) -> jstring {
-    jni_safe!(ret(&env, "error"), {
-        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "error") };
-        // Принимаем и голый hex личности, и расширенный код обмена с подписанной
-        // привязкой к адресу (ADR-007) — разбирает движок.
-        let code = jstr(&mut env, &key_hex);
-        let name = jstr(&mut env, &name);
-        ret(&env, e.add_contact_code(&code, &name))
+    jni_safe!(ret(&env, ""), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
+        let out = e.inspect_code(&jstr(&mut env, &code));
+        ret(&env, &out)
+    })
+}
+
+/// Добавить по коду и послать запрос в контакты с приветствием (шаг 7i). Итог —
+/// "sent" | "invalid" | "self" | "known".
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_requestContact<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    code: JString<'local>,
+    name: JString<'local>,
+    greeting: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "invalid"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "invalid") };
+        let (code, name, greeting) = (jstr(&mut env, &code), jstr(&mut env, &name), jstr(&mut env, &greeting));
+        ret(&env, e.request_contact(&code, &name, &greeting))
     })
 }
 

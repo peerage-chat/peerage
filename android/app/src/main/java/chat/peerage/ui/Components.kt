@@ -553,6 +553,23 @@ internal fun SheetHandle() {
     )
 }
 
+/** Пилюля действия (макет: `.pill`): «Готово» в шапке правки, «Открыть чат» в карточке. */
+@Composable
+internal fun PillButton(text: String, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Text(
+        text,
+        color = if (enabled) Tokens.Colors.accentSoft else Tokens.Colors.tertiary,
+        fontSize = Tokens.Font.preview,
+        fontWeight = FontWeight.Medium,
+        modifier = modifier
+            .heightIn(min = Tokens.Size.pill)
+            .clip(RoundedCornerShape(Tokens.Radius.pill))
+            .background(if (enabled) Tokens.Colors.accentMuted else Tokens.Colors.raised)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = Tokens.Space.m + Tokens.Space.xxs, vertical = Tokens.Space.s),
+    )
+}
+
 /** Кнопка без подложки: второстепенное действие под главной («Отклонить», «Заблокировать»). */
 @Composable
 internal fun GhostButton(text: String, color: Color = Tokens.Colors.accent, modifier: Modifier = Modifier, onClick: () -> Unit) {

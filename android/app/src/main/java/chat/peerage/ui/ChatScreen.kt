@@ -81,6 +81,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -146,6 +147,8 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                 }
                 if (key != null && isTyping(model, key)) {
                     Text(stringResource(R.string.status_typing), color = Tokens.Colors.accent, fontSize = Tokens.Font.caption)
+                } else if (c?.awaiting == true) {
+                    Text(stringResource(R.string.chat_request_sent), color = HoloSecondary, fontSize = Tokens.Font.caption)
                 } else {
                     Text(
                         stringResource(if (online) R.string.status_in_network else R.string.status_offline),
@@ -372,6 +375,10 @@ private fun DmFeed(model: AppModel, msgs: List<Message>, listState: LazyListStat
                 MessageRow(model, m, pos, animate = m.id > appearFrom)
             }
         }
+        // Запрос в контакты ещё не принят (7i): сверху ленты — что сообщения ждут.
+        model.contacts.firstOrNull { it.key == model.currentChat }?.takeIf { it.awaiting }?.let { c ->
+            item(key = "awaiting") { AwaitingBanner(c.displayName) }
+        }
         // Последний элемент = верх ленты: баннер над самой старой перепиской.
         item { E2EBanner() }
     }
@@ -594,6 +601,39 @@ internal fun ReplyStrip(model: AppModel, m: Message) {
 }
 
 /** Системная строка «E2E» в начале переписки. */
+/** Плашка над перепиской с тем, кто ещё не принял запрос (макет `people/Pending`). */
+@Composable
+private fun AwaitingBanner(name: String) {
+    Box(Modifier.fillMaxWidth().padding(top = Tokens.Space.s, bottom = Tokens.Space.m), contentAlignment = Alignment.Center) {
+        Text(
+            stringResource(R.string.chat_awaiting_banner, name),
+            color = Tokens.Colors.snippet,
+            fontSize = Tokens.Font.body,
+            lineHeight = Tokens.Font.lineHeight,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = Tokens.Size.systemLine)
+                .clip(RoundedCornerShape(Tokens.Radius.button))
+                .background(Tokens.Colors.labelScrim)
+                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+        )
+    }
+}
+
+/**
+ * Статус своего сообщения для показа. Собеседник ещё не принял запрос в контакты (7i) —
+ * «отправлено» и «ожидание» честнее назвать «ждёт принятия»: сообщение лежит у нас и
+ * уйдёт, когда запрос примут.
+ */
+internal fun shownStatus(model: AppModel, chat: String?, group: Boolean, status: String): String {
+    if (group || status !in setOf("sent", "pending", "queued")) return status
+    val awaiting = model.contacts.firstOrNull { it.key == chat }?.awaiting == true
+    return if (awaiting) "held" else status
+}
+
+/** То же для сообщения открытого чата; у чужих статуса нет. */
+internal fun shownStatus(model: AppModel, m: Message, group: Boolean): String =
+    if (m.mine) shownStatus(model, model.currentChat, group, m.status) else m.status
+
 @Composable
 internal fun E2EBanner() {
     Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.s), horizontalArrangement = Arrangement.Center) {
@@ -1177,7 +1217,7 @@ internal fun MessageBubble(
     // Мета одна на все ветки пузыря: и когда она встроена в текст, и когда лежит
     // поверх вложения — это один и тот же набор значков.
     val meta: @Composable () -> Unit = {
-        MsgMeta(m.time, m.mine && m.status.isNotEmpty(), m.editedAt > 0, m.status)
+        MsgMeta(m.time, m.mine && m.status.isNotEmpty(), m.editedAt > 0, shownStatus(model, m, group))
     }
     Row(
         modifier.fillMaxWidth().padding(bottom = blockGap(pos))
@@ -1807,6 +1847,8 @@ internal fun StatusTick(status: String) {
         "delivered" -> Icon(Icons.Filled.DoneAll, stringResource(R.string.status_delivered), tint = tint, modifier = Modifier.size(Tokens.Size.iconXs))
         "sent" -> Icon(Icons.Filled.Done, stringResource(R.string.status_sent), tint = tint, modifier = Modifier.size(Tokens.Size.iconXs))
         "pending" -> Icon(Icons.Filled.Schedule, stringResource(R.string.status_sending), tint = tint.copy(alpha = 0.6f), modifier = Modifier.size(Tokens.Size.iconXs))
+        // Ждёт принятия запроса в контакты (7i): часы, но не «отправляется».
+        "held" -> Icon(TablerIcons.Clock, stringResource(R.string.status_held), tint = Tokens.Colors.heldTick, modifier = Modifier.size(Tokens.Size.iconXs))
         // Только значок, без слова: мета живёт в углу пузыря и должна оставаться
         // узкой — слово растянуло бы её на половину строки. Расшифровка статуса —
         // в описании для screen reader и на экране очереди отправки.

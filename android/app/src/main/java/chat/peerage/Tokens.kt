@@ -77,6 +77,7 @@ object Tokens {
         val stateWarnText = Color(0xFFF2C98A) // её заголовок и щит
         val stateOk = Color(0xFF17261A) // плашка «Ключ сверен» (`security/Verified`)
         val errorSoft = Color(0xFFFFB4B4) // заголовок «Ключ не совпал» (`security/Mismatch`)
+        val heldTick = Color(0xFF9FC6D6) // часы «ждёт принятия» в мете пузыря (`people/Pending`)
         val glyphTile = Color(0xFF23242A) // плитка знака набора сверки — ступень над group
         val error = Color(0xFFFF6B6B) // ТЕКСТ и знак ошибки/опасного действия (6:1 на group)
         val errorFill = Color(0xFFE53935) // ЗАЛИВКА: отклонить звонок, запись голосового
@@ -333,6 +334,14 @@ object Tokens {
         val avatarChip = 28.dp // аватар в чипе выбранного человека
         val avatarSheet = 48.dp // аватар в шапке шторки человека
         val groupDraftAvatar = 72.dp // аватар группы на шаге «название»
+        val addCamera = 300.dp // видоискатель на «Добавить контакт» (`people/Main`)
+        val addCameraShort = 220.dp // он же, когда под ним карточка ошибки (`people/Errors`)
+        val cameraCorner = 44.dp // уголок рамки видоискателя
+        val cameraCornerInset = 56.dp // его отступ от края видоискателя
+        val cameraCornerInsetShort = 40.dp // то же у короткого (под ним ошибка)
+        val cameraCornerStroke = 3.dp // толщина уголка
+        val avatarFound = 64.dp // аватар распознанного кода (`people/Found`)
+        val greetingField = 96.dp // поле приветствия (`people/Found`)
         val groupEditAvatar = 104.dp // фото группы на правке (`people/GroupEdit`)
         val groupEditBadge = 36.dp // значок камеры на нём
         val badgeRing = 3.dp // кольцо фона вокруг значка поверх аватара
