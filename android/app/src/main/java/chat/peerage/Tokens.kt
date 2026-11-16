@@ -164,11 +164,10 @@ object Tokens {
         // Предупреждения
         val noticeBg = Color(0xFF3A2F12) // плашка-предупреждение (очередь разрослась)
         val noticeText = Color(0xFFF6C453) // текст и знак на ней
-        val onboardWarnText = Color(0xFFE8C98A) // текст предупреждения в онбординге
+        val onbAvatarIcon = Color(0xFF6B6C74) // фигурка на пустом своём фото в первом запуске (`onboard/Profile`)
 
         // Прочее
         val iconBar = Color(0xFFD6D6DD) // иконки верхней панели
-        val iconPlaceholder = Color(0xFF9AA0A6) // заглушка своего аватара
         val unreadMutedText = Color(0xFFB9B9C2) // цифра на счётчике чата без звука
         val scanScrim = Color(0x99000000) // затемнение вокруг рамки сканера QR
         val kindVideo = Color(0xFF7E57C2) // видео в разбивке «Хранилища»
@@ -284,6 +283,7 @@ object Tokens {
         val pill = 18.dp // пилюли панели управления
         val field = 16.dp // поле ввода, поиск
         val voiceHold = 24.dp // выросшая кнопка микрофона
+        val heroTile = 24.dp // крупная плитка-знак шага первого запуска (`onboard/KeyIntro`)
         val group = 18.dp // группа строк на панели: 28 = 18 + отступ панели 10 (концентрично)
         val card = group // старое имя карточки-секции
         val panel = 28.dp // верх панели «листа», шторки
@@ -427,6 +427,11 @@ object Tokens {
         val phraseRow = 36.dp // строка слова в сетке 24 слов
         val phraseNum = 20.dp // колонка номера слова в сетке
         val touch = 48.dp // минимальная зона касания (Android): плашка может быть меньше, зона — нет
+        val onbProgress = 4.dp // высота полоски «шаг N из 3» первого запуска
+        val heroTile = 72.dp // знак приложения и плитка-знак шага первого запуска
+        val iconTile = 34.dp // иконка в плитке heroTile
+        val iconAvatar = 40.dp // фигурка на пустом своём фото (аватар 96)
+        val onbBadge = 34.dp // значок камеры на своём фото в первом запуске
     }
 
     /**
@@ -448,6 +453,11 @@ object Tokens {
         val profile = 24.sp // имя в профиле
         val big = 26.sp // имя во входящем звонке, эмодзи в панели
         val huge = 28.sp // крупные числа (трафик, обратный отсчёт)
+        val hero = 28.sp // заголовок шага первого запуска (`onboard/`)
+        val heroLine = 34.sp // его интервал
+        val welcome = 34.sp // имя приложения на приветствии
+        val welcomeLine = 40.sp // его интервал
+        val leadLine = 21.sp // интервал подзаголовка шага (label 15)
         val tileLetter = 18.sp // буква домена на плитке ссылки
         val tileTracking = 0.3.sp // разрядка расширения на плитке файла
 

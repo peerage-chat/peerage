@@ -79,6 +79,8 @@ internal fun KeyCheckContent(
     onFailed: () -> Unit,
     onShowWords: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Крупный заголовок над пояснением — в первом запуске (`onboard/Check`). */
+    heading: String? = null,
 ) {
     SecureFlag()
     LaunchedEffect(Unit) { model.loadBip39() }
@@ -119,9 +121,24 @@ internal fun KeyCheckContent(
     Column(modifier.fillMaxSize()) {
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState())
-                .padding(horizontal = Tokens.Space.xl).padding(top = Tokens.Space.l),
+                .padding(horizontal = Tokens.Space.xl).padding(top = if (heading == null) Tokens.Space.l else Tokens.Space.s),
         ) {
-            Text(stringResource(R.string.key_check_sub), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.label)
+            if (heading != null) {
+                Text(
+                    heading,
+                    color = Color.White,
+                    fontSize = Tokens.Font.hero,
+                    lineHeight = Tokens.Font.heroLine,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = Tokens.Space.s),
+                )
+            }
+            Text(
+                stringResource(R.string.key_check_sub),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.label,
+                lineHeight = Tokens.Font.leadLine,
+            )
             Spacer(Modifier.height(Tokens.Space.xl))
             picks.forEachIndexed { i, n ->
                 Text(
