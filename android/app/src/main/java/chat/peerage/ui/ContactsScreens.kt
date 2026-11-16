@@ -174,6 +174,7 @@ internal fun ContactsScreen(
                 RequestRow(
                     title = r.shownName,
                     tag = stringResource(R.string.req_tag),
+                    lookalike = r.lookalikeKey.isNotEmpty(),
                     preview = r.greeting.ifBlank { stringResource(R.string.req_no_message) },
                     time = r.time,
                     group = false,
@@ -681,6 +682,7 @@ private fun RequestRow(
     time: Long,
     group: Boolean,
     first: Boolean,
+    lookalike: Boolean = false,
     onClick: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().background(Tokens.Colors.rowRequest)) {
@@ -712,6 +714,15 @@ private fun RequestRow(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
                         )
+                        // Имя как у контакта (7e) — знак прямо у имени (`requests/Rows`).
+                        if (lookalike) {
+                            Icon(
+                                TablerIcons.AlertTriangle,
+                                stringResource(R.string.req_lookalike_short),
+                                tint = Tokens.Colors.stripAmber,
+                                modifier = Modifier.size(Tokens.Size.iconXs),
+                            )
+                        }
                         RowTag(tag)
                     }
                     if (time > 0) {

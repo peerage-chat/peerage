@@ -74,7 +74,8 @@
 | `verified` | `#4CAF50` | подтверждённый контакт |
 | `verifiedTile` | `#1E3A24` | плитка «Ключ сверен» в профиле (`prof/`) |
 | `warnTile` | `#3A3020` | плитка «Ключ не сверен» — приглушённый `warn` |
-| `stateWarn` / `stateWarnText` | `#2A2116` / `#F2C98A` | плашка «Ключ не сверен» на экране сверки и её заголовок (`security/Pair`) |
+| `stateWarn` / `stateWarnText` | `#2A2116` / `#F2C98A` | плашка «Ключ не сверен» на экране сверки и её заголовок (`security/Pair`); она же — «Имя совпадает с контактом» в запросе (`android/Request`) |
+| `stateWarnLink` | `#FFCC80` | действие на янтарной плашке предупреждения («Сверить ключ лично», `android/Request`) |
 | `stateOk` | `#17261A` | плашка «Ключ сверен» (`security/Verified`) |
 | `errorSoft` | `#FFB4B4` | заголовок «Ключ не совпал» (`security/Mismatch`) |
 | `glyphTile` | `#23242A` | плитка знака набора сверки — ступень над `group` |

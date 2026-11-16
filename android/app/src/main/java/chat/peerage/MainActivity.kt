@@ -563,7 +563,22 @@ private fun CompactShell(model: AppModel) {
                                     }
                                     Screen.Me -> ProfileScreen(model, navigate)
                                     Screen.MyCode -> MyCodeScreen(model) { nav.replace(Screen.Add) }
-                                    Screen.Request -> RequestScreen(model, requestKey, onDone = goBack)
+                                    Screen.Request -> {
+                                        // Сверка ключа незнакомца — тем же сканером и шторкой, что у контакта.
+                                        val scan = {
+                                            verifyingPeer = requestKey
+                                            screen = Screen.Scanner
+                                        }
+                                        RequestScreen(model, requestKey, onDone = goBack, onVerify = scan)
+                                        verifyResult?.let { r ->
+                                            VerifyResultSheet(
+                                                r,
+                                                onMyCode = { screen = Screen.MyCode },
+                                                onScanAgain = scan,
+                                                onClose = { verifyResult = null },
+                                            )
+                                        }
+                                    }
                                     Screen.Invite -> InviteScreen(model, inviteGid, onDone = goBack)
                                     Screen.KeyFlow -> KeyFlowScreen(model, keyWordsFirst, onDone = goBack)
                                     Screen.Info -> ContactProfileScreen(

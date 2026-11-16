@@ -62,6 +62,9 @@ data class ContactRequest(
     /** Приветствие (шаг 7i): при принятии ляжет в чат первым сообщением. */
     val greeting: String,
     val time: Long,
+    /** Контакт с похожим именем и другим ключом (7e): ключ и как он подписан; пусто — нет. */
+    val lookalikeKey: String = "",
+    val lookalikeName: String = "",
 ) {
     val shortKey: String get() = key.take(8)
 

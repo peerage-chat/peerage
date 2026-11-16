@@ -1043,4 +1043,9 @@
     <string name="chat_request_sent">request sent</string>
     <string name="chat_awaiting_banner">Contact request sent. %1$s gets the messages below once the request is accepted.</string>
     <string name="status_held">awaiting acceptance</string>
+    <!-- Запрос с именем как у контакта (4.2, шаг 7e, макет android/Request) -->
+    <string name="req_caption">%1$s · %2$s</string>
+    <string name="req_lookalike">The name matches the contact %1$s (key %2$s…); the key is different.</string>
+    <string name="req_lookalike_short">Name matches a contact</string>
+    <string name="req_verify_in_person">Verify the key in person</string>
 </resources>

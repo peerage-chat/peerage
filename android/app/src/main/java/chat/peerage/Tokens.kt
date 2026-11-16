@@ -75,6 +75,7 @@ object Tokens {
         val warnTile = Color(0xFF3A3020) // плитка «Ключ не сверен» — тот же тон, что warn, приглушённый
         val stateWarn = Color(0xFF2A2116) // плашка «Ключ не сверен» на экране сверки (`security/Pair`)
         val stateWarnText = Color(0xFFF2C98A) // её заголовок и щит
+        val stateWarnLink = Color(0xFFFFCC80) // действие на этой плашке («Сверить ключ лично», `android/Request`)
         val stateOk = Color(0xFF17261A) // плашка «Ключ сверен» (`security/Verified`)
         val errorSoft = Color(0xFFFFB4B4) // заголовок «Ключ не совпал» (`security/Mismatch`)
         val heldTick = Color(0xFF9FC6D6) // часы «ждёт принятия» в мете пузыря (`people/Pending`)

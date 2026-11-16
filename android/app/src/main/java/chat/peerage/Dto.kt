@@ -132,6 +132,14 @@ internal data class ContactRequestDto(
     val name: String = "",
     val greeting: String = "",
     val time: Long = 0,
+    /** Контакт, на чьё имя похоже самоназвание запроса (7e); null — не похоже. */
+    val lookalike: LookalikeDto? = null,
+)
+
+@Serializable
+internal data class LookalikeDto(
+    val key: String = "",
+    val name: String = "",
 )
 
 @Serializable

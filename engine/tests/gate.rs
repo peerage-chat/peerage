@@ -110,8 +110,8 @@ fn request_holds_queue_until_accepted() {
     assert!(
         wait(10, || texts(&b, &a_key)
             == ["привет, это Алиса", "раз", "два"]),
-        "приветствие и удержанное — по порядку: {:?}",
-        texts(&b, &a_key)
+        "приветствие и удержанное — по порядку: {}",
+        b.history_json(&a_key)
     );
     assert_eq!(
         contact(&b, &a_hex).unwrap()["name"],
@@ -232,6 +232,41 @@ fn block_drops_request_and_silences() {
 
     a.shutdown();
     b.shutdown();
+}
+
+/// 7e: запрос с именем, похожим на имя контакта (двойники букв, регистр), помечен этим
+/// контактом — у него другой ключ. Непохожее имя не помечается.
+#[test]
+fn request_named_like_contact_is_flagged() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id, c_id) = (id(19), id(20), id(21));
+    let (a_key, c_key) = (a_id.public_key_bytes(), c_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a"));
+    let b = start(&net, b_id, tmpdir("b"));
+    let c = start(&net, c_id, tmpdir("c"));
+    b.add_contact(&c_key, "Алиса"); // настоящая Алиса — уже контакт
+    a.set_self_name("AЛИCA"); // латинские A и C
+    a.request_contact(&b.my_contact_code(), "", "это я, новый телефон");
+    let a_hex = hex::encode(a_key);
+    assert!(wait(10, || request(&b, &a_hex).is_some()));
+    let twin = &request(&b, &a_hex).unwrap()["lookalike"];
+    assert_eq!(twin["key"], hex::encode(c_key));
+    assert_eq!(twin["name"], "Алиса", "имя контакта — как подписан у себя");
+
+    let d_id = id(22);
+    let d_hex = hex::encode(d_id.public_key_bytes());
+    let d = start(&net, d_id, tmpdir("d"));
+    d.set_self_name("Анна");
+    d.request_contact(&b.my_contact_code(), "", "");
+    assert!(wait(10, || request(&b, &d_hex).is_some()));
+    assert!(
+        request(&b, &d_hex).unwrap()["lookalike"].is_null(),
+        "непохожее имя не помечено"
+    );
+
+    for e in [a, b, c, d] {
+        e.shutdown();
+    }
 }
 
 /// Код обмена разбирается до решения: свой, уже знакомый, чужой мусор.

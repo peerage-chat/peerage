@@ -1969,7 +1969,17 @@ class AppModel private constructor() {
 
     private fun refreshRequestsNow() {
         val list = decodeList<ContactRequestDto>(Native.contactRequests(sessionPtr))
-            .map { ContactRequest(it.key, it.fingerprint, it.name, it.greeting, it.time) }
+            .map {
+                ContactRequest(
+                    it.key,
+                    it.fingerprint,
+                    it.name,
+                    it.greeting,
+                    it.time,
+                    lookalikeKey = it.lookalike?.key.orEmpty(),
+                    lookalikeName = it.lookalike?.name.orEmpty(),
+                )
+            }
             .sortedByDescending { it.time }
         contactRequests.replaceWith(list)
     }

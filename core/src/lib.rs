@@ -4,6 +4,7 @@
 //! сетевой протокол. Используется и Desktop (Tauri), и Android (через JNI).
 
 pub mod kdf;
+pub mod lookalike;
 pub mod backup;
 pub mod budget;
 pub mod db;

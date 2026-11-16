@@ -1103,4 +1103,9 @@
     <string name="chat_request_sent">запрос отправлен</string>
     <string name="chat_awaiting_banner">Запрос в контакты отправлен. Сообщения ниже %1$s получит, когда примет его.</string>
     <string name="status_held">ждёт принятия</string>
+    <!-- Запрос с именем как у контакта (4.2, шаг 7e, макет android/Request) -->
+    <string name="req_caption">%1$s · %2$s</string>
+    <string name="req_lookalike">Имя совпадает с контактом %1$s (ключ %2$s…), ключ другой.</string>
+    <string name="req_lookalike_short">Имя совпадает с контактом</string>
+    <string name="req_verify_in_person">Сверить ключ лично</string>
 </resources>

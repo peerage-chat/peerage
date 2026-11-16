@@ -1,19 +1,24 @@
 package chat.peerage.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,9 +31,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import chat.peerage.AppModel
+import chat.peerage.ContactRequest
 import chat.peerage.R
 import chat.peerage.Tokens
 
@@ -36,9 +45,11 @@ import chat.peerage.Tokens
  * Карточка запроса в контакты: кто пишет, когда и с чем. Решение — здесь, а не кнопками в
  * строке главной: принять незнакомца стоит, только увидев всё, что он прислал.
  * Запрос исчез (принят, отклонён, заблокирован) — [onDone] возвращает на главную.
+ * Имя как у контакта, а ключ другой (7e, макет `android/Request`) — предупреждение и
+ * [onVerify]: сверить ключ с человеком лично, сканированием его кода.
  */
 @Composable
-internal fun RequestScreen(model: AppModel, key: String, onDone: () -> Unit) {
+internal fun RequestScreen(model: AppModel, key: String, onDone: () -> Unit, onVerify: () -> Unit) {
     val r = model.contactRequests.firstOrNull { it.key == key }
     LaunchedEffect(r == null) { if (r == null) onDone() }
     if (r == null) return
@@ -50,7 +61,11 @@ internal fun RequestScreen(model: AppModel, key: String, onDone: () -> Unit) {
             GhostButton(stringResource(R.string.req_decline), modifier = Modifier.fillMaxWidth()) { model.declineRequest(r.key) }
         },
     ) {
-        DecisionHead(r.shownName, fmtListTime(r.time), group = false)
+        DecisionHead(r.shownName, stringResource(R.string.req_caption, stringResource(R.string.add_key_start, r.shortKey), fmtListTime(r.time)), group = false)
+        if (r.lookalikeKey.isNotEmpty()) {
+            Spacer(Modifier.height(Tokens.Space.l))
+            LookalikeWarning(r, onVerify)
+        }
         SectionTitle(stringResource(R.string.req_greeting))
         Box(
             Modifier.padding(horizontal = Tokens.Space.panel).fillMaxWidth()
@@ -110,6 +125,42 @@ internal fun InviteScreen(model: AppModel, gid: String, onDone: () -> Unit) {
                     .clip(RoundedCornerShape(Tokens.Radius.group))
                     .background(Tokens.Colors.group)
                     .padding(Tokens.Space.l),
+            )
+        }
+    }
+}
+
+/** «Имя совпадает с контактом …, ключ другой» и «Сверить ключ лично» (7e). */
+@Composable
+private fun LookalikeWarning(r: ContactRequest, onVerify: () -> Unit) {
+    val text = stringResource(R.string.req_lookalike, r.lookalikeName, r.lookalikeKey.take(8))
+    val at = text.indexOf(r.lookalikeName)
+    Row(
+        Modifier.padding(horizontal = Tokens.Space.panel).fillMaxWidth()
+            .clip(RoundedCornerShape(Tokens.Radius.group))
+            .background(Tokens.Colors.stateWarn)
+            .padding(start = Tokens.Space.l, end = Tokens.Space.l, top = Tokens.Space.m),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+    ) {
+        Icon(TablerIcons.AlertTriangle, null, tint = Tokens.Colors.stripAmber, modifier = Modifier.size(Tokens.Size.iconRow))
+        Column(Modifier.weight(1f)) {
+            Text(
+                buildAnnotatedString {
+                    append(text)
+                    if (at >= 0) addStyle(SpanStyle(fontWeight = FontWeight.Medium), at, at + r.lookalikeName.length)
+                },
+                color = Tokens.Colors.stateWarnText,
+                fontSize = Tokens.Font.preview,
+                lineHeight = Tokens.Font.lineHeight,
+            )
+            Text(
+                stringResource(R.string.req_verify_in_person),
+                color = Tokens.Colors.stateWarnLink,
+                fontSize = Tokens.Font.preview,
+                fontWeight = FontWeight.Medium,
+                // Отступ внутри нажимаемой области — палец попадает и чуть мимо слов.
+                modifier = Modifier.clickable(role = Role.Button, onClick = onVerify)
+                    .padding(top = Tokens.Space.xs, bottom = Tokens.Space.m),
             )
         }
     }

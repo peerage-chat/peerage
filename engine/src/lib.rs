@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use peerage_core::budget::Tier;
+use peerage_core::lookalike::same_name;
 pub use peerage_core::mention::Mention;
 use peerage_core::settings::AudioSettings;
 use peerage_core::store::{
@@ -1994,9 +1995,34 @@ impl Engine {
 
     // — Гейт контактов (замена TOFU-автодобавления) —
     /// Входящие запросы от незнакомцев как JSON-массив (ключ, fingerprint, превью, время).
+    /// Запросы в контакты. У каждого `lookalike` — контакт, на чьё имя похоже самоназвание
+    /// запроса (`{key, name}`, иначе null): ключ у него другой, и это главный признак
+    /// подмены (шаг 7e, `peerage_core::lookalike`).
     pub fn contact_requests_json(&self) -> String {
-        serde_json::to_string(&self.gate.lock_safe().list_requests())
-            .unwrap_or_else(|_| "[]".into())
+        // Снимок имён — без вложенных замков контактов и гейта.
+        let people: Vec<(String, String, String)> = self
+            .contacts
+            .lock_safe()
+            .list()
+            .into_iter()
+            .map(|c| (c.key.clone(), c.name.clone(), c.profile_name.clone()))
+            .collect();
+        let gate = self.gate.lock_safe();
+        let out: Vec<serde_json::Value> = gate
+            .list_requests()
+            .into_iter()
+            .map(|r| {
+                let twin = people.iter().find(|(key, local, own)| {
+                    *key != r.key && (same_name(&r.name, local) || same_name(&r.name, own))
+                });
+                let mut v = serde_json::to_value(r).unwrap_or_default();
+                v["lookalike"] = twin.map_or(serde_json::Value::Null, |(key, local, own)| {
+                    serde_json::json!({ "key": key, "name": if local.is_empty() { own } else { local } })
+                });
+                v
+            })
+            .collect();
+        serde_json::to_string(&out).unwrap_or_else(|_| "[]".into())
     }
 
     /// Одобрить запрос: незнакомец становится контактом, приветствие ложится в чат
