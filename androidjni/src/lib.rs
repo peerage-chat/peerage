@@ -1129,7 +1129,7 @@ pub extern "system" fn Java_chat_peerage_Native_backupEstimate<'local>(
     })
 }
 
-/// Создать резервную копию данных в файл `path`, зашифровав `password`.
+/// Создать резервную копию данных в файл `path`: ключом из 24 слов, с непустым `password` — ещё и им.
 /// `partsJson` — что положить: `{"contacts":true,"messages":true,...}`.
 /// Возвращает JSON статистики или `{"error":"..."}`. Долгая операция (KDF + вложения).
 #[no_mangle]
@@ -1168,6 +1168,23 @@ pub extern "system" fn Java_chat_peerage_Native_backupImport<'local>(
         let path = jstr(&mut env, &path);
         let pass = jstr(&mut env, &password);
         ret(&env, &e.backup_import_json(&path, &pass))
+    })
+}
+
+/// Закрыта ли копия `path` паролем: 1 — да, 0 — нет, -1 — не копия или не прочесть.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_backupNeedsPassword<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    path: JString<'local>,
+) -> jint {
+    jni_safe!(-1, {
+        let path = jstr(&mut env, &path);
+        match peerage_engine::backup::backup_needs_password(std::path::Path::new(&path)) {
+            Ok(true) => 1,
+            Ok(false) => 0,
+            Err(_) => -1,
+        }
     })
 }
 

@@ -230,15 +230,19 @@ understand them before trusting the system with sensitive conversations.
   size indistinguishability.
 
 - **N10. A data backup is an asset that lives OFF the device.** A `.peerage` file by its
-  nature goes to the cloud, to an SD card, to someone else's computer, and is protected
-  only by a password (Argon2id + XChaCha20-Poly1305; the Keystore key is not available
-  there and would not help — the backup has to open on another device). Honestly, that
-  means:
-  * **whoever finds the file gets nothing without the password** — and we give no hints
-    either: no date, no contents in the plaintext header (only magic, version, KDF
-    profile, salt);
-  * **a weak password = a weak backup.** Guessing happens offline, without our limits;
-    the only protection is the cost of an attempt (~1 s on a phone);
+  nature goes to the cloud, to an SD card, to someone else's computer. Since step 7k it is
+  protected by a key derived from the identity (the 24 words, own derivation label) and,
+  optionally, by a password on top (Argon2id; the file key then needs both). The Keystore
+  key is not used — the backup has to open on another device. Honestly, that means:
+  * **whoever finds the file gets nothing without the 24 words** (and without the
+    password, if one was set) — and we give no hints either: no date, no contents in the
+    plaintext header (only magic, version, the "has password" flag, KDF profile, salt);
+  * **a leak of the 24 words opens the backups without a password too** — the words
+    already give the identity, now also the conversations of password-less backups. Who
+    keeps backups in the cloud sets a password;
+  * **a weak password = a weak extra layer.** Guessing happens offline, without our
+    limits; the only protection is the cost of an attempt (~1 s on a phone) — and the
+    attacker needs the 24 words first;
   * **the file contains neither the identity key nor MLS group state** — a leaked backup
     means "they read the conversations", not "they became you" or "they keep reading your
     groups";

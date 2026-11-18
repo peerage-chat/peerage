@@ -30,6 +30,29 @@
 
 ---
 
+## 2026-11-19 · Копия данных ключом из 24 слов, пароль по желанию · (хэш — следующим коммитом) (шаг беты 7k)
+
+**Причина:** beta.md → шаг 7k (решение владельца 2026-11-01): копия закрывалась только
+отдельным паролем — на новом телефоне «24 слова → файл → пароль», который легко забыть.
+
+- **Контракт:** `peerage_core::backup` — формат **v2**: заголовок
+  `"PEERBK" | 2 | flags | kdf_profile | salt[16]`, `flags` бит 0 — «есть пароль»; ключ файла =
+  `blake3::derive_key("peerage:backup-file:v2", подключ ‖ соль [‖ Argon2id(пароль)])`, подключ —
+  `Identity::derive_subkey(SUBKEY_CONTEXT = "peerage:backup:v1")`. `Writer::create(out, key,
+  Option<&str>)`, `Reader::open(inp, key, Option<&str>)`, новое `needs_password(inp)`; ошибки
+  `Foreign` («копия другой личности или файл повреждён») и `PasswordRequired`. Движок:
+  `backup_export/backup_import(…, Option<&str>)`, `backup_*_json` — пустой пароль = без пароля;
+  `engine::backup::backup_needs_password(path)`. JNI: новый `backupNeedsPassword(path) → 1/0/-1`.
+- **Схема:** без изменений.
+- **Поведение:** копию открывает только та же личность (восстановленная по 24 словам); с паролем
+  нужны и личность, и пароль. Подмена флага в заголовке не снимает пароль — ключ выводится по нему.
+- **Совместимость:** копии v1 (только пароль) не открываются — `Version(1)`; до беты формат ломать
+  можно (шаг 8).
+- **Тесты:** `core::backup::tests` (личность, пароль, пустой пароль, подмена флага, версия);
+  `engine/tests/backup.rs` — восстановление на той же личности (`twin`),
+  `copy_without_password_opens_only_for_the_same_identity`,
+  `copy_with_password_needs_it_on_top_of_the_identity`.
+
 ## 2026-11-17 · «Убрать фото» своего профиля · 3b4a4dc (UI 4.3)
 
 **Причина:** app-ui.md → «Свой профиль»: «Убрать фото» (макет `people/MeEdit`); снять своё фото

@@ -4,6 +4,9 @@
 //! выбранное действительно попадает в архив (и невыбранное НЕ попадает), данные
 //! доезжают до другого устройства целыми, а восстановление СЛИВАЕТ, а не затирает.
 //!
+//! Копию открывает только та же личность (шаг 7k: ключ из 24 слов), поэтому «чистое
+//! устройство» в тестах — та же личность с пустой базой на своей сети ([`twin`]).
+//!
 //! Прогон из WSL: LD_LIBRARY_PATH=ygg/libygg.
 
 use std::path::PathBuf;
@@ -34,6 +37,12 @@ fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
     Engine::start_with_transport(dir, ident, net.endpoint(key))
         .unwrap()
         .engine
+}
+
+/// Тот же человек на новом телефоне: личность `n` (восстановлена по 24 словам), пустая
+/// база. Своя сеть: два узла с одним ключом в одной сети делили бы входящие.
+fn twin(n: u8, tag: &str) -> Arc<Engine> {
+    start(&LoopbackNet::new(), id(n), tmpdir(tag))
 }
 
 fn all() -> Parts {
@@ -83,15 +92,15 @@ fn export_import_restores_conversation_on_a_clean_device() {
     fill(&a, &peer);
 
     let file = tmpdir("file").join("copy.peerage");
-    let out = a.backup_export(&file, all(), "пароль-копии").unwrap();
+    let out = a.backup_export(&file, all(), Some("пароль-копии")).unwrap();
     assert_eq!(out.contacts, 1);
     assert_eq!(out.messages, 3, "два текста + медиа");
     assert_eq!(out.notes, 1);
     assert_eq!(out.attachments, 1, "байты вложения в копии");
 
-    // Чистое устройство: другая личность, пустая база.
-    let fresh = start(&net, id(83), tmpdir("dst"));
-    let got = fresh.backup_import(&file, "пароль-копии").unwrap();
+    // Чистое устройство: та же личность, пустая база.
+    let fresh = twin(81, "dst");
+    let got = fresh.backup_import(&file, Some("пароль-копии")).unwrap();
     assert_eq!(got.contacts, 1);
     assert_eq!(got.messages, 3);
     assert_eq!(got.notes, 1);
@@ -133,10 +142,10 @@ fn restore_does_not_grant_verification() {
     a.set_verified(&peer, Some(peerage_core::store::VerifyHow::Set)); // у источника контакт сверен вживую
 
     let file = tmpdir("ver").join("copy.peerage");
-    a.backup_export(&file, all(), "пк").unwrap();
+    a.backup_export(&file, all(), Some("пк")).unwrap();
 
-    let b = start(&net, id(99), tmpdir("ver-dst"));
-    b.backup_import(&file, "пк").unwrap();
+    let b = twin(97, "ver-dst");
+    b.backup_import(&file, Some("пк")).unwrap();
     let contacts: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
     assert_eq!(
         contacts[0]["key"],
@@ -165,14 +174,14 @@ fn only_selected_parts_are_included() {
                 contacts: true,
                 ..Default::default()
             },
-            "пк",
+            Some("пк"),
         )
         .unwrap();
     assert_eq!(out.contacts, 1);
     assert_eq!((out.messages, out.notes, out.calls), (0, 0, 0));
 
-    let fresh = start(&net, id(86), tmpdir("sel-dst"));
-    let got = fresh.backup_import(&file, "пк").unwrap();
+    let fresh = twin(84, "sel-dst");
+    let got = fresh.backup_import(&file, Some("пк")).unwrap();
     assert_eq!(got.contacts, 1);
     assert_eq!(got.messages, 0, "невыбранная переписка не должна появиться");
     let hist: serde_json::Value = serde_json::from_str(&fresh.history_json(&peer)).unwrap();
@@ -195,7 +204,7 @@ fn notes_are_separate_from_conversations() {
                 messages: true,
                 ..Default::default()
             },
-            "пк",
+            Some("пк"),
         )
         .unwrap();
     assert_eq!(out.notes, 0, "заметки не выбраны — их в копии нет");
@@ -210,20 +219,20 @@ fn import_merges_and_is_idempotent() {
     let a = start(&net, id(89), tmpdir("merge-src"));
     fill(&a, &peer);
     let file = tmpdir("merge").join("copy.peerage");
-    a.backup_export(&file, all(), "пк").unwrap();
+    a.backup_export(&file, all(), Some("пк")).unwrap();
 
-    let b = start(&net, id(91), tmpdir("merge-dst"));
+    let b = twin(89, "merge-dst");
     b.add_contact(&peer, "Аня (переименована после копии)");
     b.send_text(&peer, "сообщение, которого не было в копии");
 
-    let first = b.backup_import(&file, "пк").unwrap();
+    let first = b.backup_import(&file, Some("пк")).unwrap();
     assert_eq!(
         first.contacts, 0,
         "существующий контакт не перезаписывается"
     );
     assert_eq!(first.messages, 3);
 
-    let second = b.backup_import(&file, "пк").unwrap();
+    let second = b.backup_import(&file, Some("пк")).unwrap();
     assert_eq!(
         second.messages, 0,
         "повторный импорт того же файла ничего не добавляет"
@@ -253,10 +262,10 @@ fn wrong_password_does_not_restore_anything() {
     let a = start(&net, id(92), tmpdir("pw-src"));
     fill(&a, &peer);
     let file = tmpdir("pw").join("copy.peerage");
-    a.backup_export(&file, all(), "правильный").unwrap();
+    a.backup_export(&file, all(), Some("правильный")).unwrap();
 
-    let b = start(&net, id(94), tmpdir("pw-dst"));
-    assert!(b.backup_import(&file, "неправильный").is_err());
+    let b = twin(92, "pw-dst");
+    assert!(b.backup_import(&file, Some("неправильный")).is_err());
     let hist: serde_json::Value = serde_json::from_str(&b.history_json(&peer)).unwrap();
     assert!(
         hist.as_array().unwrap().is_empty(),
@@ -285,10 +294,10 @@ fn restored_group_is_read_only() {
         .contains("сообщение в группе")));
 
     let file = tmpdir("grp").join("copy.peerage");
-    a.backup_export(&file, all(), "пк").unwrap();
+    a.backup_export(&file, all(), Some("пк")).unwrap();
 
-    let b = start(&net, id(96), tmpdir("grp-dst"));
-    b.backup_import(&file, "пк").unwrap();
+    let b = twin(95, "grp-dst");
+    b.backup_import(&file, Some("пк")).unwrap();
 
     // Попытка написать в архивную группу ничего не меняет: MLS-состояния нет.
     b.group_send_text(gid.clone(), "а я всё равно напишу".into());
@@ -329,13 +338,13 @@ fn group_history_survives_backup_as_an_archive() {
     );
 
     let file = tmpdir("gfile").join("groups.peerage");
-    let out = a.backup_export(&file, all(), "пароль").unwrap();
+    let out = a.backup_export(&file, all(), None).unwrap();
     // Строка «Группа создана» + сообщение: системные строки — часть истории.
     assert_eq!(out.group_messages, 2, "история группы попала в копию");
 
     // Чистое устройство: ни группы, ни истории.
-    let b = start(&net, id(88), tmpdir("gdst"));
-    let got = b.backup_import(&file, "пароль").unwrap();
+    let b = twin(87, "gdst");
+    let got = b.backup_import(&file, None).unwrap();
     assert_eq!(got.group_messages, 2);
 
     let hist = b.group_history_json(&gid);
@@ -366,14 +375,15 @@ fn forged_blob_in_backup_is_rejected() {
     let victim_id = hex::encode(peerage_blob::blob_id(b"real picture"));
 
     let file = tmpdir("forged-file").join("copy.peerage");
+    let key = id(84).derive_subkey(peerage_core::backup::SUBKEY_CONTEXT);
     let mut w =
-        peerage_core::backup::Writer::create(std::fs::File::create(&file).unwrap(), "пароль")
+        peerage_core::backup::Writer::create(std::fs::File::create(&file).unwrap(), &key, None)
             .unwrap();
     w.blob(&victim_id, b"forged").unwrap();
     w.blob(&honest_id, &honest).unwrap();
     w.finish().unwrap();
 
-    let got = e.backup_import(&file, "пароль").unwrap();
+    let got = e.backup_import(&file, None).unwrap();
     assert_eq!(got.attachments, 1, "принят только честный блоб");
     assert!(
         !e.blob_exists(&victim_id),
@@ -396,19 +406,63 @@ fn reactions_ride_along_with_their_chat() {
     assert!(a.react(peerage_engine::ChatKey::Dm(peer), msg, &author, "👍"));
 
     let file = tmpdir("rfile").join("copy.peerage");
-    a.backup_export(&file, all(), "пароль").unwrap();
-    let fresh = start(&net, id(91), tmpdir("rdst"));
-    fresh.backup_import(&file, "пароль").unwrap();
+    a.backup_export(&file, all(), None).unwrap();
+    let fresh = twin(89, "rdst");
+    fresh.backup_import(&file, None).unwrap();
     let hist: serde_json::Value = serde_json::from_str(&fresh.history_json(&peer)).unwrap();
     let r = &hist[0]["reactions"];
     assert_eq!(r[0]["emoji"], "👍", "реакция восстановлена: {hist}");
     assert_eq!(r[0]["who"][0], author.as_str());
 
     // Повторный импорт того же файла реакцию не задваивает.
-    fresh.backup_import(&file, "пароль").unwrap();
+    fresh.backup_import(&file, None).unwrap();
     let hist: serde_json::Value = serde_json::from_str(&fresh.history_json(&peer)).unwrap();
     assert_eq!(
         hist[0]["reactions"][0]["who"].as_array().map(|w| w.len()),
         Some(1)
     );
+}
+
+/// Шаг 7k: копия без пароля — «24 слова → файл → готово» на той же личности; чужая
+/// личность её не открывает и ничего из неё не получает.
+#[test]
+fn copy_without_password_opens_only_for_the_same_identity() {
+    let net = LoopbackNet::new();
+    let peer = id(101).public_key_bytes();
+    let a = start(&net, id(100), tmpdir("k-src"));
+    fill(&a, &peer);
+    let file = tmpdir("k").join("copy.peerage");
+    a.backup_export(&file, all(), None).unwrap();
+    assert!(!peerage_engine::backup::backup_needs_password(&file).unwrap());
+
+    let stranger = twin(102, "k-other");
+    let err = stranger.backup_import(&file, None).unwrap_err();
+    assert!(
+        matches!(err, peerage_core::backup::BackupError::Foreign),
+        "чужая личность: {err}"
+    );
+    let hist: serde_json::Value = serde_json::from_str(&stranger.history_json(&peer)).unwrap();
+    assert!(hist.as_array().unwrap().is_empty(), "ничего не просочилось");
+
+    let me = twin(100, "k-dst");
+    assert_eq!(me.backup_import(&file, None).unwrap().messages, 3);
+}
+
+/// С паролем нужны и личность, и пароль; флаг в заголовке говорит, спрашивать ли его.
+#[test]
+fn copy_with_password_needs_it_on_top_of_the_identity() {
+    let net = LoopbackNet::new();
+    let peer = id(104).public_key_bytes();
+    let a = start(&net, id(103), tmpdir("kp-src"));
+    fill(&a, &peer);
+    let file = tmpdir("kp").join("copy.peerage");
+    a.backup_export(&file, all(), Some("облако")).unwrap();
+    assert!(peerage_engine::backup::backup_needs_password(&file).unwrap());
+
+    let me = twin(103, "kp-dst");
+    assert!(matches!(
+        me.backup_import(&file, None),
+        Err(peerage_core::backup::BackupError::PasswordRequired)
+    ));
+    assert_eq!(me.backup_import(&file, Some("облако")).unwrap().messages, 3);
 }

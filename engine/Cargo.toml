@@ -19,6 +19,7 @@ hex.workspace = true
 rand_core.workspace = true
 litertc = { path = "../litertc" }
 peerage-core = { path = "../core", features = ["sqlcipher"] }
+zeroize = "1"
 peerage-messenger = { path = "../messenger" }
 peerage-media = { path = "../media" }
 peerage-group = { path = "../group" }

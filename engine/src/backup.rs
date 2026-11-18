@@ -166,6 +166,12 @@ fn err_json(msg: &str) -> String {
     serde_json::json!({ "error": msg }).to_string()
 }
 
+/// Закрыта ли копия `path` паролем — по заголовку, до расшифровки: восстановление
+/// спрашивает пароль только тогда.
+pub fn backup_needs_password(path: &Path) -> Result<bool, BackupError> {
+    peerage_core::backup::needs_password(std::fs::File::open(path)?)
+}
+
 impl Engine {
     /// Оценка объёма ДО создания копии: чтобы выбор «класть вложения или нет» делался
     /// по цифрам, а не вслепую.
@@ -236,15 +242,20 @@ impl Engine {
             Ok(p) => p,
             Err(e) => return err_json(&format!("неверный состав копии: {e}")),
         };
-        match self.backup_export(Path::new(path), parts, password) {
+        match self.backup_export(
+            Path::new(path),
+            parts,
+            Some(password).filter(|p| !p.is_empty()),
+        ) {
             Ok(s) => serde_json::to_string(&s).unwrap_or_else(|_| "{}".into()),
             Err(e) => err_json(&e.to_string()),
         }
     }
 
     /// Восстановить из копии. Возвращает JSON ДОБАВЛЕННОГО либо `{"error":"..."}`.
+    /// Пустой `password` — без пароля.
     pub fn backup_import_json(&self, path: &str, password: &str) -> String {
-        match self.backup_import(Path::new(path), password) {
+        match self.backup_import(Path::new(path), Some(password).filter(|p| !p.is_empty())) {
             Ok(s) => serde_json::to_string(&s).unwrap_or_else(|_| "{}".into()),
             Err(e) => err_json(&e.to_string()),
         }
@@ -273,15 +284,23 @@ impl Engine {
         out
     }
 
-    /// Создать копию в `path`, зашифрованную `password`.
+    /// Ключ копий этой личности — из 24 слов (шаг 7k).
+    fn backup_key(&self) -> zeroize::Zeroizing<[u8; 32]> {
+        zeroize::Zeroizing::new(
+            self.identity
+                .derive_subkey(peerage_core::backup::SUBKEY_CONTEXT),
+        )
+    }
+
+    /// Создать копию в `path`: ключом личности, с `password` — ещё и им.
     pub fn backup_export(
         &self,
         path: &Path,
         parts: Parts,
-        password: &str,
+        password: Option<&str>,
     ) -> Result<Stats, BackupError> {
         let file = std::fs::File::create(path)?;
-        let mut w = Writer::create(std::io::BufWriter::new(file), password)?;
+        let mut w = Writer::create(std::io::BufWriter::new(file), &self.backup_key(), password)?;
         let mut stats = Stats::default();
 
         w.json(&Rec::Manifest {
@@ -458,9 +477,9 @@ impl Engine {
     /// Восстановить из копии. Возвращает, сколько записей реально ДОБАВЛЕНО (уже
     /// известные не считаются) — иначе пользователь не отличил бы «восстановилось»
     /// от «импортировал тот же файл второй раз».
-    pub fn backup_import(&self, path: &Path, password: &str) -> Result<Stats, BackupError> {
+    pub fn backup_import(&self, path: &Path, password: Option<&str>) -> Result<Stats, BackupError> {
         let file = std::fs::File::open(path)?;
-        let mut r = Reader::open(std::io::BufReader::new(file), password)?;
+        let mut r = Reader::open(std::io::BufReader::new(file), &self.backup_key(), password)?;
         let mut stats = Stats::default();
         let me = self.me_pub;
         // Чья это копия. Заметки себе — чат с САМИМ СОБОЙ, то есть ключ автора; если
