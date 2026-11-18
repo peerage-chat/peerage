@@ -435,6 +435,8 @@ object Tokens {
         val iconTile = 34.dp // иконка в плитке heroTile
         val iconAvatar = 40.dp // фигурка на пустом своём фото (аватар 96)
         val onbBadge = 34.dp // значок камеры на своём фото в первом запуске
+        val radio = 22.dp // кружок выбора варианта (`security/Level`)
+        val radioRing = 2.dp // его обводка, пока не выбран
     }
 
     /**

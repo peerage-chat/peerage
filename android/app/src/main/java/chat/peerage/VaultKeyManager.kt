@@ -1,6 +1,8 @@
 package chat.peerage
 
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import java.io.File
 import java.security.KeyStore
@@ -47,6 +49,8 @@ object VaultKeyManager {
     private const val GCM_TAG_BITS = 128
     private const val KEY_LEN = 32
     private val PAIR = listOf(META_FILE, ENC_FILE)
+    private const val BIO_ALIAS = "vault-bio"
+    private const val BIO_FILE = "vault.bio.enc"
 
     /** Текущий уровень (по умолчанию — Keystore, как было до появления выбора). */
     fun level(filesDir: File): VaultLevel {
@@ -118,6 +122,8 @@ object VaultKeyManager {
         // Смена уровня = новая соль, значит и профиль берём текущий: файл всё равно
         // перезаписывается, и старую стоимость тащить незачем.
         val profile = Native.currentKdfProfile()
+        // Отпечаток — только у «Пароля»: у остальных уровней его обёртка лишняя.
+        if (target != VaultLevel.PASSWORD) bioDisable(filesDir)
         StagedFiles.replaceAll(
             filesDir,
             mapOf(
@@ -138,6 +144,78 @@ object VaultKeyManager {
         runCatching {
             KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(KEYSTORE_ALIAS)
         }
+        bioDisable(filesDir)
+    }
+
+    // ── «Открывать отпечатком» (уровень PASSWORD) ───────────────────────────────
+    // Тот же ключ хранилища дополнительно обёрнут ключом Keystore, который отдаёт шифр
+    // только после биометрии (на каждое использование) и стирается системой при новом
+    // отпечатке. Пароль работает всегда: эта обёртка — вторая дверь, не замена.
+    // Android 11+: раньше ключ «биометрия на каждое использование» задаётся иначе.
+
+    /** Можно ли включить на этом телефоне. */
+    fun bioSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+
+    /** Включено ли (и есть ли что разворачивать). */
+    fun bioEnabled(filesDir: File): Boolean =
+        bioSupported() && level(filesDir) == VaultLevel.PASSWORD && File(filesDir, BIO_FILE).exists()
+
+    /** Шифр для включения — его подписывает BiometricPrompt. Ключ каждый раз новый. */
+    fun bioEncryptCipher(): Cipher {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        ks.deleteEntry(BIO_ALIAS)
+        val key = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+            init(
+                KeyGenParameterSpec.Builder(BIO_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .setUserAuthenticationRequired(true)
+                    .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
+                    .setInvalidatedByBiometricEnrollment(true)
+                    .build(),
+            )
+        }.generateKey()
+        return Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+    }
+
+    /** Записать обёртку отпечатком: [cipher] — подписанный биометрией из [bioEncryptCipher]. */
+    fun bioEnable(filesDir: File, cipher: Cipher, raw: ByteArray) {
+        StagedFiles.writeAtomic(File(filesDir, BIO_FILE), cipher.iv + cipher.doFinal(raw))
+    }
+
+    /** Шифр для открытия; null — обёртки нет или ключ стёрт новым отпечатком (тогда
+     *  обёртка убирается: развернуть её уже нечем, остаётся пароль). */
+    fun bioDecryptCipher(filesDir: File): Cipher? {
+        if (!bioEnabled(filesDir)) return null
+        val key = runCatching {
+            KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.getKey(BIO_ALIAS, null) as? SecretKey
+        }.getOrNull()
+        val data = File(filesDir, BIO_FILE).readBytes()
+        if (key == null || data.size <= GCM_IV_LEN) {
+            bioDisable(filesDir)
+            return null
+        }
+        return try {
+            Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, data.copyOf(GCM_IV_LEN)))
+            }
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            bioDisable(filesDir)
+            null
+        }
+    }
+
+    /** Ключ хранилища из обёртки отпечатком; [cipher] — подписанный из [bioDecryptCipher]. */
+    fun bioUnwrap(filesDir: File, cipher: Cipher): ByteArray {
+        val data = File(filesDir, BIO_FILE).readBytes()
+        return cipher.doFinal(data.copyOfRange(GCM_IV_LEN, data.size))
+    }
+
+    /** Выключить: обёртку и её ключ. */
+    fun bioDisable(filesDir: File) {
+        File(filesDir, BIO_FILE).delete()
+        runCatching { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(BIO_ALIAS) }
     }
 
     /** Обернуть ключ по уровню: пароль внутри, Keystore снаружи. Соль и профиль —

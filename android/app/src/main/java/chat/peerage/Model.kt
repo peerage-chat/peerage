@@ -1081,9 +1081,10 @@ class AppModel private constructor() {
      * Возвращает false, если пароль не подошёл, — вызывающий показывает ошибку, а
      * не стартует с мусорным ключом (иначе база выглядела бы повреждённой).
      */
-    fun start(dataDir: String, password: String? = null): Boolean {
+    /** [key] — ключ хранилища, уже развёрнутый отпечатком: пароль тогда не нужен. */
+    fun start(dataDir: String, password: String? = null, key: ByteArray? = null): Boolean {
         if (started) return true
-        val vaultKey = runCatching { VaultKeyManager.getOrCreate(File(dataDir), password) }
+        val vaultKey = key ?: runCatching { VaultKeyManager.getOrCreate(File(dataDir), password) }
             .getOrElse {
                 // С паролем сбой значит «неверный пароль» — это покажет экран ввода.
                 // Без пароля ключ не развернулся: Keystore потерял свой ключ (сменили

@@ -50,7 +50,10 @@ reveals activity), a compromised operating system, physical access to an unlocke
 - **Wire padding:** every payload is padded to one of three size buckets (256 B / 4 KiB /
   25 KiB), so message classes are indistinguishable by size (threat model G6/N7).
 - **At rest:** XChaCha20-Poly1305 for files, SQLCipher for the database. On Android the
-  key is wrapped by the Keystore, derived from a password with Argon2id, or both. State
+  key is wrapped by the Keystore, derived from a password with Argon2id, or both. With the
+  password level, "open with fingerprint" adds a second wrap of the same key by a Keystore key
+  that requires strong biometrics per use and is invalidated by a new enrollment (Android 11+);
+  the password keeps working. State
   files are written crash-safely (temp → fsync → rename); key and seed files are 0600.
 
 ## First audit (core and desktop, before the Android client)

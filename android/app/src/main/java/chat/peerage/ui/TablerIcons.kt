@@ -604,3 +604,14 @@ val TablerIcons.Eye: ImageVector by lazy {
         "M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6",
     )
 }
+
+val TablerIcons.Fingerprint: ImageVector by lazy {
+    tabler(
+        "fingerprint",
+        "M18.9 7a8 8 0 0 1 1.1 5v1a6 6 0 0 0 .8 3",
+        "M8 11a4 4 0 0 1 8 0v1a10 10 0 0 0 2 6",
+        "M12 11v2a14 14 0 0 0 2.5 8",
+        "M8 15a18 18 0 0 0 1.8 6",
+        "M4.9 19a22 22 0 0 1 -.9 -7v-1a8 8 0 0 1 12 -6.95",
+    )
+}

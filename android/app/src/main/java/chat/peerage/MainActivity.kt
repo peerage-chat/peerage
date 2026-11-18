@@ -175,7 +175,13 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
     var vaultOpen by remember { mutableStateOf(!needsPassword) }
     if (!vaultOpen) {
         val scope = rememberCoroutineScope()
-        VaultUnlockScreen(model, dataDir) { password, done ->
+        VaultUnlockScreen(model, dataDir, onKey = { key ->
+            scope.launch(Dispatchers.IO) {
+                // Ключ развёрнут отпечатком; не подошёл — остаётся экран пароля.
+                if (model.start(dataDir, key = key)) vaultOpen = true
+                key.fill(0)
+            }
+        }) { password, done ->
             scope.launch(Dispatchers.IO) {
                 val ok = model.start(dataDir, password)
                 done(ok)
@@ -484,7 +490,7 @@ private fun CompactShell(model: AppModel) {
                                     BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
                                 }
                                 Screen.EditProfile -> {}
-                                Screen.VaultLevel -> TopBar(stringResource(R.string.settings_at_rest), onBack = goBack)
+                                Screen.VaultLevel -> {}
                                 Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
                                 Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = goBack)
                                 Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = goBack)
@@ -738,7 +744,7 @@ private fun CompactShell(model: AppModel) {
                                         RotateAddressScreen(model) {}
                                     }
                                     Screen.EditProfile -> EditProfileScreen(model) { goBack() }
-                                    Screen.VaultLevel -> VaultLevelScreen(model, dataDir) { goBack() }
+                                    Screen.VaultLevel -> VaultLevelScreen(dataDir) { goBack() }
                                     Screen.Saved -> SavedScreen(model)
                                     Screen.Storage -> StorageScreen(model) { screen = Screen.Backup }
                                     Screen.Backup -> BackupScreen(model) { screen = Screen.Storage }

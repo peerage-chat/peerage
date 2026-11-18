@@ -11,6 +11,7 @@ import android.os.CancellationSignal
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import javax.crypto.Cipher
 
 /**
  * Блокировка приложения (M4).
@@ -115,6 +116,38 @@ object AppLock {
             },
         )
         return true
+    }
+
+    /**
+     * Биометрия, подписывающая [cipher] (ключ хранилища «Открывать отпечатком»): только
+     * сильная биометрия, без PIN устройства — запасной путь здесь пароль, кнопка [negative].
+     * [onResult] — подписанный шифр или null (закрыли, «Ввести пароль», ошибка).
+     */
+    fun promptCrypto(activity: Activity, cipher: Cipher, title: String, negative: String, onResult: (Cipher?) -> Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return onResult(null)
+        val prompt = BiometricPrompt.Builder(activity)
+            .setTitle(title)
+            .setAllowedAuthenticators(Authenticators.BIOMETRIC_STRONG)
+            .setNegativeButton(negative, activity.mainExecutor) { _, _ -> onResult(null) }
+            .build()
+        prompt.authenticate(
+            BiometricPrompt.CryptoObject(cipher),
+            CancellationSignal(),
+            activity.mainExecutor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) =
+                    onResult(result.cryptoObject?.cipher)
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) = onResult(null)
+            },
+        )
+    }
+
+    /** Есть ли сильная биометрия с отпечатками — иначе «Открывать отпечатком» не показывать. */
+    fun strongBiometrics(ctx: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        val bm = ctx.getSystemService(android.hardware.biometrics.BiometricManager::class.java) ?: return false
+        return bm.canAuthenticate(Authenticators.BIOMETRIC_STRONG) == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS
     }
 
     private fun promptTitle(ctx: Context) = ctx.getString(R.string.lock_prompt, ctx.getString(R.string.app_name))
