@@ -904,7 +904,8 @@
     </plurals>
     <string name="backup_data_sub">Messages, contacts and notes.</string>
     <string name="backup_data_make">Back up</string>
-    <string name="key_flow_title">Key backup</string>
+    <string name="key_flow_title">Key</string>
+    <string name="key_words_check">Check the record</string>
     <string name="key_check_sub">Three words by number.</string>
     <string name="key_check_word">Word #%d</string>
     <string name="key_check_unknown">Not a dictionary word</string>

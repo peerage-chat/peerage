@@ -305,7 +305,7 @@ private fun KeyWordsContent(model: AppModel, deviceSecure: Boolean, onWritten: (
             }
         }
         AccentButton(
-            stringResource(R.string.onb_wrote_down),
+            stringResource(R.string.key_words_check),
             Modifier.fillMaxWidth().padding(vertical = Tokens.Space.m).navigationBarsPadding()
                 .heightIn(min = Tokens.Size.primaryButton),
         ) {
@@ -328,19 +328,24 @@ internal fun KeyFlowScreen(model: AppModel, wordsFirst: Boolean, onDone: () -> U
     // Шаг: слова или проверка. Слова — только после разблокировки (unlocked).
     var words by rememberSaveable { mutableStateOf(wordsFirst) }
     var unlocked by rememberSaveable { mutableStateOf(false) }
-    val unlock = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
-        if (res.resultCode == Activity.RESULT_OK) {
-            unlocked = true
-        } else if (wordsFirst && !unlocked) {
-            onDone()
-        } else {
-            words = false
+    val result: (Boolean) -> Unit = { ok ->
+        when {
+            ok -> unlocked = true
+            wordsFirst && !unlocked -> onDone()
+            else -> words = false
         }
     }
+    val unlock = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        result(res.resultCode == Activity.RESULT_OK)
+    }
+    // Тот же системный запрос, что у замка: отпечаток сразу, PIN устройства запасным.
     LaunchedEffect(words, unlocked) {
         if (words && !unlocked) {
-            val intent = AppLock.credentialIntent(ctx)
-            if (intent == null) unlocked = true else unlock.launch(intent)
+            val activity = ctx as? Activity
+            if (activity == null || !AppLock.prompt(activity, result)) {
+                val intent = AppLock.credentialIntent(ctx)
+                if (intent == null) unlocked = true else unlock.launch(intent)
+            }
         }
     }
     LaunchedEffect(words, unlocked) { if (words && unlocked) model.keyReconciled() }

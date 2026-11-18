@@ -956,7 +956,8 @@
     </plurals>
     <string name="backup_data_sub">Переписка, контакты и заметки.</string>
     <string name="backup_data_make">Сделать копию</string>
-    <string name="key_flow_title">Копия ключа</string>
+    <string name="key_flow_title">Ключ</string>
+    <string name="key_words_check">Проверить запись</string>
     <string name="key_check_sub">Три слова по номерам.</string>
     <string name="key_check_word">Слово №%d</string>
     <string name="key_check_unknown">Нет такого слова в словаре</string>
