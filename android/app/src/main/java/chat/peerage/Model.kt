@@ -176,7 +176,9 @@ class AppModel private constructor() {
                 if (key != null && Native.restoreSeedPhrase(dataDir, key, phrase)) {
                     // Фраза у человека есть — он её только что ввёл.
                     appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-                        ?.edit()?.putBoolean("onboarded", true)?.putBoolean("key_backup_done", true)?.commit()
+                        ?.edit()?.putBoolean("onboarded", true)?.putBoolean("key_backup_done", true)
+                        // После перезапуска — «Перенести переписку» (TransferFlow), один раз.
+                        ?.putBoolean("offer_transfer", true)?.commit()
                     RecoverResult.OK
                 } else {
                     RecoverResult.FAILED
@@ -196,7 +198,9 @@ class AppModel private constructor() {
             !Native.importSeedPhrase(dataDir, phrase) -> RecoverResult.FAILED
             else -> {
                 appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
-                    ?.edit()?.putBoolean("onboarded", true)?.putBoolean("key_backup_done", true)?.commit()
+                    ?.edit()?.putBoolean("onboarded", true)?.putBoolean("key_backup_done", true)
+                    // После перезапуска — «Перенести переписку» (TransferFlow), один раз.
+                    ?.putBoolean("offer_transfer", true)?.commit()
                 RecoverResult.OK
             }
         }

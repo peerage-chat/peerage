@@ -198,6 +198,8 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
     val ctx = LocalContext.current
     val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
     var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
+    // Личность восстановлена по 24 словам — предложить перенести переписку (шаг 7k).
+    var transfer by remember { mutableStateOf(prefs.getBoolean("offer_transfer", false)) }
 
     // Камеру и микрофон здесь НЕ просим: они запрашиваются контекстно, в момент
     // использования (звонок / включение видео / сканер QR) — см. rememberPermissionRunner.
@@ -205,8 +207,8 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
     // экрану, и просить их можно лишь после гейта (иначе диалог накроет онбординг).
     // Онбординг просит их в своей карточке; здесь — для тех, кто там пропустил.
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-    LaunchedEffect(onboarded) {
-        if (onboarded && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+    LaunchedEffect(onboarded, transfer) {
+        if (onboarded && !transfer && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             !ctx.hasPermission(Manifest.permission.POST_NOTIFICATIONS)
         ) {
             permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -219,6 +221,10 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
         !onboarded -> OnboardingFlow(model) {
             prefs.edit().putBoolean("onboarded", true).apply()
             onboarded = true
+        }
+        transfer -> TransferFlow(model) {
+            prefs.edit().remove("offer_transfer").apply()
+            transfer = false
         }
         else -> Root(model, width)
     }

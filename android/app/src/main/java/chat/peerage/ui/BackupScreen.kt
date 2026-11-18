@@ -1,6 +1,5 @@
 package chat.peerage.ui
 
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -15,7 +14,6 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.People
@@ -30,12 +28,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Резервная копия ДАННЫХ (макет `docs/design/mockups/data-backup.html`).
@@ -58,9 +56,13 @@ internal fun BackupScreen(model: AppModel, onDone: () -> Unit) {
     var parts by remember { mutableStateOf(BackupPartsDto()) }
     var password by remember { mutableStateOf("") }
     var repeat by remember { mutableStateOf("") }
+    var withPassword by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<BackupStatsDto?>(null) }
     var restoring by remember { mutableStateOf(false) }
-    var pickedFile by remember { mutableStateOf<Uri?>(null) }
+    var picked by remember { mutableStateOf<PickedBackup?>(null) }
+    var pickFailed by remember { mutableStateOf(false) }
+    val restoreTmp = remember { java.io.File(ctx.cacheDir, "restore.tmp") }
+    DisposableEffect(Unit) { onDispose { restoreTmp.delete() } }
 
     LaunchedEffect(Unit) { model.refreshBackupEstimate() }
     val est = model.backupEstimate
@@ -77,7 +79,7 @@ internal fun BackupScreen(model: AppModel, onDone: () -> Unit) {
         step = Step.Working
         scope.launch(Dispatchers.IO) {
             val tmp = java.io.File(ctx.cacheDir, "backup.tmp")
-            var stats = model.exportBackupBlocking(tmp.absolutePath, parts, password)
+            var stats = model.exportBackupBlocking(tmp.absolutePath, parts, if (withPassword) password else "")
             if (stats.error.isEmpty()) {
                 // Копия собрана — но ещё не записана туда, куда выбрал человек. Сбой
                 // записи (флешка вынута, провайдер отказал) раньше проглатывался, и
@@ -99,7 +101,18 @@ internal fun BackupScreen(model: AppModel, onDone: () -> Unit) {
 
     val openFrom = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
-    ) { uri -> pickedFile = uri }
+    ) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                val p = pickBackup(ctx, uri, restoreTmp)
+                withContext(Dispatchers.Main) {
+                    picked = p
+                    pickFailed = p == null
+                    password = ""
+                }
+            }
+        }
+    }
 
     when (step) {
         Step.Pick -> PickParts(
@@ -117,6 +130,8 @@ internal fun BackupScreen(model: AppModel, onDone: () -> Unit) {
         )
 
         Step.Password -> PasswordStep(
+            withPassword = withPassword,
+            onWithPassword = { withPassword = it },
             password = password,
             repeat = repeat,
             onPassword = { password = it },
@@ -127,30 +142,19 @@ internal fun BackupScreen(model: AppModel, onDone: () -> Unit) {
         Step.Working -> WorkingStep(restoring)
 
         Step.Restore -> RestoreStep(
-            file = pickedFile,
-            // Не lastPathSegment: у content:// это идентификатор документа («43»),
-            // и человек восстанавливался бы вслепую. Имя знает провайдер.
-            fileName = pickedFile?.let { displayName(ctx, it) },
+            // Имя — от провайдера, не lastPathSegment: у content:// это id документа («43»).
+            picked = picked,
+            pickFailed = pickFailed,
             password = password,
             onPassword = { password = it },
             onPickFile = { openFrom.launch(arrayOf("*/*")) },
             onGo = {
-                val uri = pickedFile ?: return@RestoreStep
+                if (picked == null) return@RestoreStep
                 step = Step.Working
                 restoring = true
                 scope.launch(Dispatchers.IO) {
-                    val tmp = java.io.File(ctx.cacheDir, "restore.tmp")
-                    val copied = runCatching {
-                        ctx.contentResolver.openInputStream(uri)?.use { inp ->
-                            tmp.outputStream().use { inp.copyTo(it) }
-                        } != null
-                    }.getOrDefault(false)
-                    result = if (copied) {
-                        model.importBackupBlocking(tmp.absolutePath, password)
-                    } else {
-                        BackupStatsDto(error = ctx.getString(R.string.backup_read_failed))
-                    }
-                    tmp.delete()
+                    result = model.importBackupBlocking(restoreTmp.absolutePath, password)
+                    restoreTmp.delete()
                     step = Step.Done
                 }
             },
@@ -271,55 +275,65 @@ private fun PickParts(
     }
 }
 
+/**
+ * Чем закрыта копия (макет `misc/BackupPass`, шаг 7k): ключом из 24 слов всегда, паролем —
+ * по желанию. Без пароля «Создать копию» доступна сразу.
+ */
 @Composable
 private fun PasswordStep(
+    withPassword: Boolean,
+    onWithPassword: (Boolean) -> Unit,
     password: String,
     repeat: String,
     onPassword: (String) -> Unit,
     onRepeat: (String) -> Unit,
     onGo: () -> Unit,
 ) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
-    ) {
-        InfoCard(
-            Icons.Filled.Lock,
-            stringResource(R.string.backup_pw_title),
-            stringResource(R.string.backup_pw_text),
-        )
-
-        FieldLabel(stringResource(R.string.backup_pw_label))
-        TextField(
-            password,
-            onPassword,
-            Modifier.fillMaxWidth(),
-            colors = inputColors(),
-            singleLine = true,
-            placeholder = { Text(stringResource(R.string.vault_ph_password), color = HoloSecondary) },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = PasswordKeyboard,
-        )
-        FieldLabel(stringResource(R.string.backup_pw_repeat))
-        TextField(
-            repeat,
-            onRepeat,
-            Modifier.fillMaxWidth(),
-            colors = inputColors(),
-            singleLine = true,
-            placeholder = { Text(stringResource(R.string.vault_ph_repeat), color = HoloSecondary) },
-            isError = repeat.isNotEmpty() && repeat != password,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = PasswordKeyboard,
-        )
-        if (repeat.isNotEmpty() && repeat != password) {
-            Text(stringResource(R.string.vault_mismatch), color = HoloError, fontSize = Tokens.Font.small)
+    val mismatch = repeat.isNotEmpty() && repeat != password
+    val ready = !withPassword || (password.isNotEmpty() && password == repeat)
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.l)) {
+            SectionTitle(stringResource(R.string.backup_lock_title))
+            CardSection {
+                CardRow(divider = false, inset = Tokens.Space.l) {
+                    Icon(TablerIcons.Key, null, tint = Tokens.Colors.fieldIcon, modifier = Modifier.size(Tokens.Size.iconM))
+                    Spacer(Modifier.width(Tokens.Space.m))
+                    Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
+                        Text(stringResource(R.string.backup_lock_words), color = Color.White, fontSize = Tokens.Font.name)
+                        Text(
+                            stringResource(R.string.backup_lock_words_sub),
+                            color = Tokens.Colors.tertiary,
+                            fontSize = Tokens.Font.body,
+                            modifier = Modifier.padding(top = Tokens.Space.xxs),
+                        )
+                    }
+                    Icon(TablerIcons.Check, null, tint = Tokens.Colors.online, modifier = Modifier.size(Tokens.Size.iconS))
+                }
+                CardRow(inset = Tokens.Space.l, modifier = Modifier.switchRow(withPassword, onChange = onWithPassword)) {
+                    Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
+                        Text(stringResource(R.string.backup_lock_password), color = Color.White, fontSize = Tokens.Font.name)
+                        Text(
+                            stringResource(R.string.backup_lock_password_sub),
+                            color = Tokens.Colors.tertiary,
+                            fontSize = Tokens.Font.body,
+                            modifier = Modifier.padding(top = Tokens.Space.xxs),
+                        )
+                    }
+                    Spacer(Modifier.width(Tokens.Space.m))
+                    Switch(checked = withPassword, onCheckedChange = null)
+                }
+            }
+            if (withPassword) {
+                Spacer(Modifier.height(Tokens.Space.m))
+                Column(Modifier.padding(horizontal = Tokens.Space.panel), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+                    PasswordField(password, error = false, hint = stringResource(R.string.vault_ph_password), onValue = onPassword)
+                    PasswordField(repeat, error = mismatch, hint = stringResource(R.string.vault_ph_repeat), onValue = onRepeat)
+                    if (mismatch) OnbError(stringResource(R.string.vault_mismatch))
+                    OnbWarn(stringResource(R.string.backup_lock_no_recovery))
+                }
+            }
         }
-        Text(stringResource(R.string.backup_pw_no_recovery), color = HoloWarn, fontSize = Tokens.Font.small)
-
-        val ready = password.isNotEmpty() && password == repeat
-        AccentButton(stringResource(R.string.backup_create), Modifier.fillMaxWidth(), enabled = ready, onClick = onGo)
-        Text(stringResource(R.string.backup_where_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
+        ScreenFooter(stringResource(R.string.backup_create), enabled = ready, onClick = onGo)
     }
 }
 
@@ -346,8 +360,8 @@ private fun WorkingStep(restoring: Boolean) {
 
 @Composable
 private fun RestoreStep(
-    file: Uri?,
-    fileName: String?,
+    picked: PickedBackup?,
+    pickFailed: Boolean,
     password: String,
     onPassword: (String) -> Unit,
     onPickFile: () -> Unit,
@@ -363,7 +377,7 @@ private fun RestoreStep(
                 Spacer(Modifier.width(Tokens.Space.m))
                 Column {
                     Text(
-                        fileName ?: stringResource(R.string.backup_pick_file),
+                        picked?.name ?: stringResource(R.string.backup_pick_file),
                         color = Color.White,
                         fontSize = Tokens.Font.label,
                     )
@@ -377,17 +391,12 @@ private fun RestoreStep(
             }
         }
 
-        FieldLabel(stringResource(R.string.backup_pw_label))
-        TextField(
-            password,
-            onPassword,
-            Modifier.fillMaxWidth(),
-            colors = inputColors(),
-            singleLine = true,
-            placeholder = { Text(stringResource(R.string.vault_ph_password), color = HoloSecondary) },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = PasswordKeyboard,
-        )
+        if (pickFailed) OnbError(stringResource(R.string.transfer_not_backup))
+        // Пароль — только если копия им закрыта (шаг 7k): без него она открывается ключом из 24 слов.
+        if (picked?.needsPassword == true) {
+            FieldLabel(stringResource(R.string.backup_pw_label))
+            PasswordField(password, error = false, hint = stringResource(R.string.vault_ph_password), onValue = onPassword)
+        }
 
         // Страх «а не затрёт ли новое» — главная причина не нажимать эту кнопку.
         InfoCard(
@@ -407,7 +416,7 @@ private fun RestoreStep(
         AccentButton(
             stringResource(R.string.backup_restore_go),
             Modifier.fillMaxWidth(),
-            enabled = file != null && password.isNotEmpty(),
+            enabled = picked != null && (!picked.needsPassword || password.isNotEmpty()),
             onClick = onGo,
         )
     }

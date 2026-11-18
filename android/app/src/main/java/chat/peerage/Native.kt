@@ -193,6 +193,9 @@ object Native {
     /** Восстановить из копии. Возвращает JSON ДОБАВЛЕННОГО или {"error":...}. */
     external fun backupImport(sessionPtr: Long, path: String, password: String): String
 
+    /** Закрыта ли копия паролем (по заголовку): 1 — да, 0 — нет, -1 — не копия. */
+    external fun backupNeedsPassword(path: String): Int
+
     /** Ключ хранилища из пароля (Argon2id в ядре). Долгая операция — с фонового
      *  потока. Пустой массив при ошибке.
      *
