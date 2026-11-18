@@ -139,6 +139,16 @@ class ConnService : Service() {
 
     companion object {
         private const val CHANNEL = "conn"
+
+        /** Системные настройки категории «связи» (Android 8+: категория; раньше — уведомления приложения). */
+        fun channelSettings(ctx: Context): Intent =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                    .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, CHANNEL)
+            } else {
+                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null))
+            }
         private const val NOTIF_ID = 1
         private const val ACTION_DISCONNECT = "chat.peerage.DISCONNECT_MESH"
 

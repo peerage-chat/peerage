@@ -15,7 +15,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
@@ -468,21 +467,36 @@ private fun OptionBlock(
     }
 }
 
-/** Уведомления: разрастание очереди — единственное, о чём мы говорим помимо сообщений. */
+/**
+ * Уведомления (макет `settings/Notifications`). Здесь только то, что уже уведомляет:
+ * флуд, рост очереди, постоянное «связи». «Сообщения», «Звонки», «Запросы и приглашения»,
+ * «Передача файлов» встанут вместе с самими уведомлениями (шаг 7b) — пустых тумблеров нет.
+ */
 @Composable
 internal fun SettingsNotificationsScreen(model: AppModel) {
+    val ctx = LocalContext.current
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = Tokens.Space.m, bottom = Tokens.Space.xxl),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
     ) {
-        Spacer(Modifier.height(Tokens.Space.m))
         CardSection {
-            SettingSwitchRow(
-                Icons.Filled.Notifications,
-                stringResource(R.string.settings_outbox_warn),
-                stringResource(R.string.settings_outbox_warn_hint),
-                checked = model.warnOutboxGrowth,
-                divider = false,
-            ) { model.toggleOutboxWarning() }
+            PlainSwitchRow(stringResource(R.string.notif_set_flood), model.notifyFlood, divider = false) { model.setFloodNotify(it) }
+            PlainSwitchRow(stringResource(R.string.settings_outbox_warn), model.warnOutboxGrowth) { model.toggleOutboxWarning() }
+        }
+        CardSection {
+            CardRow(onClick = { ctx.startActivity(ConnService.channelSettings(ctx)) }, divider = false, inset = Tokens.Space.l) {
+                Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
+                    Text(stringResource(R.string.notif_set_conn), color = Color.White, fontSize = Tokens.Font.name)
+                    Text(
+                        stringResource(R.string.notif_set_conn_sub),
+                        color = Tokens.Colors.tertiary,
+                        fontSize = Tokens.Font.body,
+                        modifier = Modifier.padding(top = Tokens.Space.xxs),
+                    )
+                }
+                Spacer(Modifier.width(Tokens.Space.m))
+                Icon(TablerIcons.ArrowUpRight, null, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconS))
+            }
         }
     }
 }

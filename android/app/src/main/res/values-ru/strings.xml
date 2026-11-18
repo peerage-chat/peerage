@@ -145,8 +145,10 @@
     <string name="contacts_empty_title">Нет контактов</string>
     <string name="contacts_empty_hint">Добавьте собеседника по ключу или QR — кнопкой вверху</string>
     <!-- Предупреждение о разросшейся очереди (ничего не удаляется, это только уведомление) -->
-    <string name="settings_outbox_warn">Предупреждать о росте очереди</string>
-    <string name="settings_outbox_warn_hint">Сообщения не удаляются — это только уведомление</string>
+    <string name="settings_outbox_warn">Рост очереди отправки</string>
+    <string name="notif_set_flood">Флуд на адрес</string>
+    <string name="notif_set_conn">Постоянное уведомление</string>
+    <string name="notif_set_conn_sub">Держит соединение в фоне. Скрытие в настройках Android работу не прерывает.</string>
     <!-- Запросы в контакты (гейт вместо TOFU-автодобавления) -->
     <string name="req_accept">Принять</string>
     <string name="req_decline">Отклонить</string>

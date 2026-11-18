@@ -147,8 +147,10 @@
     <string name="contacts_empty_title">No contacts</string>
     <string name="contacts_empty_hint">Add a peer by key or QR — using the button above</string>
     <!-- Offline queue growth warning (nothing is ever deleted, this is just a notice) -->
-    <string name="settings_outbox_warn">Warn about a growing outbox</string>
-    <string name="settings_outbox_warn_hint">Messages are never deleted — this only shows a notice</string>
+    <string name="settings_outbox_warn">Send queue growth</string>
+    <string name="notif_set_flood">Flood on the address</string>
+    <string name="notif_set_conn">Persistent notification</string>
+    <string name="notif_set_conn_sub">Keeps the connection in the background. Hiding it in Android settings does not stop the app.</string>
     <!-- Contact requests (gate instead of TOFU auto-add) -->
     <string name="req_accept">Accept</string>
     <string name="req_decline">Decline</string>

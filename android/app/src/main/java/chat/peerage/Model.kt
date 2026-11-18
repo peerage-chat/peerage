@@ -486,6 +486,17 @@ class AppModel private constructor() {
             ?.edit()?.putBoolean("warn_outbox", warnOutboxGrowth)?.apply()
     }
 
+    /** Уведомлять о флуде на адрес (вкл по умолчанию). Сам учёт потока и «Сеть» — всегда. */
+    var notifyFlood by mutableStateOf(true)
+        private set
+
+    fun setFloodNotify(on: Boolean) {
+        notifyFlood = on
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("notif_flood", on)?.apply()
+        if (!on) appContext?.let { FloodNotifier.cancelFlood(it) }
+    }
+
     /** Сколько сообщений ждёт доставки и надо ли предупредить (из движка). */
     var outboxPending by mutableStateOf(0)
         internal set
@@ -721,6 +732,7 @@ class AppModel private constructor() {
         showTechInfo = prefs.getBoolean("tech_info", false)
         recentEmoji = prefs.getString("recent_emoji", "")?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
         warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
+        notifyFlood = prefs.getBoolean("notif_flood", true)
         mediaColumns = prefs.getInt("media_columns", 3).takeIf { it in MEDIA_COLUMNS } ?: 3
         val w = prefs.getInt("video_w", VideoQuality.default.width)
         val h = prefs.getInt("video_h", VideoQuality.default.height)
@@ -1221,7 +1233,7 @@ class AppModel private constructor() {
                     if (top != null && top.pps >= FLOOD_NOTIFY_PPS) {
                         if (!floodNotified) {
                             floodNotified = true
-                            appContext?.let { ctx ->
+                            appContext?.takeIf { notifyFlood }?.let { ctx ->
                                 val who = contacts.firstOrNull { it.key == top.peer }?.displayName
                                     ?: (top.peer.take(8) + "…")
                                 FloodNotifier.showFlood(ctx, who, top.pps.toInt())

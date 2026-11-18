@@ -615,3 +615,7 @@ val TablerIcons.Fingerprint: ImageVector by lazy {
         "M4.9 19a22 22 0 0 1 -.9 -7v-1a8 8 0 0 1 12 -6.95",
     )
 }
+
+val TablerIcons.ArrowUpRight: ImageVector by lazy {
+    tabler("arrow-up-right", "M17 7l-10 10", "M8 7l9 0l0 9")
+}
