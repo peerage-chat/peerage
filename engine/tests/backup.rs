@@ -466,3 +466,36 @@ fn copy_with_password_needs_it_on_top_of_the_identity() {
     ));
     assert_eq!(me.backup_import(&file, Some("облако")).unwrap().messages, 3);
 }
+
+/// Шаг 7g: своё имя и фото едут в копии — после переноса на новый телефон профиль не
+/// пустой. Введённое на новом телефоне имя копия не затирает.
+#[test]
+fn own_name_and_photo_ride_along_and_do_not_overwrite() {
+    let net = LoopbackNet::new();
+    let a = start(&net, id(105), tmpdir("p-src"));
+    a.set_self_name("Алиса");
+    let photo = b"pretend png bytes".to_vec();
+    let photo_id = a.set_self_avatar(photo, "image/png");
+    let file = tmpdir("p").join("copy.peerage");
+    a.backup_export(&file, Parts::default(), None).unwrap();
+
+    let fresh = twin(105, "p-dst");
+    fresh.backup_import(&file, None).unwrap();
+    assert_eq!(fresh.self_name(), "Алиса", "имя из копии");
+    assert_eq!(
+        fresh.self_avatar_id().as_deref(),
+        Some(photo_id.as_str()),
+        "фото из копии"
+    );
+    assert!(fresh.self_avatar().is_some(), "байты фото на месте");
+
+    let typed = twin(105, "p-typed");
+    typed.set_self_name("Аля");
+    typed.backup_import(&file, None).unwrap();
+    assert_eq!(typed.self_name(), "Аля", "введённое не затёрто");
+    assert_eq!(
+        typed.self_avatar_id().as_deref(),
+        Some(photo_id.as_str()),
+        "фото не было — взято из копии"
+    );
+}

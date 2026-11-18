@@ -115,6 +115,13 @@ enum Rec {
     Reactions {
         items: Vec<ReactRow>,
     },
+    /// Своё имя и фото (шаг 7g): без них после переноса на новый телефон профиль пустой.
+    /// Всегда в составе — это не переписка и не объём. Фото — блобом, как вложения.
+    Profile {
+        name: String,
+        avatar_id: String,
+        avatar_mime: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -310,9 +317,19 @@ impl Engine {
             parts,
         })?;
 
+        let me = self.load_profile_meta();
+        w.json(&Rec::Profile {
+            name: me.name,
+            avatar_id: me.avatar_id.clone(),
+            avatar_mime: me.avatar_mime,
+        })?;
+
         // Аватары едут вместе с контактами: без них список выглядит сломанным, а весят
-        // они единицы килобайт.
+        // они единицы килобайт. Своё фото — всегда, вместе с именем.
         let mut blobs: Vec<String> = Vec::new();
+        if !me.avatar_id.is_empty() {
+            blobs.push(me.avatar_id);
+        }
         if parts.contacts {
             let contacts: Vec<Contact> = self
                 .contacts
@@ -487,6 +504,8 @@ impl Engine {
         // осели бы в чате с несуществующим собеседником. Поэтому переадресуем их на
         // текущее «я»: авторство заметки и так наше, менять нечего.
         let mut src_me: Option<[u8; 32]> = None;
+        // Своё имя и фото из копии — применяются после обхода: фото-блоб идёт в конце.
+        let mut profile: Option<(String, String, String)> = None;
 
         while let Some(frame) = r.next()? {
             match frame {
@@ -499,6 +518,11 @@ impl Engine {
                                 .ok()
                                 .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());
                         }
+                        Rec::Profile {
+                            name,
+                            avatar_id,
+                            avatar_mime,
+                        } => profile = Some((name, avatar_id, avatar_mime)),
                         Rec::Contacts { items: list } => {
                             let mut added: Vec<[u8; 32]> = Vec::new();
                             {
@@ -637,10 +661,33 @@ impl Engine {
         if !r.complete() {
             return Err(BackupError::Truncated);
         }
+        if let Some((name, avatar_id, avatar_mime)) = profile {
+            self.apply_backup_profile(&name, &avatar_id, &avatar_mime);
+        }
         // Контакты и чаты поменялись под ногами у UI — пусть перечитает список.
         // Отдельного события «восстановлено» не заводим: клиенту важен факт «данные
         // изменились», а не причина.
         push_event(self, dto::UiEvent::ContactsChanged);
         Ok(stats)
+    }
+
+    /// Своё имя и фото из копии — только если на устройстве их ещё нет: введённое
+    /// человеком не затирается. Что-то применилось — профиль уходит контактам.
+    fn apply_backup_profile(&self, name: &str, avatar_id: &str, avatar_mime: &str) {
+        let mut m = self.load_profile_meta();
+        let mut changed = false;
+        if m.name.trim().is_empty() && !name.trim().is_empty() {
+            m.name = name.trim().to_string();
+            changed = true;
+        }
+        if m.avatar_id.is_empty() && !avatar_id.is_empty() && self.blob_exists(avatar_id) {
+            m.avatar_id = avatar_id.to_string();
+            m.avatar_mime = avatar_mime.to_string();
+            changed = true;
+        }
+        if changed {
+            self.save_profile_meta(&m);
+            self.broadcast_profile();
+        }
     }
 }

@@ -706,13 +706,13 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
 
 /** «Как подписаться» (`onboard/Profile`): фото и имя, можно пропустить. */
 @Composable
-private fun ProfileStep(model: AppModel, onBack: () -> Unit, onNext: () -> Unit) {
+internal fun ProfileStep(model: AppModel, onBack: (() -> Unit)?, bar: Int = OnbStep.Profile.bar, onNext: () -> Unit) {
     // Имя живёт в движке (M2): он его хранит и рассылает контактам. Не в prefs.
     var name by rememberSaveable { mutableStateOf(model.selfName) }
     // Системный Photo Picker (M2) → квадрат 512 → set_self_avatar; фото — из model.selfAvatar.
     val pickAvatar = rememberAvatarPicker(model)
     OnbPage(
-        bar = OnbStep.Profile.bar,
+        bar = bar,
         onBack = onBack,
         title = stringResource(R.string.onb_profile_title),
         sub = stringResource(R.string.onb_profile_sub),

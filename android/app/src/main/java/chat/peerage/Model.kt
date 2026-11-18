@@ -571,6 +571,9 @@ class AppModel private constructor() {
             // Контакты и чаты поменялись — перечитываем то, что уже на экране.
             refreshContacts()
             refreshStorage()
+            // Своё имя и фото могли приехать из копии (шаг 7g).
+            selfName = Native.selfName(sessionPtr)
+            selfAvatar = Native.selfAvatar(sessionPtr)
         }
         return stats
     }

@@ -50,7 +50,7 @@ internal fun pickBackup(ctx: Context, uri: Uri, tmp: File): PickedBackup? {
     return PickedBackup(displayName(ctx, uri) ?: tmp.name, tmp.length(), pw == 1)
 }
 
-private enum class TransferStep { Offer, Password, Working, Done }
+private enum class TransferStep { Offer, Password, Working, Done, Name }
 
 /**
  * Перенос переписки после восстановления по 24 словам (макеты `onboard/Restored`,
@@ -107,6 +107,8 @@ internal fun TransferFlow(model: AppModel, onDone: () -> Unit) {
         }
     }
     val pickFile = { pick.launch(arrayOf("*/*")) }
+    // «Как подписаться» — только если имени не вернула копия (шаг 7g).
+    val finish = { if (model.selfName.isBlank()) step = TransferStep.Name else onDone() }
 
     when (step) {
         TransferStep.Offer -> OnbPage(
@@ -119,7 +121,7 @@ internal fun TransferFlow(model: AppModel, onDone: () -> Unit) {
             icon = TablerIcons.Check,
             iconTint = Tokens.Colors.online,
             secondary = stringResource(R.string.transfer_skip),
-            onSecondary = onDone,
+            onSecondary = finish,
         ) {
             Spacer(Modifier.height(Tokens.Space.xxl))
             OnbGroup {
@@ -177,7 +179,7 @@ internal fun TransferFlow(model: AppModel, onDone: () -> Unit) {
             title = stringResource(R.string.transfer_done),
             sub = null,
             primary = stringResource(R.string.common_done),
-            onPrimary = onDone,
+            onPrimary = finish,
             icon = TablerIcons.Check,
             iconTint = Tokens.Colors.online,
         ) {
@@ -186,6 +188,8 @@ internal fun TransferFlow(model: AppModel, onDone: () -> Unit) {
             Spacer(Modifier.height(Tokens.Space.m))
             OnbCaption(stringResource(R.string.transfer_done_caption))
         }
+
+        TransferStep.Name -> ProfileStep(model, onBack = null, bar = 0, onNext = onDone)
     }
 }
 
