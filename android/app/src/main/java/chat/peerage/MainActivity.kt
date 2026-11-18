@@ -93,12 +93,23 @@ class MainActivity : ComponentActivity() {
         if (hasPermission(Manifest.permission.RECORD_AUDIO)) model.acceptDmCall()
     }
 
+    /** Запрос уже на экране: onStart и кнопка замка не должны поднять второй. */
+    private var asking = false
+
     /** Запрос системного подтверждения личности (биометрия/PIN устройства). */
     private fun askCredential() {
+        if (asking) return
+        asking = true
+        val shown = AppLock.prompt(this) { ok ->
+            asking = false
+            if (ok) AppLock.unlock()
+        }
+        if (shown) return
         val intent = AppLock.credentialIntent(this)
         if (intent == null) {
             // Экран блокировки на устройстве сняли, пока приложение было в фоне:
             // подтверждать нечем, держать пользователя взаперти бессмысленно.
+            asking = false
             AppLock.unlock()
             return
         }
@@ -108,6 +119,7 @@ class MainActivity : ComponentActivity() {
     private val credentialLauncher = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
     ) { res ->
+        asking = false
         if (res.resultCode == RESULT_OK) AppLock.unlock()
     }
 
@@ -163,7 +175,7 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
     var vaultOpen by remember { mutableStateOf(!needsPassword) }
     if (!vaultOpen) {
         val scope = rememberCoroutineScope()
-        VaultUnlockScreen { password, done ->
+        VaultUnlockScreen(model, dataDir) { password, done ->
             scope.launch(Dispatchers.IO) {
                 val ok = model.start(dataDir, password)
                 done(ok)

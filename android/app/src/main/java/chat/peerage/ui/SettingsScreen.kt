@@ -39,7 +39,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
@@ -614,96 +613,6 @@ internal fun EditProfileScreen(model: AppModel, onDone: () -> Unit) {
                         photo = null
                         removed = true
                     }
-                }
-            }
-        }
-    }
-}
-
-/** Экран замка: ничего лишнего, только повод и кнопка подтверждения. */
-@Composable
-internal fun LockScreen(onUnlock: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().background(HoloBg).padding(ScreenPad),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(Icons.Filled.Lock, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconHero))
-        Spacer(Modifier.height(Tokens.Space.xl))
-        Text(
-            stringResource(R.string.lock_title),
-            color = Color.White,
-            fontSize = Tokens.Font.title,
-            fontWeight = FontWeight.Medium,
-        )
-        Spacer(Modifier.height(Tokens.Space.s))
-        Text(stringResource(R.string.lock_subtitle), color = HoloSecondary, fontSize = Tokens.Font.body)
-        Spacer(Modifier.height(Tokens.Space.xxl))
-        AccentButton(stringResource(R.string.lock_unlock), onClick = onUnlock)
-    }
-}
-
-/**
- * Ввод пароля хранилища при холодном старте (уровни PASSWORD/BOTH).
- *
- * Пока пароль не введён, движок не стартует вовсе: данные лежат зашифрованными, и
- * показывать «пустой мессенджер» вместо запроса было бы враньём про состояние.
- */
-@Composable
-internal fun VaultUnlockScreen(onSubmit: (String, (Boolean) -> Unit) -> Unit) {
-    var password by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var wrong by remember { mutableStateOf(false) }
-
-    Column(
-        Modifier.fillMaxSize().background(HoloBg).padding(ScreenPad),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(Icons.Filled.Shield, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconHero))
-        Spacer(Modifier.height(Tokens.Space.l))
-        Text(
-            stringResource(R.string.vault_unlock_title),
-            color = Color.White,
-            fontSize = Tokens.Font.title,
-            fontWeight = FontWeight.Medium,
-        )
-        Spacer(Modifier.height(Tokens.Space.s))
-        Text(
-            stringResource(R.string.vault_unlock_sub),
-            color = HoloSecondary,
-            fontSize = Tokens.Font.body,
-        )
-        Spacer(Modifier.height(Tokens.Space.xl))
-        TextField(
-            password,
-            {
-                password = it
-                wrong = false
-            },
-            Modifier.fillMaxWidth(),
-            colors = inputColors(),
-            singleLine = true,
-            enabled = !busy,
-            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-            keyboardOptions = PasswordKeyboard,
-        )
-        if (wrong) {
-            Spacer(Modifier.height(Tokens.Space.s))
-            Text(stringResource(R.string.vault_wrong), color = HoloError, fontSize = Tokens.Font.body)
-        }
-        Spacer(Modifier.height(Tokens.Space.l))
-        if (busy) {
-            // Argon2id считается ~секунду: без индикатора это выглядит зависанием.
-            CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.height(Tokens.Space.s))
-            Text(stringResource(R.string.vault_deriving), color = HoloSecondary, fontSize = Tokens.Font.small)
-        } else {
-            AccentButton(stringResource(R.string.vault_unlock_btn), enabled = password.isNotEmpty()) {
-                busy = true
-                onSubmit(password) { ok ->
-                    busy = false
-                    wrong = !ok
                 }
             }
         }

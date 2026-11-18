@@ -27,6 +27,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Замок приложения: системный BiometricPrompt (AppLock.prompt), Android 10+. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Прямой диалог «не оптимизировать батарею» (карточка «Работа в фоне» в онбординге).
          Google Play такое ограничивает; дистрибуция целевая — F-Droid (см. docs/v1.0-scope.md). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />

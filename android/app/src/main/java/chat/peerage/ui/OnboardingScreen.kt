@@ -364,7 +364,7 @@ private fun RowScope.WordSlot(
 
 /** Ошибка под полем: красным, зачитывается без перебивания. */
 @Composable
-private fun OnbError(text: String) {
+internal fun OnbError(text: String) {
     Text(
         text,
         color = Tokens.Colors.error,
@@ -374,9 +374,9 @@ private fun OnbError(text: String) {
 }
 
 /**
- * Данные на устройстве не открываются (R-029): ключ хранилища потерян или не тот.
- * Без человека ничего не стирается — он выбирает: вернуть личность по 24 словам или
- * начать заново. Старые данные в обоих случаях откладываются, а не удаляются.
+ * Данные на устройстве не открываются (R-029, макет `security/Recovery`): ключ хранилища
+ * потерян или не тот. Без человека ничего не стирается — он выбирает: вернуть личность по
+ * 24 словам или начать заново. Старые данные в обоих случаях откладываются, а не удаляются.
  */
 @Composable
 internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
@@ -384,29 +384,13 @@ internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
     var step by rememberSaveable { mutableStateOf(0) } // 0 — выбор, 1 — фраза, 2 — «начать заново?»
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Int?>(null) }
-    var result by remember { mutableStateOf<RecoverResult?>(null) }
     val back = {
         step = 0
         error = null
-        result = null
     }
     BackHandler(enabled = step != 0 && !busy) { back() }
     when (step) {
-        1 -> PhraseEntryStep(
-            model,
-            busy = busy,
-            mismatch = result == RecoverResult.BAD_PHRASE,
-            error = if (result == RecoverResult.FAILED) stringResource(R.string.recovery_failed) else null,
-            onBack = back,
-            onEdit = { result = null },
-        ) { phrase ->
-            busy = true
-            result = null
-            model.recoverFromPhrase(dataDir, phrase) { r ->
-                busy = false
-                if (r == RecoverResult.OK) relaunchApp(ctx) else result = r
-            }
-        }
+        1 -> PhraseRecoverStep(model, dataDir, onBack = back)
         2 -> OnbPage(
             bar = 0,
             onBack = back,
@@ -432,19 +416,46 @@ internal fun RecoveryScreen(model: AppModel, dataDir: String, why: Recovery) {
             onBack = null,
             icon = TablerIcons.AlertTriangle,
             iconTint = Tokens.Colors.stateWarnText,
-            iconBg = Tokens.Colors.stateWarn,
             title = stringResource(R.string.recovery_title),
             sub = stringResource(R.string.recovery_sub),
             primary = stringResource(R.string.recovery_restore),
             onPrimary = { step = 1 },
-            secondary = stringResource(R.string.recovery_start_over),
+            secondary = stringResource(R.string.recovery_start_over_long),
             onSecondary = { step = 2 },
         ) {
             Spacer(Modifier.height(Tokens.Space.xxl))
             val reason = if (why == Recovery.KEY_LOST) R.string.recovery_reason_key_lost else R.string.recovery_reason_mismatch
             OnbGroup {
-                OnbRow(TablerIcons.Lock, stringResource(reason), stringResource(R.string.recovery_body), divider = false)
+                OnbRow(TablerIcons.ShieldCheck, stringResource(R.string.recovery_reason), stringResource(reason), divider = false)
             }
+            OnbCaption(stringResource(R.string.recovery_body), Modifier.padding(top = Tokens.Space.s))
+        }
+    }
+}
+
+/**
+ * Личность по 24 словам на месте данных, которые не открыть (R-029, забытый пароль):
+ * данные откладываются ([AppModel.recoverFromPhrase]), уровень шифрования после — «ключ
+ * устройства». Успех — перезапуск процесса.
+ */
+@Composable
+internal fun PhraseRecoverStep(model: AppModel, dataDir: String, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<RecoverResult?>(null) }
+    PhraseEntryStep(
+        model,
+        busy = busy,
+        mismatch = result == RecoverResult.BAD_PHRASE,
+        error = if (result == RecoverResult.FAILED) stringResource(R.string.recovery_failed) else null,
+        onBack = onBack,
+        onEdit = { result = null },
+    ) { phrase ->
+        busy = true
+        result = null
+        model.recoverFromPhrase(dataDir, phrase) { r ->
+            busy = false
+            if (r == RecoverResult.OK) relaunchApp(ctx) else result = r
         }
     }
 }
@@ -464,7 +475,7 @@ private fun relaunchApp(ctx: Context) {
  * [secondary] текстом. [scroll] = false — содержимое само делит высоту (поле на весь экран).
  */
 @Composable
-private fun OnbPage(
+internal fun OnbPage(
     bar: Int,
     onBack: (() -> Unit)?,
     title: String,
@@ -478,6 +489,7 @@ private fun OnbPage(
     onSecondary: () -> Unit = {},
     note: (@Composable () -> Unit)? = null,
     scroll: Boolean = true,
+    primaryEnabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(Tokens.Colors.bg)) {
@@ -498,7 +510,7 @@ private fun OnbPage(
             if (sub != null) OnbLead(sub)
             content()
         }
-        OnbFooter(primary, onPrimary, secondary, onSecondary, note)
+        OnbFooter(primary, onPrimary, secondary, onSecondary, note, enabled = primaryEnabled)
     }
 }
 
@@ -576,13 +588,13 @@ private fun OnbFooter(
 
 /** Группа строк шага (макет `.grp`): ступень group, скругление 18. */
 @Composable
-private fun OnbGroup(content: @Composable ColumnScope.() -> Unit) {
+internal fun OnbGroup(content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.group)).background(Tokens.Colors.group), content = content)
 }
 
 /** Строка группы (макет `.gr`): иконка без плитки, название, пояснение, справа — действие. */
 @Composable
-private fun OnbRow(
+internal fun OnbRow(
     icon: ImageVector,
     title: String,
     sub: String? = null,
@@ -615,7 +627,7 @@ private fun OnbRow(
 
 /** Плашка-последствие, которое нельзя пропустить глазами: янтарная, [bad] — красная. */
 @Composable
-private fun OnbWarn(text: String, bad: Boolean = false) {
+internal fun OnbWarn(text: String, bad: Boolean = false) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.group))
             .background(if (bad) Tokens.Colors.stateBad else Tokens.Colors.stateWarn)
@@ -639,7 +651,7 @@ private fun OnbWarn(text: String, bad: Boolean = false) {
 
 /** Пояснение под группой. */
 @Composable
-private fun OnbCaption(text: String, modifier: Modifier = Modifier) {
+internal fun OnbCaption(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
         color = Tokens.Colors.tertiary,
@@ -670,7 +682,7 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
                 OnbRow(TablerIcons.PhoneOff, stringResource(R.string.onb_bullet_nophone), divider = false)
                 OnbRow(TablerIcons.AddressBookOff, stringResource(R.string.onb_bullet_nocontacts))
                 OnbRow(TablerIcons.MapPinOff, stringResource(R.string.onb_bullet_nolocation))
-                OnbRow(TablerIcons.ServerOff, stringResource(R.string.onb_bullet_noserver), stringResource(R.string.onb_bullet_noserver_sub))
+                OnbRow(TablerIcons.ServerOff, stringResource(R.string.onb_bullet_noserver))
             }
             Spacer(Modifier.height(Tokens.Space.xxl))
         }
@@ -886,7 +898,7 @@ private fun PermissionsStep(onBack: () -> Unit, onDone: () -> Unit) {
         bar = OnbStep.Perms.bar,
         onBack = onBack,
         title = stringResource(R.string.onb_perms_title),
-        sub = stringResource(R.string.onb_perms_sub),
+        sub = null,
         primary = stringResource(R.string.onb_done),
         onPrimary = onDone,
     ) {
@@ -907,7 +919,6 @@ private fun PermissionsStep(onBack: () -> Unit, onDone: () -> Unit) {
                 }
             }
         }
-        OnbCaption(stringResource(R.string.onb_perms_caption), Modifier.padding(top = Tokens.Space.s))
         Spacer(Modifier.height(Tokens.Space.xxl))
     }
 }

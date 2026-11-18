@@ -1,8 +1,13 @@
 package chat.peerage
 
+import android.app.Activity
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
+import android.hardware.biometrics.BiometricManager.Authenticators
+import android.hardware.biometrics.BiometricPrompt
+import android.os.Build
+import android.os.CancellationSignal
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -18,8 +23,9 @@ import androidx.compose.runtime.setValue
  * F-Droid.
  *
  * **Почему не androidx.biometric.** Он требует `FragmentActivity` и тянет фрагменты
- * ради одного диалога; платформенный `BiometricPrompt` доступен только с API 28, а у
- * нас minSdk 24. `KeyguardManager` покрывает весь диапазон и делает ровно то же.
+ * ради одного диалога. С Android 10 — платформенный `BiometricPrompt` ([prompt]): сразу
+ * отпечаток или лицо, PIN устройства — запасным. Ниже (minSdk 24) — экран подтверждения
+ * `KeyguardManager` ([credentialIntent]), он покрывает весь диапазон.
  */
 object AppLock {
     /**
@@ -82,11 +88,36 @@ object AppLock {
     fun credentialIntent(ctx: Context): Intent? {
         val km = ctx.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         @Suppress("DEPRECATION") // единственный путь, покрывающий minSdk 24
-        return km.createConfirmDeviceCredentialIntent(
-            ctx.getString(R.string.lock_title),
-            ctx.getString(R.string.lock_subtitle),
-        )
+        return km.createConfirmDeviceCredentialIntent(promptTitle(ctx), null)
     }
+
+    /**
+     * Системный запрос на Android 10+: биометрия, PIN/ключ устройства — запасным, оба рисует
+     * система. false — запроса не будет (старый Android или нет блокировки экрана): звать
+     * [credentialIntent]. [onResult] — на главном потоке; false — запрос закрыли.
+     */
+    fun prompt(activity: Activity, onResult: (Boolean) -> Unit): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !deviceSecure(activity)) return false
+        val builder = BiometricPrompt.Builder(activity).setTitle(promptTitle(activity))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.setAllowedAuthenticators(Authenticators.BIOMETRIC_WEAK or Authenticators.DEVICE_CREDENTIAL)
+        } else {
+            @Suppress("DEPRECATION") // на Android 10 PIN запасным включается только так
+            builder.setDeviceCredentialAllowed(true)
+        }
+        builder.build().authenticate(
+            CancellationSignal(),
+            activity.mainExecutor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) = onResult(true)
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) = onResult(false)
+            },
+        )
+        return true
+    }
+
+    private fun promptTitle(ctx: Context) = ctx.getString(R.string.lock_prompt, ctx.getString(R.string.app_name))
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }
