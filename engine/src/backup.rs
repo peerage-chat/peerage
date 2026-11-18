@@ -500,12 +500,19 @@ impl Engine {
                                 .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());
                         }
                         Rec::Contacts { items: list } => {
-                            let mut store = self.contacts.lock_safe();
-                            for c in &list {
-                                if store.import_contact(c).unwrap_or(false) {
-                                    stats.contacts += 1;
+                            let mut added: Vec<[u8; 32]> = Vec::new();
+                            {
+                                let mut store = self.contacts.lock_safe();
+                                for c in &list {
+                                    if store.import_contact(c).unwrap_or(false) {
+                                        stats.contacts += 1;
+                                        added.extend(crate::parse_key(&c.key));
+                                    }
                                 }
                             }
+                            // Восстановленный по 24 словам телефон — на новой эпохе:
+                            // контактам из копии он сообщит новый адрес (шаг 7g).
+                            self.announce_later(&added);
                         }
                         Rec::Messages { items: list } => {
                             let store = self.messages.lock_safe();

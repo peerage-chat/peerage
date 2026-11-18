@@ -1638,6 +1638,7 @@ impl Engine {
         match outcome {
             Ok(peerage_core::store::AddOutcome::Added) => {
                 self.refresh_budgets(); // M3: контакт → щедрый ingress-бюджет; и в набор связи
+                self.announce_later(&[*key]);
                 self.messenger.poke(key);
                 "added"
             }
@@ -1682,7 +1683,7 @@ impl Engine {
     }
 
     fn rotate_transport_blocking(self: &Arc<Self>, recipients: Vec<[u8; 32]>, gap_secs: u64) {
-        let epoch = self.transport_epoch().saturating_add(1);
+        let epoch = next_epoch(self.transport_epoch(), now());
         let tk = self.identity.transport_public(epoch);
         log::info!("смена адреса: эпоха {epoch}, пауза офлайн {gap_secs}с");
 
@@ -1812,6 +1813,23 @@ impl Engine {
             };
             self.set_rotate_pending(&rest);
         }
+    }
+
+    /// Контакт появился, когда мы уже не на адресе личности (эпоха > 0): он нашего
+    /// адреса не знает — объявление ему при первой встрече ([`Self::announce_rotation_to`]).
+    /// Так восстановленный по 24 словам телефон сообщает новый адрес контактам из копии
+    /// и добавленным заново по коду (шаг 7g). Кого мы при смене адреса намеренно не
+    /// оповестили, он не трогает: тот уже в контактах, сюда не попадает.
+    pub(crate) fn announce_later(&self, peers: &[[u8; 32]]) {
+        if peers.is_empty() || self.transport_epoch() == 0 {
+            return;
+        }
+        let all: Vec<[u8; 32]> = {
+            let mut p = self.rotate_pending.lock_safe();
+            p.extend(peers.iter().copied());
+            p.iter().copied().collect()
+        };
+        self.set_rotate_pending(&all);
     }
 
     /// Сохранить список «кому ещё не сообщили новый адрес» (память + диск).
@@ -3386,6 +3404,24 @@ fn transport_meta_path(dir: &Path) -> PathBuf {
     dir.join("transport.json")
 }
 
+/// Эпоха следующего адреса (шаг 7g, R-118): секунды Unix в момент смены, но не меньше
+/// прошлой + 1 — от сбитых назад часов. Время, а не счётчик: восстановленный по 24 словам
+/// телефон прошлой эпохи не знает (её нет ни во фразе, ни в копии), а «сейчас» заведомо
+/// больше любой прошлой — монотонность у контактов не нарушается.
+pub fn next_epoch(prev: u32, now_secs: i64) -> u32 {
+    let now = u32::try_from(now_secs.max(0)).unwrap_or(u32::MAX);
+    now.max(prev.saturating_add(1))
+}
+
+/// Личность только что восстановлена по 24 словам в каталог `dir`: поднять её на эпохе
+/// «сейчас». Старый адрес никто не держит, паузы офлайн не нужно; контактам новый адрес
+/// уйдёт объявлением ([`Engine::announce_later`]). Возвращает эпоху.
+pub fn begin_restored_epoch(dir: &Path) -> u32 {
+    let epoch = next_epoch(load_transport_epoch(dir), now());
+    save_transport_epoch(dir, epoch);
+    epoch
+}
+
 /// Текущая эпоха адреса. Нет файла = 0, то есть адрес совпадает с ключом личности.
 fn load_transport_epoch(dir: &Path) -> u32 {
     std::fs::read(transport_meta_path(dir))
@@ -4946,6 +4982,24 @@ impl Engine {
 #[cfg(test)]
 mod presence_tests {
     use super::*;
+
+    /// Эпоха — время смены; часы назад не дают эпохе убыть или повториться.
+    #[test]
+    fn next_epoch_is_time_but_strictly_grows() {
+        assert_eq!(next_epoch(0, 1_800_000_000), 1_800_000_000);
+        assert_eq!(
+            next_epoch(3, 1_800_000_000),
+            1_800_000_000,
+            "счётчик до 7g перекрыт временем"
+        );
+        assert_eq!(
+            next_epoch(1_800_000_500, 1_800_000_000),
+            1_800_000_501,
+            "часы назад"
+        );
+        assert_eq!(next_epoch(7, -5), 8, "отрицательное время");
+        assert_eq!(next_epoch(u32::MAX, 0), u32::MAX);
+    }
 
     fn k(b: u8) -> [u8; 32] {
         [b; 32]

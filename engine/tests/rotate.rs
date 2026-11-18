@@ -138,16 +138,22 @@ fn own_rotation_keeps_the_contact_reachable() {
     // свойство настоящего меша и измерено отдельным стендом (flood_pubmesh).
     a.rotate_transport(vec![b_key], 0);
 
-    // Боб узнал новый адрес Алисы, и это адрес эпохи 1.
-    let tk1 = alice.transport_public(1);
+    // Эпоха — время смены (шаг 7g), а не счётчик: сохранена на диске.
+    assert!(
+        wait(20, || a.transport_epoch() > 0),
+        "эпоха сохранена на диске"
+    );
+    let epoch = a.transport_epoch();
+    assert!(
+        i64::from(epoch) >= peerage_engine::now() - 60,
+        "эпоха — секунды Unix: {epoch}"
+    );
+    // Боб узнал новый адрес Алисы — адрес этой эпохи.
+    let tk1 = alice.transport_public(epoch);
     assert!(
         wait(20, || transport_of(&b, &a_key) == hex::encode(tk1)),
         "Боб должен получить новый адрес, получено {:?}",
         transport_of(&b, &a_key),
-    );
-    assert!(
-        wait(5, || a.transport_epoch() == 1),
-        "эпоха сохранена на диске"
     );
 
     // Главное: связь жива в обе стороны. Боб шлёт на НОВЫЙ адрес (он его знает),
@@ -301,7 +307,8 @@ fn group_survives_member_rotation() {
         Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
     }));
     a.rotate_transport(vec![b_key], 0);
-    let tk1 = alice.transport_public(1);
+    assert!(wait(20, || a.transport_epoch() > 0), "A на новой эпохе");
+    let tk1 = alice.transport_public(a.transport_epoch());
     assert!(
         wait(20, || transport_of(&b, &a_key) == hex::encode(tk1)),
         "B узнал новый адрес A",
@@ -352,7 +359,8 @@ fn contact_code_carries_signed_address() {
         Some(net_for_factory.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
     }));
     a.rotate_transport(vec![], 0); // никого не оповещаем — знакомимся заново по коду
-    assert!(wait(20, || a.transport_epoch() == 1));
+    assert!(wait(20, || a.transport_epoch() > 0));
+    let epoch = a.transport_epoch();
 
     // Кэрол добавляет Алису по коду и сразу знает её текущий адрес.
     let code = a.my_contact_code();
@@ -360,7 +368,7 @@ fn contact_code_carries_signed_address() {
     assert_eq!(c.request_contact(&code, "Алиса", ""), "sent");
     assert_eq!(
         transport_of(&c, &a_key),
-        hex::encode(alice.transport_public(1))
+        hex::encode(alice.transport_public(epoch))
     );
 
     // Проверяем главное: сообщение доходит с первой попытки, без «а куда слать».
@@ -428,4 +436,71 @@ fn failed_rotation_falls_back_to_the_old_address() {
         wait(20, || a.history_json(&b_key).contains("ты здесь?")),
         "связь на прежнем адресе жива"
     );
+}
+
+/// Шаг 7g (R-118): Алиса сменила адрес, потеряла телефон и восстановилась по 24 словам
+/// на новом. Прошлой эпохи новый телефон не знает — поднимается на «сейчас» и сообщает
+/// адрес контакту при встрече; Боб принимает (эпоха больше прежней), и связь жива.
+#[test]
+fn restored_identity_announces_its_new_address() {
+    let net = LoopbackNet::new();
+    let alice = id(70);
+    let bob_id = id(71);
+    let (a_key, b_key) = (alice.public_key_bytes(), bob_id.public_key_bytes());
+    let factory = |net: LoopbackNet| -> peerage_engine::TransportFactory {
+        std::sync::Arc::new(move |seed: &[u8; 32]| {
+            let key = peerage_core::Identity::from_seed(seed)
+                .ok()?
+                .public_key_bytes();
+            Some(net.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
+        })
+    };
+
+    let a = Engine::start_with_transport(tmpdir("a7"), alice.clone(), net.endpoint(a_key))
+        .unwrap()
+        .engine;
+    let b = Engine::start_with_transport(tmpdir("b7"), bob_id, net.endpoint(b_key))
+        .unwrap()
+        .engine;
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Алиса");
+    a.set_transport_factory(factory(net.clone()));
+    a.rotate_transport(vec![b_key], 0);
+    assert!(
+        wait(20, || a.transport_epoch() > 0),
+        "старый телефон сменил адрес"
+    );
+    let old = alice.transport_public(a.transport_epoch());
+    assert!(
+        wait(20, || transport_of(&b, &a_key) == hex::encode(old)),
+        "Боб знает адрес"
+    );
+    a.shutdown(); // телефон потерян
+                  // Эпоха — секунды: восстановление в ту же секунду дало бы ту же эпоху.
+    std::thread::sleep(Duration::from_millis(1100));
+
+    // Новый телефон: та же личность из 24 слов, пустой каталог.
+    let dir = tmpdir("a7-new");
+    let epoch = peerage_engine::begin_restored_epoch(&dir);
+    let tk = alice.transport_public(epoch);
+    let a2 = Engine::start_with_transport(dir, alice, net.endpoint(tk))
+        .unwrap()
+        .engine;
+    a2.set_transport_factory(factory(net.clone()));
+    assert_eq!(a2.transport_epoch(), epoch);
+    a2.add_contact(&b_key, "Боб"); // из копии данных или заново по коду
+
+    assert!(
+        wait(30, || transport_of(&b, &a_key) == hex::encode(tk)),
+        "Боб должен принять новый адрес, у него {:?}",
+        transport_of(&b, &a_key),
+    );
+    b.send_text(&a_key, "это ты с нового телефона?");
+    assert!(
+        wait(20, || a2.history_json(&b_key).contains("с нового телефона")),
+        "сообщение на восстановленный телефон дошло: {}",
+        a2.history_json(&b_key),
+    );
+    a2.shutdown();
+    b.shutdown();
 }
