@@ -70,8 +70,6 @@
     <string name="audio_quality_auto">Авто</string>
     <string name="audio_quality_voice">Голос</string>
     <string name="audio_quality_audio">Аудио</string>
-    <string name="audio_quality_adaptive">адаптивно · %1$d–%2$d кбит</string>
-    <string name="audio_quality_rate">~%1$d кбит</string>
     <string name="audio_processing">Обработка</string>
     <string name="audio_ns">Шумоподавление</string>
     <string name="audio_aec">Эхоподавление</string>
@@ -302,17 +300,16 @@
 
     <!-- ── Настройки ───────────────────────────────────────────────────── -->
     <string name="settings_about">О приложении</string>
-    <string name="settings_version_label">Версия</string>
+    <string name="settings_version">Версия %1$s</string>
     <string name="settings_transport_label">Транспорт</string>
-    <string name="settings_transport_value">Yggdrasil mesh (serverless)</string>
+    <string name="settings_transport_value">Yggdrasil, без серверов</string>
     <string name="settings_encryption_label">Шифрование</string>
-    <string name="settings_encryption_value">E2E, всегда включено</string>
+    <string name="settings_encryption_value">Сквозное, всегда</string>
     <string name="settings_license_label">Лицензия</string>
     <string name="settings_log_save">Сохранить лог</string>
-    <string name="settings_log_hint">Для сообщения об ошибке: текстовый файл, который вы пересылаете сами. Без сообщений и ключей; ключи собеседников укорочены, сетевые адреса убраны.</string>
+    <string name="settings_log_hint">Текстовый файл для сообщения об ошибке. Пересылается вручную.</string>
     <string name="settings_log_saved">Лог сохранён</string>
     <string name="settings_log_failed">Не удалось сохранить лог</string>
-    <string name="settings_about_future">Энергия, медиа и хранилище — настройки появятся ближе к релизу.</string>
 
     <!-- ── Доп. строки звонка ──────────────────────────────────────────── -->
     <string name="call_in_room_caps">В ЗВОНКЕ · %1$d</string>
@@ -868,10 +865,14 @@
     <string name="settings_cat_media">Медиа и звонки</string>
     <string name="media_video_section">Видео</string>
     <string name="media_audio_section">Звук</string>
-    <string name="media_camera">Камера</string>
+    <string name="media_camera">Камера по умолчанию</string>
     <string name="media_camera_front">Фронтальная</string>
     <string name="media_camera_back">Тыловая</string>
-    <string name="media_defaults_hint">Действует со следующего звонка. Во время звонка — долгое нажатие на кнопку «Видео» или «Микрофон».</string>
+    <string name="media_video_quality">Качество видео</string>
+    <string name="media_video_auto">Авто · до %1$s %2$d</string>
+    <string name="media_video_fixed">%1$s %2$d · %3$s Мбит/с</string>
+    <string name="audio_mode_caption">Авто — %1$d–%2$d кбит по каналу · Голос — до %3$d · Аудио — %4$d (музыка)</string>
+    <string name="media_defaults_hint">Действует со следующего звонка.</string>
     <string name="call_video_settings">Настройки видео</string>
     <string name="settings_cat_notifications">Уведомления</string>
     <string name="settings_cat_about">О приложении</string>

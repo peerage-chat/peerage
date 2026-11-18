@@ -10,24 +10,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.CameraFront
-import androidx.compose.material.icons.filled.CameraRear
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -43,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /** Безопасность: копия ключа, блокировка приложения, шифрование хранилища, сверка. */
 @Composable
@@ -188,54 +178,158 @@ private fun PrivacyFact(icon: ImageVector, tint: Color, title: Int, sub: Int, di
 }
 
 /**
- * Медиа и звонки: значения ПО УМОЛЧАНИЮ для всех звонков. Те же элементы, что на
- * экранах «Показать видео» и «Звук» внутри звонка (call-ui.md, «Настройки по
- * умолчанию»), только без превью и без кнопки «Применить»: выбор сохраняется сразу
- * и действует со следующего звонка.
- *
- * Разрешения и 60 fps — только то, что реально отдаёт камера ([CameraCaps]):
- * раньше здесь был жёсткий список пресетов, и неподдерживаемое разрешение давало
- * чёрный экран вместо видео.
+ * Медиа и звонки (макет `settings/Media`): значения ПО УМОЛЧАНИЮ для всех звонков.
+ * Выбор сохраняется сразу и действует со следующего звонка; во время звонка те же
+ * настройки — на экранах «Показать видео» и «Звук» (call-ui.md, «Настройки по умолчанию»).
+ * Разрешение, fps и битрейт — на подэкране [SettingsVideoQualityScreen].
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun SettingsMediaScreen(model: AppModel) {
+internal fun SettingsMediaScreen(model: AppModel, onVideoQuality: () -> Unit) {
     val ctx = LocalContext.current
-    val q = model.videoQuality
-    val front = model.cameraFront
-    val resolutions = remember(front) { CameraCaps.resolutions(ctx, front) }
-    val has60 = remember(front) { CameraCaps.supports60(ctx, front) }
-    // Сохранённое значение может быть недоступно этой камере (старый пресет 480p,
-    // смена камеры) — тогда берём первое честное разрешение и 30 fps.
-    LaunchedEffect(resolutions, has60) {
-        val resOk = resolutions.isEmpty() || resolutions.any { it.width == q.width && it.height == q.height }
-        val fpsOk = q.fps == 30 || has60
-        if (!resOk || !fpsOk) {
-            // Список бывает пуст (нет камеры, эмулятор): тогда разрешение не трогаем,
-            // а `first()` здесь ронял экран, если сохранены 60 fps.
-            val r = resolutions.firstOrNull { it.width == q.width && it.height == q.height } ?: resolutions.firstOrNull()
-            model.setVideoDefaults(w = r?.width ?: q.width, h = r?.height ?: q.height, fps = if (fpsOk) q.fps else 30)
-        }
-    }
-    val outs = model.availableAudioOuts()
-    val ins = model.availableAudioIns()
-
+    VideoCapsGuard(model)
+    var picker by remember { mutableStateOf<AudioPicker?>(null) }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
     ) {
         SectionTitle(stringResource(R.string.media_video_section))
         CardSection {
-            OptionBlock(stringResource(R.string.media_camera), divider = false) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                    OptionChip(stringResource(R.string.media_camera_front), front, Modifier.weight(1f), Icons.Filled.CameraFront) {
-                        model.setVideoDefaults(front = true)
-                    }
-                    OptionChip(stringResource(R.string.media_camera_back), !front, Modifier.weight(1f), Icons.Filled.CameraRear) {
-                        model.setVideoDefaults(front = false)
+            SegmentLabel(stringResource(R.string.media_camera))
+            Segmented(
+                listOf(stringResource(R.string.media_camera_front), stringResource(R.string.media_camera_back)),
+                if (model.cameraFront) 0 else 1,
+                Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.m, bottom = Tokens.Space.m),
+            ) { model.setVideoDefaults(front = it == 0) }
+            ValueRow(stringResource(R.string.media_video_quality), videoQualityValue(model), chevron = true, onClick = onVideoQuality)
+        }
+
+        SectionTitle(stringResource(R.string.media_audio_section))
+        CardSection {
+            val ins = model.availableAudioIns()
+            val outs = model.availableAudioOuts()
+            ValueRow(
+                stringResource(R.string.audio_input),
+                ctx.getString(audioDevLabel(model.audioIn)),
+                divider = false,
+                onClick = if (ins.size > 1) ({ picker = AudioPicker.IN }) else null,
+            )
+            ValueRow(
+                stringResource(R.string.audio_output),
+                ctx.getString(audioDevLabel(model.audioOut)),
+                onClick = if (outs.size > 1) ({ picker = AudioPicker.OUT }) else null,
+            )
+            HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.divider, modifier = Modifier.padding(start = Tokens.Space.l))
+            SegmentLabel(stringResource(R.string.audio_quality))
+            AudioModePicker(model, Modifier.padding(horizontal = Tokens.Space.m))
+            Spacer(Modifier.height(Tokens.Space.m))
+        }
+
+        SectionTitle(stringResource(R.string.audio_processing))
+        CardSection {
+            PlainSwitchRow(stringResource(R.string.audio_ns), model.audioFx.ns, divider = false) { model.setAudioFx(ns = it) }
+            PlainSwitchRow(stringResource(R.string.audio_aec), model.audioFx.aec) { model.setAudioFx(aec = it) }
+            PlainSwitchRow(stringResource(R.string.audio_agc), model.audioFx.agc) { model.setAudioFx(agc = it) }
+        }
+        Text(
+            stringResource(R.string.media_defaults_hint),
+            color = Tokens.Colors.tertiary,
+            fontSize = Tokens.Font.body,
+            modifier = Modifier.padding(start = Tokens.Space.panelText, end = Tokens.Space.panelText, top = Tokens.Space.m),
+        )
+    }
+    picker?.let { p ->
+        val inPick = p == AudioPicker.IN
+        val devs = if (inPick) model.availableAudioIns() else model.availableAudioOuts()
+        val current = if (inPick) model.audioIn else model.audioOut
+        SheetFrame(onClose = { picker = null }) {
+            Text(
+                stringResource(if (inPick) R.string.audio_input else R.string.audio_output),
+                color = Color.White,
+                fontSize = Tokens.Font.sheet,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = Tokens.Space.xs),
+            )
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.group)).background(Tokens.Colors.raised)) {
+                devs.forEachIndexed { i, dev ->
+                    CardRow(
+                        onClick = {
+                            if (inPick) model.pickAudioIn(dev) else model.pickAudioOut(dev)
+                            picker = null
+                        },
+                        divider = i > 0,
+                        inset = Tokens.Space.l,
+                    ) {
+                        Text(stringResource(audioDevLabel(dev)), color = Color.White, fontSize = Tokens.Font.name, modifier = Modifier.weight(1f))
+                        if (dev == current) Icon(TablerIcons.Check, null, tint = Tokens.Colors.accent, modifier = Modifier.size(Tokens.Size.iconRow))
                     }
                 }
             }
-            OptionBlock(stringResource(R.string.share_resolution), badge = stringResource(R.string.share_available_on_device)) {
+        }
+    }
+}
+
+private enum class AudioPicker { IN, OUT }
+
+/** Подпись устройства звука по его коду. */
+private fun audioDevLabel(dev: String): Int = when (dev) {
+    "headset" -> R.string.audio_dev_headset
+    "bluetooth" -> R.string.audio_dev_bluetooth
+    "speaker" -> R.string.audio_dev_speaker
+    else -> R.string.audio_dev_builtin
+}
+
+/** «Авто · до 1080p 30» или «720p 30 · 2 Мбит/с» — как стоит качество видео. */
+@Composable
+private fun videoQualityValue(model: AppModel): String {
+    val q = model.videoQuality
+    val res = "${q.height}p"
+    return if (model.videoBitrateAuto) {
+        stringResource(R.string.media_video_auto, res, q.fps)
+    } else {
+        val bps = model.bitrateOptions(q.width, q.height, q.fps).getOrNull(model.videoBitrateIdx) ?: q.bitrate
+        stringResource(R.string.media_video_fixed, res, q.fps, fmtMbps(bps))
+    }
+}
+
+/**
+ * Сохранённое качество может быть недоступно этой камере (старый пресет, смена камеры) —
+ * тогда первое честное разрешение и 30 fps. Список бывает пуст (нет камеры, эмулятор):
+ * тогда разрешение не трогаем.
+ */
+@Composable
+private fun VideoCapsGuard(model: AppModel) {
+    val ctx = LocalContext.current
+    val q = model.videoQuality
+    val front = model.cameraFront
+    val resolutions = remember(front) { CameraCaps.resolutions(ctx, front) }
+    val has60 = remember(front) { CameraCaps.supports60(ctx, front) }
+    LaunchedEffect(resolutions, has60) {
+        val resOk = resolutions.isEmpty() || resolutions.any { it.width == q.width && it.height == q.height }
+        val fpsOk = q.fps == 30 || has60
+        if (!resOk || !fpsOk) {
+            val r = resolutions.firstOrNull { it.width == q.width && it.height == q.height } ?: resolutions.firstOrNull()
+            model.setVideoDefaults(w = r?.width ?: q.width, h = r?.height ?: q.height, fps = if (fpsOk) q.fps else 30)
+        }
+    }
+}
+
+/**
+ * Качество видео по умолчанию: разрешения и 60 fps — только то, что реально отдаёт камера
+ * ([CameraCaps]); жёсткий список пресетов давал чёрный экран на неподдерживаемом разрешении.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun SettingsVideoQualityScreen(model: AppModel) {
+    val ctx = LocalContext.current
+    VideoCapsGuard(model)
+    val q = model.videoQuality
+    val front = model.cameraFront
+    val resolutions = remember(front) { CameraCaps.resolutions(ctx, front) }
+    val has60 = remember(front) { CameraCaps.supports60(ctx, front) }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = Tokens.Space.m, bottom = Tokens.Space.xxl),
+    ) {
+        CardSection {
+            OptionBlock(stringResource(R.string.share_resolution), divider = false) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                     verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
@@ -276,111 +370,67 @@ internal fun SettingsMediaScreen(model: AppModel) {
                 }
             }
         }
+    }
+}
 
-        SectionTitle(stringResource(R.string.media_audio_section))
-        CardSection {
-            OptionBlock(stringResource(R.string.audio_input), divider = false) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-                ) {
-                    if ("builtin" in ins) {
-                        OptionChip(stringResource(R.string.audio_dev_builtin), model.audioIn == "builtin", icon = Icons.Filled.Smartphone) {
-                            model.pickAudioIn("builtin")
-                        }
-                    }
-                    if ("headset" in ins) {
-                        OptionChip(stringResource(R.string.audio_dev_headset), model.audioIn == "headset", icon = Icons.Filled.Headset) {
-                            model.pickAudioIn("headset")
-                        }
-                    }
-                    if ("bluetooth" in ins) {
-                        OptionChip(stringResource(R.string.audio_dev_bluetooth), model.audioIn == "bluetooth", icon = Icons.Filled.Bluetooth) {
-                            model.pickAudioIn("bluetooth")
-                        }
-                    }
-                }
-            }
-            OptionBlock(stringResource(R.string.audio_output)) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-                ) {
-                    if ("builtin" in outs) {
-                        OptionChip(stringResource(R.string.audio_dev_builtin), model.audioOut == "builtin", icon = Icons.Filled.Smartphone) {
-                            model.pickAudioOut("builtin")
-                        }
-                    }
-                    if ("speaker" in outs) {
-                        OptionChip(stringResource(R.string.audio_dev_speaker), model.audioOut == "speaker", icon = Icons.Filled.VolumeUp) {
-                            model.pickAudioOut("speaker")
-                        }
-                    }
-                    if ("bluetooth" in outs) {
-                        OptionChip(stringResource(R.string.audio_dev_bluetooth), model.audioOut == "bluetooth", icon = Icons.Filled.Bluetooth) {
-                            model.pickAudioOut("bluetooth")
-                        }
-                    }
-                }
-            }
-            OptionBlock(
-                stringResource(R.string.audio_quality),
-                trailing = {
-                    OptionChip(stringResource(R.string.audio_quality_auto), model.audioQualityAuto, icon = Icons.Filled.Bolt, compact = true) {
-                        model.setAudioQuality(!model.audioQualityAuto)
-                    }
-                },
-            ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(stringResource(R.string.audio_quality_voice), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
-                    Text(stringResource(R.string.audio_quality_audio), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
-                }
-                Slider(
-                    value = model.audioBitrate.toFloat(),
-                    onValueChange = { model.setAudioQuality(false, it.roundToInt()) },
-                    valueRange = AppModel.AUDIO_BITRATE_MIN.toFloat()..AppModel.AUDIO_BITRATE_MAX.toFloat(),
-                    enabled = !model.audioQualityAuto,
-                    // Дорожка — tertiary: цвет тайла сливается с фоном карточки, и в
-                    // режиме «авто» ползунок висел в пустоте.
-                    colors = SliderDefaults.colors(
-                        thumbColor = Tokens.Colors.accent,
-                        activeTrackColor = Tokens.Colors.accent,
-                        inactiveTrackColor = Tokens.Colors.divider,
-                        disabledThumbColor = Tokens.Colors.tertiary,
-                        disabledActiveTrackColor = Tokens.Colors.tertiary,
-                        disabledInactiveTrackColor = Tokens.Colors.divider,
-                    ),
-                )
-                Text(
-                    if (model.audioQualityAuto) {
-                        stringResource(R.string.audio_quality_adaptive, AppModel.AUDIO_BITRATE_MIN / 1000, AppModel.AUDIO_BITRATE_MAX / 1000)
-                    } else {
-                        stringResource(R.string.audio_quality_rate, model.audioBitrate / 1000)
-                    },
-                    color = Tokens.Colors.secondary,
-                    fontSize = Tokens.Font.small,
-                )
-            }
-        }
-
-        SectionTitle(stringResource(R.string.audio_processing))
-        CardSection {
-            SettingSwitchRow(Icons.Filled.GraphicEq, stringResource(R.string.audio_ns), null, model.audioFx.ns, divider = false) {
-                model.setAudioFx(ns = it)
-            }
-            SettingSwitchRow(Icons.Filled.SurroundSound, stringResource(R.string.audio_aec), null, model.audioFx.aec) {
-                model.setAudioFx(aec = it)
-            }
-            SettingSwitchRow(Icons.Filled.VolumeUp, stringResource(R.string.audio_agc), null, model.audioFx.agc) {
-                model.setAudioFx(agc = it)
-            }
-        }
+/** Качество звука: Авто / Голос / Аудио и что они значат. Один на настройки и звонок. */
+@Composable
+internal fun AudioModePicker(model: AppModel, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Segmented(
+            listOf(
+                stringResource(R.string.audio_quality_auto),
+                stringResource(R.string.audio_quality_voice),
+                stringResource(R.string.audio_quality_audio),
+            ),
+            model.audioMode.ordinal,
+        ) { model.pickAudioMode(AudioMode.entries[it]) }
         Text(
-            stringResource(R.string.media_defaults_hint),
-            color = Tokens.Colors.secondary,
-            fontSize = Tokens.Font.small,
-            modifier = Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
+            stringResource(
+                R.string.audio_mode_caption,
+                AppModel.AUDIO_BITRATE_MIN / 1000,
+                AudioMode.AUTO.bitrate / 1000,
+                AudioMode.VOICE.bitrate / 1000,
+                AudioMode.MUSIC.bitrate / 1000,
+            ),
+            color = Tokens.Colors.tertiary,
+            fontSize = Tokens.Font.body,
+            modifier = Modifier.padding(top = Tokens.Space.s, start = Tokens.Space.xxs, end = Tokens.Space.xxs),
         )
+    }
+}
+
+/** Подпись над сегментами внутри группы. */
+@Composable
+private fun SegmentLabel(text: String) {
+    Text(
+        text,
+        color = Color.White,
+        fontSize = Tokens.Font.option,
+        modifier = Modifier.padding(start = Tokens.Space.l, end = Tokens.Space.l, top = Tokens.Space.m, bottom = Tokens.Space.s),
+    )
+}
+
+/** Строка «название — значение» (+ шеврон, если ведёт на экран). Без [onClick] не нажимается. */
+@Composable
+private fun ValueRow(title: String, value: String, divider: Boolean = true, chevron: Boolean = false, onClick: (() -> Unit)? = null) {
+    CardRow(onClick = onClick, divider = divider, inset = Tokens.Space.l) {
+        Text(title, color = Color.White, fontSize = Tokens.Font.name, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(Tokens.Space.m))
+        Text(value, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.option, maxLines = 1)
+        if (chevron) {
+            Spacer(Modifier.width(Tokens.Space.s))
+            Icon(TablerIcons.ChevronRight, null, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconS))
+        }
+    }
+}
+
+/** Тумблер без значка: название и переключатель, нажимается вся строка. */
+@Composable
+private fun PlainSwitchRow(title: String, checked: Boolean, divider: Boolean = true, onChange: (Boolean) -> Unit) {
+    CardRow(divider = divider, inset = Tokens.Space.l, modifier = Modifier.switchRow(checked, onChange = onChange)) {
+        Text(title, color = Color.White, fontSize = Tokens.Font.name, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
@@ -437,9 +487,12 @@ internal fun SettingsNotificationsScreen(model: AppModel) {
     }
 }
 
-/** О приложении: версия, транспорт, шифрование, лицензия. */
+/**
+ * О приложении (макет `settings/About`): знак, имя и версия над панелью; транспорт,
+ * шифрование, лицензия; «Сохранить лог». Шапка своя: знак стоит на фоне, не на панели.
+ */
 @Composable
-internal fun SettingsAboutScreen() {
+internal fun SettingsAboutScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     // Сохранить лог: человек выбирает, куда положить файл, и сам его пересылает.
     val saveLog = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -458,41 +511,64 @@ internal fun SettingsAboutScreen() {
             }
         }.apply { isDaemon = true }.start()
     }
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
-    ) {
-        Spacer(Modifier.height(Tokens.Space.m))
-        CardSection {
-            SettingInfoRow(
-                stringResource(R.string.settings_version_label),
-                appVersion(),
-                divider = false,
+    Column(Modifier.fillMaxSize().background(Tokens.Colors.bg)) {
+        TopBar(stringResource(R.string.settings_cat_about), onBack = onBack)
+        Column(
+            Modifier.fillMaxWidth().padding(top = Tokens.Space.l, bottom = Tokens.Space.xl),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier.size(Tokens.Size.aboutTile).clip(RoundedCornerShape(Tokens.Radius.aboutTile)).background(Tokens.Colors.panel),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    androidx.compose.ui.res.painterResource(R.drawable.ic_glyph),
+                    null,
+                    tint = Tokens.Colors.accent,
+                    modifier = Modifier.size(Tokens.Size.aboutGlyph),
+                )
+            }
+            Spacer(Modifier.height(Tokens.Space.m))
+            Text(
+                stringResource(R.string.app_name),
+                color = Color.White,
+                fontSize = Tokens.Font.title,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
             )
-            SettingInfoRow(
-                stringResource(R.string.settings_transport_label),
-                stringResource(R.string.settings_transport_value),
+            Text(
+                stringResource(R.string.settings_version, appVersion()),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.body,
+                modifier = Modifier.padding(top = Tokens.Space.xs),
             )
-            SettingInfoRow(
-                stringResource(R.string.settings_encryption_label),
-                stringResource(R.string.settings_encryption_value),
-            )
-            SettingInfoRow(stringResource(R.string.settings_license_label), "GPL-3.0")
         }
-        Spacer(Modifier.height(Tokens.Space.m))
-        CardSection {
-            SettingRow(
-                Icons.Filled.Description,
-                stringResource(R.string.settings_log_save),
-                stringResource(R.string.settings_log_hint),
-                divider = false,
-            ) { saveLog.launch(chat.peerage.LogExport.fileName()) }
+        Column(
+            Modifier.weight(1f).fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
+                .background(Tokens.Colors.panel)
+                .verticalScroll(rememberScrollState())
+                .padding(top = Tokens.Space.panel, bottom = Tokens.Space.xxl),
+            verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+        ) {
+            CardSection {
+                ValueRow(stringResource(R.string.settings_transport_label), stringResource(R.string.settings_transport_value), divider = false)
+                ValueRow(stringResource(R.string.settings_encryption_label), stringResource(R.string.settings_encryption_value))
+                ValueRow(stringResource(R.string.settings_license_label), "GPL-3.0")
+            }
+            CardSection {
+                CardRow(onClick = { saveLog.launch(chat.peerage.LogExport.fileName()) }, divider = false, inset = Tokens.Space.l) {
+                    Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
+                        Text(stringResource(R.string.settings_log_save), color = Color.White, fontSize = Tokens.Font.name)
+                        Text(
+                            stringResource(R.string.settings_log_hint),
+                            color = Tokens.Colors.tertiary,
+                            fontSize = Tokens.Font.body,
+                            modifier = Modifier.padding(top = Tokens.Space.xxs),
+                        )
+                    }
+                }
+            }
         }
-        Text(
-            stringResource(R.string.settings_about_future),
-            color = Tokens.Colors.secondary,
-            fontSize = Tokens.Font.small,
-            modifier = Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
-        )
     }
 }
 
@@ -548,17 +624,6 @@ private fun SettingSwitchRow(
             }
         }
         Switch(checked = checked, enabled = enabled, onCheckedChange = null)
-    }
-}
-
-/** Строка «параметр — значение» в футере (только чтение). */
-@Composable
-private fun SettingInfoRow(label: String, value: String, divider: Boolean = true) {
-    // Справочная строка (версия, транспорт, лицензия) живёт в той же карточке, что и
-    // настраиваемое, но без иконки — разделитель у неё идёт во всю ширину.
-    CardRow(divider = divider, inset = 0.dp) {
-        Text(label, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
-        Text(value, color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
     }
 }
 

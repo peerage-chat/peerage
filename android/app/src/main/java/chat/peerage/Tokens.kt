@@ -112,6 +112,7 @@ object Tokens {
         val onBubbleButton = Color(0x14FFFFFF) // кнопка на пузыре («Позвонить» у звонка), белый @8%
         val fieldIcon = Color(0xFF9AA3AD) // иконки в поле поиска и строках-уточнениях
         val snippet = Color(0xFFB8B8C0) // текст находки в списке поиска
+        val segmentIdle = Color(0xFFB8B8C0) // невыбранный вариант в сегментах (`settings/Media`)
         val faint = Color(0xFF4A4B52) // приглушённое: день без сообщений, «ничего не найдено»
         val searchMark = Color(0x4D33B5E5) // подсветка совпадения в пузыре (акцент @30%)
         val chipText = Color(0xFFC4C7CC) // светлый вторичный: число в чипе реакции, вкладка шторки, имя в системной строке
@@ -286,10 +287,13 @@ object Tokens {
         val field = 16.dp // поле ввода, поиск
         val voiceHold = 24.dp // выросшая кнопка микрофона
         val heroTile = 24.dp // крупная плитка-знак шага первого запуска (`onboard/KeyIntro`)
+        val aboutTile = 26.dp // плитка знака на «О приложении»
         val group = 18.dp // группа строк на панели: 28 = 18 + отступ панели 10 (концентрично)
         val card = group // старое имя карточки-секции
         val panel = 28.dp // верх панели «листа», шторки
         val inner = 8.dp // плитка/иконка внутри группы
+        val segment = 12.dp // подложка сегментов: 9 + зазор 3 (концентрично)
+        val segmentItem = 9.dp // выбранный вариант в сегментах
         val thumb = 4.dp // миниатюра в сетке медиа
     }
 
@@ -310,6 +314,8 @@ object Tokens {
         val ctlButtonH = 48.dp
         val callButton = 56.dp // сквиркул отклонить/принять/пресет
         val avatarBig = 88.dp
+        val aboutTile = 88.dp // плитка знака на «О приложении» (`settings/About`)
+        val aboutGlyph = 56.dp // знак в ней
         val avatarHero = 96.dp // аватар «витрины» профиля (`prof/`)
         val showAction = 64.dp // плитка действия под витриной: Написать · Звонок · …
 
@@ -427,6 +433,8 @@ object Tokens {
         val sheetList = 400.dp // предельная высота списка в шторке (выбор участника)
         val systemLine = 300.dp // предельная ширина системной строки группы (макет `special/GroupSystem`)
         val phraseRow = 36.dp // строка слова в сетке 24 слов
+        val segment = 36.dp // высота варианта в сегментах (`settings/Media`)
+        val segmentGap = 3.dp // поле подложки сегментов и зазор между вариантами
         val phraseNum = 20.dp // колонка номера слова в сетке
         val phraseNote = 26.dp // строка ошибки «№N — нет такого слова» над сеткой ввода: место держится
         val touch = 48.dp // минимальная зона касания (Android): плашка может быть меньше, зона — нет
@@ -450,6 +458,7 @@ object Tokens {
         val small = 12.sp // мелкие подписи, бейджи
         val body = 13.sp // вторичный текст, чипы, имена в тайлах
         val preview = 14.sp // превью последнего сообщения в списке
+        val option = 14.sp // вариант в сегментах, значение справа в строке настройки
         val label = 15.sp // основной текст: сообщения, поля ввода, кнопки
         val name = 16.sp // имена в списке, строки групп
         val sheet = 20.sp // заголовок шторки

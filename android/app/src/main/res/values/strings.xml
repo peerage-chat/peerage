@@ -76,8 +76,6 @@
     <string name="audio_quality_auto">Auto</string>
     <string name="audio_quality_voice">Voice</string>
     <string name="audio_quality_audio">Audio</string>
-    <string name="audio_quality_adaptive">adaptive · %1$d–%2$d kbps</string>
-    <string name="audio_quality_rate">~%1$d kbps</string>
     <string name="audio_processing">Processing</string>
     <string name="audio_ns">Noise suppression</string>
     <string name="audio_aec">Echo cancellation</string>
@@ -300,17 +298,16 @@
 
     <!-- ── Settings ────────────────────────────────────────────────────── -->
     <string name="settings_about">About</string>
-    <string name="settings_version_label">Version</string>
+    <string name="settings_version">Version %1$s</string>
     <string name="settings_transport_label">Transport</string>
-    <string name="settings_transport_value">Yggdrasil mesh (serverless)</string>
+    <string name="settings_transport_value">Yggdrasil, serverless</string>
     <string name="settings_encryption_label">Encryption</string>
-    <string name="settings_encryption_value">E2E, always on</string>
+    <string name="settings_encryption_value">End-to-end, always</string>
     <string name="settings_license_label">License</string>
     <string name="settings_log_save">Save log</string>
-    <string name="settings_log_hint">For a bug report: a text file you send yourself. No messages or keys; peer keys are shortened, network addresses removed.</string>
+    <string name="settings_log_hint">Text file for a bug report. Sent manually.</string>
     <string name="settings_log_saved">Log saved</string>
     <string name="settings_log_failed">Could not save the log</string>
-    <string name="settings_about_future">Power, media and storage settings are coming closer to release.</string>
 
     <!-- ── CallUi extras ───────────────────────────────────────────────── -->
     <string name="call_in_room_caps">IN CALL · %1$d</string>
@@ -826,10 +823,14 @@
     <string name="settings_cat_media">Media and calls</string>
     <string name="media_video_section">Video</string>
     <string name="media_audio_section">Sound</string>
-    <string name="media_camera">Camera</string>
+    <string name="media_camera">Default camera</string>
     <string name="media_camera_front">Front</string>
     <string name="media_camera_back">Back</string>
-    <string name="media_defaults_hint">Applies to the next calls. During a call, long-press the Video or Microphone button.</string>
+    <string name="media_video_quality">Video quality</string>
+    <string name="media_video_auto">Auto · up to %1$s %2$d</string>
+    <string name="media_video_fixed">%1$s %2$d · %3$s Mbps</string>
+    <string name="audio_mode_caption">Auto — %1$d–%2$d kbps by channel · Voice — up to %3$d · Audio — %4$d (music)</string>
+    <string name="media_defaults_hint">Applies from the next call.</string>
     <string name="call_video_settings">Video settings</string>
     <string name="settings_cat_notifications">Notifications</string>
     <string name="settings_cat_about">About</string>

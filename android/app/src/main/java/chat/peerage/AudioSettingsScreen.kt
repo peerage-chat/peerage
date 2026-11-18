@@ -24,14 +24,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -44,6 +41,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import chat.peerage.ui.AudioModePicker
 import chat.peerage.ui.switchRow
 import kotlin.math.roundToInt
 
@@ -109,52 +107,8 @@ fun AudioSettingsScreen(model: AppModel) {
         }
 
         Spacer(Modifier.height(Tokens.Space.l))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.audio_quality), color = Tokens.Colors.secondary, fontSize = Tokens.Font.small, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            val auto = model.audioQualityAuto
-            Row(
-                Modifier.clip(RoundedCornerShape(Tokens.Radius.chip))
-                    .background(if (auto) Tokens.Colors.accentMuted else Tokens.Colors.tile)
-                    .then(if (auto) Modifier.border(1.5.dp, Tokens.Colors.accent, RoundedCornerShape(Tokens.Radius.chip)) else Modifier)
-                    .clickable { model.setAudioQuality(!auto) }
-                    .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
-            ) {
-                Icon(Icons.Filled.Bolt, null, tint = if (auto) Tokens.Colors.accent else Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconXs))
-                Text(stringResource(R.string.audio_quality_auto), color = if (auto) Tokens.Colors.accent else Color.White, fontSize = Tokens.Font.caption)
-            }
-        }
-        Spacer(Modifier.height(Tokens.Space.xs))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(stringResource(R.string.audio_quality_voice), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
-            Text(stringResource(R.string.audio_quality_audio), color = Tokens.Colors.secondary, fontSize = Tokens.Font.caption)
-        }
-        Slider(
-            value = model.audioBitrate.toFloat(),
-            onValueChange = { model.setAudioQuality(false, it.roundToInt()) },
-            valueRange = AppModel.AUDIO_BITRATE_MIN.toFloat()..AppModel.AUDIO_BITRATE_MAX.toFloat(),
-            enabled = !model.audioQualityAuto,
-            colors = SliderDefaults.colors(
-                thumbColor = Tokens.Colors.accent,
-                activeTrackColor = Tokens.Colors.accent,
-                inactiveTrackColor = Tokens.Colors.trackIdle,
-                disabledThumbColor = Tokens.Colors.secondary,
-                disabledActiveTrackColor = Tokens.Colors.trackIdle,
-            ),
-        )
-        Text(
-            if (model.audioQualityAuto) {
-                stringResource(R.string.audio_quality_adaptive, AppModel.AUDIO_BITRATE_MIN / 1000, AppModel.AUDIO_BITRATE_MAX / 1000)
-            } else {
-                stringResource(R.string.audio_quality_rate, model.audioBitrate / 1000)
-            },
-            color = Tokens.Colors.secondary,
-            fontSize = Tokens.Font.small,
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-
+        SectionLabel(stringResource(R.string.audio_quality))
+        AudioModePicker(model)
         Spacer(Modifier.height(Tokens.Space.l))
         SectionLabel(stringResource(R.string.audio_processing))
         FxToggle(stringResource(R.string.audio_ns), model.audioFx.ns) { model.setAudioFx(ns = it) }

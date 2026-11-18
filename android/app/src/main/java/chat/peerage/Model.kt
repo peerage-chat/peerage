@@ -64,10 +64,9 @@ class AppModel private constructor() {
         /** Докачка заказана, но чанки ещё не пошли (пир офлайн / идёт манифест). */
         const val DOWNLOAD_INIT = -1f
 
-        /** Пределы битрейта голоса (Opus, бит/с): ниже речь рассыпается, выше — уже
-         *  музыка, которой звонку не нужно. Один источник для ползунков и подписи. */
+        /** Нижний предел битрейта звука в «Авто», бит/с — тот же, что `MIN_AUDIO_BITRATE`
+         *  движка: ниже речь рассыпается. Только для подписи режимов. */
         const val AUDIO_BITRATE_MIN = 16_000
-        const val AUDIO_BITRATE_MAX = 48_000
 
         /** Шаг вариантов битрейта видео: 0,5 Мбит/с — мельче разница не видна. */
         /** Оценка входящего трафика звонка на участника, МБ/мин (call-ui.md): видео
@@ -845,10 +844,8 @@ class AppModel private constructor() {
     var audioFx by mutableStateOf(AudioFx())
         private set
 
-    /** Качество: авто (адаптивно) либо ручной Opus-битрейт 16–48 кбит. */
-    var audioQualityAuto by mutableStateOf(true)
-        private set
-    var audioBitrate by mutableStateOf(24_000)
+    /** Качество звука: Авто / Голос / Аудио ([AudioMode]). */
+    var audioMode by mutableStateOf(AudioMode.AUTO)
         private set
 
     /** Живой уровень микрофона 0..1 — индикатор на экране настроек. */
@@ -885,10 +882,9 @@ class AppModel private constructor() {
         saveAudioPrefs() // эффекты привязаны к audioSessionId → применяются на следующем старте
     }
 
-    fun setAudioQuality(auto: Boolean, bitrate: Int = audioBitrate) {
-        audioQualityAuto = auto
-        audioBitrate = bitrate.coerceIn(AUDIO_BITRATE_MIN, AUDIO_BITRATE_MAX)
-        saveAudioPrefs() // TODO: Opus bitrate/mode на сессию — нужен JNI-сеттер (+ adaptive)
+    fun pickAudioMode(mode: AudioMode) {
+        audioMode = mode
+        saveAudioPrefs() // битрейт — на лету через applyAudioSettings, режим Opus — со следующего звонка
     }
 
     @Suppress("DEPRECATION")
@@ -960,8 +956,7 @@ class AppModel private constructor() {
             ?.putBoolean("fx_ns", audioFx.ns)
             ?.putBoolean("fx_aec", audioFx.aec)
             ?.putBoolean("fx_agc", audioFx.agc)
-            ?.putBoolean("aq_auto", audioQualityAuto)
-            ?.putInt("aq_bitrate", audioBitrate)
+            ?.putString("aq_mode", audioMode.name)
             ?.apply()
     }
 
@@ -970,8 +965,7 @@ class AppModel private constructor() {
         audioOut = p.getString("audio_out", "builtin") ?: "builtin"
         audioIn = p.getString("audio_in", "builtin") ?: "builtin"
         audioFx = AudioFx(p.getBoolean("fx_ns", true), p.getBoolean("fx_aec", true), p.getBoolean("fx_agc", true))
-        audioQualityAuto = p.getBoolean("aq_auto", true)
-        audioBitrate = p.getInt("aq_bitrate", 24_000)
+        audioMode = AudioMode.entries.firstOrNull { it.name == p.getString("aq_mode", null) } ?: AudioMode.AUTO
     }
 
     var appContext: android.content.Context? = null
@@ -2374,10 +2368,10 @@ class AppModel private constructor() {
     /** Создать аудио-сессию комнаты (Opus-битрейт/режим + fx + устройство из настроек).
      *  Используется при старте звонка и при «Применить» в настройках звука (рестарт). */
     private fun startRoomAudioSession(ctx: android.content.Context, gid: String) {
-        // битрейт/режим из настроек звука (audioBitrate: дефолт 24к=голос при «Авто»);
-        // music = Opus Audio-режим на верхней половине диапазона.
+        // Потолок битрейта и режим Opus — из «Качества звука»; ниже потолка движок
+        // держит битрейт по оценке канала.
         val params = decodeOrNull<CallParamsDto>(
-            Native.roomAudioStart(sessionPtr, gid, audioBitrate, audioBitrate >= 32_000),
+            Native.roomAudioStart(sessionPtr, gid, audioMode.bitrate, audioMode.music),
         )
         val sr = params?.sampleRate?.takeIf { it > 0 } ?: 48_000
         val ch = params?.channels?.takeIf { it > 0 } ?: 1
@@ -2414,7 +2408,7 @@ class AppModel private constructor() {
         roomAudio?.applyFx(audioFx) // обработка — на существующих эффектах
         roomAudio?.setInputDevice(selectedInputDevice()) // вход — preferredDevice
         if (currentRoom != null) {
-            ops.execute { Native.roomSetAudioBitrate(sessionPtr, audioBitrate) }
+            ops.execute { Native.roomSetAudioBitrate(sessionPtr, audioMode.bitrate) }
         }
     }
 

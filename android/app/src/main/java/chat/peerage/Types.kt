@@ -13,6 +13,17 @@ import androidx.compose.runtime.setValue
  * мимо звонков и резервных копий.
  */
 
+/**
+ * Режим звука звонка (`settings/Media`): Авто — по каналу до 128 кбит, Голос — до 32,
+ * Аудио — 128 в музыкальном режиме Opus. Предел канала движок накладывает сам
+ * (`audio_bitrate` в room_call.rs): здесь только потолок и режим кодека.
+ */
+enum class AudioMode(val bitrate: Int, val music: Boolean) {
+    AUTO(128_000, false),
+    VOICE(32_000, false),
+    MUSIC(128_000, true),
+}
+
 data class VideoQuality(
     val label: String,
     val width: Int,

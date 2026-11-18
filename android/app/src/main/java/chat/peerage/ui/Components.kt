@@ -17,6 +17,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -428,6 +430,37 @@ internal fun Modifier.switchRow(checked: Boolean, enabled: Boolean = true, onCha
     toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
 
 /**
+ * Сегменты: один из 2–3 вариантов (`settings/Media` — камера, качество звука). Подложка
+ * raised, выбранный — accentMuted; озвучиваются как группа переключателей.
+ */
+@Composable
+internal fun Segmented(options: List<String>, selected: Int, modifier: Modifier = Modifier, onSelect: (Int) -> Unit) {
+    Row(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.segment)).background(Tokens.Colors.raised)
+            .padding(Tokens.Size.segmentGap).selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Size.segmentGap),
+    ) {
+        options.forEachIndexed { i, text ->
+            val on = i == selected
+            Box(
+                Modifier.weight(1f).height(Tokens.Size.segment).clip(RoundedCornerShape(Tokens.Radius.segmentItem))
+                    .background(if (on) Tokens.Colors.accentMuted else Color.Transparent)
+                    .selectable(on, role = Role.RadioButton) { onSelect(i) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text,
+                    color = if (on) Tokens.Colors.accentSoft else Tokens.Colors.segmentIdle,
+                    fontSize = Tokens.Font.option,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
  * Пилюля выбора варианта (разрешение, fps, устройство звука, «авто»). Одна на все
  * экраны: в звонке и в настройках варианты выглядят одинаково — так и задумано
  * (call-ui.md, «Настройки по умолчанию»: те же элементы, что во время звонка).
@@ -720,7 +753,10 @@ internal fun SendButton(onClick: () -> Unit) {
 internal fun appVersion(): String {
     val ctx = LocalContext.current
     return remember {
-        runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull().orEmpty()
+        runCatching {
+            val p = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+            "${p.versionName} (${androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(p)})"
+        }.getOrNull().orEmpty()
     }
 }
 

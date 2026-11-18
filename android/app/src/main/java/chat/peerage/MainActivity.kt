@@ -281,6 +281,7 @@ internal enum class Screen {
     SettingsSecurity,
     SettingsPrivacy,
     SettingsMedia,
+    VideoQuality,
     SettingsNotifications,
     SettingsAbout,
 }
@@ -471,8 +472,9 @@ private fun CompactShell(model: AppModel) {
                                 Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = goBack)
                                 Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = goBack)
                                 Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = goBack)
+                                Screen.VideoQuality -> TopBar(stringResource(R.string.media_video_quality), onBack = goBack)
                                 Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = goBack)
-                                Screen.SettingsAbout -> TopBar(stringResource(R.string.settings_cat_about), onBack = goBack)
+                                Screen.SettingsAbout -> {}
                                 Screen.Scanner -> TopBar(stringResource(R.string.title_verify_qr), onBack = goBack)
                                 Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
                                     BarIcon(TablerIcons.Search, stringResource(R.string.cd_search)) {
@@ -700,9 +702,10 @@ private fun CompactShell(model: AppModel) {
                                         vaultLevel = VaultKeyManager.level(java.io.File(dataDir)),
                                     )
                                     Screen.SettingsPrivacy -> SettingsPrivacyScreen(model)
-                                    Screen.SettingsMedia -> SettingsMediaScreen(model)
+                                    Screen.SettingsMedia -> SettingsMediaScreen(model) { screen = Screen.VideoQuality }
+                                    Screen.VideoQuality -> SettingsVideoQualityScreen(model)
                                     Screen.SettingsNotifications -> SettingsNotificationsScreen(model)
-                                    Screen.SettingsAbout -> SettingsAboutScreen()
+                                    Screen.SettingsAbout -> SettingsAboutScreen(onBack = goBack)
                                     Screen.ContactList -> ContactListScreen(
                                         model,
                                         query = contactQuery,
