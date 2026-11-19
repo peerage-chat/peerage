@@ -206,12 +206,24 @@ later):**
 - **M3.** Epoch buffer for groups.
 - **M4.** Volunteers: blinded tokens, ADR-008 receipts, the Peerage peer network.
 
-## Open questions (owner)
+## Decisions taken (2026-11-19)
 
-1. **Is the online-status switch mutual** (hide own status, then do not see others'), like
-   read receipts in 7c?
-2. **Default mail lifetime** and whether a contact has to agree before becoming a mailbox.
-3. **How the "in the mailbox" state is shown.**
+- **The online-status switch is not mutual.** Seeing a contact online is local information,
+  and mutuality would protect nothing.
+- **Everyone is a leech by default.**
+  - Holding mail for others is part of peer mode, which is switched on separately; the
+    mailbox role comes with it.
+  - A device in peer mode serves as a mailbox for its own contacts (stage 1), and for
+    strangers only in stage 2.
+  - Defaults: mail is kept 14 days (as peer mode was planned); 50 MiB per served contact and
+    500 MiB in total. Everything is adjustable.
+- **"Online" can be switched off only when at least one mailbox exists** (a contact in peer
+  mode or one's own device). Otherwise incoming messages would have no way to arrive.
+
+## Open questions
+
+1. **How the "in the mailbox" state is shown** — decided in `app-ui.md` when it is
+   implemented.
 
 ## How to check the decision is followed
 

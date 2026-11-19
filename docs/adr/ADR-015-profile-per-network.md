@@ -239,7 +239,7 @@ Measures, driven by the "hidden" property:
   - in the database (`contacts.transport_key` holds the address with its kind);
   - in the contact code v2 (TLV);
   - in the backup header.
-- **F4.** The `profiles/<id>/` layout, plus `kind` and `hidden` in `profile.json`.
+- **F4.** The `profiles/<slot>/` layout with opaque slot names and no global profile list (see the open question below), plus `kind` and `hidden` in `profile.json`, which lives inside the container.
 - **F5.** The rule for deriving profile n from the phrase (spec only).
 
 **Refactoring before the first new adapter (not format; it is cheaper now):**
@@ -253,17 +253,51 @@ Measures, driven by the "hidden" property:
 - **P1.** Several profiles, all on Yggdrasil, one active at a time. This tests the whole
   profile machinery without a new network, and is useful on its own (work and personal).
 - **P2.** Carriers: wss and proxy for Yggdrasil (`censorship-transport.md`).
-- **P3 / P4.** Tor and I2P, both required. The owner picks the order.
+- **P3.** Tor (arti).
+- **P4.** I2P (required).
 - **P5.** All profiles receive at the same time.
 - **P6.** The direct path for calls with NAT traversal (needs the Peerage peer network from
   ADR-016).
 
-## Open questions (owner)
+## Decisions taken (2026-11-19)
 
-1. **What a locked, seized phone shows.** Options: the list of profiles, or nothing — each
-   profile opens only with its own password, and the list stores only opaque ids.
-2. **One phrase per profile, or one for all.** The recommended default is one per profile.
-3. **Order of Tor and I2P.**
+- **One phrase per profile** (§3): profile n is not derived from another profile's words by
+  default. The derivation rule stays recorded for a possible opt-in later.
+- **Tor first, then I2P** (P3 → P4): arti is Rust and embeds directly; I2P is still required.
+
+## Open question: what a locked, seized phone shows
+
+The owner is choosing between the list of profiles and nothing. The proposed design for
+"nothing":
+
+- **No list on disk.** Each profile is a sealed container `profiles/<slot>/`, where
+  `slot = H(k)` and `k = Argon2id(password, device salt)`. Everything that names the profile
+  is inside the container under its vault key: `profile.json`, database, blobs, vault meta.
+- **One neutral password field at start.** A password opens exactly one container, with one
+  KDF run per attempt. A wrong password and a nonexistent profile look the same.
+- **The main profile may keep Keystore and biometric unlock** (the vault levels that exist
+  today, `VaultKeyManager`). Other profiles use the `PASSWORD` level only: biometrics and the
+  device PIN belong to the device, not to a profile.
+- **What else must not name a profile:**
+  - notification channels (generic ones, shared by all profiles);
+  - notification and foreground-service texts (no profile name);
+  - Keystore aliases (opaque);
+  - the saved log (current profile only);
+  - launcher shortcuts (main profile only);
+  - the recents screen (`FLAG_SECURE`, already in place).
+- **What still leaks:**
+  - the number and size of container directories on a filesystem image;
+  - the app's storage size in system settings.
+
+  Decoy slots (a fixed number of containers filled with random data in size buckets) close
+  this and can be added later **without a format change**, because slot names are opaque
+  from the start.
+- **Duress comes for free.** Under pressure, one gives the password of a harmless profile.
+- **Limits:**
+  - while a profile receives in the background (stage 2), its key is in memory;
+  - a forgotten password cannot be hinted, by design; only that profile's 24 words restore it.
+
+The format consequence is part of F4: opaque slot names and no global list.
 
 ## How to check the decision is followed
 
