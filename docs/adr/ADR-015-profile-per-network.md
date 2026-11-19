@@ -206,7 +206,7 @@ Measures, driven by the "hidden" property:
   - the vault.
 
   Every profile has its own vault key. The question of what a seized, locked phone shows is
-  open (below).
+  decided: nothing is visible (below).
 
 ## Networks one by one
 
@@ -239,7 +239,7 @@ Measures, driven by the "hidden" property:
   - in the database (`contacts.transport_key` holds the address with its kind);
   - in the contact code v2 (TLV);
   - in the backup header.
-- **F4.** The `profiles/<slot>/` layout with opaque slot names and no global profile list (see the open question below), plus `kind` and `hidden` in `profile.json`, which lives inside the container.
+- **F4.** The `profiles/<slot>/` layout with opaque slot names and no global profile list (see "a locked, seized phone shows nothing"), plus `kind` and `hidden` in `profile.json`, which lives inside the container.
 - **F5.** The rule for deriving profile n from the phrase (spec only).
 
 **Refactoring before the first new adapter (not format; it is cheaper now):**
@@ -265,10 +265,9 @@ Measures, driven by the "hidden" property:
   default. The derivation rule stays recorded for a possible opt-in later.
 - **Tor first, then I2P** (P3 → P4): arti is Rust and embeds directly; I2P is still required.
 
-## Open question: what a locked, seized phone shows
+## Decided: a locked, seized phone shows nothing
 
-The owner is choosing between the list of profiles and nothing. The proposed design for
-"nothing":
+Decided by the owner 2026-11-19 (the alternative was a visible list of profiles). Design:
 
 - **No list on disk.** Each profile is a sealed container `profiles/<slot>/`, where
   `slot = H(k)` and `k = Argon2id(password, device salt)`. Everything that names the profile
