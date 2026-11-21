@@ -112,9 +112,9 @@
         <item quantity="one">%d file</item>
         <item quantity="other">%d files</item>
     </plurals>
-    <string name="storage_attachments_hint">Photos, files and voice messages you sent or received. Clearing them does not delete messages — the files can be downloaded from the sender again.</string>
+    <string name="storage_attachments_hint">Photos, files and voice messages on this phone. Clearing keeps the messages; files can be downloaded from the sender again.</string>
     <string name="storage_clear_attachments">Clear attachments</string>
-    <string name="storage_clear_confirm">Delete downloaded attachments? Messages stay; files can be downloaded again while the sender still has them.</string>
+    <string name="storage_clear_confirm">Delete downloaded attachments? Messages stay. Files can be downloaded again while the sender still has them.</string>
     <string name="storage_clear_ok">Clear</string>
     <string name="common_cancel">Cancel</string>
     <string name="menu_settings">Settings</string>
@@ -209,10 +209,8 @@
     <string name="search_clear">Clear</string>
     <string name="search_refine">Refine</string>
     <string name="search_from_member">From member</string>
-    <string name="search_from_member_sub">Only one person\'s messages</string>
     <string name="search_go_date">Go to date</string>
-    <string name="search_go_date_sub">Chat calendar</string>
-    <string name="search_local_note">Search runs over message text stored on this device. The query is not sent anywhere.</string>
+    <string name="search_local_note">Searches messages on this device. The query is not sent anywhere.</string>
     <string name="search_count">%1$d of %2$d</string>
     <plurals name="search_found">
         <item quantity="one">%1$d message</item>
@@ -229,7 +227,6 @@
     <string name="search_all_members">Search all members</string>
     <string name="date_prev">Previous month</string>
     <string name="date_next">Next month</string>
-    <string name="date_hint">Dim days have no messages. Tapping a day opens its first message.</string>
     <string name="date_first">To the first message</string>
     <string name="date_last">To the latest</string>
     <string name="jump_down">Down</string>
@@ -267,7 +264,7 @@
     <string name="calls_empty_title">No calls yet</string>
     <string name="calls_empty_hint">Call history will appear here</string>
     <string name="saved_empty_title">Saved is empty</string>
-    <string name="saved_empty_hint">Messages you save will appear here</string>
+    <string name="saved_empty_hint">Saved messages appear here</string>
 
     <!-- ── Network screen ──────────────────────────────────────────────── -->
     <string name="net_metric_peers">Peers</string>
@@ -367,7 +364,7 @@
     <string name="onb_key_sub">The identity is a key on this phone. It can be restored on a new device only with the 24 words.</string>
     <string name="onb_show_phrase">Show 24 words</string>
     <string name="onb_skip_remind">Later</string>
-    <string name="onb_key_warn">No server keeps access. Without the 24 words, a lost phone is a lost identity.</string>
+    <string name="onb_key_warn">No server keeps access: without the 24 words, the identity is lost with the phone.</string>
     <string name="onb_phrase_title">24 words</string>
     <string name="onb_phrase_sub">In order.</string>
     <string name="onb_wrote_down">Words written down</string>
@@ -496,7 +493,7 @@
     <string name="storage_kind_file">Files</string>
     <string name="title_outbox">Send queue</string>
     <string name="folders_title">Folders</string>
-    <string name="folders_hint">A folder is a VIEW, not a box: one chat can appear in several at once.</string>
+    <string name="folders_hint">A chat can be in several folders. Deleting a folder leaves the messages intact.</string>
     <string name="folders_builtin">Built-in</string>
     <string name="folders_mine">Mine</string>
     <string name="folder_name_and_icon">Name and icon</string>
@@ -645,7 +642,7 @@
 
     <string name="backup_title">Data backup</string>
     <string name="backup_what_title">What this is</string>
-    <string name="backup_what_text">A copy of your messages, not of your identity. The key (24 words) is stored separately: the key restores who the network sees you as, this copy restores what you read.</string>
+    <string name="backup_what_text">The identity is not part of the backup: the 24 words restore it.</string>
     <string name="backup_contents">What to include</string>
     <string name="backup_part_contacts">Contacts</string>
     <string name="backup_part_messages">Messages</string>
@@ -679,9 +676,8 @@
     <string name="backup_pw_text">The file will leave the phone — to a cloud, a card, another computer. This device\'s key is not available there, so the archive is locked with a password and opens anywhere.</string>
     <string name="backup_pw_label">Backup password</string>
     <string name="backup_pw_repeat">Again</string>
-    <string name="backup_pw_no_recovery">A forgotten password cannot be recovered: the archive becomes a dead file. That is by design — a way in for you is a way in for anyone who finds the file.</string>
+    <string name="backup_pw_no_recovery">A forgotten password cannot be recovered: the 24 words will not open such a backup either.</string>
     <string name="backup_create">Create backup</string>
-    <string name="backup_where_hint">The system will ask where to save the file.</string>
     <string name="backup_working">Building the backup</string>
     <string name="backup_working_restore">Restoring</string>
     <string name="backup_working_hint">Keep this screen open. Checking the password takes about a second — deliberately: it costs the same to anyone trying to guess it.</string>
@@ -705,7 +701,7 @@
     <string name="transfer_restore">Restore messages</string>
     <string name="transfer_working">Restoring</string>
     <string name="transfer_done">Messages restored</string>
-    <string name="transfer_done_caption">“Verified” marks are not part of the backup: contacts are verified again. Groups are readable; writing to them needs a new invitation.</string>
+    <string name="transfer_done_caption">“Verified” marks are not part of the backup: contacts are verified again after restoring. Groups are readable; writing to them needs a new invitation.</string>
     <string name="restored_contacts">Contacts</string>
     <string name="restored_messages">Messages</string>
     <string name="restored_groups">Group messages</string>
@@ -717,19 +713,19 @@
     <string name="backup_lock_password">Also protect with a password</string>
     <string name="backup_lock_password_sub">Without the password the file does not open even with the 24 words.</string>
     <string name="backup_lock_no_recovery">A forgotten password cannot be recovered: such a backup does not open even with the 24 words.</string>
-    <string name="backup_write_failed">Couldn\'t write the file where you chose. Try another place.</string>
+    <string name="backup_write_failed">Couldn\'t write the file to the chosen place.</string>
     <string name="backup_failed">Did not work</string>
     <string name="backup_done_export">Backup ready</string>
     <string name="backup_done_restore">Restored</string>
     <string name="backup_done_counts">Contacts: %1$d · messages: %2$d · notes: %3$d · attachments: %4$d</string>
     <string name="backup_after_groups_title">Groups need to be restored by hand</string>
-    <string name="backup_after_groups_text">Ask the members to invite you again: group history stays visible, but new messages arrive only after an invite.</string>
+    <string name="backup_after_groups_text">Writing to groups needs a new invitation from members. Group history stays visible.</string>
     <string name="storage_backup_open">Create or restore a data backup</string>
 
     <string name="storage_backup_done">Data backup from %1$s</string>
-    <string name="storage_backup_done_hint">The file is in your hands — keep it away from the phone. The fresher the backup, the less you lose.</string>
+    <string name="storage_backup_done_hint">A backup left on the phone is lost with it.</string>
 
-    <string name="backup_verify_again">Contact verification is not restored: a file can be handed to you, and «verified» means the fingerprint was checked in person. Verify again after restoring.</string>
+    <string name="backup_verify_again">“Verified” marks are not restored: contacts are verified again after restoring.</string>
 
     <string name="chat_copy">Copy</string>
     <string name="chat_reply">Reply</string>
@@ -750,7 +746,7 @@
         <item quantity="one">%d message</item>
         <item quantity="other">%d messages</item>
     </plurals>
-    <string name="group_archived">Archive from a backup · you are not in this group</string>
+    <string name="group_archived">Archive from a backup · not a group member</string>
     <string name="forward_action">Forward</string>
     <string name="forward_title">Forward (%1$d) to</string>
     <string name="forward_from">Forwarded from %1$s</string>
@@ -778,12 +774,10 @@
     <string name="chat_menu_unpin">Unpin</string>
     <string name="select_clear">Clear selection</string>
     <string name="select_count">Selected: %1$d</string>
-    <string name="select_hint">Tap a message to add it to the selection</string>
     <string name="act_save">Add to Saved</string>
     <string name="act_select">Select</string>
     <string name="react_title">Reactions</string>
     <string name="react_all">All %1$d</string>
-    <string name="react_hint">Tap your own reaction to remove it</string>
     <string name="react_with">React with %1$s</string>
     <string name="react_more">Other reaction</string>
     <plurals name="react_chip">
@@ -827,7 +821,7 @@
     <string name="media_video_quality">Video quality</string>
     <string name="media_video_auto">Auto · up to %1$s %2$d</string>
     <string name="media_video_fixed">%1$s %2$d · %3$s Mbps</string>
-    <string name="audio_mode_caption">Auto — %1$d–%2$d kbps by channel · Voice — up to %3$d · Audio — %4$d (music)</string>
+    <string name="audio_mode_caption">Auto: %1$d–%2$d kbps by link. Voice: up to %3$d. Audio: %4$d, for music.</string>
     <string name="media_defaults_hint">Applies from the next call.</string>
     <string name="call_video_settings">Video settings</string>
     <string name="settings_cat_notifications">Notifications</string>
@@ -940,7 +934,7 @@
     <string name="privacy_not_sent_sub">Not in the app and not on the network</string>
     <string name="privacy_seen">Contacts see</string>
     <string name="privacy_online">Online status</string>
-    <string name="privacy_online_sub">Follows from the keepalive that delivery relies on</string>
+    <string name="privacy_online_sub">Needed for delivery, cannot be turned off</string>
     <string name="privacy_profile">Name and avatar</string>
     <string name="privacy_profile_sub">Contacts only, never the network</string>
     <string name="blocked_title">Blocked</string>
@@ -998,10 +992,10 @@
     <string name="group_members_count">Members · %1$d</string>
     <string name="group_creator_admin">creator — admin</string>
     <string name="group_gets_invite">gets an invite</string>
-    <string name="group_create_caption">Members get an invite and decide whether to join. Only the admin removes members and pins messages; any member can invite.</string>
+    <string name="group_create_caption">Members get an invite. Only the admin removes members and pins messages; any member can invite.</string>
     <string name="group_in_group">already in the group</string>
     <string name="group_invite_sent">invite sent</string>
-    <string name="group_invite_caption">Invites go to contacts only. Each gets a Join / Decline card and enters the group after accepting.</string>
+    <string name="group_invite_caption">Only contacts can be invited. They join after accepting the invite.</string>
     <string name="group_invite_btn">Invite</string>
     <string name="group_invite_btn_n">Invite · %1$d</string>
     <string name="common_remove">Remove</string>
@@ -1020,7 +1014,7 @@
     <string name="group_transfer_text">%1$s will remove members, pin messages and change the name and photo. This phone becomes a regular member.</string>
     <string name="group_transfer_ok">Transfer</string>
     <string name="group_leave_admin_title">Leave “%1$s”?</string>
-    <string name="group_leave_admin_text">This phone is the group admin. Without an admin, nobody can remove members or pin messages, and members who leave stay listed: nobody can take them off the group. Rights can be transferred before leaving.</string>
+    <string name="group_leave_admin_text">This phone is the group admin. Without an admin, nobody can remove members or pin messages.</string>
     <string name="group_leave_transfer">Transfer rights and leave</string>
     <string name="group_leave_no_transfer">Leave without transfer</string>
     <string name="group_sys_photo">New group photo</string>
@@ -1031,7 +1025,7 @@
     <string name="verify_how_set">%1$s, by the set</string>
     <string name="verify_pair_title">%1$s and this phone</string>
     <string name="verify_pair_same">same on both</string>
-    <string name="verify_pair_caption">%1$s sees the same set on their verification screen. If it matches, the keys are genuine. It can also be checked by voice on a video call: read the words aloud.</string>
+    <string name="verify_pair_caption">The same set is shown on the verification screen of %1$s. A match confirms the keys. It can also be checked by voice on a video call.</string>
     <string name="verify_scan">Scan code</string>
     <string name="verify_my_code">My code</string>
     <string name="verify_mark_set">The set matches — mark verified</string>
@@ -1050,7 +1044,6 @@
     <string name="add_paste">Paste code</string>
     <string name="add_paste_sub">If the code was sent in a message</string>
     <string name="add_show_code">Show my code</string>
-    <string name="add_show_code_sub">To scan from another phone</string>
     <string name="add_caption">Share the code in person or through any messenger: it holds the key, the network address and the name.</string>
     <string name="add_err_invalid">Not a %1$s code</string>
     <string name="add_err_invalid_sub">The QR was read, but it has no key. Links and other codes do not open here.</string>
@@ -1062,7 +1055,7 @@
     <string name="add_key_start">key %1$s…</string>
     <string name="add_greeting">Greeting</string>
     <string name="add_greeting_hint">Who this is and how you know each other</string>
-    <string name="add_greeting_caption">Goes out as a contact request with this profile’s name; the photo follows after acceptance. %1$s decides whether to accept.</string>
+    <string name="add_greeting_caption">Goes out as a contact request with this profile’s name; the photo follows after acceptance.</string>
     <string name="add_local_name">Name on this phone</string>
     <string name="add_local_name_caption">Optional. Visible only on this phone.</string>
     <string name="add_send">Send request</string>
@@ -1079,7 +1072,7 @@
     <string name="contacts_requests_strip">Contact requests · %1$d</string>
     <!-- Свой профиль (4.3, макет people/MeEdit) -->
     <string name="me_edit_name">Name</string>
-    <string name="me_edit_caption">The name and photo go out to contacts. Each contact can label this phone differently on their side and sees that label instead.</string>
+    <string name="me_edit_caption">The name and photo go out to contacts. A contact can give this phone its own label, which replaces the sent name.</string>
     <string name="me_remove_photo">Remove photo</string>
     <string name="net_status_away">Offline · connections closed</string>
     <string name="net_go_online">Go online</string>

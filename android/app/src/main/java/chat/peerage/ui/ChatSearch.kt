@@ -267,11 +267,11 @@ private fun SearchStart(model: AppModel, s: ChatSearch, onMedia: (MediaTab) -> U
         SectionTitle(stringResource(R.string.search_refine))
         CardSection {
             if (s.chat.group) {
-                OptionRow(TablerIcons.User, stringResource(R.string.search_from_member), stringResource(R.string.search_from_member_sub), divider = false) {
+                OptionRow(TablerIcons.User, stringResource(R.string.search_from_member), null, divider = false) {
                     s.sheet = SearchSheet.Member
                 }
             }
-            OptionRow(TablerIcons.Calendar, stringResource(R.string.search_go_date), stringResource(R.string.search_go_date_sub), divider = s.chat.group) {
+            OptionRow(TablerIcons.Calendar, stringResource(R.string.search_go_date), null, divider = s.chat.group) {
                 s.sheet = SearchSheet.Date
             }
         }
@@ -635,7 +635,6 @@ private fun DateSheet(model: AppModel, chat: ChatTarget, onClose: () -> Unit, on
             }
         } else {
             DayGrid(year, month, days, today) { day -> onPick(dayStart(year, month, day)) }
-            Text(stringResource(R.string.date_hint), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body, modifier = Modifier.padding(horizontal = Tokens.Space.xs))
         }
         Row(Modifier.padding(top = Tokens.Space.xs), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             SearchPill(stringResource(R.string.date_first), bg = Tokens.Colors.raised, modifier = Modifier.weight(1f)) { onPick(0) }

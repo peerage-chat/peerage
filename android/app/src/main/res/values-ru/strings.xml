@@ -108,9 +108,9 @@
         <item quantity="many">%d файлов</item>
         <item quantity="other">%d файла</item>
     </plurals>
-    <string name="storage_attachments_hint">Фото, файлы и голосовые, которые вы отправили или получили. Очистка не удаляет сообщения — файлы можно скачать у отправителя заново.</string>
+    <string name="storage_attachments_hint">Фото, файлы и голосовые на этом телефоне. При очистке сообщения остаются, файлы можно скачать у отправителя заново.</string>
     <string name="storage_clear_attachments">Очистить вложения</string>
-    <string name="storage_clear_confirm">Удалить скачанные вложения? Сообщения останутся; файлы можно будет скачать заново, пока они есть у отправителя.</string>
+    <string name="storage_clear_confirm">Удалить скачанные вложения? Сообщения останутся. Скачать заново можно, пока файлы есть у отправителя.</string>
     <string name="storage_clear_ok">Очистить</string>
     <string name="common_cancel">Отмена</string>
     <string name="menu_settings">Настройки</string>
@@ -207,10 +207,8 @@
     <string name="search_clear">Очистить</string>
     <string name="search_refine">Уточнить</string>
     <string name="search_from_member">От участника</string>
-    <string name="search_from_member_sub">Только сообщения одного человека</string>
     <string name="search_go_date">Перейти к дате</string>
-    <string name="search_go_date_sub">Календарь переписки</string>
-    <string name="search_local_note">Поиск идёт по тексту сообщений, которые хранятся на этом устройстве. Запрос никуда не отправляется.</string>
+    <string name="search_local_note">Поиск по сообщениям на этом устройстве. Запрос никуда не отправляется.</string>
     <string name="search_count">%1$d из %2$d</string>
     <plurals name="search_found">
         <item quantity="one">%1$d сообщение</item>
@@ -229,7 +227,6 @@
     <string name="search_all_members">Искать у всех участников</string>
     <string name="date_prev">Предыдущий месяц</string>
     <string name="date_next">Следующий месяц</string>
-    <string name="date_hint">Тусклые дни — без сообщений. Нажатие на день открывает его первое сообщение.</string>
     <string name="date_first">К первому сообщению</string>
     <string name="date_last">К последнему</string>
     <string name="jump_down">Вниз</string>
@@ -269,7 +266,7 @@
     <string name="calls_empty_title">Пока нет звонков</string>
     <string name="calls_empty_hint">Журнал звонков появится здесь</string>
     <string name="saved_empty_title">Сохранённое пусто</string>
-    <string name="saved_empty_hint">Сообщения, которые вы сохраните, появятся здесь</string>
+    <string name="saved_empty_hint">Здесь появятся сохранённые сообщения</string>
 
     <!-- ── Экран «Сеть» ────────────────────────────────────────────────── -->
     <string name="net_metric_peers">Пиры</string>
@@ -359,7 +356,7 @@
     <string name="onb_bullet_nocontacts">Контакты телефона не читаются</string>
     <string name="onb_bullet_nolocation">Геолокация не запрашивается</string>
     <string name="onb_bullet_noserver">Без центрального сервера</string>
-    <string name="onb_profile_title">Как подписаться</string>
+    <string name="onb_profile_title">Имя и фото</string>
     <string name="onb_profile_sub">Видят контакты и те, кому передан код.</string>
     <string name="onb_done">Готово</string>
     <string name="onb_skip">Пропустить</string>
@@ -369,7 +366,7 @@
     <string name="onb_key_sub">Личность — это ключ на этом телефоне. Вернуть её на новом устройстве можно только по 24 словам.</string>
     <string name="onb_show_phrase">Показать 24 слова</string>
     <string name="onb_skip_remind">Позже</string>
-    <string name="onb_key_warn">Сервера, который хранит доступ, нет. Без 24 слов потерянный телефон — потерянная личность.</string>
+    <string name="onb_key_warn">Сервера с доступом нет: без 24 слов личность теряется вместе с телефоном.</string>
     <string name="onb_phrase_title">24 слова</string>
     <string name="onb_phrase_sub">Записать по порядку.</string>
     <string name="onb_wrote_down">Слова записаны</string>
@@ -514,7 +511,7 @@
     <string name="storage_kind_file">Файлы</string>
     <string name="title_outbox">Очередь отправки</string>
     <string name="folders_title">Папки</string>
-    <string name="folders_hint">Папка — это ВИД, а не коробка: один чат может попадать сразу в несколько.</string>
+    <string name="folders_hint">Чат может входить в несколько папок. Удаление папки переписку не трогает.</string>
     <string name="folders_builtin">Встроенные</string>
     <string name="folders_mine">Мои</string>
     <string name="folder_name_and_icon">Название и значок</string>
@@ -665,7 +662,7 @@
 
     <string name="backup_title">Копия данных</string>
     <string name="backup_what_title">Что это</string>
-    <string name="backup_what_text">Копия переписки, а не личности. Ключ (24 слова) хранится отдельно: ключ возвращает, кем вас видит сеть, копия — что вы читали.</string>
+    <string name="backup_what_text">Личность в копию не входит: её возвращают 24 слова.</string>
     <string name="backup_contents">Что положить в копию</string>
     <string name="backup_part_contacts">Контакты</string>
     <string name="backup_part_messages">Переписка</string>
@@ -707,9 +704,8 @@
     <string name="backup_pw_text">Файл уедет с телефона — в облако, на карту, на чужой компьютер. Ключ этого устройства там недоступен, поэтому копия закрывается паролем и открывается где угодно.</string>
     <string name="backup_pw_label">Пароль копии</string>
     <string name="backup_pw_repeat">Ещё раз</string>
-    <string name="backup_pw_no_recovery">Забытый пароль не восстанавливается: копия станет мёртвым файлом. Так и задумано — лазейка для вас была бы лазейкой для любого, кто найдёт файл.</string>
+    <string name="backup_pw_no_recovery">Забытый пароль не восстанавливается: такую копию не откроют и 24 слова.</string>
     <string name="backup_create">Создать копию</string>
-    <string name="backup_where_hint">Дальше система спросит, куда сохранить файл.</string>
     <string name="backup_working">Собираем копию</string>
     <string name="backup_working_restore">Восстанавливаем</string>
     <string name="backup_working_hint">Не закрывайте экран. Проверка пароля занимает около секунды — намеренно: столько же она займёт у того, кто станет перебирать.</string>
@@ -733,7 +729,7 @@
     <string name="transfer_restore">Восстановить переписку</string>
     <string name="transfer_working">Восстановление</string>
     <string name="transfer_done">Переписка восстановлена</string>
-    <string name="transfer_done_caption">Отметки «сверен» в копию не входят: контакты сверяются заново. Группы читаются; писать в них — после нового приглашения.</string>
+    <string name="transfer_done_caption">Отметки «сверен» в копию не входят: после восстановления контакты сверяются заново. Группы читаются, писать в них — после нового приглашения.</string>
     <string name="restored_contacts">Контакты</string>
     <string name="restored_messages">Сообщения</string>
     <string name="restored_groups">Групповые</string>
@@ -745,19 +741,19 @@
     <string name="backup_lock_password">Дополнительно закрыть паролем</string>
     <string name="backup_lock_password_sub">Без пароля файл не откроют и с 24 словами.</string>
     <string name="backup_lock_no_recovery">Забытый пароль не восстанавливается: такую копию не откроют и 24 слова.</string>
-    <string name="backup_write_failed">Не удалось записать файл туда, куда вы выбрали. Попробуйте другое место.</string>
+    <string name="backup_write_failed">Не удалось записать файл в выбранное место.</string>
     <string name="backup_failed">Не получилось</string>
     <string name="backup_done_export">Копия готова</string>
     <string name="backup_done_restore">Восстановлено</string>
     <string name="backup_done_counts">Контакты: %1$d · сообщения: %2$d · заметки: %3$d · вложения: %4$d</string>
     <string name="backup_after_groups_title">Группы придётся вернуть вручную</string>
-    <string name="backup_after_groups_text">Попросите участников пригласить вас заново: переписка групп останется видна, но новые сообщения придут только после приглашения.</string>
+    <string name="backup_after_groups_text">Писать в группы можно после нового приглашения от участников. Переписка групп остаётся видна.</string>
     <string name="storage_backup_open">Сделать или восстановить копию данных</string>
 
     <string name="storage_backup_done">Копия данных от %1$s</string>
-    <string name="storage_backup_done_hint">Файл у вас на руках — держите его отдельно от телефона. Чем свежее копия, тем меньше потеряется.</string>
+    <string name="storage_backup_done_hint">Копия, оставленная на телефоне, теряется вместе с ним.</string>
 
-    <string name="backup_verify_again">Верификация контактов не переносится: файл могли подсунуть, а «сверено» означает, что отпечаток сверили вживую. После восстановления сверьте заново.</string>
+    <string name="backup_verify_again">Отметки «сверен» не переносятся: после восстановления контакты сверяются заново.</string>
 
     <string name="chat_copy">Копировать</string>
     <string name="chat_reply">Ответить</string>
@@ -780,7 +776,7 @@
         <item quantity="many">%d сообщений</item>
         <item quantity="other">%d сообщения</item>
     </plurals>
-    <string name="group_archived">Архив из копии · вы не состоите в этой группе</string>
+    <string name="group_archived">Архив из копии · нет членства в группе</string>
     <string name="forward_action">Переслать</string>
     <string name="forward_title">Переслать (%1$d) в чат</string>
     <string name="forward_from">Переслано от %1$s</string>
@@ -808,12 +804,10 @@
     <string name="chat_menu_unpin">Открепить</string>
     <string name="select_clear">Снять выбор</string>
     <string name="select_count">Выбрано: %1$d</string>
-    <string name="select_hint">Нажатие на сообщение добавляет его к выбранным</string>
     <string name="act_save">В «Сохранённое»</string>
     <string name="act_select">Выбрать</string>
     <string name="react_title">Реакции</string>
     <string name="react_all">Все %1$d</string>
-    <string name="react_hint">Нажатие на свою реакцию снимает её</string>
     <string name="react_with">Реакция %1$s</string>
     <string name="react_more">Другая реакция</string>
     <plurals name="react_chip">
@@ -861,7 +855,7 @@
     <string name="media_video_quality">Качество видео</string>
     <string name="media_video_auto">Авто · до %1$s %2$d</string>
     <string name="media_video_fixed">%1$s %2$d · %3$s Мбит/с</string>
-    <string name="audio_mode_caption">Авто — %1$d–%2$d кбит по каналу · Голос — до %3$d · Аудио — %4$d (музыка)</string>
+    <string name="audio_mode_caption">Авто: %1$d–%2$d кбит/с по каналу. Голос: до %3$d. Аудио: %4$d, для музыки.</string>
     <string name="media_defaults_hint">Действует со следующего звонка.</string>
     <string name="call_video_settings">Настройки видео</string>
     <string name="settings_cat_notifications">Уведомления</string>
@@ -988,7 +982,7 @@
     <string name="privacy_not_sent_sub">Их нет ни в приложении, ни в сети</string>
     <string name="privacy_seen">Видят контакты</string>
     <string name="privacy_online">Статус «в сети»</string>
-    <string name="privacy_online_sub">Следует из keepalive, на котором держится доставка</string>
+    <string name="privacy_online_sub">Нужен для доставки, не отключается</string>
     <string name="privacy_profile">Имя и аватар</string>
     <string name="privacy_profile_sub">Только контактам, не в сеть</string>
     <string name="blocked_title">Заблокированные</string>
@@ -1048,10 +1042,10 @@
     <string name="group_members_count">Участники · %1$d</string>
     <string name="group_creator_admin">создатель — админ</string>
     <string name="group_gets_invite">получит приглашение</string>
-    <string name="group_create_caption">Участники получат приглашение и сами решат, вступать ли. Удалять участников и закреплять сообщения может только админ; приглашать — любой участник.</string>
+    <string name="group_create_caption">Участники получат приглашение. Удалять участников и закреплять сообщения может только админ, приглашать — любой участник.</string>
     <string name="group_in_group">уже в группе</string>
     <string name="group_invite_sent">приглашение отправлено</string>
-    <string name="group_invite_caption">Приглашают только из контактов. Каждый получит карточку «Вступить / Отклонить» и войдёт в группу, когда примет.</string>
+    <string name="group_invite_caption">Приглашаются только контакты. Вход в группу — после принятия приглашения.</string>
     <string name="group_invite_btn">Пригласить</string>
     <string name="group_invite_btn_n">Пригласить · %1$d</string>
     <string name="common_remove">Убрать</string>
@@ -1072,7 +1066,7 @@
     <string name="group_transfer_text">%1$s сможет удалять участников, закреплять сообщения, менять название и фото. Этот телефон станет обычным участником.</string>
     <string name="group_transfer_ok">Передать</string>
     <string name="group_leave_admin_title">Выйти из «%1$s»?</string>
-    <string name="group_leave_admin_text">Этот телефон — админ группы. Без админа в группе никто не сможет удалять участников и закреплять сообщения, а выход участников станет только локальным: снять их с группы будет некому. Права можно передать перед выходом.</string>
+    <string name="group_leave_admin_text">Этот телефон — админ группы. Без админа никто не сможет удалять участников и закреплять сообщения.</string>
     <string name="group_leave_transfer">Передать права и выйти</string>
     <string name="group_leave_no_transfer">Выйти без передачи</string>
     <string name="group_sys_photo">Новое фото группы</string>
@@ -1083,7 +1077,7 @@
     <string name="verify_how_set">%1$s, по набору</string>
     <string name="verify_pair_title">%1$s и этот телефон</string>
     <string name="verify_pair_same">одинаково у обоих</string>
-    <string name="verify_pair_caption">Тот же набор %1$s видит у себя на экране сверки. Совпало — ключи настоящие. Можно сверить голосом по видеосвязи: прочитать слова.</string>
+    <string name="verify_pair_caption">Тот же набор показан на экране сверки контакта %1$s. Совпадение подтверждает ключи. Сверить можно и голосом, по видеосвязи.</string>
     <string name="verify_scan">Сканировать код</string>
     <string name="verify_my_code">Свой код</string>
     <string name="verify_mark_set">Набор совпал — отметить сверенным</string>
@@ -1102,7 +1096,6 @@
     <string name="add_paste">Вставить код</string>
     <string name="add_paste_sub">Если код прислали сообщением</string>
     <string name="add_show_code">Показать свой код</string>
-    <string name="add_show_code_sub">Для сканирования с другого телефона</string>
     <string name="add_caption">Код передаётся лицом к лицу или любым мессенджером: в нём ключ, адрес в сети и имя.</string>
     <string name="add_err_invalid">Это не код %1$s</string>
     <string name="add_err_invalid_sub">QR распознан, но в нём нет ключа. Ссылки и другие коды здесь не открываются.</string>
@@ -1114,7 +1107,7 @@
     <string name="add_key_start">ключ %1$s…</string>
     <string name="add_greeting">Приветствие</string>
     <string name="add_greeting_hint">Кто это и откуда знакомы</string>
-    <string name="add_greeting_caption">Уйдёт запросом в контакты вместе с именем этого профиля; фото — после принятия. %1$s решит, принять ли.</string>
+    <string name="add_greeting_caption">Уйдёт запросом в контакты вместе с именем этого профиля; фото — после принятия.</string>
     <string name="add_local_name">Как подписать у себя</string>
     <string name="add_local_name_caption">Необязательно. Видно только на этом телефоне.</string>
     <string name="add_send">Отправить запрос</string>
@@ -1131,7 +1124,7 @@
     <string name="contacts_requests_strip">Запросы в контакты · %1$d</string>
     <!-- Свой профиль (4.3, макет people/MeEdit) -->
     <string name="me_edit_name">Имя</string>
-    <string name="me_edit_caption">Имя и фото рассылаются контактам. Каждый контакт может подписать этот телефон у себя по-своему — это имя он увидит вместо присланного.</string>
+    <string name="me_edit_caption">Имя и фото рассылаются контактам. Контакт может задать этому телефону своё имя, оно заменит присланное.</string>
     <string name="me_remove_photo">Убрать фото</string>
     <string name="net_status_away">Офлайн · соединения разорваны</string>
     <string name="net_go_online">В сеть</string>

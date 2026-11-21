@@ -107,7 +107,7 @@ private fun ScanCode(
                 sub = stringResource(R.string.add_paste_sub),
                 divider = false,
             ) { clipboard.getText()?.text?.let { take(it, true) } }
-            NavRow(TablerIcons.Qrcode, stringResource(R.string.add_show_code), sub = stringResource(R.string.add_show_code_sub), onClick = onMyCode)
+            NavRow(TablerIcons.Qrcode, stringResource(R.string.add_show_code), onClick = onMyCode)
         }
         Caption(stringResource(R.string.add_caption))
     }
@@ -270,7 +270,7 @@ private fun FoundCode(model: AppModel, code: String, info: CodeInfo, onSent: (St
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Caption(stringResource(R.string.add_greeting_caption, shown))
+            Caption(stringResource(R.string.add_greeting_caption))
             SectionTitle(stringResource(R.string.add_local_name))
             FormInput(localName, shown, Modifier.padding(horizontal = Tokens.Space.panel).fillMaxWidth()) { localName = it }
             Caption(stringResource(R.string.add_local_name_caption))

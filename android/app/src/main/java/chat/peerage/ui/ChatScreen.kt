@@ -762,11 +762,8 @@ internal fun MessageInput(
     onMentionPicked: (String, String) -> Unit = { _, _ -> },
     onSend: () -> Unit,
 ) {
-    // Пока идёт выбор, поле ввода не нужно: на его месте — как выбирать дальше.
-    if (model?.selection?.isNotEmpty() == true) {
-        SelectHint()
-        return
-    }
+    // Пока идёт выбор, поле ввода не нужно: действия — в шапке выбора.
+    if (model?.selection?.isNotEmpty() == true) return
     // Поле держим как TextFieldValue: панели эмодзи нужна ПОЗИЦИЯ КУРСОРА, иначе
     // символ всегда падал бы в конец, даже если человек правит середину строки.
     var field by remember { mutableStateOf(TextFieldValue(value)) }

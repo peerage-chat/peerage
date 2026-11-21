@@ -39,7 +39,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import chat.peerage.AppModel
 import chat.peerage.BubbleActions
 import chat.peerage.MsgRef
@@ -330,17 +329,4 @@ internal fun SelectCheck(on: Boolean) {
     ) {
         if (on) Icon(TablerIcons.Check, null, tint = Tokens.Colors.accentDark, modifier = Modifier.size(Tokens.Size.checkMark))
     }
-}
-
-/** Подсказка на месте поля ввода, пока идёт выбор. */
-@Composable
-internal fun SelectHint() {
-    Text(
-        stringResource(R.string.select_hint),
-        color = Tokens.Colors.tertiary,
-        fontSize = Tokens.Font.body,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth()
-            .padding(start = Tokens.Space.m, end = Tokens.Space.m, top = Tokens.Space.s, bottom = Tokens.Space.l),
-    )
 }

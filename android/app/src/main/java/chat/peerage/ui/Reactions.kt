@@ -278,12 +278,6 @@ private fun ReactionsSheet(model: AppModel, m: Message, chat: ChatTarget, start:
                     }
                 }
             }
-            Text(
-                stringResource(R.string.react_hint),
-                color = Tokens.Colors.tertiary,
-                fontSize = Tokens.Font.body,
-                modifier = Modifier.padding(horizontal = Tokens.Space.xs),
-            )
         }
     }
 }
