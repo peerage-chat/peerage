@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Автоудаление: подтверждение</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.bin{align-self:flex-start;max-width:290px;background:#23242A;color:#E6E7EA;font-size:15px;line-height:21px;padding:7px 12px;border-radius:18px}
+.bout{align-self:flex-end;max-width:290px;background:#1F4657;color:#EAF6FB;font-size:15px;line-height:21px;padding:7px 12px;border-radius:18px}
+.s1{border-bottom-left-radius:6px}.s2{border-top-left-radius:6px}
+.o1{border-bottom-right-radius:6px}.o2{border-top-right-radius:6px}
+.mt{font-size:11px;color:#9AA3AD;margin-left:8px;white-space:nowrap}
+.mto{font-size:11px;color:#9FC6D6;margin-left:8px;white-space:nowrap}
+.lbl{align-self:center;font-size:12px;color:#B8B8C0;background:rgba(255,255,255,0.06);padding:3px 10px;border-radius:10px;margin:4px 0}
+.q{background:rgba(255,255,255,0.1);border-left:3px solid #7FD0EE;border-radius:10px;padding:4px 8px;margin-bottom:5px;font-size:13px;line-height:17px}
+.sel{background:rgba(51,181,229,0.16);margin:0 -14px;padding:2px 14px;display:flex;flex-direction:column}
+.row{margin:0 -14px;padding:2px 14px;display:flex;flex-direction:column}
+.ck{position:absolute;left:12px;top:50%;margin-top:-11px;width:22px;height:22px;border-radius:50%;box-sizing:border-box;border:1.5px solid #6B6C74}
+.ck.on{border:none;background:#33B5E5;display:flex;align-items:center;justify-content:center}
+.cmp{display:flex;align-items:flex-end;gap:8px;padding:8px 12px 16px}
+.fld{flex:1;min-height:46px;border-radius:16px;background:#1C1D22;display:flex;align-items:center;gap:10px;padding:0 12px;box-sizing:border-box}
+.ph{flex:1;color:#8E8E98;font-size:15px}
+.tx{flex:1;color:#ECEDEF;font-size:15px;line-height:21px;padding:12px 0}
+.cr{display:inline-block;width:2px;height:18px;background:#33B5E5;vertical-align:-3px;margin-left:1px}
+.snd{width:46px;height:46px;border-radius:16px;background:#33B5E5;border:none;display:flex;align-items:center;justify-content:center;flex:none}
+.strip{display:flex;align-items:center;gap:10px;margin:0 12px;padding:8px 6px 8px 12px;background:#1C1D22;border-radius:16px 16px 6px 6px}
+.strip + .cmp{padding-top:2px}
+.sti{flex:1;min-width:0}
+.stt{font-size:13px;font-weight:500;color:#33B5E5}
+.sts{font-size:13px;color:#B8B8C0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu{background:#1C1D22;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,0.5),0 0 0 1px rgba(255,255,255,0.04)}
+.mi{display:flex;align-items:center;gap:14px;min-height:48px;padding:0 16px;background:none;border:none;font-family:inherit;color:#ECEDEF;font-size:15px;text-align:left;width:100%;box-sizing:border-box}
+.mi.red{color:#FF6B6B}
+.mdv{height:1px;background:#26272D}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#1C1D22;border-radius:28px 28px 0 0;padding:10px 16px 20px;display:flex;flex-direction:column;gap:12px}
+.hdl{align-self:center;width:36px;height:4px;border-radius:2px;background:#3A3B42}
+.sht{font-size:20px;font-weight:700;color:#ECEDEF;padding:6px 4px 0}
+.sub{font-size:13px;line-height:18px;color:#8E8E98}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border-radius:14px;border:none;font-family:inherit;font-size:15px;font-weight:500;background:#26272D;color:#ECEDEF;width:100%}
+.btn.red{background:#3A1E22;color:#FF8A8A}
+.btn.pri{background:#33B5E5;color:#04222E}
+.dim{position:absolute;inset:0;background:rgba(0,0,0,0.6)}
+.tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:72px;border-radius:14px;background:#26272D;border:none;font-family:inherit;color:#ECEDEF;font-size:13px;flex:1}
+.av{width:40px;height:40px;border-radius:50%;color:#FFFFFF;font-size:16px;font-weight:500;display:flex;align-items:center;justify-content:center;flex:none}
+.lr{display:flex;align-items:center;gap:12px;min-height:56px;padding:0 4px}
+.lr b{flex:1;font-size:15px;font-weight:500;color:#ECEDEF}
+.rc{width:22px;height:22px;border-radius:50%;box-sizing:border-box;border:1.5px solid #6B6C74;flex:none}
+.rc.on{border:none;background:#33B5E5;display:flex;align-items:center;justify-content:center}
+.tg{width:44px;height:26px;border-radius:13px;background:#3A3B42;position:relative;flex:none}
+.tg i{position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#8E8E98}
+.ph3{aspect-ratio:1;border-radius:8px;position:relative;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.1)}
+.num{position:absolute;right:6px;top:6px;width:22px;height:22px;border-radius:50%;background:#33B5E5;color:#04222E;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.rx{width:40px;height:40px;border-radius:50%;border:none;background:none;font-size:24px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
+.rc2{display:flex;align-items:center;gap:4px;min-height:28px;padding:0 9px;border-radius:14px;border:none;background:#23242A;color:#C4C7CC;font-family:inherit;font-size:13px;font-variant-numeric:tabular-nums}
+.rc2 span{font-size:15px}
+.rc2.me{background:#13313D;color:#7FD0EE;box-shadow:inset 0 0 0 1px #33B5E5}
+.tabs{display:flex;gap:6px;overflow:hidden}
+.tb{display:flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border-radius:18px;border:none;background:#26272D;color:#C4C7CC;font-family:inherit;font-size:14px}
+.tb.on{background:#13313D;color:#7FD0EE}
+.ring{position:absolute;right:6px;top:6px;width:22px;height:22px;border-radius:50%;box-sizing:border-box;border:1.5px solid rgba(255,255,255,0.85)}
+.st{display:inline-flex;align-items:center;vertical-align:-2px;margin-left:3px}
+.fail{font-size:12px;color:#FF8A8A;align-self:flex-end;display:flex;align-items:center;gap:6px;margin:2px 4px 0 0}
+.fail b{font-weight:500;color:#7FD0EE}
+.del{align-self:flex-start;background:#1B1C20;color:#8E8E98;font-size:14px;font-style:italic;padding:7px 12px;border-radius:18px;display:flex;align-items:center;gap:6px;box-shadow:inset 0 0 0 1px #26272D}
+.fw{font-size:13px;color:#7FD0EE;font-weight:500;display:flex;align-items:center;gap:4px;margin-bottom:2px}
+.sys{align-self:center;max-width:300px;text-align:center;font-size:13px;line-height:18px;color:#9AA3AD;padding:4px 10px;margin:4px 0}
+.sys b{color:#C4C7CC;font-weight:500}
+.call{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 12px;min-width:220px}
+.cic{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none}
+.ct{flex:1;min-width:0}
+.ct div:first-child{font-size:15px;color:#ECEDEF}
+.ct div:last-child{font-size:12px;color:#9AA3AD;margin-top:1px;font-variant-numeric:tabular-nums}
+.cb{width:36px;height:36px;border-radius:50%;border:none;background:rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;flex:none}
+.thumb{width:230px;height:160px;border-radius:18px;position:relative;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.dl{width:48px;height:48px;border-radius:50%;background:rgba(0,0,0,0.55);border:none;display:flex;align-items:center;justify-content:center}
+.sz{position:absolute;left:8px;bottom:8px;font-size:11px;color:#FFFFFF;background:rgba(0,0,0,0.55);padding:2px 6px;border-radius:8px;font-variant-numeric:tabular-nums}
+.tm{position:absolute;right:8px;bottom:8px;font-size:11px;color:#FFFFFF;background:rgba(0,0,0,0.55);padding:2px 6px;border-radius:8px}
+.file{display:flex;align-items:center;gap:12px;padding:10px 12px;min-width:240px;max-width:290px;box-sizing:border-box}
+.fic{width:44px;height:44px;border-radius:12px;background:#33B5E5;display:flex;align-items:center;justify-content:center;flex:none;position:relative}
+.fn{flex:1;min-width:0}
+.fn div:first-child{font-size:15px;color:#ECEDEF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fn div:last-child{font-size:12px;color:#9AA3AD;margin-top:2px;font-variant-numeric:tabular-nums}
+.warn{display:flex;gap:10px;align-items:flex-start;background:#33260F;border-radius:14px;padding:12px;color:#FFCC80;font-size:14px;line-height:19px}
+.card{background:#1C1D22;border-radius:18px;padding:18px 16px;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+.unr{display:flex;align-items:center;gap:10px;margin:8px -14px;padding:0 14px}
+.unr i{flex:1;height:1px;background:#2E4B57}
+.unr span{font-size:12px;font-weight:500;color:#7FD0EE}
+.fab{position:absolute;right:16px;width:46px;height:46px;border-radius:50%;background:#26272D;border:none;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,0.45),0 0 0 1px rgba(255,255,255,0.05)}
+.bdg{position:absolute;top:-6px;left:50%;transform:translateX(-50%);min-width:20px;height:20px;border-radius:10px;background:#33B5E5;color:#04222E;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-sizing:border-box}
+.grp{background:#1C1D22;border-radius:18px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+.r{display:flex;align-items:center;gap:14px;min-height:56px;padding:9px 14px;background:none;border:none;width:100%;box-sizing:border-box;font-family:inherit;color:#ECEDEF;font-size:16px;text-align:left}
+.ic{width:36px;height:36px;border-radius:12px;background:#26272D;display:flex;align-items:center;justify-content:center;flex:none}
+.lb{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.v{color:#8E8E98;font-size:14px;flex:none}
+.dv{height:1px;background:#26272D;margin-left:14px}
+.hd{font-size:13px;font-weight:500;color:#8E8E98;padding:0 6px;margin-bottom:-6px}
+.cap{font-size:13px;line-height:18px;color:#8E8E98;padding:0 6px}
+.segs{display:flex;gap:4px;padding:4px;background:#26272D;border-radius:12px}
+.sg{flex:1;height:36px;border-radius:9px;border:none;background:none;color:#B8B8C0;font-family:inherit;font-size:14px;font-weight:500}
+.sg.on{background:#13313D;color:#7FD0EE}
+.blk{display:flex;flex-direction:column;gap:10px;padding:14px}
+.blk b{font-size:16px;font-weight:400;color:#ECEDEF}
+.opt{display:flex;align-items:center;gap:14px;min-height:52px;padding:0 4px;font-size:16px;color:#ECEDEF}
+.opt span{flex:1}
+.opt small{display:block;font-size:13px;color:#8E8E98;margin-top:2px}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; position: relative;">
+<div style="display:flex;align-items:center;gap:10px;padding:14px 12px 10px 8px;"><button class="ib" style="background:none;" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button><div style="flex:1;font-size:22px;font-weight:700;color:#ECEDEF;">Автоудаление</div></div><div style="flex:1;min-height:0;background:#16171B;border-radius:28px 28px 0 0;display:flex;flex-direction:column;gap:14px;padding:10px;overflow:hidden;"><div class="cap">Удаление только на этом телефоне: у собеседников ничего не меняется. «Сохранённое» и закреплённые сообщения не удаляются.</div><div class="hd">Сообщения</div><div class="grp"><div class="blk"><b>Удалять старше</b><div class="segs"><button class="sg">Никогда</button><button class="sg">Недели</button><button class="sg on">Месяца</button><button class="sg">Года</button></div></div></div></div><div class="dim"></div><div class="sheet"><div class="hdl"></div><div class="sht">Удалить старые сообщения?</div><div class="sub" style="font-size:15px;line-height:21px;padding:0 4px;">Под правило сейчас попадают 1 240 сообщений и 820 МБ вложений. Удаление — только на этом телефоне, вернуть нельзя.</div><button class="btn red">Удалить и включить</button><button class="btn">Отмена</button></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
