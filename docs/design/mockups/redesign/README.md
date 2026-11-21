@@ -35,6 +35,7 @@
 | `misc/` | Второстепенные экраны: сохранённое, исходящие, поиск, папки, заблокированные, поток трафика, смена адреса, копия данных | [3Lm7Fu8XokunU7M2vQiFsp](https://claude.ai/artifact/3Lm7Fu8XokunU7M2vQiFsp) |
 | `shared/` | Общие элементы: меню «⋮» чата и группы, подтверждения (диалог / шторка), «Отменить» | [5HnRVSnQGqBQ5rKXHugAG8](https://claude.ai/artifact/5HnRVSnQGqBQ5rKXHugAG8) |
 | `android/` | Встраивание в Android: «Поделиться» в Peerage, ссылка-приглашение (А/Б), запрос с именем как у контакта | [KK4bdoBMdwWJN9VUGzCdiS](https://claude.ai/artifact/KK4bdoBMdwWJN9VUGzCdiS) |
+| `jump/` | Переходы по ленте: стопка «реакции · @ · вниз» (варианты А/Б/В), к новой реакции, по цитате и обратно | [Mr7ycxi88mKM4h6Nqxwb2P](https://claude.ai/artifact/Mr7ycxi88mKM4h6Nqxwb2P) |
 
 **2026-11-01, проверка `better-interface`:** серый подсказок `#7A7A84` → `#8E8E98` во всех копиях
 здесь; у холстов из `_gen/` — отступ панели 10, шапка 22, тексты без объяснений. Живые артефакты
