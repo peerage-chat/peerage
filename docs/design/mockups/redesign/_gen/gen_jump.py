@@ -16,6 +16,9 @@ CSS += """.cap2{position:absolute;left:16px;right:78px;font-size:12px;line-heigh
 .chp{display:flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border-radius:18px;border:none;background:#26272D;color:#ECEDEF;font-family:inherit;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.35)}
 .chp b{font-weight:700;color:#7FD0EE;font-variant-numeric:tabular-nums}
 .rc2.new{box-shadow:inset 0 0 0 1.5px #7FD0EE;background:#1F3A46;color:#EAF6FB}
+.fab{border-radius:16px}
+.bdg{min-width:22px;height:22px;border-radius:11px;font-size:13px;top:-8px;padding:0 6px}
+.pill2{right:12px;border-radius:16px}
 """
 
 HEART = '<path d="M19.5 12.6L12 20l-7.5-7.4A5 5 0 1 1 12 6a5 5 0 1 1 7.5 6.6z"></path>'
