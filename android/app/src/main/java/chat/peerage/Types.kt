@@ -251,6 +251,8 @@ data class NetPeer(
     val rxRate: Long,
     val txRate: Long,
     val uptimeS: Double,
+    /** Адрес меша (выводит движок из ключа); пусто — соединение не поднялось. */
+    val addr: String = "",
 )
 
 /** Снапшот стата сети (агрегаты считает движок). */
@@ -266,11 +268,14 @@ data class NetStats(
 /** Присутствие группы «N уч · M в сети» — агрегат (MLS-ростер ∩ presence) считает движок. */
 data class GroupRoster(val total: Int, val online: Int)
 
-/** Источник флуда для UI: сколько отброшено и с каким темпом (ADR-007). */
+/** Источник флуда для UI: сколько отброшено с запуска и с каким темпом (ADR-007).
+ *  Темп ноль — поток стих; объём остаётся. */
 data class FloodPeer(
     val peer: String,
     val dropped: Long,
+    val bytes: Long,
     val pps: Double,
+    val bps: Long,
     /** Уже заблокирован — его пакеты режутся ещё в транспорте, до FFI. */
     val blocked: Boolean,
 )
@@ -279,8 +284,10 @@ data class FloodPeer(
 data class RotationState(
     /** Сколько секунд паузы осталось; 0 — пауза кончилась. */
     val secondsLeft: Int,
-    /** Скольким контактам уйдёт новый адрес. */
-    val told: Int,
+    /** Скольким отмеченным объявление уже ушло (считает движок). */
+    val told: Int = 0,
+    /** Сколько контактов отмечено. */
+    val total: Int,
     /** Новый адрес — приходит событием после подъёма узла. */
     val newAddress: String = "",
 )

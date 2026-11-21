@@ -276,24 +276,20 @@
     <string name="net_metric_ping">Пинг</string>
     <string name="net_unit_ms">мс</string>
     <string name="net_metric_traffic">Трафик</string>
-    <string name="net_unit_kbs">КБ/с</string>
     <string name="net_my_node">Мой узел</string>
     <string name="net_copy_address">Скопировать адрес</string>
     <string name="net_address">Адрес</string>
-    <string name="net_my_qr">Мой QR</string>
-    <string name="net_share">Поделиться</string>
     <string name="net_mode">Режим участия</string>
     <string name="net_connected">Подключено к мешу</string>
     <string name="net_peer_connecting">подключается…</string>
     <string name="net_peer_inbound">Входящее</string>
     <string name="net_peer_outbound">Исходящее</string>
     <string name="net_node_mode">Узел сети</string>
-    <string name="net_node_mode_desc">Пока приложение в сети, телефон пересылает чужой трафик — на этом меш и держится</string>
-    <string name="net_benefit_cost">Цена: выше расход батареи и трафика</string>
+    <string name="net_node_mode_desc">Пока приложение в сети, телефон пересылает чужой трафик меша. Расход батареи и трафика выше.</string>
     <string name="net_peers_label">Пиры · %1$d</string>
     <string name="net_no_peers">Нет прямых пиров</string>
     <string name="net_offline_queue">Офлайн-очередь · %1$d</string>
-    <string name="net_offline_queue_desc">доставится, когда получатель появится</string>
+    <string name="net_offline_queue_desc">Доставится, когда получатель появится в сети</string>
     <string name="net_share_chooser">Поделиться ключом</string>
     <string name="net_ms_value">%1$s мс</string>
 
@@ -547,12 +543,11 @@
     <string name="profile_share">Поделиться контактом</string>
     <string name="profile_share_confirm">Ключ %1$s достанется другому человеку: тот сможет написать напрямую. Отозвать это нельзя.</string>
     <string name="profile_share_ok">Поделиться</string>
-    <string name="net_diagnostics">Диагностика</string>
     <string name="net_bench_row">Замер скорости</string>
     <string name="net_bench_row_desc">Скорость меша до выбранного контакта</string>
-    <string name="net_bench_nobody">Сейчас никого нет на связи.</string>
+    <string name="net_bench_nobody">Нет контактов в сети.</string>
     <string name="net_bench_confirm_title">Запустить замер?</string>
-    <string name="net_bench_confirm">Контакту %1$s уйдёт около 30 МБ тестовых данных по мешу. За это платит и он — трафиком и батареей.</string>
+    <string name="net_bench_confirm">По мешу уйдёт около 30 МБ тестовых данных. Трафик и батарея тратятся с обеих сторон.</string>
     <string name="net_bench_start">Запустить</string>
     <string name="profile_rename">Изменить имя</string>
     <string name="profile_block">Заблокировать</string>
@@ -577,68 +572,35 @@
 
     <!-- Поток трафика и смена адреса (ADR-007) -->
     <string name="flood_title">Вас заваливают трафиком</string>
-    <plurals name="flood_card_body">
-        <item quantity="one">Идёт поток с %d адреса; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</item>
-        <item quantity="few">Идёт поток с %d адресов; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</item>
-        <item quantity="many">Идёт поток с %d адресов; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</item>
-        <item quantity="other">Идёт поток с %d адреса; приложение его отбрасывает. Содержимое до вас не доходит, но мобильный трафик уже списан: остановить чужие пакеты на устройстве нельзя.</item>
-    </plurals>
     <string name="flood_screen_title">Поток трафика</string>
-    <string name="flood_explain">Приложение отбрасывает эти пакеты до расшифровки — процессор, батарея и память не тратятся, содержимое не показывается. Но байты уже дошли до радио, и трафик за них списан. Так устроена любая открытая сеть: кто знает адрес, тот может слать.</string>
+    <string name="flood_explain">Пакеты отбрасываются до расшифровки: процессор и батарея не тратятся, трафик — тратится. Счёт — с запуска приложения.</string>
     <string name="flood_sources">Источники</string>
-    <string name="flood_blocked_tag">заблокирован</string>
-    <plurals name="flood_src_dropped">
-        <item quantity="one">отброшен %d пакет</item>
-        <item quantity="few">отброшено %d пакета</item>
-        <item quantity="many">отброшено %d пакетов</item>
-        <item quantity="other">отброшено %d пакета</item>
-    </plurals>
-    <string name="flood_src_stranger">не в контактах · отброшено %1$d</string>
-    <string name="flood_pps">пкт/с</string>
+    <string name="flood_blocked_tag">блокировка</string>
+    <string name="flood_src_stranger">не в контактах · %1$s</string>
     <string name="flood_what_to_do">Что можно сделать</string>
     <string name="flood_go_offline">Уйти в офлайн</string>
-    <string name="flood_go_offline_desc">Разорвать соединения — трафик перестанет тратиться сразу. Сообщения не будут приходить, пока не вернётесь.</string>
+    <string name="flood_go_offline_desc">Трафик перестаёт тратиться сразу. Сообщения не приходят до возврата в сеть.</string>
     <string name="flood_rotate">Сменить адрес</string>
-    <string name="flood_rotate_desc">Единственный способ оборвать поток и остаться в сети. Контакты сохранятся — им уйдёт новый адрес.</string>
+    <string name="flood_rotate_desc">Поток обрывается, связь остаётся. Отмеченным контактам уходит новый адрес.</string>
     <string name="flood_offline_btn">В офлайн</string>
-    <string name="flood_back_online">Вернуться в сеть</string>
-    <string name="flood_rotate_btn">Сменить адрес</string>
-    <string name="flood_footer">Заблокированные источники уже режутся на самом низком уровне — дальше приложения их пакеты не идут.</string>
 
     <string name="rotate_title">Сменить адрес</string>
-    <string name="rotate_explain">Ваша личность не меняется: имя, отпечаток, история и группы останутся прежними. Меняется только адрес, по которому вас находят в сети. Кому вы его не сообщите — потеряет с вами связь.</string>
+    <string name="rotate_explain">Личность не меняется: имя, ключ, история и группы остаются. Меняется только адрес в сети.</string>
     <string name="rotate_tell_whom">Сообщить новый адрес</string>
-    <string name="rotate_hint_flooder">Источник потока — снят по умолчанию</string>
-    <string name="rotate_hint_offline">Узнает, когда появится в сети</string>
-    <string name="rotate_selected">Выбрано %1$d из %2$d</string>
-    <string name="rotate_will_lose">Останутся со старым адресом: %1$s</string>
+    <string name="rotate_hint_flooder">источник потока</string>
+    <string name="rotate_hint_offline">узнает, когда появится в сети</string>
+    <string name="rotate_will_lose">Не отмеченные останутся со старым адресом и потеряют связь с этим телефоном.</string>
     <string name="rotate_how">Как это произойдёт</string>
-    <plurals name="rotate_step_offline">
-        <item quantity="one">Уйдём в офлайн ровно на %d секунду — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</item>
-        <item quantity="few">Уйдём в офлайн ровно на %d секунды — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</item>
-        <item quantity="many">Уйдём в офлайн ровно на %d секунд — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</item>
-        <item quantity="other">Уйдём в офлайн ровно на %d секунды — за это время старый адрес выпадает из сети. Без паузы поток продолжит приходить.</item>
-    </plurals>
-    <string name="rotate_step_up">Поднимемся под новым адресом.</string>
-    <string name="rotate_step_tell">Выбранным контактам уйдёт подписанное уведомление — вручную ничего пересылать не нужно.</string>
+    <string name="rotate_step_tell">Отмеченным — подписанное уведомление</string>
     <string name="rotate_btn">Сменить адрес</string>
-    <string name="rotate_no_undo">Отменить смену нельзя: старый адрес освобождается сразу.</string>
-    <string name="rotate_wait_body">Вы офлайн. Ждём, пока старый адрес исчезнет из сети.</string>
-    <string name="rotate_wait_footer">Сообщения, отправленные вам сейчас, дойдут позже — отправитель повторит их автоматически.</string>
+    <string name="rotate_no_undo">Отменить нельзя: старый адрес освобождается сразу.</string>
     <string name="rotate_p_stopped">Старый адрес погашен</string>
     <string name="rotate_p_pause">Пауза — осталось %1$d с</string>
     <string name="rotate_p_up">Подъём под новым адресом</string>
-    <plurals name="rotate_p_told">
-        <item quantity="one">Уведомление %d контакту</item>
-        <item quantity="few">Уведомление %d контактам</item>
-        <item quantity="many">Уведомление %d контактам</item>
-        <item quantity="other">Уведомление %d контакта</item>
-    </plurals>
-    <string name="rotate_failed">Сменить адрес не удалось — вы снова на прежнем</string>
-    <string name="rotate_failed_offline">Сменить адрес не удалось. Вы офлайн — нажмите «Вернуться в сеть»</string>
+    <string name="rotate_failed">Адрес не сменён: остался прежний.</string>
+    <string name="rotate_failed_offline">Адрес не сменён. Связи нет — «Сеть» → «В сеть».</string>
     <string name="rotate_done">Адрес сменён</string>
-    <string name="rotate_if_continues">Если поток продолжится и по новому адресу — значит его знает кто-то из оповещённых.</string>
-    <string name="net_epoch">Адрес меняли раз: %1$d</string>
+    <string name="rotate_if_continues">Поток на новом адресе означает, что адрес известен кому-то из уведомлённых.</string>
     <string name="net_rotate_row">Сменить адрес</string>
     <string name="net_rotate_row_desc">Оборвать поток от того, кто узнал старый</string>
 
@@ -1171,4 +1133,26 @@
     <string name="me_edit_name">Имя</string>
     <string name="me_edit_caption">Имя и фото рассылаются контактам. Каждый контакт может подписать этот телефон у себя по-своему — это имя он увидит вместо присланного.</string>
     <string name="me_remove_photo">Убрать фото</string>
+    <string name="net_status_away">Офлайн · соединения разорваны</string>
+    <string name="net_go_online">В сеть</string>
+    <string name="net_rotate_row_since">Оборвать поток от того, кто узнал старый · сменён %1$s</string>
+    <string name="net_all_peers">Все пиры</string>
+    <string name="net_rate">%1$s/с</string>
+    <string name="flood_card_sub">%1$s сейчас · %2$s потрачено</string>
+    <string name="flood_tile_now">сейчас</string>
+    <string name="flood_tile_spent">потрачено</string>
+    <string name="flood_rotate_pill">Сменить</string>
+    <string name="rotate_count">%1$d из %2$d</string>
+    <string name="rotate_hint_online">в сети</string>
+    <string name="rotate_step_offline">Минута офлайн — старый адрес исчезает из сети</string>
+    <string name="rotate_p_paused">Пауза</string>
+    <string name="rotate_p_told">Уведомлено %1$d из %2$d</string>
+    <string name="rotate_wait_caption">Телефон офлайн. Сообщения, отправленные в эти секунды, придут позже.</string>
+    <string name="rotate_new_address">Новый адрес</string>
+    <plurals name="flood_tile_sources">
+        <item quantity="one">источник</item>
+        <item quantity="few">источника</item>
+        <item quantity="many">источников</item>
+        <item quantity="other">источника</item>
+    </plurals>
 </resources>

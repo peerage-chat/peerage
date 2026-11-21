@@ -106,6 +106,8 @@ internal fun TopBar(
     leading: (@Composable () -> Unit)? = null,
     /** Подпись под заголовком (чат и счёт у «Медиа и файлы»). */
     subtitle: String? = null,
+    /** Цвет подписи: состояние («Подключено к мешу» — зелёным), по умолчанию тихий. */
+    subtitleColor: Color = Tokens.Colors.tertiary,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     // Шапка на фоне экрана, а не на акцентной плашке: цветная полоса сверху делила
@@ -130,7 +132,7 @@ internal fun TopBar(
                 overflow = TextOverflow.Ellipsis,
             )
             if (subtitle != null) {
-                Text(subtitle, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, color = subtitleColor, fontSize = Tokens.Font.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         actions()

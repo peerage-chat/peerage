@@ -30,6 +30,27 @@
 
 ---
 
+## 2026-11-22 · Поток трафика в байтах, адрес пира, ход смены адреса · (хэш — следующим коммитом) (UI 5.3)
+
+**Причина:** ui-redesign-impl.md 5.3 (макеты `screens/Network`, `misc/Flood`,
+`misc/RotateProgress`): экран потока показывает МБ/с и потраченное, а `FloodEntry` считал только
+пакеты; темп последнего окна висел «сейчас» вечно после конца потока; пиры в макете — адресами
+меша; ход смены адреса — «Уведомлено N из M».
+
+- **Контракт:** `FloodStat` + `bytes`, `bps`; `flood_json` → `[{peer, dropped, bytes, pps, bps,
+  blocked}]`, порядок — по `bps`, затем `bytes`. `PeerStat` + `addr` (выводит
+  `NetStats::aggregate` через `addr_for_key`; пусто без ключа). Новый
+  `Engine::rotation_progress_json()` → `{told, total}`; JNI `Native.rotationProgress`.
+- **Схема:** без изменений.
+- **Поведение:** учёт потока — длины отброшенных датаграмм; тишина от источника дольше 3 с
+  (`FLOOD_QUIET`) обнуляет его темп, объём остаётся. Вытеснение при переполнении карты — по
+  темпу в байтах. `told` — отмеченные при последней смене, уже убранные из `rotate_pending`; на
+  паузе офлайн — 0.
+- **Совместимость:** только локальные снимки, в сеть ничего нового не уходит.
+- **Тесты:** `messenger tests::flood_entry_counts_bytes_and_goes_quiet`,
+  `engine net::tests::netstats_derives_peer_address`, `engine/tests/flood.rs` (байты),
+  `engine/tests/rotate.rs::own_rotation_keeps_the_contact_reachable` (ход смены).
+
 ## 2026-11-22 · «Заблокированные»: имя при блокировке, список · de3b898 (UI 5.2)
 
 **Причина:** ui-redesign-impl.md 5.2 (макет `misc/Blocked`): блок удаляет контакт вместе с

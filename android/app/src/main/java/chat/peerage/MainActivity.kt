@@ -13,11 +13,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -496,9 +494,7 @@ private fun CompactShell(model: AppModel) {
                                     ) { screen = Screen.Add }
                                 }
                                 Screen.Calls -> TopBar(stringResource(R.string.menu_calls), onBack = goBack)
-                                Screen.Network -> TopBar(stringResource(R.string.menu_network), onBack = goBack) {
-                                    BarIcon(Icons.Filled.Refresh, stringResource(R.string.cd_refresh)) { /* авто-поллинг; ручной рефреш — TODO */ }
-                                }
+                                Screen.Network -> NetworkHeader(model, onBack = goBack)
                                 Screen.EditProfile -> {}
                                 Screen.VaultLevel -> {}
                                 Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
@@ -739,7 +735,6 @@ private fun CompactShell(model: AppModel) {
                                     )
                                     Screen.Network -> NetworkScreen(
                                         model,
-                                        onMyQr = { screen = Screen.MyCode },
                                         onOpenOutbox = { screen = Screen.Outbox },
                                         onFlood = { screen = Screen.Flood },
                                         onRotate = { screen = Screen.RotateAddress },

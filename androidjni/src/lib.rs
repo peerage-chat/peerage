@@ -1223,6 +1223,20 @@ pub extern "system" fn Java_chat_peerage_Native_floodPeers<'local>(
     })
 }
 
+/// Ход последней смены адреса: JSON `{told, total}`.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_rotationProgress<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    const EMPTY: &str = r#"{"told":0,"total":0}"#;
+    jni_safe!(ret(&env, EMPTY), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, EMPTY) };
+        ret(&env, &e.rotation_progress_json())
+    })
+}
+
 /// Текущая эпоха адреса (0 — адрес совпадает с ключом личности).
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_transportEpoch<'local>(

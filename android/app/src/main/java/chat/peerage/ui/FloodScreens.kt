@@ -1,180 +1,176 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-
 package chat.peerage.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Autorenew
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 
 /**
- * Экраны потока трафика и смены адреса (ADR-007).
- *
- * Тон текстов здесь намеренно прямой: остановить чужие пакеты на устройстве нельзя,
- * трафик за них уже списан. Обещать защиту, которой нет, — худшее, что можно сделать
- * с человеком, у которого прямо сейчас тают деньги на счету.
+ * Поток трафика и смена адреса (ADR-007; макеты `misc/Flood`, `misc/Rotate`,
+ * `misc/RotateProgress`). Остановить чужие пакеты на устройстве нельзя — трафик за них
+ * уже списан; экран называет цену и два действия, которые реально помогают.
  */
 
-/** Карточка на экране «Сеть»: появляется, только когда поток идёт. */
+/** Поток трафика: темп, потраченное, источники и два действия. Счёт — с запуска. */
 @Composable
-internal fun FloodCard(model: AppModel, onDetails: () -> Unit) {
-    val flood = model.floodPeers
-    if (flood.isEmpty()) return
-    Box(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(Tokens.Radius.button))
-            .background(HoloWarn.copy(alpha = 0.08f))
-            .clickable { onDetails() }
-            .padding(Tokens.Space.m),
+internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
+    val list = model.floodPeers
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(top = Tokens.Space.l, bottom = Tokens.Space.xxl),
     ) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Warning, null, tint = HoloWarn, modifier = Modifier.size(Tokens.Size.iconM))
-                Spacer(Modifier.width(Tokens.Space.s))
-                Text(
-                    stringResource(R.string.flood_title),
-                    color = HoloWarn,
-                    fontSize = Tokens.Font.label,
-                    fontWeight = FontWeight.Medium,
-                )
+        Row(
+            Modifier.padding(horizontal = Tokens.Space.panel),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+        ) {
+            val tile = Modifier.weight(1f)
+            StatTile(rateOf(list.sumOf { it.bps }), stringResource(R.string.flood_tile_now), tile, bg = Tokens.Colors.group, size = Tokens.Font.sheet)
+            StatTile(fmtSizeLong(list.sumOf { it.bytes }), stringResource(R.string.flood_tile_spent), tile, bg = Tokens.Colors.group, size = Tokens.Font.sheet)
+            StatTile(
+                "${list.size}",
+                pluralStringResource(R.plurals.flood_tile_sources, list.size),
+                tile,
+                bg = Tokens.Colors.group,
+                size = Tokens.Font.sheet,
+            )
+        }
+        Caption(stringResource(R.string.flood_explain))
+
+        if (list.isNotEmpty()) {
+            SectionTitle(stringResource(R.string.flood_sources))
+            CardSection {
+                list.forEachIndexed { i, f ->
+                    SourceRow(f, model.contacts.firstOrNull { it.key == f.peer }?.displayName, divider = i > 0)
+                }
             }
+        }
+
+        SectionTitle(stringResource(R.string.flood_what_to_do))
+        CardSection {
+            ActionRow(
+                TablerIcons.WifiOff,
+                stringResource(R.string.flood_go_offline),
+                stringResource(R.string.flood_go_offline_desc),
+                divider = false,
+            ) {
+                if (model.offline) {
+                    PillButton(stringResource(R.string.net_go_online)) { model.goOnline() }
+                } else {
+                    PillButton(stringResource(R.string.flood_offline_btn), neutral = true) { model.goOffline() }
+                }
+            }
+            ActionRow(
+                TablerIcons.SwitchHorizontal,
+                stringResource(R.string.flood_rotate),
+                stringResource(R.string.flood_rotate_desc),
+            ) {
+                PillButton(stringResource(R.string.flood_rotate_pill), onClick = onRotate)
+            }
+        }
+    }
+}
+
+/** Темп словами: «2,4 МБ/с»; стихший поток — «0 Б/с». */
+@Composable
+private fun rateOf(bps: Long): String = stringResource(R.string.net_rate, fmtSizeLong(bps))
+
+/** Источник: контакт — именем, незнакомец — ключом; темп и потраченное, пометка блока. */
+@Composable
+private fun SourceRow(f: FloodPeer, name: String?, divider: Boolean) {
+    val volume = if (f.bps > 0) "${rateOf(f.bps)} · ${fmtSizeLong(f.bytes)}" else fmtSizeLong(f.bytes)
+    CardRow(divider = divider, inset = PersonInset, modifier = Modifier.heightIn(min = Tokens.Size.personRow)) {
+        KeyOrAvatar(name)
+        Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
+        Column(Modifier.weight(1f)) {
             Text(
-                pluralStringResource(R.plurals.flood_card_body, flood.size, flood.size),
-                color = HoloSecondary,
+                name ?: stringResource(R.string.blocked_key, f.peer.take(8)),
+                color = Color.White,
+                fontSize = Tokens.Font.label,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (name == null) stringResource(R.string.flood_src_stranger, volume) else volume,
+                color = Tokens.Colors.tertiary,
                 fontSize = Tokens.Font.body,
-                modifier = Modifier.padding(top = Tokens.Space.s),
+                modifier = Modifier.padding(top = Tokens.Space.xxs),
+            )
+        }
+        if (f.blocked) {
+            Spacer(Modifier.width(Tokens.Space.s))
+            Text(
+                stringResource(R.string.flood_blocked_tag),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.small,
+                modifier = Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(Tokens.Colors.raised)
+                    .padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xxs),
             )
         }
     }
 }
 
-/** Детали потока: кто, с каким темпом, и два настоящих действия. */
+/** Аватар контакта или ключ на плитке raised — у незнакомца имени нет. */
 @Composable
-internal fun FloodScreen(model: AppModel, onRotate: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
-    ) {
-        SurfaceCard(outer = 0.dp) {
-            Text(stringResource(R.string.flood_explain), color = HoloSecondary, fontSize = Tokens.Font.body)
+private fun KeyOrAvatar(name: String?) {
+    if (name != null) {
+        SquareAvatar(name, size = Tokens.Size.avatarPick, circle = true)
+    } else {
+        SquareAvatar("", size = Tokens.Size.avatarPick, circle = true, bg = Tokens.Colors.raised) {
+            Icon(TablerIcons.Key, null, tint = Tokens.Colors.fieldIcon, modifier = Modifier.size(Tokens.Size.iconRow))
         }
-
-        FieldLabel(stringResource(R.string.flood_sources))
-        model.floodPeers.forEach { f ->
-            val name = model.contacts.firstOrNull { it.key == f.peer }?.displayName
-            SurfaceCard(outer = 0.dp) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                name ?: (f.peer.take(8) + "…"),
-                                color = Color.White,
-                                fontSize = Tokens.Font.label,
-                                fontFamily = if (name == null) FontFamily.Monospace else FontFamily.Default,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                            if (f.blocked) {
-                                Spacer(Modifier.width(Tokens.Space.s))
-                                Text(
-                                    stringResource(R.string.flood_blocked_tag),
-                                    color = HoloError,
-                                    fontSize = Tokens.Font.caption,
-                                )
-                            }
-                        }
-                        Text(
-                            if (name == null) {
-                                stringResource(R.string.flood_src_stranger, f.dropped)
-                            } else {
-                                pluralOf(R.plurals.flood_src_dropped, f.dropped)
-                            },
-                            color = HoloSecondary,
-                            fontSize = Tokens.Font.small,
-                            modifier = Modifier.padding(top = Tokens.Space.xxs),
-                        )
-                    }
-                    Spacer(Modifier.width(Tokens.Space.m))
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("%.0f".format(f.pps), color = HoloWarn, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
-                        Text(stringResource(R.string.flood_pps), color = HoloSecondary, fontSize = Tokens.Font.caption)
-                    }
-                }
-            }
-        }
-
-        FieldLabel(stringResource(R.string.flood_what_to_do))
-        ActionExplain(
-            Icons.Filled.PowerSettingsNew,
-            stringResource(R.string.flood_go_offline),
-            stringResource(R.string.flood_go_offline_desc),
-        )
-        ActionExplain(
-            Icons.Filled.Autorenew,
-            stringResource(R.string.flood_rotate),
-            stringResource(R.string.flood_rotate_desc),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
-            OutlineAction(
-                stringResource(if (model.offline) R.string.flood_back_online else R.string.flood_offline_btn),
-                Icons.Filled.PowerSettingsNew,
-                Modifier.weight(1f),
-            ) { if (model.offline) model.goOnline() else model.goOffline() }
-            Box(Modifier.weight(1f)) { AccentButton(stringResource(R.string.flood_rotate_btn), onClick = onRotate) }
-        }
-        Text(
-            stringResource(R.string.flood_footer),
-            color = HoloSecondary,
-            fontSize = Tokens.Font.small,
-        )
     }
 }
 
-/** Строка «действие + честное объяснение цены». */
+/** Действие: иконка, название, последствие и пилюля справа. */
 @Composable
-private fun ActionExplain(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, desc: String) {
-    SurfaceCard(outer = 0.dp) {
-        Row {
-            Icon(icon, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
-            Spacer(Modifier.width(Tokens.Space.m))
-            Column {
-                Text(title, color = Color.White, fontSize = Tokens.Font.label)
-                Text(desc, color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = Tokens.Space.xxs))
-            }
+private fun ActionRow(
+    icon: ImageVector,
+    title: String,
+    desc: String,
+    divider: Boolean = true,
+    pill: @Composable () -> Unit,
+) {
+    CardRow(divider = divider, inset = Tokens.Space.l) {
+        Icon(icon, null, tint = Tokens.Colors.fieldIcon, modifier = Modifier.size(Tokens.Size.iconRow))
+        Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
+        Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
+            Text(title, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
+            Text(
+                desc,
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.body,
+                lineHeight = Tokens.Font.lineHeight,
+                modifier = Modifier.padding(top = Tokens.Space.xxs),
+            )
         }
+        Spacer(Modifier.width(Tokens.Space.m))
+        pill()
     }
 }
 
 /**
- * Смена адреса: выбор, КОМУ сообщить новый.
- *
- * Здесь главный смысл операции. Адрес меняется для всех, но узнают о нём только
- * отмеченные — не отмеченный контакт теряет с нами связь. Источник потока снят
- * заранее, однако галочка остаётся кликабельной: решение за пользователем.
+ * Смена адреса: кому сообщить новый. Адрес меняется для всех, узнают только отмеченные —
+ * не отмеченный теряет связь. Источник потока снят заранее, но выбор за человеком.
  */
 @Composable
 internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
@@ -186,155 +182,197 @@ internal fun RotateAddressScreen(model: AppModel, onDone: () -> Unit) {
     }
     val chosen = model.contacts.filter { selected[it.key] == true }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
-    ) {
-        SurfaceCard(outer = 0.dp) {
-            Text(stringResource(R.string.rotate_explain), color = HoloSecondary, fontSize = Tokens.Font.body)
-        }
-
-        FieldLabel(stringResource(R.string.rotate_tell_whom))
-        model.contacts.forEach { c ->
-            val on = selected[c.key] == true
-            SurfaceCard(onClick = { selected[c.key] = !on }, outer = 0.dp) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = on,
-                        onCheckedChange = { selected[c.key] = it },
-                        colors = CheckboxDefaults.colors(checkedColor = HoloAccent, uncheckedColor = HoloSecondary),
-                    )
-                    Spacer(Modifier.width(Tokens.Space.xs))
-                    SquareAvatar(c.displayName, size = 34.dp, online = model.online[c.key] == true)
-                    Spacer(Modifier.width(Tokens.Space.m))
-                    Column(Modifier.weight(1f)) {
-                        Text(c.displayName, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        val hint = when {
-                            c.key in flooders -> stringResource(R.string.rotate_hint_flooder)
-                            model.online[c.key] != true -> stringResource(R.string.rotate_hint_offline)
-                            else -> null
-                        }
-                        if (hint != null) {
-                            Text(hint, color = HoloWarn, fontSize = Tokens.Font.small, modifier = Modifier.padding(top = Tokens.Space.xxs))
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState())
+                .padding(top = Tokens.Space.s, bottom = Tokens.Space.l),
+        ) {
+            Caption(stringResource(R.string.rotate_explain))
+            if (model.contacts.isNotEmpty()) {
+                Row(
+                    Modifier.padding(
+                        start = Tokens.Space.panelText,
+                        end = Tokens.Space.panelText,
+                        top = Tokens.Space.l,
+                        bottom = Tokens.Space.s,
+                    ),
+                ) {
+                    SectionText(stringResource(R.string.rotate_tell_whom), Modifier.weight(1f))
+                    SectionText(stringResource(R.string.rotate_count, chosen.size, model.contacts.size))
+                }
+                CardSection {
+                    model.contacts.forEachIndexed { i, c ->
+                        val on = selected[c.key] == true
+                        CardRow(
+                            divider = i > 0,
+                            inset = PersonInset,
+                            modifier = Modifier.heightIn(min = Tokens.Size.personRow)
+                                .clickable(role = Role.Checkbox) { selected[c.key] = !on },
+                        ) {
+                            SquareAvatar(c.displayName, size = Tokens.Size.avatarPick, circle = true)
+                            Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    c.displayName,
+                                    color = Color.White,
+                                    fontSize = Tokens.Font.label,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    stringResource(
+                                        when {
+                                            c.key in flooders -> R.string.rotate_hint_flooder
+                                            model.online[c.key] == true -> R.string.rotate_hint_online
+                                            else -> R.string.rotate_hint_offline
+                                        },
+                                    ),
+                                    color = Tokens.Colors.tertiary,
+                                    fontSize = Tokens.Font.body,
+                                    modifier = Modifier.padding(top = Tokens.Space.xxs),
+                                )
+                            }
+                            Spacer(Modifier.width(Tokens.Space.m))
+                            SelectCheck(on)
                         }
                     }
                 }
+                Caption(stringResource(R.string.rotate_will_lose))
             }
-        }
 
-        SurfaceCard(outer = 0.dp) {
-            Column {
-                Text(
-                    stringResource(R.string.rotate_selected, chosen.size, model.contacts.size),
-                    color = Color.White,
-                    fontSize = Tokens.Font.label,
-                )
-                val lost = model.contacts.filter { selected[it.key] != true }
-                if (lost.isNotEmpty()) {
-                    Text(
-                        stringResource(R.string.rotate_will_lose, lost.joinToString { it.displayName }),
-                        color = HoloSecondary,
-                        fontSize = Tokens.Font.small,
-                        modifier = Modifier.padding(top = Tokens.Space.xxs),
-                    )
+            SectionTitle(stringResource(R.string.rotate_how))
+            CardSection {
+                StepsColumn {
+                    StepLine(1, stringResource(R.string.rotate_step_offline), RotStep.Wait)
+                    StepLine(2, stringResource(R.string.rotate_p_up), RotStep.Wait)
+                    StepLine(3, stringResource(R.string.rotate_step_tell), RotStep.Wait)
                 }
             }
         }
-
-        FieldLabel(stringResource(R.string.rotate_how))
-        StepRow(Icons.Filled.PowerSettingsNew, pluralStringResource(R.plurals.rotate_step_offline, AppModel.ROTATE_GAP_SECS, AppModel.ROTATE_GAP_SECS))
-        StepRow(Icons.Filled.Autorenew, stringResource(R.string.rotate_step_up))
-        StepRow(Icons.Filled.Send, stringResource(R.string.rotate_step_tell))
-
-        AccentButton(stringResource(R.string.rotate_btn)) {
+        Text(
+            stringResource(R.string.rotate_no_undo),
+            color = Tokens.Colors.tertiary,
+            fontSize = Tokens.Font.body,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.xl),
+        )
+        ScreenFooter(stringResource(R.string.rotate_btn)) {
             model.rotateAddress(chosen.map { it.key })
             onDone()
         }
-        Text(stringResource(R.string.rotate_no_undo), color = HoloSecondary, fontSize = Tokens.Font.small)
     }
 }
 
-@Composable
-private fun StepRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
-    Row(Modifier.padding(vertical = Tokens.Space.xxs)) {
-        Icon(icon, null, tint = HoloIconMuted, modifier = Modifier.size(Tokens.Size.iconS))
-        Spacer(Modifier.width(Tokens.Space.m))
-        Text(text, color = HoloSecondary, fontSize = Tokens.Font.body)
-    }
-}
-
-/**
- * Ход смены адреса: обратный отсчёт паузы, затем итог.
- *
- * Паузу не прячем — пользователь минуту офлайн, и он должен понимать, почему.
- */
+/** Ход смены адреса: пауза офлайн с отсчётом, подъём, «уведомлено N из M». */
 @Composable
 internal fun RotationProgress(model: AppModel, onFinish: () -> Unit) {
     val st = model.rotation ?: return
-    val done = st.newAddress.isNotEmpty()
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(ScreenPad),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        if (!done) {
-            Text(
-                "0:%02d".format(st.secondsLeft),
-                color = Color.White,
-                fontSize = Tokens.Font.huge,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(top = Tokens.Space.xxl),
-            )
-            Text(
-                stringResource(R.string.rotate_wait_body),
-                color = HoloSecondary,
-                fontSize = Tokens.Font.body,
-            )
-        }
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            ProgressStep(true, stringResource(R.string.rotate_p_stopped))
-            ProgressStep(st.secondsLeft == 0, stringResource(R.string.rotate_p_pause, st.secondsLeft))
-            ProgressStep(done, stringResource(R.string.rotate_p_up))
-            ProgressStep(done, pluralStringResource(R.plurals.rotate_p_told, st.told, st.told))
-        }
-        if (done) {
-            SurfaceCard(outer = 0.dp) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.CheckCircle, null, tint = HoloOnline, modifier = Modifier.size(Tokens.Size.iconM))
-                        Spacer(Modifier.width(Tokens.Space.s))
-                        Text(stringResource(R.string.rotate_done), color = HoloOnline, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
-                    }
-                    Text(
-                        st.newAddress,
-                        color = Color.White,
-                        fontSize = Tokens.Font.body,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(top = Tokens.Space.s),
+    val up = st.newAddress.isNotEmpty()
+    val paused = st.secondsLeft > 0
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState())
+                .padding(top = Tokens.Space.l, bottom = Tokens.Space.l),
+        ) {
+            CardSection {
+                StepsColumn {
+                    StepLine(1, stringResource(R.string.rotate_p_stopped), RotStep.Done)
+                    StepLine(
+                        2,
+                        if (paused) stringResource(R.string.rotate_p_pause, st.secondsLeft) else stringResource(R.string.rotate_p_paused),
+                        if (paused) RotStep.Now else RotStep.Done,
+                    )
+                    StepLine(
+                        3,
+                        stringResource(R.string.rotate_p_up),
+                        when {
+                            up -> RotStep.Done
+                            !paused -> RotStep.Now
+                            else -> RotStep.Wait
+                        },
+                    )
+                    StepLine(
+                        4,
+                        stringResource(R.string.rotate_p_told, st.told, st.total),
+                        when {
+                            up && st.told >= st.total -> RotStep.Done
+                            up -> RotStep.Now
+                            else -> RotStep.Wait
+                        },
                     )
                 }
             }
-            AccentButton(stringResource(R.string.common_done)) {
+            if (!up) {
+                Caption(stringResource(R.string.rotate_wait_caption))
+            } else {
+                SectionTitle(stringResource(R.string.rotate_done))
+                CardSection {
+                    CardRow(divider = false) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.rotate_new_address), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body)
+                            MonoText(st.newAddress, Color.White)
+                        }
+                    }
+                }
+                Caption(stringResource(R.string.rotate_if_continues))
+            }
+        }
+        if (up) {
+            ScreenFooter(stringResource(R.string.common_done)) {
                 model.dismissRotation()
                 onFinish()
             }
-            Text(stringResource(R.string.rotate_if_continues), color = HoloSecondary, fontSize = Tokens.Font.small)
-        } else {
-            Text(stringResource(R.string.rotate_wait_footer), color = HoloSecondary, fontSize = Tokens.Font.small)
         }
     }
 }
 
+/** Подпись над группой с числом справа («Сообщить новый адрес · 4 из 5»). */
 @Composable
-private fun ProgressStep(done: Boolean, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            if (done) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-            null,
-            tint = if (done) HoloOnline else HoloIconMuted,
-            modifier = Modifier.size(Tokens.Size.iconS),
-        )
-        Spacer(Modifier.width(Tokens.Space.m))
-        Text(text, color = if (done) Color.White else HoloSecondary, fontSize = Tokens.Font.body)
+private fun SectionText(text: String, modifier: Modifier = Modifier) {
+    Text(text, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium, modifier = modifier)
+}
+
+private enum class RotStep { Done, Now, Wait }
+
+/** Группа шагов: поля 16 по бокам, 4 сверху и снизу (макет `.grp` с шагами). */
+@Composable
+private fun StepsColumn(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.xs), content = content)
+}
+
+/** Шаг: кружок с номером (сделан — галочка на зелёном, сейчас — акцент) и текст. */
+@Composable
+private fun StepLine(n: Int, text: String, state: RotStep) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = Tokens.Size.stepRow),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+    ) {
+        Box(
+            Modifier.size(Tokens.Size.stepDot).clip(CircleShape).background(
+                when (state) {
+                    RotStep.Done -> Tokens.Colors.stateOk
+                    RotStep.Now -> Tokens.Colors.accentMuted
+                    RotStep.Wait -> Tokens.Colors.raised
+                },
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (state == RotStep.Done) {
+                Icon(TablerIcons.Check, null, tint = Tokens.Colors.online, modifier = Modifier.size(Tokens.Size.checkMark))
+            } else {
+                Text(
+                    "$n",
+                    color = if (state == RotStep.Now) Tokens.Colors.accentSoft else Tokens.Colors.tertiary,
+                    fontSize = Tokens.Font.small,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        Text(text, color = if (state == RotStep.Wait) Tokens.Colors.tertiary else Color.White, fontSize = Tokens.Font.label)
     }
 }
+
+/** Отступ разделителя у строки человека: поле строки + аватар + зазор. */
+private val PersonInset = Tokens.Space.l + Tokens.Size.avatarPick + Tokens.Space.m + Tokens.Space.xxs

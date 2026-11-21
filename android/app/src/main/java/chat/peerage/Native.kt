@@ -209,8 +209,12 @@ object Native {
     /** Свежая соль для KDF (16 байт). */
     external fun newVaultSalt(): ByteArray
 
-    /** Кто сейчас флудит: JSON [{peer, dropped, pps, blocked}], по убыванию темпа. */
+    /** Кто флудил с запуска: JSON [{peer, dropped, bytes, pps, bps, blocked}], по убыванию
+     *  темпа в байтах; идёт сейчас — где bps > 0. */
     external fun floodPeers(sessionPtr: Long): String
+
+    /** Ход последней смены адреса: JSON {told, total} — скольким отмеченным ушло объявление. */
+    external fun rotationProgress(sessionPtr: Long): String
 
     /** Текущая эпоха адреса (0 — адрес совпадает с ключом личности). */
     external fun transportEpoch(sessionPtr: Long): Int

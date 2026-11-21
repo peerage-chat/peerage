@@ -250,9 +250,15 @@ internal data class BlockedPeerDto(
 internal data class FloodPeerDto(
     val peer: String = "",
     val dropped: Long = 0,
+    val bytes: Long = 0,
     val pps: Double = 0.0,
+    val bps: Long = 0,
     val blocked: Boolean = false,
 )
+
+/** Ход смены адреса: скольким из отмеченных уже ушло объявление. */
+@Serializable
+internal data class RotationProgressDto(val told: Int = 0, val total: Int = 0)
 
 @Serializable
 internal data class CallEntryDto(
@@ -281,6 +287,7 @@ internal data class NetPeerDto(
     @SerialName("rx_rate") val rxRate: Long = 0,
     @SerialName("tx_rate") val txRate: Long = 0,
     @SerialName("uptime_s") val uptimeS: Double = 0.0,
+    val addr: String = "",
 )
 
 @Serializable

@@ -14,6 +14,19 @@ pub struct PeerStat {
     pub rx_rate: u64,
     pub tx_rate: u64,
     pub uptime_s: f64,
+    /// Адрес меша, выведенный из ключа (в JSON libygg его нет — считает
+    /// [`NetStats::aggregate`]). Пусто — ключа ещё нет (соединение не поднялось).
+    #[serde(default)]
+    pub addr: String,
+}
+
+/// Адрес Yggdrasil по hex-ключу пира; пусто, если ключ не 32 байта.
+fn addr_of(key_hex: &str) -> String {
+    let mut key = [0u8; 32];
+    match hex::decode_to_slice(key_hex, &mut key) {
+        Ok(()) => peerage_core::identity::addr_for_key(&key).to_string(),
+        Err(_) => String::new(),
+    }
 }
 
 /// Снапшот стата сети: пиры + агрегаты (число/пинг/трафик).
@@ -31,7 +44,10 @@ pub struct NetStats {
 
 impl NetStats {
     /// Свернуть список пиров в агрегаты. Чистая функция — тестируется без сети.
-    pub fn aggregate(peers: Vec<PeerStat>, tree: i32) -> NetStats {
+    pub fn aggregate(mut peers: Vec<PeerStat>, tree: i32) -> NetStats {
+        for p in &mut peers {
+            p.addr = addr_of(&p.key);
+        }
         let best_ping = peers
             .iter()
             .filter(|p| p.up && p.latency_ms > 0.0)
@@ -83,7 +99,23 @@ mod tests {
             rx_rate: rx,
             tx_rate: tx,
             uptime_s: 1.0,
+            addr: String::new(),
         }
+    }
+
+    /// Адрес пира выводит движок: клиент не знает алгоритма Yggdrasil.
+    #[test]
+    fn netstats_derives_peer_address() {
+        let key = [7u8; 32];
+        let mut p = peer(true, 10.0, 0, 0);
+        p.key = hex::encode(key);
+        let mut pending = peer(false, 0.0, 0, 0);
+        pending.key = String::new();
+        let s = NetStats::aggregate(vec![p, pending], 1);
+        let want = peerage_core::identity::addr_for_key(&key).to_string();
+        assert!(want.starts_with("2"), "адрес меша: {want}");
+        assert_eq!(s.peers[0].addr, want);
+        assert_eq!(s.peers[1].addr, "", "без ключа адреса нет");
     }
 
     #[test]

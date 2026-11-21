@@ -628,3 +628,17 @@ val TablerIcons.Archive: ImageVector by lazy {
         "M10 12l4 0",
     )
 }
+
+/** Уйти в офлайн (`misc/Flood`, «Что можно сделать»). */
+val TablerIcons.WifiOff: ImageVector by lazy {
+    tabler(
+        "wifi-off",
+        "M3 3l18 18",
+        "M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 5 -2.7M14 9.8a10 10 0 0 1 5 2.7M2 8.8a15 15 0 0 1 4.5 -2.8M12 20h.01",
+    )
+}
+
+/** Сменить адрес (`misc/Flood`, «Что можно сделать»). */
+val TablerIcons.SwitchHorizontal: ImageVector by lazy {
+    tabler("switch-horizontal", "M4 8h13l-3 -3M20 16h-13l3 3")
+}

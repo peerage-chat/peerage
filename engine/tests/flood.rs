@@ -88,6 +88,12 @@ fn flood_from_stranger_shows_up_in_snapshot() {
         entry["dropped"].as_u64().unwrap() > 0,
         "счётчик отброшенных растёт"
     );
+    // Объём — в байтах датаграмм: каждая длиннее байта, так что байт больше пакетов.
+    assert!(
+        entry["bytes"].as_u64().unwrap() > entry["dropped"].as_u64().unwrap(),
+        "объём считается в байтах: {entry}"
+    );
+    assert!(entry["bps"].is_u64(), "темп в байтах/с — целым: {entry}");
     assert_eq!(entry["blocked"], false, "пока не блокировали — флаг снят");
 
     // После блокировки источник помечен: его режет и транспорт (до FFI), и бюджет.

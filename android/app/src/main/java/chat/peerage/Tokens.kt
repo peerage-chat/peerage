@@ -413,6 +413,8 @@ object Tokens {
         val check = 22.dp // кружок выбора сообщения у ведущего края
         val checkStroke = 1.5.dp // контур пустого кружка выбора
         val checkMark = 14.dp // галочка в отмеченном кружке
+        val stepDot = 24.dp // кружок шага с номером (`misc/Rotate`, `.st i`)
+        val stepRow = 44.dp // строка шага в группе «Как это произойдёт»
         val swipeReply = 64.dp // сдвиг пузыря, после которого отпускание — ответ
         val replyBadge = 32.dp // кружок со стрелкой ответа, проявляется при свайпе
         val menuShadow = 12.dp

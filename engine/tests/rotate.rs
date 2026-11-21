@@ -134,6 +134,11 @@ fn own_rotation_keeps_the_contact_reachable() {
     }));
 
     assert_eq!(a.transport_epoch(), 0, "до ротации живём на ключе личности");
+    assert_eq!(
+        a.rotation_progress_json(),
+        r#"{"told":0,"total":0}"#,
+        "смены ещё не было"
+    );
     // Пауза 0: здесь проверяется механизм, а не выпадение ключа из дерева — оно
     // свойство настоящего меша и измерено отдельным стендом (flood_pubmesh).
     a.rotate_transport(vec![b_key], 0);
@@ -154,6 +159,13 @@ fn own_rotation_keeps_the_contact_reachable() {
         wait(20, || transport_of(&b, &a_key) == hex::encode(tk1)),
         "Боб должен получить новый адрес, получено {:?}",
         transport_of(&b, &a_key),
+    );
+    // Ход смены видит, кому объявление уже ушло (экран «Уведомлено 1 из 1»).
+    assert!(
+        wait(20, || a.rotation_progress_json()
+            == r#"{"told":1,"total":1}"#),
+        "Боб — в счёте уведомлённых: {}",
+        a.rotation_progress_json(),
     );
 
     // Главное: связь жива в обе стороны. Боб шлёт на НОВЫЙ адрес (он его знает),

@@ -87,7 +87,7 @@ private fun BlockedRow(b: BlockedPeer, divider: Boolean, onUnblock: () -> Unit) 
 }
 
 /** «28 октября»; год — только если не текущий. */
-private fun fmtSince(ts: Long): String {
+internal fun fmtSince(ts: Long): String {
     val d = java.util.Date(ts * 1000)
     val cal = java.util.Calendar.getInstance()
     val year = cal.get(java.util.Calendar.YEAR)

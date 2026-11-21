@@ -458,6 +458,9 @@ pub struct Engine {
     /// presence: пока контакт не появился, слать некуда, а не узнав нового адреса,
     /// он потеряет с нами связь навсегда.
     rotate_pending: Mutex<std::collections::HashSet<[u8; 32]>>,
+    /// Кого отметили в последней смене адреса: экрану хода нужен счёт «уведомлено
+    /// N из M». Только память — после перезапуска хода смены уже нет.
+    rotate_round: Mutex<Vec<[u8; 32]>>,
     /// Мы намеренно вне сети: пользователь ушёл в офлайн либо идёт пауза смены
     /// адреса. Отличается от «нет связи» — это осознанное состояние, и UI обязан
     /// его показывать.
@@ -1686,6 +1689,7 @@ impl Engine {
         let epoch = next_epoch(self.transport_epoch(), now());
         let tk = self.identity.transport_public(epoch);
         log::info!("смена адреса: эпоха {epoch}, пауза офлайн {gap_secs}с");
+        *self.rotate_round.lock_safe() = recipients.clone();
 
         // 1. Гасим текущий узел: с этого момента нас нет в сети — ни для флудера,
         //    ни для контактов.
@@ -1830,6 +1834,19 @@ impl Engine {
             p.iter().copied().collect()
         };
         self.set_rotate_pending(&all);
+    }
+
+    /// Ход последней смены адреса: `{told, total}` — скольким из отмеченных
+    /// объявление уже ушло живому получателю. Пока идёт пауза офлайн — ноль.
+    pub fn rotation_progress_json(&self) -> String {
+        let round = self.rotate_round.lock_safe().clone();
+        let told = if self.is_offline() {
+            0
+        } else {
+            let pending = self.rotate_pending.lock_safe();
+            round.iter().filter(|k| !pending.contains(*k)).count()
+        };
+        serde_json::json!({ "told": told, "total": round.len() }).to_string()
     }
 
     /// Сохранить список «кому ещё не сообщили новый адрес» (память + диск).
@@ -2102,8 +2119,9 @@ impl Engine {
         ok
     }
 
-    /// Кто сейчас флудит: `[{peer, dropped, pps, blocked}]`, по убыванию темпа.
-    /// Пустой массив — флуда нет.
+    /// Кто флудил с запуска: `[{peer, dropped, bytes, pps, bps, blocked}]`, по
+    /// убыванию темпа в байтах. Пустой массив — флуда не было; идёт сейчас — где
+    /// `bps > 0` (стихший поток через 3 с даёт ноль, объём остаётся).
     ///
     /// Остановить чужой поток на устройстве нельзя (threat-model N8): байты уже
     /// оплачены радио. Но пользователь имеет право знать, почему тает трафик, и
@@ -2117,7 +2135,9 @@ impl Engine {
             .map(|f| dto::FloodPeer {
                 peer: hex::encode(f.peer),
                 dropped: f.dropped,
+                bytes: f.bytes,
                 pps: (f.pps * 10.0).round() / 10.0, // десятых хватает, UI не нужен шум
+                bps: f.bps.round() as u64,
                 blocked: tiers.get(&f.peer).map(|t| t.is_blocked()).unwrap_or(false),
             })
             .collect();
@@ -4946,6 +4966,7 @@ impl Engine {
             tier_cache,
             data_dir: dir.clone(),
             rotate_pending: Mutex::new(std::collections::HashSet::new()),
+            rotate_round: Mutex::new(Vec::new()),
             transport_factory: Mutex::new(None),
             offline: AtomicBool::new(false),
             receipts: Mutex::new(receipts::Receipts::load(&dir)),

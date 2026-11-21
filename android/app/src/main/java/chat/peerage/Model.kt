@@ -1234,7 +1234,7 @@ class AppModel private constructor() {
                     }
                     wasOffline = nowOffline
                     val flood = decodeList<FloodPeerDto>(Native.floodPeers(sessionPtr))
-                        .map { FloodPeer(it.peer, it.dropped, it.pps, it.blocked) }
+                        .map { FloodPeer(it.peer, it.dropped, it.bytes, it.pps, it.bps, it.blocked) }
                     if (floodPeers != flood) {
                         onMain { floodPeers.replaceWith(flood) }
                     }
@@ -1250,8 +1250,14 @@ class AppModel private constructor() {
                                 FloodNotifier.showFlood(ctx, who, top.pps.toInt())
                             }
                         }
-                    } else if (flood.isEmpty()) {
+                    } else if (flood.none { it.bps > 0 }) {
                         floodNotified = false
+                    }
+                    // Ход смены адреса: «уведомлено N из M» считает движок.
+                    if (rotation != null) {
+                        decodeOrNull<RotationProgressDto>(Native.rotationProgress(sessionPtr))?.let { p ->
+                            onMain { rotation = rotation?.copy(told = p.told) }
+                        }
                     }
                     if (benchRecv) {
                         val mbps = decodeOrNull<BenchDto>(Native.benchRecvStats(sessionPtr))?.mbps ?: 0.0
@@ -1270,7 +1276,7 @@ class AppModel private constructor() {
                                 n.rxRate,
                                 n.txRate,
                                 n.peers.map {
-                                    NetPeer(it.key, it.inbound, it.up, it.latencyMs, it.rxRate, it.txRate, it.uptimeS)
+                                    NetPeer(it.key, it.inbound, it.up, it.latencyMs, it.rxRate, it.txRate, it.uptimeS, it.addr)
                                 },
                             )
                             onMain { netStats = stats }
@@ -1890,7 +1896,7 @@ class AppModel private constructor() {
      * Поэтому её не прячем, а показываем обратным отсчётом.
      */
     fun rotateAddress(recipients: List<String>) {
-        rotation = RotationState(secondsLeft = ROTATE_GAP_SECS, told = recipients.size)
+        rotation = RotationState(secondsLeft = ROTATE_GAP_SECS, total = recipients.size)
         offline = true
         ops.execute { Native.rotateTransport(sessionPtr, recipients.joinToString(","), ROTATE_GAP_SECS) }
         // Отсчёт — отдельным потоком: сам движок в это время спит в паузе.

@@ -427,14 +427,61 @@ struct Shared {
     targets: Mutex<std::collections::HashSet<PeerKey>>,
 }
 
-/// Учёт отброшенного по одному источнику. `pps` — оценка за последнее окно.
+/// Учёт отброшенного по одному источнику: пакеты и байты с запуска, темп — за
+/// последнее секундное окно.
 #[derive(Debug, Clone)]
 struct FloodEntry {
     dropped: u64,
+    bytes: u64,
     window_start: Instant,
     in_window: u32,
+    in_window_bytes: u64,
     pps: f64,
+    bps: f64,
     last_seen: Instant,
+}
+
+impl FloodEntry {
+    fn new(now: Instant) -> Self {
+        FloodEntry {
+            dropped: 0,
+            bytes: 0,
+            window_start: now,
+            in_window: 0,
+            in_window_bytes: 0,
+            pps: 0.0,
+            bps: 0.0,
+            last_seen: now,
+        }
+    }
+
+    /// Учесть отброшенную датаграмму длиной `len`.
+    fn note(&mut self, len: usize, now: Instant) {
+        let len = len as u64;
+        self.dropped = self.dropped.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(len);
+        self.in_window = self.in_window.saturating_add(1);
+        self.in_window_bytes = self.in_window_bytes.saturating_add(len);
+        self.last_seen = now;
+        let elapsed = now.saturating_duration_since(self.window_start);
+        if elapsed >= Duration::from_secs(1) {
+            let secs = elapsed.as_secs_f64();
+            self.pps = self.in_window as f64 / secs;
+            self.bps = self.in_window_bytes as f64 / secs;
+            self.in_window = 0;
+            self.in_window_bytes = 0;
+            self.window_start = now;
+        }
+    }
+
+    /// Темп (пакетов/с, байт/с) на момент `now`: стихший поток — ноль.
+    fn rate(&self, now: Instant) -> (f64, f64) {
+        if now.saturating_duration_since(self.last_seen) > FLOOD_QUIET {
+            (0.0, 0.0)
+        } else {
+            (self.pps, self.bps)
+        }
+    }
 }
 
 /// Сколько недавно принятых надёжных сообщений помним для отсева повторов.
@@ -446,14 +493,22 @@ const FLOOD_CAP: usize = 64;
 /// Простаивающие записи выбрасываем: «долбился час назад» пользователю не новость.
 const FLOOD_IDLE: Duration = Duration::from_secs(120);
 
+/// Сколько тишины от источника — и его поток считается стихшим (темп ноль).
+/// Больше окна оценки: одно пропущенное окно не обнуляет темп.
+const FLOOD_QUIET: Duration = Duration::from_secs(3);
+
 /// Интенсивность флуда от одного источника (для UI и диагностики).
 #[derive(Debug, Clone, Copy)]
 pub struct FloodStat {
     pub peer: PeerKey,
     /// Всего отброшено пакетов от источника за время жизни процесса.
     pub dropped: u64,
-    /// Оценка темпа в последнем секундном окне, пакетов/с.
+    /// Всего отброшено байт (длины датаграмм) за время жизни процесса.
+    pub bytes: u64,
+    /// Темп в последнем секундном окне, пакетов/с; стихший поток — 0.
     pub pps: f64,
+    /// То же в байтах/с.
+    pub bps: f64,
 }
 
 impl Shared {
@@ -949,15 +1004,19 @@ impl Messenger {
         self.shared.boosted.lock().unwrap().insert(*peer, Instant::now() + until);
     }
 
-    /// Кто сейчас флудит: источники с наибольшим отброшенным темпом, по убыванию.
-    /// Пустой список = флуда нет. Читает UI, чтобы честно показать происходящее.
+    /// Кто флудил с запуска: по убыванию темпа в байтах, затем объёма. Пустой
+    /// список — флуда не было; идёт ли он сейчас — по ненулевому темпу.
     pub fn flood_stats(&self) -> Vec<FloodStat> {
+        let now = Instant::now();
         let map = self.shared.flood.lock().unwrap();
         let mut v: Vec<FloodStat> = map
             .iter()
-            .map(|(peer, e)| FloodStat { peer: *peer, dropped: e.dropped, pps: e.pps })
+            .map(|(peer, e)| {
+                let (pps, bps) = e.rate(now);
+                FloodStat { peer: *peer, dropped: e.dropped, bytes: e.bytes, pps, bps }
+            })
             .collect();
-        v.sort_by(|a, b| b.pps.total_cmp(&a.pps).then(b.dropped.cmp(&a.dropped)));
+        v.sort_by(|a, b| b.bps.total_cmp(&a.bps).then(b.bytes.cmp(&a.bytes)));
         v
     }
 
@@ -1461,30 +1520,15 @@ impl Messenger {
 /// Учесть отброшенный пакет от источника: счётчик и оценка темпа за секундное
 /// окно. Карта ограничена по размеру и чистится от простоя — иначе Sybil-флуд
 /// с тысячи ключей растил бы её без предела.
-fn note_flood(shared: &Arc<Shared>, src: &PeerKey, now: Instant) {
+fn note_flood(shared: &Arc<Shared>, src: &PeerKey, len: usize, now: Instant) {
     let mut map = shared.flood.lock().unwrap();
-    let e = map.entry(*src).or_insert(FloodEntry {
-        dropped: 0,
-        window_start: now,
-        in_window: 0,
-        pps: 0.0,
-        last_seen: now,
-    });
-    e.dropped = e.dropped.saturating_add(1);
-    e.in_window = e.in_window.saturating_add(1);
-    e.last_seen = now;
-    let elapsed = now.saturating_duration_since(e.window_start);
-    if elapsed >= Duration::from_secs(1) {
-        e.pps = e.in_window as f64 / elapsed.as_secs_f64();
-        e.in_window = 0;
-        e.window_start = now;
-    }
+    map.entry(*src).or_insert_with(|| FloodEntry::new(now)).note(len, now);
     if map.len() > FLOOD_CAP {
         map.retain(|_, e| now.saturating_duration_since(e.last_seen) < FLOOD_IDLE);
         while map.len() > FLOOD_CAP {
             // Выбрасываем самый тихий источник: экран всё равно показывает верхних.
             if let Some(quietest) =
-                map.iter().min_by(|a, b| a.1.pps.total_cmp(&b.1.pps)).map(|(k, _)| *k)
+                map.iter().min_by(|a, b| a.1.bps.total_cmp(&b.1.bps)).map(|(k, _)| *k)
             {
                 map.remove(&quietest);
             } else {
@@ -1573,7 +1617,7 @@ fn receive_loop(shared: Arc<Shared>) {
         };
         if !allowed {
             dropped = dropped.wrapping_add(1);
-            note_flood(&shared, &sender_id, now);
+            note_flood(&shared, &sender_id, n, now);
             // Логируем редко, чтобы лог сам не стал амплификацией флуда.
             if dropped % 512 == 1 {
                 log::warn!(
@@ -2100,6 +2144,24 @@ mod tests {
 
     fn id(n: u8) -> Identity {
         Identity::from_seed(&[n; 32]).unwrap()
+    }
+
+    /// Учёт потока — в байтах (экран показывает МБ/с и потраченное), и темп гаснет,
+    /// когда поток стих: иначе последнее окно висело бы «сейчас» вечно.
+    #[test]
+    fn flood_entry_counts_bytes_and_goes_quiet() {
+        let t0 = Instant::now();
+        let mut e = FloodEntry::new(t0);
+        for i in 0..11u64 {
+            e.note(1000, t0 + Duration::from_millis(i * 110));
+        }
+        assert_eq!((e.dropped, e.bytes), (11, 11_000));
+        let (pps, bps) = e.rate(t0 + Duration::from_millis(1200));
+        assert!((9.0..11.0).contains(&pps), "пакетов/с: {pps}");
+        assert!((9_000.0..11_000.0).contains(&bps), "байт/с: {bps}");
+        // Поток стих: темп — ноль, потраченное остаётся.
+        assert_eq!(e.rate(t0 + Duration::from_secs(10)), (0.0, 0.0));
+        assert_eq!(e.bytes, 11_000);
     }
 
     /// Дождаться конкретного события до таймаута (фон-потоки доставляют асинхронно).

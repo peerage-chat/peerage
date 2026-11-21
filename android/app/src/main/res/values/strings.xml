@@ -274,24 +274,20 @@
     <string name="net_metric_ping">Ping</string>
     <string name="net_unit_ms">ms</string>
     <string name="net_metric_traffic">Traffic</string>
-    <string name="net_unit_kbs">KB/s</string>
     <string name="net_my_node">My node</string>
     <string name="net_copy_address">Copy address</string>
     <string name="net_address">Address</string>
-    <string name="net_my_qr">My QR</string>
-    <string name="net_share">Share</string>
     <string name="net_mode">Participation mode</string>
     <string name="net_connected">Connected to the mesh</string>
     <string name="net_peer_connecting">connecting…</string>
     <string name="net_peer_inbound">Incoming</string>
     <string name="net_peer_outbound">Outgoing</string>
     <string name="net_node_mode">Network node</string>
-    <string name="net_node_mode_desc">While online, the phone relays other people\'s traffic — that is what keeps the mesh alive</string>
-    <string name="net_benefit_cost">Cost: higher battery and data use</string>
+    <string name="net_node_mode_desc">While the app is online, the phone relays other mesh traffic. Battery and data use are higher.</string>
     <string name="net_peers_label">Peers · %1$d</string>
     <string name="net_no_peers">No direct peers</string>
     <string name="net_offline_queue">Offline queue · %1$d</string>
-    <string name="net_offline_queue_desc">will be delivered when the recipient comes online</string>
+    <string name="net_offline_queue_desc">Delivered when the recipient comes online</string>
     <string name="net_share_chooser">Share key</string>
     <string name="net_ms_value">%1$s ms</string>
 
@@ -527,12 +523,11 @@
     <string name="profile_share">Share contact</string>
     <string name="profile_share_confirm">The key of %1$s goes to another person, who can then write directly. This cannot be undone.</string>
     <string name="profile_share_ok">Share</string>
-    <string name="net_diagnostics">Diagnostics</string>
     <string name="net_bench_row">Throughput test</string>
     <string name="net_bench_row_desc">Measures mesh speed to a contact</string>
-    <string name="net_bench_nobody">Nobody is online right now.</string>
+    <string name="net_bench_nobody">No contacts online.</string>
     <string name="net_bench_confirm_title">Run the test?</string>
-    <string name="net_bench_confirm">About 30 MB of test data will be sent to %1$s over the mesh. Their traffic and battery pay for it too.</string>
+    <string name="net_bench_confirm">About 30 MB of test data goes over the mesh. Data and battery are spent on both sides.</string>
     <string name="net_bench_start">Run</string>
     <string name="profile_rename">Change name</string>
     <string name="profile_block">Block</string>
@@ -557,62 +552,37 @@
 
     <!-- Traffic flood and address rotation (ADR-007) -->
     <string name="flood_title">You are being flooded</string>
-    <plurals name="flood_card_body">
-        <item quantity="one">A stream is coming from %d address; the app drops it. The content never reaches you, but the mobile data is already spent: foreign packets cannot be stopped on the device.</item>
-        <item quantity="other">A stream is coming from %d addresses; the app drops it. The content never reaches you, but the mobile data is already spent: foreign packets cannot be stopped on the device.</item>
-    </plurals>
     <string name="flood_screen_title">Traffic flood</string>
-    <string name="flood_explain">The app drops these packets before decryption — no CPU, battery or storage is spent, and nothing is shown. But the bytes already reached the radio, and you paid for them. That is how any open network works: whoever knows the address can send.</string>
+    <string name="flood_explain">Packets are dropped before decryption: CPU and battery are not spent, data is. Counted since the app started.</string>
     <string name="flood_sources">Sources</string>
     <string name="flood_blocked_tag">blocked</string>
-    <plurals name="flood_src_dropped">
-        <item quantity="one">%d packet dropped</item>
-        <item quantity="other">%d packets dropped</item>
-    </plurals>
-    <string name="flood_src_stranger">not a contact · %1$d dropped</string>
-    <string name="flood_pps">pkt/s</string>
+    <string name="flood_src_stranger">not a contact · %1$s</string>
     <string name="flood_what_to_do">What you can do</string>
     <string name="flood_go_offline">Go offline</string>
-    <string name="flood_go_offline_desc">Drop the connections — data stops being spent at once. Messages will not arrive until you return.</string>
+    <string name="flood_go_offline_desc">Data stops being spent at once. Messages do not arrive until back online.</string>
     <string name="flood_rotate">Change address</string>
-    <string name="flood_rotate_desc">The only way to cut the stream and stay online. Contacts are kept — they receive the new address.</string>
+    <string name="flood_rotate_desc">The stream is cut, the connection stays. Selected contacts receive the new address.</string>
     <string name="flood_offline_btn">Go offline</string>
-    <string name="flood_back_online">Back online</string>
-    <string name="flood_rotate_btn">Change address</string>
-    <string name="flood_footer">Blocked sources are already cut at the lowest level — their packets go no further than the transport.</string>
 
     <string name="rotate_title">Change address</string>
-    <string name="rotate_explain">Your identity does not change: name, fingerprint, history and groups stay the same. Only the address you are found by changes. Anyone you do not tell will lose contact with you.</string>
+    <string name="rotate_explain">Identity does not change: name, key, history and groups stay. Only the network address changes.</string>
     <string name="rotate_tell_whom">Tell the new address to</string>
-    <string name="rotate_hint_flooder">Source of the flood — unchecked by default</string>
-    <string name="rotate_hint_offline">Will be told when they come online</string>
-    <string name="rotate_selected">Selected %1$d of %2$d</string>
-    <string name="rotate_will_lose">Will keep the old address: %1$s</string>
+    <string name="rotate_hint_flooder">source of the stream</string>
+    <string name="rotate_hint_offline">will learn it when online</string>
+    <string name="rotate_will_lose">Unselected contacts keep the old address and lose contact with this phone.</string>
     <string name="rotate_how">How it will go</string>
-    <plurals name="rotate_step_offline">
-        <item quantity="one">We go offline for exactly %d second — that is how long the old address takes to disappear from the network. Without the pause the stream keeps coming.</item>
-        <item quantity="other">We go offline for exactly %d seconds — that is how long the old address takes to disappear from the network. Without the pause the stream keeps coming.</item>
-    </plurals>
-    <string name="rotate_step_up">We come back up under the new address.</string>
-    <string name="rotate_step_tell">Selected contacts receive a signed notice — nothing to forward by hand.</string>
+    <string name="rotate_step_tell">Selected contacts get a signed notice</string>
     <string name="rotate_btn">Change address</string>
-    <string name="rotate_no_undo">The change cannot be undone: the old address is released immediately.</string>
-    <string name="rotate_wait_body">You are offline. Waiting for the old address to disappear.</string>
-    <string name="rotate_wait_footer">Messages sent to you now will arrive later — the sender retries automatically.</string>
+    <string name="rotate_no_undo">Cannot be undone: the old address is released at once.</string>
     <string name="rotate_p_stopped">Old address shut down</string>
     <string name="rotate_p_pause">Pause — %1$d s left</string>
     <string name="rotate_p_up">Coming up under the new address</string>
-    <plurals name="rotate_p_told">
-        <item quantity="one">Notice to %d contact</item>
-        <item quantity="other">Notice to %d contacts</item>
-    </plurals>
-    <string name="rotate_failed">Could not change the address — you are back on the old one</string>
-    <string name="rotate_failed_offline">Could not change the address. You are offline — tap “Back online”</string>
+    <string name="rotate_failed">Address not changed: the previous one stays.</string>
+    <string name="rotate_failed_offline">Address not changed. No connection — Network → Go online.</string>
     <string name="rotate_done">Address changed</string>
-    <string name="rotate_if_continues">If the stream continues at the new address too, someone you told knows it.</string>
-    <string name="net_epoch">Address changed %1$d time(s)</string>
+    <string name="rotate_if_continues">A stream on the new address means one of the notified contacts knows it.</string>
     <string name="net_rotate_row">Change address</string>
-    <string name="net_rotate_row_desc">Cut the stream from whoever learned the old one</string>
+    <string name="net_rotate_row_desc">Cut off the stream from whoever knows the old one</string>
 
     <string name="notif_flood_title">You are being flooded</string>
     <string name="notif_flood_body">%1$s: %2$d packets/s. The content does not reach you, but data is being spent.</string>
@@ -1111,4 +1081,24 @@
     <string name="me_edit_name">Name</string>
     <string name="me_edit_caption">The name and photo go out to contacts. Each contact can label this phone differently on their side and sees that label instead.</string>
     <string name="me_remove_photo">Remove photo</string>
+    <string name="net_status_away">Offline · connections closed</string>
+    <string name="net_go_online">Go online</string>
+    <string name="net_rotate_row_since">Cut off the stream from whoever knows the old one · changed %1$s</string>
+    <string name="net_all_peers">All peers</string>
+    <string name="net_rate">%1$s/s</string>
+    <string name="flood_card_sub">%1$s now · %2$s spent</string>
+    <string name="flood_tile_now">now</string>
+    <string name="flood_tile_spent">spent</string>
+    <string name="flood_rotate_pill">Change</string>
+    <string name="rotate_count">%1$d of %2$d</string>
+    <string name="rotate_hint_online">online</string>
+    <string name="rotate_step_offline">A minute offline — the old address leaves the network</string>
+    <string name="rotate_p_paused">Pause</string>
+    <string name="rotate_p_told">Notified %1$d of %2$d</string>
+    <string name="rotate_wait_caption">The phone is offline. Messages sent during these seconds arrive later.</string>
+    <string name="rotate_new_address">New address</string>
+    <plurals name="flood_tile_sources">
+        <item quantity="one">source</item>
+        <item quantity="other">sources</item>
+    </plurals>
 </resources>
