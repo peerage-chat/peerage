@@ -73,7 +73,7 @@ toggle = page("Настройка: чаты в системном меню", hdr
     '<div class="sec">Система</div><div class="grp">'
     + grow(SHARE_I, "Чаты в меню «Поделиться»", "Последние чаты видны в системном меню вне приложения", '<span class="tg"><i></i></span>')
     + '</div>'
-    + '<div class="cap" style="margin-top:8px;">Выключено: имена и фото чатов не передаются системе. Отправить в Peerage можно и так — через значок приложения в меню.</div>'
+    + '<div class="cap" style="margin-top:8px;">Выключено: имена и фото чатов системе не передаются. Peerage остаётся в меню значком приложения.</div>'
     + FILL))
 
 # ---------- 2в. Ярлыки на значке приложения ----------
@@ -94,7 +94,7 @@ def foreign(link_html, note):
     return ('<div class="hdr"><div style="width:40px;"></div><b style="color:#9AA3AD;font-weight:500;font-size:15px;">'
             'Другой мессенджер</b></div>'
             + body('<div style="display:flex;flex-direction:column;gap:10px;flex:1;justify-content:flex-end;">'
-                   + '<div class="bub"><div class="lnk">Добавляйся в Peerage:</div>' + link_html + '</div>'
+                   + '<div class="bub"><div class="lnk">Контакт в Peerage:</div>' + link_html + '</div>'
                    + f'<div class="cap" style="padding:8px 4px 0;">{note}</div></div>'))
 
 
@@ -118,7 +118,7 @@ my = page("Мой код: ссылка", hdr("Мой код") + body(
     + grow(COPY, "Скопировать ссылку", None, '')
     + grow(SHARE, "Поделиться", None, '')
     + '</div>'
-    + '<div class="cap" style="margin-top:8px;">Ссылка и QR — одно и то же: ключ, адрес и имя. По ссылке приходит обычный запрос в контакты.</div>'
+    + '<div class="cap" style="margin-top:8px;">В ссылке и QR одно и то же: ключ, адрес и имя.</div>'
     + FILL))
 
 # ---------- 6. Открыта ссылка ----------

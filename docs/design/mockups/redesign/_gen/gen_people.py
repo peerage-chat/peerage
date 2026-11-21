@@ -102,7 +102,7 @@ add = page("Добавить контакт", hdr("Добавить контак
     + '<div class="h">Навести на код собеседника</div></div>' + SP16
     + '<div class="grp">'
     + grow(PASTE, "Вставить код", "Если код прислали сообщением", '')
-    + grow(QRI, "Показать свой код", "Для сканирования с другого телефона", '')
+    + grow(QRI, "Показать свой код", "", '')
     + '</div>'
     + '<div class="cap" style="margin-top:8px;">Код передаётся лицом к лицу или любым мессенджером: в нём ключ, адрес в сети и имя.</div>'
     + FILL))
@@ -114,7 +114,7 @@ found = page("Добавить контакт: код распознан", hdr("
     + '<div class="cap" style="font-variant-numeric:tabular-nums;padding:0;">ключ 3f9a1c07…</div></div></div>'
     + '<div class="sec">Приветствие</div>'
     + '<div class="inp" style="align-items:flex-start;min-height:96px;padding-top:14px;"><span class="v" style="line-height:22px;">Привет! Это Аня, с курсов по керамике<span class="cr"></span></span></div>'
-    + '<div class="cap" style="margin-top:8px;">Уйдёт запросом в контакты вместе с именем этого профиля; фото — после принятия. Алиса решит, принять ли.</div>'
+    + '<div class="cap" style="margin-top:8px;">Уйдёт запросом в контакты вместе с именем этого профиля; фото — после принятия.</div>'
     + SP16 + '<div class="sec">Как подписать у себя</div>'
     + '<div class="inp"><span class="p">Алиса</span></div>'
     + '<div class="cap" style="margin-top:8px;">Необязательно. Видно только на этом телефоне.</div>'
@@ -158,7 +158,7 @@ mycode = page("Мой код", hdr("Мой код") + body(
     + f'<button class="btn" style="flex:1;">{ic(COPY, 20, "#ECEDEF")}Скопировать</button>'
     + f'<button class="btn" style="flex:1;">{ic(SHARE, 20, "#ECEDEF")}Поделиться</button></div>'
     + f'<button class="btn" style="margin-top:8px;">{ic(SCAN_I, 20, "#ECEDEF")}Сканировать код</button>'
-    + '<div class="cap" style="margin-top:12px;">В коде — ключ, адрес в сети и имя. Адрес Yggdrasil и знаки отпечатка отсюда убраны: адрес — в «Сети», сверка — на экране контакта.</div>'
+    + '<div class="cap" style="margin-top:12px;">В коде — ключ, адрес в сети и имя.</div>'
     + FILL))
 
 # ---------- 5. Свой профиль ----------
@@ -167,7 +167,7 @@ avatar = ('<div style="position:relative;width:104px;height:104px;margin:16px au
           + f'<div style="position:absolute;right:-2px;bottom:-2px;width:36px;height:36px;border-radius:50%;background:#33B5E5;box-shadow:0 0 0 3px #08090B;display:flex;align-items:center;justify-content:center;">{ic(CAMERA, 18, "#04222E")}</div></div>')
 me_edit = page("Свой профиль: правка", hdr("Профиль", '<button class="pill" style="margin-right:4px;">Готово</button>') + body(
     avatar + '<div class="sec">Имя</div><div class="inp"><span class="v">Аня<span class="cr"></span></span></div>'
-    + '<div class="cap" style="margin-top:8px;">Имя и фото рассылаются контактам. Каждый контакт может подписать этот телефон у себя по-своему — это имя он увидит вместо присланного.</div>'
+    + '<div class="cap" style="margin-top:8px;">Имя и фото рассылаются контактам. Контакт может задать этому телефону своё имя, оно заменит присланное.</div>'
     + SP16 + '<div class="grp">' + grow(TRASH, "Убрать фото", None, '') + '</div>'
     + FILL))
 
@@ -187,7 +187,7 @@ g2 = page("Новая группа: название", hdr("Новая груп�
     + '<div class="sec">Участники · 3</div><div class="grp">'
     + prow("Аня", "создатель — админ", '<span class="tag">админ</span>').replace(C["А"], "#C2185B", 1)
     + prow("Алиса", "получит приглашение") + prow("Вера", "получит приглашение") + '</div>'
-    + '<div class="cap" style="margin-top:8px;">Участники получат приглашение и сами решат, вступать ли. Удалять участников и закреплять сообщения может только админ; приглашать — любой участник.</div>'
+    + '<div class="cap" style="margin-top:8px;">Участники получат приглашение. Удалять участников и закреплять сообщения может только админ, приглашать — любой участник.</div>'
     + FILL) + foot("Создать"))
 
 # ---------- 8. Пригласить в группу ----------
@@ -197,7 +197,7 @@ rows8 = (prow("Алиса", "уже в группе", '', 'dis') + prow("Бор�
 addm = page("Пригласить в группу", hdr("Пригласить", '<span class="cap" style="padding-right:12px;">2 выбрано</span>') + body(
     f'<div class="srch">{ic(SEARCH, 20, "#8E8E98", NF)}Поиск по контактам</div>' + '<div style="height:12px;"></div>'
     + f'<div class="grp">{rows8}</div>'
-    + '<div class="cap" style="margin-top:8px;">Приглашают только из контактов. Каждый получит карточку «Вступить / Отклонить» и войдёт в группу, когда примет.</div>'
+    + '<div class="cap" style="margin-top:8px;">Приглашаются только контакты. Вход в группу — после принятия приглашения.</div>'
     + FILL) + foot("Пригласить · 2"))
 
 # ---------- 9. Участник: шторка админа ----------
@@ -216,7 +216,7 @@ sheet = page("Участник: действия админа", behind + '<div c
 # ---------- 10. Выход админа ----------
 leave = page("Выход админа из группы", behind + '<div class="dim"></div><div class="sheet"><div class="hdl"></div>'
              + '<div class="sht">Выйти из «Дачи»?</div>'
-             + '<div class="sub" style="font-size:14px;line-height:20px;">Этот телефон — админ группы. Без админа в группе никто не сможет удалять участников и закреплять сообщения, а выход участников станет только локальным: снять их с группы будет некому. Права можно передать перед выходом.</div>'
+             + '<div class="sub" style="font-size:14px;line-height:20px;">Этот телефон — админ группы. Без админа никто не сможет удалять участников и закреплять сообщения.</div>'
              + '<div class="grp" style="background:#26272D;">' + prow("Алиса", "в сети", check(True)) + prow("Вера", "в сети", check(False)) + '</div>'
              + '<button class="btn red">Передать Алисе и выйти</button>'
              + '<button class="btn">Выйти без передачи</button></div>')
@@ -231,7 +231,7 @@ gedit = page("Группа: правка", hdr("Группа", '<button class="p
 # ---------- 12. Новая группа · А · сначала название ----------
 g_a = page("Новая группа: А, сначала название", hdr("Новая группа") + body(
     '<div class="sec" style="margin-top:8px;">Название</div><div class="inp"><span class="v">Дача<span class="cr"></span></span></div>'
-    + '<div class="cap" style="margin-top:8px;">Участников — потом, из группы.</div>' + FILL) + foot("Создать"))
+    + '<div class="cap" style="margin-top:8px;">Участники добавляются из группы.</div>' + FILL) + foot("Создать"))
 
 rows = [
     [("Main.dc.html", add, "Добавить контакт: сразу камера"),

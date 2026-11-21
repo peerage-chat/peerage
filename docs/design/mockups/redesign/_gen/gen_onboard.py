@@ -136,7 +136,7 @@ avatar = ('<div style="position:relative;width:96px;height:96px;margin:28px 0 20
           + f'<div style="width:96px;height:96px;border-radius:50%;background:#26272D;display:flex;align-items:center;justify-content:center;">{ic(USER, 40, "#6B6C74")}</div>'
           + f'<div style="position:absolute;right:-2px;bottom:-2px;width:34px;height:34px;border-radius:50%;background:#33B5E5;box-shadow:0 0 0 3px #08090B;display:flex;align-items:center;justify-content:center;">{ic(CAMERA, 18, "#04222E")}</div></div>')
 profile = page("Первый запуск: профиль", screen(
-    "", 1, heading("Как подписаться", "Имя и фото видят контакты и те, кому передан код. Можно изменить позже."),
+    "", 1, heading("Имя и фото", "Имя и фото видят контакты и те, кому передан код. Можно изменить позже."),
     avatar + '<div class="inp"><span class="v">Аня<span class="cr"></span></span></div>'
     + '<div class="cap" style="margin-top:8px;">Без имени контакты увидят короткий код ключа.</div>' + FILL,
     "Далее", "Пропустить"))
@@ -148,9 +148,9 @@ keyi = page("Первый запуск: копия ключа", screen(
     + grow(EYE_OFF, "Записать на бумаге или в менеджер паролей", "Не фотографировать и не хранить в заметках", '')
     + grow(SHIELD, "Никому не показывать", "Кто знает слова — тот может писать от этого имени", '')
     + '</div>' + SP16
-    + f'<div class="warn">{ic(WARN, 20, "#F2C98A", NF)}<div>Сервера, который хранит доступ, нет. Без 24 слов потерянный телефон — потерянная личность.</div></div>'
+    + f'<div class="warn">{ic(WARN, 20, "#F2C98A", NF)}<div>Сервера с доступом нет: без 24 слов личность теряется вместе с телефоном.</div></div>'
     + FILL,
-    "Показать 24 слова", "Позже — напоминание останется на главной"))
+    "Показать 24 слова", "Позже"))
 
 # ---------- 4. Фраза ----------
 def phrase_grid(slots):
@@ -205,7 +205,7 @@ def check_screen(title, step, sub, sec):
 
 
 check = check_screen("Первый запуск: проверка слов", 2,
-                     "Три слова из записанных — по номерам. Подсказка — по первым буквам.",
+                     "Три слова из записанных, по номерам.",
                      "Показать слова ещё раз")
 
 # ---------- 6. Разрешения · А одним экраном ----------
@@ -249,14 +249,14 @@ restored = page("Восстановление: личность на месте"
     "", None, '<div style="height:24px;"></div>' + heading("Личность восстановлена", "Ключ тот же — для контактов это та же личность.", ic(CHECK, 34, "#8BC34A")),
     SP24 + '<div class="grp">'
     + grow(ARCHIVE, "Перенести переписку", "Из файла копии данных: контакты, сообщения, заметки", '')
-    + '</div><div class="cap" style="margin-top:8px;">Без файла копии контакты и чаты начнутся с нуля, а если адрес в сети менялся — контакты не дозвонятся до этого телефона. Членство в группах не переносится ни так, ни так.</div>'
+    + '</div><div class="cap" style="margin-top:8px;">Без файла копии контакты и чаты начнутся с нуля, а если адрес в сети менялся — контакты не дозвонятся до этого телефона. Членство в группах не переносится.</div>'
     + FILL, "Выбрать файл копии", "Продолжить без переписки", back=False))
 
 # ---------- 10. Пароль файла ----------
 fileline = (f'<div class="grp"><div class="gr">{ic(FILE, 22, "#9AA3AD", NF)}<div class="gt"><b>backup-2026-10-30.peerage</b><span>48 МБ · снят 30 октября</span></div>'
             + '<button class="pill" style="background:#26272D;color:#C4C7CC;">Другой</button></div></div>')
 bkpass = page("Восстановление: пароль копии", screen(
-    "", None, heading("Пароль копии", "Эта копия дополнительно закрыта паролем. Копия без пароля открывается сразу — этого шага нет."),
+    "", None, heading("Пароль копии", "Эта копия дополнительно закрыта паролем."),
     SP24 + fileline + SP16
     + '<div class="inp"><span class="v">••••••••••<span class="cr"></span></span>' + ic(EYE_OFF, 20, "#9AA3AD", NF) + '</div>'
     + '<div class="cap" style="margin-top:8px;">Переписка добавится к той, что уже есть на устройстве; ничего не затирается.</div>' + FILL,

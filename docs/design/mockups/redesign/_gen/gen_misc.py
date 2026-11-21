@@ -70,14 +70,14 @@ outbox = page("Исходящие", hdr("Исходящие") + body(
     + orow("Глеб", "1 204 · 3,2 МБ · не в сети 24 дня")
     + orow("Борис", "31 · 120 КБ · отправляется…")
     + orow("Вера", "13 · 64 КБ · не в сети 2 часа") + '</div>'
-    + '<div class="cap" style="margin-top:8px;">Тап — открыть чат или очистить очередь получателя.</div>' + FILL)
+    + '' + FILL)
     + '<div class="obf"><button class="btn red">Очистить всё</button></div>')
 
 # ---------- 3. Подтверждение удержанием ----------
 hold = page("Исходящие: очистить всё", hdr("Исходящие") + body(tiles([("1 248", "сообщений"), ("3,4 МБ", "объём"), ("24 дня", "самое старое")]) + FILL)
             + '<div class="dim"></div><div class="sheet"><div class="hdl"></div>'
             + '<div class="sht">Очистить всю очередь?</div>'
-            + '<div class="sub" style="font-size:14px;line-height:20px;">1 248 сообщений для Глеба, Бориса и Веры не дойдут никогда. Это сообщения с этого телефона, которые ещё никто не получил; вернуть их будет неоткуда.</div>'
+            + '<div class="sub" style="font-size:14px;line-height:20px;">1 248 сообщений для Глеба, Бориса и Веры не будут доставлены. Восстановить их нельзя.</div>'
             + '<button class="btn red" style="position:relative;overflow:hidden;"><span style="position:absolute;left:0;top:0;bottom:0;width:58%;background:rgba(255,107,107,0.25);"></span><span style="position:relative;">Удерживать, чтобы очистить</span></button>'
             + '<button class="btn">Не очищать</button></div>')
 
@@ -96,7 +96,7 @@ search = page("Поиск", '<div class="hdr">' + btn(BACK, "Назад")
                      + mres("Алиса", "вчера", 'Привет! Это Аня, с курсов по <span class="hl">керами</span>ке')
                      + mres("Вера", "28 окт", 'Глина для <span class="hl">керами</span>ки приехала, забирай')
                      + mres("Дина", "12 окт", 'Курс <span class="hl">керами</span>ки переносят на четверг')
-                     + '</div><div class="cap" style="margin-top:8px;">Поиск идёт по сообщениям, которые хранятся на этом устройстве; запрос никуда не отправляется.</div>'
+                     + '</div><div class="cap" style="margin-top:8px;">Поиск по сообщениям на этом устройстве. Запрос никуда не отправляется.</div>'
                      + FILL))
 
 # ---------- 5. Папки ----------
@@ -106,7 +106,7 @@ def frow(icon, name, sub, right=""):
 
 
 folders = page("Папки", hdr("Папки") + body(
-    '<div class="cap" style="margin-bottom:16px;">Папка — это вид, а не коробка: один чат может попадать сразу в несколько, удаление папки переписку не трогает.</div>'
+    '<div class="cap" style="margin-bottom:16px;">Чат может входить в несколько папок. Удаление папки переписку не трогает.</div>'
     + '<div class="sec">Встроенные</div><div class="grp">'
     + frow(MSGS, "Все", None) + frow(MSG, "Личные", None) + frow(HEADPH, "Комнаты", None) + frow(SPEAK, "Каналы", None) + '</div>'
     + SP16 + '<div class="sec">Свои</div><div class="grp">'
@@ -134,7 +134,7 @@ blocked = page("Заблокированные", hdr("Заблокированн
     '<div class="grp">'
     + prow("Глеб", "ключ 7c21e0a4… · с 28 октября", UNB)
     + keyrow("ключ 9b0e5f12…", "не был в контактах · с 30 октября", UNB)
-    + '</div><div class="cap" style="margin-top:8px;">Пакеты заблокированных отбрасываются до расшифровки. Разблокированный не возвращается в контакты сам: связаться снова — только новым запросом.</div>'
+    + '</div><div class="cap" style="margin-top:8px;">Пакеты заблокированных отбрасываются до расшифровки. После разблокировки связь только через новый запрос в контакты.</div>'
     + FILL))
 
 # ---------- 8. Поток трафика ----------
@@ -179,7 +179,7 @@ def part(name, sub, on):
 
 
 bparts = page("Копия данных: состав", hdr("Копия данных") + body(
-    f'<div class="grp">{grow(ARCHIVE, "Копия переписки, а не личности", "Личность возвращают 24 слова; они же открывают копию. Копия — то, что читать: контакты, сообщения, заметки.", "")}</div>'
+    f'<div class="grp">{grow(ARCHIVE, "Личность в копию не входит", "Её возвращают 24 слова, они же открывают копию.", "")}</div>'
     + SP16 + '<div class="sec">Что положить в копию</div><div class="grp">'
     + part("Контакты", "23 · с аватарами", True) + part("Переписка", "4 812 сообщений", True)
     + part("Групповые чаты", "1 250 сообщений", True) + part("Заметки себе", "37", True)
@@ -190,13 +190,13 @@ bparts = page("Копия данных: состав", hdr("Копия данн�
 # ---------- 12. Копия данных: пароль ----------
 bpass = page("Копия данных: защита", hdr("Копия данных") + body(
     '<div class="sec">Чем закрыта копия</div><div class="grp">'
-    + grow(KEY, "Ключом из 24 слов", "Открывается на любом телефоне, где восстановлена эта личность. Помнить ничего не нужно.", f'<div class="ok">{ic(CHECK, 18, "#8BC34A")}</div>')
+    + grow(KEY, "Ключом из 24 слов", "Открывается на любом телефоне, где восстановлена эта личность.", f'<div class="ok">{ic(CHECK, 18, "#8BC34A")}</div>')
     + '<div class="gr"><div class="gt"><b>Дополнительно закрыть паролем</b><span>Для копий в облаке: без пароля файл не откроют и с 24 словами.</span></div>' + toggle(True) + '</div>'
     + '</div>' + SP16
     + '<div class="inp"><span class="v">••••••••••••</span></div><div style="height:8px;"></div>'
     + '<div class="inp"><span class="p">Ещё раз</span></div>' + SP16
     + f'<div class="warn">{ic(WARN, 20, "#F2C98A", NF)}<div>Забытый пароль не восстанавливается: такую копию не откроют и 24 слова.</div></div>'
-    + FILL) + foot("Создать копию", None, '<div class="cap" style="text-align:center;padding-bottom:4px;">Дальше система спросит, куда сохранить файл.</div>'))
+    + FILL) + foot("Создать копию", None, ''))
 
 # ---------- 13. Копия данных: готово ----------
 bdone = page("Копия данных: готово", hdr("Копия данных") + body(
@@ -204,7 +204,7 @@ bdone = page("Копия данных: готово", hdr("Копия данны
     + '<div class="obt" style="margin:0;font-size:24px;">Копия готова</div><div class="cap">backup-2026-11-01.peerage · 48 МБ</div></div>'
     + '<div class="grp">' + ''.join(f'<div class="gr"><div class="gt"><b>{a}</b></div><span style="color:#8E8E98;font-size:15px;font-variant-numeric:tabular-nums;">{b}</span></div>'
                                     for a, b in [("Контакты", "23"), ("Сообщения", "4 812"), ("Групповые", "1 250"), ("Заметки", "37")]) + '</div>'
-    + '<div class="cap" style="margin-top:8px;">Отметки «сверен» в копию не входят — после восстановления контакты сверяются заново.</div>'
+    + '<div class="cap" style="margin-top:8px;">Отметки «сверен» в копию не входят: после восстановления контакты сверяются заново.</div>'
     + FILL) + foot("Готово"))
 
 rows = [

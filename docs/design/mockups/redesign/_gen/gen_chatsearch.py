@@ -127,9 +127,9 @@ MIC_P = '<rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 
 start = page("Поиск в чате: начало", header('<span class="ph">Поиск в чате<span class="cr"></span></span>', '') + PANEL_PAD + f"""
 <div class="hd" style="margin-top:4px;">Уточнить</div>
 <div class="grp">
-{row(USER_P, "От участника", sub="Только сообщения одного человека")}
+{row(USER_P, "От участника", sub="")}
 {DV}
-{row(CAL_P, "Перейти к дате", sub="Календарь переписки")}
+{row(CAL_P, "Перейти к дате", sub="")}
 </div>
 <div class="hd">Медиа и файлы</div>
 <div class="grp">
@@ -141,7 +141,7 @@ start = page("Поиск в чате: начало", header('<span class="ph">П
 {DV}
 {row(MIC_P, "Голосовые", "12")}
 </div>
-<div class="sub" style="padding: 0 6px;">Поиск идёт по тексту сообщений, которые хранятся на этом устройстве. Запрос никуда не отправляется.</div>
+<div class="sub" style="padding: 0 6px;">Поиск по сообщениям на этом устройстве. Запрос никуда не отправляется.</div>
 </div>""")
 
 
@@ -229,7 +229,7 @@ date = page("Поиск в чате: перейти к дате", header('<span 
 <button class="ib" style="background:none;" aria-label="Следующий месяц">{ic('<path d="M9 5l7 7-7 7"></path>')}</button>
 </div>
 <div class="cal">{cells}</div>
-<div class="sub" style="padding: 0 4px;">Тусклые дни — без сообщений. Нажатие на день открывает его первое сообщение.</div>
+
 <div style="display: flex; gap: 8px; padding-top: 4px;">
 <button class="pill" style="flex:1;justify-content:center;background:#26272D;">К первому сообщению</button>
 <button class="pill" style="flex:1;justify-content:center;background:#26272D;">К последнему</button>

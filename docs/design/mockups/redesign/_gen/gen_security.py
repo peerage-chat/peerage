@@ -140,9 +140,9 @@ va = page("Сверка ключа: А, два ключа", hdr("Сверка к
     UNVER + SP16
     + '<div class="blk"><div class="bh">Алиса<span>на этом телефоне</span></div>' + glyphs(FP_ALICE)
     + f'<div class="fpw">{W_ALICE}</div></div>' + SP16
-    + '<div class="blk"><div class="bh">Свой ключ<span>у Алисы — в её профиле</span></div>' + glyphs(FP_SELF)
+    + '<div class="blk"><div class="bh">Свой ключ<span>у Алисы — в профиле</span></div>' + glyphs(FP_SELF)
     + f'<div class="fpw">{W_SELF}</div></div>'
-    + '<div class="cap" style="margin-top:8px;">Блок «Алиса» здесь должен совпасть с блоком «Свой ключ» на её телефоне, и наоборот.</div>'
+    + '<div class="cap" style="margin-top:8px;">Блок «Алиса» должен совпасть с блоком «Свой ключ» на телефоне Алисы, и наоборот.</div>'
     + FILL) + '<div class="obf">' + ACTIONS + '<button class="btn ghost">Отметить сверенным без кода</button></div>')
 
 # ---------- 2. Б · один набор на пару ----------
@@ -150,7 +150,7 @@ vb = page("Сверка ключа: Б, общий набор", hdr("Сверк�
     UNVER + SP16
     + '<div class="blk"><div class="bh">Алиса и этот телефон<span>одинаково у обоих</span></div>' + glyphs(FP_PAIR)
     + f'<div class="fpw">{W_PAIR}</div></div>'
-    + '<div class="cap" style="margin-top:8px;">Тот же набор Алиса видит у себя на экране сверки. Совпало — ключи настоящие. Можно сверить голосом по видеосвязи: прочитать слова.</div>'
+    + '<div class="cap" style="margin-top:8px;">Тот же набор — на экране сверки у Алисы. Совпадение подтверждает ключи. Сверить можно и голосом, по видеосвязи.</div>'
     + FILL) + '<div class="obf">' + ACTIONS + '<button class="btn ghost">Набор совпал — отметить сверенным</button></div>')
 
 # ---------- 3. Код совпал ----------
@@ -159,7 +159,7 @@ ok_sheet = page("Сверка ключа: код совпал", behind + '<div c
                 + '<div class="hdl"></div>'
                 + f'<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0 4px;">{ic(VER, 48, "#8BC34A")}'
                 + '<div class="sht" style="padding:0;">Ключ совпал</div>'
-                + '<div class="sub" style="text-align:center;">Алиса отмечена сверенной на этом телефоне. Чтобы отметка появилась и у неё, ей нужно отсканировать код этого телефона.</div></div>'
+                + '<div class="sub" style="text-align:center;">Ключ Алисы отмечен сверенным на этом телефоне. Для отметки на телефоне Алисы нужно отсканировать там код этого телефона.</div></div>'
                 + f'<button class="btn">{ic(QR, 20, "#ECEDEF")}Показать свой код Алисе</button>'
                 + '<button class="btn pri">Готово</button></div>')
 
@@ -182,7 +182,7 @@ verified = page("Сверка ключа: сверен", hdr("Сверка кл�
 # ---------- 6. Замок ----------
 lock = page("Блокировка приложения", '<div class="ob" style="align-items:center;justify-content:center;text-align:center;gap:12px;">'
             + f'{MESH}<div class="obt" style="margin:8px 0 0;">Peerage заблокирован</div>'
-            + '<div class="obs">Отпечаток, лицо или PIN телефона — то, что настроено в системе.</div></div>'
+            + '<div class="obs">Отпечаток, лицо или PIN телефона, как настроено в системе.</div></div>'
             + '<div class="obf"><button class="btn pri" style="min-height:52px;">' + ic(FINGER, 20, "#04222E") + 'Разблокировать</button></div>'
             + '<div class="dim"></div><div class="bio" role="dialog" aria-label="Системный запрос биометрии">'
             + ic(FINGER, 56, "#33B5E5") + '<b>Разблокировать Peerage</b><span>Приложите палец к сканеру</span>'
@@ -228,7 +228,7 @@ def radio(on, t, s, extra=""):
 level = page("Шифрование данных", hdr("Шифрование данных") + body(
     '<div class="grp">'
     + radio(False, "Ключ устройства", "Открывается само. Снятая копия памяти бесполезна; на разблокированном телефоне от чужих рук защищает только блокировка приложения.", RISK)
-    + radio(True, "Пароль", "Спрашивается при каждом запуске; перезапустит система приложение — сообщения ждут ввода. От сброса ключа устройства не зависит.")
+    + radio(True, "Пароль", "Спрашивается при каждом запуске, до ввода сообщения не принимаются. От сброса ключа устройства не зависит.")
     + '<div class="sub2">' + ic(FINGER, 20, "#9AA3AD", NF) + '<b>Открывать отпечатком</b><div class="tg on"><i></i></div></div>'
     + radio(False, "Ключ устройства и пароль", "Нужны и этот телефон, и пароль: снятая с него копия без пароля бесполезна.", RISK)
     + '</div>' + SP16 + '<div class="sec">Новый пароль</div>'

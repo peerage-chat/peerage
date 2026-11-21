@@ -255,7 +255,7 @@ multi_feed = (FEED_OPEN + '<div class="lbl">Сегодня</div>'
               + ckrow(M["out1"], False) + ckrow(M["out2"], True) + SP + ckrow(M["in3"], False) + '</div>')
 multi = page("Действия: выбор нескольких", sel_header("Выбрано: 3", [btn(FWD, "Переслать"), btn(COPY, "Копировать"), btn(TRASH, "Удалить")])
              + PANEL + multi_feed
-             + '<div style="padding: 8px 12px 16px; text-align: center; font-size: 13px; color: #8E8E98;">Нажатие на сообщение добавляет его к выбранным</div>'
+             + ''
              + '</div>')
 
 # ---------- 5. Ответ свайпом ----------
@@ -418,7 +418,7 @@ react_who = page("Кто отреагировал", chat_header("Дача", "4 �
                  + '<div style="display:flex;flex-direction:column;">'
                  + who("Я", "#2B5F73", "Вы", "👍") + who("М", "#8E24AA", "Мария", "👍")
                  + who("К", "#C2185B", "Кирилл", "👍") + who("Б", "#6D4C41", "Богдан", "😂")
-                 + '</div><div class="sub" style="padding:0 4px;">Нажатие на свою реакцию снимает её</div></div>')
+                 + '</div></div>')
 
 rows = [
     [("Main.dc.html", act_a, "А · Панель вместо шапки (как сейчас): иконки + «⋮»"),
