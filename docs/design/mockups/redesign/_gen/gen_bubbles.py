@@ -8,15 +8,14 @@ P = os.path.join(OUT, "project")
 os.makedirs(P, exist_ok=True)
 
 R, S = 18, 6  # полный угол и срез на стыке
-NEAR = 18     # разница ширин меньше полного угла — края считаются вровень
 
 
 def corners(widths, mine, adaptive):
     """Углы пузырей одной серии: (верх-лево, верх-право, низ-право, низ-лево) каждого.
 
     Ведущая сторона (у входящих — левая, у своих — правая) на стыках всегда срезана.
-    Дальняя — по соседу: сосед выступает дальше, или края почти вровень, — угол на этом
-    стыке срезан; выступает сам пузырь — угол полный. Без `adaptive` — как сейчас:
+    Дальняя — по соседу: сосед шире или вровень — угол на этом стыке срезан; сам пузырь
+    шире — угол полный. Без `adaptive` — как сейчас:
     дальняя сторона всегда полная.
     """
     n = len(widths)
@@ -26,9 +25,9 @@ def corners(widths, mine, adaptive):
         bot_lead = S if i < n - 1 else R
         top_far = bot_far = R
         if adaptive:
-            if i > 0 and widths[i - 1] - w > -NEAR:
+            if i > 0 and widths[i - 1] >= w:
                 top_far = S
-            if i < n - 1 and widths[i + 1] - w > -NEAR:
+            if i < n - 1 and widths[i + 1] >= w:
                 bot_far = S
         if mine:
             out.append((top_far, top_lead, bot_lead, bot_far))
@@ -65,7 +64,7 @@ now = page("Пузыри: сейчас", chat_header() + PANEL + feed(False) + c
 new = page("Пузыри: дальняя сторона по соседу", chat_header() + PANEL + feed(True) + composer() + '</div>')
 
 rows = [[("Main.dc.html", now, "Сейчас: дальняя сторона всегда скруглена"),
-         ("Adaptive.dc.html", new, "Предлагаю: угол у стыка срезан, если сосед шире или вровень")]]
+         ("Adaptive.dc.html", new, "Предлагаю: дальний угол у стыка срезан, если сосед шире")]]
 row_titles = ["Углы пузырей в серии"]
 boards, order, notes = {}, [], {}
 for ri, r in enumerate(rows):

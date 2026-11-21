@@ -1,1 +1,44 @@
-{"v": 3, "createdOnFiles": {"v": 1, "at": "2026-11-22T13:00:00Z"}, "title": "Углы пузырей Peerage", "launch": {"view": "canvas"}, "pages": [], "boards": {"Main.dc.html": {"x": 0, "y": 0, "w": 412, "h": 892, "title": "Сейчас: дальняя сторона всегда скруглена"}, "Adaptive.dc.html": {"x": 492, "y": 0, "w": 412, "h": 892, "title": "Предлагаю: угол у стыка срезан, если сосед шире или вровень"}}, "order": ["Main.dc.html", "Adaptive.dc.html"], "notes": {"t1": {"x": 0, "y": -300, "text": "Углы пузырей в серии", "kind": "title1", "maxW": 904}}, "designSystems": []}
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Adaptive.dc.html": {
+      "h": 892,
+      "title": "Предлагаю: дальний угол у стыка срезан, если сосед шире",
+      "w": 412,
+      "x": 492,
+      "y": 0
+    },
+    "Main.dc.html": {
+      "h": 892,
+      "title": "Сейчас: дальняя сторона всегда скруглена",
+      "w": 412,
+      "x": 0,
+      "y": 0
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-11-22T13:00:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "t1": {
+      "kind": "title1",
+      "maxW": 904,
+      "text": "Углы пузырей в серии",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Adaptive.dc.html"
+  ],
+  "pages": [],
+  "title": "Углы пузырей Peerage"
+}
