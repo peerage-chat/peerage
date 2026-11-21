@@ -58,27 +58,27 @@ storage = st.replace(anchor, row + anchor).replace("<title>Хранилище</t
 
 # ---------- 2. Экран правила ----------
 rules = page("Автоудаление", head("Автоудаление") + panel(
-    '<div class="cap">Удаление только на этом телефоне: у собеседников ничего не меняется. «Сохранённое» и закреплённые сообщения не удаляются.</div>'
+    '<div class="cap">Только на этом телефоне. «Сохранённое» и закреплённые сообщения не удаляются.</div>'
     + '<div class="hd">Сообщения</div><div class="grp"><div class="blk"><b>Удалять старше</b>'
     + segs(["Никогда", "Недели", "Месяца", "Года"], "Месяца") + '</div></div>'
     + '<div class="hd">Вложения</div><div class="grp"><div class="blk"><b>Удалять старше</b>'
     + segs(["Никогда", "Недели", "Месяца", "Года"], "Недели") + '</div><div class="dv"></div>'
     + '<div class="blk"><b>Только файлы от</b>' + segs(["Любого", "10 МБ", "100 МБ"], "10 МБ") + '</div></div>'
-    + '<div class="cap">У сообщения остаётся строка «Вложение удалено»; файл можно скачать у отправителя заново, пока он у него есть.</div>'
+    + '<div class="cap">Вместо файла остаётся строка «Вложение удалено». Скачать заново можно, пока файл есть у отправителя.</div>'
     + '<div class="hd">Свои правила</div><div class="grp">'
     + '<button class="r"><span class="av" style="background:#00695C;border-radius:12px;width:36px;height:36px;font-size:15px;">П</span><span class="lb">Походы</span><span class="v">Никогда</span></button>'
     + '<div class="dv" style="margin-left:64px;"></div>'
     + '<button class="r"><span class="av" style="background:#3949AB;width:36px;height:36px;font-size:15px;">А</span><span class="lb">Алиса</span><span class="v">Недели</span></button></div>'
-    + '<div class="cap">Своё правило задаётся в профиле чата.</div>'))
+    + '<div class="cap">Задаётся в профиле чата.</div>'))
 
 # ---------- 3. Подтверждение ----------
 confirm = page("Автоудаление: подтверждение", head("Автоудаление") + panel(
-    '<div class="cap">Удаление только на этом телефоне: у собеседников ничего не меняется. «Сохранённое» и закреплённые сообщения не удаляются.</div>'
+    '<div class="cap">Только на этом телефоне. «Сохранённое» и закреплённые сообщения не удаляются.</div>'
     + '<div class="hd">Сообщения</div><div class="grp"><div class="blk"><b>Удалять старше</b>'
     + segs(["Никогда", "Недели", "Месяца", "Года"], "Месяца") + '</div></div>')
     + '<div class="dim"></div><div class="sheet"><div class="hdl"></div>'
     + '<div class="sht">Удалить старые сообщения?</div>'
-    + '<div class="sub" style="font-size:15px;line-height:21px;padding:0 4px;">Под правило сейчас попадают 1 240 сообщений и 820 МБ вложений. Удаление — только на этом телефоне, вернуть нельзя.</div>'
+    + '<div class="sub" style="font-size:15px;line-height:21px;padding:0 4px;">Под правило попадают 1 240 сообщений и 820 МБ вложений. Удаление только на этом телефоне, без возврата.</div>'
     + '<button class="btn red">Удалить и включить</button><button class="btn">Отмена</button></div>')
 
 # ---------- 4. Правило чата ----------
