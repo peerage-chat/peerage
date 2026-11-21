@@ -173,7 +173,7 @@ internal fun ContactProfileScreen(
         )
         ProfileDanger.Block -> ConfirmSheet(
             title = stringResource(R.string.chat_block_title),
-            text = stringResource(R.string.profile_block_confirm, c.displayName),
+            text = stringResource(R.string.profile_block_confirm),
             ok = stringResource(R.string.profile_block),
             onOk = { model.blockRequest(key) },
             onClose = { confirm = null },

@@ -185,7 +185,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
         )
         ChatDanger.Block -> ConfirmSheet(
             title = stringResource(R.string.chat_block_title),
-            text = stringResource(R.string.profile_block_confirm, name),
+            text = stringResource(R.string.profile_block_confirm),
             ok = stringResource(R.string.profile_block),
             onOk = {
                 model.blockRequest(k)

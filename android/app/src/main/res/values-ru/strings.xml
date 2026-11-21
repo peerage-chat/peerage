@@ -556,7 +556,7 @@
     <string name="net_bench_start">Запустить</string>
     <string name="profile_rename">Изменить имя</string>
     <string name="profile_block">Заблокировать</string>
-    <string name="profile_block_confirm">Сообщения от %1$s будут тихо отбрасываться, ещё до расшифровки.</string>
+    <string name="profile_block_confirm">Сообщения отбрасываются до расшифровки, контакт удаляется из списка.</string>
     <string name="profile_delete_confirm">Контакт и история переписки будут удалены с этого устройства.</string>
     <string name="profile_clear_history">Очистить историю</string>
     <string name="profile_clear_history_confirm">Переписка будет удалена с этого устройства вместе с ещё не отправленными сообщениями. У собеседника она останется.</string>

@@ -536,7 +536,7 @@
     <string name="net_bench_start">Run</string>
     <string name="profile_rename">Change name</string>
     <string name="profile_block">Block</string>
-    <string name="profile_block_confirm">Messages from %1$s will be dropped silently, before decryption.</string>
+    <string name="profile_block_confirm">Messages are dropped before decryption, and the contact is removed from the list.</string>
     <string name="profile_delete_confirm">The contact and the conversation history will be removed from this device.</string>
     <string name="profile_clear_history">Clear history</string>
     <string name="profile_clear_history_confirm">The conversation will be deleted from this device, including messages not yet sent. The other person keeps their copy.</string>
