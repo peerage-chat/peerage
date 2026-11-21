@@ -286,6 +286,7 @@ internal enum class Screen {
     // Настройки разложены по категориям: корень — оглавление, содержимое живёт здесь.
     SettingsSecurity,
     SettingsPrivacy,
+    SettingsBlocked,
     SettingsMedia,
     VideoQuality,
     SettingsNotifications,
@@ -477,6 +478,7 @@ private fun CompactShell(model: AppModel) {
                                 }
                                 Screen.SettingsSecurity -> TopBar(stringResource(R.string.settings_cat_security), onBack = goBack)
                                 Screen.SettingsPrivacy -> TopBar(stringResource(R.string.settings_cat_privacy), onBack = goBack)
+                                Screen.SettingsBlocked -> TopBar(stringResource(R.string.blocked_title), onBack = goBack)
                                 Screen.SettingsMedia -> TopBar(stringResource(R.string.settings_cat_media), onBack = goBack)
                                 Screen.VideoQuality -> TopBar(stringResource(R.string.media_video_quality), onBack = goBack)
                                 Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = goBack)
@@ -707,7 +709,8 @@ private fun CompactShell(model: AppModel) {
                                         onKeyFlow = openKeyFlow,
                                         vaultLevel = VaultKeyManager.level(java.io.File(dataDir)),
                                     )
-                                    Screen.SettingsPrivacy -> SettingsPrivacyScreen(model)
+                                    Screen.SettingsPrivacy -> SettingsPrivacyScreen(model, onBlocked = { screen = Screen.SettingsBlocked })
+                                    Screen.SettingsBlocked -> SettingsBlockedScreen(model)
                                     Screen.SettingsMedia -> SettingsMediaScreen(model) { screen = Screen.VideoQuality }
                                     Screen.VideoQuality -> SettingsVideoQualityScreen(model)
                                     Screen.SettingsNotifications -> SettingsNotificationsScreen(model)

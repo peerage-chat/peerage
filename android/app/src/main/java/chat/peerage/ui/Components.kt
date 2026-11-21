@@ -593,18 +593,31 @@ internal fun SheetHandle() {
     )
 }
 
-/** Пилюля действия (макет: `.pill`): «Готово» в шапке правки, «Открыть чат» в карточке. */
+/**
+ * Пилюля действия (макет: `.pill`): «Готово» в шапке правки, «Открыть чат» в карточке.
+ * [neutral] — без акцента, для действия в строке списка («Разблокировать»).
+ */
 @Composable
-internal fun PillButton(text: String, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun PillButton(
+    text: String,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+    neutral: Boolean = false,
+    onClick: () -> Unit,
+) {
     Text(
         text,
-        color = if (enabled) Tokens.Colors.accentSoft else Tokens.Colors.tertiary,
+        color = when {
+            !enabled -> Tokens.Colors.tertiary
+            neutral -> Tokens.Colors.chipText
+            else -> Tokens.Colors.accentSoft
+        },
         fontSize = Tokens.Font.preview,
         fontWeight = FontWeight.Medium,
         modifier = modifier
             .heightIn(min = Tokens.Size.pill)
             .clip(RoundedCornerShape(Tokens.Radius.pill))
-            .background(if (enabled) Tokens.Colors.accentMuted else Tokens.Colors.raised)
+            .background(if (enabled && !neutral) Tokens.Colors.accentMuted else Tokens.Colors.raised)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = Tokens.Space.m + Tokens.Space.xxs, vertical = Tokens.Space.s),
     )

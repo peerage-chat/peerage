@@ -107,10 +107,10 @@ internal fun SettingsSecurityScreen(
 /**
  * Приватность (макет `settings/Privacy`): что раскрывается по выбору, что не отправляется
  * вовсе и что видят контакты. Отчёты о прочтении и набор взаимны — подпись говорит, что
- * значит выключенное. «Заблокированные» появятся с их экраном (5.2).
+ * значит выключенное. Последняя группа — вход в «Заблокированные» (5.2).
  */
 @Composable
-internal fun SettingsPrivacyScreen(model: AppModel) {
+internal fun SettingsPrivacyScreen(model: AppModel, onBlocked: () -> Unit) {
     val p = model.privacy
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
@@ -137,6 +137,16 @@ internal fun SettingsPrivacyScreen(model: AppModel) {
         CardSection {
             PrivacyFact(TablerIcons.InfoCircle, Tokens.Colors.fieldIcon, R.string.privacy_online, R.string.privacy_online_sub, divider = false)
             PrivacyFact(TablerIcons.InfoCircle, Tokens.Colors.fieldIcon, R.string.privacy_profile, R.string.privacy_profile_sub)
+        }
+        Spacer(Modifier.height(Tokens.Space.l))
+        CardSection {
+            ValueRow(
+                stringResource(R.string.blocked_title),
+                model.blocked.size.toString(),
+                divider = false,
+                chevron = true,
+                onClick = onBlocked,
+            )
         }
     }
 }

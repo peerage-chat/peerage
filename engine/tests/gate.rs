@@ -225,6 +225,10 @@ fn block_drops_request_and_silences() {
     assert!(wait(10, || request(&b, &a_hex).is_some()));
     assert!(b.block_contact(&a_key));
     assert!(request(&b, &a_hex).is_none() && !has_contact(&b, &a_hex));
+    // Незнакомец из запроса — без имени: самоназвание запроса не проверено.
+    assert!(b
+        .blocked_json()
+        .contains(&format!(r#"{{"key":"{a_hex}","name":"","contact":false"#)));
     a.send_text(&b_key, "второй");
     std::thread::sleep(Duration::from_millis(500));
     assert!(request(&b, &a_hex).is_none() && texts(&b, &a_key).is_empty());
@@ -325,4 +329,33 @@ fn verifying_a_contact_raises_its_budget_at_once() {
             .any(|f| f["peer"] == hex::encode(a_key)),
         "сверенный контакт не режется как флуд: {flood}"
     );
+}
+
+/// 5.2: блок удаляет контакт, но «Заблокированные» подписывают строку его именем;
+/// разблокировка убирает строку и не возвращает контакт.
+#[test]
+fn blocked_contact_keeps_its_name() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(17), id(18));
+    let a_key = a_id.public_key_bytes();
+    let b = start(&net, b_id, tmpdir("b"));
+    let a = start(&net, a_id, tmpdir("a"));
+    let a_hex = hex::encode(a_key);
+    b.add_contact(&a_key, "Глеб");
+    assert!(b.block_contact(&a_key));
+    assert!(!has_contact(&b, &a_hex));
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&b.blocked_json()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0]["name"].as_str(), rows[0]["contact"].as_bool()),
+        (Some("Глеб"), Some(true))
+    );
+    assert!(b.unblock_contact(&a_key));
+    assert_eq!(b.blocked_json(), "[]");
+    assert!(
+        !has_contact(&b, &a_hex),
+        "разблокировка не возвращает в контакты"
+    );
+    a.shutdown();
+    b.shutdown();
 }

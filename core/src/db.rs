@@ -151,9 +151,14 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             request_id  INTEGER NOT NULL DEFAULT 0,
             time        INTEGER NOT NULL
         );
+        -- Блок-лист. name — как пир был показан в момент блокировки (блок удаляет
+        -- контакт, иначе строку в «Заблокированных» нечем подписать); contact — был ли
+        -- он контактом. Самоназвание незнакомца не хранится: оно не проверено.
         CREATE TABLE IF NOT EXISTS blocklist (
             key     BLOB    PRIMARY KEY,
-            blocked INTEGER NOT NULL
+            blocked INTEGER NOT NULL,
+            name    TEXT    NOT NULL DEFAULT '',
+            contact INTEGER NOT NULL DEFAULT 0
         );
 
         -- Журнал звонков. Локальный: наружу не уходит и никем не синхронизируется —
@@ -277,6 +282,8 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN verified_at INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN verified_how TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN awaiting INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN name TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN contact INTEGER NOT NULL DEFAULT 0", []);
     // Полнотекстовый индекс переписки: текст и имя файла вложения (поиск в чате, 2.9).
     // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
     // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5

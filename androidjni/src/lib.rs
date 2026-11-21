@@ -1197,6 +1197,19 @@ pub extern "system" fn Java_chat_peerage_Native_backupNeedsPassword<'local>(
     })
 }
 
+/// «Заблокированные»: JSON `[{key, name, contact, time}]`, новые сверху.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_blockedPeers<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        ret(&env, &e.blocked_json())
+    })
+}
+
 /// Кто сейчас флудит: JSON `[{peer, dropped, pps, blocked}]`, по убыванию темпа.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_floodPeers<'local>(

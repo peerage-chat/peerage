@@ -236,6 +236,15 @@ internal data class BackupPartsDto(
     val attachments: Boolean = false,
 )
 
+/** Строка блок-листа: `blocked_json` движка. */
+@Serializable
+internal data class BlockedPeerDto(
+    val key: String = "",
+    val name: String = "",
+    val contact: Boolean = false,
+    val time: Long = 0,
+)
+
 /** Источник флуда: сколько его пакетов отброшено и с каким темпом. */
 @Serializable
 internal data class FloodPeerDto(

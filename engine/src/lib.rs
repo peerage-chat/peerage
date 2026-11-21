@@ -2072,10 +2072,24 @@ impl Engine {
     /// Заблокировать пира: будущие сообщения тихо дропаются, запрос снят, из контактов
     /// удалён (перестаёт быть доверенным и получать наш профиль).
     pub fn block_contact(&self, key: &[u8; 32]) -> bool {
-        let _ = self.gate.lock_safe().block(key, now());
+        // Подпись для «Заблокированных»: контакт удаляется ниже, имя — сейчас или никогда.
+        let who = self.contacts.lock_safe().get(key).map(|c| {
+            if c.name.trim().is_empty() {
+                c.profile_name.trim().to_string()
+            } else {
+                c.name.trim().to_string()
+            }
+        });
+        let _ = self.gate.lock_safe().block(key, now(), who.as_deref());
         let _ = self.contacts.lock_safe().remove(key);
         self.refresh_budgets();
         true
+    }
+
+    /// «Заблокированные» (5.2): `[{key, name, contact, time}]`, новые сверху.
+    pub fn blocked_json(&self) -> String {
+        let rows = self.gate.lock_safe().blocked_rows().unwrap_or_default();
+        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
     }
 
     pub fn unblock_contact(&self, key: &[u8; 32]) -> bool {

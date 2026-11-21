@@ -334,6 +334,9 @@ class AppModel private constructor() {
 
     /** Входящие запросы в контакты от незнакомцев (гейт). */
     val contactRequests = mutableStateListOf<ContactRequest>()
+
+    /** «Заблокированные» (5.2), новые сверху. */
+    val blocked = mutableStateListOf<BlockedPeer>()
     val online = mutableStateMapOf<String, Boolean>()
     val unread = mutableStateMapOf<String, Int>()
 
@@ -1128,6 +1131,7 @@ class AppModel private constructor() {
         prefs?.let { p -> BackupFacts.load(p, System.currentTimeMillis() / 1000).let { onMain { backupFacts = it } } }
         refreshContactsNow()
         refreshRequestsNow()
+        refreshBlockedNow()
         refreshGroupsNow()
         refreshGroupInvitesNow()
         refreshChatSummariesNow() // список чатов с превью — сразу, до первого события
@@ -2035,6 +2039,19 @@ class AppModel private constructor() {
         Native.blockContact(sessionPtr, key)
         refreshRequestsNow()
         refreshContactsNow()
+        refreshBlockedNow()
+    }
+
+    /** Разблокировать: строка уходит из «Заблокированных», в контакты пир не возвращается. */
+    fun unblock(key: String) = ops.execute {
+        Native.unblockContact(sessionPtr, key)
+        refreshBlockedNow()
+    }
+
+    private fun refreshBlockedNow() {
+        val list = decodeList<BlockedPeerDto>(Native.blockedPeers(sessionPtr))
+            .map { BlockedPeer(it.key, it.name, it.contact, it.time) }
+        onMain { blocked.replaceWith(list) }
     }
 
     /** Применить одно событие из ядра. Вызывается из [pollThread] (фон). */

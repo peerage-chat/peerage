@@ -400,6 +400,9 @@ object Native {
 
     /** Разблокировать пира. */
     external fun unblockContact(sessionPtr: Long, keyHex: String): Boolean
+
+    /** «Заблокированные»: JSON `[{key, name, contact, time}]`, новые сверху. */
+    external fun blockedPeers(sessionPtr: Long): String
     external fun isOnline(sessionPtr: Long, keyHex: String): Boolean
     external fun netPeers(sessionPtr: Long): Int
     external fun netTree(sessionPtr: Long): Int

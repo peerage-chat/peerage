@@ -1029,6 +1029,14 @@
     <string name="privacy_online_sub">Следует из keepalive, на котором держится доставка</string>
     <string name="privacy_profile">Имя и аватар</string>
     <string name="privacy_profile_sub">Только контактам, не в сеть</string>
+    <string name="blocked_title">Заблокированные</string>
+    <string name="blocked_key">ключ %1$s…</string>
+    <string name="blocked_sub_contact">ключ %1$s… · с&#160;%2$s</string>
+    <string name="blocked_sub_stranger">не из контактов · с&#160;%1$s</string>
+    <string name="blocked_sub_since">с&#160;%1$s</string>
+    <string name="blocked_unblock">Разблокировать</string>
+    <string name="blocked_empty">Список пуст</string>
+    <string name="blocked_caption">Пакеты заблокированных отбрасываются до расшифровки. После разблокировки контакт восстанавливается только новым запросом.</string>
     <string name="profile_write">Написать</string>
     <string name="profile_video">Видео</string>
     <string name="profile_sound">Звук</string>

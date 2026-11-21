@@ -63,6 +63,10 @@ data class Contact(
         get() = localName.ifBlank { profileName.ifBlank { key.take(8) } }
 }
 
+/** Строка «Заблокированных» (5.2). [name] — как пир был показан в момент блокировки;
+ *  пусто — незнакомец или контакт без имени. [contact] — был контактом. */
+data class BlockedPeer(val key: String, val name: String, val contact: Boolean, val time: Long)
+
 /** Входящий «запрос в контакты» от незнакомца (гейт вместо TOFU). Первое сообщение
  *  приходит сюда карточкой на одобрение, а не в чат. */
 data class ContactRequest(

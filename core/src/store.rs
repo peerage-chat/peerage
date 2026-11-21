@@ -690,6 +690,19 @@ pub struct ContactRequest {
     pub time: i64,
 }
 
+/// Строка блок-листа для экрана «Заблокированные».
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BlockedPeer {
+    /// hex ключа личности.
+    pub key: String,
+    /// Как пир был показан в момент блокировки; пусто — незнакомец или контакт без имени.
+    pub name: String,
+    /// Был контактом в момент блокировки.
+    pub contact: bool,
+    /// Когда заблокирован (unix-секунды).
+    pub time: i64,
+}
+
 /// SQLite-хранилище гейта: `contact_requests` (pending) + `blocklist` (тихий дроп).
 /// In-memory кэши — приём сообщений проверяет гейт на горячем пути.
 pub struct GateStore {
@@ -805,11 +818,35 @@ impl GateStore {
         self.blocked.iter().map(hex::encode).collect()
     }
 
+    /// Заблокированные для экрана «Заблокированные» — новые сверху.
+    pub fn blocked_rows(&self) -> Result<Vec<BlockedPeer>, StoreError> {
+        let conn = db::lock(&self.db);
+        let mut stmt = conn.prepare("SELECT key, name, contact, blocked FROM blocklist ORDER BY blocked DESC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (kb, name, contact, time) = row?;
+            if kb.len() == 32 {
+                out.push(BlockedPeer { key: hex::encode(kb), name, contact: contact != 0, time });
+            }
+        }
+        Ok(out)
+    }
+
     /// Заблокировать пира: будущие сообщения тихо дропаются. Снимает висящий запрос.
-    pub fn block(&mut self, key: &[u8; 32], time: i64) -> Result<(), StoreError> {
+    /// `who` — как пир был показан, если он был контактом (блок удаляет контакт, а
+    /// строку «Заблокированных» надо чем-то подписать); `None` — незнакомец.
+    pub fn block(&mut self, key: &[u8; 32], time: i64, who: Option<&str>) -> Result<(), StoreError> {
         db::lock(&self.db).execute(
-            "INSERT OR REPLACE INTO blocklist (key, blocked) VALUES (?1, ?2)",
-            rusqlite::params![key.as_slice(), time],
+            "INSERT OR REPLACE INTO blocklist (key, blocked, name, contact) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![key.as_slice(), time, who.unwrap_or(""), i64::from(who.is_some())],
         )?;
         self.blocked.insert(*key);
         let _ = self.take_request(key);
@@ -2737,7 +2774,7 @@ mod tests {
         {
             let mut g = GateStore::open(shared.clone()).unwrap();
             g.upsert_request(&k, "", "спам", 1, 1).unwrap();
-            g.block(&k, 2).unwrap();
+            g.block(&k, 2, None).unwrap();
             assert!(g.is_blocked(&k));
             assert!(!g.has_request(&k)); // блок снял запрос
         }
@@ -2746,6 +2783,28 @@ mod tests {
         assert!(g2.unblock(&k).unwrap());
         assert!(!g2.is_blocked(&k));
         assert!(!g2.unblock(&k).unwrap()); // повторный unblock — уже нет
+    }
+
+    /// «Заблокированные» (5.2): имя контакта переживает блок и переоткрытие,
+    /// незнакомец — без имени; новые сверху; разблокированный пропадает из списка.
+    #[test]
+    fn blocked_rows_keep_contact_name() {
+        let (gleb, stranger) = (key(), key());
+        let shared = db();
+        {
+            let mut g = GateStore::open(shared.clone()).unwrap();
+            g.block(&gleb, 10, Some("Глеб")).unwrap();
+            g.block(&stranger, 20, None).unwrap();
+        }
+        let mut g = GateStore::open(shared).unwrap();
+        let rows = g.blocked_rows().unwrap();
+        assert_eq!(
+            rows.iter().map(|r| (r.name.as_str(), r.contact, r.time)).collect::<Vec<_>>(),
+            vec![("", false, 20), ("Глеб", true, 10)]
+        );
+        assert_eq!(rows[1].key, hex::encode(gleb));
+        g.unblock(&stranger).unwrap();
+        assert_eq!(g.blocked_rows().unwrap().len(), 1);
     }
 
     /// Запись группы обновляется, не теряя времени ротации ключа (оно пишется

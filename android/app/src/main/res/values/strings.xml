@@ -973,6 +973,14 @@
     <string name="privacy_online_sub">Follows from the keepalive that delivery relies on</string>
     <string name="privacy_profile">Name and avatar</string>
     <string name="privacy_profile_sub">Contacts only, never the network</string>
+    <string name="blocked_title">Blocked</string>
+    <string name="blocked_key">key %1$s…</string>
+    <string name="blocked_sub_contact">key %1$s… · since&#160;%2$s</string>
+    <string name="blocked_sub_stranger">not a contact · since&#160;%1$s</string>
+    <string name="blocked_sub_since">since&#160;%1$s</string>
+    <string name="blocked_unblock">Unblock</string>
+    <string name="blocked_empty">The list is empty</string>
+    <string name="blocked_caption">Packets from blocked peers are dropped before decryption. After unblocking, a contact is restored only by a new request.</string>
     <string name="profile_write">Message</string>
     <string name="profile_video">Video</string>
     <string name="profile_sound">Sound</string>
