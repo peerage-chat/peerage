@@ -40,14 +40,16 @@ internal object MessageNotifier {
         val time: Long,
         val avatar: ByteArray?,
         val mine: Boolean = false,
+        /** Пропущенный звонок: у личного чата под ним «Перезвонить». */
+        val missedCall: Boolean = false,
     )
 
     /** Всё, из чего строится уведомление чата, — чтобы перестроить его при отзыве или правке. */
     data class Chat(val title: String, val group: Boolean, val channel: String, val lines: List<Line>)
 
     /**
-     * Поднимать ли шторку — всё правило в одном месте. Своё, служебное и звонки (у них свой
-     * путь) — нет; лента этого чата на экране — нет, там звук (п. 4); режим чата не пускает
+     * Поднимать ли шторку — всё правило в одном месте. Своё и служебное — нет; из звонков —
+     * только пропущенный, и его режим чата не глушит (п. 7: звонки режим не глушит); лента этого чата на экране — нет, там звук (п. 4); режим чата не пускает
      * ([NotifyMode.lets]: «упоминания» — только с упоминанием меня) — нет;
      * досланное старше [ChatSounds.BACKLOG_MS] по времени отправки — нет (п. 3).
      */
@@ -55,12 +57,13 @@ internal object MessageNotifier {
         mine: Boolean,
         system: Boolean,
         call: Boolean,
+        missed: Boolean,
         onScreen: Boolean,
         mode: NotifyMode,
         mentionsMe: Boolean,
         sentMs: Long,
         nowMs: Long,
-    ): Boolean = !mine && !system && !call && !onScreen && mode.lets(mentionsMe) &&
+    ): Boolean = !mine && !system && !onScreen && (if (call) missed else mode.lets(mentionsMe)) &&
         !(sentMs > 0 && nowMs - sentMs > ChatSounds.BACKLOG_MS)
 
     private val chats = HashMap<ChatTarget, Chat>()
@@ -161,25 +164,50 @@ internal object MessageNotifier {
             .setOnlyAlertOnce(!alert)
             .setWhen(c.lines.last().time)
             .setShowWhen(true)
-            .addAction(replyAction(ctx, tag))
+        // Система показывает не больше трёх кнопок. Под пропущенным звонком первая —
+        // «Перезвонить», и «Заглушить на час» уступает ей место: режим звонки всё равно не глушит.
+        val missed = !c.group && c.lines.last().missedCall
+        if (missed) n.addAction(callBackAction(ctx, tag))
+        n.addAction(replyAction(ctx, tag))
             .addAction(
                 NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_read), actionIntent(ctx, ACTION_READ, tag, mutable = false))
                     .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
                     .setShowsUserInterface(false)
                     .build(),
             )
-            // п. 5: в группе — только упоминания на час, в личном — ничего на час.
-            .addAction(
+        // п. 5: в группе — только упоминания на час, в личном — ничего на час.
+        if (!missed) {
+            n.addAction(
                 NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_mute_hour), actionIntent(ctx, ACTION_MUTE_HOUR, tag, mutable = false))
                     .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MUTE)
                     .setShowsUserInterface(false)
                     .build(),
             )
+        }
         // Разговор в «Разговорах» системы — только если ярлык чата опубликован (его имя и фото
         // уходят системе только по выбору: «Чаты в меню Поделиться», 5.6).
         if (model.shareChatsInMenu) n.setShortcutId(tag)
         // Без разрешения на уведомления (Android 13+) notify бросает — просто молчим.
         runCatching { NotificationManagerCompat.from(ctx).notify(tag, NOTIF_ID, n.build()) }
+    }
+
+    /**
+     * «Перезвонить»: ведёт в активити (звонок без экрана не начать); активити экспортирована,
+     * поэтому — с одноразовым токеном.
+     */
+    private fun callBackAction(ctx: Context, tag: String): NotificationCompat.Action {
+        val token = java.util.UUID.randomUUID().toString()
+        callTokens[tag] = token
+        val back = PendingIntent.getActivity(
+            ctx,
+            (ACTION_CALL_BACK + tag).hashCode(),
+            Intent(ACTION_CALL_BACK).setClass(ctx, MainActivity::class.java)
+                .putExtra(EXTRA_SHORTCUT_CHAT, tag)
+                .putExtra(EXTRA_CALL_TOKEN, token)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_call_back), back).build()
     }
 
     private fun replyAction(ctx: Context, tag: String): NotificationCompat.Action {
@@ -233,6 +261,18 @@ internal object MessageNotifier {
     const val ACTION_REPLY = "chat.peerage.NOTIF_REPLY"
     const val ACTION_READ = "chat.peerage.NOTIF_READ"
     const val ACTION_MUTE_HOUR = "chat.peerage.NOTIF_MUTE_HOUR"
+    const val ACTION_CALL_BACK = "chat.peerage.NOTIF_CALL_BACK"
+    const val EXTRA_CALL_TOKEN = "chat.peerage.CALL_TOKEN"
+
+    /** Одноразовые токены «Перезвонить» по чатам: чужое приложение не начнёт звонок за человека. */
+    private val callTokens = HashMap<String, String>()
+
+    @Synchronized
+    fun consumeCallToken(tag: String, token: String?): Boolean {
+        val ok = !token.isNullOrEmpty() && callTokens[tag] == token
+        if (ok) callTokens.remove(tag)
+        return ok
+    }
     const val ACTION_READ_ALL = "chat.peerage.NOTIF_READ_ALL"
 }
 

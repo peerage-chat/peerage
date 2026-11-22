@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
      * остаётся экран входящего — его «Принять» само спросит разрешение.
      */
     private fun handleCallIntent(i: android.content.Intent?) {
+        if (i?.action == MessageNotifier.ACTION_CALL_BACK) return callBack(i)
         if (i?.action != IncomingCallReceiver.ACTION_ACCEPT) return
         i.action = null // пересоздание активити не должно принять звонок второй раз
         // Активити экспортирована: ACTION_ACCEPT может прислать кто угодно. Верим
@@ -92,6 +93,19 @@ class MainActivity : ComponentActivity() {
         // спрашивать его из шторки некому, звонок тогда начнётся голосом.
         val video = i.getBooleanExtra(IncomingCallReceiver.EXTRA_VIDEO, false) && hasPermission(Manifest.permission.CAMERA)
         if (hasPermission(Manifest.permission.RECORD_AUDIO)) model.acceptDmCall(video = video)
+    }
+
+    /**
+     * «Перезвонить» из уведомления о пропущенном: чат открывается всегда, звонок — только с
+     * токеном из нашего уведомления и с микрофоном (иначе остаётся чат с кнопкой звонка).
+     */
+    private fun callBack(i: android.content.Intent) {
+        val tag = i.getStringExtra(EXTRA_SHORTCUT_CHAT).orEmpty()
+        val ok = MessageNotifier.consumeCallToken(tag, i.getStringExtra(MessageNotifier.EXTRA_CALL_TOKEN))
+        i.action = ACTION_OPEN_CHAT // дальше — как тап по уведомлению: открыть чат
+        val chat = chatOfShortcut(tag) ?: return
+        MessageNotifier.cancel(this, chat)
+        if (ok && !chat.group && hasPermission(Manifest.permission.RECORD_AUDIO)) model.callDm(chat.id)
     }
 
     /** Запрос уже на экране: onStart и кнопка замка не должны поднять второй. */

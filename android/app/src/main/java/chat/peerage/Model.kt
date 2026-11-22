@@ -616,7 +616,9 @@ class AppModel private constructor() {
         val mode = notifyMode(chat.id, chat.group)
         val mentionsMe = chat.group && m.mentions.any { it.key == me?.pubkey }
         val now = System.currentTimeMillis()
-        if (!MessageNotifier.shouldNotify(m.mine, m.system, m.isCall, onScreen && foreground, mode, mentionsMe, sent, now)) return
+        // Строка звонка обновляется по ходу (звонит → отвечен/пропущен) — по ней не уведомляем;
+        // пропущенный поднимает [notifyMissedCall], когда звонящий сбросил без ответа.
+        if (!MessageNotifier.shouldNotify(m.mine, m.system, m.isCall, false, onScreen && foreground, mode, mentionsMe, sent, now)) return
         val title = if (chat.group) groups.firstOrNull { it.gid == chat.id }?.name.orEmpty() else peerName(chat.id)
         val sender = contacts.firstOrNull { it.key == m.sender }
         val line = MessageNotifier.Line(
@@ -628,6 +630,28 @@ class AppModel private constructor() {
             avatar = sender?.avatarId?.let { contactAvatars[it] },
         )
         MessageNotifier.post(ctx, chat, title, mention = mentionsMe, line = line)
+    }
+
+    /**
+     * Пропущенный звонок — строкой в разговор чата с «Перезвонить» (п. 7). Режим чата его не
+     * глушит; лента этого чата на экране — без шторки (звонок и так был виден).
+     */
+    private fun notifyMissedCall(peer: String, video: Boolean) {
+        val ctx = appContext ?: return
+        val chat = ChatTarget(peer, group = false)
+        val now = System.currentTimeMillis()
+        val onScreen = viewing == chat && foreground
+        if (!MessageNotifier.shouldNotify(false, false, true, true, onScreen, notifyMode(peer, false), false, 0, now)) return
+        val line = MessageNotifier.Line(
+            id = now,
+            sender = peer,
+            name = peerName(peer),
+            text = ctx.getString(if (video) R.string.chat_call_missed_video else R.string.chat_call_missed),
+            time = now,
+            avatar = contacts.firstOrNull { it.key == peer }?.avatarId?.let { contactAvatars[it] },
+            missedCall = true,
+        )
+        MessageNotifier.post(ctx, chat, peerName(peer), mention = false, line = line)
     }
 
     /** Текст строки шторки: подпись или текст, у вложения без подписи — его вид. */
@@ -2366,10 +2390,12 @@ class AppModel private constructor() {
                     leaveRoom()
                     if (dialing) CallTones.busy()
                 }
-                // Звонящий сбросил до того как мы ответили — гасим уведомление.
-                if (incomingCall?.peer == ev.peer) {
+                // Звонящий сбросил до того как мы ответили — гасим входящий; это пропущенный.
+                val ic = incomingCall
+                if (ic?.peer == ev.peer) {
                     incomingCall = null
                     appContext?.let { IncomingCallReceiver.cancel(it) }
+                    if (!isGroupRoom(ic.roomId)) notifyMissedCall(ic.peer, ic.video)
                 }
             }
             is EngineEvent.RoomPresence -> if (ev.gid == currentRoom) {
