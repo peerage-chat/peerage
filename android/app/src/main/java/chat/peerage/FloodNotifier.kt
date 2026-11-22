@@ -26,15 +26,12 @@ class FloodNotifier : BroadcastReceiver() {
 
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
+            // Офлайн — состояние «связи» (решение 10), не отдельное уведомление.
             ACTION_OFFLINE -> {
                 AppModel.instance.goOffline()
                 cancelFlood(ctx)
-                showOffline(ctx)
             }
-            ACTION_ONLINE -> {
-                AppModel.instance.goOnline()
-                cancelOffline(ctx)
-            }
+            ACTION_ONLINE -> AppModel.instance.goOnline()
             ACTION_ROTATE -> {
                 // Смена адреса — не «одна кнопка»: пользователь должен выбрать, кому
                 // сообщить новый. Поэтому открываем экран, а не запускаем молча.
@@ -52,7 +49,6 @@ class FloodNotifier : BroadcastReceiver() {
     companion object {
         private const val CHANNEL = "flood"
         const val NOTIF_FLOOD = 4
-        const val NOTIF_OFFLINE = 5
         const val ACTION_OFFLINE = "chat.peerage.GO_OFFLINE"
         const val ACTION_ONLINE = "chat.peerage.GO_ONLINE"
         const val ACTION_ROTATE = "chat.peerage.ROTATE_ADDRESS"
@@ -120,30 +116,7 @@ class FloodNotifier : BroadcastReceiver() {
             nm.notify(NOTIF_FLOOD, n)
         }
 
-        /** Постоянное «вы офлайн» с кнопкой возврата. */
-        fun showOffline(ctx: Context) {
-            ensureChannel(ctx)
-            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val n = Notification.Builder(ctx, CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_lock_power_off)
-                .setContentTitle(ctx.getString(R.string.notif_offline_title))
-                .setContentText(ctx.getString(R.string.notif_offline_body))
-                .setOngoing(true) // не смахнуть: состояние важнее аккуратной шторки
-                .addAction(
-                    Notification.Action.Builder(
-                        null,
-                        ctx.getString(R.string.notif_action_online),
-                        broadcast(ctx, 23, ACTION_ONLINE),
-                    ).build(),
-                )
-                .build()
-            nm.notify(NOTIF_OFFLINE, n)
-        }
-
         fun cancelFlood(ctx: Context) =
             (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF_FLOOD)
-
-        fun cancelOffline(ctx: Context) =
-            (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIF_OFFLINE)
     }
 }

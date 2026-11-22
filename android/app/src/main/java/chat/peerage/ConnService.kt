@@ -96,54 +96,80 @@ class ConnService : Service() {
         }
     }
 
-    private fun buildNotification(): Notification {
-        ensureChannel(this)
-
-        val openPi = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val disconnectPi = PendingIntent.getBroadcast(
-            this,
-            0,
-            Intent(ACTION_DISCONNECT).apply { setPackage(packageName) },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        @Suppress("DEPRECATION")
-        val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL)
-        } else {
-            Notification.Builder(this)
-        }
-
-        b.setContentTitle(getString(R.string.app_name))
-            .setContentText(getString(R.string.notif_conn_text))
-            .setSmallIcon(R.drawable.ic_glyph)
-            .setOngoing(true)
-            .setContentIntent(openPi)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            b.addAction(
-                Notification.Action.Builder(
-                    android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_lock_power_off),
-                    getString(R.string.notif_disconnect),
-                    disconnectPi,
-                ).build(),
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            b.addAction(0, getString(R.string.notif_disconnect), disconnectPi)
-        }
-
-        return b.build()
-    }
+    private fun buildNotification(): Notification = build(this, last ?: ConnState())
 
     companion object {
         internal const val CHANNEL = "conn"
+
+        /** Последнее показанное состояние: перестраиваем уведомление только при смене. */
+        @Volatile private var last: ConnState? = null
+
+        /** Привести «связь» к состоянию [state] (тикер модели, раз в секунду). */
+        fun refresh(ctx: Context, state: ConnState) {
+            if (state == last) return
+            last = state
+            ensureChannel(ctx)
+            runCatching { ctx.getSystemService(NotificationManager::class.java).notify(NOTIF_ID, build(ctx, state)) }
+        }
+
+        /**
+         * «Связь» (notifications.md, решения 2 и 10): заголовок — состояние узла, текст — всё
+         * непрочитанное одной строкой. Тап — приложение; «Прочитать всё», если есть что; в офлайне —
+         * «Подключиться» вместо отдельного уведомления об офлайне.
+         */
+        private fun build(ctx: Context, state: ConnState): Notification {
+            val open = PendingIntent.getActivity(
+                ctx,
+                0,
+                Intent(ctx, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            fun broadcast(code: Int, action: String, cls: Class<*>? = null): PendingIntent = PendingIntent.getBroadcast(
+                ctx,
+                code,
+                Intent(action).apply { if (cls != null) setClass(ctx, cls) else setPackage(ctx.packageName) },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val title = ctx.getString(
+                when {
+                    state.offline -> R.string.notif_conn_offline
+                    state.searching -> R.string.notif_conn_search
+                    else -> R.string.notif_conn_online
+                },
+            )
+            val text = if (state.offline) ctx.getString(R.string.notif_conn_offline_body) else summary(ctx, state)
+
+            @Suppress("DEPRECATION")
+            val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(ctx, CHANNEL) else Notification.Builder(ctx)
+            b.setContentTitle(title)
+                .setSmallIcon(R.drawable.ic_glyph)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(open)
+            if (text.isNotEmpty()) b.setContentText(text)
+            fun action(label: Int, pi: PendingIntent) = b.addAction(Notification.Action.Builder(null, ctx.getString(label), pi).build())
+            when {
+                state.offline -> action(R.string.notif_connect, broadcast(1, FloodNotifier.ACTION_ONLINE))
+                state.hasUnread -> action(R.string.notif_read_all, broadcast(2, MessageNotifier.ACTION_READ_ALL, MessageActionReceiver::class.java))
+            }
+            action(R.string.notif_disconnect, broadcast(0, ACTION_DISCONNECT))
+            return b.build()
+        }
+
+        /** «5 новых в 2 чатах · упоминание · 1 запрос»; пусто — нечего. */
+        fun summary(ctx: Context, s: ConnState): String {
+            val r = ctx.resources
+            return s.parts().joinToString(" · ") { p ->
+                when (p) {
+                    is ConnState.Part.Messages ->
+                        r.getQuantityString(R.plurals.notif_conn_msgs, p.count, p.count) + " " +
+                            r.getQuantityString(R.plurals.notif_conn_chats, p.chats, p.chats)
+                    ConnState.Part.Mention -> ctx.getString(R.string.notif_conn_mention)
+                    is ConnState.Part.Requests -> r.getQuantityString(R.plurals.notif_conn_requests, p.count, p.count)
+                    is ConnState.Part.Invites -> r.getQuantityString(R.plurals.notif_conn_invites, p.count, p.count)
+                }
+            }
+        }
 
         /** Служба поднимает и движок (запуск без экрана — [BootReceiver]). */
         private const val EXTRA_ENGINE = "engine"

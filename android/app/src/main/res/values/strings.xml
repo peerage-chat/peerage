@@ -149,6 +149,29 @@
     <string name="notif_sec_messages">Messages</string>
     <string name="notif_set_chat_sounds">In-chat sounds</string>
     <string name="notif_sec_other">Other</string>
+    <string name="notif_conn_online">Online</string>
+    <string name="notif_conn_search">Searching for network</string>
+    <string name="notif_conn_offline">Offline mode</string>
+    <string name="notif_conn_offline_body">Connections closed, messages are not received</string>
+    <string name="notif_conn_mention">mention</string>
+    <string name="notif_read_all">Mark all as read</string>
+    <string name="notif_connect">Connect</string>
+    <plurals name="notif_conn_msgs">
+        <item quantity="one">%d new</item>
+        <item quantity="other">%d new</item>
+    </plurals>
+    <plurals name="notif_conn_chats">
+        <item quantity="one">in %d chat</item>
+        <item quantity="other">in %d chats</item>
+    </plurals>
+    <plurals name="notif_conn_requests">
+        <item quantity="one">%d request</item>
+        <item quantity="other">%d requests</item>
+    </plurals>
+    <plurals name="notif_conn_invites">
+        <item quantity="one">%d invite</item>
+        <item quantity="other">%d invites</item>
+    </plurals>
     <string name="notif_msg_hidden">New message</string>
     <string name="notif_reply">Reply</string>
     <string name="notif_read">Mark as read</string>
@@ -345,7 +368,6 @@
     <string name="notif_incoming_channel_desc">Incoming call notification</string>
     <string name="notif_conn_channel">Connection</string>
     <string name="notif_conn_channel_desc">Online — mesh node active</string>
-    <string name="notif_conn_text">Online — keeping mesh connection</string>
     <string name="notif_locked_title">Messages locked with a password</string>
     <string name="notif_locked_body">Messages are not received until the password is entered</string>
     <string name="notif_disconnect">Disconnect</string>
@@ -593,8 +615,6 @@
 
     <string name="notif_flood_title">You are being flooded</string>
     <string name="notif_flood_body">%1$s: %2$d packets/s. The content does not reach you, but data is being spent.</string>
-    <string name="notif_offline_title">You are offline</string>
-    <string name="notif_offline_body">Connections dropped, no data is being spent. Messages will not arrive.</string>
     <string name="notif_action_offline">Go offline</string>
     <string name="notif_action_online">Back online</string>
     <string name="notif_action_rotate">Change address</string>

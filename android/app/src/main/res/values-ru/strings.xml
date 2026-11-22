@@ -147,6 +147,37 @@
     <string name="notif_sec_messages">Сообщения</string>
     <string name="notif_set_chat_sounds">Звуки в чате</string>
     <string name="notif_sec_other">Прочее</string>
+    <string name="notif_conn_online">В сети</string>
+    <string name="notif_conn_search">Поиск сети</string>
+    <string name="notif_conn_offline">Офлайн-режим</string>
+    <string name="notif_conn_offline_body">Соединения разорваны, сообщения не приходят</string>
+    <string name="notif_conn_mention">упоминание</string>
+    <string name="notif_read_all">Прочитать всё</string>
+    <string name="notif_connect">Подключиться</string>
+    <plurals name="notif_conn_msgs">
+        <item quantity="one">%d новое</item>
+        <item quantity="few">%d новых</item>
+        <item quantity="many">%d новых</item>
+        <item quantity="other">%d новых</item>
+    </plurals>
+    <plurals name="notif_conn_chats">
+        <item quantity="one">в %d чате</item>
+        <item quantity="few">в %d чатах</item>
+        <item quantity="many">в %d чатах</item>
+        <item quantity="other">в %d чатах</item>
+    </plurals>
+    <plurals name="notif_conn_requests">
+        <item quantity="one">%d запрос</item>
+        <item quantity="few">%d запроса</item>
+        <item quantity="many">%d запросов</item>
+        <item quantity="other">%d запроса</item>
+    </plurals>
+    <plurals name="notif_conn_invites">
+        <item quantity="one">%d приглашение</item>
+        <item quantity="few">%d приглашения</item>
+        <item quantity="many">%d приглашений</item>
+        <item quantity="other">%d приглашения</item>
+    </plurals>
     <string name="notif_msg_hidden">Новое сообщение</string>
     <string name="notif_reply">Ответить</string>
     <string name="notif_read">Прочитано</string>
@@ -347,7 +378,6 @@
     <string name="notif_incoming_channel_desc">Уведомление о входящем звонке</string>
     <string name="notif_conn_channel">Соединение</string>
     <string name="notif_conn_channel_desc">В сети — mesh-узел активен</string>
-    <string name="notif_conn_text">В сети — держим mesh-соединение</string>
     <string name="notif_locked_title">Переписка закрыта паролем</string>
     <string name="notif_locked_body">Сообщения не принимаются до ввода пароля</string>
     <string name="notif_disconnect">Отключить</string>
@@ -611,8 +641,6 @@
 
     <string name="notif_flood_title">Вас заваливают трафиком</string>
     <string name="notif_flood_body">%1$s: %2$d пакетов/с. Содержимое не доходит, но трафик расходуется.</string>
-    <string name="notif_offline_title">Вы офлайн</string>
-    <string name="notif_offline_body">Соединения разорваны, трафик не расходуется. Сообщения не приходят.</string>
     <string name="notif_action_offline">В офлайн</string>
     <string name="notif_action_online">Вернуться в сеть</string>
     <string name="notif_action_rotate">Сменить адрес</string>

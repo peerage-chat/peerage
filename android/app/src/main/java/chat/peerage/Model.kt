@@ -544,6 +544,38 @@ class AppModel private constructor() {
             ?.edit()?.putBoolean("notif_text", on)?.apply()
     }
 
+    /** Состояние «связи» для шторки ([ConnState]). Снимок-карты читаются с тикера безопасно. */
+    private fun connState(nowOffline: Boolean, peers: Int): ConnState {
+        val dm = unread.filterValues { it > 0 }
+        val grp = groupUnread.filterValues { it > 0 }
+        return ConnState(
+            offline = nowOffline,
+            searching = peers == 0,
+            messages = dm.values.sum() + grp.values.sum(),
+            chats = dm.size + grp.size,
+            mention = groupMentioned.isNotEmpty(),
+            requests = contactRequests.size,
+            invites = groupInvites.size,
+        )
+    }
+
+    /** Перестроить «связь» сейчас, не дожидаясь тикера (в фоне он спит 15 с). */
+    private fun refreshConn() {
+        appContext?.let { ConnService.refresh(it, connState(offline, netPeers)) }
+    }
+
+    /** «Прочитать всё» в «связи»: каждый чат с непрочитанным — как «Прочитано» в его уведомлении. */
+    fun readAll() {
+        val ctx = appContext
+        val chats = unread.filterValues { it > 0 }.keys.map { ChatTarget(it, group = false) } +
+            groupUnread.filterValues { it > 0 }.keys.map { ChatTarget(it, group = true) }
+        chats.forEach { c ->
+            readFromNotification(c)
+            ctx?.let { MessageNotifier.cancel(it, c) }
+        }
+        refreshConn()
+    }
+
     /** «Прочитано» в шторке: как открыть чат — счётчик в ноль, отметка собеседнику. */
     fun readFromNotification(chat: ChatTarget) {
         if (chat.group) {
@@ -553,6 +585,7 @@ class AppModel private constructor() {
             unread[chat.id] = 0
             ops.execute { Native.markRead(sessionPtr, chat.id) }
         }
+        refreshConn()
     }
 
     /** «Ответить» в шторке: обычным сообщением, не трогая ответ, начатый в открытом чате. */
@@ -1120,7 +1153,18 @@ class AppModel private constructor() {
         set(v) {
             field = v
             // Вернулись к ленте чата — она снова на экране, значит прочитана, и шторка о нём не нужна.
-            if (v) viewing?.let { c -> appContext?.let { MessageNotifier.cancel(it, c) } }
+            if (v) {
+                viewing?.let { c ->
+                    appContext?.let { MessageNotifier.cancel(it, c) }
+                    // Пришедшее в него, пока приложение было свёрнуто, теперь на экране.
+                    if (c.group) {
+                        groupUnread[c.id] = 0
+                        groupMentioned.remove(c.id)
+                    } else {
+                        unread[c.id] = 0
+                    }
+                }
+            }
             if (v) viewing?.takeUnless { it.group }?.let { c -> ops.execute { Native.markRead(sessionPtr, c.id) } }
         }
 
@@ -1349,7 +1393,6 @@ class AppModel private constructor() {
         tickerThread = Thread {
             var tick = 0L
             var zeroPeerTicks = 0 // счётчик тиков без пиров
-            var wasOffline = offline
             while (running) {
                 runCatching {
                     val p = Native.netPeers(sessionPtr)
@@ -1363,11 +1406,7 @@ class AppModel private constructor() {
                         presence.forEach { (key, on) -> online[key] = on }
                         offline = nowOffline
                     }
-                    appContext?.let { ctx ->
-                        if (nowOffline && !wasOffline) FloodNotifier.showOffline(ctx)
-                        if (!nowOffline && wasOffline) FloodNotifier.cancelOffline(ctx)
-                    }
-                    wasOffline = nowOffline
+                    appContext?.let { ConnService.refresh(it, connState(nowOffline, p)) }
                     val flood = decodeList<FloodPeerDto>(Native.floodPeers(sessionPtr))
                         .map { FloodPeer(it.peer, it.dropped, it.bytes, it.pps, it.bps, it.blocked) }
                     if (floodPeers != flood) {
@@ -2256,13 +2295,15 @@ class AppModel private constructor() {
                     val muted = chatSummaries[chatKey(ev.chat, ev.group)]?.muted == true
                     appContext?.let { ChatSounds.play(it, ChatSounds.Kind.In, chatSounds, muted, ev.sent) }
                 }
-                if (!m.mine && counts && !onScreen) {
+                // Свёрнутое приложение с открытым чатом — тоже непрочитанное: его считает «связь».
+                if (!m.mine && counts && !(onScreen && foreground)) {
                     if (ev.group) {
                         groupUnread[ev.chat] = (groupUnread[ev.chat] ?: 0) + 1
                         if (m.mentions.any { it.key == me?.pubkey }) groupMentioned[ev.chat] = true
                     } else {
                         unread[ev.chat] = (unread[ev.chat] ?: 0) + 1
                     }
+                    refreshConn()
                 }
             }
             // Собеседник отозвал своё сообщение: движок уже удалил его из истории,

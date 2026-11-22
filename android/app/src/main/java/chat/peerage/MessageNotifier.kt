@@ -223,11 +223,17 @@ internal object MessageNotifier {
 
     const val ACTION_REPLY = "chat.peerage.NOTIF_REPLY"
     const val ACTION_READ = "chat.peerage.NOTIF_READ"
+    const val ACTION_READ_ALL = "chat.peerage.NOTIF_READ_ALL"
 }
 
 /** Кнопки уведомления о сообщении. Не экспортирован: интенты — только наши PendingIntent. */
 class MessageActionReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
+        if (intent.action == MessageNotifier.ACTION_READ_ALL) {
+            // «Связь» есть, только пока жив процесс со службой — движок уже работает.
+            AppModel.instance.readAll()
+            return
+        }
         val chat = intent.getStringExtra(EXTRA_SHORTCUT_CHAT)?.let(::chatOfShortcut) ?: return
         val reply = if (intent.action == MessageNotifier.ACTION_REPLY) MessageNotifier.replyText(intent) ?: return else null
         val app = ctx.applicationContext
