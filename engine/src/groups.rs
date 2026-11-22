@@ -1037,7 +1037,12 @@ impl GroupManager {
                         .unwrap_or(false);
                     GroupOutcome {
                         gid: Some(gid.clone()),
-                        reacted: changed.then_some((target, sender)),
+                        reacted: changed.then(|| Reacted {
+                            target,
+                            sender,
+                            by: hex::encode(actor),
+                            emoji,
+                        }),
                         ..Default::default()
                     }
                 }
@@ -1555,8 +1560,18 @@ pub struct GroupOutcome {
     pub media: Option<MediaBody>,
     /// Участник отозвал своё сообщение — строка исчезла из истории, UI перечитать.
     pub retracted: bool,
-    /// Реакции под сообщением `(id, автор)` изменились — UI поправить его на месте.
-    pub reacted: Option<(u64, String)>,
+    /// Реакции под сообщением изменились — UI поправить его на месте.
+    pub reacted: Option<Reacted>,
+}
+
+/// Пришедшая реакция участника: на какое сообщение `(target, sender)`, кто (из MLS) и что.
+#[derive(Debug, Clone)]
+pub struct Reacted {
+    pub target: u64,
+    pub sender: String,
+    pub by: String,
+    /// Пусто — снята.
+    pub emoji: String,
 }
 
 #[cfg(test)]

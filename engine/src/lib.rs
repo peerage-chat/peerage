@@ -806,7 +806,7 @@ impl Engine {
                     .react(chat.as_chat(), id, sender, &self.me_hex(), emoji, at)
                     .unwrap_or(false);
                 if changed {
-                    push_reactions(self, chat.as_chat(), id, sender);
+                    push_reactions(self, chat.as_chat(), id, sender, None);
                 }
                 true
             }
@@ -3667,9 +3667,11 @@ fn put_greeting(engine: &Engine, peer: &[u8; 32], id: u64, greeting: &str, time:
     );
 }
 
-/// Новый набор реакций одного сообщения — клиенту, чтобы поправить его на месте.
-fn push_reactions(engine: &Engine, chat: Chat, id: u64, sender: &str) {
+/// Новый набор реакций одного сообщения — клиенту, чтобы поправить его на месте. `by` —
+/// пришедшая реакция `(кто, что)`; своя — `None`.
+fn push_reactions(engine: &Engine, chat: Chat, id: u64, sender: &str, by: Option<(&str, &str)>) {
     let reactions = engine.messages.lock_safe().reactions(chat, id, sender);
+    let news = by.and_then(|(who, emoji)| react_news(engine, chat, id, sender, who, emoji));
     push_event(
         engine,
         dto::UiEvent::Reactions {
@@ -3678,8 +3680,36 @@ fn push_reactions(engine: &Engine, chat: Chat, id: u64, sender: &str) {
             id,
             sender: sender.to_string(),
             reactions,
+            news,
         },
     );
+}
+
+/// Повод для уведомления — только чужая поставленная (не снятая) реакция на моё сообщение.
+fn react_news(
+    engine: &Engine,
+    chat: Chat,
+    id: u64,
+    sender: &str,
+    who: &str,
+    emoji: &str,
+) -> Option<dto::ReactNews> {
+    let me = engine.me_hex();
+    if emoji.is_empty() || sender != me || who == me {
+        return None;
+    }
+    let target = engine
+        .messages
+        .lock_safe()
+        .get_many(chat, &[(id, sender.to_string())])
+        .into_iter()
+        .next()?;
+    Some(dto::ReactNews {
+        by: who.to_string(),
+        emoji: emoji.to_string(),
+        quote: target.text,
+        kind: target.kind,
+    })
 }
 
 /// Положить событие в очередь для клиента. Принимает ТИП, а не свободный JSON:
@@ -4138,7 +4168,14 @@ fn handle_event(
                 )
                 .unwrap_or(false);
             if changed {
-                push_reactions(engine, Chat::Dm(&peer), target, &author);
+                let who = hex::encode(peer);
+                push_reactions(
+                    engine,
+                    Chat::Dm(&peer),
+                    target,
+                    &author,
+                    Some((&who, &emoji)),
+                );
             }
         }
         Event::Read { peer, upto } => engine.on_read(&peer, upto),
@@ -4365,8 +4402,9 @@ fn handle_event(
                     );
                 }
             }
-            if let (Some(gid), Some((id, sender))) = (&out.gid, &out.reacted) {
-                push_reactions(engine, Chat::Group(gid), *id, sender);
+            if let (Some(gid), Some(r)) = (&out.gid, &out.reacted) {
+                let by = Some((r.by.as_str(), r.emoji.as_str()));
+                push_reactions(engine, Chat::Group(gid), r.target, &r.sender, by);
             }
             if out.pinned {
                 // Шапка чата живёт отдельно от ленты — событие своё.
@@ -4757,7 +4795,7 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
             at,
         } => {
             if groups.react(&gid, id, &sender, &emoji, at) {
-                push_reactions(engine, Chat::Group(&gid), id, &sender);
+                push_reactions(engine, Chat::Group(&gid), id, &sender, None);
             }
         }
         GroupCmd::Pin {

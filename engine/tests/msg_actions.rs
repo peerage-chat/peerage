@@ -692,6 +692,69 @@ fn reactions_travel_replace_and_clear() {
     assert!(!a.react(peerage_engine::ChatKey::Dm(b_key), id1, &author, "a b"));
 }
 
+/// Уведомление о реакции (beta.md 7f): событие `reactions` несёт `news` — кто, что и начало
+/// сообщения — только у чужой реакции на моё. Своё эхо, реакция на чужое и снятие — без него.
+#[test]
+fn reaction_on_my_message_carries_news() {
+    let (a, b, a_key, b_key) = pair("react_news", 65, 66);
+    let id1 = a.send_text(&b_key, "кто берёт палатку?").unwrap() as u64;
+    assert!(wait(10, || !history(&b, &a_key).is_empty()));
+    let author = hex::encode(a_key);
+    drain(&a, "reactions");
+    drain(&b, "reactions");
+
+    assert!(b.react(peerage_engine::ChatKey::Dm(a_key), id1, &author, "👍"));
+    let mut got = Vec::new();
+    assert!(wait(10, || {
+        got.extend(drain(&a, "reactions"));
+        !got.is_empty()
+    }));
+    let news = &got[0]["news"];
+    assert_eq!(news["by"], hex::encode(b_key));
+    assert_eq!(news["emoji"], "👍");
+    assert_eq!(news["quote"], "кто берёт палатку?");
+    assert_eq!(news["kind"], "text");
+    // У ставившего — эхо своей реакции, без news.
+    assert!(drain(&b, "reactions")
+        .iter()
+        .all(|e| e.get("news").is_none()));
+
+    // Своя реакция на своё — без news.
+    assert!(a.react(peerage_engine::ChatKey::Dm(b_key), id1, &author, "🔥"));
+    assert!(drain(&a, "reactions")
+        .iter()
+        .all(|e| e.get("news").is_none()));
+
+    // Снятие чужой — без news.
+    assert!(b.react(peerage_engine::ChatKey::Dm(a_key), id1, &author, ""));
+    let mut off = Vec::new();
+    assert!(wait(10, || {
+        off.extend(drain(&a, "reactions"));
+        !off.is_empty()
+    }));
+    assert!(off.iter().all(|e| e.get("news").is_none()));
+
+    // Реакция Ани на сообщение Боба у Боба — news (его сообщение); у Ани — нет.
+    let id2 = b.send_text(&a_key, "я беру").unwrap() as u64;
+    assert!(wait(10, || history(&a, &b_key).len() == 2));
+    drain(&b, "reactions");
+    assert!(a.react(
+        peerage_engine::ChatKey::Dm(b_key),
+        id2,
+        &hex::encode(b_key),
+        "❤️"
+    ));
+    let mut bob = Vec::new();
+    assert!(wait(10, || {
+        bob.extend(drain(&b, "reactions"));
+        !bob.is_empty()
+    }));
+    assert_eq!(bob[0]["news"]["by"], hex::encode(a_key));
+    assert!(drain(&a, "reactions")
+        .iter()
+        .all(|e| e.get("news").is_none()));
+}
+
 /// Капсула «❤» (5.7): реакция собеседника на моё сообщение — непросмотренная у меня и
 /// только у меня; просмотр гасит её, новая реакция того же человека — снова новая.
 #[test]

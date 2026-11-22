@@ -17,6 +17,18 @@ use serde::Serialize;
 
 /// Сводка офлайн-очереди. `warn` — только сигнал клиенту показать предупреждение:
 /// движок ничего не удаляет сам.
+/// Кто поставил реакцию на моё сообщение, какую, и чем было это сообщение — строка
+/// уведомления «<имя>: 👍 к «<начало>»» без запроса истории.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReactNews {
+    /// hex ключа поставившего.
+    pub by: String,
+    pub emoji: String,
+    /// Текст сообщения (у вложения без подписи — пусто, тогда клиенту хватит `kind`).
+    pub quote: String,
+    pub kind: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct OutboxStats {
     pub pending: usize,
@@ -210,6 +222,10 @@ pub enum UiEvent {
         id: u64,
         sender: String,
         reactions: Vec<peerage_core::store::Reaction>,
+        /// Чужая реакция на моё сообщение — повод для уведомления (beta.md 7f); у своего
+        /// эха, реакции на чужое и снятия его нет.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        news: Option<ReactNews>,
     },
     /// Сообщение исправлено автором: текст в ленте надо заменить на месте (вместе с
     /// упоминаниями — их участки привязаны к тексту).
