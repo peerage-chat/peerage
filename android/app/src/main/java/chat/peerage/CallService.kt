@@ -177,13 +177,14 @@ class CallService : Service() {
         if (room) {
             // Комната: шаблон звонка подписал бы кнопку «Завершить», а из комнаты выходят.
             val inside = model.roomMembers.map { model.peerName(it.peer) }
-            b.setContentTitle(peerName.ifEmpty { getString(R.string.notif_voice_chat) })
-                .setContentText(if (inside.isEmpty()) getString(R.string.notif_room_alone) else inside.joinToString(", "))
+            b.setContentTitle(peerName)
+                .setContentText(getString(R.string.notif_voice_room, (listOf(getString(R.string.notif_room_you)) + inside).joinToString(", ")))
                 .addAction(0, mic, broadcast(ACTION_MUTE, 1))
                 .addAction(0, getString(R.string.notif_leave), endPi)
         } else {
             val peer = Person.Builder().setName(peerName.ifEmpty { getString(R.string.common_contact) }).setImportant(true).build()
             b.setStyle(NotificationCompat.CallStyle.forOngoingCall(peer, endPi))
+                .setContentText(getString(R.string.notif_ongoing))
                 .addAction(0, mic, broadcast(ACTION_MUTE, 1))
         }
         return b.build()

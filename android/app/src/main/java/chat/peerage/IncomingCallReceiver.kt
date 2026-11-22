@@ -105,6 +105,7 @@ class IncomingCallReceiver : BroadcastReceiver() {
             val b = NotificationCompat.Builder(ctx, CHANNEL)
                 .setSmallIcon(R.drawable.ic_glyph)
                 .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, declinePi, accept(11, video)).setIsVideo(video))
+                .setContentText(ctx.getString(if (video) R.string.notif_incoming_video else R.string.notif_incoming_audio))
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setOngoing(true)

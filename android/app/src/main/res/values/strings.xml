@@ -386,6 +386,13 @@
     <string name="notif_no_video">Without video</string>
     <string name="notif_call_back">Call back</string>
     <string name="notif_join_room">Join</string>
+    <string name="notif_incoming_audio">Incoming voice call</string>
+    <string name="notif_incoming_video">Incoming video call</string>
+    <string name="notif_ongoing">Ongoing call</string>
+    <string name="notif_missed_audio">Missed voice call</string>
+    <string name="notif_voice_room">Voice room · %1$s</string>
+    <string name="notif_room_you">you</string>
+    <string name="notif_room_line">In the voice room</string>
     <string name="notif_incoming_channel">Incoming calls</string>
     <string name="notif_incoming_channel_desc">Incoming call notification</string>
     <string name="notif_conn_channel">Connection</string>
@@ -396,12 +403,10 @@
     <string name="notif_call_channel">Calls</string>
     <string name="notif_call_channel_desc">Active call or voice room</string>
     <string name="notif_call_with">Call with %1$s</string>
-    <string name="notif_voice_chat">In voice chat</string>
     <string name="notif_end">End</string>
     <string name="notif_mic_off">Mute</string>
     <string name="notif_mic_on">Unmute</string>
     <string name="notif_leave">Leave</string>
-    <string name="notif_room_alone">Nobody else yet</string>
 
     <!-- Onboarding (M4) -->
     <string name="onb_welcome_sub">Messaging and calls without servers. The identity is a key on this device.</string>

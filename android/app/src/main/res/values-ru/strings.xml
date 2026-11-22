@@ -396,6 +396,13 @@
     <string name="notif_no_video">Без видео</string>
     <string name="notif_call_back">Перезвонить</string>
     <string name="notif_join_room">Присоединиться</string>
+    <string name="notif_incoming_audio">Входящий аудиозвонок</string>
+    <string name="notif_incoming_video">Входящий видеозвонок</string>
+    <string name="notif_ongoing">Идёт звонок</string>
+    <string name="notif_missed_audio">Пропущенный аудиозвонок</string>
+    <string name="notif_voice_room">Голосовая комната · %1$s</string>
+    <string name="notif_room_you">вы</string>
+    <string name="notif_room_line">В голосовой комнате</string>
     <string name="notif_incoming_channel">Входящие звонки</string>
     <string name="notif_incoming_channel_desc">Уведомление о входящем звонке</string>
     <string name="notif_conn_channel">Соединение</string>
@@ -406,12 +413,10 @@
     <string name="notif_call_channel">Звонки</string>
     <string name="notif_call_channel_desc">Активный звонок или голосовая комната</string>
     <string name="notif_call_with">Звонок с %1$s</string>
-    <string name="notif_voice_chat">В голосовом чате</string>
     <string name="notif_end">Завершить</string>
     <string name="notif_mic_off">Выкл. микрофон</string>
     <string name="notif_mic_on">Вкл. микрофон</string>
     <string name="notif_leave">Выйти</string>
-    <string name="notif_room_alone">Больше никого</string>
 
     <!-- Онбординг (M4) -->
     <string name="onb_welcome_sub">Переписка и звонки без серверов. Личность — ключ на этом устройстве.</string>
