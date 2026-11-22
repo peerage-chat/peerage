@@ -116,6 +116,8 @@ pub enum Event {
         fwd_from: String,
         /// «Переслано, автора не называем».
         fwd_anon: bool,
+        /// Время отправки по часам отправителя, мс (0 — неизвестно, старый клиент).
+        sent: i64,
     },
     /// Запрос в контакты (7i): приветствие (обрезано до `MAX_GREETING` байт) и
     /// самоназвание отправителя — как есть, чистит движок.
@@ -160,6 +162,8 @@ pub enum Event {
         reply_to: u64,
         /// Чьё сообщение цитируется — уже с НАШЕЙ точки зрения (флаг перевёрнут).
         reply_mine: bool,
+        /// Время отправки, мс (см. `Event::Text::sent`).
+        sent: i64,
     },
     /// Пир подтвердил доставку нашего сообщения с данным id (✓✓).
     Ack { peer: PeerKey, id: u64 },
@@ -516,6 +520,14 @@ impl Shared {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Время отправки сообщения чата (`Payload::Text::sent`), мс.
+    fn now_ms() -> i64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
             .unwrap_or(0)
     }
 
@@ -1185,6 +1197,7 @@ impl Messenger {
         let text = text.to_string();
         let fwd_from = fwd_from.to_string();
         // DM: notify=true → UI получает Ack/Undelivered (✓✓ / ошибка).
+        let sent = Shared::now_ms();
         self.shared.send_durable(peer, true, move |id| Payload::Text {
             id,
             text,
@@ -1192,6 +1205,7 @@ impl Messenger {
             reply_mine,
             fwd_from,
             fwd_anon,
+            sent,
         })
     }
 
@@ -1308,6 +1322,7 @@ impl Messenger {
         // Режем подпись здесь, а не в UI: за размер пакета отвечает отправляющий
         // слой, и обойти его через другой клиент не должно получаться.
         let caption = truncate_caption(&meta.caption);
+        let sent = Shared::now_ms();
         self.shared.send_durable(peer, true, move |id| Payload::Media {
             id, hash, mime, name,
             size: meta.size,
@@ -1320,6 +1335,7 @@ impl Messenger {
             fwd_anon: meta.fwd_anon,
             reply_to: meta.reply_to,
             reply_mine: meta.reply_mine,
+            sent,
         })
     }
 
@@ -1783,7 +1799,7 @@ fn receive_loop(shared: Arc<Shared>) {
 
         match payload {
             Payload::Hello => {}
-            Payload::Text { id, text, reply_to, reply_mine, fwd_from, fwd_anon } => {
+            Payload::Text { id, text, reply_to, reply_mine, fwd_from, fwd_anon, sent } => {
                 // Флаг «чьё сообщение» приходит с точки зрения ОТПРАВИТЕЛЯ — здесь он
                 // переворачивается: его «моё» для нас «его», и наоборот.
                 shared.emit(Event::Text {
@@ -1794,6 +1810,7 @@ fn receive_loop(shared: Arc<Shared>) {
                     reply_mine: reply_to != 0 && !reply_mine,
                     fwd_from,
                     fwd_anon,
+                    sent,
                 });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }
@@ -1834,7 +1851,7 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::Typing => shared.emit(Event::Typing { peer: peer_id }),
             Payload::Media {
                 id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
-                fwd_anon, reply_to, reply_mine,
+                fwd_anon, reply_to, reply_mine, sent,
             } => {
                 shared.emit(Event::Media {
                     peer: peer_id, id, hash, mime, name, size, duration_ms, width, height,
@@ -1845,6 +1862,7 @@ fn receive_loop(shared: Arc<Shared>) {
                     reply_to,
                     // Как у текста: «моё» отправителя — это «его» для нас.
                     reply_mine: !reply_mine,
+                    sent,
                 });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }

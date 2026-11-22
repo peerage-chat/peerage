@@ -149,10 +149,16 @@ pub enum UiEvent {
     /// ровно та строка, что легла в историю (подпись, «переслано», ответ, номер
     /// строки): одна форма для ленты и для истории, и открытый чат не расходится с
     /// тем, что покажет перезаход.
+    ///
+    /// `sent` — время отправки по часам автора, мс (0 — своё, служебное или старый клиент;
+    /// тогда поле не пишется). Не хранится: нужно клиенту лишь в момент прихода, чтобы
+    /// досланное после офлайна не звенело и не поднимало шторку (notifications.md, п. 3).
     Message {
         chat: String,
         group: bool,
         msg: peerage_core::store::StoredMessage,
+        #[serde(skip_serializing_if = "is_zero")]
+        sent: i64,
     },
     Ack {
         peer: String,
@@ -268,6 +274,10 @@ pub enum UiEvent {
     },
 }
 
+fn is_zero(v: &i64) -> bool {
+    *v == 0
+}
+
 impl UiEvent {
     /// Сериализовать в строку для очереди событий. Пустой JSON-объект вместо паники:
     /// потеря одного события лучше, чем падение потока-актора.
@@ -331,10 +341,12 @@ mod tests {
             chat: "ff".into(),
             group: true,
             msg,
+            sent: 1_790_000_000_000,
         }
         .to_json();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["type"], "message");
+        assert_eq!(v["sent"], 1_790_000_000_000i64);
         assert_eq!(v["chat"], "ff");
         assert_eq!(v["group"], true);
         assert_eq!(v["msg"]["text"], "подпись");

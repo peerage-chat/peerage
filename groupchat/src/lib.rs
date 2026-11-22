@@ -51,6 +51,10 @@ enum AppMsg {
         /// Пустой список не сериализуется — тело обычного сообщения не меняется.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         mentions: Vec<Mention>,
+        /// Время отправки по часам отправителя, мс (0 — старый клиент): досланное после
+        /// офлайна получатель не озвучивает (notifications.md, п. 3). Как `Payload::Text::sent`.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        sent: i64,
     },
     #[serde(rename = "media")]
     Media(MediaBody),
@@ -136,6 +140,21 @@ pub struct MediaBody {
     /// hex блоба-миниатюры (пусто — нет). Едет отдельным мелким блобом: вшить её
     /// сюда нельзя — тело раздулось бы и вышло из бакета паддинга (M5).
     pub thumb: String,
+    /// Время отправки, мс (см. `AppMsg::Text::sent`); ставит [`GroupChat::send_media`].
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub sent: i64,
+}
+
+fn is_zero(v: &i64) -> bool {
+    *v == 0
+}
+
+/// Время отправки сообщения группы, мс.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Результат обработки входящего группового сообщения — для показа в UI.
@@ -153,6 +172,8 @@ pub enum Inbound {
         fwd_anon: bool,
         /// Упоминания (уже проверенные [`mention::clean`]).
         mentions: Vec<Mention>,
+        /// Время отправки по часам отправителя, мс (0 — неизвестно).
+        sent: i64,
     },
     /// Отправитель просит удалить СВОЁ сообщение `target` у всех.
     Retract { sender: PeerKey, target: u64 },
@@ -335,6 +356,7 @@ impl GroupChat {
             fwd_from: fwd_from.to_string(),
             fwd_anon,
             mentions: mention::clean(text, mentions.to_vec()),
+            sent: now_ms(),
         })
     }
 
@@ -347,7 +369,11 @@ impl GroupChat {
     /// отдельно (движок решает, пушить их или ждать запроса получателя).
     pub fn send_media(&mut self, media: &MediaBody) -> Result<(), GroupChatError> {
         // Подпись режем здесь, а не в UI: за размер шифруемого тела отвечает этот слой.
-        let body = MediaBody { caption: truncate_caption(&media.caption), ..media.clone() };
+        let body = MediaBody {
+            caption: truncate_caption(&media.caption),
+            sent: now_ms(),
+            ..media.clone()
+        };
         self.send_app(&AppMsg::Media(body))
     }
 
@@ -412,13 +438,13 @@ impl GroupChat {
                 // M2: тело — JSON-envelope (текст/медиа); старое сырое-UTF-8 → текст.
                 Ok(match serde_json::from_slice::<AppMsg>(&body) {
                     Ok(AppMsg::Text {
-                        text, id, reply_to, reply_sender, fwd_from, fwd_anon, mentions,
+                        text, id, reply_to, reply_sender, fwd_from, fwd_anon, mentions, sent,
                     }) => {
                         // Чистим и на приёме: отправитель мог быть пропатчен.
                         let mentions = mention::clean(&text, mentions);
                         Inbound::Message {
                             sender, text, id, reply_to, reply_sender, fwd_from, fwd_anon,
-                            mentions,
+                            mentions, sent,
                         }
                     }
                     Ok(AppMsg::Retract { target }) => Inbound::Retract { sender, target },
@@ -469,6 +495,7 @@ impl GroupChat {
                         fwd_from: String::new(),
                         fwd_anon: false,
                         mentions: Vec::new(),
+                        sent: 0,
                     },
                 })
             }

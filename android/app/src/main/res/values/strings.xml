@@ -146,6 +146,9 @@
     <!-- Offline queue growth warning (nothing is ever deleted, this is just a notice) -->
     <string name="settings_outbox_warn">Send queue growth</string>
     <string name="notif_set_flood">Flood on the address</string>
+    <string name="notif_sec_messages">Messages</string>
+    <string name="notif_set_chat_sounds">In-chat sounds</string>
+    <string name="notif_sec_other">Other</string>
     <string name="notif_set_conn">Persistent notification</string>
     <string name="notif_set_conn_sub">Keeps the connection in the background. Hiding it in Android settings does not stop the app.</string>
     <!-- Contact requests (gate instead of TOFU auto-add) -->

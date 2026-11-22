@@ -70,6 +70,29 @@ fn find(e: &Engine, peer: &[u8; 32], text: &str) -> Option<serde_json::Value> {
         .cloned()
 }
 
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+}
+
+/// Ждать событие `message` с текстом `text`; остальные события пропускаются.
+fn wait_message(e: &Engine, secs: u64, text: &str) -> Option<serde_json::Value> {
+    let mut found = None;
+    wait(secs, || {
+        while let Some(js) = e.poll_event() {
+            let v = json(&js);
+            if v["type"] == "message" && v["msg"]["text"] == text {
+                found = Some(v);
+                return true;
+            }
+        }
+        false
+    });
+    found
+}
+
 /// Поднять пару контактов и прогреть связь первым сообщением.
 fn pair(
     net: &LoopbackNet,
@@ -214,14 +237,20 @@ fn group_message_survives_member_offline() {
 
     b1.shutdown();
     drop(b1);
+    let before = now_ms();
     a.group_send_text(gid.clone(), "пока тебя не было".into());
     std::thread::sleep(Duration::from_secs(3));
 
     let b2 = start(&net, b_id, b_dir);
-    let got = wait(20, || {
-        b2.group_history_json(&gid).contains("пока тебя не было")
-    });
-    assert!(got, "групповое сообщение догнало вернувшегося участника");
+    let ev = wait_message(&b2, 20, "пока тебя не было")
+        .expect("групповое сообщение догнало вернувшегося участника");
+    // 7b: досланное несёт время отправки — по нему клиент не звенит на старое.
+    let sent = ev["sent"].as_i64().unwrap_or(0);
+    assert!(
+        sent >= before && sent < before + 2000,
+        "время отправки, а не доставки: {sent} против {before}"
+    );
+    assert!(b2.group_history_json(&gid).contains("пока тебя не было"));
     a.shutdown();
     b2.shutdown();
 }
@@ -265,6 +294,33 @@ fn cleared_message_fails_then_retry_delivers() {
         "и подтверждено"
     );
     assert!(!a.retry_message(&b_key, late), "повторять уже нечего");
+    a.shutdown();
+    b2.shutdown();
+}
+
+/// 7b: досланное после офлайна несёт время ОТПРАВКИ (часы отправителя), а не доставки —
+/// по нему клиент не поднимает шторку и не звенит на старое (notifications.md, п. 3).
+#[test]
+fn late_dm_carries_send_time() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(95), id(96));
+    let b_key = b_id.public_key_bytes();
+    let b_dir = tmpdir("b");
+    let (a, b1, _) = pair(&net, (a_id, tmpdir("a")), (b_id.clone(), b_dir.clone()));
+
+    b1.shutdown();
+    drop(b1);
+    let before = now_ms();
+    a.send_text(&b_key, "из очереди").unwrap();
+    std::thread::sleep(Duration::from_secs(3));
+
+    let b2 = start(&net, b_id, b_dir);
+    let ev = wait_message(&b2, 20, "из очереди").expect("досланное пришло событием");
+    let sent = ev["sent"].as_i64().unwrap_or(0);
+    assert!(
+        sent >= before && sent < before + 2000,
+        "время отправки, а не доставки: {sent} против {before}"
+    );
     a.shutdown();
     b2.shutdown();
 }

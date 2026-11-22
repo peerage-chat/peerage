@@ -518,6 +518,21 @@ class AppModel private constructor() {
     var notifyFlood by mutableStateOf(true)
         private set
 
+    /** «Звуки в чате»: капля на приход в открытый чат и на отправку ([ChatSounds]). */
+    var chatSounds by mutableStateOf(true)
+        private set
+
+    fun setChatSoundsOn(on: Boolean) {
+        chatSounds = on
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("chat_sounds", on)?.apply()
+    }
+
+    /** Капля отправки — на нажатие «отправить», а не на эхо из движка. */
+    private fun chimeSent() {
+        appContext?.let { ChatSounds.play(it, ChatSounds.Kind.Out, chatSounds) }
+    }
+
     fun setFloodNotify(on: Boolean) {
         notifyFlood = on
         appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
@@ -788,6 +803,7 @@ class AppModel private constructor() {
         warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
         shareChatsInMenu = prefs.getBoolean("share_chats", false)
         notifyFlood = prefs.getBoolean("notif_flood", true)
+        chatSounds = prefs.getBoolean("chat_sounds", true)
         mediaColumns = prefs.getInt("media_columns", 3).takeIf { it in MEDIA_COLUMNS } ?: 3
         val w = prefs.getInt("video_w", VideoQuality.default.width)
         val h = prefs.getInt("video_h", VideoQuality.default.height)
@@ -1201,7 +1217,10 @@ class AppModel private constructor() {
         me = Me(started.pubkey, started.address, started.fingerprint)
         startLoops()
         registerNetworkCallback()
-        appContext?.let { BootReceiver.dismissLocked(it) }
+        appContext?.let {
+            BootReceiver.dismissLocked(it)
+            ChatSounds.init(it)
+        }
         return true
     }
 
@@ -1659,6 +1678,7 @@ class AppModel private constructor() {
         // Хвостовые пробелы и переводы строк — случайность (лишний Enter): с ними время в
         // пузыре уезжает на пустую строку. Начало не трогаем — от него считаются упоминания.
         val text = raw.trimEnd()
+        if (text.isNotBlank()) chimeSent()
         if (group) {
             sendGroup(key, text, mentions)
             return
@@ -1844,6 +1864,7 @@ class AppModel private constructor() {
         caption: String = "",
         group: Boolean = false,
     ) = ops.execute {
+        chimeSent()
         // Цель ответа снимаем в тот же момент, что и у текста: иначе полоска
         // «отвечаем на …» висела бы после отправки вложения, а ссылка терялась.
         val reply = replyTarget
@@ -1878,6 +1899,7 @@ class AppModel private constructor() {
         caption: String = "",
         group: Boolean = false,
     ) {
+        chimeSent()
         // Цель ответа снимаем сразу, в момент нажатия — как у текста.
         val reply = replyTarget
         replyTarget = null
@@ -2167,6 +2189,10 @@ class AppModel private constructor() {
                 // профиль или на главную) — пришедшее непрочитанное.
                 val onScreen = viewing == ChatTarget(ev.chat, ev.group)
                 if (onScreen && !m.mine && counts) noteIncoming(m, ev.group)
+                if (onScreen && foreground && !m.mine && !m.system && !m.isCall) {
+                    val muted = chatSummaries[chatKey(ev.chat, ev.group)]?.muted == true
+                    appContext?.let { ChatSounds.play(it, ChatSounds.Kind.In, chatSounds, muted, ev.sent) }
+                }
                 if (!m.mine && counts && !onScreen) {
                     if (ev.group) {
                         groupUnread[ev.chat] = (groupUnread[ev.chat] ?: 0) + 1

@@ -1151,6 +1151,7 @@ impl Engine {
                     width: m.width,
                     height: m.height,
                     thumb: thumb.map(hex::encode).unwrap_or_default(),
+                    sent: 0, // ставит слой групп при отправке
                 };
                 self.jobs
                     .send(Job::GroupMediaRef {
@@ -3095,6 +3096,7 @@ impl Engine {
                     chat: hex::encode(c.peer),
                     group: false,
                     msg: StoredMessage { row, ..msg },
+                    sent: 0,
                 },
             );
         }
@@ -3622,6 +3624,7 @@ fn put_greeting(engine: &Engine, peer: &[u8; 32], id: u64, greeting: &str, time:
             kind: "text".into(),
             ..Default::default()
         },
+        0,
     );
 }
 
@@ -3647,7 +3650,8 @@ fn push_event(engine: &Engine, ev: dto::UiEvent) {
 }
 
 /// Записать входящее личное сообщение и отдать его клиенту той же строкой.
-fn push_dm_message(engine: &Engine, peer: &[u8; 32], mut msg: StoredMessage) {
+/// `sent` — время отправки по часам собеседника (мс, 0 — неизвестно), см. `UiEvent::Message`.
+fn push_dm_message(engine: &Engine, peer: &[u8; 32], mut msg: StoredMessage, sent: i64) {
     if let Ok(row) = engine.messages.lock_safe().append(Chat::Dm(peer), &msg) {
         msg.row = row;
         push_event(
@@ -3656,6 +3660,7 @@ fn push_dm_message(engine: &Engine, peer: &[u8; 32], mut msg: StoredMessage) {
                 chat: hex::encode(peer),
                 group: false,
                 msg,
+                sent,
             },
         );
     }
@@ -3664,7 +3669,7 @@ fn push_dm_message(engine: &Engine, peer: &[u8; 32], mut msg: StoredMessage) {
 /// Отдать клиенту строки групп, записанные за этот виток. Флаг «скачано» уточняем
 /// по факту: у входящего вложения слой групп его не знает.
 fn push_group_messages(engine: &Engine, groups: &mut GroupManager) {
-    for (gid, mut msg) in groups.take_fresh() {
+    for (gid, mut msg, sent) in groups.take_fresh() {
         if !msg.downloaded && !msg.blob_id.is_empty() && engine.blob_exists(&msg.blob_id) {
             msg.downloaded = true;
         }
@@ -3674,6 +3679,7 @@ fn push_group_messages(engine: &Engine, groups: &mut GroupManager) {
                 chat: hex::encode(&gid),
                 group: true,
                 msg,
+                sent,
             },
         );
     }
@@ -3879,6 +3885,7 @@ fn prepare_group_media(engine: &Arc<Engine>, job: Job) -> Option<(Vec<u8>, Media
         width: info.width,
         height: info.height,
         thumb,
+        sent: 0, // ставит слой групп при отправке
     };
     Some((gid, media))
 }
@@ -3997,6 +4004,7 @@ fn handle_event(
             reply_mine,
             fwd_from,
             fwd_anon,
+            sent,
         } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
@@ -4028,7 +4036,7 @@ fn handle_event(
                     kind: "text".into(),
                     ..Default::default()
                 };
-                push_dm_message(engine, &peer, msg);
+                push_dm_message(engine, &peer, msg, sent);
             }
         }
         Event::Edit { peer, target, text } => {
@@ -4129,6 +4137,7 @@ fn handle_event(
             fwd_anon,
             reply_to,
             reply_mine,
+            sent,
         } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
@@ -4186,7 +4195,7 @@ fn handle_event(
                 if auto && !have {
                     engine.request_blob(&peer, &hash);
                 }
-                push_dm_message(engine, &peer, msg);
+                push_dm_message(engine, &peer, msg, sent);
             }
         }
         Event::ContactRequest {

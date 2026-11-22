@@ -6,8 +6,8 @@
 //! отправитель снаружи не видны: на проводе только индекс сессии и счётчик.
 //!
 //! Отклонение от ТЗ: `type` сообщения убран в зашифрованную часть (приватность
-//! метаданных), времени отправки нет (его некому читать, а открытым текстом оно
-//! лишь метаданные). Формат самоописывающий (MessagePack с именами полей):
+//! метаданных); время отправки — только внутри шифра, у сообщений чата (`sent`): по нему
+//! получатель отличает досланное после офлайна. Формат самоописывающий (MessagePack с именами полей):
 //! неизвестный тип и новые поля читаются старым клиентом без ошибки, а байты едут
 //! байтами — без hex и без JSON-массивов чисел.
 
@@ -70,6 +70,11 @@ pub enum Payload {
         /// «спрятал в интерфейсе, но отдал по проводу».
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         fwd_anon: bool,
+        /// Время отправки по часам отправителя, мс (0 — старый клиент). Задаётся раз, при
+        /// постановке в очередь: досланное после офлайна несёт свой возраст, и получатель
+        /// не звенит и не поднимает шторку на старое (notifications.md, п. 3).
+        #[serde(default, skip_serializing_if = "is_zero")]
+        sent: i64,
     },
     /// Отзыв СВОЕГО ранее отправленного сообщения («удалить у всех»).
     ///
@@ -153,6 +158,9 @@ pub enum Payload {
         /// Чьё сообщение цитируется — с точки зрения ОТПРАВИТЕЛЯ (как у `Text`).
         #[serde(default)]
         reply_mine: bool,
+        /// Время отправки, мс (см. `Text::sent`).
+        #[serde(default, skip_serializing_if = "is_zero")]
+        sent: i64,
     },
     /// Подтверждение доставки сообщения с данным id (✓✓ в ТЗ).
     Ack { id: u64 },
@@ -411,6 +419,10 @@ pub const APP_BUCKET: usize = 4096;
 /// `padded_blob_chunk_fits_datagram`.
 const CHUNK_BUCKET: usize = 12 * 1024 + 256;
 
+fn is_zero(v: &i64) -> bool {
+    *v == 0
+}
+
 fn bucket_for(payload: &Payload) -> usize {
     match payload {
         // Прикладные: текст и медиа обязаны быть в ОДНОМ бакете (DoD M5).
@@ -466,6 +478,7 @@ mod tests {
             reply_mine: false,
             fwd_from: String::new(),
             fwd_anon: false,
+            sent: 1_790_000_000_123,
         };
         assert_eq!(roundtrip(&payload), payload);
         assert!(matches!(Payload::from_padded(&[0, 0, 0, 9, 1]), Err(ProtocolError::BadPadding)));
@@ -526,15 +539,15 @@ mod tests {
             Payload::Ping { transit: None },
             Payload::Pong { transit: None },
             Payload::Ack { id: 7 },
-            Payload::Text { id: 1, text: "hi".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false },
+            Payload::Text { id: 1, text: "hi".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false, sent: 1_790_000_000_000 },
             Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "p.jpg".into(),
-                size: 1234, duration_ms: 0, width: 800, height: 600, caption: String::new(), thumb: vec![9u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
+                size: 1234, duration_ms: 0, width: 800, height: 600, caption: String::new(), thumb: vec![9u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
             },
             // Видео с длительностью и без превью — поля опциональны.
             Payload::Media {
                 id: 3, hash: vec![6u8; 32], mime: "video/mp4".into(), name: "v.mp4".into(),
-                size: 900_000_000, duration_ms: 125_000, width: 1920, height: 1080, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
+                size: 900_000_000, duration_ms: 125_000, width: 1920, height: 1080, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
             },
             Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: false },
             Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] },
@@ -571,8 +584,8 @@ mod tests {
 
     #[test]
     fn padding_hides_text_length() {
-        let short = Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false };
-        let long = Payload::Text { id: 1, text: "a".repeat(500), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false };
+        let short = Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false, sent: 0 };
+        let long = Payload::Text { id: 1, text: "a".repeat(500), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false, sent: 0 };
         // M5: разные по длине тексты → одинаковый размер датаграммы (бакет скрыл длину).
         assert_eq!(wire(&short), wire(&long), "паддинг должен скрыть длину текста");
         assert!(matches!(roundtrip(&short), Payload::Text { text, .. } if text == "да"));
@@ -586,22 +599,22 @@ mod tests {
 
         // Прикладной класс: текст (короткий/длинный), картинка, голосовое, файл, группа.
         let sizes = [
-            enc(&Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false }),
-            enc(&Payload::Text { id: 1, text: "a".repeat(900), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false }),
+            enc(&Payload::Text { id: 1, text: "да".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false, sent: 0 }),
+            enc(&Payload::Text { id: 1, text: "a".repeat(900), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false, sent: 0 }),
             enc(&Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(),
                 name: "secret-photo.jpg".into(), size: 2_400_000,
-                duration_ms: 0, width: 4000, height: 3000, caption: String::new(), thumb: vec![1u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
+                duration_ms: 0, width: 4000, height: 3000, caption: String::new(), thumb: vec![1u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
             }),
             enc(&Payload::Media {
                 id: 3, hash: vec![6u8; 32], mime: "audio/mp4".into(),
                 name: "voice.m4a".into(), size: 48_000,
-                duration_ms: 7_400, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
+                duration_ms: 7_400, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
             }),
             enc(&Payload::Media {
                 id: 4, hash: vec![7u8; 32], mime: "application/pdf".into(),
                 name: "договор-2026.pdf".into(), size: 900_000_000,
-                duration_ms: 0, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false,
+                duration_ms: 0, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
             }),
             enc(&Payload::Group { id: 5, data: vec![1u8; 200] }),
             // Правка своего сообщения: короткая и длинная неотличимы от текста.
@@ -657,7 +670,7 @@ mod tests {
         let req = Payload::ContactRequest { id: 5, greeting: "я".repeat(MAX_GREETING / 2), name: "Ж".repeat(64) };
         let acc = Payload::ContactAccept { id: 6, request: u64::MAX };
         let text = Payload::Text {
-            id: 1, text: "привет".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false,
+            id: 1, text: "привет".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false, sent: 0,
         };
         for p in [&req, &acc] {
             assert_eq!(&roundtrip(p), p);

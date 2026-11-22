@@ -428,7 +428,8 @@ internal sealed interface EngineEvent {
      */
     @Serializable
     @SerialName("message")
-    data class MessageEv(val chat: String, val group: Boolean = false, val msg: MessageDto) : EngineEvent
+    /** `sent` — время отправки по часам автора, мс (0 — своё, служебное или старый клиент). */
+    data class MessageEv(val chat: String, val group: Boolean = false, val msg: MessageDto, val sent: Long = 0) : EngineEvent
 
     /** Собеседник отозвал своё сообщение — строку надо убрать из ленты. */
     @Serializable

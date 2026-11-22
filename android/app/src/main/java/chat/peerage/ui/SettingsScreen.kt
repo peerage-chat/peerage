@@ -507,21 +507,27 @@ private fun OptionBlock(
 }
 
 /**
- * Уведомления (макет `settings/Notifications`). Здесь только то, что уже уведомляет:
- * флуд, рост очереди, постоянное «связи». «Сообщения», «Звонки», «Запросы и приглашения»,
- * «Передача файлов» встанут вместе с самими уведомлениями (шаг 7b) — пустых тумблеров нет.
+ * Уведомления (макет `settings/Notifications`). Здесь только то, что уже уведомляет: звуки в
+ * чате, флуд, рост очереди, постоянное «связи». Строки каналов сообщений и звонков встанут вместе
+ * с самими уведомлениями (шаг 7b) — пустых тумблеров нет. «Звуки в чате» — решение 2026-11-22,
+ * после макета (notifications.md → «Звуки в приложении»).
  */
 @Composable
 internal fun SettingsNotificationsScreen(model: AppModel) {
     val ctx = LocalContext.current
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = Tokens.Space.m, bottom = Tokens.Space.xxl),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
     ) {
+        SectionTitle(stringResource(R.string.notif_sec_messages))
+        CardSection {
+            PlainSwitchRow(stringResource(R.string.notif_set_chat_sounds), model.chatSounds, divider = false) { model.setChatSoundsOn(it) }
+        }
+        SectionTitle(stringResource(R.string.notif_sec_other))
         CardSection {
             PlainSwitchRow(stringResource(R.string.notif_set_flood), model.notifyFlood, divider = false) { model.setFloodNotify(it) }
             PlainSwitchRow(stringResource(R.string.settings_outbox_warn), model.warnOutboxGrowth) { model.toggleOutboxWarning() }
         }
+        Spacer(Modifier.height(Tokens.Space.l))
         CardSection {
             CardRow(onClick = { ctx.startActivity(ConnService.channelSettings(ctx)) }, divider = false, inset = Tokens.Space.l) {
                 Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {

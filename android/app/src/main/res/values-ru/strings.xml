@@ -144,6 +144,9 @@
     <!-- Предупреждение о разросшейся очереди (ничего не удаляется, это только уведомление) -->
     <string name="settings_outbox_warn">Рост очереди отправки</string>
     <string name="notif_set_flood">Флуд на адрес</string>
+    <string name="notif_sec_messages">Сообщения</string>
+    <string name="notif_set_chat_sounds">Звуки в чате</string>
+    <string name="notif_sec_other">Прочее</string>
     <string name="notif_set_conn">Постоянное уведомление</string>
     <string name="notif_set_conn_sub">Держит соединение в фоне. Скрытие в настройках Android работу не прерывает.</string>
     <!-- Запросы в контакты (гейт вместо TOFU-автодобавления) -->

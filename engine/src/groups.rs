@@ -125,7 +125,8 @@ pub struct GroupManager {
     /// Записанные, но ещё не отданные клиенту строки `(gid, сообщение)`. Каждая
     /// строка, которую этот слой кладёт в историю, уходит в UI событием целиком —
     /// своё, входящее и системное одной формой, без перечитывания ленты.
-    fresh: Vec<(Vec<u8>, StoredMessage)>,
+    /// Строки для событий `message`: группа, строка, время отправки (мс, 0 — своё/служебное).
+    fresh: Vec<(Vec<u8>, StoredMessage, i64)>,
 }
 
 /// Как часто повторять принятое, но не завершённое вступление в группу.
@@ -215,9 +216,14 @@ impl GroupManager {
     /// Записать своё/входящее сообщение группы в общее хранилище и отложить его
     /// для UI (см. [`Self::take_fresh`]).
     fn put(&mut self, gid: &[u8], msg: &StoredMessage) {
+        self.put_sent(gid, msg, 0);
+    }
+
+    /// То же для входящего: `sent` — время отправки по часам автора (7b).
+    fn put_sent(&mut self, gid: &[u8], msg: &StoredMessage, sent: i64) {
         if let Ok(row) = self.messages.lock_safe().append(Chat::Group(gid), msg) {
             self.fresh
-                .push((gid.to_vec(), StoredMessage { row, ..msg.clone() }));
+                .push((gid.to_vec(), StoredMessage { row, ..msg.clone() }, sent));
         }
     }
 
@@ -242,7 +248,7 @@ impl GroupManager {
     }
 
     /// Строки, записанные с прошлого вызова, — для событий `message`.
-    pub fn take_fresh(&mut self) -> Vec<(Vec<u8>, StoredMessage)> {
+    pub fn take_fresh(&mut self) -> Vec<(Vec<u8>, StoredMessage, i64)> {
         std::mem::take(&mut self.fresh)
     }
 
@@ -930,9 +936,10 @@ impl GroupManager {
                     fwd_from,
                     fwd_anon,
                     mentions,
+                    sent,
                 })) => {
                     let sender_hex = hex::encode(sender);
-                    self.put(
+                    self.put_sent(
                         &gid,
                         &StoredMessage {
                             id,
@@ -948,6 +955,7 @@ impl GroupManager {
                             sender: sender_hex.clone(),
                             ..Default::default()
                         },
+                        sent,
                     );
                     GroupOutcome {
                         gid: Some(gid.clone()),
@@ -1038,7 +1046,7 @@ impl GroupManager {
                 }
                 Some(Ok(Inbound::Media { sender, media })) => {
                     let sender_hex = hex::encode(sender);
-                    self.put(
+                    self.put_sent(
                         &gid,
                         &StoredMessage {
                             id: media.id,
@@ -1063,6 +1071,7 @@ impl GroupManager {
                             downloaded: false,
                             ..Default::default()
                         },
+                        media.sent,
                     );
                     GroupOutcome {
                         gid: Some(gid.clone()),
