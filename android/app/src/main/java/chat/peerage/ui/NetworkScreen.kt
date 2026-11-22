@@ -73,6 +73,8 @@ internal fun NetworkScreen(
     onFlood: () -> Unit,
     onRotate: () -> Unit,
 ) {
+    // Счётчик «Офлайн-очередь» — свежий на входе: событий о каждой постановке в очередь нет.
+    LaunchedEffect(Unit) { model.refreshOutbox() }
     val me = model.me ?: return
     val ctx = LocalContext.current
     var benchPick by remember { mutableStateOf(false) }

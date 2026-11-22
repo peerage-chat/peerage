@@ -407,44 +407,32 @@
     <string name="attach_need_gallery">To show your recent photos here, the app needs access to the gallery. Files can still be sent through the picker above.</string>
     <string name="attach_allow">Allow</string>
     <string name="attach_gallery_denied">Gallery access denied</string>
-    <string name="outbox_empty_title">Everything delivered</string>
-    <string name="outbox_empty_hint">Messages sent while a contact was offline wait here and go out on their own.</string>
-    <plurals name="outbox_total">
-        <item quantity="one">%d message waiting</item>
-        <item quantity="other">%d messages waiting</item>
+    <string name="outbox_empty_title">Queue is empty</string>
+    <string name="outbox_empty_hint">Messages wait here while the recipient is offline.</string>
+    <plurals name="outbox_tile_msgs">
+        <item quantity="one">message</item>
+        <item quantity="other">messages</item>
     </plurals>
-    <string name="outbox_lead_hint">They go out as soon as the recipient comes online. There is no server to hold them, so the queue to contacts is never trimmed by age or size.</string>
+    <string name="outbox_tile_bytes">size</string>
+    <string name="outbox_tile_oldest">oldest</string>
+    <string name="outbox_lead">Sent as soon as the recipient comes online. The queue is never cleared automatically.</string>
+    <string name="outbox_warn_hint">Over a thousand unsent.</string>
+    <string name="outbox_row_sub">%1$s · %2$s · %3$s</string>
+    <string name="outbox_clear_peer">Clear queue</string>
+    <string name="outbox_clear_peer_body">The messages stop being sent and stay in the chat marked “Not delivered”.</string>
+    <plurals name="outbox_clear_all_body">
+        <item quantity="one">%1$s message stops being sent and stays in its chat marked “Not delivered”.</item>
+        <item quantity="other">%1$s messages stop being sent and stay in their chats marked “Not delivered”.</item>
+    </plurals>
+    <string name="outbox_hold">Hold to clear</string>
+    <string name="outbox_keep">Keep</string>
     <string name="outbox_warn_title">The queue has grown</string>
-    <string name="outbox_warn_hint">Over a thousand undelivered — usually that means the other side has been away for a while. They take up space on this device.</string>
-    <string name="outbox_warn_off">Stop reminding me</string>
     <string name="outbox_by_peer">By recipient</string>
-    <string name="outbox_manage">Manage</string>
-    <string name="outbox_longpress_hint">Long-press a recipient to clear their queue.</string>
     <string name="outbox_sending">sending…</string>
     <string name="outbox_offline_for">offline for %1$s</string>
-    <string name="outbox_menu_hint">Open the chat or clear what has not been delivered yet.</string>
     <string name="outbox_open_chat">Open chat</string>
-    <string name="outbox_clear_one">Clear queue</string>
-    <string name="outbox_clear_one_title">Clear the queue for %1$s?</string>
-    <string name="outbox_clear_one_body">These messages stop being sent. They stay in the chat marked “Not delivered”, and each can be sent again with “Retry”.</string>
-    <string name="outbox_sum_count">Messages</string>
-    <string name="outbox_sum_bytes">Size</string>
-    <string name="outbox_sum_oldest">Oldest</string>
-    <string name="outbox_clear_ok">Clear</string>
     <string name="outbox_clear_all">Clear everything</string>
-    <string name="outbox_clear_all_hint">Undelivered messages stop being sent and stay in their chats marked “Not delivered”.</string>
     <string name="outbox_clear_all_title">Clear the whole queue?</string>
-    <plurals name="outbox_clear_all_body">
-        <item quantity="one">%d recipient is waiting. Undelivered messages stay in their chats marked “Not delivered”.</item>
-        <item quantity="other">%d recipients are waiting. Undelivered messages stay in their chats marked “Not delivered”.</item>
-    </plurals>
-    <string name="outbox_more">and %1$d more</string>
-    <plurals name="outbox_clear_all_final">
-        <item quantity="one">%d message will not be delivered</item>
-        <item quantity="other">%d messages will not be delivered</item>
-    </plurals>
-    <string name="outbox_hold_hint">Sending again works one message at a time, in each chat. Hold the button to confirm.</string>
-    <string name="common_hold">Hold…</string>
     <string name="common_next">Next</string>
     <plurals name="ago_days">
         <item quantity="one">%d day</item>
@@ -481,7 +469,7 @@
     <string name="storage_kind_video">Video</string>
     <string name="storage_kind_voice">Voice messages</string>
     <string name="storage_kind_file">Files</string>
-    <string name="title_outbox">Send queue</string>
+    <string name="title_outbox">Outbox</string>
     <string name="folders_title">Folders</string>
     <string name="folders_hint">A chat can be in several folders. Deleting a folder leaves the messages intact.</string>
     <string name="folders_builtin">Built-in</string>
@@ -650,8 +638,8 @@
     <string name="backup_part_attachments">Attachments</string>
     <string name="backup_n_contacts">%1$d · with avatars</string>
     <plurals name="backup_n_messages">
-        <item quantity="one">%d message</item>
-        <item quantity="other">%d messages</item>
+        <item quantity="one">%1$s message</item>
+        <item quantity="other">%1$s messages</item>
     </plurals>
     <string name="backup_n_notes">%1$d</string>
     <plurals name="backup_n_calls">
@@ -739,8 +727,8 @@
     <string name="group_invite_waiting">awaiting reply</string>
     <string name="backup_part_groups">Group chats</string>
     <plurals name="backup_n_group_messages">
-        <item quantity="one">%d message</item>
-        <item quantity="other">%d messages</item>
+        <item quantity="one">%1$s message</item>
+        <item quantity="other">%1$s messages</item>
     </plurals>
     <string name="group_archived">Archive from a backup · not a group member</string>
     <string name="forward_action">Forward</string>
@@ -863,8 +851,8 @@
     <string name="req_block_title">Block %1$s?</string>
     <string name="req_block_text">Messages from this key are no longer accepted.</string>
     <plurals name="queue_count">
-        <item quantity="one">%d message queued</item>
-        <item quantity="other">%d messages queued</item>
+        <item quantity="one">%1$s message queued</item>
+        <item quantity="other">%1$s messages queued</item>
     </plurals>
     <string name="queue_offline_sub">Sent once a connection appears</string>
     <string name="queue_growth_sub">Sent when recipients come online</string>
@@ -908,8 +896,8 @@
     <string name="settings_key_failed">Check failed</string>
     <string name="undo_action">Undo</string>
     <plurals name="undo_msgs_deleted">
-        <item quantity="one">%d message deleted</item>
-        <item quantity="other">%d messages deleted</item>
+        <item quantity="one">%1$s message deleted</item>
+        <item quantity="other">%1$s messages deleted</item>
     </plurals>
     <plurals name="undo_notes_deleted">
         <item quantity="one">%d note deleted</item>

@@ -1,19 +1,13 @@
 package chat.peerage.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,329 +16,238 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.launch
 
 /**
- * Очередь отправки (макет `docs/design/mockups/outbox.html`).
+ * «Исходящие» (макеты `misc/Outbox`, `misc/OutboxHold`): плитки «сообщений · объём · самое
+ * старое», предупреждение от тысячи, очереди по получателям, «Очистить всё» — удержанием.
  *
- * Здесь лежат СОБСТВЕННЫЕ сообщения пользователя, которые ещё не дошли. Сервера,
- * который подержал бы их, нет — поэтому очередь к контактам не чистится ни по сроку,
- * ни по объёму, а разрастание только ПРЕДУПРЕЖДАЕТ. Сброс — всегда явный: получателю
- * длинным тапом, всем — в два шага. Сброшенное не стирается: в чате оно остаётся
- * «Не доставлено» с кнопкой «Повторить».
+ * Здесь лежат СВОИ сообщения, которые ещё не дошли. Сервера, который подержал бы их, нет —
+ * поэтому очередь сама не чистится ни по сроку, ни по объёму, а разрастание только
+ * предупреждает. Сброс — всегда явный. Сброшенное остаётся в чате «Не доставлено» с
+ * «Повторить».
  */
 @Composable
 internal fun OutboxScreen(model: AppModel, onOpenChat: (String) -> Unit) {
-    var menuFor by remember { mutableStateOf<OutboxPeer?>(null) }
-    var confirmFor by remember { mutableStateOf<OutboxPeer?>(null) }
-    var confirmAll by remember { mutableStateOf(0) } // 0 — нет, 1 — первый шаг, 2 — второй
+    var peerSheet by remember { mutableStateOf<OutboxPeer?>(null) }
+    var clearAll by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { model.refreshOutbox() }
 
     val rows = model.outboxByPeer
-    val total = rows.sumOf { it.count }
-
     if (rows.isEmpty()) {
         EmptyState(
-            Icons.Filled.Check,
+            TablerIcons.Check,
             stringResource(R.string.outbox_empty_title),
             stringResource(R.string.outbox_empty_hint),
         )
         return
     }
+    val total = rows.sumOf { it.count }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        // Что это вообще такое — сразу, а не мелким шрифтом внизу.
-        InfoCard(Icons.Filled.Schedule, HoloAccent) {
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState())
+                .padding(top = Tokens.Space.l, bottom = Tokens.Space.l),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.panel),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            ) {
+                StatTile(
+                    fmtCount(total),
+                    pluralStringResource(R.plurals.outbox_tile_msgs, total),
+                    Modifier.weight(1f),
+                    bg = Tokens.Colors.group,
+                    size = Tokens.Font.sheet,
+                )
+                StatTile(
+                    fmtSizeLong(rows.sumOf { it.bytes }),
+                    stringResource(R.string.outbox_tile_bytes),
+                    Modifier.weight(1f),
+                    bg = Tokens.Colors.group,
+                    size = Tokens.Font.sheet,
+                )
+                StatTile(
+                    agoLabel(rows.minOf { it.oldest }),
+                    stringResource(R.string.outbox_tile_oldest),
+                    Modifier.weight(1f),
+                    bg = Tokens.Colors.group,
+                    size = Tokens.Font.sheet,
+                )
+            }
             Text(
-                pluralStringResource(R.plurals.outbox_total, total, total),
-                color = Color.White,
-                fontSize = Tokens.Font.label,
+                stringResource(R.string.outbox_lead),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.body,
+                lineHeight = Tokens.Font.lineHeight,
+                modifier = Modifier.padding(
+                    start = Tokens.Space.panelText,
+                    end = Tokens.Space.panelText,
+                    top = Tokens.Space.m,
+                ),
+            )
+            // Предупреждение, а не лимит: молча выкинуть СВОИ сообщения нельзя.
+            if (model.outboxWarn && model.warnOutboxGrowth) GrowthWarning()
+
+            SectionTitle(stringResource(R.string.outbox_by_peer))
+            CardSection {
+                rows.forEachIndexed { i, r -> OutboxRow(model, r, divider = i > 0) { peerSheet = r } }
+            }
+        }
+        Box(
+            Modifier.fillMaxWidth().padding(
+                start = Tokens.Space.xl,
+                end = Tokens.Space.xl,
+                top = Tokens.Space.m,
+                bottom = Tokens.Space.xxl,
+            ),
+        ) {
+            PlateButton(stringResource(R.string.outbox_clear_all), modifier = Modifier.fillMaxWidth(), danger = true) {
+                clearAll = true
+            }
+        }
+    }
+
+    peerSheet?.let { r ->
+        val name = peerName(model, r.peer)
+        ActionSheet(name, stringResource(R.string.outbox_clear_peer_body), onClose = { peerSheet = null }) {
+            PlateButton(stringResource(R.string.outbox_clear_peer), modifier = Modifier.fillMaxWidth(), danger = true) {
+                model.clearOutboxFor(r.peer)
+                peerSheet = null
+            }
+            PlateButton(stringResource(R.string.outbox_open_chat), modifier = Modifier.fillMaxWidth()) {
+                peerSheet = null
+                onOpenChat(r.peer)
+            }
+        }
+    }
+
+    // «Очистить всё» — удержанием: промахнуться по кнопке можно, случайно держать её
+    // две секунды — нет.
+    if (clearAll) {
+        ActionSheet(
+            stringResource(R.string.outbox_clear_all_title),
+            pluralStringResource(R.plurals.outbox_clear_all_body, total, fmtCount(total)),
+            onClose = { clearAll = false },
+        ) {
+            HoldButton(stringResource(R.string.outbox_hold)) {
+                model.clearOutboxAll()
+                clearAll = false
+            }
+            PlateButton(stringResource(R.string.outbox_keep), modifier = Modifier.fillMaxWidth()) { clearAll = false }
+        }
+    }
+}
+
+/** Плашка «Очередь разрослась» (`misc/Outbox`): тот же тон, что «Ключ не сверен». */
+@Composable
+private fun GrowthWarning() {
+    Row(
+        Modifier.fillMaxWidth().padding(start = Tokens.Space.panel, end = Tokens.Space.panel, top = Tokens.Space.l)
+            .clip(RoundedCornerShape(Tokens.Radius.group))
+            .background(Tokens.Colors.stateWarn)
+            .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m + Tokens.Space.xxs),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
+    ) {
+        Icon(TablerIcons.AlertTriangle, null, tint = Tokens.Colors.stateWarnText, modifier = Modifier.size(Tokens.Size.iconRow))
+        Column {
+            Text(
+                stringResource(R.string.outbox_warn_title),
+                color = Tokens.Colors.stateWarnText,
+                fontSize = Tokens.Font.preview,
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                stringResource(R.string.outbox_lead_hint),
-                color = HoloSecondary,
-                fontSize = Tokens.Font.body,
-                modifier = Modifier.padding(top = Tokens.Space.xs),
+                stringResource(R.string.outbox_warn_hint),
+                color = Tokens.Colors.stateWarnText,
+                fontSize = Tokens.Font.preview,
+                lineHeight = Tokens.Font.lineHeight,
             )
         }
-
-        // Предупреждение, а не лимит: молча выкинуть чужие... точнее СВОИ сообщения нельзя.
-        if (model.outboxWarn && model.warnOutboxGrowth) {
-            InfoCard(Icons.Filled.Warning, WarnColor, bg = WarnColor.copy(alpha = 0.12f)) {
-                Text(
-                    stringResource(R.string.outbox_warn_title),
-                    color = WarnColor,
-                    fontSize = Tokens.Font.body,
-                    fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    stringResource(R.string.outbox_warn_hint),
-                    color = HoloSecondary,
-                    fontSize = Tokens.Font.small,
-                    modifier = Modifier.padding(top = Tokens.Space.xxs),
-                )
-                // Кнопкой: у голого текста зона касания — высота строки мелкого шрифта.
-                TextButton(
-                    onClick = { model.toggleOutboxWarning() },
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    Text(stringResource(R.string.outbox_warn_off), color = HoloAccent, fontSize = Tokens.Font.small)
-                }
-            }
-        }
-
-        SectionTitle(stringResource(R.string.outbox_by_peer))
-        rows.forEach { r -> OutboxRow(model, r, onTap = { onOpenChat(r.peer) }) { menuFor = r } }
-        Text(
-            stringResource(R.string.outbox_longpress_hint),
-            color = HoloSecondary,
-            fontSize = Tokens.Font.small,
-            modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
-        )
-
-        SectionTitle(stringResource(R.string.outbox_manage))
-        Row(
-            Modifier.fillMaxWidth().clickable { confirmAll = 1 }
-                .padding(horizontal = ScreenPad, vertical = RowPadV),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.Delete, null, tint = HoloError, modifier = Modifier.size(Tokens.Size.iconM))
-            Spacer(Modifier.width(Tokens.Space.m))
-            Text(stringResource(R.string.outbox_clear_all), color = HoloError, fontSize = Tokens.Font.label)
-        }
-        Text(
-            stringResource(R.string.outbox_clear_all_hint),
-            color = HoloSecondary,
-            fontSize = Tokens.Font.small,
-            modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.xs),
-        )
-        Spacer(Modifier.height(Tokens.Space.l))
-    }
-
-    // Долгий тап по получателю → меню действий.
-    menuFor?.let { r ->
-        val name = model.contacts.firstOrNull { it.key == r.peer }?.displayName ?: r.peer.take(8)
-        AlertDialog(
-            onDismissRequest = { menuFor = null },
-            title = { Text(name) },
-            text = { Text(stringResource(R.string.outbox_menu_hint)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    menuFor = null
-                    confirmFor = r
-                }) { Text(stringResource(R.string.outbox_clear_one), color = HoloError) }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    menuFor = null
-                    onOpenChat(r.peer)
-                }) { Text(stringResource(R.string.outbox_open_chat), color = HoloAccent) }
-            },
-        )
-    }
-
-    // Подтверждение по одному: с точными числами, включая возраст самой старой записи.
-    confirmFor?.let { r ->
-        val name = model.contacts.firstOrNull { it.key == r.peer }?.displayName ?: r.peer.take(8)
-        AlertDialog(
-            onDismissRequest = { confirmFor = null },
-            title = { Text(stringResource(R.string.outbox_clear_one_title, name)) },
-            text = {
-                Column {
-                    Text(stringResource(R.string.outbox_clear_one_body))
-                    Spacer(Modifier.height(Tokens.Space.s))
-                    SumRow(stringResource(R.string.outbox_sum_count), "${r.count}")
-                    SumRow(stringResource(R.string.outbox_sum_bytes), fmtSizeLong(r.bytes))
-                    SumRow(stringResource(R.string.outbox_sum_oldest), agoLabel(r.oldest))
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    model.clearOutboxFor(r.peer)
-                    confirmFor = null
-                }) { Text(stringResource(R.string.outbox_clear_ok), color = HoloError) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmFor = null }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
-        )
-    }
-
-    // «Очистить всё» — два шага: сперва у КОГО и сколько не дойдёт, потом удержание —
-    // повторять потом придётся по одному сообщению.
-    if (confirmAll == 1) {
-        AlertDialog(
-            onDismissRequest = { confirmAll = 0 },
-            title = { Text(stringResource(R.string.outbox_clear_all_title)) },
-            text = {
-                Column {
-                    Text(pluralStringResource(R.plurals.outbox_clear_all_body, rows.size, rows.size))
-                    Spacer(Modifier.height(Tokens.Space.s))
-                    rows.take(6).forEach { r ->
-                        val nm = model.contacts.firstOrNull { it.key == r.peer }?.displayName ?: r.peer.take(8)
-                        SumRow(nm, "${r.count} · ${fmtSizeLong(r.bytes)}")
-                    }
-                    // Остальные — не молча: шесть строк из двадцати читались бы как «все».
-                    if (rows.size > 6) SumRow(stringResource(R.string.outbox_more, rows.size - 6), "")
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { confirmAll = 2 }) {
-                    Text(stringResource(R.string.common_next), color = HoloError)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmAll = 0 }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
-        )
-    }
-    if (confirmAll == 2) {
-        HoldToConfirmDialog(
-            title = pluralStringResource(R.plurals.outbox_clear_all_final, total, total),
-            hint = stringResource(R.string.outbox_hold_hint),
-            onCancel = { confirmAll = 0 },
-            onConfirm = {
-                model.clearOutboxAll()
-                confirmAll = 0
-            },
-        )
     }
 }
 
-/** Строка получателя: сколько ждёт, сколько весит и почему не уходит. */
+/** Получатель: «1 204 · 3,2 МБ · не в сети 24 дня» или «… · отправляется…». */
 @Composable
-private fun OutboxRow(model: AppModel, r: OutboxPeer, onTap: () -> Unit, onLongPress: () -> Unit) {
+private fun OutboxRow(model: AppModel, r: OutboxPeer, divider: Boolean, onTap: () -> Unit) {
     val c = model.contacts.firstOrNull { it.key == r.peer }
-    val name = c?.displayName ?: r.peer.take(12)
+    val name = peerName(model, r.peer)
     val online = model.online[r.peer] == true
-    Row(
-        Modifier.fillMaxWidth()
-            .pointerInput(r.peer) { detectTapGestures(onTap = { onTap() }, onLongPress = { onLongPress() }) }
-            .padding(horizontal = ScreenPad, vertical = RowPadV),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SquareAvatar(name, size = Tokens.Size.avatarRow, online = online, avatarBytes = model.contactAvatars[c?.avatarId])
-        Spacer(Modifier.width(Tokens.Space.m))
-        Column(Modifier.weight(1f)) {
-            Text(name, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (online) Icons.Filled.Send else Icons.Filled.Schedule,
-                    null,
-                    tint = if (online) HoloOnline else HoloSecondary,
-                    modifier = Modifier.size(Tokens.Size.iconXs),
-                )
-                Spacer(Modifier.width(Tokens.Space.xs))
-                // Причина, а не только факт: разросшаяся очередь к человеку, которого
-                // месяц не было в сети, — это ожидаемое поведение, а не поломка.
-                Text(
-                    if (online) stringResource(R.string.outbox_sending) else stringResource(R.string.outbox_offline_for, agoLabel(r.oldest)),
-                    color = if (online) HoloOnline else HoloSecondary,
-                    fontSize = Tokens.Font.body,
-                )
-            }
+    // Причина, а не только факт: очередь к человеку, которого месяц не было, — ожидаемое.
+    val state = if (online) stringResource(R.string.outbox_sending) else stringResource(R.string.outbox_offline_for, agoLabel(r.oldest))
+    CardRow(onClick = onTap, divider = divider, inset = Tokens.Space.l + Tokens.Size.avatarPick + Tokens.Space.m + Tokens.Space.xxs) {
+        SquareAvatar(name, size = Tokens.Size.avatarPick, avatarBytes = model.contactAvatars[c?.avatarId], circle = true)
+        Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
+        Column(Modifier.weight(1f).heightIn(min = Tokens.Size.personRow - Tokens.Space.l), verticalArrangement = Arrangement.Center) {
+            Text(name, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(
+                stringResource(R.string.outbox_row_sub, fmtCount(r.count), fmtSizeLong(r.bytes), state),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.body,
+                maxLines = 1,
+                modifier = Modifier.padding(top = Tokens.Space.xxs),
+            )
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Text("${r.count}", color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
-            Text(fmtSizeLong(r.bytes), color = HoloSecondary, fontSize = Tokens.Font.small)
-        }
+        Icon(TablerIcons.ChevronRight, null, tint = Tokens.Colors.chevron, modifier = Modifier.size(Tokens.Size.iconS))
     }
 }
 
-/** Финальное подтверждение УДЕРЖАНИЕМ: промахнуться по кнопке можно, случайно
- *  удержать её две секунды — нет. */
+/**
+ * Красная кнопка подтверждения удержанием: пока палец на кнопке, растёт заливка; дошла до
+ * конца (2 с) — действие. Отпустил раньше — всё обнуляется.
+ */
 @Composable
-internal fun HoldToConfirmDialog(
-    title: String,
-    hint: String,
-    onCancel: () -> Unit,
-    onConfirm: () -> Unit,
-) {
+private fun HoldButton(text: String, onConfirm: () -> Unit) {
     var progress by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text(title) },
-        text = {
-            Column {
-                Text(hint)
-                Spacer(Modifier.height(Tokens.Space.l))
-                Box(
-                    Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(Tokens.Radius.button))
-                        .background(HoloBg)
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onPress = {
-                                    // Пока палец на кнопке — полоса растёт; дошла до конца
-                                    // (2 с) — подтверждаем. Отпустил раньше — всё обнуляем.
-                                    val fill = scope.launch {
-                                        while (progress < 1f) {
-                                            kotlinx.coroutines.delay(50)
-                                            progress = (progress + 0.025f).coerceAtMost(1f)
-                                        }
-                                        onConfirm()
-                                    }
-                                    tryAwaitRelease()
-                                    if (progress < 1f) {
-                                        fill.cancel()
-                                        progress = 0f
-                                    }
-                                },
-                            )
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        Modifier.fillMaxHeight().fillMaxWidth(progress)
-                            .background(Tokens.Colors.errorFill.copy(alpha = 0.2f)),
-                    )
-                    Text(stringResource(R.string.common_hold), color = HoloError, fontWeight = FontWeight.Medium)
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onCancel) {
-                Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-            }
-        },
-    )
-}
-
-@Composable
-private fun SumRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-        Text(label, color = HoloSecondary, fontSize = Tokens.Font.body, modifier = Modifier.weight(1f))
-        Text(value, color = Color.White, fontSize = Tokens.Font.body, fontWeight = FontWeight.Medium)
-    }
-}
-
-/** Карточка-пояснение с иконкой. */
-@Composable
-private fun InfoCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: Color,
-    bg: Color = HoloSurface,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = Tokens.Space.s)
-            .clip(RoundedCornerShape(Tokens.Radius.tile)).background(bg).padding(Tokens.Space.l),
+    Box(
+        Modifier.fillMaxWidth().heightIn(min = Tokens.Size.touch)
+            .clip(RoundedCornerShape(Tokens.Radius.button))
+            .background(Tokens.Colors.dangerPlate)
+            .semantics { role = Role.Button }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        val fill = scope.launch {
+                            while (progress < 1f) {
+                                kotlinx.coroutines.delay(HoldStepMs)
+                                progress = (progress + HoldStep).coerceAtMost(1f)
+                            }
+                            onConfirm()
+                        }
+                        tryAwaitRelease()
+                        if (progress < 1f) {
+                            fill.cancel()
+                            progress = 0f
+                        }
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(Tokens.Size.iconM))
-        Spacer(Modifier.width(Tokens.Space.m))
-        Column(content = content)
+        Box(
+            Modifier.matchParentSize().wrapContentWidth(Alignment.Start).fillMaxWidth(progress)
+                .background(Tokens.Colors.holdFill),
+        )
+        Text(text, color = Tokens.Colors.iconDangerMuted, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium)
     }
 }
+
+private const val HoldStepMs = 50L
+private const val HoldStep = 0.025f // 40 шагов по 50 мс — 2 секунды
+
+@Composable
+private fun peerName(model: AppModel, peer: String): String =
+    model.contacts.firstOrNull { it.key == peer }?.displayName ?: peer.take(12)
+
+/** «1 248» — с разделителем разрядов по языку. */
+private fun fmtCount(n: Int): String = java.text.NumberFormat.getIntegerInstance().format(n)
 
 /** «24 дня» / «3 часа» — возраст самой старой записи в очереди. */
 @Composable

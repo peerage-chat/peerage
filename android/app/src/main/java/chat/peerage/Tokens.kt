@@ -93,6 +93,8 @@ object Tokens {
         val btnNeutral = Color(0xFF3A3D44) // mic on / invite / camera
         val btnDangerMuted = Color(0xFF3A2A2C) // выключенное (mic off / video off)
         val dangerPlate = Color(0xFF3A1E22) // красная кнопка в шторке (текст iconDangerMuted)
+        val holdFill = Color(0x40FF6B6B) // заливка кнопки «Удерживать, чтобы очистить» по ходу удержания (`misc/OutboxHold`)
+        val chevron = Color(0xFF6B6C74) // шеврон перехода в строке группы (`misc/Outbox`)
         val handle = Color(0xFF3A3B42) // ручка шторки
         val rowRequest = Color(0xFF1A1B20) // строка запроса/приглашения на главной — чуть другой фон
         val iconDangerMuted = Color(0xFFFF8A8A) // иконка выключенного

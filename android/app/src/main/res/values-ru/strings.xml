@@ -413,50 +413,36 @@
     <string name="attach_need_gallery">Чтобы показывать здесь последние снимки, нужен доступ к галерее. Файл при этом можно отправить через пикер выше.</string>
     <string name="attach_allow">Разрешить</string>
     <string name="attach_gallery_denied">Доступ к галерее не выдан</string>
-    <string name="outbox_empty_title">Всё доставлено</string>
-    <string name="outbox_empty_hint">Сообщения, отправленные пока собеседник был офлайн, ждут здесь и уходят сами.</string>
-    <plurals name="outbox_total">
-        <item quantity="one">%d сообщение ждёт</item>
-        <item quantity="few">%d сообщения ждут</item>
-        <item quantity="many">%d сообщений ждут</item>
-        <item quantity="other">%d сообщения ждут</item>
+    <string name="outbox_empty_title">Очередь пуста</string>
+    <string name="outbox_empty_hint">Сюда встают сообщения, пока получатель не в сети.</string>
+    <plurals name="outbox_tile_msgs">
+        <item quantity="one">сообщение</item>
+        <item quantity="few">сообщения</item>
+        <item quantity="many">сообщений</item>
+        <item quantity="other">сообщения</item>
     </plurals>
-    <string name="outbox_lead_hint">Они уйдут, как только получатель появится в сети. Сервера, который подержал бы их, нет — поэтому очередь к контактам не чистится ни по сроку, ни по объёму.</string>
+    <string name="outbox_tile_bytes">объём</string>
+    <string name="outbox_tile_oldest">самое старое</string>
+    <string name="outbox_lead">Уйдут, как только получатель появится в сети. Очередь сама не очищается.</string>
+    <string name="outbox_warn_hint">Больше тысячи неотправленных.</string>
+    <string name="outbox_row_sub">%1$s · %2$s · %3$s</string>
+    <string name="outbox_clear_peer">Очистить очередь</string>
+    <string name="outbox_clear_peer_body">Сообщения перестанут отправляться и останутся в чате с пометкой «Не доставлено».</string>
+    <plurals name="outbox_clear_all_body">
+        <item quantity="one">%1$s сообщение перестанет отправляться и останется в чате с пометкой «Не доставлено».</item>
+        <item quantity="few">%1$s сообщения перестанут отправляться и останутся в чатах с пометкой «Не доставлено».</item>
+        <item quantity="many">%1$s сообщений перестанут отправляться и останутся в чатах с пометкой «Не доставлено».</item>
+        <item quantity="other">%1$s сообщения перестанут отправляться и останутся в чатах с пометкой «Не доставлено».</item>
+    </plurals>
+    <string name="outbox_hold">Удерживать, чтобы очистить</string>
+    <string name="outbox_keep">Не очищать</string>
     <string name="outbox_warn_title">Очередь разрослась</string>
-    <string name="outbox_warn_hint">Больше тысячи неотправленных — обычно так бывает, если собеседник давно не появлялся. Место они занимают на этом устройстве.</string>
-    <string name="outbox_warn_off">Не напоминать об этом</string>
     <string name="outbox_by_peer">По получателям</string>
-    <string name="outbox_manage">Управление</string>
-    <string name="outbox_longpress_hint">Долгий тап по получателю — очистить его очередь.</string>
     <string name="outbox_sending">отправляется…</string>
     <string name="outbox_offline_for">не в сети %1$s</string>
-    <string name="outbox_menu_hint">Открыть чат или очистить то, что ещё не доставлено.</string>
     <string name="outbox_open_chat">Открыть чат</string>
-    <string name="outbox_clear_one">Очистить</string>
-    <string name="outbox_clear_one_title">Очистить очередь %1$s?</string>
-    <string name="outbox_clear_one_body">Эти сообщения перестанут отправляться. В чате они останутся с пометкой «Не доставлено» — каждое можно отправить заново кнопкой «Повторить».</string>
-    <string name="outbox_sum_count">Сообщений</string>
-    <string name="outbox_sum_bytes">Объём</string>
-    <string name="outbox_sum_oldest">Самое старое</string>
-    <string name="outbox_clear_ok">Очистить</string>
     <string name="outbox_clear_all">Очистить всё</string>
-    <string name="outbox_clear_all_hint">Недоставленное перестанет отправляться и останется в чатах с пометкой «Не доставлено».</string>
     <string name="outbox_clear_all_title">Очистить всю очередь?</string>
-    <plurals name="outbox_clear_all_body">
-        <item quantity="one">Доставки ждёт %d получатель. Недоставленное останется в чатах с пометкой «Не доставлено».</item>
-        <item quantity="few">Доставки ждут %d получателя. Недоставленное останется в чатах с пометкой «Не доставлено».</item>
-        <item quantity="many">Доставки ждут %d получателей. Недоставленное останется в чатах с пометкой «Не доставлено».</item>
-        <item quantity="other">Доставки ждут %d получателя. Недоставленное останется в чатах с пометкой «Не доставлено».</item>
-    </plurals>
-    <string name="outbox_more">и ещё %1$d</string>
-    <plurals name="outbox_clear_all_final">
-        <item quantity="one">%d сообщение не будет доставлено</item>
-        <item quantity="few">%d сообщения не будут доставлены</item>
-        <item quantity="many">%d сообщений не будут доставлены</item>
-        <item quantity="other">%d сообщения не будут доставлены</item>
-    </plurals>
-    <string name="outbox_hold_hint">Отправить заново можно только по одному сообщению, в каждом чате. Удерживайте кнопку, чтобы подтвердить.</string>
-    <string name="common_hold">Удерживайте…</string>
     <string name="common_next">Далее</string>
     <plurals name="ago_days">
         <item quantity="one">%d день</item>
@@ -497,7 +483,7 @@
     <string name="storage_kind_video">Видео</string>
     <string name="storage_kind_voice">Голосовые</string>
     <string name="storage_kind_file">Файлы</string>
-    <string name="title_outbox">Очередь отправки</string>
+    <string name="title_outbox">Исходящие</string>
     <string name="folders_title">Папки</string>
     <string name="folders_hint">Чат может входить в несколько папок. Удаление папки переписку не трогает.</string>
     <string name="folders_builtin">Встроенные</string>
@@ -670,10 +656,10 @@
     <string name="backup_part_attachments">Вложения</string>
     <string name="backup_n_contacts">%1$d · с аватарами</string>
     <plurals name="backup_n_messages">
-        <item quantity="one">%d сообщение</item>
-        <item quantity="few">%d сообщения</item>
-        <item quantity="many">%d сообщений</item>
-        <item quantity="other">%d сообщения</item>
+        <item quantity="one">%1$s сообщение</item>
+        <item quantity="few">%1$s сообщения</item>
+        <item quantity="many">%1$s сообщений</item>
+        <item quantity="other">%1$s сообщения</item>
     </plurals>
     <string name="backup_n_notes">%1$d</string>
     <plurals name="backup_n_calls">
@@ -767,10 +753,10 @@
     <string name="group_invite_waiting">ждёт ответа</string>
     <string name="backup_part_groups">Групповые чаты</string>
     <plurals name="backup_n_group_messages">
-        <item quantity="one">%d сообщение</item>
-        <item quantity="few">%d сообщения</item>
-        <item quantity="many">%d сообщений</item>
-        <item quantity="other">%d сообщения</item>
+        <item quantity="one">%1$s сообщение</item>
+        <item quantity="few">%1$s сообщения</item>
+        <item quantity="many">%1$s сообщений</item>
+        <item quantity="other">%1$s сообщения</item>
     </plurals>
     <string name="group_archived">Архив из копии · нет членства в группе</string>
     <string name="forward_action">Переслать</string>
@@ -901,10 +887,10 @@
     <string name="req_block_title">Заблокировать %1$s?</string>
     <string name="req_block_text">Сообщения с этого ключа больше не принимаются.</string>
     <plurals name="queue_count">
-        <item quantity="one">%d сообщение в очереди</item>
-        <item quantity="few">%d сообщения в очереди</item>
-        <item quantity="many">%d сообщений в очереди</item>
-        <item quantity="other">%d сообщения в очереди</item>
+        <item quantity="one">%1$s сообщение в очереди</item>
+        <item quantity="few">%1$s сообщения в очереди</item>
+        <item quantity="many">%1$s сообщений в очереди</item>
+        <item quantity="other">%1$s сообщения в очереди</item>
     </plurals>
     <string name="queue_offline_sub">Отправятся при появлении соединения</string>
     <string name="queue_growth_sub">Уйдут, когда получатели появятся в сети</string>
@@ -952,10 +938,10 @@
     <string name="settings_key_failed">Проверка не пройдена</string>
     <string name="undo_action">Отменить</string>
     <plurals name="undo_msgs_deleted">
-        <item quantity="one">%d сообщение удалено</item>
-        <item quantity="few">%d сообщения удалены</item>
-        <item quantity="many">%d сообщений удалено</item>
-        <item quantity="other">%d сообщения удалены</item>
+        <item quantity="one">%1$s сообщение удалено</item>
+        <item quantity="few">%1$s сообщения удалены</item>
+        <item quantity="many">%1$s сообщений удалено</item>
+        <item quantity="other">%1$s сообщения удалены</item>
     </plurals>
     <plurals name="undo_notes_deleted">
         <item quantity="one">%d заметка удалена</item>
