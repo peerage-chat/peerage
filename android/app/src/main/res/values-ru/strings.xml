@@ -147,6 +147,19 @@
     <string name="notif_sec_messages">Сообщения</string>
     <string name="notif_set_chat_sounds">Звуки в чате</string>
     <string name="notif_sec_other">Прочее</string>
+    <string name="notif_msg_hidden">Новое сообщение</string>
+    <string name="notif_reply">Ответить</string>
+    <string name="notif_read">Прочитано</string>
+    <string name="notif_ch_dm">Личные чаты</string>
+    <string name="notif_ch_group">Группы</string>
+    <string name="notif_ch_mention">Упоминания</string>
+    <string name="notif_set_text">Текст в уведомлении</string>
+    <string name="notif_set_text_sub">При блокировке приложения текст скрыт всегда</string>
+    <string name="notif_ch_sound">Звук</string>
+    <string name="notif_ch_silent">Без звука</string>
+    <string name="notif_ch_vibrate">вибрация</string>
+    <string name="notif_ch_novibrate">без вибрации</string>
+    <string name="notif_ch_off">Выключено</string>
     <string name="notif_set_conn">Постоянное уведомление</string>
     <string name="notif_set_conn_sub">Держит соединение в фоне. Скрытие в настройках Android работу не прерывает.</string>
     <!-- Запросы в контакты (гейт вместо TOFU-автодобавления) -->

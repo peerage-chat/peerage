@@ -149,6 +149,19 @@
     <string name="notif_sec_messages">Messages</string>
     <string name="notif_set_chat_sounds">In-chat sounds</string>
     <string name="notif_sec_other">Other</string>
+    <string name="notif_msg_hidden">New message</string>
+    <string name="notif_reply">Reply</string>
+    <string name="notif_read">Mark as read</string>
+    <string name="notif_ch_dm">Direct chats</string>
+    <string name="notif_ch_group">Groups</string>
+    <string name="notif_ch_mention">Mentions</string>
+    <string name="notif_set_text">Message text in notifications</string>
+    <string name="notif_set_text_sub">Always hidden while the app lock is on</string>
+    <string name="notif_ch_sound">Sound</string>
+    <string name="notif_ch_silent">Silent</string>
+    <string name="notif_ch_vibrate">vibration</string>
+    <string name="notif_ch_novibrate">no vibration</string>
+    <string name="notif_ch_off">Off</string>
     <string name="notif_set_conn">Persistent notification</string>
     <string name="notif_set_conn_sub">Keeps the connection in the background. Hiding it in Android settings does not stop the app.</string>
     <!-- Contact requests (gate instead of TOFU auto-add) -->

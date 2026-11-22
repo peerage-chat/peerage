@@ -70,13 +70,7 @@ class ConnService : Service() {
      *  устройства»: пароль в фоне спросить не у кого. Повторный старт ничего не делает. */
     private fun startEngine() {
         val app = applicationContext
-        if (!BootReceiver.isOnboarded(app) || VaultKeyManager.needsPassword(app.filesDir)) return
-        Thread({
-            val model = AppModel.instance
-            if (model.appContext == null) model.appContext = app
-            AppLock.load(app)
-            model.start(app.filesDir.absolutePath)
-        }, "engine-boot").start()
+        Thread({ startEngineNow(app) }, "engine-boot").start()
     }
 
     override fun onDestroy() {
@@ -164,12 +158,25 @@ class ConnService : Service() {
             ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
 
-        /** Системные настройки категории «связи» (Android 8+: категория; раньше — уведомления приложения). */
-        fun channelSettings(ctx: Context): Intent =
+        /**
+         * Поднять движок здесь же (звать с фонового потока): служба без экрана и кнопки шторки,
+         * пришедшие в новый процесс. Только на уровне «Ключ устройства» — пароль в фоне спросить
+         * не у кого. Повторный вызов ничего не делает. true — движок работает.
+         */
+        fun startEngineNow(app: Context): Boolean {
+            if (!BootReceiver.isOnboarded(app) || VaultKeyManager.needsPassword(app.filesDir)) return false
+            val model = AppModel.instance
+            if (model.appContext == null) model.appContext = app
+            AppLock.load(app)
+            return model.start(app.filesDir.absolutePath)
+        }
+
+        /** Системные настройки категории (Android 8+: категория; раньше — уведомления приложения). */
+        fun channelSettings(ctx: Context, channel: String = CHANNEL): Intent =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                     .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-                    .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, CHANNEL)
+                    .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, channel)
             } else {
                 Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null))
             }

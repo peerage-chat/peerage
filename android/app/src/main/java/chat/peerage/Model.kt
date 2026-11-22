@@ -528,9 +528,69 @@ class AppModel private constructor() {
             ?.edit()?.putBoolean("chat_sounds", on)?.apply()
     }
 
-    /** Капля отправки — на нажатие «отправить», а не на эхо из движка. */
+    /** Капля отправки — на нажатие «отправить», а не на эхо из движка; ответ из шторки — без неё. */
     private fun chimeSent() {
+        if (!foreground) return
         appContext?.let { ChatSounds.play(it, ChatSounds.Kind.Out, chatSounds) }
+    }
+
+    /** «Текст в уведомлении»: выключено — в шторке «Новое сообщение» ([MessageNotifier]). */
+    var notifyText by mutableStateOf(true)
+        private set
+
+    fun setNotifyTextOn(on: Boolean) {
+        notifyText = on
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("notif_text", on)?.apply()
+    }
+
+    /** «Прочитано» в шторке: как открыть чат — счётчик в ноль, отметка собеседнику. */
+    fun readFromNotification(chat: ChatTarget) {
+        if (chat.group) {
+            groupUnread[chat.id] = 0
+            groupMentioned.remove(chat.id)
+        } else {
+            unread[chat.id] = 0
+            ops.execute { Native.markRead(sessionPtr, chat.id) }
+        }
+    }
+
+    /** «Ответить» в шторке: обычным сообщением, не трогая ответ, начатый в открытом чате. */
+    fun replyFromNotification(chat: ChatTarget, text: String) {
+        val keep = replyTarget
+        replyTarget = null
+        send(chat.id, text, group = chat.group)
+        replyTarget = keep
+        val title = if (chat.group) groups.firstOrNull { it.gid == chat.id }?.name.orEmpty() else peerName(chat.id)
+        appContext?.let { MessageNotifier.appendMine(it, chat, title, text.trimEnd()) }
+    }
+
+    /** Входящее — в шторку, если правило [MessageNotifier.shouldNotify] пускает. */
+    private fun notifyIncoming(chat: ChatTarget, m: Message, onScreen: Boolean, sent: Long) {
+        val ctx = appContext ?: return
+        val muted = chatSummaries[chatKey(chat.id, chat.group)]?.muted == true
+        val now = System.currentTimeMillis()
+        if (!MessageNotifier.shouldNotify(m.mine, m.system, m.isCall, onScreen && foreground, muted, sent, now)) return
+        val title = if (chat.group) groups.firstOrNull { it.gid == chat.id }?.name.orEmpty() else peerName(chat.id)
+        val sender = contacts.firstOrNull { it.key == m.sender }
+        val line = MessageNotifier.Line(
+            id = m.id,
+            sender = m.sender,
+            name = peerName(m.sender),
+            text = notificationText(ctx, m),
+            time = now,
+            avatar = sender?.avatarId?.let { contactAvatars[it] },
+        )
+        MessageNotifier.post(ctx, chat, title, mention = chat.group && m.mentions.any { it.key == me?.pubkey }, line = line)
+    }
+
+    /** Текст строки шторки: подпись или текст, у вложения без подписи — его вид. */
+    private fun notificationText(ctx: android.content.Context, m: Message): String = when {
+        m.text.isNotBlank() -> Mentions.plain(m.text, m.mentions, ::mentionName)
+        m.kind == "image" -> ctx.getString(R.string.chats_preview_photo)
+        m.kind == "video" -> ctx.getString(R.string.chats_preview_video)
+        m.kind == "voice" -> ctx.getString(R.string.chats_preview_voice)
+        else -> ctx.getString(R.string.chats_preview_file)
     }
 
     fun setFloodNotify(on: Boolean) {
@@ -804,6 +864,7 @@ class AppModel private constructor() {
         shareChatsInMenu = prefs.getBoolean("share_chats", false)
         notifyFlood = prefs.getBoolean("notif_flood", true)
         chatSounds = prefs.getBoolean("chat_sounds", true)
+        notifyText = prefs.getBoolean("notif_text", true)
         mediaColumns = prefs.getInt("media_columns", 3).takeIf { it in MEDIA_COLUMNS } ?: 3
         val w = prefs.getInt("video_w", VideoQuality.default.width)
         val h = prefs.getInt("video_h", VideoQuality.default.height)
@@ -1058,7 +1119,8 @@ class AppModel private constructor() {
     @Volatile var foreground = true
         set(v) {
             field = v
-            // Вернулись к ленте чата — она снова на экране, значит прочитана.
+            // Вернулись к ленте чата — она снова на экране, значит прочитана, и шторка о нём не нужна.
+            if (v) viewing?.let { c -> appContext?.let { MessageNotifier.cancel(it, c) } }
             if (v) viewing?.takeUnless { it.group }?.let { c -> ops.execute { Native.markRead(sessionPtr, c.id) } }
         }
 
@@ -2189,6 +2251,7 @@ class AppModel private constructor() {
                 // профиль или на главную) — пришедшее непрочитанное.
                 val onScreen = viewing == ChatTarget(ev.chat, ev.group)
                 if (onScreen && !m.mine && counts) noteIncoming(m, ev.group)
+                notifyIncoming(ChatTarget(ev.chat, ev.group), m, onScreen, ev.sent)
                 if (onScreen && foreground && !m.mine && !m.system && !m.isCall) {
                     val muted = chatSummaries[chatKey(ev.chat, ev.group)]?.muted == true
                     appContext?.let { ChatSounds.play(it, ChatSounds.Kind.In, chatSounds, muted, ev.sent) }
@@ -2208,6 +2271,7 @@ class AppModel private constructor() {
                 val list = messages[chatKey(ev.peer, group = false)]
                 val at = list?.indexOfFirst { it.id == ev.id && !it.mine } ?: -1
                 if (at >= 0) list!![at] = list[at].retracted()
+                appContext?.let { MessageNotifier.replace(it, ChatTarget(ev.peer, group = false), ev.peer, ev.id, null) }
             }
             is EngineEvent.Ack -> updateStatus(ev.peer, ev.id, "delivered")
             is EngineEvent.Read -> ev.ids.forEach { updateStatus(ev.peer, it, "read") }
@@ -2276,6 +2340,10 @@ class AppModel private constructor() {
                     val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
                     // Упоминания заменяются вместе с текстом: их участки привязаны к нему.
                     if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp, mentions = ev.mentions)
+                }
+                appContext?.let { ctx ->
+                    val text = Mentions.plain(ev.text, ev.mentions, ::mentionName)
+                    listOf(false, true).forEach { g -> MessageNotifier.replace(ctx, ChatTarget(ev.chat, g), ev.sender, ev.id, text) }
                 }
             }
             // M2: контакт прислал профиль (имя/аватар) → перечитать список.
@@ -2355,7 +2423,12 @@ class AppModel private constructor() {
                     }
                 }
             }
-            is EngineEvent.GroupRetracted -> loadGroupHistory(ev.gid)
+            is EngineEvent.GroupRetracted -> {
+                loadGroupHistory(ev.gid)
+                // Какую строку отозвали, событие не говорит — снять уведомление группы целиком:
+                // отозванное в шторке оставаться не должно.
+                appContext?.let { MessageNotifier.cancel(it, ChatTarget(ev.gid, group = true)) }
+            }
             // Событие, которого этот клиент ещё не знает: молча пропускаем.
             EngineEvent.Unknown -> Unit
         }

@@ -507,20 +507,43 @@ private fun OptionBlock(
 }
 
 /**
- * Уведомления (макет `settings/Notifications`). Здесь только то, что уже уведомляет: звуки в
- * чате, флуд, рост очереди, постоянное «связи». Строки каналов сообщений и звонков встанут вместе
- * с самими уведомлениями (шаг 7b) — пустых тумблеров нет. «Звуки в чате» — решение 2026-11-22,
- * после макета (notifications.md → «Звуки в приложении»).
+ * Уведомления (макет `settings/Notifications`). Строки каналов ведут в системные настройки
+ * канала (звуки системные, решение 9) — поэтому стрелка «наружу», а не шеврон макета; подпись —
+ * то, что в канале сейчас. «Звуки в чате» — решение 2026-11-22, после макета. Строки «Звонки»,
+ * «Запросы и приглашения», «Передача файлов» — вместе с самими уведомлениями (шаг 7b).
  */
 @Composable
 internal fun SettingsNotificationsScreen(model: AppModel) {
     val ctx = LocalContext.current
+    // Каналы меняются в системных настройках — перечитать, когда экран снова виден.
+    var resumed by remember { mutableIntStateOf(0) }
+    val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) resumed++
+        }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
     ) {
         SectionTitle(stringResource(R.string.notif_sec_messages))
         CardSection {
-            PlainSwitchRow(stringResource(R.string.notif_set_chat_sounds), model.chatSounds, divider = false) { model.setChatSoundsOn(it) }
+            listOf(
+                MessageNotifier.CH_DM to R.string.notif_ch_dm,
+                MessageNotifier.CH_GROUP to R.string.notif_ch_group,
+                MessageNotifier.CH_MENTION to R.string.notif_ch_mention,
+            ).forEachIndexed { i, (id, name) ->
+                ExternalRow(stringResource(name), remember(resumed) { channelState(ctx, id) }, divider = i > 0) {
+                    MessageNotifier.ensureChannels(ctx)
+                    ctx.startActivity(ConnService.channelSettings(ctx, id))
+                }
+            }
+            PrivacySwitch(stringResource(R.string.notif_set_text), stringResource(R.string.notif_set_text_sub), model.notifyText) {
+                model.setNotifyTextOn(it)
+            }
+            PlainSwitchRow(stringResource(R.string.notif_set_chat_sounds), model.chatSounds) { model.setChatSoundsOn(it) }
         }
         SectionTitle(stringResource(R.string.notif_sec_other))
         CardSection {
@@ -529,21 +552,36 @@ internal fun SettingsNotificationsScreen(model: AppModel) {
         }
         Spacer(Modifier.height(Tokens.Space.l))
         CardSection {
-            CardRow(onClick = { ctx.startActivity(ConnService.channelSettings(ctx)) }, divider = false, inset = Tokens.Space.l) {
-                Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
-                    Text(stringResource(R.string.notif_set_conn), color = Color.White, fontSize = Tokens.Font.name)
-                    Text(
-                        stringResource(R.string.notif_set_conn_sub),
-                        color = Tokens.Colors.tertiary,
-                        fontSize = Tokens.Font.body,
-                        modifier = Modifier.padding(top = Tokens.Space.xxs),
-                    )
-                }
-                Spacer(Modifier.width(Tokens.Space.m))
-                Icon(TablerIcons.ArrowUpRight, null, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconS))
+            ExternalRow(stringResource(R.string.notif_set_conn), stringResource(R.string.notif_set_conn_sub), divider = false) {
+                ctx.startActivity(ConnService.channelSettings(ctx))
             }
         }
     }
+}
+
+/** Строка, уводящая в системные настройки: название, подпись, стрелка «наружу». */
+@Composable
+private fun ExternalRow(title: String, sub: String, divider: Boolean, onClick: () -> Unit) {
+    CardRow(onClick = onClick, divider = divider, inset = Tokens.Space.l) {
+        Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
+            Text(title, color = Color.White, fontSize = Tokens.Font.name)
+            Text(sub, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body, modifier = Modifier.padding(top = Tokens.Space.xxs))
+        }
+        Spacer(Modifier.width(Tokens.Space.m))
+        Icon(TablerIcons.ArrowUpRight, null, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconS))
+    }
+}
+
+/** Что в канале сейчас: «Звук · вибрация», «Без звука · без вибрации», «Выключено». */
+private fun channelState(ctx: android.content.Context, id: String): String {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return ctx.getString(R.string.notif_ch_sound)
+    MessageNotifier.ensureChannels(ctx)
+    val ch = ctx.getSystemService(android.app.NotificationManager::class.java).getNotificationChannel(id)
+        ?: return ctx.getString(R.string.notif_ch_sound)
+    if (ch.importance == android.app.NotificationManager.IMPORTANCE_NONE) return ctx.getString(R.string.notif_ch_off)
+    val sound = ctx.getString(if (ch.sound != null && ch.importance >= android.app.NotificationManager.IMPORTANCE_DEFAULT) R.string.notif_ch_sound else R.string.notif_ch_silent)
+    val vibe = ctx.getString(if (ch.shouldVibrate()) R.string.notif_ch_vibrate else R.string.notif_ch_novibrate)
+    return "$sound · $vibe"
 }
 
 /**

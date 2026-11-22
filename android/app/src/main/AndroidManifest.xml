@@ -134,6 +134,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- Кнопки «Ответить»/«Прочитано» в уведомлении о сообщении (7b). -->
+        <receiver
+            android:name=".MessageActionReceiver"
+            android:exported="false" />
+
         <!-- Кнопки «Принять»/«Отклонить» в уведомлении о входящем звонке. -->
         <receiver
             android:name=".IncomingCallReceiver"

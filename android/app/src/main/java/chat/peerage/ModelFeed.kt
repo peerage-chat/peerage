@@ -124,6 +124,7 @@ internal fun AppModel.openChatTarget(): ChatTarget? =
  */
 internal fun AppModel.startViewing(chat: ChatTarget) {
     viewing = chat
+    if (foreground) appContext?.let { MessageNotifier.cancel(it, chat) }
     if (chat.group) {
         val n = groupUnread[chat.id] ?: 0
         if (n == 0) return
