@@ -1220,5 +1220,5 @@
     <string name="privacy_share_chats">Чаты в меню «Поделиться»</string>
     <string name="privacy_share_chats_sub">Последние чаты видны в системном меню вне приложения</string>
     <string name="privacy_share_chats_off">Выключено: имена и фото чатов системе не передаются. %1$s остаётся в меню значком приложения.</string>
-    <string name="privacy_share_chats_on">Включено: имена и фото восьми последних чатов передаются системе для меню «Поделиться».</string>
+    <string name="privacy_share_chats_on">Включено: «Сохранённое», имена и фото семи последних чатов передаются системе для меню «Поделиться».</string>
 </resources>
