@@ -1569,7 +1569,7 @@ class AppModel private constructor() {
     /** Отправить правку своего сообщения (в группе — вместе с упоминаниями). */
     fun applyEdit(chat: String, group: Boolean, id: Long, text: String, mentions: List<Mention> = emptyList()) =
         ops.execute {
-            if (text.isNotBlank()) Native.editMessage(sessionPtr, chat, group, id, text, mentionsJson(mentions))
+            if (text.isNotBlank()) Native.editMessage(sessionPtr, chat, group, id, text.trimEnd(), mentionsJson(mentions))
         }
 
     private fun mentionsJson(m: List<Mention>): String = Mentions.toJson(m)
@@ -1649,7 +1649,10 @@ class AppModel private constructor() {
      * Отправить текст в чат. Различие каналов — одна ветка внутри, а не два
      * публичных метода: снаружи «отправить» означает одно и то же.
      */
-    fun send(key: String, text: String, group: Boolean = false, mentions: List<Mention> = emptyList()) {
+    fun send(key: String, raw: String, group: Boolean = false, mentions: List<Mention> = emptyList()) {
+        // Хвостовые пробелы и переводы строк — случайность (лишний Enter): с ними время в
+        // пузыре уезжает на пустую строку. Начало не трогаем — от него считаются упоминания.
+        val text = raw.trimEnd()
         if (group) {
             sendGroup(key, text, mentions)
             return

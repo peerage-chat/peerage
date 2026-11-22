@@ -39,7 +39,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -949,6 +952,37 @@ internal fun BubbleText(
         // сбоку резервировать нечего, мета уже не в строке.
         val height = textP.height + if (fits) 0 else metaH
         layout(width, height) { textP.place(0, 0) }
+    }
+}
+
+/** Метка ребёнка [BubbleColumn], который тянется во всю ширину пузыря (цитата). */
+internal object BubbleStretch
+
+/**
+ * Содержимое пузыря столбцом. Ребёнок с `Modifier.layoutId(BubbleStretch)` (цитата)
+ * встаёт во всю ширину пузыря: она — самый широкий из остальных детей или его собственная
+ * естественная ширина, если он шире их всех. `fillMaxWidth` тут не годится — пузырь
+ * растянулся бы до края ленты, а текст в нём ([BubbleText]) внутренних мер не отдаёт,
+ * поэтому у ребёнка-растяжки спрашиваем только его собственные.
+ */
+@Composable
+internal fun BubbleColumn(content: @Composable () -> Unit) {
+    Layout(content) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0)
+        val isStretch = { ms: Measurable -> ms.layoutId == BubbleStretch }
+        val rest = measurables.filterNot(isStretch).associateWith { it.measure(loose) }
+        val natural = measurables.filter(isStretch).maxOfOrNull { it.maxIntrinsicWidth(constraints.maxHeight) } ?: 0
+        val width = maxOf(rest.values.maxOfOrNull { it.width } ?: 0, natural)
+            .coerceIn(constraints.minWidth, constraints.maxWidth)
+        val fixed = loose.copy(minWidth = width, maxWidth = width)
+        val placed = measurables.map { rest[it] ?: it.measure(fixed) }
+        layout(width, placed.sumOf { it.height }.coerceAtLeast(constraints.minHeight)) {
+            var y = 0
+            placed.forEach { p ->
+                p.place(0, y)
+                y += p.height
+            }
+        }
     }
 }
 

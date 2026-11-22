@@ -71,6 +71,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.HorizontalAlignmentLine
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -772,11 +773,13 @@ private fun MentionSuggestions(candidates: List<Pair<String, String>>, onPick: (
 
 /** Текст пузыря: упоминания рисуются именами, которые знает это устройство. */
 private fun bubbleText(model: AppModel, m: Message): AnnotatedString =
+    // Хвост из пробелов и переводов строк (пришедший или старый) не рисуем: время иначе
+    // встаёт на пустую последнюю строку.
     if (m.mentions.isEmpty()) {
-        AnnotatedString(m.text)
+        AnnotatedString(m.text.trimEnd())
     } else {
         Mentions.render(
-            m.text,
+            m.text.trimEnd(),
             m.mentions,
             model.me?.pubkey,
             model::mentionName,
@@ -1332,7 +1335,8 @@ internal fun MessageBubble(
                     ),
             ) {
                 Crossfade(pending, animationSpec = tween(Tokens.Anim.normal), label = "attach") { isPending ->
-                    Column {
+                    // Не Column: цитата тянется во всю ширину пузыря, а не по своему тексту.
+                    BubbleColumn {
                         // Ответ рисуется ССЫЛКОЙ в локальную историю (ADR-006): текст цитаты
                         // не копируется в сообщение, поэтому удаление оригинала не оставляет
                         // расходящегося дубля.
@@ -1355,9 +1359,9 @@ internal fun MessageBubble(
                                     } else {
                                         null
                                     },
-                                    // Над фото плашка тянется во всю ширину шапки: узкая
+                                    // Плашка — во всю ширину пузыря (над фото — шапки): узкая
                                     // посреди широкой полосы читается обрывком.
-                                    modifier = if (photoHeader) Modifier.fillMaxWidth() else Modifier,
+                                    modifier = if (photoHeader) Modifier.fillMaxWidth() else Modifier.layoutId(BubbleStretch),
                                 )
                             }
                             // Имя автора — под цитатой и пометкой пересылки: сначала «на
@@ -1434,7 +1438,7 @@ internal fun MessageBubble(
                         // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
                         if (m.kind != "text" && m.text.isNotEmpty()) {
                             BubbleText(
-                                AnnotatedString(m.text).marked(LocalSearchMarks.current, m),
+                                AnnotatedString(m.text.trimEnd()).marked(LocalSearchMarks.current, m),
                                 modifier = Modifier.padding(top = Tokens.Space.s),
                             ) { meta() }
                         }
