@@ -1397,7 +1397,8 @@ internal fun MessageBubble(
                                 // Просим у автора: в личном чате это собеседник, в группе —
                                 // тот, кто прислал (вложение лежит у него).
                                 val from = if (group) m.sender else model.currentChat
-                                from?.let { model.downloadMedia(it, m.blobId) }
+                                val chat = if (group) model.currentGroup?.let { ChatTarget(it, true) } else model.currentChat?.let { ChatTarget(it, false) }
+                                from?.let { model.downloadMedia(it, m.blobId, m.name, m.size, chat) }
                             }
                             else -> when (m.kind) {
                                 // В режиме выделения тап по вложению переключает выбор,

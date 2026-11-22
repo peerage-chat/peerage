@@ -394,6 +394,27 @@
     <string name="notif_room_you">you</string>
     <string name="notif_room_line">In the voice room</string>
     <string name="notif_reaction">%1$s to “%2$s”</string>
+    <string name="xfer_channel">File transfers</string>
+    <string name="xfer_downloading">Downloading · %1$d%%</string>
+    <string name="xfer_paused">Downloading · paused</string>
+    <string name="xfer_many">File transfers · %1$d%%</string>
+    <string name="xfer_from">from %1$s · %2$s of %3$s</string>
+    <string name="xfer_offline">Sender offline · %1$s of %2$s</string>
+    <string name="xfer_line">↓ %1$s · %2$s %3$s</string>
+    <string name="xfer_state_queued">queued</string>
+    <string name="xfer_state_paused">paused</string>
+    <string name="xfer_cancel">Cancel</string>
+    <string name="xfer_cancel_all">Cancel all</string>
+    <string name="xfer_done">Downloaded</string>
+    <string name="xfer_done_text">from %1$s · %2$s</string>
+    <string name="xfer_open">Open</string>
+    <string name="xfer_to_chat">Go to chat</string>
+    <string name="xfer_failed">Download failed</string>
+    <string name="xfer_retry">Retry</string>
+    <plurals name="xfer_files">
+        <item quantity="one">%1$d file · %2$s of %3$s</item>
+        <item quantity="other">%1$d files · %2$s of %3$s</item>
+    </plurals>
     <string name="fsi_title">Full-screen incoming calls</string>
     <string name="fsi_text">Without this permission, an incoming call on the lock screen arrives only as a notification.</string>
     <string name="fsi_later">Not now</string>

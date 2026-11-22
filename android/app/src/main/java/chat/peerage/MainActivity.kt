@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun handleCallIntent(i: android.content.Intent?) {
         if (i?.action == MessageNotifier.ACTION_CALL_BACK) return callBack(i)
+        if (i?.action == TransferNotifier.ACTION_OPEN_FILE) return openDownloaded(i)
         if (i?.action != IncomingCallReceiver.ACTION_ACCEPT) return
         i.action = null // пересоздание активити не должно принять звонок второй раз
         // Активити экспортирована: ACTION_ACCEPT может прислать кто угодно. Верим
@@ -108,6 +109,17 @@ class MainActivity : ComponentActivity() {
         MessageNotifier.cancel(this, chat)
         if (!ok || !hasPermission(Manifest.permission.RECORD_AUDIO)) return
         if (chat.group) model.joinRoom(chat.id) else model.callDm(chat.id)
+    }
+
+    /** «Открыть» из уведомления «Скачано»: файл — системным приложением, только с токеном. */
+    private fun openDownloaded(i: android.content.Intent) {
+        i.action = null
+        val blob = i.getStringExtra(TransferNotifier.EXTRA_BLOB).orEmpty()
+        if (!TransferNotifier.consumeOpenToken(blob, i.getStringExtra(TransferNotifier.EXTRA_TOKEN))) return
+        TransferNotifier.cancelResult(this, blob)
+        model.exportBlob(blob, "shared", i.getStringExtra(TransferNotifier.EXTRA_NAME).orEmpty()) { f ->
+            f?.let { openWithSystem(this, it) }
+        }
     }
 
     /** Запрос уже на экране: onStart и кнопка замка не должны поднять второй. */

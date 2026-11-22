@@ -306,6 +306,16 @@ class MessageActionReceiver : BroadcastReceiver() {
                 }
                 w
             }
+            TransferNotifier.ACTION_DISMISSED -> return TransferNotifier.onDismissed()
+            TransferNotifier.ACTION_CANCEL, TransferNotifier.ACTION_RETRY -> {
+                val id = intent.getStringExtra(TransferNotifier.EXTRA_BLOB)?.takeIf { it.matches(HEX_ID) } ?: return
+                val w: (AppModel) -> Unit = { m -> if (action == TransferNotifier.ACTION_CANCEL) m.cancelDownload(id) else m.retryDownload(id) }
+                w
+            }
+            TransferNotifier.ACTION_CANCEL_ALL -> {
+                val w: (AppModel) -> Unit = { m -> m.cancelAllDownloads() }
+                w
+            }
             RequestNotifier.ACTION_ACCEPT, RequestNotifier.ACTION_DECLINE,
             RequestNotifier.ACTION_JOIN, RequestNotifier.ACTION_REFUSE,
             -> {

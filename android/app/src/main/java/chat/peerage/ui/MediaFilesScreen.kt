@@ -213,7 +213,7 @@ private fun ready(model: AppModel, m: Message) = m.downloaded || model.savedBlob
 
 /** Скачать у автора: в личном чате это собеседник, в группе — приславший. */
 private fun download(model: AppModel, chat: ChatTarget, m: Message) =
-    model.downloadMedia(if (chat.group) m.sender else chat.id, m.blobId)
+    model.downloadMedia(if (chat.group) m.sender else chat.id, m.blobId, m.name, m.size, chat)
 
 // ── Медиа: сетка ────────────────────────────────────────────────────────────
 

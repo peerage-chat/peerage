@@ -1518,6 +1518,7 @@ class AppModel private constructor() {
                         netPeers = p
                         presence.forEach { (key, on) -> online[key] = on }
                         offline = nowOffline
+                        if (transfers.isNotEmpty()) refreshTransfers() // отправитель ушёл / вернулся
                     }
                     appContext?.let { ConnService.refresh(it, connState(nowOffline, p)) }
                     val flood = decodeList<FloodPeerDto>(Native.floodPeers(sessionPtr))
@@ -2228,10 +2229,49 @@ class AppModel private constructor() {
     }
 
     /** Скачать вложение по кнопке (крупное не тянется автоматически).
-     *  Готовность придёт событием `blob_received` — история перечитается. */
-    fun downloadMedia(peer: String, blobId: String) {
+     *  Готовность придёт событием `blob_received` — история перечитается. [name], [size] и
+     *  [chat] — для уведомления о передаче (без них докачка идёт молча). */
+    fun downloadMedia(peer: String, blobId: String, name: String = "", size: Long = 0, chat: ChatTarget? = null) {
         downloads[blobId] = DOWNLOAD_INIT
+        if (chat != null) {
+            appContext?.let { TransferNotifier.cancelResult(it, blobId) }
+            transfers[blobId] = TransferNotifier.Item(blobId, name.ifBlank { blobId.take(12) }, size, chat, peer, peerName(peer))
+            refreshTransfers()
+        }
         ops.execute { Native.downloadMedia(sessionPtr, peer, blobId) }
+    }
+
+    /** Докачки, заказанные в этой сессии, — для уведомления о передаче. Только главный поток. */
+    private val transfers = HashMap<String, TransferNotifier.Item>()
+
+    /** Не удавшиеся — для «Повторить». */
+    private val failedTransfers = HashMap<String, TransferNotifier.Item>()
+
+    /** Уведомление о передаче — по текущему прогрессу и тому, в сети ли отправитель. */
+    private fun refreshTransfers() {
+        val ctx = appContext ?: return
+        if (transfers.isEmpty() && !transfersShown) return
+        transfersShown = transfers.isNotEmpty()
+        val items = transfers.values.map { it.copy(frac = downloads[it.blobId] ?: DOWNLOAD_INIT, waiting = online[it.peer] == false) }
+        TransferNotifier.show(ctx, items)
+    }
+    private var transfersShown = false
+
+    /** «Отмена» в уведомлении: снять заказ, карточка снова предложит «Скачать». */
+    fun cancelDownload(blobId: String) = onMain {
+        downloads.remove(blobId)
+        transfers.remove(blobId)
+        refreshTransfers()
+        ops.execute { Native.cancelDownload(sessionPtr, blobId) }
+    }
+
+    fun cancelAllDownloads() = onMain { transfers.keys.toList().forEach { cancelDownload(it) } }
+
+    /** «Повторить» после ошибки — тот же заказ у того же отправителя. */
+    fun retryDownload(blobId: String) = onMain {
+        val item = failedTransfers.remove(blobId) ?: return@onMain
+        appContext?.let { ctx -> TransferNotifier.cancelResult(ctx, blobId) }
+        downloadMedia(item.peer, blobId, item.name, item.size, item.chat)
     }
 
     /** Код для своего QR (ADR-007): личность + подписанный текущий адрес, если он
@@ -2561,16 +2601,26 @@ class AppModel private constructor() {
             }
             is EngineEvent.BlobProgress -> {
                 if (ev.total > 0) downloads[ev.id] = ev.done / ev.total.toFloat()
+                onMain { if (ev.id in transfers) refreshTransfers() }
             }
             // Докачка не началась — карточка снова предлагает «Скачать», а человек
             // узнаёт причину, а не смотрит на вечный кружок.
             is EngineEvent.HistoryPruned -> reloadAfterPrune()
             is EngineEvent.BlobFailed -> {
                 downloads.remove(ev.id)
-                val msg = if (ev.reason == "no_space") R.string.download_no_space else R.string.download_too_large
+                val noSpace = ev.reason == "no_space"
+                val msg = if (noSpace) R.string.download_no_space else R.string.download_too_large
                 appContext?.let { ctx ->
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         android.widget.Toast.makeText(ctx, ctx.getString(msg), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    // Ошибка передачи — в шторку всегда; «Повторить» — где повтор поможет.
+                    onMain {
+                        transfers.remove(ev.id)?.let { item ->
+                            if (noSpace) failedTransfers[ev.id] = item
+                            TransferNotifier.failed(ctx, item, retry = noSpace, reason = ctx.getString(msg))
+                            refreshTransfers()
+                        }
                     }
                 }
             }
@@ -2578,6 +2628,13 @@ class AppModel private constructor() {
             // положить байты в реактивный кэш (пузырь перерисуется).
             is EngineEvent.BlobReceived -> {
                 downloads.remove(ev.id)
+                // «Скачано» — только ручное и только когда приложение свёрнуто.
+                onMain {
+                    transfers.remove(ev.id)?.let { item ->
+                        appContext?.let { ctx -> if (!foreground) TransferNotifier.done(ctx, item) }
+                        refreshTransfers()
+                    }
+                }
                 savedBlobs[ev.id] = true
                 // Пометка «скачано» — на месте во всех открытых лентах: блоб
                 // контент-адресный, один файл мог прийти в несколько чатов.

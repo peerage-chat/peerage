@@ -104,6 +104,9 @@ object Native {
     /** Скачать вложение по кнопке. Готовность придёт событием `blob_received`. */
     external fun downloadMedia(sessionPtr: Long, peerHex: String, blobIdHex: String): Boolean
 
+    /** Отменить заказанную докачку: заказ снят, недособранное удалено. */
+    external fun cancelDownload(sessionPtr: Long, blobIdHex: String): Boolean
+
     /** Журнал звонков (JSON-массив, свежие первыми). */
     external fun callLog(sessionPtr: Long, limit: Int): String
 
