@@ -426,13 +426,14 @@ impl GroupChat {
 
     /// Обработать входящее групповое сообщение ([`peerage_messenger::Event::Group`]).
     /// Если мы ещё не в группе — это Welcome (вступаем). Возвращает отправителя
-    /// и текст для прикладных сообщений либо актора смены состава.
-    pub fn handle(&mut self, data: &[u8]) -> Result<Inbound, GroupChatError> {
+    /// и текст для прикладных сообщений либо актора смены состава. `admin` — кто
+    /// вправе менять состав (см. [`Member::process`]); чужой такой коммит — ошибка.
+    pub fn handle(&mut self, data: &[u8], admin: Option<&PeerKey>) -> Result<Inbound, GroupChatError> {
         if !self.member.is_joined() {
             self.member.join(data)?;
             return Ok(Inbound::None);
         }
-        match self.member.process(data) {
+        match self.member.process(data, admin.map(|k| k.as_slice())) {
             Ok(Incoming::Message { sender, body }) => {
                 let sender = to_key(sender);
                 // M2: тело — JSON-envelope (текст/медиа); старое сырое-UTF-8 → текст.

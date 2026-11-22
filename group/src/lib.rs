@@ -39,6 +39,21 @@ pub enum GroupError {
     /// Верхний слой должен инициировать resync (re-add), а не глотать ошибку.
     #[error("рассинхрон эпох MLS — нужен resync")]
     EpochMismatch,
+    /// Коммит меняет состав (или правила группы), а сделал его не админ — не применён.
+    #[error("состав группы меняет только админ")]
+    NotAdmin,
+}
+
+/// Вправе ли автор применить этот коммит. Ротация своего ключа (Update и пустой
+/// путь) — любой участник; Add/Remove — только админ; прочие предложения (PSK,
+/// ReInit, правила группы…) мы не используем — их не принимаем ни от кого.
+fn commit_allowed(staged: &StagedCommit, committer: &[u8], admin: Option<&[u8]>) -> bool {
+    let is_admin = admin == Some(committer);
+    staged.queued_proposals().all(|q| match q.proposal() {
+        Proposal::Update(_) => true,
+        Proposal::Add(_) | Proposal::Remove(_) => is_admin,
+        _ => false,
+    })
 }
 
 fn mls<E: std::fmt::Display>(e: E) -> GroupError {
@@ -296,8 +311,10 @@ impl Member {
         out.tls_serialize_detached().map_err(mls)
     }
 
-    /// Обработать входящее групповое сообщение (прикладное или Commit).
-    pub fn process(&mut self, message: &[u8]) -> Result<Incoming, GroupError> {
+    /// Обработать входящее групповое сообщение (прикладное или Commit). `admin` —
+    /// единственный, чей коммит вправе менять состав (`None` — админ неизвестен:
+    /// не вправе никто). Чужой такой коммит не применяется: эпоха остаётся прежней.
+    pub fn process(&mut self, message: &[u8], admin: Option<&[u8]>) -> Result<Incoming, GroupError> {
         let msg = MlsMessageIn::tls_deserialize_exact(message).map_err(mls)?;
         let protocol = msg.try_into_protocol_message().map_err(mls)?;
         let group = self.group.as_mut().ok_or(GroupError::NoGroup)?;
@@ -314,11 +331,19 @@ impl Member {
         // Личность отправителя (= ed25519-pubkey, см. member_identities) доступна
         // до распаковки содержимого — снимаем до into_content(), который её поглощает.
         let sender = processed.credential().serialized_content().to_vec();
+        // Внешний вход (External Commit) и внешние отправители не предусмотрены:
+        // в группу попадают только через Add от админа.
+        if !matches!(processed.sender(), Sender::Member(_)) {
+            return Err(GroupError::NotAdmin);
+        }
         match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(app) => {
                 Ok(Incoming::Message { sender, body: app.into_bytes() })
             }
             ProcessedMessageContent::StagedCommitMessage(staged) => {
+                if !commit_allowed(&staged, &sender, admin) {
+                    return Err(GroupError::NotAdmin);
+                }
                 // Различаем ДО merge: удалили нас / сменился состав / только ротация.
                 let self_removed = staged.self_removed();
                 let mut added: Vec<Vec<u8>> = staged
@@ -401,6 +426,63 @@ mod tests {
         Identity::from_seed(&[n; 32]).unwrap()
     }
 
+    /// Приём в группе, где админ — создатель id(1) (как во всех тестах ниже).
+    fn from_a(m: &mut Member, msg: &[u8]) -> Result<Incoming, GroupError> {
+        m.process(msg, Some(&id(1).public_key_bytes()))
+    }
+
+    #[test]
+    fn roster_change_by_non_admin_is_refused() {
+        // Звать и убирать вправе только админ: коммит с Add/Remove от рядового
+        // участника остальные не применяют — их эпоха и ростер остаются прежними.
+        let mut a = Member::new(&id(1)).unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        let mut c = Member::new(&id(3)).unwrap();
+        let d = Member::new(&id(4)).unwrap();
+        a.create_group().unwrap();
+        let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
+        b.join(&w).unwrap();
+        let (commit, w) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
+        from_a(&mut b, &commit).unwrap();
+        c.join(&w).unwrap();
+
+        // B (не админ) зовёт D и отзывает C.
+        let (add_d, _) = b.add(&d.key_package().unwrap(), &id(4).public_key_bytes()).unwrap();
+        assert!(matches!(from_a(&mut a, &add_d), Err(GroupError::NotAdmin)));
+        assert!(matches!(from_a(&mut c, &add_d), Err(GroupError::NotAdmin)));
+        assert_eq!(a.member_count(), 3);
+        assert_eq!(c.member_count(), 3);
+
+        // Группа у A и C жива на прежней эпохе.
+        let ct = a.encrypt(b"still here").unwrap();
+        assert!(matches!(from_a(&mut c, &ct).unwrap(), Incoming::Message { body, .. } if body == b"still here"));
+    }
+
+    #[test]
+    fn non_admin_may_rotate_own_key() {
+        // Ротация своего ключа (PCS) состав не меняет — её может делать любой.
+        let mut a = Member::new(&id(1)).unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        a.create_group().unwrap();
+        let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
+        b.join(&w).unwrap();
+        let commit = b.update_self().unwrap();
+        assert!(matches!(from_a(&mut a, &commit).unwrap(), Incoming::Rekeyed));
+    }
+
+    #[test]
+    fn unknown_admin_refuses_roster_changes() {
+        // Админ неизвестен (старая группа) — менять состав не вправе никто.
+        let mut a = Member::new(&id(1)).unwrap();
+        let mut b = Member::new(&id(2)).unwrap();
+        let c = Member::new(&id(3)).unwrap();
+        a.create_group().unwrap();
+        let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
+        b.join(&w).unwrap();
+        let (commit, _) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
+        assert!(matches!(b.process(&commit, None), Err(GroupError::NotAdmin)));
+    }
+
     #[test]
     fn two_members_exchange_encrypted_messages() {
         let mut alice = Member::new(&id(1)).unwrap();
@@ -416,7 +498,7 @@ mod tests {
 
         // Alice → группа; Bob расшифровывает.
         let ct = alice.encrypt(b"hi group").unwrap();
-        match bob.process(&ct).unwrap() {
+        match from_a(&mut bob, &ct).unwrap() {
             Incoming::Message { sender, body } => {
                 assert_eq!(body, b"hi group");
                 assert_eq!(sender, id(1).public_key_bytes()); // отправитель = Alice
@@ -426,7 +508,7 @@ mod tests {
 
         // Bob → группа; Alice расшифровывает.
         let ct = bob.encrypt(b"hello back").unwrap();
-        match alice.process(&ct).unwrap() {
+        match from_a(&mut alice, &ct).unwrap() {
             Incoming::Message { sender, body } => {
                 assert_eq!(body, b"hello back");
                 assert_eq!(sender, id(2).public_key_bytes()); // отправитель = Bob
@@ -446,7 +528,7 @@ mod tests {
 
         // A добавляет C: commit идёт B, welcome — C.
         let (commit, welcome) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
-        b.process(&commit).unwrap(); // B применяет изменение состава
+        from_a(&mut b, &commit).unwrap(); // B применяет изменение состава
         c.join(&welcome).unwrap();
 
         assert_eq!(a.member_count(), 3);
@@ -455,8 +537,8 @@ mod tests {
 
         // Сообщение от C видят и A, и B.
         let ct = c.encrypt(b"hey all").unwrap();
-        assert!(matches!(a.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"hey all"));
-        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"hey all"));
+        assert!(matches!(from_a(&mut a, &ct).unwrap(), Incoming::Message { body, .. } if body == b"hey all"));
+        assert!(matches!(from_a(&mut b, &ct).unwrap(), Incoming::Message { body, .. } if body == b"hey all"));
     }
 
     #[test]
@@ -486,7 +568,7 @@ mod tests {
         let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
         b.join(&w).unwrap();
         let (commit_add_c, w) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
-        b.process(&commit_add_c).unwrap();
+        from_a(&mut b, &commit_add_c).unwrap();
         c.join(&w).unwrap();
         assert_eq!(a.member_count(), 3);
 
@@ -497,14 +579,14 @@ mod tests {
         // A отзывает C. Commit идёт ВСЕМ, включая удаляемого.
         let commit = a.remove(&id(3).public_key_bytes()).unwrap();
         assert_eq!(a.member_count(), 2);
-        assert!(matches!(b.process(&commit).unwrap(), Incoming::MembershipChanged { .. }));
+        assert!(matches!(from_a(&mut b, &commit).unwrap(), Incoming::MembershipChanged { .. }));
         assert_eq!(b.member_count(), 2);
-        assert!(matches!(c.process(&commit).unwrap(), Incoming::SelfRemoved));
+        assert!(matches!(from_a(&mut c, &commit).unwrap(), Incoming::SelfRemoved));
 
         // После отзыва: B читает, отозванный C — уже нет.
         let ct = a.encrypt(b"after kick").unwrap();
-        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"after kick"));
-        assert!(c.process(&ct).is_err());
+        assert!(matches!(from_a(&mut b, &ct).unwrap(), Incoming::Message { body, .. } if body == b"after kick"));
+        assert!(from_a(&mut c, &ct).is_err());
     }
 
     #[test]
@@ -519,7 +601,7 @@ mod tests {
         b.join(&w).unwrap();
 
         let (commit, w) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
-        match b.process(&commit).unwrap() {
+        match from_a(&mut b, &commit).unwrap() {
             Incoming::MembershipChanged { actor, added, removed } => {
                 assert_eq!(actor, id(1).public_key_bytes());
                 assert_eq!(added, vec![id(3).public_key_bytes().to_vec()]);
@@ -530,7 +612,7 @@ mod tests {
         c.join(&w).unwrap();
 
         let commit = a.remove(&id(3).public_key_bytes()).unwrap();
-        match b.process(&commit).unwrap() {
+        match from_a(&mut b, &commit).unwrap() {
             Incoming::MembershipChanged { added, removed, .. } => {
                 assert!(added.is_empty());
                 assert_eq!(removed, vec![id(3).public_key_bytes().to_vec()]);
@@ -550,20 +632,20 @@ mod tests {
         let (_, w) = a.add(&b.key_package().unwrap(), &id(2).public_key_bytes()).unwrap();
         b.join(&w).unwrap();
         let (commit, w) = a.add(&c.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
-        b.process(&commit).unwrap();
+        from_a(&mut b, &commit).unwrap();
         c.join(&w).unwrap();
 
         // C отстал: заново — со свежим KeyPackage.
         let mut c2 = Member::new(&id(3)).unwrap();
         let (commit, welcome) = a.swap(&c2.key_package().unwrap(), &id(3).public_key_bytes()).unwrap();
-        assert!(matches!(b.process(&commit).unwrap(), Incoming::Rekeyed));
+        assert!(matches!(from_a(&mut b, &commit).unwrap(), Incoming::Rekeyed));
         c2.join(&welcome).unwrap();
         assert_eq!(a.member_count(), 3);
         assert_eq!(b.member_count(), 3);
 
         let ct = a.encrypt(b"after swap").unwrap();
-        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"after swap"));
-        assert!(matches!(c2.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"after swap"));
+        assert!(matches!(from_a(&mut b, &ct).unwrap(), Incoming::Message { body, .. } if body == b"after swap"));
+        assert!(matches!(from_a(&mut c2, &ct).unwrap(), Incoming::Message { body, .. } if body == b"after swap"));
     }
 
     #[test]
@@ -576,9 +658,9 @@ mod tests {
         b.join(&w).unwrap();
 
         let commit = a.update_self().unwrap();
-        assert!(matches!(b.process(&commit).unwrap(), Incoming::Rekeyed));
+        assert!(matches!(from_a(&mut b, &commit).unwrap(), Incoming::Rekeyed));
         let ct = a.encrypt(b"post-rekey").unwrap();
-        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"post-rekey"));
+        assert!(matches!(from_a(&mut b, &ct).unwrap(), Incoming::Message { body, .. } if body == b"post-rekey"));
     }
 
     #[test]
@@ -595,7 +677,7 @@ mod tests {
         let _missed = a.update_self().unwrap();
         // Сообщение уже из новой эпохи; B на старой → рассинхрон.
         let ct = a.encrypt(b"from new epoch").unwrap();
-        assert!(matches!(b.process(&ct), Err(GroupError::EpochMismatch)));
+        assert!(matches!(from_a(&mut b, &ct), Err(GroupError::EpochMismatch)));
     }
 
     #[test]
@@ -618,7 +700,7 @@ mod tests {
         let mut a2 = Member::load(&path, &a_id).unwrap();
         assert_eq!(a2.member_count(), 2);
         let ct = a2.encrypt(b"after reload").unwrap();
-        assert!(matches!(b.process(&ct).unwrap(), Incoming::Message { body, .. } if body == b"after reload"));
+        assert!(matches!(from_a(&mut b, &ct).unwrap(), Incoming::Message { body, .. } if body == b"after reload"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

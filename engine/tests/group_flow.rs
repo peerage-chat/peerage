@@ -1206,6 +1206,31 @@ fn admin_transfer_moves_rights() {
     assert!(gone, "A отозван новым админом");
 }
 
+/// Звать в группу вправе только админ: у рядового участника приглашение не уходит,
+/// бывший админ после передачи прав тоже больше не зовёт. Чужой Add-коммит
+/// остальные не применяют — это проверяет `peerage-group` (roster_change_by_non_admin).
+#[test]
+fn only_admin_invites() {
+    let mut c = setup_and_join(0);
+    let (gid, b_key) = (c.gid.clone(), c.b_key);
+    let stranger = id(77).public_key_bytes();
+    c.gm_b.invite(&gid, stranger);
+    assert_eq!(c.gm_b.invited_json(&gid), "[]", "B не админ — не зовёт");
+
+    assert!(c.gm_a.transfer_admin(&gid, b_key, false));
+    let moved = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, b| {
+        admin_in_list(b, &gid) == hex::encode(b_key)
+    });
+    assert!(moved, "права у B");
+    c.gm_a.invite(&gid, stranger);
+    assert_eq!(c.gm_a.invited_json(&gid), "[]", "бывший админ не зовёт");
+    c.gm_b.invite(&gid, stranger);
+    assert!(
+        c.gm_b.invited_json(&gid).contains(&hex::encode(stranger)),
+        "новый админ зовёт"
+    );
+}
+
 /// Шаг 7j: админ уходит с передачей — у себя забывает группу сразу, новый админ
 /// отзывает его из ростера по тому же сообщению.
 #[test]

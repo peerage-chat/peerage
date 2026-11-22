@@ -25,7 +25,7 @@ fn pump_admin(rx: &Receiver<Event>, a: &mut GroupChat, secs: u64) -> Vec<String>
                 let _ = a.add_member(peer, &key_package);
             }
             Ok(Event::Group { data, .. }) => {
-                if let Ok(peerage_groupchat::Inbound::Message { text, .. }) = a.handle(&data) {
+                if let Ok(peerage_groupchat::Inbound::Message { text, .. }) = a.handle(&data, None) {
                     texts.push(text);
                 }
             }
@@ -58,7 +58,7 @@ fn pump_member(
             }
             Ok(Event::Group { data, .. }) => {
                 if let Some(c) = chat.as_mut() {
-                    if let Ok(Some(t)) = c.handle(&data) {
+                    if let Ok(Some(t)) = c.handle(&data, None) {
                         texts.push(t);
                     }
                 }

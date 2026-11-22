@@ -43,6 +43,15 @@ Introduce the **full membership lifecycle through one sequencer-admin** (the gro
 already established for adding and for order in ADR-002), plus **self-healing of laggards**.
 Three primitives, all on top of the existing reliable channel `Payload::Group` (retry until ack):
 
+### 0. Who may change the roster — enforced on receive (2026-11-22)
+Adding and removing is the admin's right not only in the UI: every member checks each incoming
+Commit before merging it (`peerage_group::Member::process(msg, admin)`). Add/Remove from anyone
+but the known admin, any other proposal kind (PSK, ReInit, GroupContextExtensions, …) and any
+non-member sender (External Commit) are refused — the Commit is not merged and the epoch stays.
+A plain self-Update (key rotation) is allowed from any member. Unknown admin (old group) —
+nobody may change the roster. A forged invite therefore only forks off the forger and the
+person they lured in; the rest of the group is unaffected.
+
 ### 1. Remove (revocation) — admin only
 The admin builds an MLS Commit removing the member's leaf (`remove_members` in openmls) and
 sends it **to all current members, including the one being removed**. The removed member,

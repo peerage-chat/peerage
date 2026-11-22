@@ -1023,7 +1023,7 @@
     <string name="group_members_count">Members · %1$d</string>
     <string name="group_creator_admin">creator — admin</string>
     <string name="group_gets_invite">gets an invite</string>
-    <string name="group_create_caption">Members get an invite. Only the admin removes members and pins messages; any member can invite.</string>
+    <string name="group_create_caption">Members get an invite. Only the admin invites, removes members and pins messages.</string>
     <string name="group_in_group">already in the group</string>
     <string name="group_invite_sent">invite sent</string>
     <string name="group_invite_caption">Only contacts can be invited. They join after accepting the invite.</string>

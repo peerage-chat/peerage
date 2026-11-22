@@ -331,9 +331,10 @@ impl GroupManager {
 
     /// Пригласить контакт в группу карточкой-сообщением (решение владельца 2026-06-28):
     /// шлём `GroupInvite` с именем группы; получатель сам решает вступать. Запоминаем
-    /// пару (peer, gid): его KeyPackage придёт с этим gid.
+    /// пару (peer, gid): его KeyPackage придёт с этим gid. Звать вправе только
+    /// админ: Add от другого участники не применят (см. `Member::process`).
     pub fn invite(&mut self, gid: &[u8], peer: [u8; 32]) {
-        if let Some(e) = self.groups.get(gid) {
+        if let Some(e) = self.groups.get(gid).filter(|e| e.admin) {
             let _ = self.messenger.send_group_invite(&peer, gid, &e.name);
             self.invites.insert((peer, gid.to_vec()));
             let _ = self.meta.add_sent_invite(&peer, gid);
@@ -891,6 +892,10 @@ impl GroupManager {
         let id = gid.to_vec();
         let _ = self.meta.remove_sent_invite(&peer, gid);
         let resync = self.resyncing.remove(&peer);
+        // Админство могли передать после приглашения: добавлять теперь не нам.
+        if !self.groups.get(&id).is_some_and(|e| e.admin) {
+            return false;
+        }
         // Перевыпуск отставшего — один коммит Remove+Add: остальным это смена эпохи,
         // а не «вышел и вошёл».
         let added = self
@@ -925,7 +930,11 @@ impl GroupManager {
         // Известная группа? (Commit или прикладное сообщение)
         let known = peek_group_id(data).filter(|g| self.groups.contains_key(g));
         if let Some(gid) = known {
-            let inbound = self.groups.get_mut(&gid).map(|e| e.chat.handle(data));
+            let admin = self.admin_keys.get(&gid).copied();
+            let inbound = self
+                .groups
+                .get_mut(&gid)
+                .map(|e| e.chat.handle(data, admin.as_ref()));
             let outcome = match inbound {
                 Some(Ok(Inbound::Message {
                     sender,
@@ -1133,15 +1142,11 @@ impl GroupManager {
                     added,
                     removed,
                 })) => {
-                    // Добавил тот, кто сделал коммит; убранный — о нём и строка.
-                    let fresh = !added.is_empty();
+                    // Добавил тот, кто сделал коммит (это всегда админ — чужой коммит
+                    // `handle` отверг); убранный — о нём и строка. Имя и фото новичку
+                    // админ уже послал сам (`on_key_reply`).
                     for who in added {
                         self.put_event(&gid, "joined", who, hex::encode(actor));
-                    }
-                    // Позвал не админ — имя и фото новичку шлёт админ: от других их
-                    // не примут.
-                    if fresh {
-                        self.send_card(&gid);
                     }
                     for who in removed {
                         self.put_event(&gid, "left", who, String::new());
@@ -1201,7 +1206,7 @@ impl GroupManager {
             return GroupOutcome::default();
         };
         let joined_gid = self.pending.as_mut().and_then(|p| {
-            let _ = p.handle(data);
+            let _ = p.handle(data, None); // ещё не в группе: это Welcome
             p.group_id()
         });
         if let Some(id) = joined_gid {

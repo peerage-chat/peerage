@@ -1079,7 +1079,7 @@
     <string name="group_members_count">Участники · %1$d</string>
     <string name="group_creator_admin">создатель — админ</string>
     <string name="group_gets_invite">получит приглашение</string>
-    <string name="group_create_caption">Участники получат приглашение. Удалять участников и закреплять сообщения может только админ, приглашать — любой участник.</string>
+    <string name="group_create_caption">Участники получат приглашение. Приглашать, удалять участников и закреплять сообщения может только админ.</string>
     <string name="group_in_group">уже в группе</string>
     <string name="group_invite_sent">приглашение отправлено</string>
     <string name="group_invite_caption">Приглашаются только контакты. Вход в группу — после принятия приглашения.</string>
