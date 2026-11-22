@@ -53,11 +53,20 @@ pub struct OutboxPeer {
     pub oldest: i64,
 }
 
-/// Сколько вложений от конкретного чата лежит на диске.
+/// Сколько вложений от конкретного чата лежит на диске. `chat` — hex ключа
+/// собеседника или gid, `group` — это группа.
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatStorage {
-    pub peer: String,
+    pub chat: String,
+    pub group: bool,
     pub files: u64,
+    pub bytes: u64,
+}
+
+/// Что удалило (или удалит, в предпросмотре) автоудаление: сообщений и байт файлов.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Pruned {
+    pub messages: usize,
     pub bytes: u64,
 }
 
@@ -238,6 +247,11 @@ pub enum UiEvent {
     /// удалось ли вернуться на него (иначе мы офлайн, и вернуть сеть может «онлайн»).
     TransportRotateFailed {
         online: bool,
+    },
+    /// Автоудаление убрало старое: перечитать список чатов, открытый чат и хранилище.
+    HistoryPruned {
+        messages: usize,
+        bytes: u64,
     },
     BlobProgress {
         id: String,

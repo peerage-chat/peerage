@@ -64,7 +64,7 @@ rules = page("Автоудаление", head("Автоудаление") + pane
     + '<div class="hd">Вложения</div><div class="grp"><div class="blk"><b>Удалять старше</b>'
     + segs(["Никогда", "Недели", "Месяца", "Года"], "Недели") + '</div><div class="dv"></div>'
     + '<div class="blk"><b>Только файлы от</b>' + segs(["Любого", "10 МБ", "100 МБ"], "10 МБ") + '</div></div>'
-    + '<div class="cap">Вместо файла остаётся строка «Вложение удалено». Скачать заново можно, пока файл есть у отправителя.</div>'
+    + '<div class="cap">Сообщения остаются. Скачать заново можно, пока файл есть у отправителя.</div>'
     + '<div class="hd">Свои правила</div><div class="grp">'
     + '<button class="r"><span class="av" style="background:#00695C;border-radius:12px;width:36px;height:36px;font-size:15px;">П</span><span class="lb">Походы</span><span class="v">Никогда</span></button>'
     + '<div class="dv" style="margin-left:64px;"></div>'

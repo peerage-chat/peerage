@@ -101,16 +101,13 @@
     <string name="menu_saved">Сохранённое</string>
     <string name="menu_storage">Хранилище</string>
     <!-- Экран хранилища (пока сознательно простой) -->
-    <string name="storage_attachments">Вложения</string>
     <plurals name="storage_files">
         <item quantity="one">%d файл</item>
         <item quantity="few">%d файла</item>
         <item quantity="many">%d файлов</item>
         <item quantity="other">%d файла</item>
     </plurals>
-    <string name="storage_attachments_hint">Фото, файлы и голосовые на этом телефоне. При очистке сообщения остаются, файлы можно скачать у отправителя заново.</string>
     <string name="storage_clear_attachments">Очистить вложения</string>
-    <string name="storage_clear_confirm">Удалить скачанные вложения? Сообщения останутся. Скачать заново можно, пока файлы есть у отправителя.</string>
     <string name="storage_clear_ok">Очистить</string>
     <string name="common_cancel">Отмена</string>
     <string name="menu_settings">Настройки</string>
@@ -474,18 +471,9 @@
         <item quantity="other">%d часа</item>
     </plurals>
     <string name="ago_minutes">%1$d мин</string>
-    <plurals name="storage_total_sub">
-        <item quantity="one">занято вложениями · %d файл</item>
-        <item quantity="few">занято вложениями · %d файла</item>
-        <item quantity="many">занято вложениями · %d файлов</item>
-        <item quantity="other">занято вложениями · %d файла</item>
-    </plurals>
     <string name="storage_by_chat">По чатам</string>
-    <string name="storage_free_up">Освободить место</string>
     <string name="storage_backup">Резервная копия данных</string>
     <string name="storage_backup_none">Копия не сделана</string>
-    <string name="storage_backup_hint">Переписка и контакты живут только на этом устройстве. Потеряете телефон — восстановить будет нечем: ключ возвращает личность, но не историю.</string>
-    <string name="storage_empty">Вложений пока нет.</string>
     <string name="viewer_of">%1$s · %2$d из %3$d</string>
     <string name="viewer_show_in_chat">Показать в чате</string>
     <string name="viewer_delete">Удалить</string>
@@ -748,10 +736,7 @@
     <string name="backup_done_counts">Контакты: %1$d · сообщения: %2$d · заметки: %3$d · вложения: %4$d</string>
     <string name="backup_after_groups_title">Группы придётся вернуть вручную</string>
     <string name="backup_after_groups_text">Писать в группы можно после нового приглашения от участников. Переписка групп остаётся видна.</string>
-    <string name="storage_backup_open">Сделать или восстановить копию данных</string>
 
-    <string name="storage_backup_done">Копия данных от %1$s</string>
-    <string name="storage_backup_done_hint">Копия, оставленная на телефоне, теряется вместе с ним.</string>
 
     <string name="backup_verify_again">Отметки «сверен» не переносятся: после восстановления контакты сверяются заново.</string>
 
@@ -1148,4 +1133,56 @@
         <item quantity="many">источников</item>
         <item quantity="other">источника</item>
     </plurals>
+
+    <!-- Хранилище и автоудаление (5.4, макеты screens/Storage, autodel/) -->
+    <string name="storage_total_caption">вложения на устройстве</string>
+    <string name="storage_backup_last">Последняя — %1$s</string>
+    <string name="storage_clear_title">Удалить скачанные вложения?</string>
+    <string name="storage_clear_sub">Сообщения останутся. Скачать заново можно, пока файлы есть у отправителя.</string>
+    <string name="autodel_title">Автоудаление</string>
+    <string name="autodel_off">Выключено</string>
+    <string name="autodel_sum_msgs">сообщения старше %1$s</string>
+    <string name="autodel_sum_att">вложения старше %1$s</string>
+    <string name="autodel_sum_att_size">вложения от %1$s старше %2$s</string>
+    <string name="autodel_gen_never">никогда</string>
+    <string name="autodel_gen_week">недели</string>
+    <string name="autodel_gen_month">месяца</string>
+    <string name="autodel_gen_year">года</string>
+    <string name="autodel_seg_never">Никогда</string>
+    <string name="autodel_seg_week">Недели</string>
+    <string name="autodel_seg_month">Месяца</string>
+    <string name="autodel_seg_year">Года</string>
+    <string name="autodel_size_any">Любого</string>
+    <string name="autodel_size_10">10 МБ</string>
+    <string name="autodel_size_100">100 МБ</string>
+    <string name="autodel_cap">Только на этом телефоне. «Сохранённое» и закреплённые сообщения не удаляются.</string>
+    <string name="autodel_messages">Сообщения</string>
+    <string name="autodel_attachments">Вложения</string>
+    <string name="autodel_older_than">Удалять старше</string>
+    <string name="autodel_min_size">Только файлы от</string>
+    <string name="autodel_att_cap">Сообщения остаются. Скачать заново можно, пока файл есть у отправителя.</string>
+    <string name="autodel_own">Свои правила</string>
+    <string name="autodel_own_cap">Задаётся в профиле чата.</string>
+    <string name="autodel_chat_title">Автоудаление в этом чате</string>
+    <string name="autodel_inherit">Как в общих</string>
+    <string name="autodel_older">Старше %1$s</string>
+    <string name="autodel_older_lc">старше %1$s</string>
+    <string name="autodel_chat_cap">Только на этом телефоне. Закреплённые сообщения не удаляются.</string>
+    <string name="autodel_confirm_msgs_title">Удалить старые сообщения?</string>
+    <string name="autodel_confirm_att_title">Удалить старые вложения?</string>
+    <plurals name="autodel_confirm_both">
+        <item quantity="one">Под правило попадает %1$s сообщение и %2$s вложений.</item>
+        <item quantity="few">Под правило попадают %1$s сообщения и %2$s вложений.</item>
+        <item quantity="many">Под правило попадают %1$s сообщений и %2$s вложений.</item>
+        <item quantity="other">Под правило попадают %1$s сообщения и %2$s вложений.</item>
+    </plurals>
+    <plurals name="autodel_confirm_msgs">
+        <item quantity="one">Под правило попадает %1$s сообщение.</item>
+        <item quantity="few">Под правило попадают %1$s сообщения.</item>
+        <item quantity="many">Под правило попадают %1$s сообщений.</item>
+        <item quantity="other">Под правило попадают %1$s сообщения.</item>
+    </plurals>
+    <string name="autodel_confirm_att">Под правило попадают %1$s вложений.</string>
+    <string name="autodel_confirm_tail">Удаление только на этом телефоне, без возврата.</string>
+    <string name="autodel_confirm_ok">Удалить и включить</string>
 </resources>

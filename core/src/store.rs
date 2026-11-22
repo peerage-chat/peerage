@@ -1214,7 +1214,7 @@ pub struct Attachment {
 /// Личные чаты, «Сохранённое» и группы лежат в ОДНОЙ таблице: разные хранилища
 /// означали бы, что каждая фича чата пишется дважды (и однажды — по-разному).
 pub struct MessageStore {
-    db: Db,
+    pub(crate) db: Db,
 }
 
 impl MessageStore {

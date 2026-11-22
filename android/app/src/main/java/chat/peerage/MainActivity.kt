@@ -272,6 +272,7 @@ internal enum class Screen {
     Search,
     NewChat,
     Storage,
+    Autodel,
     Outbox,
     Folders,
     FolderEdit,
@@ -500,7 +501,8 @@ private fun CompactShell(model: AppModel) {
                                 Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
                                 Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = goBack)
                                 Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = goBack)
-                                Screen.Storage -> TopBar(stringResource(R.string.menu_storage), onBack = goBack)
+                                Screen.Storage -> StorageHeader(model, onBack = goBack)
+                                Screen.Autodel -> TopBar(stringResource(R.string.autodel_title), onBack = goBack)
                                 Screen.Backup -> TopBar(stringResource(R.string.backup_title), onBack = goBack)
                                 Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = goBack)
                                 Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = goBack)
@@ -753,7 +755,12 @@ private fun CompactShell(model: AppModel) {
                                     Screen.EditProfile -> EditProfileScreen(model) { goBack() }
                                     Screen.VaultLevel -> VaultLevelScreen(dataDir) { goBack() }
                                     Screen.Saved -> SavedScreen(model)
-                                    Screen.Storage -> StorageScreen(model) { screen = Screen.Backup }
+                                    Screen.Storage -> StorageScreen(
+                                        model,
+                                        onBackup = { screen = Screen.Backup },
+                                        onAutodel = { screen = Screen.Autodel },
+                                    )
+                                    Screen.Autodel -> AutodelScreen(model)
                                     Screen.Backup -> BackupScreen(model) { screen = Screen.Storage }
                                     Screen.Folders -> FoldersScreen(model) { id ->
                                         editFolder = id

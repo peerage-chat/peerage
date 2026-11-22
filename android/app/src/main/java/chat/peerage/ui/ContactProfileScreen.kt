@@ -125,6 +125,7 @@ internal fun ContactProfileScreen(
         }
         CardSection {
             ProfileMediaEntry(model, ChatTarget(key, group = false), onMedia)
+            ProfileAutodelRow(model, ChatTarget(key, group = false))
             NavRow(
                 TablerIcons.Users,
                 stringResource(R.string.profile_common_groups),

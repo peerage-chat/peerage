@@ -231,6 +231,7 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             scope     INTEGER NOT NULL DEFAULT 0,
             pinned_at INTEGER NOT NULL DEFAULT 0,  -- 0 = не закреплён; иначе когда
             muted     INTEGER NOT NULL DEFAULT 0,
+            autodel   INTEGER NOT NULL DEFAULT -1, -- своё правило автоудаления, −1 = как в общих
             PRIMARY KEY (chat, scope)
         );
 
@@ -284,6 +285,7 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE contacts ADD COLUMN awaiting INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN name TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN contact INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN autodel INTEGER NOT NULL DEFAULT -1", []);
     // Полнотекстовый индекс переписки: текст и имя файла вложения (поиск в чате, 2.9).
     // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
     // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5

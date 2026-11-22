@@ -1537,6 +1537,105 @@ pub extern "system" fn Java_chat_peerage_Native_clearBlobs<'local>(
     })
 }
 
+/// Автоудаление: правило и чаты со своим, JSON `{rule, chats: [{chat, group, age}]}`.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_autodelState<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        ret(&env, &e.autodel_json())
+    })
+}
+
+/// Своё правило чата из пары «hex + группа?» и кода правила (пусто — как в общих).
+/// `None` — чата нет или код битый: ничего не делаем.
+fn chat_rule_arg(
+    env: &mut JNIEnv,
+    chat_hex: &JString,
+    is_group: jboolean,
+    own: &JString,
+) -> Option<(peerage_engine::ChatKey, peerage_core::autodel::ChatRule)> {
+    let chat = peerage_engine::ChatKey::parse(&jstr(env, chat_hex), is_group != 0)?;
+    let own = peerage_engine::autodel::parse_chat_rule(&jstr(env, own))?;
+    Some((chat, own))
+}
+
+fn pruned_json(p: peerage_engine::dto::Pruned) -> String {
+    serde_json::to_string(&p).unwrap_or_else(|_| "{}".into())
+}
+
+/// Что удалит правило `rule_json` (и своё правило чата поверх, если `chat_hex` не
+/// пуст), ничего не трогая. JSON `{messages, bytes}`.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_autodelPreview<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    rule_json: JString<'local>,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    own: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        let rule = match jstr(&mut env, &rule_json).as_str() {
+            "" => e.autodel_rule(),
+            s => match serde_json::from_str(s) {
+                Ok(r) => r,
+                Err(_) => return ret(&env, "{}"),
+            },
+        };
+        let chat = if jstr(&mut env, &chat_hex).is_empty() {
+            None
+        } else {
+            match chat_rule_arg(&mut env, &chat_hex, is_group, &own) {
+                Some(c) => Some(c),
+                None => return ret(&env, "{}"),
+            }
+        };
+        ret(&env, &pruned_json(e.autodel_preview(&rule, chat)))
+    })
+}
+
+/// Записать общее правило и применить. JSON удалённого `{messages, bytes}`.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_setAutodel<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    rule_json: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        let Ok(rule) = serde_json::from_str(&jstr(&mut env, &rule_json)) else {
+            return ret(&env, "{}");
+        };
+        ret(&env, &pruned_json(e.set_autodel(&rule)))
+    })
+}
+
+/// Записать своё правило чата (`own` пусто — как в общих) и применить.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_setChatAutodel<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    own: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        let Some((chat, own)) = chat_rule_arg(&mut env, &chat_hex, is_group, &own) else {
+            return ret(&env, "{}");
+        };
+        ret(&env, &pruned_json(e.set_chat_autodel(chat, own)))
+    })
+}
+
 /// Список контактов как JSON-массив.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_listContacts<'local>(

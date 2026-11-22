@@ -1,15 +1,10 @@
 package chat.peerage.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.HideImage
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,213 +18,186 @@ import chat.peerage.*
 import chat.peerage.R
 
 /**
- * Хранилище (макет `docs/design/mockups/storage.html`).
- *
- * Вопрос пользователя — «что съело место», поэтому первым идёт состав, а не список.
- * Ничего не удаляется само: очистка только по кнопке, и рядом честно сказано, что
- * скачать заново получится лишь пока файл есть у отправителя.
+ * Шапка «Хранилища» (макеты `screens/Storage`, `autodel/Main`): заголовок, итог и полоса
+ * состава — над панелью, на фоне экрана. Вопрос человека — «что съело место», поэтому
+ * состав читается раньше любого списка.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun StorageScreen(model: AppModel, onBackup: () -> Unit = {}) {
-    var confirm by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { model.refreshStorage() }
-
+internal fun StorageHeader(model: AppModel, onBack: () -> Unit) {
     val total = model.storageBlobBytes
     val kinds = model.storageByKind
-
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        // Итог крупно: сколько занято приложением.
+    Column(Modifier.fillMaxWidth().background(Tokens.Colors.bg)) {
+        TopBar(stringResource(R.string.menu_storage), onBack = onBack)
         Column(
-            Modifier.fillMaxWidth().padding(top = Tokens.Space.xl, bottom = Tokens.Space.m),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            Modifier.padding(start = Tokens.Space.xl, end = Tokens.Space.xl, top = Tokens.Space.s, bottom = Tokens.Space.xl),
+            verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
         ) {
-            Text(fmtSizeLong(total), color = Color.White, fontSize = Tokens.Font.huge, fontWeight = FontWeight.Medium)
-            Text(
-                pluralOf(R.plurals.storage_total_sub, model.storageBlobs),
-                color = HoloSecondary,
-                fontSize = Tokens.Font.body,
-                modifier = Modifier.padding(top = Tokens.Space.xxs),
-            )
-        }
-
-        // Полоса состава: ответ на «что съело место» должен читаться за секунду.
-        if (total > 0 && kinds.isNotEmpty()) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = ScreenPad).height(10.dp)
-                    .clip(RoundedCornerShape(Tokens.Radius.badge)),
-            ) {
-                kinds.forEach { (kind, bytes) ->
-                    Box(
-                        Modifier.fillMaxHeight().weight(bytes.toFloat().coerceAtLeast(0.001f))
-                            .background(kindColor(kind)),
-                    )
-                }
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                Text(fmtSizeLong(total), color = Color.White, fontSize = Tokens.Font.huge, fontWeight = FontWeight.Bold)
+                Text(
+                    stringResource(R.string.storage_total_caption),
+                    color = Tokens.Colors.tertiary,
+                    fontSize = Tokens.Font.body,
+                    modifier = Modifier.padding(bottom = Tokens.Space.xs),
+                )
             }
-            KindLegend(kinds)
-        }
-
-        SectionTitle(stringResource(R.string.storage_by_chat))
-        if (model.storageChats.isEmpty()) {
-            Text(
-                stringResource(R.string.storage_empty),
-                color = HoloSecondary,
-                fontSize = Tokens.Font.body,
-                modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
-            )
-        }
-        CardSection {
-            model.storageChats.forEachIndexed { i, (peer, files, bytes) ->
-                val c = model.contacts.firstOrNull { it.key == peer }
-                val name = c?.displayName ?: peer.take(12)
-                CardRow(divider = i > 0, inset = Tokens.Space.m + Tokens.Size.avatarHead + Tokens.Space.m) {
-                    SquareAvatar(
-                        name,
-                        size = Tokens.Size.avatarHead,
-                        avatarBytes = model.contactAvatars[c?.avatarId],
-                        circle = true,
-                        ring = Tokens.Colors.surface,
-                    )
-                    Spacer(Modifier.width(Tokens.Space.m))
-                    Column(Modifier.weight(1f)) {
-                        Text(name, color = Color.White, fontSize = Tokens.Font.label)
-                        Text(
-                            pluralOf(R.plurals.storage_files, files),
-                            color = HoloSecondary,
-                            fontSize = Tokens.Font.small,
-                        )
+            if (total > 0 && kinds.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(Tokens.Radius.badge)),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs),
+                ) {
+                    kinds.forEach { (kind, bytes) ->
+                        Box(Modifier.fillMaxHeight().weight(bytes.toFloat().coerceAtLeast(0.001f)).background(kindColor(kind)))
                     }
-                    Text(fmtSizeLong(bytes), color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m + Tokens.Space.xxs),
+                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+                ) {
+                    kinds.forEach { (kind, bytes) ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xs + Tokens.Space.xxs)) {
+                            Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(kindColor(kind)))
+                            Text(
+                                "${kindLabel(kind)} ${fmtSizeLong(bytes)}",
+                                color = Tokens.Colors.kindLegend,
+                                fontSize = Tokens.Font.small,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * «Хранилище» на панели: копия данных и автоудаление, вес по чатам, очистка вложений.
+ * Сама очистка — только по кнопке и с подтверждением; автоудаление — по правилу,
+ * которое человек включил сам.
+ */
+@Composable
+internal fun StorageScreen(model: AppModel, onBackup: () -> Unit, onAutodel: () -> Unit) {
+    var confirm by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        model.refreshStorage()
+        model.refreshAutodel()
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(top = Tokens.Space.panel, bottom = Tokens.Space.xxl),
+    ) {
+        CardSection {
+            val hasBackup = model.dataBackupAt > 0
+            NavRow(
+                TablerIcons.Database,
+                stringResource(R.string.storage_backup),
+                sub = if (hasBackup) {
+                    stringResource(R.string.storage_backup_last, fmtDayShort(model.dataBackupAt))
+                } else {
+                    stringResource(R.string.storage_backup_none)
+                },
+                divider = false,
+                onClick = onBackup,
+            )
+            NavRow(
+                TablerIcons.Clock,
+                stringResource(R.string.autodel_title),
+                sub = autodelSummary(model.autodel.rule),
+                onClick = onAutodel,
+            )
+        }
+
+        if (model.storageChats.isNotEmpty()) {
+            SectionTitle(stringResource(R.string.storage_by_chat))
+            CardSection {
+                model.storageChats.forEachIndexed { i, sc ->
+                    StorageChatRow(model, sc, divider = i > 0)
                 }
             }
         }
 
-        SectionTitle(stringResource(R.string.storage_free_up))
+        val canClear = model.storageBlobs > 0
+        Spacer(Modifier.height(Tokens.Space.m + Tokens.Space.xxs))
         CardSection {
-            CardRow(onClick = if (model.storageBlobs > 0) ({ confirm = true }) else null, divider = false) {
-                Icon(
-                    Icons.Filled.HideImage,
-                    null,
-                    tint = if (model.storageBlobs > 0) HoloAccent else HoloSecondary,
-                    modifier = Modifier.size(Tokens.Size.iconM),
-                )
-                Spacer(Modifier.width(Tokens.Space.m))
-                Text(
-                    stringResource(R.string.storage_clear_attachments),
-                    color = if (model.storageBlobs > 0) HoloAccent else HoloSecondary,
-                    fontSize = Tokens.Font.label,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(fmtSizeLong(total), color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
+            CardRow(onClick = if (canClear) ({ confirm = true }) else null, divider = false) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.storage_clear_attachments),
+                        color = if (canClear) Tokens.Colors.accent else Tokens.Colors.tertiary,
+                        fontSize = Tokens.Font.name,
+                    )
+                    Text(
+                        stringResource(R.string.storage_clear_sub),
+                        color = Tokens.Colors.tertiary,
+                        fontSize = Tokens.Font.body,
+                        modifier = Modifier.padding(top = Tokens.Space.xxs),
+                    )
+                }
             }
         }
-        Text(
-            stringResource(R.string.storage_attachments_hint),
-            color = HoloSecondary,
-            fontSize = Tokens.Font.small,
-            modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.xs),
-        )
-
-        // Резервная копия ДАННЫХ — не путать с копией КЛЮЧА: ключ возвращает личность,
-        // копия данных — переписку. Разделение намеренное.
-        //
-        // Пока копии не было — янтарь и объяснение цены бездействия. После неё —
-        // нейтральный тон и дата: тревожить дальше не за что, а дата отвечает на
-        // единственный оставшийся вопрос «насколько она свежая».
-        val hasBackup = model.dataBackupAt > 0
-        val accentColor = if (hasBackup) HoloOnline else WarnColor
-        SectionTitle(stringResource(R.string.storage_backup))
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = Tokens.Space.s)
-                .clip(RoundedCornerShape(Tokens.Radius.tile))
-                .background(accentColor.copy(alpha = 0.12f))
-                .clickable { onBackup() }
-                .padding(Tokens.Space.l),
-        ) {
-            Icon(
-                if (hasBackup) Icons.Filled.CheckCircle else Icons.Filled.Warning,
-                null,
-                tint = accentColor,
-                modifier = Modifier.size(Tokens.Size.iconM),
-            )
-            Spacer(Modifier.width(Tokens.Space.m))
-            Column {
-                Text(
-                    if (hasBackup) {
-                        stringResource(R.string.storage_backup_done, fmtDay(model.dataBackupAt))
-                    } else {
-                        stringResource(R.string.storage_backup_none)
-                    },
-                    color = accentColor,
-                    fontSize = Tokens.Font.body,
-                    fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    stringResource(
-                        if (hasBackup) R.string.storage_backup_done_hint else R.string.storage_backup_hint,
-                    ),
-                    color = HoloSecondary,
-                    fontSize = Tokens.Font.small,
-                    modifier = Modifier.padding(top = Tokens.Space.xxs),
-                )
-                Text(
-                    stringResource(R.string.storage_backup_open),
-                    color = HoloAccent,
-                    fontSize = Tokens.Font.body,
-                    modifier = Modifier.padding(top = Tokens.Space.s),
-                )
-            }
-        }
-        Spacer(Modifier.height(Tokens.Space.l))
     }
 
     if (confirm) {
-        AlertDialog(
-            onDismissRequest = { confirm = false },
-            title = { Text(stringResource(R.string.storage_clear_attachments)) },
-            text = { Text(stringResource(R.string.storage_clear_confirm)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    model.clearAttachments()
-                    confirm = false
-                }) { Text(stringResource(R.string.storage_clear_ok), color = HoloError) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirm = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
+        ConfirmSheet(
+            title = stringResource(R.string.storage_clear_title),
+            text = stringResource(R.string.storage_clear_sub),
+            ok = stringResource(R.string.storage_clear_ok),
+            onOk = { model.clearAttachments() },
+            onClose = { confirm = false },
         )
     }
 }
 
-/** Легенда состава: цвет + подпись + вес. */
+/** Строка «По чатам»: аватар чата (группа — квадратом), имя, сколько весят вложения. */
 @Composable
-private fun KindLegend(kinds: List<Pair<String, Long>>) {
-    Column(Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s)) {
-        kinds.forEach { (kind, bytes) ->
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = Tokens.Space.xxs),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(9.dp).clip(RoundedCornerShape(3.dp)).background(kindColor(kind)))
-                Spacer(Modifier.width(Tokens.Space.s))
-                Text(kindLabel(kind), color = HoloSecondary, fontSize = Tokens.Font.small, modifier = Modifier.weight(1f))
-                Text(fmtSizeLong(bytes), color = HoloSecondary, fontSize = Tokens.Font.small)
-            }
-        }
+private fun StorageChatRow(model: AppModel, sc: StorageChat, divider: Boolean) {
+    val (name, avatar) = chatFace(model, ChatTarget(sc.id, sc.group))
+    CardRow(divider = divider, inset = Tokens.Space.l + Tokens.Size.rowIcon + Tokens.Space.m) {
+        SquareAvatar(
+            name,
+            size = Tokens.Size.rowIcon,
+            avatarBytes = avatar,
+            circle = !sc.group,
+            bg = if (sc.group) Tokens.Colors.groupAvatar else null,
+        )
+        Spacer(Modifier.width(Tokens.Space.m))
+        Text(name, color = Color.White, fontSize = Tokens.Font.name, modifier = Modifier.weight(1f), maxLines = 1)
+        Text(fmtSizeLong(sc.bytes), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.option)
     }
 }
+
+/** Имя и фото чата: контакт — его имя и аватар, группа — название и фото. */
+@Composable
+internal fun chatFace(model: AppModel, chat: ChatTarget): Pair<String, ByteArray?> =
+    if (chat.group) {
+        val g = model.groups.firstOrNull { it.gid == chat.id }
+        (g?.name ?: chat.id.take(12)) to model.groupPhoto(chat.id)
+    } else {
+        val c = model.contacts.firstOrNull { it.key == chat.id }
+        (c?.displayName ?: chat.id.take(12)) to model.contactAvatars[c?.avatarId]
+    }
 
 /** Дата «1 августа 2026» — человеку важен возраст копии, а не время суток. */
 internal fun fmtDay(ts: Long): String =
     java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale.getDefault())
         .format(java.util.Date(ts * 1000))
 
+/** «3 октября» в этом году, «3 октября 2025» — в прошлом. */
+internal fun fmtDayShort(ts: Long): String {
+    val cal = java.util.Calendar.getInstance()
+    val year = cal.get(java.util.Calendar.YEAR)
+    cal.timeInMillis = ts * 1000
+    val pattern = if (cal.get(java.util.Calendar.YEAR) == year) "d MMMM" else "d MMMM yyyy"
+    return java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).format(cal.time)
+}
+
 private fun kindColor(kind: String): Color = when (kind) {
     "image" -> Tokens.Colors.accent
     "video" -> Tokens.Colors.kindVideo
     "voice" -> Tokens.Colors.online
-    else -> Tokens.Colors.iconMuted
+    else -> Tokens.Colors.kindFile
 }
 
 @Composable

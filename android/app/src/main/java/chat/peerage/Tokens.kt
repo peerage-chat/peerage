@@ -173,7 +173,9 @@ object Tokens {
         val iconBar = Color(0xFFD6D6DD) // иконки верхней панели
         val unreadMutedText = Color(0xFFB9B9C2) // цифра на счётчике чата без звука
         val scanScrim = Color(0x99000000) // затемнение вокруг рамки сканера QR
-        val kindVideo = Color(0xFF7E57C2) // видео в разбивке «Хранилища»
+        val kindVideo = Color(0xFF9B8CFF) // видео в разбивке «Хранилища»
+        val kindFile = Color(0xFFFFB74D) // файлы в разбивке «Хранилища»
+        val kindLegend = Color(0xFFB8B8C0) // подпись легенды разбивки «Хранилища»
         val trackIdle = Color(0xFF2A2D31) // неактивная дорожка слайдера, погасшая ячейка индикатора
         val viewerShadeTop = Color(0xB3000000) // затемнение под шапкой просмотрщика (чёрный @70%, в прозрачное)
         val viewerShadeBottom = Color(0xBF000000) // затемнение под подписью и таймлайном (чёрный @75%)

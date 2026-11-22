@@ -5,6 +5,7 @@
 
 pub mod kdf;
 pub mod lookalike;
+pub mod autodel;
 pub mod backup;
 pub mod budget;
 pub mod db;

@@ -528,9 +528,12 @@ class AppModel private constructor() {
     var storageByKind by mutableStateOf<List<Pair<String, Long>>>(emptyList())
         internal set
 
-    /** По чатам: (ключ пира, файлов, байт), самый тяжёлый первым. */
-    var storageChats by mutableStateOf<List<Triple<String, Long, Long>>>(emptyList())
+    /** По чатам, самый тяжёлый первым. */
+    var storageChats by mutableStateOf<List<StorageChat>>(emptyList())
         internal set
+
+    /** Автоудаление: общее правило и чаты со своим (5.4). */
+    internal var autodel by mutableStateOf(AutodelStateDto())
 
     // ── Резервная копия ДАННЫХ (M4) ───────────────────────────────────────────
     // Не путать с копией КЛЮЧА ([revealSeedPhrase]): ключ возвращает личность, копия
@@ -2072,7 +2075,7 @@ class AppModel private constructor() {
             is EngineEvent.MessageEv, is EngineEvent.Ack, is EngineEvent.Read,
             is EngineEvent.Retracted, is EngineEvent.GroupRetracted, is EngineEvent.MessageEdited,
             EngineEvent.GroupsChanged,
-            is EngineEvent.Undelivered, is EngineEvent.Failed,
+            is EngineEvent.Undelivered, is EngineEvent.Failed, is EngineEvent.HistoryPruned,
             -> markSummariesDirty()
             else -> {}
         }
@@ -2221,6 +2224,7 @@ class AppModel private constructor() {
             }
             // Докачка не началась — карточка снова предлагает «Скачать», а человек
             // узнаёт причину, а не смотрит на вечный кружок.
+            is EngineEvent.HistoryPruned -> reloadAfterPrune()
             is EngineEvent.BlobFailed -> {
                 downloads.remove(ev.id)
                 val msg = if (ev.reason == "no_space") R.string.download_no_space else R.string.download_too_large
@@ -2955,6 +2959,23 @@ class AppModel private constructor() {
                 loadingNewer -= key
             }
         }
+    }
+
+    /**
+     * Автоудаление убрало старое: открытые ленты перечитываются целиком, закрытые
+     * забываются (их перечитает вход в чат), кэш байтов сбрасывается — удалённый файл
+     * иначе показывался бы из памяти.
+     */
+    internal fun reloadAfterPrune() = ops.execute {
+        val dm = currentChat
+        val gid = currentGroup
+        val open = setOfNotNull(dm?.let { chatKey(it, group = false) }, gid?.let { chatKey(it, group = true) })
+        onMain { messages.keys.filter { it !in open }.forEach { messages.remove(it) } }
+        dm?.let { loadHistory(it) }
+        gid?.let { loadGroupHistory(it) }
+        mediaBlobs.clear()
+        chat.peerage.ui.Bitmaps.clear()
+        refreshStorage()
     }
 
     /** Вернуть ленту к хвосту переписки и встать на последнее сообщение. */

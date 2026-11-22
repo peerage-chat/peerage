@@ -258,6 +258,19 @@ object Native {
     /** Удалить все сохранённые вложения. Возвращает освобождённые байты. */
     external fun clearBlobs(sessionPtr: Long): Long
 
+    /** Автоудаление: правило и чаты со своим (JSON [AutodelStateDto]). */
+    external fun autodelState(sessionPtr: Long): String
+
+    /** Что удалит правило [ruleJson] (и своё правило чата [own] поверх, если [chatHex]
+     *  не пуст), ничего не трогая. JSON [PrunedDto]. [own] пусто — как в общих. */
+    external fun autodelPreview(sessionPtr: Long, ruleJson: String, chatHex: String, isGroup: Boolean, own: String): String
+
+    /** Записать общее правило и применить. JSON удалённого [PrunedDto]. */
+    external fun setAutodel(sessionPtr: Long, ruleJson: String): String
+
+    /** Записать своё правило чата ([own] пусто — как в общих) и применить. */
+    external fun setChatAutodel(sessionPtr: Long, chatHex: String, isGroup: Boolean, own: String): String
+
     /**
      * Закрепить/открепить сообщение. `isGroup` выбирает вид чата, `senderHex` —
      * автор закрепляемого (ссылка на сообщение — пара «автор + id»).

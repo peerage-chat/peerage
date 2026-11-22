@@ -16,7 +16,47 @@ fun AppModel.refreshStorage() = ops.execute {
     storageOutboxPending = st.outboxPending
     // Самый тяжёлый тип первым — полоса состава читается сверху вниз.
     storageByKind = st.byKind.toList().sortedByDescending { it.second }
-    storageChats = st.chats.map { Triple(it.peer, it.files, it.bytes) }
+    storageChats = st.chats.map { StorageChat(it.chat, it.group, it.files, it.bytes) }
+}
+
+// ── Автоудаление (5.4) ───────────────────────────────────────────────────────
+// Только на этом телефоне: правило — движка, здесь лишь его снимок для экранов.
+
+fun AppModel.refreshAutodel() = ops.execute {
+    autodel = decodeOrNull<AutodelStateDto>(Native.autodelState(sessionPtr)) ?: AutodelStateDto()
+}
+
+/** Своё правило чата: код возраста или `null` — как в общих. */
+internal fun AppModel.chatAutodel(chat: ChatTarget): String? =
+    autodel.chats.firstOrNull { it.chat == chat.id && it.group == chat.group }?.age
+
+/**
+ * Что удалит новое правило [rule] (или своё правило [own] чата [chat] поверх общего).
+ * Ответ — на главном потоке: экран по нему решает, нужна ли шторка подтверждения.
+ */
+internal fun AppModel.previewAutodel(
+    rule: AutodelRuleDto,
+    chat: ChatTarget? = null,
+    own: String? = null,
+    done: (PrunedDto) -> Unit,
+) = ops.execute {
+    val json = WireJson.encodeToString(AutodelRuleDto.serializer(), rule)
+    val p = decodeOrNull<PrunedDto>(
+        Native.autodelPreview(sessionPtr, json, chat?.id.orEmpty(), chat?.group == true, own.orEmpty()),
+    ) ?: PrunedDto()
+    android.os.Handler(android.os.Looper.getMainLooper()).post { done(p) }
+}
+
+/** Записать общее правило; удаление по нему идёт сразу. */
+internal fun AppModel.setAutodel(rule: AutodelRuleDto) = ops.execute {
+    Native.setAutodel(sessionPtr, WireJson.encodeToString(AutodelRuleDto.serializer(), rule))
+    autodel = decodeOrNull<AutodelStateDto>(Native.autodelState(sessionPtr)) ?: autodel
+}
+
+/** Записать своё правило чата ([own] `null` — как в общих). */
+internal fun AppModel.setChatAutodel(chat: ChatTarget, own: String?) = ops.execute {
+    Native.setChatAutodel(sessionPtr, chat.id, chat.group, own.orEmpty())
+    autodel = decodeOrNull<AutodelStateDto>(Native.autodelState(sessionPtr)) ?: autodel
 }
 
 /** Удалить сохранённые вложения. История и ссылки остаются — байты можно

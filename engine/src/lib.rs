@@ -8,6 +8,7 @@
 //! маршрутизацию) считает движок, не клиент. Поэтому ядро юнит-тестируется без
 //! устройства (см. `net.rs`, тесты презенса ниже).
 
+pub mod autodel;
 pub mod backup;
 pub mod blobs;
 pub mod dto;
@@ -2263,11 +2264,10 @@ impl Engine {
         // файлам на диске (сообщение может ссылаться на ещё не скачанный блоб), а один
         // и тот же блоб в разных чатах не дублируем — он контент-адресный.
         let mut by_kind: HashMap<String, u64> = HashMap::new();
-        let mut by_peer: HashMap<[u8; 32], (u64, u64)> = HashMap::new();
+        let mut by_chat: HashMap<(Vec<u8>, i64), (u64, u64)> = HashMap::new();
         let mut counted: std::collections::HashSet<String> = std::collections::HashSet::new();
         for a in self.messages.lock_safe().attachments() {
             let (blob_id, kind) = (a.blob_id, a.kind);
-            let peer = <[u8; 32]>::try_from(a.chat.as_slice()).unwrap_or([0u8; 32]);
             let path = self.blob_dir.join(&blob_id);
             let Ok(meta) = std::fs::metadata(&path) else {
                 continue;
@@ -2276,14 +2276,15 @@ impl Engine {
             if counted.insert(blob_id.clone()) {
                 *by_kind.entry(kind).or_insert(0) += len;
             }
-            let e = by_peer.entry(peer).or_insert((0, 0));
+            let e = by_chat.entry((a.chat, a.scope)).or_insert((0, 0));
             e.0 += 1;
             e.1 += len;
         }
-        let mut chats: Vec<dto::ChatStorage> = by_peer
+        let mut chats: Vec<dto::ChatStorage> = by_chat
             .into_iter()
-            .map(|(p, (files, bytes))| dto::ChatStorage {
-                peer: hex::encode(p),
+            .map(|((chat, scope), (files, bytes))| dto::ChatStorage {
+                chat: hex::encode(chat),
+                group: scope == 1,
                 files,
                 bytes,
             })
@@ -2319,21 +2320,8 @@ impl Engine {
         }
         self.blob_expect.lock_safe().clear();
 
-        let mut keep: std::collections::HashSet<String> =
-            self.messages.lock_safe().thumb_ids().into_iter().collect();
-        keep.extend(self.self_avatar_id());
-        // Фото групп — как аватары контактов: без них группа осталась бы без лица.
-        let cached = self.group_cache.lock_safe().list.clone();
-        let rows: Vec<GroupRowJson> = serde_json::from_str(&cached).unwrap_or_default();
-        keep.extend(rows.into_iter().map(|r| r.photo).filter(|p| !p.is_empty()));
-        keep.extend(
-            self.contacts
-                .lock_safe()
-                .list()
-                .iter()
-                .map(|c| c.avatar_id.clone())
-                .filter(|a| !a.is_empty()),
-        );
+        let mut keep = self.identity_blobs();
+        keep.extend(self.messages.lock_safe().thumb_ids());
 
         let mut freed = 0u64;
         if let Ok(rd) = std::fs::read_dir(&self.blob_dir) {
@@ -3678,6 +3666,10 @@ fn event_pump(
     push_event(&engine, dto::UiEvent::GroupsChanged);
     push_event(&engine, dto::UiEvent::GroupInvitesChanged);
     let mut last_beacon = Instant::now();
+    // Автоудаление: первый прогон сразу после старта (телефон мог лежать выключенным
+    // дольше порога), дальше — раз в час.
+    engine.autodel_run();
+    let mut last_autodel = Instant::now();
     // Один поток подготовки — вложения уходят в группу в том порядке, в каком их
     // отправили.
     let (prep_tx, prep_rx) = std::sync::mpsc::channel::<Job>();
@@ -3739,6 +3731,10 @@ fn event_pump(
         if last_beacon.elapsed() >= BEACON_INTERVAL {
             last_beacon = Instant::now();
             beacon_tick(&engine, &mut groups, &messenger);
+        }
+        if last_autodel.elapsed() >= autodel::AUTODEL_EVERY {
+            last_autodel = Instant::now();
+            engine.autodel_run();
         }
         push_group_messages(&engine, &mut groups);
         blobs.tick(); // переспросить потерянные чанки докачки (M2)

@@ -100,6 +100,7 @@ internal fun GroupProfileScreen(
     ) {
         CardSection {
             ProfileMediaEntry(model, ChatTarget(gid, group = true), onMedia)
+            ProfileAutodelRow(model, ChatTarget(gid, group = true))
         }
         Column {
             // Подпись группы стоит вплотную к ней (макет): общий зазор между группами её

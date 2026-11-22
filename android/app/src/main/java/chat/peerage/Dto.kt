@@ -188,10 +188,44 @@ internal data class OutboxPeerDto(
     val oldest: Long = 0,
 )
 
+/** Вложения одного чата на диске: `chat` — ключ собеседника или gid. */
 @Serializable
 internal data class ChatStorageDto(
-    val peer: String = "",
+    val chat: String = "",
+    val group: Boolean = false,
     val files: Long = 0,
+    val bytes: Long = 0,
+)
+
+/**
+ * Автоудаление (5.4): общее правило. Возраст — `never|week|month|year`, размер —
+ * `any|10mb|100mb` (форма провода `peerage_core::autodel`).
+ */
+@Serializable
+internal data class AutodelRuleDto(
+    val messages: String = "never",
+    val attachments: String = "never",
+    @SerialName("min_size") val minSize: String = "any",
+)
+
+/** Своё правило чата для сообщений. */
+@Serializable
+internal data class AutodelChatDto(
+    val chat: String = "",
+    val group: Boolean = false,
+    val age: String = "never",
+)
+
+@Serializable
+internal data class AutodelStateDto(
+    val rule: AutodelRuleDto = AutodelRuleDto(),
+    val chats: List<AutodelChatDto> = emptyList(),
+)
+
+/** Что удалит (предпросмотр) или удалило автоудаление. */
+@Serializable
+internal data class PrunedDto(
+    val messages: Long = 0,
     val bytes: Long = 0,
 )
 
@@ -513,6 +547,11 @@ internal sealed interface EngineEvent {
     @Serializable
     @SerialName("blob_progress")
     data class BlobProgress(val id: String, val done: Int = 0, val total: Int = 0) : EngineEvent
+
+    /** Автоудаление убрало старое: перечитать ленты, список чатов и хранилище. */
+    @Serializable
+    @SerialName("history_pruned")
+    data class HistoryPruned(val messages: Long = 0, val bytes: Long = 0) : EngineEvent
 
     /** Докачка не началась: `too_large` или `no_space`. Заказ снят движком. */
     @Serializable

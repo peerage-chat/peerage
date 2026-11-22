@@ -159,6 +159,9 @@ data class Reaction(val emoji: String, val who: List<String>)
 /** Чат как адресат пересылки: личный (ключ собеседника) или группа (gid). */
 data class ChatTarget(val id: String, val group: Boolean, val title: String = "")
 
+/** Строка «По чатам» в «Хранилище»: чат и сколько его вложений на диске. */
+data class StorageChat(val id: String, val group: Boolean, val files: Long, val bytes: Long)
+
 /**
  * Меню у пузыря (долгое нажатие): сообщение, его чат и где пузырь лежит в окне — меню
  * встаёт рядом, а затемнение обходит пузырь по его форме.

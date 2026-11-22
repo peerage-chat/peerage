@@ -107,14 +107,11 @@
     <string name="menu_saved">Saved</string>
     <string name="menu_storage">Storage</string>
     <!-- Storage screen (deliberately simple for now) -->
-    <string name="storage_attachments">Attachments</string>
     <plurals name="storage_files">
         <item quantity="one">%d file</item>
         <item quantity="other">%d files</item>
     </plurals>
-    <string name="storage_attachments_hint">Photos, files and voice messages on this phone. Clearing keeps the messages; files can be downloaded from the sender again.</string>
     <string name="storage_clear_attachments">Clear attachments</string>
-    <string name="storage_clear_confirm">Delete downloaded attachments? Messages stay. Files can be downloaded again while the sender still has them.</string>
     <string name="storage_clear_ok">Clear</string>
     <string name="common_cancel">Cancel</string>
     <string name="menu_settings">Settings</string>
@@ -458,16 +455,9 @@
         <item quantity="other">%d hours</item>
     </plurals>
     <string name="ago_minutes">%1$d min</string>
-    <plurals name="storage_total_sub">
-        <item quantity="one">used by attachments · %d file</item>
-        <item quantity="other">used by attachments · %d files</item>
-    </plurals>
     <string name="storage_by_chat">By chat</string>
-    <string name="storage_free_up">Free up space</string>
     <string name="storage_backup">Data backup</string>
     <string name="storage_backup_none">No backup yet</string>
-    <string name="storage_backup_hint">Your messages and contacts live only on this device. Lose the phone and there is nothing to restore from: the key brings back your identity, not your history.</string>
-    <string name="storage_empty">No attachments saved yet.</string>
     <string name="viewer_of">%1$s · %2$d of %3$d</string>
     <string name="viewer_show_in_chat">Show in chat</string>
     <string name="viewer_delete">Delete</string>
@@ -720,10 +710,7 @@
     <string name="backup_done_counts">Contacts: %1$d · messages: %2$d · notes: %3$d · attachments: %4$d</string>
     <string name="backup_after_groups_title">Groups need to be restored by hand</string>
     <string name="backup_after_groups_text">Writing to groups needs a new invitation from members. Group history stays visible.</string>
-    <string name="storage_backup_open">Create or restore a data backup</string>
 
-    <string name="storage_backup_done">Data backup from %1$s</string>
-    <string name="storage_backup_done_hint">A backup left on the phone is lost with it.</string>
 
     <string name="backup_verify_again">“Verified” marks are not restored: contacts are verified again after restoring.</string>
 
@@ -1094,4 +1081,52 @@
         <item quantity="one">source</item>
         <item quantity="other">sources</item>
     </plurals>
+
+    <!-- Хранилище и автоудаление (5.4, макеты screens/Storage, autodel/) -->
+    <string name="storage_total_caption">attachments on this device</string>
+    <string name="storage_backup_last">Last: %1$s</string>
+    <string name="storage_clear_title">Delete downloaded attachments?</string>
+    <string name="storage_clear_sub">Messages stay. Files can be downloaded again while the sender still has them.</string>
+    <string name="autodel_title">Auto-delete</string>
+    <string name="autodel_off">Off</string>
+    <string name="autodel_sum_msgs">messages older than %1$s</string>
+    <string name="autodel_sum_att">attachments older than %1$s</string>
+    <string name="autodel_sum_att_size">attachments from %1$s older than %2$s</string>
+    <string name="autodel_gen_never">never</string>
+    <string name="autodel_gen_week">a week</string>
+    <string name="autodel_gen_month">a month</string>
+    <string name="autodel_gen_year">a year</string>
+    <string name="autodel_seg_never">Never</string>
+    <string name="autodel_seg_week">Week</string>
+    <string name="autodel_seg_month">Month</string>
+    <string name="autodel_seg_year">Year</string>
+    <string name="autodel_size_any">Any</string>
+    <string name="autodel_size_10">10 MB</string>
+    <string name="autodel_size_100">100 MB</string>
+    <string name="autodel_cap">Only on this phone. Saved and pinned messages are never deleted.</string>
+    <string name="autodel_messages">Messages</string>
+    <string name="autodel_attachments">Attachments</string>
+    <string name="autodel_older_than">Delete older than</string>
+    <string name="autodel_min_size">Only files from</string>
+    <string name="autodel_att_cap">Messages stay. Files can be downloaded again while the sender still has them.</string>
+    <string name="autodel_own">Chat rules</string>
+    <string name="autodel_own_cap">Set in the chat profile.</string>
+    <string name="autodel_chat_title">Auto-delete in this chat</string>
+    <string name="autodel_inherit">As in general</string>
+    <string name="autodel_older">Older than %1$s</string>
+    <string name="autodel_older_lc">older than %1$s</string>
+    <string name="autodel_chat_cap">Only on this phone. Pinned messages are never deleted.</string>
+    <string name="autodel_confirm_msgs_title">Delete old messages?</string>
+    <string name="autodel_confirm_att_title">Delete old attachments?</string>
+    <plurals name="autodel_confirm_both">
+        <item quantity="one">The rule covers %1$s message and %2$s of attachments.</item>
+        <item quantity="other">The rule covers %1$s messages and %2$s of attachments.</item>
+    </plurals>
+    <plurals name="autodel_confirm_msgs">
+        <item quantity="one">The rule covers %1$s message.</item>
+        <item quantity="other">The rule covers %1$s messages.</item>
+    </plurals>
+    <string name="autodel_confirm_att">The rule covers %1$s of attachments.</string>
+    <string name="autodel_confirm_tail">Deleted only on this phone, permanently.</string>
+    <string name="autodel_confirm_ok">Delete and turn on</string>
 </resources>
