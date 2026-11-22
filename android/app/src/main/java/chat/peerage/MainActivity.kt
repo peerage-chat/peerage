@@ -96,8 +96,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * «Перезвонить» из уведомления о пропущенном: чат открывается всегда, звонок — только с
-     * токеном из нашего уведомления и с микрофоном (иначе остаётся чат с кнопкой звонка).
+     * «Перезвонить» (пропущенный) или «Присоединиться» (комната группы ожила) из уведомления: чат
+     * открывается всегда, звонок — только с токеном из нашего уведомления и с микрофоном (иначе
+     * остаётся чат с кнопкой звонка).
      */
     private fun callBack(i: android.content.Intent) {
         val tag = i.getStringExtra(EXTRA_SHORTCUT_CHAT).orEmpty()
@@ -105,7 +106,8 @@ class MainActivity : ComponentActivity() {
         i.action = ACTION_OPEN_CHAT // дальше — как тап по уведомлению: открыть чат
         val chat = chatOfShortcut(tag) ?: return
         MessageNotifier.cancel(this, chat)
-        if (ok && !chat.group && hasPermission(Manifest.permission.RECORD_AUDIO)) model.callDm(chat.id)
+        if (!ok || !hasPermission(Manifest.permission.RECORD_AUDIO)) return
+        if (chat.group) model.joinRoom(chat.id) else model.callDm(chat.id)
     }
 
     /** Запрос уже на экране: onStart и кнопка замка не должны поднять второй. */

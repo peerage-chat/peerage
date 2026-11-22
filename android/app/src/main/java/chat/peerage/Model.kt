@@ -649,9 +649,32 @@ class AppModel private constructor() {
             text = ctx.getString(if (video) R.string.chat_call_missed_video else R.string.chat_call_missed),
             time = now,
             avatar = contacts.firstOrNull { it.key == peer }?.avatarId?.let { contactAvatars[it] },
-            missedCall = true,
+            call = true,
         )
         MessageNotifier.post(ctx, chat, peerName(peer), mention = false, line = line)
+    }
+
+    /**
+     * Комната группы ожила ([RoomWatch]) — строкой в разговор группы с «Присоединиться» (п. 7):
+     * только при режиме группы «все»; лента группы на экране — без шторки (комнату и так видно).
+     */
+    private fun notifyRoomAlive(gid: String, inside: List<RoomMember>) {
+        val ctx = appContext ?: return
+        val first = inside.firstOrNull() ?: return
+        val chat = ChatTarget(gid, group = true)
+        if (notifyMode(gid, true) != NotifyMode.All || (viewing == chat && foreground)) return
+        val now = System.currentTimeMillis()
+        val line = MessageNotifier.Line(
+            id = now,
+            sender = first.peer,
+            name = peerName(first.peer),
+            text = ctx.getString(R.string.notif_voice_chat),
+            time = now,
+            avatar = contacts.firstOrNull { it.key == first.peer }?.avatarId?.let { contactAvatars[it] },
+            call = true,
+        )
+        val title = groups.firstOrNull { it.gid == gid }?.name ?: return
+        MessageNotifier.post(ctx, chat, title, mention = false, line = line)
     }
 
     /** Текст строки шторки: подпись или текст, у вложения без подписи — его вид. */
@@ -1431,6 +1454,7 @@ class AppModel private constructor() {
         tickerThread = Thread {
             var tick = 0L
             var zeroPeerTicks = 0 // счётчик тиков без пиров
+            val roomWatch = RoomWatch(System.currentTimeMillis())
             while (running) {
                 runCatching {
                     val p = Native.netPeers(sessionPtr)
@@ -1519,11 +1543,16 @@ class AppModel private constructor() {
                     }
                     // Присутствие в группах, к которым мы НЕ подключены:
                     // показывает кто уже в комнате до того как мы вошли.
+                    val nowMs = System.currentTimeMillis()
                     groups.forEach { g ->
-                        if (g.gid == currentRoom) return@forEach
+                        if (g.gid == currentRoom) {
+                            roomWatch.observe(g.gid, true, nowMs) // своя — живая, не «ожила»
+                            return@forEach
+                        }
                         val list = decodeList<RoomMemberDto>(Native.roomPresencePeers(sessionPtr, g.gid))
                             .map { RoomMember(it.peer, it.audio, it.video) }
                         if (groupPresence[g.gid] != list) onMain { groupPresence[g.gid] = list }
+                        if (roomWatch.observe(g.gid, list.isNotEmpty(), nowMs)) onMain { notifyRoomAlive(g.gid, list) }
                     }
                     // Диагностика + авто-реконнект меша.
                     // peers=0 два тика подряд (~6с) → Yggdrasil потерял все пиры.

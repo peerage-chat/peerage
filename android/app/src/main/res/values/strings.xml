@@ -385,6 +385,7 @@
     <string name="notif_decline">Decline</string>
     <string name="notif_no_video">Without video</string>
     <string name="notif_call_back">Call back</string>
+    <string name="notif_join_room">Join</string>
     <string name="notif_incoming_channel">Incoming calls</string>
     <string name="notif_incoming_channel_desc">Incoming call notification</string>
     <string name="notif_conn_channel">Connection</string>

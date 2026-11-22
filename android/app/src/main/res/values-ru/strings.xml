@@ -395,6 +395,7 @@
     <string name="notif_decline">Отклонить</string>
     <string name="notif_no_video">Без видео</string>
     <string name="notif_call_back">Перезвонить</string>
+    <string name="notif_join_room">Присоединиться</string>
     <string name="notif_incoming_channel">Входящие звонки</string>
     <string name="notif_incoming_channel_desc">Уведомление о входящем звонке</string>
     <string name="notif_conn_channel">Соединение</string>
