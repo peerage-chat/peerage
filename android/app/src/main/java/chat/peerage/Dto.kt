@@ -499,7 +499,13 @@ internal sealed interface EngineEvent {
         val id: Long,
         val sender: String,
         val reactions: List<Reaction> = emptyList(),
+        /** Чужая реакция на моё сообщение — повод для уведомления (beta.md 7f). */
+        val news: ReactNewsDto? = null,
     ) : EngineEvent
+
+    /** Кто, что и чем было сообщение: строка «Боб: 👍 к «…»» без запроса истории. */
+    @Serializable
+    data class ReactNewsDto(val by: String, val emoji: String, val quote: String = "", val kind: String = "text")
 
     /** Сообщение исправлено автором — заменить текст в ленте на месте. */
     @Serializable

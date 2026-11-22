@@ -42,6 +42,9 @@ internal const val TYPING_SHOWN_MS = 5_000L
 
 class AppModel private constructor() {
     companion object {
+        /** Начало сообщения в строке о реакции — не длиннее (символов). */
+        private const val QUOTE_MAX = 40
+
         private const val KEY_SEEN_INVITES = "seen_invites"
 
         /**
@@ -699,12 +702,38 @@ class AppModel private constructor() {
         MessageNotifier.post(ctx, chat, title, mention = false, line = line)
     }
 
+    /**
+     * Реакция на моё сообщение (beta.md 7f) — строкой «Боб: 👍 к «начало»» в разговор чата, по
+     * тому же правилу, что сообщение: режим чата (реакция — не упоминание), лента на экране — без
+     * шторки (там капсула «❤»).
+     */
+    private fun notifyReaction(chat: ChatTarget, news: EngineEvent.ReactNewsDto) {
+        val ctx = appContext ?: return
+        val now = System.currentTimeMillis()
+        val onScreen = viewing == chat && foreground
+        if (!MessageNotifier.shouldNotify(false, false, false, false, onScreen, notifyMode(chat.id, chat.group), false, 0, now)) return
+        val title = if (chat.group) groups.firstOrNull { it.gid == chat.id }?.name.orEmpty() else peerName(chat.id)
+        val quote = previewText(ctx, news.quote, news.kind).let { if (it.length > QUOTE_MAX) it.take(QUOTE_MAX).trimEnd() + "…" else it }
+        val line = MessageNotifier.Line(
+            id = now,
+            sender = news.by,
+            name = peerName(news.by),
+            text = ctx.getString(R.string.notif_reaction, news.emoji, quote),
+            time = now,
+            avatar = contacts.firstOrNull { it.key == news.by }?.avatarId?.let { contactAvatars[it] },
+        )
+        MessageNotifier.post(ctx, chat, title, mention = false, line = line)
+    }
+
     /** Текст строки шторки: подпись или текст, у вложения без подписи — его вид. */
-    private fun notificationText(ctx: android.content.Context, m: Message): String = when {
-        m.text.isNotBlank() -> Mentions.plain(m.text, m.mentions, ::mentionName)
-        m.kind == "image" -> ctx.getString(R.string.chats_preview_photo)
-        m.kind == "video" -> ctx.getString(R.string.chats_preview_video)
-        m.kind == "voice" -> ctx.getString(R.string.chats_preview_voice)
+    private fun notificationText(ctx: android.content.Context, m: Message): String =
+        if (m.text.isNotBlank()) Mentions.plain(m.text, m.mentions, ::mentionName) else previewText(ctx, "", m.kind)
+
+    private fun previewText(ctx: android.content.Context, text: String, kind: String): String = when {
+        text.isNotBlank() -> text
+        kind == "image" -> ctx.getString(R.string.chats_preview_photo)
+        kind == "video" -> ctx.getString(R.string.chats_preview_video)
+        kind == "voice" -> ctx.getString(R.string.chats_preview_voice)
         else -> ctx.getString(R.string.chats_preview_file)
     }
 
@@ -2489,6 +2518,7 @@ class AppModel private constructor() {
                 }
                 // Новая чужая реакция на моё в открытом чате — на «❤».
                 if (openChatTarget() == ChatTarget(ev.chat, ev.group)) loadUnseenReactions(ChatTarget(ev.chat, ev.group))
+                ev.news?.let { notifyReaction(ChatTarget(ev.chat, ev.group), it) }
             }
             is EngineEvent.MessageEdited -> {
                 val stamp = System.currentTimeMillis() / 1000

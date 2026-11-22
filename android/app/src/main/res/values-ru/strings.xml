@@ -403,6 +403,7 @@
     <string name="notif_voice_room">Голосовая комната · %1$s</string>
     <string name="notif_room_you">вы</string>
     <string name="notif_room_line">В голосовой комнате</string>
+    <string name="notif_reaction">%1$s к «%2$s»</string>
     <string name="fsi_title">Входящий на весь экран</string>
     <string name="fsi_text">Без разрешения входящий звонок на заблокированном экране приходит только уведомлением.</string>
     <string name="fsi_later">Не сейчас</string>
