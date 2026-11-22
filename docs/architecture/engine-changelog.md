@@ -30,6 +30,28 @@
 
 ---
 
+## 2026-11-22 · Зачистка метаданных видео, HEIC и WebP · (коммит ниже) (бета 7m)
+
+**Причина:** beta.md 7m — `blob/src/scrub.rs` чистил только JPEG и PNG; видео с камеры уходило
+с геометкой (`©xyz`, ключи `mdta` в `moov/udta/meta`), HEIC — с EXIF-элементом, WebP — с чанками
+`EXIF`/`XMP `.
+
+- **Поведение:** перед подсчётом хэша вложение чистится **по содержимому, а не по mime**:
+  JPEG/PNG — как раньше; WebP — вырезаются `EXIF`/`XMP `, снимаются флаги в `VP8X`; ISO BMFF
+  (MP4/MOV/3GP, HEIC/HEIF/AVIF) — новый `peerage_blob::bmff`: `udta`, `meta` (кроме HEIF-`meta`
+  с `hdlr pict`), XMP-`uuid` перемечаются в `free` и зануляются, время в `mvhd`/`tkhd`/`mdhd` —
+  ноль; в HEIF зануляются данные элементов `Exif` и XMP по `iloc`. Длина и смещения кадров не
+  меняются — видео не ломается и чистится файлом на месте. Файл, который не удалось зачистить
+  (нет записи), не отправляется.
+- **Контракт:** `Engine::send_media_file` / `group_send_media_file` теперь переписывают файл на
+  месте — отдавать свою копию (клиент и так отдаёт копию из кэша). Новое в `peerage-blob`:
+  `scrub::scrub_file`, модуль `bmff`.
+- **Схема / совместимость:** не меняются; получатель видит обычный файл.
+- **Тесты:** `blob/tests/scrub_media.rs` (образцы ffmpeg с геометкой обоих видов, синтетический
+  HEIC; кадры и `stco` побайтно целы), `scrub::tests::webp_strips_exif_and_xmp`,
+  `garbage_never_panics` (proptest), `engine/tests/media.rs::video_file_leaves_without_geotag`.
+  Вручную: зачищенные образцы декодируются ffmpeg, `location`/`creation_time` пропали.
+
 ## 2026-11-22 · Признак просмотра реакций (капсула «❤») · af17100 (UI 5.7)
 
 **Причина:** ui-redesign-impl.md 5.7, app-ui.md → «Непрочитанные», макет `jump/Capsule`:

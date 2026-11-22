@@ -1262,7 +1262,8 @@ impl Engine {
         self.send_media_from(key, MediaSource::Bytes(content), mime, name, info)
     }
 
-    /// Отправить вложение, лежащее ФАЙЛОМ, не поднимая его в память.
+    /// Отправить вложение, лежащее ФАЙЛОМ, не поднимая его в память. Файл
+    /// переписывается на месте (зачистка метаданных) — отдавать свою копию.
     pub fn send_media_file(
         &self,
         key: &[u8; 32],
@@ -1293,24 +1294,28 @@ impl Engine {
     /// после рестарта) и вернуть его контент-адрес и размер. Общая подготовка
     /// личного и группового вложения.
     ///
-    /// Байты в памяти: картинку сперва чистим от метаданных (EXIF/GPS), как аватар.
-    /// Файл: манифест считается потоково, копия пишется тем же потоком чанками —
-    /// в память он не поднимается. Картинки сюда файлом не приходят: scrub-у нужен
-    /// весь файл, а весят они немного. `None` — файл не читается или больше предела
-    /// приёма (его не примет ни один получатель).
+    /// Метаданные (EXIF/GPS, геометка видео, время) снимаются до подсчёта хэша — по
+    /// содержимому, а не по mime: HEIC, WebP и MP4 уходили как есть (шаг беты 7m).
+    /// Байты в памяти — [`peerage_blob::scrub::scrub`]. Файл чистится НА МЕСТЕ
+    /// ([`peerage_blob::scrub::scrub_file`], без сдвига байтов — видео не поднимается в
+    /// память), поэтому сюда отдают свою копию, а не оригинал. Затем манифест считается
+    /// потоково, копия пишется тем же потоком чанками. `None` — файл не читается или
+    /// больше предела приёма (его не примет ни один получатель).
     fn store_media(&self, source: MediaSource, mime: &str) -> Option<(peerage_blob::Hash, u64)> {
         match source {
             MediaSource::Bytes(content) => {
-                let bytes = if mime.starts_with("image/") {
-                    peerage_blob::scrub::scrub(mime, &content)
-                } else {
-                    content
-                };
+                let bytes = peerage_blob::scrub::scrub(mime, &content);
                 let hash = peerage_blob::blob_id(&bytes);
                 self.store_blob(hash, &bytes);
                 Some((hash, bytes.len() as u64))
             }
             MediaSource::File(path) => {
+                // Не вышло зачистить (файл только на чтение) — не отправляем: молча уйти с
+                // геометкой хуже, чем не уйти.
+                if let Err(e) = peerage_blob::scrub::scrub_file(&path) {
+                    log::warn!("вложение: зачистка метаданных не удалась: {e}");
+                    return None;
+                }
                 let manifest = peerage_blob::manifest_of_file(&path, mime.to_string()).ok()?;
                 if manifest.size > peerage_blob::Limits::default().max_size {
                     return None;
@@ -2503,7 +2508,8 @@ impl Engine {
     }
 
     /// Отправить в группу вложение, лежащее ФАЙЛОМ, не поднимая его в память.
-    /// Fire-and-forget: манифест и своя копия считаются в потоке подготовки.
+    /// Fire-and-forget: манифест и своя копия считаются в потоке подготовки. Файл
+    /// переписывается на месте (зачистка метаданных) — отдавать свою копию.
     pub fn group_send_media_file(
         &self,
         gid: Vec<u8>,

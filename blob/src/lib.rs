@@ -16,6 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod bmff;
 pub mod disk;
 pub mod scrub;
 

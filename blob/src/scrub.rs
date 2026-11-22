@@ -1,28 +1,65 @@
-//! Снятие приватных метаданных с изображений перед отправкой (веха M2, PET-ось).
+//! Снятие приватных метаданных с вложений перед отправкой (веха M2, PET-ось; шаг беты 7m).
 //!
 //! Работает **без перекодирования** (без потери качества, без тяжёлых зависимостей):
-//! вырезает сегменты/чанки с метаданными из JPEG и PNG. Снимает стандартный
-//! приватный слой — **EXIF/GPS, XMP, IPTC, текстовые комментарии, время**.
+//! вырезает или зануляет известные места с метаданными. Снимает стандартный приватный слой —
+//! **EXIF/GPS, XMP, IPTC, текстовые комментарии, время**:
+//! - JPEG, PNG, WebP — вырезанием сегментов и чанков;
+//! - ISO BMFF (MP4/MOV/3GP, HEIC/HEIF/AVIF) — на месте, без сдвига байтов ([`crate::bmff`]):
+//!   видео и HEIC так можно чистить и файлом на диске ([`scrub_file`]).
 //!
-//! Честный предел: это не полный ре-энкод. Стандартные EXIF/GPS-геометки уходят
-//! гарантированно; экзотический эмбеддер в нестандартном сегменте может проскочить.
-//! Полная зачистка ре-энкодом — отдельный опциональный слой (тяжёлая image-зависимость).
-//! Неизвестные форматы возвращаются без изменений (best-effort).
+//! Честный предел: это не полный ре-энкод. Стандартные геометки уходят гарантированно;
+//! экзотический эмбеддер в нестандартном месте может проскочить. Полная зачистка
+//! перекодированием — после беты. Неизвестные форматы возвращаются без изменений.
 
-/// Снять метаданные с изображения по mime/содержимому. Возвращает очищенные байты
-/// (или исходные, если формат не распознан). Вызывать ДО [`crate::build`].
+use std::io::Cursor;
+use std::path::Path;
+
+/// Снять метаданные по содержимому (mime не нужен: формат виден по сигнатуре). Возвращает
+/// очищенные байты (или исходные, если формат не распознан). Вызывать ДО [`crate::build`].
 pub fn scrub(_mime: &str, data: &[u8]) -> Vec<u8> {
     if is_jpeg(data) {
         scrub_jpeg(data)
     } else if is_png(data) {
         scrub_png(data)
+    } else if is_webp(data) {
+        scrub_webp(data)
+    } else if crate::bmff::looks_like(data) {
+        let mut c = Cursor::new(data.to_vec());
+        let len = data.len() as u64;
+        // Ошибка ввода-вывода у курсора — только обрыв разбора: что успели, то занулено.
+        let _ = crate::bmff::scrub(&mut c, len);
+        c.into_inner()
     } else {
         data.to_vec()
     }
 }
 
+/// Зачистить файл НА МЕСТЕ, не поднимая в память (видео на гигабайт). Только ISO BMFF —
+/// у него зачистка не меняет длину; прочее не трогаем (`Ok(0)`). Файл переписывается — звать
+/// на своей копии, а не на оригинале пользователя. Возвращает число зачищенных мест.
+pub fn scrub_file(path: &Path) -> std::io::Result<usize> {
+    use std::io::Read;
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?;
+    let mut head = [0u8; 12];
+    let got = f.read(&mut head)?;
+    if !crate::bmff::looks_like(&head[..got]) {
+        return Ok(0);
+    }
+    let len = f.metadata()?.len();
+    let n = crate::bmff::scrub(&mut f, len)?;
+    f.sync_all()?;
+    Ok(n)
+}
+
 fn is_jpeg(d: &[u8]) -> bool {
     d.len() >= 2 && d[0] == 0xFF && d[1] == 0xD8
+}
+
+fn is_webp(d: &[u8]) -> bool {
+    d.len() >= 12 && &d[..4] == b"RIFF" && &d[8..12] == b"WEBP"
 }
 
 fn is_png(d: &[u8]) -> bool {
@@ -93,6 +130,36 @@ fn scrub_png(d: &[u8]) -> Vec<u8> {
     out
 }
 
+/// WebP: RIFF-чанки, вырезать `EXIF` и `XMP `, в `VP8X` снять флаги их наличия (иначе
+/// декодер ищет то, чего нет) и пересчитать размер RIFF.
+fn scrub_webp(d: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(d.len());
+    out.extend_from_slice(&d[..12]);
+    let mut i = 12;
+    while i + 8 <= d.len() {
+        let kind = &d[i..i + 4];
+        let len = u32::from_le_bytes([d[i + 4], d[i + 5], d[i + 6], d[i + 7]]) as usize;
+        let end = (i + 8).saturating_add(len).saturating_add(len & 1); // чётное выравнивание
+        if end > d.len() {
+            out.extend_from_slice(&d[i..]); // обрыв — хвост как есть
+            break;
+        }
+        match kind {
+            b"EXIF" | b"XMP " => {}
+            b"VP8X" if len >= 1 => {
+                let at = out.len() + 8;
+                out.extend_from_slice(&d[i..end]);
+                out[at] &= !(0x08 | 0x04); // флаги EXIF и XMP
+            }
+            _ => out.extend_from_slice(&d[i..end]),
+        }
+        i = end;
+    }
+    let riff = (out.len() - 8) as u32;
+    out[4..8].copy_from_slice(&riff.to_le_bytes());
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +217,69 @@ mod tests {
     fn non_image_passthrough() {
         let data = b"just a text file, not an image".to_vec();
         assert_eq!(scrub("text/plain", &data), data);
+    }
+
+    fn chunk(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut c = kind.to_vec();
+        c.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        c.extend_from_slice(payload);
+        if payload.len() % 2 == 1 {
+            c.push(0);
+        }
+        c
+    }
+
+    /// WebP: EXIF и XMP вырезаны, флаги в VP8X сняты, кадр цел, размер RIFF верный.
+    #[test]
+    fn webp_strips_exif_and_xmp() {
+        let mut body = b"WEBP".to_vec();
+        body.extend(chunk(b"VP8X", &[0x0C, 0, 0, 0, 15, 0, 0, 15, 0, 0]));
+        body.extend(chunk(b"VP8 ", b"frame-bytes"));
+        body.extend(chunk(b"EXIF", b"GPS 55.75N 37.61E"));
+        body.extend(chunk(b"XMP ", b"<x:xmpmeta/>"));
+        let mut webp = b"RIFF".to_vec();
+        webp.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        webp.extend(body);
+
+        let out = scrub("image/webp", &webp);
+        assert!(
+            !contains(&out, b"EXIF") && !contains(&out, b"GPS"),
+            "EXIF ушёл"
+        );
+        assert!(
+            !contains(&out, b"XMP ") && !contains(&out, b"xmpmeta"),
+            "XMP ушёл"
+        );
+        assert!(contains(&out, b"frame-bytes"), "кадр на месте");
+        assert_eq!(out[20], 0, "флаги EXIF/XMP в VP8X сняты");
+        let riff = u32::from_le_bytes([out[4], out[5], out[6], out[7]]) as usize;
+        assert_eq!(riff, out.len() - 8, "размер RIFF пересчитан");
+    }
+
+    /// Битые входы любой формы не роняют разбор и не меняют длину ISO BMFF.
+    #[test]
+    fn garbage_never_panics() {
+        use proptest::prelude::*;
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let heads: [&[u8]; 4] = [b"ftyp", b"moov", b"RIFF", b"\xff\xd8"];
+        runner
+            .run(
+                &(0usize..4, proptest::collection::vec(any::<u8>(), 0..400)),
+                |(h, tail)| {
+                    let mut d = vec![0, 0, 0, 24];
+                    d.extend_from_slice(heads[h]);
+                    if h == 2 {
+                        d = b"RIFF\0\0\0\0WEBP".to_vec();
+                    }
+                    d.extend(tail);
+                    let out = scrub("x", &d);
+                    if crate::bmff::looks_like(&d) {
+                        prop_assert_eq!(out.len(), d.len());
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
     }
 
     fn contains(hay: &[u8], needle: &[u8]) -> bool {

@@ -176,3 +176,54 @@ fn helpful_of(engine: &Engine, peer: &[u8; 32]) -> u64 {
         .and_then(|c| c["helpful"].as_u64())
         .unwrap_or(0)
 }
+
+/// Видео файлом уходит без геометки (шаг беты 7m): движок чистит свою копию на месте, и в
+/// хранилище — а значит и у получателя — лежит уже зачищенное.
+#[test]
+fn video_file_leaves_without_geotag() {
+    peerage_core::vault::init_with_key([9u8; 32]);
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(41), id(42));
+    let b_key = b_id.public_key_bytes();
+    let a = start(&net, a_id, tmpdir("ga"));
+    a.add_contact(&b_key, "B");
+
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../blob/tests/fixtures/geotag-mdta.mp4");
+    let original = std::fs::read(&fixture).unwrap();
+    let geo = b"+55.7558";
+    assert!(
+        original.windows(geo.len()).any(|w| w == geo),
+        "в образце геометка есть"
+    );
+    let path = tmpdir("gsrc").join("v.mp4");
+    std::fs::write(&path, &original).unwrap();
+
+    a.send_media_file(
+        &b_key,
+        &path,
+        "video/mp4",
+        "v.mp4",
+        peerage_engine::MediaInfo::default(),
+    )
+    .expect("send_media_file");
+
+    let sent = std::fs::read(&path).unwrap();
+    assert_eq!(
+        sent.len(),
+        original.len(),
+        "длина прежняя — кадры не сдвинуты"
+    );
+    assert!(
+        !sent.windows(geo.len()).any(|w| w == geo),
+        "своя копия зачищена"
+    );
+    let stored = a
+        .blob_read(&hex::encode(peerage_blob::blob_id(&sent)))
+        .expect("в хранилище — зачищенная копия");
+    assert!(
+        !stored.windows(geo.len()).any(|w| w == geo),
+        "в хранилище геометки нет"
+    );
+    a.shutdown();
+}
