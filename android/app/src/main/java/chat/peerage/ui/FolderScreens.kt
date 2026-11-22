@@ -1,17 +1,16 @@
 package chat.peerage.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MarkEmailRead
-import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,327 +20,298 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 
 /**
- * Папки (макет `docs/design/mockups/folder-editor.html`).
+ * Папки (макеты `misc/Folders`, `misc/FolderEdit`).
  *
  * Папка — ВИД, а не коробка: чат попадает сразу в несколько, а удаление папки не
  * трогает переписку. Правила комбинируются неочевидно («типы + конкретные чаты −
- * исключения»), поэтому в редакторе обязателен живой счётчик: иначе результат виден
- * только после выхода.
+ * исключения»), поэтому у редактора живой счётчик в шапке: результат виден, пока правишь.
  */
 
-/** Значки, доступные пользователю для своей папки (из курируемого набора Tabler). */
+/** Значки своей папки (`misc/FolderEdit`). Ключ хранится в папке; незнакомый — «папка». */
 internal val FolderIcons: List<Pair<String, ImageVector>> = listOf(
-    "messages" to TablerIcons.Messages,
-    "message" to TablerIcons.Message,
+    "briefcase" to TablerIcons.Briefcase,
+    "home" to TablerIcons.Home,
+    "folder" to TablerIcons.Folder,
     "headphones" to TablerIcons.Headphones,
     "speakerphone" to TablerIcons.Speakerphone,
-    "users" to TablerIcons.Users,
-    "bell" to TablerIcons.Bell,
-    "lock" to TablerIcons.ShieldLock,
-    "user" to TablerIcons.User,
+    "message" to TablerIcons.Message,
 )
 
 internal fun folderIcon(key: String): ImageVector =
-    FolderIcons.firstOrNull { it.first == key }?.second ?: TablerIcons.Messages
+    FolderIcons.firstOrNull { it.first == key }?.second ?: TablerIcons.Folder
 
-/** Список папок: встроенные (только для сведения) + свои с переходом в редактор. */
+/** Список папок: встроенные — для сведения; свои — с переходом в редактор и «Создать папку». */
 @Composable
 internal fun FoldersScreen(model: AppModel, onEdit: (String?) -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = Tokens.Space.l, bottom = Tokens.Space.xxl)) {
         Text(
             stringResource(R.string.folders_hint),
-            color = HoloSecondary,
+            color = Tokens.Colors.tertiary,
             fontSize = Tokens.Font.body,
-            modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.m),
+            lineHeight = Tokens.Font.lineHeight,
+            modifier = Modifier.padding(horizontal = Tokens.Space.panelText),
         )
 
         SectionTitle(stringResource(R.string.folders_builtin))
         CardSection {
-            Folders.forEachIndexed { i, (key, icon, labelRes) ->
-                val count = when (key) {
-                    "all" -> model.contacts.size + model.groups.size
-                    "dm" -> model.contacts.size
-                    "room" -> model.groups.size
-                    else -> 0
-                }
-                CardRow(divider = i > 0) {
-                    Icon(icon, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconM))
-                    Spacer(Modifier.width(Tokens.Space.m))
-                    Text(
-                        stringResource(labelRes),
-                        color = Color.White,
-                        fontSize = Tokens.Font.label,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text("$count", color = Tokens.Colors.secondary, fontSize = Tokens.Font.body)
-                }
+            Folders.forEachIndexed { i, (_, icon, labelRes) ->
+                FolderRow(icon, stringResource(labelRes), divider = i > 0)
             }
         }
 
-        // Своих папок нет — нет и раздела: пустая карточка под заголовком читалась
-        // как недогрузившийся список.
-        if (model.folders.isNotEmpty()) {
-            SectionTitle(stringResource(R.string.folders_mine))
-            CardSection {
-                model.folders.forEachIndexed { i, f ->
-                    CardRow(onClick = { onEdit(f.id) }, divider = i > 0, inset = Tokens.Space.m + Tokens.Size.avatarHead + Tokens.Space.m) {
-                        Box(
-                            Modifier.size(Tokens.Size.avatarHead).clip(RoundedCornerShape(Tokens.Radius.button))
-                                .background(FolderSelected),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(folderIcon(f.icon), null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconS))
-                        }
-                        Spacer(Modifier.width(Tokens.Space.m))
-                        Text(f.name, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
-                        Icon(
-                            TablerIcons.ChevronRight,
-                            null,
-                            tint = Tokens.Colors.tertiary,
-                            modifier = Modifier.size(Tokens.Size.iconS),
-                        )
+        SectionTitle(stringResource(R.string.folders_mine))
+        CardSection {
+            model.folders.forEachIndexed { i, f ->
+                val n = model.folderCount(f)
+                FolderRow(
+                    folderIcon(f.icon),
+                    f.name,
+                    divider = i > 0,
+                    sub = pluralStringResource(R.plurals.folder_chats, n, n),
+                    chevron = true,
+                ) { onEdit(f.id) }
+            }
+            FolderRow(
+                TablerIcons.Plus,
+                stringResource(R.string.folder_create),
+                divider = model.folders.isNotEmpty(),
+                accent = true,
+            ) { onEdit(null) }
+        }
+    }
+}
+
+/** Строка группы папок (`.gr`): значок, название и подпись, шеврон у своей. */
+@Composable
+private fun FolderRow(
+    icon: ImageVector,
+    label: String,
+    divider: Boolean,
+    sub: String? = null,
+    chevron: Boolean = false,
+    accent: Boolean = false,
+    onClick: (() -> Unit)? = null,
+) {
+    CardRow(onClick = onClick, divider = divider, inset = 0.dp) {
+        Icon(icon, null, tint = if (accent) Tokens.Colors.accent else Tokens.Colors.fieldIcon, modifier = Modifier.size(Tokens.Size.iconRow))
+        Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
+        Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xxs)) {
+            Text(
+                label,
+                color = if (accent) Tokens.Colors.accent else Color.White,
+                fontSize = Tokens.Font.label,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+            if (sub != null) {
+                Text(sub, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body, modifier = Modifier.padding(top = Tokens.Space.xxs))
+            }
+        }
+        if (chevron) Icon(TablerIcons.ChevronRight, null, tint = Tokens.Colors.chevron, modifier = Modifier.size(Tokens.Size.iconS))
+    }
+}
+
+/** Шапка редактора: «Папка» и живой счётчик «7 чатов». */
+@Composable
+internal fun FolderEditTopBar(model: AppModel, onBack: () -> Unit) {
+    TopBar(stringResource(R.string.folder_edit_title), onBack = onBack) {
+        model.folderDraft?.let { d ->
+            val n = model.folderCount(d)
+            Text(
+                pluralStringResource(R.plurals.folder_chats, n, n),
+                color = Tokens.Colors.accentSoft,
+                fontSize = Tokens.Font.body,
+                modifier = Modifier.padding(end = Tokens.Space.m),
+            )
+        }
+    }
+}
+
+/**
+ * Редактор папки. [folderId] == null — новая. Правка идёт в черновик модели и пишется при
+ * выходе ([AppModel.commitFolderDraft]); без названия новая папка не появляется.
+ */
+@Composable
+internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -> Unit) {
+    DisposableEffect(folderId) {
+        model.folderDraft = folderId?.let { model.folderById(it) }
+            ?: Folder("f${System.currentTimeMillis()}", "", FolderIcons.first().first, types = setOf("dm"))
+        onDispose { model.commitFolderDraft() }
+    }
+    val d = model.folderDraft ?: return
+    val edit = { f: Folder -> model.folderDraft = f }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val existing = folderId != null
+
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = Tokens.Space.l)) {
+            NameField(d.name) { edit(d.copy(name = it)) }
+            Row(
+                Modifier.fillMaxWidth().padding(
+                    start = Tokens.Space.panel,
+                    end = Tokens.Space.panel,
+                    top = Tokens.Space.s + Tokens.Space.xxs,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            ) {
+                FolderIcons.forEach { (key, iv) -> IconTile(iv, key == d.icon) { edit(d.copy(icon = key)) } }
+            }
+
+            SectionTitle(stringResource(R.string.folder_include))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.panel),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            ) {
+                TypeChip(stringResource(R.string.folder_type_dm), "dm" in d.types) { edit(d.copy(types = d.types.toggle("dm"))) }
+                TypeChip(stringResource(R.string.folder_type_room), "room" in d.types) { edit(d.copy(types = d.types.toggle("room"))) }
+            }
+
+            val picks = pickable(model)
+            if (picks.isNotEmpty()) {
+                SectionTitle(stringResource(R.string.folder_pick_chats))
+                CardSection {
+                    picks.forEachIndexed { i, t ->
+                        PickRow(model, t, t.id in d.chats, divider = i > 0) { edit(d.copy(chats = d.chats.toggle(t.id))) }
                     }
                 }
             }
-        }
 
-        // «Создать папку» — своей карточкой под списком: это действие, а не ещё
-        // одна папка, и попасть в него по ошибке при промахе по списку не должно.
-        Spacer(Modifier.height(Tokens.Space.s))
-        CardSection {
-            CardRow(onClick = { onEdit(null) }, divider = false) {
-                Icon(TablerIcons.Plus, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
-                Spacer(Modifier.width(Tokens.Space.m))
-                Text(stringResource(R.string.folder_create), color = HoloAccent, fontSize = Tokens.Font.label)
-            }
-        }
-        Spacer(Modifier.height(Tokens.Space.l))
-    }
-}
-
-/** Редактор папки. [folderId] == null — создание новой. */
-@Composable
-internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -> Unit) {
-    val existing = folderId?.let { model.folderById(it) }
-    var name by remember(folderId) { mutableStateOf(existing?.name ?: "") }
-    var icon by remember(folderId) { mutableStateOf(existing?.icon ?: FolderIcons.first().first) }
-    var types by remember(folderId) { mutableStateOf(existing?.types ?: setOf("dm")) }
-    var chats by remember(folderId) { mutableStateOf(existing?.chats ?: emptySet()) }
-    var excludeRead by remember(folderId) { mutableStateOf(existing?.excludeRead ?: false) }
-    var confirmDelete by remember { mutableStateOf(false) }
-
-    // Живой счётчик: без него правила «типы + чаты − исключения» проверяются только
-    // выходом из редактора.
-    val preview = Folder("preview", name, icon, types, chats, excludeRead)
-    val hits = model.contacts.count { model.folderHasDm(preview, it.key) } +
-        model.groups.count { model.folderHasGroup(preview, it.gid) }
-
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        SectionTitle(stringResource(R.string.folder_name_and_icon))
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = ScreenPad),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier.size(48.dp).clip(RoundedCornerShape(Tokens.Radius.button)).background(FolderSelected),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(folderIcon(icon), null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconL))
-            }
-            Spacer(Modifier.width(Tokens.Space.m))
-            Box(
-                Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(Tokens.Radius.tile))
-                    .background(HoloSurface).padding(horizontal = Tokens.Space.l),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                BasicTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    textStyle = Tokens.Text.base.copy(color = Color.White),
-                    cursorBrush = SolidColor(HoloAccent),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    decorationBox = { inner ->
-                        if (name.isEmpty()) {
-                            Text(stringResource(R.string.folder_name_hint), color = HoloSecondary, fontSize = Tokens.Font.label)
-                        }
-                        inner()
-                    },
-                )
-            }
-        }
-        // Выбор значка — сразу рядом, без отдельного экрана.
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = Tokens.Space.m),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-        ) {
-            FolderIcons.forEach { (key, iv) ->
-                val on = key == icon
-                Box(
-                    Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(Tokens.Radius.chip))
-                        .background(if (on) FolderSelected else HoloSurface)
-                        .clickable { icon = key },
-                    contentAlignment = Alignment.Center,
+            SectionTitle(stringResource(R.string.folder_exclude))
+            CardSection {
+                CardRow(
+                    divider = false,
+                    modifier = Modifier.switchRow(d.excludeRead) { edit(d.copy(excludeRead = it)) },
                 ) {
-                    Icon(iv, null, tint = if (on) HoloAccent else HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
+                    Icon(TablerIcons.Check, null, tint = Tokens.Colors.fieldIcon, modifier = Modifier.size(Tokens.Size.iconRow))
+                    Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
+                    Text(
+                        stringResource(R.string.folder_exclude_read),
+                        color = Color.White,
+                        fontSize = Tokens.Font.label,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(checked = d.excludeRead, onCheckedChange = null)
                 }
             }
+            Spacer(Modifier.height(Tokens.Space.l))
         }
-
-        SectionTitle(stringResource(R.string.folder_include))
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = ScreenPad),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-        ) {
-            TypeChip(TablerIcons.Message, R.string.folder_type_dm, "dm" in types) {
-                types = if ("dm" in types) types - "dm" else types + "dm"
-            }
-            TypeChip(TablerIcons.Headphones, R.string.folder_type_room, "room" in types) {
-                types = if ("room" in types) types - "room" else types + "room"
-            }
-        }
-
-        Text(
-            stringResource(R.string.folder_pick_chats),
-            color = HoloSecondary,
-            fontSize = Tokens.Font.small,
-            modifier = Modifier.padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
-        )
-        model.groups.forEach { g ->
-            PickRow(g.name, g.gid in chats, null) {
-                chats = if (g.gid in chats) chats - g.gid else chats + g.gid
-            }
-        }
-        model.contacts.forEach { c ->
-            PickRow(c.displayName, c.key in chats, model.contactAvatars[c.avatarId]) {
-                chats = if (c.key in chats) chats - c.key else chats + c.key
-            }
-        }
-
-        SectionTitle(stringResource(R.string.folder_exclude))
-        Row(Modifier.fillMaxWidth().padding(horizontal = ScreenPad)) {
-            TypeChip(Icons.Filled.MarkEmailRead, R.string.folder_exclude_read, excludeRead) {
-                excludeRead = !excludeRead
-            }
-        }
-
-        // Итог правил — одной строкой.
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = ScreenPad, vertical = Tokens.Space.m)
-                .clip(RoundedCornerShape(Tokens.Radius.tile)).background(HoloSurface)
-                .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                pluralStringResource(R.plurals.folder_counter, hits, hits),
-                color = HoloSecondary,
-                fontSize = Tokens.Font.body,
-            )
-        }
-
-        // Без имени — серая, а не глухая кнопка.
-        AccentButton(
-            stringResource(R.string.common_save),
-            Modifier.fillMaxWidth().padding(horizontal = ScreenPad),
-            enabled = name.isNotBlank(),
-        ) {
-            model.saveFolder(
-                Folder(
-                    id = folderId ?: "f${System.currentTimeMillis()}",
-                    name = name.trim(),
-                    icon = icon,
-                    types = types,
-                    chats = chats,
-                    excludeRead = excludeRead,
+        if (existing) {
+            GhostButton(
+                stringResource(R.string.folder_delete),
+                color = Tokens.Colors.iconDangerMuted,
+                modifier = Modifier.fillMaxWidth().padding(
+                    start = Tokens.Space.xl,
+                    end = Tokens.Space.xl,
+                    top = Tokens.Space.m,
+                    bottom = Tokens.Space.xxl,
                 ),
-            )
-            onDone()
+            ) { confirmDelete = true }
         }
-
-        if (existing != null) {
-            Row(
-                Modifier.fillMaxWidth().clickable { confirmDelete = true }
-                    .padding(horizontal = ScreenPad, vertical = RowPadV),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Delete, null, tint = HoloError, modifier = Modifier.size(Tokens.Size.iconM))
-                Spacer(Modifier.width(Tokens.Space.m))
-                Text(stringResource(R.string.folder_delete), color = HoloError, fontSize = Tokens.Font.label)
-            }
-        }
-        Spacer(Modifier.height(Tokens.Space.l))
     }
 
     if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text(stringResource(R.string.folder_delete)) },
-            // Папка выглядит контейнером; без этой строки удаление читается как
-            // удаление переписок.
-            text = { Text(stringResource(R.string.folder_delete_confirm)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    folderId?.let { model.deleteFolder(it) }
-                    confirmDelete = false
-                    onDone()
-                }) { Text(stringResource(R.string.folder_delete_ok), color = HoloError) }
+        // Папка выглядит контейнером; без этой строки удаление читается как удаление переписок.
+        ConfirmSheet(
+            title = stringResource(R.string.folder_delete),
+            text = stringResource(R.string.folder_delete_confirm),
+            ok = stringResource(R.string.folder_delete_ok),
+            onOk = {
+                folderId?.let { model.deleteFolder(it) }
+                model.folderDraft = null // выход не должен записать удалённую обратно
+                onDone()
             },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text(stringResource(R.string.common_cancel), color = HoloSecondary)
-                }
-            },
+            onClose = { confirmDelete = false },
         )
     }
 }
 
+/** Чаты для «И конкретные чаты»: сначала те, где писали недавно. «Сохранённое» — не чат для папки. */
+private fun pickable(model: AppModel): List<ChatTarget> {
+    val all = model.contacts.map { ChatTarget(it.key, group = false) } + model.groups.map { ChatTarget(it.gid, group = true) }
+    return all.sortedByDescending { model.chatSummaries[model.chatKey(it.id, it.group)]?.lastTime ?: 0L }
+}
+
+private fun Set<String>.toggle(v: String): Set<String> = if (v in this) this - v else this + v
+
 @Composable
-private fun RowScope.TypeChip(icon: ImageVector, labelRes: Int, on: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier.clip(RoundedCornerShape(Tokens.Radius.pill))
-            .background(if (on) Tokens.Colors.accentBadge else HoloSurface)
-            .clickable { onClick() }
-            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
-        verticalAlignment = Alignment.CenterVertically,
+private fun NameField(value: String, onChange: (String) -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.panel).heightIn(min = Tokens.Size.formField)
+            .clip(RoundedCornerShape(Tokens.Radius.field))
+            .background(Tokens.Colors.group)
+            .padding(horizontal = Tokens.Space.l),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        Icon(icon, null, tint = if (on) HoloAccent else HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
-        Spacer(Modifier.width(Tokens.Space.s))
+        if (value.isEmpty()) Text(stringResource(R.string.folder_name_hint), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.name)
+        BasicTextField(
+            value,
+            onChange,
+            singleLine = true,
+            textStyle = Tokens.Text.base.copy(color = Color.White, fontSize = Tokens.Font.name),
+            cursorBrush = SolidColor(Tokens.Colors.accent),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** Плитка значка: выбранная — приглушённым акцентом с обводкой. */
+@Composable
+private fun IconTile(icon: ImageVector, on: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(Tokens.Radius.button)
+    Box(
+        Modifier.size(Tokens.Size.folderIcon).clip(shape)
+            .background(if (on) Tokens.Colors.accentMuted else Tokens.Colors.raised)
+            .then(if (on) Modifier.border(Tokens.Size.checkStroke, Tokens.Colors.accent, shape) else Modifier)
+            .clickable(role = Role.RadioButton) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, null, tint = if (on) Tokens.Colors.accentSoft else Tokens.Colors.fieldIcon, modifier = Modifier.size(Tokens.Size.iconRow))
+    }
+}
+
+/** Чип «Личные» / «Группы» (`.tb`). */
+@Composable
+private fun TypeChip(label: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.heightIn(min = Tokens.Size.typeChip).clip(RoundedCornerShape(Tokens.Radius.pill))
+            .background(if (on) Tokens.Colors.accentMuted else Tokens.Colors.raised)
+            .clickable(role = Role.Checkbox) { onClick() }
+            .padding(horizontal = Tokens.Space.m),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = if (on) Tokens.Colors.accentSoft else Tokens.Colors.chipText, fontSize = Tokens.Font.option)
+    }
+}
+
+/** Чат в «И конкретные чаты»: аватар, имя и кружок выбора. */
+@Composable
+private fun PickRow(model: AppModel, t: ChatTarget, checked: Boolean, divider: Boolean, onToggle: () -> Unit) {
+    val (name, avatar) = chatFace(model, t)
+    CardRow(onClick = onToggle, divider = divider, inset = Tokens.Space.l + Tokens.Size.avatarPick + Tokens.Space.m + Tokens.Space.xxs) {
+        SquareAvatar(
+            name,
+            size = Tokens.Size.avatarPick,
+            avatarBytes = avatar,
+            circle = !t.group,
+            bg = if (t.group) Tokens.Colors.groupAvatar else null,
+        )
+        Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
         Text(
-            stringResource(labelRes),
-            color = if (on) HoloAccent else HoloSecondary,
-            fontSize = Tokens.Font.body,
+            name,
+            color = Color.White,
+            fontSize = Tokens.Font.label,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            modifier = Modifier.weight(1f).heightIn(min = Tokens.Size.personRow - Tokens.Space.l).wrapContentHeight(),
         )
-    }
-}
-
-@Composable
-private fun PickRow(name: String, checked: Boolean, avatar: ByteArray?, onToggle: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable { onToggle() }
-            .padding(horizontal = ScreenPad, vertical = Tokens.Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SquareAvatar(name, size = 38.dp, avatarBytes = avatar)
-        Spacer(Modifier.width(Tokens.Space.m))
-        Text(name, color = Color.White, fontSize = Tokens.Font.label, modifier = Modifier.weight(1f))
-        Box(
-            Modifier.size(22.dp).clip(CircleShape)
-                .background(if (checked) HoloAccent else Color.Transparent),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (checked) {
-                Icon(TablerIcons.Check, null, tint = HoloAccentDark, modifier = Modifier.size(Tokens.Size.iconXs))
-            } else {
-                Box(
-                    Modifier.size(22.dp).clip(CircleShape)
-                        .background(HoloSurface),
-                )
-            }
-        }
+        SelectCheck(checked)
     }
 }

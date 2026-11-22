@@ -721,6 +721,26 @@ class AppModel private constructor() {
 
     fun folderById(id: String): Folder? = folders.firstOrNull { it.id == id }
 
+    /** Сколько чатов попадает в папку [f] сейчас: живой счётчик редактора и подпись в списке. */
+    fun folderCount(f: Folder): Int =
+        contacts.count { folderHasDm(f, it.key) } + groups.count { folderHasGroup(f, it.gid) }
+
+    /**
+     * Папка в редакторе: в модели, потому что её счётчик — в шапке, а правка — на панели.
+     * Пишется в [folders] при выходе из редактора ([commitFolderDraft]), кнопки «Сохранить» нет.
+     */
+    var folderDraft by mutableStateOf<Folder?>(null)
+
+    /** Записать черновик: без названия папки нет — новая пропадает, у старой остаётся прежнее имя. */
+    fun commitFolderDraft() {
+        val d = folderDraft ?: return
+        folderDraft = null
+        val old = folderById(d.id)
+        val name = d.name.trim().ifEmpty { old?.name ?: return }
+        val f = d.copy(name = name)
+        if (f != old) saveFolder(f)
+    }
+
     /** Попадает ли личный чат в папку. */
     fun folderHasDm(f: Folder, key: String): Boolean =
         ("dm" in f.types || key in f.chats) && !(f.excludeRead && (unread[key] ?: 0) == 0)

@@ -415,6 +415,8 @@ object Tokens {
         val handleH = 4.dp
         val primaryButton = 52.dp // главная кнопка экрана-решения, во всю ширину
         val formField = 52.dp // поле формы на панели: слово проверки ключа
+        val folderIcon = 44.dp // плитка значка в редакторе папки (`misc/FolderEdit`)
+        val typeChip = 36.dp // чип «Личные / Группы» в редакторе папки
         val pill = 36.dp // кнопка-пилюля полосы-напоминания (зона касания — touch)
         val suggest = 40.dp // подсказка слова над клавиатурой
         val focusRing = 1.5.dp // обводка поля в фокусе или с ошибкой

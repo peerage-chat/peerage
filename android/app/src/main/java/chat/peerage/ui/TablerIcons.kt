@@ -67,6 +67,29 @@ val TablerIcons.Message: ImageVector by lazy {
     )
 }
 
+val TablerIcons.Briefcase: ImageVector by lazy {
+    tabler(
+        "briefcase",
+        "M3 9a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -9",
+        "M8 7v-2a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v2",
+        "M12 12l0 .01",
+        "M3 13a20 20 0 0 0 18 0",
+    )
+}
+
+val TablerIcons.Home: ImageVector by lazy {
+    tabler(
+        "home",
+        "M5 12l-2 0l9 -9l9 9l-2 0",
+        "M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7",
+        "M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6",
+    )
+}
+
+val TablerIcons.Folder: ImageVector by lazy {
+    tabler("folder", "M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2")
+}
+
 val TablerIcons.Headphones: ImageVector by lazy {
     tabler(
         "headphones",

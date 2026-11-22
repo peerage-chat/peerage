@@ -509,7 +509,7 @@ private fun CompactShell(model: AppModel) {
                                 Screen.Backup -> TopBar(stringResource(R.string.backup_title), onBack = goBack)
                                 Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = goBack)
                                 Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = goBack)
-                                Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = goBack)
+                                Screen.FolderEdit -> FolderEditTopBar(model, onBack = goBack)
                                 Screen.Search -> SearchTopBar(model, onBack = goBack)
                             }
                             // ── Контент экрана (без шапки) ────────────────────────────────────
@@ -771,7 +771,7 @@ private fun CompactShell(model: AppModel) {
                                         editFolder = id
                                         screen = Screen.FolderEdit
                                     }
-                                    Screen.FolderEdit -> FolderEditorScreen(model, editFolder) { screen = Screen.Folders }
+                                    Screen.FolderEdit -> FolderEditorScreen(model, editFolder, onDone = goBack)
                                     Screen.Outbox -> OutboxScreen(model) { peer ->
                                         model.openChat(peer)
                                         screen = Screen.Chat
