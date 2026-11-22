@@ -155,7 +155,7 @@ internal fun ReactionChips(model: AppModel, m: Message, chat: ChatTarget) {
     val mine = model.myReaction(m)
     val chipShape = RoundedCornerShape(percent = 50)
     FlowRow(
-        Modifier.widthIn(max = Tokens.Size.bubbleMax).padding(top = Tokens.Space.xs),
+        Modifier.widthIn(max = LocalBubbleMax.current).padding(top = Tokens.Space.xs),
         horizontalArrangement = Arrangement.spacedBy(
             Tokens.Space.xs,
             if (m.mine) Alignment.End else Alignment.Start,

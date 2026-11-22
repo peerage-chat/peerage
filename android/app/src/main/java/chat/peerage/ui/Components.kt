@@ -1460,3 +1460,22 @@ private fun SwapLayer(shown: Float, content: @Composable () -> Unit) {
         contentAlignment = Alignment.Center,
     ) { content() }
 }
+
+/** Предельная ширина пузыря в этой ленте: на телефоне [Tokens.Size.bubbleMax], в широкой
+ *  ленте (две панели, планшет) — до [Tokens.Size.bubbleMaxWide]. */
+internal val LocalBubbleMax = androidx.compose.runtime.staticCompositionLocalOf { Tokens.Size.bubbleMax }
+
+/**
+ * Рамка ленты: ширины пузырей для углов у стыков (5.8) и предел пузыря по ширине самой
+ * ленты — доля ленты, как в макетах (`home/SheetTablet`: 460 при 760), но не уже телефонного.
+ */
+@Composable
+internal fun FeedFrame(content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.BoxWithConstraints {
+        val max = (maxWidth * 0.6f).coerceIn(Tokens.Size.bubbleMax, Tokens.Size.bubbleMaxWide)
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalBubbleWidths provides remember { androidx.compose.runtime.mutableStateMapOf() },
+            LocalBubbleMax provides max,
+        ) { content() }
+    }
+}

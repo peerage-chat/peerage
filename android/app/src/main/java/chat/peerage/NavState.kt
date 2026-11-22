@@ -61,6 +61,17 @@ internal class NavState(initial: Screen, private val root: Screen = Screen.Conta
         lastForward = false
     }
 
+    /**
+     * Начать историю заново с [dest] поверх главной. Две панели (от 720 dp): главная всегда
+     * видна слева, и выбранное в ней открывается справа С ЧИСТОГО ЛИСТА — «назад» из чата,
+     * выбранного в списке, не должна вести в прошлый чат и его профиль.
+     */
+    fun resetTo(dest: Screen) {
+        while (stack.size > 1) stack.removeAt(stack.lastIndex)
+        if (dest != root) stack.add(dest)
+        lastForward = true
+    }
+
     /** Заменить текущий экран на [dest]. */
     fun replace(dest: Screen) {
         back()

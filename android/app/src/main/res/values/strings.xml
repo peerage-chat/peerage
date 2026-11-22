@@ -139,6 +139,7 @@
     <string name="room_join">Join</string>
 
     <!-- ── Contacts / add / info ───────────────────────────────────────── -->
+    <string name="pane_no_chat">No chat selected</string>
     <string name="folder_empty">Nothing in this folder yet.</string>
     <string name="contacts_empty_title">No contacts</string>
     <string name="contacts_empty_hint">Add a peer by key or QR — using the button above</string>

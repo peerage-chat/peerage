@@ -49,6 +49,7 @@ internal fun ScreenTransitions(
     nav: NavState,
     backEnabled: Boolean,
     onBack: () -> Unit,
+    rootFade: Boolean = false,
     content: @Composable AnimatedContentScope.(Screen) -> Unit,
 ) {
     val target = nav.current
@@ -81,6 +82,12 @@ internal fun ScreenTransitions(
                     val side = if ((if (forward) targetState else initialState) == Screen.Me) -1 else 1
                     val spec = tween<androidx.compose.ui.unit.IntOffset>(Tokens.Anim.screen, easing = FastOutSlowInEasing)
                     val fade = tween<Float>(Tokens.Anim.screen)
+                    // Правая из двух панелей: экран, открытый с главной (она слева и никуда не
+                    // уходит), проявляется на месте, а не выезжает — сдвигать нечего. «Прежнего
+                    // нет в стеке, шаг вперёд на глубину 1» — это история, начатая заново.
+                    if (rootFade && (from == 0 || to == 0 || (from < 0 && nav.lastForward && to == 1))) {
+                        return@AnimatedContent (fadeIn(fade) togetherWith fadeOut(fade)).apply { targetContentZIndex = to.toFloat() }
+                    }
                     val enter = slideInHorizontally(spec) { side * if (forward) it else -it / 4 } + fadeIn(fade, if (forward) 1f else 0.6f)
                     val exit = slideOutHorizontally(spec) { side * if (forward) -it / 4 else it } + fadeOut(fade, if (forward) 0.6f else 1f)
                     // Слой — место в истории: глубже лежит выше. Уходящий хранит слой, с которым

@@ -137,6 +137,7 @@
     <string name="room_join">Войти</string>
 
     <!-- ── Контакты / добавление / профиль ─────────────────────────────── -->
+    <string name="pane_no_chat">Чат не выбран</string>
     <string name="folder_empty">В этой папке пока ничего нет.</string>
     <string name="contacts_empty_title">Нет контактов</string>
     <string name="contacts_empty_hint">Добавьте собеседника по ключу или QR — кнопкой вверху</string>

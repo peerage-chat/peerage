@@ -112,6 +112,21 @@ class NavStateTest {
     }
 
     /**
+     * Две панели: выбранное в списке открывается с чистой истории — «назад» из нового чата
+     * ведёт на главную (пустая правая панель), а не в прежний чат и его профиль.
+     */
+    @Test
+    fun resetToStartsHistoryOverHome() {
+        val n = nav(Screen.Chat, Screen.Info)
+        n.resetTo(Screen.GroupChat)
+        assertEquals(Screen.GroupChat, n.current)
+        assertEquals(2, n.depth)
+        assertEquals(Screen.Contacts, n.previous)
+        n.resetTo(Screen.Contacts)
+        assertEquals(1, n.depth)
+    }
+
+    /**
      * Сторож от возврата бага: у шапок не должно быть своих `onBack = { screen = … }`
      * и таблицы родителей — «назад» решает только стек. Именно так баг и появлялся:
      * новый экран получал зашитого родителя мимо общего правила.

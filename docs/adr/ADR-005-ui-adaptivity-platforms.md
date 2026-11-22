@@ -151,3 +151,9 @@ So there are two layouts, not three, and the split point is 720dp instead of the
 classes. Still decided by window width (`WindowSizeClass` width in dp), not by device, and
 the content composables still know nothing about the width. The tiers, seams and platform
 priorities above are unchanged.
+
+Implemented 2026-11-22 (redesign phase 6): `MainActivity` reads the window width in dp
+(`LocalConfiguration.screenWidthDp`) in one place and picks `WidthClass.OnePane | TwoPane`; the
+material3 `WindowSizeClass` classes are no longer used, since 720dp is not one of their
+breakpoints. The two-pane shell (`ui/Panes.kt`) renders the same screens: home on the left, the
+navigation stack on the right.

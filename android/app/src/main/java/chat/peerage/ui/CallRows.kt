@@ -41,7 +41,7 @@ internal fun CallRow(model: AppModel, m: Message, peer: String) {
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
         Row(
-            Modifier.widthIn(min = Tokens.Size.callRowMin, max = Tokens.Size.bubbleMax)
+            Modifier.widthIn(min = Tokens.Size.callRowMin, max = LocalBubbleMax.current)
                 .clip(RoundedCornerShape(Tokens.Radius.bubble))
                 .background(if (m.mine) BubbleOut else BubbleIn)
                 .padding(start = Tokens.Space.m, end = Tokens.Space.panel, top = Tokens.Space.panel, bottom = Tokens.Space.panel),

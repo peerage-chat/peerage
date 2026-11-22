@@ -300,7 +300,8 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
         scope.launch(Dispatchers.IO) { model.sendMediaWithMeta(key, bytes, "audio/mp4", "voice.m4a", MediaMeta(durationMs = ms)) }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // Две панели: лента и поле — не шире feedMax, по центру листа (макет `home/SheetTablet`).
+    Column(Modifier.fillMaxSize().feedWidth()) {
         if (search == null) PinnedBar(model, key, group = false, canUnpin = true)
         if (search != null && search.coversFeed) {
             ChatSearchPanel(model, search, Modifier.weight(1f), onMedia)
@@ -365,10 +366,7 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
 /** Лента личного чата: привязана к низу (`reverseLayout`), элемент 0 — самое свежее. */
 @Composable
 private fun DmFeed(model: AppModel, msgs: List<Message>, listState: LazyListState, appearFrom: Long) {
-    // Ширины пузырей — для углов у стыков серии (5.8); живут, пока лента на экране.
-    CompositionLocalProvider(LocalBubbleWidths provides remember { mutableStateMapOf() }) {
-        DmFeedList(model, msgs, listState, appearFrom)
-    }
+    FeedFrame { DmFeedList(model, msgs, listState, appearFrom) }
 }
 
 @Composable
@@ -1305,7 +1303,7 @@ internal fun MessageBubble(
                 (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
             Box(
                 Modifier.markBubbleBottom()
-                    .widthIn(max = Tokens.Size.bubbleMax)
+                    .widthIn(max = LocalBubbleMax.current)
                     .onGloballyPositioned {
                         place.rect = it.boundsInRoot()
                         // Ширина — для углов соседей (5.8); пишем только перемену.

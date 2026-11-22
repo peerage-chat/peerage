@@ -234,7 +234,14 @@ private fun ChatListRow(
     onClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    val bg = if (row.pinned) Tokens.Colors.rowPinned else Tokens.Colors.panel
+    // В две панели открытый справа чат подсвечен (макеты `home/Sheet*`): иначе не видно,
+    // чей это лист.
+    val open = LocalPaneChat.current?.let { it.id == row.id && it.group == row.group } == true
+    val bg = when {
+        open -> Tokens.Colors.accentMuted
+        row.pinned -> Tokens.Colors.rowPinned
+        else -> Tokens.Colors.panel
+    }
     Column(Modifier.fillMaxWidth().background(bg)) {
         if (!first) {
             HorizontalDivider(
@@ -953,3 +960,6 @@ internal fun LazyItemScope.ContactCardRow(model: AppModel, c: Contact, first: Bo
         }
     }
 }
+
+/** Чат, открытый в правой панели (две панели); null — одна панель или ничего не открыто. */
+internal val LocalPaneChat = compositionLocalOf<ChatTarget?> { null }

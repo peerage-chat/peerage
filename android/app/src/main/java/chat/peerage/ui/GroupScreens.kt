@@ -127,7 +127,8 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
     val presenceMembers = if (inRoom) emptyList() else (model.groupPresence[gid] ?: emptyList())
 
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
+        // Две панели: лента и поле — не шире feedMax, по центру листа (макет `home/SheetTablet`).
+        Column(Modifier.fillMaxSize().feedWidth()) {
             // В комнате — сетка звонка; иначе если есть присутствие — зелёный баннер.
             if (inRoom) {
                 RoomGrid(model, true, emptyList(), onFocus = { focusedParticipant = it })
@@ -223,10 +224,7 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
 /** Лента группы: привязана к низу, как в личном чате; системные строки разрывают серии. */
 @Composable
 private fun GroupFeed(model: AppModel, msgs: List<Message>, listState: LazyListState) {
-    // Ширины пузырей — для углов у стыков серии (5.8).
-    CompositionLocalProvider(LocalBubbleWidths provides remember { mutableStateMapOf() }) {
-        GroupFeedList(model, msgs, listState)
-    }
+    FeedFrame { GroupFeedList(model, msgs, listState) }
 }
 
 @Composable
