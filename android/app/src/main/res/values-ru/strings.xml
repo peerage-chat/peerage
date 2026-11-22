@@ -332,6 +332,8 @@
     <string name="notif_conn_channel">Соединение</string>
     <string name="notif_conn_channel_desc">В сети — mesh-узел активен</string>
     <string name="notif_conn_text">В сети — держим mesh-соединение</string>
+    <string name="notif_locked_title">Переписка закрыта паролем</string>
+    <string name="notif_locked_body">Сообщения не принимаются до ввода пароля</string>
     <string name="notif_disconnect">Отключить</string>
     <string name="notif_call_channel">Звонки</string>
     <string name="notif_call_channel_desc">Активный звонок или голосовая комната</string>

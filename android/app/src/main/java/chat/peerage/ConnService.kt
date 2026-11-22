@@ -58,8 +58,26 @@ class ConnService : Service() {
         }
     }
 
-    // Перезапускаться, если система всё же убьёт сервис под давлением памяти.
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    // Перезапускаться, если система всё же убьёт сервис под давлением памяти. Перезапуск
+    // приходит с пустым интентом и в новом процессе — движок тогда поднимаем сами, иначе
+    // служба держала бы процесс без узла.
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent == null || intent.getBooleanExtra(EXTRA_ENGINE, false)) startEngine()
+        return START_STICKY
+    }
+
+    /** Движок без экрана (загрузка, обновление, перезапуск службы) — только на уровне «Ключ
+     *  устройства»: пароль в фоне спросить не у кого. Повторный старт ничего не делает. */
+    private fun startEngine() {
+        val app = applicationContext
+        if (!BootReceiver.isOnboarded(app) || VaultKeyManager.needsPassword(app.filesDir)) return
+        Thread({
+            val model = AppModel.instance
+            if (model.appContext == null) model.appContext = app
+            AppLock.load(app)
+            model.start(app.filesDir.absolutePath)
+        }, "engine-boot").start()
+    }
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(disconnectReceiver) }
@@ -85,14 +103,7 @@ class ConnService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL, getString(R.string.notif_conn_channel), NotificationManager.IMPORTANCE_LOW).apply {
-                description = getString(R.string.notif_conn_channel_desc)
-                setShowBadge(false)
-            }
-            nm.createNotificationChannel(ch)
-        }
+        ensureChannel(this)
 
         val openPi = PendingIntent.getActivity(
             this,
@@ -138,7 +149,20 @@ class ConnService : Service() {
     }
 
     companion object {
-        private const val CHANNEL = "conn"
+        internal const val CHANNEL = "conn"
+
+        /** Служба поднимает и движок (запуск без экрана — [BootReceiver]). */
+        private const val EXTRA_ENGINE = "engine"
+
+        /** Категория «связи» — общая для постоянного уведомления и тихих состояний узла. */
+        fun ensureChannel(ctx: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val ch = NotificationChannel(CHANNEL, ctx.getString(R.string.notif_conn_channel), NotificationManager.IMPORTANCE_LOW).apply {
+                description = ctx.getString(R.string.notif_conn_channel_desc)
+                setShowBadge(false)
+            }
+            ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
+        }
 
         /** Системные настройки категории «связи» (Android 8+: категория; раньше — уведомления приложения). */
         fun channelSettings(ctx: Context): Intent =
@@ -152,8 +176,8 @@ class ConnService : Service() {
         private const val NOTIF_ID = 1
         private const val ACTION_DISCONNECT = "chat.peerage.DISCONNECT_MESH"
 
-        fun start(ctx: Context) {
-            val i = Intent(ctx, ConnService::class.java)
+        fun start(ctx: Context, withEngine: Boolean = false) {
+            val i = Intent(ctx, ConnService::class.java).putExtra(EXTRA_ENGINE, withEngine)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ctx.startForegroundService(i)
             } else {

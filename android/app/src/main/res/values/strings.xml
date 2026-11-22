@@ -330,6 +330,8 @@
     <string name="notif_conn_channel">Connection</string>
     <string name="notif_conn_channel_desc">Online — mesh node active</string>
     <string name="notif_conn_text">Online — keeping mesh connection</string>
+    <string name="notif_locked_title">Messages locked with a password</string>
+    <string name="notif_locked_body">Messages are not received until the password is entered</string>
     <string name="notif_disconnect">Disconnect</string>
     <string name="notif_call_channel">Calls</string>
     <string name="notif_call_channel_desc">Active call or voice room</string>

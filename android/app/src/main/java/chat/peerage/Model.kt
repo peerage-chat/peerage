@@ -1146,6 +1146,8 @@ class AppModel private constructor() {
      * не стартует с мусорным ключом (иначе база выглядела бы повреждённой).
      */
     /** [key] — ключ хранилища, уже развёрнутый отпечатком: пароль тогда не нужен. */
+    // Звать могут двое сразу: экран и служба связи, поднятая загрузкой телефона (7h).
+    @Synchronized
     fun start(dataDir: String, password: String? = null, key: ByteArray? = null): Boolean {
         if (started) return true
         val vaultKey = key ?: runCatching { VaultKeyManager.getOrCreate(File(dataDir), password) }
@@ -1199,6 +1201,7 @@ class AppModel private constructor() {
         me = Me(started.pubkey, started.address, started.fingerprint)
         startLoops()
         registerNetworkCallback()
+        appContext?.let { BootReceiver.dismissLocked(it) }
         return true
     }
 
