@@ -81,12 +81,13 @@ class EngineEventTest {
         val json = """
             {"blobs":3,"blob_bytes":900,"outbox_pending":1,"outbox_bytes":10,
              "by_kind":{"image":700,"file":200},
-             "chats":[{"peer":"aa","files":2,"bytes":700}]}
+             "chats":[{"chat":"aa","group":true,"files":2,"bytes":700}]}
         """.trimIndent()
         val st = decodeOrNull<StorageStatsDto>(json)!!
         assertEquals(900L, st.blobBytes)
         assertEquals(700L, st.byKind["image"])
-        assertEquals("aa", st.chats.single().peer)
+        assertEquals("aa", st.chats.single().chat)
+        assertTrue(st.chats.single().group)
     }
 
     @Test fun broken_list_yields_empty_not_exception() {

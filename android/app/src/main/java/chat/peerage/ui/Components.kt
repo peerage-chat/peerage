@@ -964,17 +964,42 @@ private fun mentionAt(layout: TextLayoutResult?, text: AnnotatedString, pos: and
 
 /** Форма пузыря: «шов» внутри блока — со стороны отправителя. Внешние углы серии
  *  полные, соприкасающиеся — срезанные: наоборот получаются «песочные часы». */
-internal fun bubbleShape(mine: Boolean, pos: BlockPos): RoundedCornerShape {
+internal fun bubbleShape(mine: Boolean, pos: BlockPos, far: FarCut = FarCut.None): RoundedCornerShape {
     val r = Tokens.Radius.bubble
     val seam = Tokens.Radius.bubbleTail
     val topSeam = pos == BlockPos.Mid || pos == BlockPos.Last
     val bottomSeam = pos == BlockPos.Mid || pos == BlockPos.First
+    // Ближняя сторона (к краю ленты) у стыка всегда 6; дальняя — 6, только если сосед не уже.
+    val farTop = if (topSeam && far.top) seam else r
+    val farBottom = if (bottomSeam && far.bottom) seam else r
     return if (mine) {
-        RoundedCornerShape(r, if (topSeam) seam else r, if (bottomSeam) seam else r, r)
+        RoundedCornerShape(farTop, if (topSeam) seam else r, if (bottomSeam) seam else r, farBottom)
     } else {
-        RoundedCornerShape(if (topSeam) seam else r, r, r, if (bottomSeam) seam else r)
+        RoundedCornerShape(if (topSeam) seam else r, farTop, farBottom, if (bottomSeam) seam else r)
     }
 }
+
+/**
+ * Срез дальних углов пузыря у стыков серии (макет `bubbles/Adaptive`, UI 5.8): угол 6, если
+ * сосед сверху/снизу не уже (шире или ровно такой же, без допуска). Сосед уже — угол полный:
+ * под ним пусто, и срезанный угол висел бы в воздухе.
+ */
+internal data class FarCut(val top: Boolean = false, val bottom: Boolean = false) {
+    companion object {
+        val None = FarCut()
+    }
+}
+
+/** [FarCut] по ширинам в px; null — ширина не измерена или соседа в серии нет. */
+internal fun farCut(own: Int?, above: Int?, below: Int?): FarCut {
+    if (own == null) return FarCut.None
+    return FarCut(top = above != null && above >= own, bottom = below != null && below >= own)
+}
+
+/** Ширины пузырей ленты (px) по «автор + id»: их пишет сам пузырь, читает лента для [farCut]. */
+internal val LocalBubbleWidths = androidx.compose.runtime.staticCompositionLocalOf<
+    androidx.compose.runtime.snapshots.SnapshotStateMap<chat.peerage.MsgRef, Int>?,
+    > { null }
 
 /** Локализованная метка дня для чипа-разделителя: Сегодня / Вчера / «d MMMM». */
 @Composable

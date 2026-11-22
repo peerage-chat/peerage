@@ -223,6 +223,14 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
 /** Лента группы: привязана к низу, как в личном чате; системные строки разрывают серии. */
 @Composable
 private fun GroupFeed(model: AppModel, msgs: List<Message>, listState: LazyListState) {
+    // Ширины пузырей — для углов у стыков серии (5.8).
+    CompositionLocalProvider(LocalBubbleWidths provides remember { mutableStateMapOf() }) {
+        GroupFeedList(model, msgs, listState)
+    }
+}
+
+@Composable
+private fun GroupFeedList(model: AppModel, msgs: List<Message>, listState: LazyListState) {
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -242,13 +250,12 @@ private fun GroupFeed(model: AppModel, msgs: List<Message>, listState: LazyListS
                 // Склейка блоков. Системная строка — разделитель: у неё нет
                 // отправителя, поэтому соседние сообщения в один блок не сходятся.
                 val who = { g: Message -> if (g.system) null else g.sender }
-                val pos = blockPos(
-                    withPrev = prev != null && !m.system &&
-                        continuesBlock(who(prev), prev.time, m.sender, m.time),
-                    withNext = next != null && !m.system && !next.system &&
-                        continuesBlock(m.sender, m.time, next.sender, next.time),
-                )
-                MessageRow(model, m, pos, group = true)
+                val withPrev = prev != null && !m.system &&
+                    continuesBlock(who(prev), prev.time, m.sender, m.time)
+                val withNext = next != null && !m.system && !next.system &&
+                    continuesBlock(m.sender, m.time, next.sender, next.time)
+                val pos = blockPos(withPrev, withNext)
+                MessageRow(model, m, pos, group = true, far = seriesCut(m, prev.takeIf { withPrev }, next.takeIf { withNext }))
             }
         }
     }

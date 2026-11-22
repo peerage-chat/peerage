@@ -364,6 +364,14 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
 /** Лента личного чата: привязана к низу (`reverseLayout`), элемент 0 — самое свежее. */
 @Composable
 private fun DmFeed(model: AppModel, msgs: List<Message>, listState: LazyListState, appearFrom: Long) {
+    // Ширины пузырей — для углов у стыков серии (5.8); живут, пока лента на экране.
+    CompositionLocalProvider(LocalBubbleWidths provides remember { mutableStateMapOf() }) {
+        DmFeedList(model, msgs, listState, appearFrom)
+    }
+}
+
+@Composable
+private fun DmFeedList(model: AppModel, msgs: List<Message>, listState: LazyListState, appearFrom: Long) {
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -384,11 +392,10 @@ private fun DmFeed(model: AppModel, msgs: List<Message>, listState: LazyListStat
                 if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
                 // Склейка блоков: в DM «отправитель» — это сторона (я/собеседник).
                 val side = { msg: Message -> if (msg.mine) "me" else "peer" }
-                val pos = blockPos(
-                    withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time),
-                    withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time),
-                )
-                MessageRow(model, m, pos, animate = m.id > appearFrom)
+                val withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time)
+                val withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time)
+                val pos = blockPos(withPrev, withNext)
+                MessageRow(model, m, pos, animate = m.id > appearFrom, far = seriesCut(m, prev.takeIf { withPrev }, next.takeIf { withNext }))
             }
         }
         // Запрос в контакты ещё не принят (7i): сверху ленты — что сообщения ждут.
@@ -1054,6 +1061,7 @@ internal fun MessageRow(
     pos: BlockPos = BlockPos.Solo,
     group: Boolean = false,
     animate: Boolean = false,
+    far: FarCut = FarCut.None,
 ) {
     // Системную строку и «Сообщение удалено» не выбирают: переслать или скопировать
     // в них нечего.
@@ -1089,10 +1097,10 @@ internal fun MessageRow(
             Spacer(Modifier.width(Tokens.Space.m))
         }
         if (selecting || m.system || m.deleted || m.isCall || m.id == 0L) {
-            Box(Modifier.weight(1f)) { MessageRowContent(model, m, pos, group, animate) }
+            Box(Modifier.weight(1f)) { MessageRowContent(model, m, pos, group, animate, far) }
         } else {
             SwipeToReply(Modifier.weight(1f), onReply = { model.startReply(m) }) {
-                MessageRowContent(model, m, pos, group, animate)
+                MessageRowContent(model, m, pos, group, animate, far)
             }
         }
     }
@@ -1161,7 +1169,7 @@ private fun SwipeToReply(modifier: Modifier, onReply: () -> Unit, content: @Comp
 }
 
 @Composable
-private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group: Boolean, animate: Boolean) {
+private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group: Boolean, animate: Boolean, far: FarCut) {
     when {
         m.system -> SystemRow(model, m)
         m.isCall -> model.currentChat?.let { CallRow(model, m, it) }
@@ -1201,12 +1209,13 @@ private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group:
                 senderName = if (pos == BlockPos.Solo || pos == BlockPos.First) who else null,
                 senderColor = nameColor(m.sender),
                 group = true,
+                far = far,
                 modifier = Modifier.alignBy(BubbleBottom),
             )
         }
         // Своё сообщение в группе — тоже групповое: его вложение открывается из ленты
         // группы, а не личного чата.
-        else -> MessageBubble(m, model, pos, animate, group = group)
+        else -> MessageBubble(m, model, pos, animate, group = group, far = far)
     }
 }
 
@@ -1223,10 +1232,14 @@ internal fun MessageBubble(
     /** Пузырь в группе. Явно, а не по `currentChat`: в группе тот пуст, и всё, что
      *  ищет «свой чат», — просмотрщик, докачка, цитата — молча искало в никуда. */
     group: Boolean = false,
+    /** Дальние углы у стыков серии (5.8): решает лента по ширинам соседей. */
+    far: FarCut = FarCut.None,
     modifier: Modifier = Modifier,
 ) {
     // Чат пузыря: gid группы или ключ собеседника.
     val chatId = if (group) model.currentGroup else model.currentChat
+    val shape = bubbleShape(m.mine, pos, far)
+    val widths = LocalBubbleWidths.current
     // Байты в память берём только у фото и голосового: видео рисуется миниатюрой,
     // файл — именем и размером из сообщения. Иначе прокрутка чата с видео тянула
     // бы в кучу файлы целиком ради одного кадра.
@@ -1255,7 +1268,7 @@ internal fun MessageBubble(
         if (selecting) {
             model.toggleSelect(m)
         } else if (chatId != null && m.id != 0L) {
-            model.bubbleActions = BubbleActions(m, ChatTarget(chatId, group), place.rect, bubbleShape(m.mine, pos))
+            model.bubbleActions = BubbleActions(m, ChatTarget(chatId, group), place.rect, shape)
         }
     }
     // Мета одна на все ветки пузыря: и когда она встроена в текст, и когда лежит
@@ -1290,16 +1303,21 @@ internal fun MessageBubble(
             Box(
                 Modifier.markBubbleBottom()
                     .widthIn(max = Tokens.Size.bubbleMax)
-                    .onGloballyPositioned { place.rect = it.boundsInRoot() }
-                    .clip(bubbleShape(m.mine, pos))
+                    .onGloballyPositioned {
+                        place.rect = it.boundsInRoot()
+                        // Ширина — для углов соседей (5.8); пишем только перемену.
+                        val ref = MsgRef(m.id, m.sender)
+                        if (widths != null && widths[ref] != it.size.width) widths[ref] = it.size.width
+                    }
+                    .clip(shape)
                     .then(
                         if (photoBubble) Modifier else Modifier.background(if (m.mine) BubbleOut else BubbleIn),
                     )
                     .then(
                         when {
-                            failed -> Modifier.border(1.dp, Tokens.Colors.failEdge, bubbleShape(m.mine, pos))
+                            failed -> Modifier.border(1.dp, Tokens.Colors.failEdge, shape)
                             // Фото без подписи — само себе пузырь: обводка картинки по его форме.
-                            photoBubble -> Modifier.imageOutline(bubbleShape(m.mine, pos))
+                            photoBubble -> Modifier.imageOutline(shape)
                             else -> Modifier
                         },
                     )
@@ -1917,4 +1935,12 @@ internal fun StatusTick(status: String) {
             modifier = Modifier.size(Tokens.Size.iconXs),
         )
     }
+}
+
+/** Срез дальних углов пузыря по ширинам соседей в серии ([farCut]); вне ленты — полные углы. */
+@Composable
+internal fun seriesCut(m: Message, above: Message?, below: Message?): FarCut {
+    val widths = LocalBubbleWidths.current ?: return FarCut.None
+    fun w(x: Message?) = x?.let { widths[MsgRef(it.id, it.sender)] }
+    return farCut(w(m), w(above), w(below))
 }
