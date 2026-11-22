@@ -183,6 +183,8 @@ pub(crate) enum Job {
     },
     /// Бросить идущие докачки (очистка вложений); ответ — когда брошены.
     CancelDownloads(Sender<()>),
+    /// Бросить одну докачку («Отмена»).
+    CancelDownload(peerage_blob::Hash),
 }
 
 /// До этого размера вложение скачивается автоматически (фото, голосовое — их ждут
@@ -1473,6 +1475,23 @@ impl Engine {
         // минуты). Поднимаем лимит адресно: только этому пиру и только пока качаем.
         self.messenger.boost_peer(peer, BLOB_BOOST_FOR);
         self.request_blob(peer, &hash);
+        true
+    }
+
+    /// Отменить заказанную докачку («Отмена» в уведомлении о передаче): намерение
+    /// снимается (и после перезапуска не вернётся), идущая докачка бросается вместе с
+    /// недособранным файлом, запоздавший манифест не примется. Идемпотентно.
+    pub fn cancel_download(&self, blob_id_hex: &str) -> bool {
+        let hex_id = blob_id_hex.trim();
+        let Some(id) = hex::decode(hex_id)
+            .ok()
+            .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
+        else {
+            return false;
+        };
+        let _ = self.wanted.lock_safe().remove(hex_id);
+        self.blob_expect.lock_safe().remove(&id);
+        let _ = self.jobs.send(Job::CancelDownload(id));
         true
     }
 
@@ -3809,6 +3828,7 @@ fn event_pump(
                 blobs.cancel_downloads();
                 let _ = done.send(());
             }
+            Ok(Job::CancelDownload(id)) => blobs.cancel_download(&id),
             // Подготовка (scrub, хэш, своя зашифрованная копия) — в своём потоке:
             // файл на сотни мегабайт держал бы актор, а с ним приём сообщений и
             // маячки звонка (R-028). Готовое вернётся сюда как GroupMediaRef.

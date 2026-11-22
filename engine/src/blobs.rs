@@ -490,6 +490,20 @@ impl BlobManager {
     }
 
     /// Сколько блобов сейчас в отдаче (диагностика и тесты).
+    /// Бросить одну докачку («Отмена» в уведомлении о передаче): продолжать её некому,
+    /// поэтому недособранный файл удаляется сразу.
+    pub fn cancel_download(&mut self, id: &Hash) {
+        self.partial_manifests.remove(id);
+        if let Some(inc) = self.incoming.remove(id) {
+            let disk = matches!(inc.sink, Sink::Disk(_));
+            drop(inc); // файл закрыт до удаления
+            if disk {
+                let part = self.blob_dir.join(hex::encode(id)).with_extension("part");
+                let _ = std::fs::remove_file(part);
+            }
+        }
+    }
+
     /// Бросить все идущие докачки (очистка вложений): их недособранные файлы
     /// сейчас удалят, и дописывать в них нечего.
     pub fn cancel_downloads(&mut self) {

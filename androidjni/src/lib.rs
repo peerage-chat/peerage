@@ -568,6 +568,21 @@ pub extern "system" fn Java_chat_peerage_Native_downloadMedia<'local>(
     })
 }
 
+/// Отменить заказанную докачку («Отмена» в уведомлении о передаче).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_cancelDownload<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    blob_id_hex: JString<'local>,
+) -> jboolean {
+    jni_safe!(JNI_FALSE, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return JNI_FALSE };
+        let id = jstr(&mut env, &blob_id_hex);
+        if e.cancel_download(&id) { JNI_TRUE } else { JNI_FALSE }
+    })
+}
+
 /// Заказанные пользователем докачки (hex-id) — переживают перезапуск.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_wantedBlobs<'local>(

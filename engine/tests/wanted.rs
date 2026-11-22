@@ -126,3 +126,92 @@ fn intent_survives_restart() {
     assert_eq!(wanted(&b2), vec![fake_blob], "заказ пережил перезапуск");
     b2.shutdown();
 }
+
+/// «Отмена» в уведомлении о передаче (notifications.md → «Передача файлов»): заказ
+/// снимается и переживает перезапуск снятым, идущая докачка бросается — блоб не
+/// доезжает, недособранного файла не остаётся.
+#[test]
+fn cancel_drops_intent_and_partial_file() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(14), id(15));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let b_dir = tmpdir("cancel-b");
+    let a = start(&net, a_id, tmpdir("cancel-a"));
+    let b = start(&net, b_id.clone(), b_dir.clone());
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+
+    // Пир не в сети: заказ лежит, отмена его снимает.
+    let fake_blob = hex::encode([0x66u8; 32]);
+    b.download_media(&[0x5au8; 32], &fake_blob);
+    assert!(b.cancel_download(&fake_blob));
+    assert!(wanted(&b).is_empty(), "заказ снят");
+
+    // Идущая докачка: отмена на первом проценте — блоб не доезжает.
+    let content: Vec<u8> = (0..24 * 1024 * 1024)
+        .map(|i| (i * 7 ^ 0x5a) as u8)
+        .collect();
+    a.send_media(&b_key, content, "video/mp4", "big.mp4")
+        .expect("send_media");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let blob_id = loop {
+        let hist: serde_json::Value = serde_json::from_str(&b.history_json(&a_key)).unwrap();
+        if let Some(m) = hist
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["kind"] == "file" || m["kind"] == "video")
+        {
+            break m["blob_id"].as_str().unwrap().to_string();
+        }
+        assert!(Instant::now() < deadline, "B не получил карточку вложения");
+        std::thread::sleep(Duration::from_millis(30));
+    };
+    while b.poll_event().is_some() {}
+    assert!(b.download_media(&a_key, &blob_id));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let progress =
+            std::iter::from_fn(|| b.poll_event()).any(|e| e.contains("\"blob_progress\""));
+        if progress {
+            break;
+        }
+        assert!(Instant::now() < deadline, "докачка не пошла");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(b.cancel_download(&blob_id));
+    assert!(wanted(&b).is_empty(), "заказ снят");
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        b.blob_read(&blob_id).is_none(),
+        "брошенная докачка не доехала"
+    );
+    let parts = walk(&b_dir)
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "part"))
+        .count();
+    assert_eq!(parts, 0, "недособранный файл удалён");
+
+    a.shutdown();
+    b.shutdown();
+    drop(b);
+    let b2 = start(&net, b_id, b_dir);
+    assert!(
+        wanted(&b2).is_empty(),
+        "снятый заказ не вернулся после перезапуска"
+    );
+    b2.shutdown();
+}
+
+fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
