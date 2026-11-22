@@ -2297,7 +2297,12 @@ class AppModel private constructor() {
                 }
             }
             is EngineEvent.RoomDecline -> {
-                if (ev.peer == dmCallPeer) leaveRoom()
+                if (ev.peer == dmCallPeer) {
+                    // Сбросил, пока дозванивались, — «занято»; из идущего разговора — конец.
+                    val dialing = roomMembers.none { it.peer == ev.peer }
+                    leaveRoom()
+                    if (dialing) CallTones.busy()
+                }
                 // Звонящий сбросил до того как мы ответили — гасим уведомление.
                 if (incomingCall?.peer == ev.peer) {
                     incomingCall = null
@@ -2309,6 +2314,7 @@ class AppModel private constructor() {
                 if (ev.left) {
                     roomMembers.removeAll { it.peer == ev.peer } // явный выход — убрать сразу
                 } else {
+                    if (ev.peer == dmCallPeer) CallTones.stop() // ответил — гудки кончились
                     val rm = RoomMember(ev.peer, ev.flags and 0b01 != 0, ev.flags and 0b10 != 0)
                     val idx = roomMembers.indexOfFirst { it.peer == ev.peer }
                     if (idx >= 0) roomMembers[idx] = rm else roomMembers.add(rm)
@@ -2488,6 +2494,7 @@ class AppModel private constructor() {
             roomMembers.clear()
             CallService.start(ctx, name)
             startRoomMedia(ctx, roomId, video)
+            CallTones.ringback() // до входа собеседника — см. RoomPresence
         }
     }
 
@@ -2764,6 +2771,9 @@ class AppModel private constructor() {
         // ещё дозваниваемся (пира в комнате нет) — от этого зависит, слать ли decline.
         val peer = dmCallPeer
         val peerPresent = peer != null && roomMembers.any { it.peer == peer }
+        CallTones.stop()
+        // Конец разговора — тон; отменённый дозвон и комната группы без собеседника — тихо.
+        if (peerPresent || (peer == null && roomMembers.isNotEmpty())) CallTones.ended()
         currentRoom = null
         dmCallPeer = null
         videoActive = false

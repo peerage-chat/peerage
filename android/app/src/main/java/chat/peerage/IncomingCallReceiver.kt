@@ -27,7 +27,13 @@ class IncomingCallReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        private const val CHANNEL = "incoming_call"
+        /** Новый id: звук канала после создания не меняется, а прежний «incoming_call»
+         *  звенел звуком уведомления один раз вместо рингтона по кругу (7b). */
+        private const val CHANNEL = "call_ring"
+        private const val OLD_CHANNEL = "incoming_call"
+
+        /** Звонит не дольше этого: потерянный сброс звонящего не должен звенеть вечно. */
+        private const val RING_MS = 60_000L
         const val NOTIF_ID = 3
         const val ACTION_ACCEPT = "chat.peerage.ACCEPT_CALL"
         const val ACTION_DECLINE = "chat.peerage.DECLINE_CALL"
@@ -121,7 +127,10 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 b.addAction(0, ctx.getString(R.string.notif_decline), declinePi)
             }
 
-            nm.notify(NOTIF_ID, b.build())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) b.setTimeoutAfter(RING_MS)
+            // Рингтон по кругу, пока уведомление не снято (ответ, сброс, тайм-аут).
+            val n = b.build().apply { flags = flags or Notification.FLAG_INSISTENT }
+            nm.notify(NOTIF_ID, n)
         }
 
         fun cancel(ctx: Context) {
@@ -133,9 +142,16 @@ class IncomingCallReceiver : BroadcastReceiver() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 if (nm.getNotificationChannel(CHANNEL) == null) {
+                    nm.deleteNotificationChannel(OLD_CHANNEL)
+                    // Рингтон телефона; громкость и беззвучный режим — как у обычного звонка.
+                    val ring = android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
                     nm.createNotificationChannel(
                         NotificationChannel(CHANNEL, ctx.getString(R.string.notif_incoming_channel), NotificationManager.IMPORTANCE_HIGH).apply {
                             description = ctx.getString(R.string.notif_incoming_channel_desc)
+                            setSound(android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE), ring)
                             enableVibration(true)
                             setShowBadge(false)
                         },
