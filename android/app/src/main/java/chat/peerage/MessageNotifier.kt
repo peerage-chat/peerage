@@ -226,32 +226,60 @@ internal object MessageNotifier {
     const val ACTION_READ_ALL = "chat.peerage.NOTIF_READ_ALL"
 }
 
-/** Кнопки уведомления о сообщении. Не экспортирован: интенты — только наши PendingIntent. */
+/**
+ * Кнопки уведомлений о сообщениях, запросах и приглашениях. Не экспортирован: интенты — только
+ * наши PendingIntent. Шторка переживает процесс: кнопка могла прийти туда, где движка ещё нет, —
+ * поднимаем его (и службу: узел должен жить, пока ответ уходит) вне главного потока.
+ */
 class MessageActionReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (intent.action == MessageNotifier.ACTION_READ_ALL) {
-            // «Связь» есть, только пока жив процесс со службой — движок уже работает.
-            AppModel.instance.readAll()
-            return
-        }
-        val chat = intent.getStringExtra(EXTRA_SHORTCUT_CHAT)?.let(::chatOfShortcut) ?: return
-        val reply = if (intent.action == MessageNotifier.ACTION_REPLY) MessageNotifier.replyText(intent) ?: return else null
         val app = ctx.applicationContext
-        // «Прочитано» снимает уведомление; ответ дописывается в него строкой (см. appendMine).
-        if (reply == null) MessageNotifier.cancel(app, chat)
-        // Шторка переживает процесс: кнопка могла прийти туда, где движка ещё нет. Поднимаем его
-        // (и службу — узел должен жить, пока ответ уходит) вне главного потока.
+        val action = intent.action ?: return
+        val work: (AppModel) -> Unit = when (action) {
+            // «Связь» есть, только пока жив процесс со службой — движок уже работает.
+            MessageNotifier.ACTION_READ_ALL -> return AppModel.instance.readAll()
+            MessageNotifier.ACTION_REPLY, MessageNotifier.ACTION_READ -> {
+                val chat = intent.getStringExtra(EXTRA_SHORTCUT_CHAT)?.let(::chatOfShortcut) ?: return
+                val reply = if (action == MessageNotifier.ACTION_REPLY) MessageNotifier.replyText(intent) ?: return else null
+                // «Прочитано» снимает уведомление; ответ дописывается в него строкой (см. appendMine).
+                if (reply == null) MessageNotifier.cancel(app, chat)
+                val w: (AppModel) -> Unit = { m ->
+                    m.readFromNotification(chat)
+                    reply?.let { m.replyFromNotification(chat, it) }
+                }
+                w
+            }
+            RequestNotifier.ACTION_ACCEPT, RequestNotifier.ACTION_DECLINE,
+            RequestNotifier.ACTION_JOIN, RequestNotifier.ACTION_REFUSE,
+            -> {
+                val id = intent.getStringExtra(RequestNotifier.EXTRA_ID)?.takeIf { it.matches(HEX_ID) } ?: return
+                RequestNotifier.cancel(app, action, id)
+                val w: (AppModel) -> Unit = { m ->
+                    when (action) {
+                        RequestNotifier.ACTION_ACCEPT -> m.acceptRequest(id)
+                        RequestNotifier.ACTION_DECLINE -> m.declineRequest(id)
+                        RequestNotifier.ACTION_JOIN -> m.acceptGroupInvite(id)
+                        else -> m.declineGroupInvite(id)
+                    }
+                }
+                w
+            }
+            else -> return
+        }
         val pending = goAsync()
         Thread({
             try {
-                if (!ConnService.startEngineNow(app)) return@Thread
-                ConnService.start(app)
-                val model = AppModel.instance
-                model.readFromNotification(chat)
-                reply?.let { model.replyFromNotification(chat, it) }
+                if (ConnService.startEngineNow(app)) {
+                    ConnService.start(app)
+                    work(AppModel.instance)
+                }
             } finally {
                 pending.finish()
             }
         }, "notif-action").start()
+    }
+
+    private companion object {
+        val HEX_ID = Regex("[0-9a-f]{16,128}")
     }
 }

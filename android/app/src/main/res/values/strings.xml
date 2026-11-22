@@ -149,6 +149,10 @@
     <string name="notif_sec_messages">Messages</string>
     <string name="notif_set_chat_sounds">In-chat sounds</string>
     <string name="notif_sec_other">Other</string>
+    <string name="notif_ch_requests">Requests and invites</string>
+    <string name="notif_request_title">Contact request</string>
+    <string name="notif_invite_title">Group invite</string>
+    <string name="notif_invite_text">%1$s — from %2$s</string>
     <string name="notif_conn_online">Online</string>
     <string name="notif_conn_search">Searching for network</string>
     <string name="notif_conn_offline">Offline mode</string>

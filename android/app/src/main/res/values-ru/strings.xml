@@ -147,6 +147,10 @@
     <string name="notif_sec_messages">Сообщения</string>
     <string name="notif_set_chat_sounds">Звуки в чате</string>
     <string name="notif_sec_other">Прочее</string>
+    <string name="notif_ch_requests">Запросы и приглашения</string>
+    <string name="notif_request_title">Запрос в контакты</string>
+    <string name="notif_invite_title">Приглашение в группу</string>
+    <string name="notif_invite_text">%1$s — от %2$s</string>
     <string name="notif_conn_online">В сети</string>
     <string name="notif_conn_search">Поиск сети</string>
     <string name="notif_conn_offline">Офлайн-режим</string>

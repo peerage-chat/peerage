@@ -547,7 +547,8 @@ internal fun SettingsNotificationsScreen(model: AppModel) {
         }
         SectionTitle(stringResource(R.string.notif_sec_other))
         CardSection {
-            PlainSwitchRow(stringResource(R.string.notif_set_flood), model.notifyFlood, divider = false) { model.setFloodNotify(it) }
+            PlainSwitchRow(stringResource(R.string.notif_ch_requests), model.notifyRequests, divider = false) { model.setNotifyRequestsOn(it) }
+            PlainSwitchRow(stringResource(R.string.notif_set_flood), model.notifyFlood) { model.setFloodNotify(it) }
             PlainSwitchRow(stringResource(R.string.settings_outbox_warn), model.warnOutboxGrowth) { model.toggleOutboxWarning() }
         }
         Spacer(Modifier.height(Tokens.Space.l))

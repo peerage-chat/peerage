@@ -42,6 +42,8 @@ internal const val TYPING_SHOWN_MS = 5_000L
 
 class AppModel private constructor() {
     companion object {
+        private const val KEY_SEEN_INVITES = "seen_invites"
+
         /**
          * Пауза офлайн при смене адреса, секунды. Зашита, а не настраивается:
          * величина не про вкус, а про то, за сколько старый ключ выпадает из дерева
@@ -534,6 +536,16 @@ class AppModel private constructor() {
         appContext?.let { ChatSounds.play(it, ChatSounds.Kind.Out, chatSounds) }
     }
 
+    /** «Запросы и приглашения» в шторке ([RequestNotifier]). */
+    var notifyRequests by mutableStateOf(true)
+        private set
+
+    fun setNotifyRequestsOn(on: Boolean) {
+        notifyRequests = on
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("notif_requests", on)?.apply()
+    }
+
     /** «Текст в уведомлении»: выключено — в шторке «Новое сообщение» ([MessageNotifier]). */
     var notifyText by mutableStateOf(true)
         private set
@@ -898,6 +910,7 @@ class AppModel private constructor() {
         notifyFlood = prefs.getBoolean("notif_flood", true)
         chatSounds = prefs.getBoolean("chat_sounds", true)
         notifyText = prefs.getBoolean("notif_text", true)
+        notifyRequests = prefs.getBoolean("notif_requests", true)
         mediaColumns = prefs.getInt("media_columns", 3).takeIf { it in MEDIA_COLUMNS } ?: 3
         val w = prefs.getInt("video_w", VideoQuality.default.width)
         val h = prefs.getInt("video_h", VideoQuality.default.height)
@@ -2201,6 +2214,7 @@ class AppModel private constructor() {
             }
             .sortedByDescending { it.time }
         contactRequests.replaceWith(list)
+        syncRequestNotifications()
     }
 
     /** Одобрить запрос: незнакомец становится контактом. */
@@ -2362,9 +2376,19 @@ class AppModel private constructor() {
                 }
             }
             // Гейт: незнакомец постучался — обновить очередь запросов (карточка в UI).
-            is EngineEvent.ContactRequestEv -> refreshRequestsNow()
+            is EngineEvent.ContactRequestEv -> {
+                refreshRequestsNow()
+                // Новый (не повтор того же) — в шторку; повторы движок помечает new = false.
+                if (ev.new && notifyRequests) {
+                    val r = contactRequests.firstOrNull { it.key == ev.peer }
+                    appContext?.let { ctx -> r?.let { RequestNotifier.request(ctx, it, AppLock.enabled || !notifyText) } }
+                }
+            }
             // Приглашение в группу пришло/принято/отклонено — обновить карточки.
-            EngineEvent.GroupInvitesChanged -> refreshGroupInvitesNow()
+            EngineEvent.GroupInvitesChanged -> {
+                refreshGroupInvitesNow()
+                notifyNewInvites()
+            }
             // Закреп общий для всех: его мог поставить собеседник или админ группы.
             is EngineEvent.PinsChanged -> refreshPins(ev.chat, groups.any { it.gid == ev.chat })
             // Правка приходит и на свои сообщения (эхо движка), и на чужие: меняем
@@ -2930,6 +2954,29 @@ class AppModel private constructor() {
         val list = decodeList<GroupInviteDto>(Native.groupInvites(sessionPtr))
             .map { GroupInvite(it.gid, it.name, it.inviter, it.waiting) }
         groupInvites.replaceWith(list)
+        syncRequestNotifications()
+    }
+
+    /** Решённое в приложении (или у собеседника) — из шторки долой. */
+    private fun syncRequestNotifications() {
+        appContext?.let { RequestNotifier.sync(it, contactRequests.map { r -> r.key }.toSet(), groupInvites.map { i -> i.gid }.toSet()) }
+    }
+
+    /**
+     * Приглашения, которых шторка ещё не показывала. Флага «новое» у события нет, а сохранённые
+     * движок объявляет заново после каждого запуска — поэтому показанные помним в настройках. Самый
+     * первый раз запоминаем текущие молча: старые не должны всплыть после обновления.
+     */
+    private fun notifyNewInvites() {
+        val ctx = appContext ?: return
+        val prefs = ctx.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        val seen = prefs.getStringSet(KEY_SEEN_INVITES, null)
+        val now = groupInvites.filterNot { it.waiting }
+        if (seen != null && notifyRequests) {
+            now.filter { it.gid !in seen }.forEach { RequestNotifier.invite(ctx, it, peerName(it.inviter)) }
+        }
+        // Помним только живые: принятое и отклонённое из набора уходит, набор не растёт.
+        prefs.edit().putStringSet(KEY_SEEN_INVITES, groupInvites.map { it.gid }.toSet()).apply()
     }
 
     /** Принять приглашение: вступление завершится по `groups_changed`. */
