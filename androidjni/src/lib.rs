@@ -873,6 +873,47 @@ pub extern "system" fn Java_chat_peerage_Native_react<'local>(
     })
 }
 
+/// Мои сообщения с непросмотренными чужими реакциями: JSON `[{id, sender, time, row}]` в порядке ленты.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_unseenReactions<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+) -> jstring {
+    jni_safe!(ret(&env, "[]"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "[]") };
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        else {
+            return ret(&env, "[]");
+        };
+        ret(&env, &e.unseen_reactions_json(chat))
+    })
+}
+
+/// Реакции сообщения `(msg_id, sender_hex)` просмотрены.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_markReactionsSeen<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    chat_hex: JString<'local>,
+    is_group: jboolean,
+    msg_id: jlong,
+    sender_hex: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Some(chat) = peerage_engine::ChatKey::parse(&jstr(&mut env, &chat_hex), is_group != 0)
+        else {
+            return;
+        };
+        let sender = jstr(&mut env, &sender_hex);
+        e.mark_reactions_seen(chat, msg_id as u64, &sender);
+    })
+}
+
 /// Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_pinned<'local>(

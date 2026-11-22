@@ -1825,14 +1825,52 @@ impl MessageStore {
         at: i64,
     ) -> Result<bool, StoreError> {
         let n = db::lock(&self.db).execute(
-            "INSERT INTO reactions (chat, scope, msg_id, msg_sender, who, emoji, at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO reactions (chat, scope, msg_id, msg_sender, who, emoji, at, seen)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
              ON CONFLICT(chat, scope, msg_id, msg_sender, who)
-             DO UPDATE SET emoji = excluded.emoji, at = excluded.at
+             DO UPDATE SET emoji = excluded.emoji, at = excluded.at, seen = 0
              WHERE excluded.at > reactions.at AND excluded.emoji != reactions.emoji",
             rusqlite::params![chat.id(), chat.scope(), msg_id as i64, msg_sender, who, emoji, at],
         )?;
         Ok(n > 0)
+    }
+
+    /// Сообщения `me` с непросмотренными чужими реакциями — `(id, автор, время, строка)` в
+    /// порядке ленты (старые первыми): «❤» на капсуле ведёт к ним по очереди, а время и
+    /// строка открывают окно истории, если сообщения нет в загруженной ленте.
+    pub fn unseen_reactions(&self, chat: Chat, me: &str) -> Vec<(u64, String, i64, i64)> {
+        let conn = db::lock(&self.db);
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT r.msg_id, r.msg_sender, MIN(m.time), MIN(m.rowid) FROM reactions r
+             JOIN chat_messages m ON m.chat = r.chat AND m.scope = r.scope
+                  AND m.id = r.msg_id AND m.sender = r.msg_sender
+             WHERE r.chat = ?1 AND r.scope = ?2 AND r.seen = 0 AND r.emoji != ''
+                   AND r.msg_sender = ?3 AND r.who != ?3
+             GROUP BY r.msg_id, r.msg_sender
+             ORDER BY MIN(m.time), MIN(m.rowid)",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map(rusqlite::params![chat.id(), chat.scope(), me], |r| {
+            Ok((r.get::<_, i64>(0)? as u64, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .and_then(|rows| rows.collect())
+        .unwrap_or_default()
+    }
+
+    /// Реакции сообщения просмотрены (оно попало на экран или к нему перешли).
+    pub fn mark_reactions_seen(&self, chat: Chat, msg_id: u64, msg_sender: &str) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "UPDATE reactions SET seen = 1 WHERE chat=?1 AND scope=?2 AND msg_id=?3 AND msg_sender=?4 AND seen = 0",
+            rusqlite::params![chat.id(), chat.scope(), msg_id as i64, msg_sender],
+        )?;
+        Ok(())
+    }
+
+    /// Всё просмотрено — после восстановления из копии: старые реакции не «новые».
+    pub fn mark_all_reactions_seen(&self) -> Result<(), StoreError> {
+        db::lock(&self.db).execute("UPDATE reactions SET seen = 1 WHERE seen = 0", [])?;
+        Ok(())
     }
 
     /// Реакции одного сообщения — новый набор для события после изменения.
@@ -2918,6 +2956,39 @@ mod tests {
         store.retract_many(chat, &[(7, author.clone())]).unwrap();
         assert!(store.reactions(chat, 7, &author).is_empty());
         assert!(store.history(chat, None, 10)[0].reactions.is_empty());
+    }
+
+    /// Непросмотренные реакции (капсула «❤», 5.7): только чужие на МОИ сообщения, по
+    /// порядку сообщений в ленте; смена реакции — снова новая, снятая и своя — нет;
+    /// просмотр гасит все реакции сообщения, копия данных приходит просмотренной.
+    #[test]
+    fn unseen_reactions_are_others_on_mine_in_feed_order() {
+        let peer = key();
+        let store = MessageStore::open(db());
+        let (me, him) = ("aa".to_string(), hex::encode(peer));
+        let chat = Chat::Dm(&peer);
+        for (id, sender, time) in [(1, &me, 10), (2, &him, 20), (3, &me, 30)] {
+            store.append(chat, &StoredMessage { id, sender: sender.clone(), text: "м".into(), time, ..Default::default() }).unwrap();
+        }
+        let unseen = |store: &MessageStore| -> Vec<(u64, String)> {
+            store.unseen_reactions(chat, &me).into_iter().map(|(id, s, _, _)| (id, s)).collect()
+        };
+        store.react(chat, 3, &me, &him, "👍", 100).unwrap();
+        store.react(chat, 1, &me, &him, "❤️", 101).unwrap();
+        store.react(chat, 2, &him, &me, "👍", 102).unwrap(); // моя на его — не в счёт
+        store.react(chat, 3, &me, &me, "😂", 103).unwrap(); // своя на своё — не в счёт
+        assert_eq!(unseen(&store), vec![(1, me.clone()), (3, me.clone())]);
+        assert_eq!(store.unseen_reactions(chat, &me)[0].2, 10, "время — сообщения, для окна истории");
+
+        store.mark_reactions_seen(chat, 1, &me).unwrap();
+        assert_eq!(unseen(&store), vec![(3, me.clone())]);
+        store.react(chat, 1, &me, &him, "🔥", 104).unwrap();
+        assert_eq!(unseen(&store), vec![(1, me.clone()), (3, me.clone())], "сменил — снова новая");
+        store.react(chat, 3, &me, &him, "", 105).unwrap();
+        assert_eq!(unseen(&store), vec![(1, me.clone())], "снятая не в счёт");
+
+        store.mark_all_reactions_seen().unwrap();
+        assert!(unseen(&store).is_empty());
     }
 
     /// Отозванное «у всех» оставляет строку на месте: содержимое стёрто, правка и

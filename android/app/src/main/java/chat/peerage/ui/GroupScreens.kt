@@ -90,6 +90,11 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
     // «Поделиться» в эту группу: текст — в поле, вложения ждут над ним до «Отправить».
     val staged = model.stagedShare(chat)
     LaunchedEffect(model.shareDraft) { model.takeSharedText(chat)?.let { input = it } }
+    // Лента на экране — от этого зависят непрочитанные и «прочитано» (см. AppModel.viewing).
+    DisposableEffect(chat) {
+        model.startViewing(chat)
+        onDispose { model.stopViewing(chat) }
+    }
     PagingNewer(model, listState, chat)
     val search = model.chatSearch?.takeIf { it.chat == chat }
 
@@ -139,7 +144,8 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
                     CompositionLocalProvider(LocalSearchMarks provides searchMarks(search)) {
                         GroupFeed(model, msgs, listState)
                     }
-                    JumpDownButton(model, listState, chat, Modifier.align(Alignment.BottomEnd))
+                    JumpCapsule(model, listState, chat, Modifier.align(Alignment.BottomEnd))
+                    FeedSeen(model, listState, msgs, chat)
                 }
             }
             ForwardSheet(model)

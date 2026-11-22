@@ -3,9 +3,6 @@
 package chat.peerage.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,17 +35,14 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -84,7 +78,6 @@ import chat.peerage.moreChatHits
 import chat.peerage.refreshMediaCounts
 import chat.peerage.runChatSearch
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -787,31 +780,5 @@ internal fun PagingNewer(model: AppModel, listState: LazyListState, chat: ChatTa
     LaunchedEffect(chat) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.layoutInfo.totalItemsCount }
             .collect { (first, _) -> if (first <= 3) model.loadNewer(chat) }
-    }
-}
-
-/**
- * Кнопка «вниз» (макет `special/Unread`, пока без счётчика непрочитанных): видна, когда
- * лента прокручена от низа или открыта окном посреди переписки. Окно — возврат к хвосту.
- */
-@Composable
-internal fun JumpDownButton(model: AppModel, listState: LazyListState, chat: ChatTarget, modifier: Modifier = Modifier) {
-    val scope = rememberCoroutineScope()
-    val detached = model.detached[model.chatKey(chat.id, chat.group)] == true
-    val away by remember { derivedStateOf { listState.firstVisibleItemIndex > 2 } }
-    AnimatedVisibility(away || detached, modifier, enter = fadeIn(), exit = fadeOut()) {
-        val desc = stringResource(R.string.jump_down)
-        Box(
-            Modifier.padding(Tokens.Space.l).size(Tokens.Size.jumpDown)
-                .shadow(Tokens.Size.menuShadow, CircleShape)
-                .clip(CircleShape)
-                .background(Tokens.Colors.raised)
-                .clickable(role = Role.Button, onClickLabel = desc) {
-                    if (detached) model.toTail(chat) else scope.launch { listState.animateScrollToItem(0) }
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(TablerIcons.ChevronDown, desc, tint = Tokens.Colors.iconChrome, modifier = Modifier.size(Tokens.Size.iconM))
-        }
     }
 }

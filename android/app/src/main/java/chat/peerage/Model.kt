@@ -1042,8 +1042,8 @@ class AppModel private constructor() {
     @Volatile var foreground = true
         set(v) {
             field = v
-            // Вернулись к открытому чату — он снова на экране, значит прочитан.
-            if (v) currentChat?.let { k -> ops.execute { Native.markRead(sessionPtr, k) } }
+            // Вернулись к ленте чата — она снова на экране, значит прочитана.
+            if (v) viewing?.takeUnless { it.group }?.let { c -> ops.execute { Native.markRead(sessionPtr, c.id) } }
         }
 
     /** Отчёты о прочтении и набор (2.10): переключатели «Приватности». */
@@ -1129,6 +1129,9 @@ class AppModel private constructor() {
     private fun onMain(write: () -> Unit) {
         mainHandler.post(write)
     }
+
+    /** То же для зон модели в других файлах (ModelFeed и т.п.). */
+    internal fun runOnMain(write: () -> Unit) = onMain(write)
 
     // Офлайн-очередь целиком в движке: недоставленное лежит в его зашифрованной
     // базе и досылается им же. Здесь — только отрицательные id для того, что движок
@@ -1450,6 +1453,7 @@ class AppModel private constructor() {
         currentChat = key
         unread[key] = 0
         ops.execute { loadHistory(key) }
+        loadUnseenReactions(ChatTarget(key, group = false))
     }
 
     private fun loadHistory(key: String) {
@@ -1460,7 +1464,7 @@ class AppModel private constructor() {
         atChatStart -= key // хвост перечитан — выше снова может что-то быть
         detached.remove(chatKey(key, group = false))
         // Переписка на экране — прочитана (отметка уйдёт, только если отчёты включены).
-        if (currentChat == key && foreground) Native.markRead(sessionPtr, key)
+        if (viewing == ChatTarget(key, group = false) && foreground) Native.markRead(sessionPtr, key)
         // Байты вложений НЕ читаем заранее: `blob()` возьмёт их при показе, то есть
         // только для видимых пузырей. Раньше вход в чат тянул с диска всю страницу,
         // включая вложения, до которых человек не долистает.
@@ -1733,6 +1737,9 @@ class AppModel private constructor() {
         bubbleActions = null
         jumpTo = null // недостигнутая цель прошлого чата не должна сработать в новом
         chatSearch = null
+        feedMarks = FeedMarks()
+        flash = null
+        feedAtBottom = true
     }
 
     fun clearSelection() {
@@ -2142,17 +2149,20 @@ class AppModel private constructor() {
                 val counts = if (m.isCall) m.text == "missed" else !m.system
                 if (!ev.group && !m.mine) {
                     typingUntil.remove(ev.chat) // сообщение пришло — набор окончен
-                    if (currentChat == ev.chat && foreground && counts) {
+                    if (viewing == ChatTarget(ev.chat, group = false) && foreground && counts) {
                         ops.execute { Native.markRead(sessionPtr, ev.chat) }
                     }
                 }
-                if (!m.mine && counts) {
+                // Лента этого чата на экране: прочитано сразу, а прокрученная от хвоста —
+                // копит пришедшее на капсуле (5.7). Чат «текущий», но не на экране (ушли в
+                // профиль или на главную) — пришедшее непрочитанное.
+                val onScreen = viewing == ChatTarget(ev.chat, ev.group)
+                if (onScreen && !m.mine && counts) noteIncoming(m, ev.group)
+                if (!m.mine && counts && !onScreen) {
                     if (ev.group) {
-                        if (currentGroup != ev.chat) {
-                            groupUnread[ev.chat] = (groupUnread[ev.chat] ?: 0) + 1
-                            if (m.mentions.any { it.key == me?.pubkey }) groupMentioned[ev.chat] = true
-                        }
-                    } else if (currentChat != ev.chat) {
+                        groupUnread[ev.chat] = (groupUnread[ev.chat] ?: 0) + 1
+                        if (m.mentions.any { it.key == me?.pubkey }) groupMentioned[ev.chat] = true
+                    } else {
                         unread[ev.chat] = (unread[ev.chat] ?: 0) + 1
                     }
                 }
@@ -2213,9 +2223,13 @@ class AppModel private constructor() {
             is EngineEvent.PinsChanged -> refreshPins(ev.chat, groups.any { it.gid == ev.chat })
             // Правка приходит и на свои сообщения (эхо движка), и на чужие: меняем
             // текст на месте, чтобы не перечитывать всю ленту.
-            is EngineEvent.Reactions -> messages[chatKey(ev.chat, ev.group)]?.let { list ->
-                val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
-                if (i >= 0) list[i] = list[i].copy(reactions = ev.reactions)
+            is EngineEvent.Reactions -> {
+                messages[chatKey(ev.chat, ev.group)]?.let { list ->
+                    val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
+                    if (i >= 0) list[i] = list[i].copy(reactions = ev.reactions)
+                }
+                // Новая чужая реакция на моё в открытом чате — на «❤».
+                if (openChatTarget() == ChatTarget(ev.chat, ev.group)) loadUnseenReactions(ChatTarget(ev.chat, ev.group))
             }
             is EngineEvent.MessageEdited -> {
                 val stamp = System.currentTimeMillis() / 1000
@@ -2853,10 +2867,16 @@ class AppModel private constructor() {
         leaveChat()
         currentGroup = gid
         currentGroupRoster = null // тикер подтянет свежий агрегат
+        // Сколько пришло, пока чат был закрыт: среди этого ищутся упоминания для «@».
+        val unreadN = groupUnread[gid] ?: 0
         groupUnread[gid] = 0
         groupMentioned.remove(gid)
         loadGroupMembers(gid)
-        ops.execute { loadGroupHistory(gid) }
+        ops.execute {
+            loadGroupHistory(gid)
+            collectUnreadMentions(gid, unreadN)
+        }
+        loadUnseenReactions(ChatTarget(gid, group = true))
     }
 
     private fun loadGroupHistory(gid: String) {
@@ -2878,7 +2898,7 @@ class AppModel private constructor() {
         // читать всю страницу с диска незачем.
     }
 
-    private fun groupLog(gid: String): SnapshotStateList<Message> =
+    internal fun groupLog(gid: String): SnapshotStateList<Message> =
         messages.getOrPut(chatKey(gid, group = true)) { mutableListOf<Message>().toMutableStateList() }
 
     /**
@@ -2918,6 +2938,22 @@ class AppModel private constructor() {
      *  разных авторов. Лента сама гасит цель после прокрутки — иначе повторный вход
      *  в чат снова уезжал бы к старому вложению. */
     var jumpTo by mutableStateOf<MsgRef?>(null)
+
+    /** Капсула «❤ · @ · вниз» и стек возвратов открытого чата (5.7, [FeedMarks]). */
+    var feedMarks by mutableStateOf(FeedMarks())
+
+    /** Подсветка ряда после перехода по капсуле или цитате; гасит лента. */
+    var flash by mutableStateOf<Flash?>(null)
+
+    /** Лента открытого чата у хвоста — пришедшее видно сразу, на «вниз» не копится. Пишет лента. */
+    @Volatile var feedAtBottom = true
+
+    /**
+     * Чья лента сейчас НА ЭКРАНЕ ([startViewing]/[stopViewing]). Не то же, что [currentChat]:
+     * тот остаётся выбранным и на профиле, и после «назад» на главную, — и пришедшее в него
+     * не считалось непрочитанным, а в личном чате уходило «прочитано», которого не было.
+     */
+    @Volatile var viewing: ChatTarget? = null
 
     /** Поиск в открытом чате (2.9); null — не открыт. */
     var chatSearch by mutableStateOf<ChatSearch?>(null)

@@ -314,6 +314,12 @@ object Native {
     /** Закреплённые сообщения чата: JSON-массив строк истории, свежие первыми. */
     external fun pinned(sessionPtr: Long, chatHex: String, isGroup: Boolean): String
 
+    /** Мои сообщения с непросмотренными чужими реакциями: `[{id, sender}]` в порядке ленты (5.7). */
+    external fun unseenReactions(sessionPtr: Long, chatHex: String, isGroup: Boolean): String
+
+    /** Реакции сообщения просмотрены (попало на экран или к нему перешли). */
+    external fun markReactionsSeen(sessionPtr: Long, chatHex: String, isGroup: Boolean, msgId: Long, senderHex: String)
+
     /**
      * Сводка по всем чатам для главной: JSON `[{chat, group, pinned_at, muted, last}]`,
      * где `last` — последнее сообщение чата (или null у пустого). Один вызов на

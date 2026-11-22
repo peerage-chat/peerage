@@ -522,6 +522,18 @@ val TablerIcons.ChevronUp: ImageVector by lazy { tabler("chevron-up", "M7 14l5 -
 
 val TablerIcons.ChevronDown: ImageVector by lazy { tabler("chevron-down", "M7 10l5 5l5 -5") }
 
+val TablerIcons.Heart: ImageVector by lazy {
+    tabler("heart", "M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572")
+}
+
+val TablerIcons.At: ImageVector by lazy {
+    tabler(
+        "at",
+        "M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0",
+        "M16 12v1.5a2.5 2.5 0 0 0 5 0v-1.5a9 9 0 1 0 -5.5 8.28",
+    )
+}
+
 val TablerIcons.Calendar: ImageVector by lazy {
     tabler(
         "calendar",

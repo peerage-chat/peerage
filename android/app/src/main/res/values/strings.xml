@@ -1157,4 +1157,8 @@
     <string name="privacy_share_chats_sub">Recent chats appear in the system menu outside the app</string>
     <string name="privacy_share_chats_off">Off: chat names and photos are not passed to the system. %1$s stays in the menu as the app icon.</string>
     <string name="privacy_share_chats_on">On: Saved and the names and photos of the seven most recent chats are passed to the system for the Share menu.</string>
+    <!-- Feed jump capsule (5.7) -->
+    <string name="jump_reactions">New reactions: %1$d</string>
+    <string name="jump_mentions">Mentions: %1$d</string>
+    <string name="jump_back">Back to reply</string>
 </resources>

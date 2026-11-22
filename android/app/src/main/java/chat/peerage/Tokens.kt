@@ -297,6 +297,7 @@ object Tokens {
         val heroTile = 24.dp // крупная плитка-знак шага первого запуска (`onboard/KeyIntro`)
         val aboutTile = 26.dp // плитка знака на «О приложении»
         val liveCall = 16.dp // плашка «Идёт звонок» над журналом звонков
+        val jumpCapsule = 16.dp // капсула «❤ · @ · вниз» над лентой (`jump/Capsule`)
         val group = 18.dp // группа строк на панели: 28 = 18 + отступ панели 10 (концентрично)
         val card = group // старое имя карточки-секции
         val panel = 28.dp // верх панели «листа», шторки
@@ -446,7 +447,8 @@ object Tokens {
         val avatarHit = 36.dp // аватар находки в списке поиска
         val dayCell = 44.dp // клетка дня календаря «Перейти к дате»
         val dayDot = 40.dp // круг дня (выбранный — акцентом)
-        val jumpDown = 46.dp // кнопка «вниз» над лентой (`special/Unread`)
+        val jumpDown = 46.dp // ширина капсулы «❤ · @ · вниз» над лентой (`jump/Capsule`)
+        val jumpCell = 42.dp // ячейка капсулы: значок и число под ним
         val sheetList = 400.dp // предельная высота списка в шторке (выбор участника)
         val systemLine = 300.dp // предельная ширина системной строки группы (макет `special/GroupSystem`)
         val phraseRow = 36.dp // строка слова в сетке 24 слов

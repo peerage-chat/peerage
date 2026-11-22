@@ -610,6 +610,8 @@ impl Engine {
                                 let peer = if is_note { me } else { peer };
                                 let _ = store.react(Chat::Dm(&peer), r, s, who, e, at);
                             }
+                            // Из копии — не новость: капсула «❤» не должна звать к старым реакциям.
+                            let _ = store.mark_all_reactions_seen();
                         }
                         Rec::Calls { items: list } => {
                             let store = self.calls.lock_safe();

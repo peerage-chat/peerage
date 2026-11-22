@@ -965,6 +965,27 @@ impl Engine {
         let _ = store.set_chat_muted(chat.as_chat(), muted);
     }
 
+    /// Мои сообщения с непросмотренными чужими реакциями — `[{"id","sender","time","row"}]`
+    /// в порядке ленты (капсула «❤», UI 5.7); время и строка — для окна истории.
+    pub fn unseen_reactions_json(&self, chat: ChatKey) -> String {
+        let list: Vec<serde_json::Value> = self
+            .messages
+            .lock_safe()
+            .unseen_reactions(chat.as_chat(), &self.me_hex())
+            .into_iter()
+            .map(|(id, sender, time, row)| serde_json::json!({ "id": id, "sender": sender, "time": time, "row": row }))
+            .collect();
+        serde_json::to_string(&list).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Реакции сообщения `(id, sender)` просмотрены: оно попало на экран или к нему перешли.
+    pub fn mark_reactions_seen(&self, chat: ChatKey, id: u64, sender: &str) {
+        let _ = self
+            .messages
+            .lock_safe()
+            .mark_reactions_seen(chat.as_chat(), id, sender);
+    }
+
     /// Закреплённые сообщения чата (свежие первыми) — как обычные строки истории.
     pub fn pinned_json(&self, chat: ChatKey) -> String {
         let list = self.messages.lock_safe().pinned(chat.as_chat());

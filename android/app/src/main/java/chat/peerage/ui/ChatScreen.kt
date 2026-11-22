@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -260,6 +261,11 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
     // «Поделиться» в этот чат: текст — в поле, вложения ждут над ним до «Отправить».
     val staged = model.stagedShare(chat)
     LaunchedEffect(model.shareDraft) { model.takeSharedText(chat)?.let { input = it } }
+    // Лента на экране — от этого зависят непрочитанные и «прочитано» (см. AppModel.viewing).
+    DisposableEffect(chat) {
+        model.startViewing(chat)
+        onDispose { model.stopViewing(chat) }
+    }
     val search = model.chatSearch?.takeIf { it.chat == chat }
     // Правка начинается с ТЕКУЩЕГО текста: человек исправляет, а не набирает заново.
     LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
@@ -302,7 +308,8 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
                 CompositionLocalProvider(LocalSearchMarks provides searchMarks(search)) {
                     DmFeed(model, msgs, listState, appearFrom)
                 }
-                JumpDownButton(model, listState, chat, Modifier.align(Alignment.BottomEnd))
+                JumpCapsule(model, listState, chat, Modifier.align(Alignment.BottomEnd))
+                FeedSeen(model, listState, msgs, chat)
             }
         }
         ForwardSheet(model)
@@ -509,6 +516,7 @@ internal fun QuoteBlock(
     src: Message?,
     quotedMine: Boolean,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
 ) {
     // Автор цитаты: своё — «Вы», чужое в группе — имя участника, чужое в личном —
     // имя собеседника. Ключ автора у цитаты есть всегда (ADR-006), поэтому имя
@@ -525,7 +533,8 @@ internal fun QuoteBlock(
     Row(
         modifier.padding(bottom = Tokens.Space.xs).height(IntrinsicSize.Min).heightIn(min = Tokens.Size.rule)
             .clip(RoundedCornerShape(Tokens.Radius.chip))
-            .background(Tokens.Colors.quoteOnBubble),
+            .background(Tokens.Colors.quoteOnBubble)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier),
     ) {
         AccentRule(Modifier.fillMaxHeight())
         // Миниатюра слева от подписи — если она у нас есть.
@@ -1054,10 +1063,17 @@ internal fun MessageRow(
     val selected = selecting && MsgRef(m.id, m.sender) in model.selection
     // Правимое сообщение подсвечено так же (макет `chatact/Edit`): видно, что именно меняется.
     val editingThis = model.editTarget?.let { it.id == m.id && it.sender == m.sender } == true
+    // Пришли сюда капсулой или по цитате (5.7): ряд подсвечен так же и гаснет плавно.
+    val flashed = model.flash?.ref?.let { it.id == m.id && it.sender == m.sender } == true
+    val rowFill by animateColorAsState(
+        if (selected || editingThis || flashed) Tokens.Colors.selectedRow else Color.Transparent,
+        tween(Tokens.Anim.normal),
+        label = "rowFill",
+    )
     val press = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth()
-            .background(if (selected || editingThis) Tokens.Colors.selectedRow else Color.Transparent)
+            .background(rowFill)
             .then(
                 if (selecting) {
                     Modifier.toggleable(selected, press, indication = null, role = Role.Checkbox) { model.toggleSelect(m) }
@@ -1315,6 +1331,12 @@ internal fun MessageBubble(
                                     model,
                                     src,
                                     m.replySender == model.me?.pubkey,
+                                    // Тап — к исходному, место ответа — в стек «вниз» (5.7).
+                                    onClick = if (src != null && chatId != null && !selecting) {
+                                        { model.followQuote(ChatTarget(chatId, group), m, src) }
+                                    } else {
+                                        null
+                                    },
                                     // Над фото плашка тянется во всю ширину шапки: узкая
                                     // посреди широкой полосы читается обрывком.
                                     modifier = if (photoHeader) Modifier.fillMaxWidth() else Modifier,

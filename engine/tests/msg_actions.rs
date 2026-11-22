@@ -692,6 +692,43 @@ fn reactions_travel_replace_and_clear() {
     assert!(!a.react(peerage_engine::ChatKey::Dm(b_key), id1, &author, "a b"));
 }
 
+/// Капсула «❤» (5.7): реакция собеседника на моё сообщение — непросмотренная у меня и
+/// только у меня; просмотр гасит её, новая реакция того же человека — снова новая.
+#[test]
+fn unseen_reactions_are_mine_to_see_and_clear() {
+    let (a, b, a_key, b_key) = pair("unseen", 63, 64);
+    let id1 = a.send_text(&b_key, "кто за хлебом?").unwrap() as u64;
+    assert!(
+        wait(10, || !history(&b, &a_key).is_empty()),
+        "сообщение дошло"
+    );
+    let author = hex::encode(a_key);
+    let unseen = |e: &Engine, peer: &[u8; 32]| -> serde_json::Value {
+        serde_json::from_str(&e.unseen_reactions_json(peerage_engine::ChatKey::Dm(*peer))).unwrap()
+    };
+
+    assert!(b.react(peerage_engine::ChatKey::Dm(a_key), id1, &author, "👍"));
+    assert!(wait(10, || unseen(&a, &b_key).as_array().map(|v| v.len())
+        == Some(1)));
+    assert_eq!(unseen(&a, &b_key)[0]["id"], id1);
+    assert_eq!(unseen(&a, &b_key)[0]["sender"], author);
+    assert_eq!(
+        unseen(&b, &a_key),
+        serde_json::json!([]),
+        "своя реакция у ставившего — не новость"
+    );
+
+    a.mark_reactions_seen(peerage_engine::ChatKey::Dm(b_key), id1, &author);
+    assert_eq!(unseen(&a, &b_key), serde_json::json!([]));
+
+    assert!(b.react(peerage_engine::ChatKey::Dm(a_key), id1, &author, "🔥"));
+    assert!(
+        wait(10, || unseen(&a, &b_key).as_array().map(|v| v.len())
+            == Some(1)),
+        "сменил — снова новая"
+    );
+}
+
 /// Поиск в чате (2.9) через JSON-границу движка: счётчик и листание, фильтр
 /// отправителя, затем переход к находке — окно истории вокруг неё и дни месяца.
 #[test]

@@ -162,15 +162,25 @@ internal fun ReactionChips(model: AppModel, m: Message, chat: ChatTarget) {
         ),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
     ) {
+        // Пришли капсулой «❤» (5.7): чужие реакции обведены — видно, какая новая.
+        val flashed = model.flash?.let { it.reaction && it.ref.id == m.id && it.ref.sender == m.sender } == true
+        val me = model.me?.pubkey
         m.reactions.forEach { r ->
             val own = r.emoji == mine
+            val fresh = flashed && r.who.any { it != me }
             val label = pluralStringResource(R.plurals.react_chip, r.who.size, r.emoji, r.who.size)
             val reactionsLabel = stringResource(R.string.react_title)
             Row(
                 Modifier.heightIn(min = Tokens.Size.reactChip)
                     .clip(chipShape)
                     .background(if (own) Tokens.Colors.accentMuted else Tokens.Colors.bubbleIn)
-                    .then(if (own) Modifier.border(1.dp, Tokens.Colors.accent, chipShape) else Modifier)
+                    .then(
+                        when {
+                            fresh -> Modifier.border(1.dp, Tokens.Colors.accentSoft, chipShape)
+                            own -> Modifier.border(1.dp, Tokens.Colors.accent, chipShape)
+                            else -> Modifier
+                        },
+                    )
                     .combinedClickable(
                         role = Role.Button,
                         onLongClickLabel = reactionsLabel,

@@ -30,6 +30,28 @@
 
 ---
 
+## 2026-11-22 · Признак просмотра реакций (капсула «❤») · хэш — следующим коммитом (UI 5.7)
+
+**Причина:** ui-redesign-impl.md 5.7, app-ui.md → «Непрочитанные», макет `jump/Capsule`:
+«❤» на капсуле ведёт к новым реакциям на свои сообщения; «просмотр реакций — признак в
+движке (до шага 8)».
+
+- **Схема:** `reactions.seen INTEGER NOT NULL DEFAULT 1`; старая база — `ALTER TABLE` в
+  `migrate` (имеющиеся реакции считаются просмотренными). Запись реакции (`react`, вставка и
+  замена) ставит `seen = 0`; что «новое» — решает запрос.
+- **Контракт:** `MessageStore::unseen_reactions(chat, me) -> Vec<(id, автор, время, rowid)>`
+  — мои сообщения с непросмотренными ЧУЖИМИ реакциями в порядке ленты;
+  `mark_reactions_seen(chat, id, sender)`, `mark_all_reactions_seen()`.
+  `Engine::unseen_reactions_json(ChatKey)` → `[{id, sender, time, row}]`,
+  `Engine::mark_reactions_seen(ChatKey, id, sender)`. JNI: `Native.unseenReactions`,
+  `Native.markReactionsSeen`.
+- **Поведение:** своя реакция и реакции на чужие сообщения новыми не бывают; смена реакции
+  тем же человеком — снова новая; снятая — нет. Восстановление из копии отмечает все
+  реакции просмотренными. В сеть ничего нового не уходит.
+- **Совместимость:** формат провода не менялся.
+- **Тесты:** `core` `unseen_reactions_are_others_on_mine_in_feed_order`; engine
+  `msg_actions::unseen_reactions_are_mine_to_see_and_clear` (через сеть-двойник).
+
 ## 2026-11-22 · Чат с собой — только локально; «Сохранённое» = обычный личный чат · 1c62008 (UI 5.1)
 
 **Причина:** ui-redesign-impl.md 5.1, макет `misc/Main`: «Сохранённое» — лента с днями,

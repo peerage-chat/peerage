@@ -198,6 +198,9 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             who        TEXT    NOT NULL,
             emoji      TEXT    NOT NULL,
             at         INTEGER NOT NULL,
+            -- Просмотрена ли (капсула «❤», 5.7). Запись реакции ставит 0; «новыми» считаются
+            -- только чужие на мои сообщения — это решает запрос, а не запись.
+            seen       INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (chat, scope, msg_id, msg_sender, who)
         );
 
@@ -286,6 +289,7 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN name TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN contact INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN autodel INTEGER NOT NULL DEFAULT -1", []);
+    let _ = conn.execute("ALTER TABLE reactions ADD COLUMN seen INTEGER NOT NULL DEFAULT 1", []);
     // Полнотекстовый индекс переписки: текст и имя файла вложения (поиск в чате, 2.9).
     // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
     // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5
