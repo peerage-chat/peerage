@@ -1205,6 +1205,9 @@ class AppModel private constructor() {
         return true
     }
 
+    /** Снимок состояния для «Сохранить лог» (7n) — одни числа; null — движок не поднят. */
+    fun diagnosticsJson(): String? = if (started && sessionPtr != 0L) Native.diagnostics(sessionPtr) else null
+
     // Мгновенный реконнект при восстановлении сети (до срабатывания тикера).
     private fun registerNetworkCallback() {
         val ctx = appContext ?: return

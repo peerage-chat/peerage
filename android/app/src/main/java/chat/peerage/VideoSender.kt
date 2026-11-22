@@ -335,9 +335,9 @@ class VideoSender(
                     android.util.Log.i("VideoSender", "Received CODEC_CONFIG SPS/PPS size = ${data.size} bytes")
                     config = data
                 } else {
-                    val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
+                    val keyframe = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
                     val cfg = config
-                    val au = if (key && cfg != null) cfg + data else data
+                    val au = if (keyframe && cfg != null) cfg + data else data
                     // Ориентация (угол сенсора/90) — приёмник доворачивает; fps — приёмник
                     // пейсит по НЕМУ, а не по своей настройке (иначе разный fps → видео не
                     // на той скорости). Оба едут в протоколе LiteRTC рядом с кадром.
@@ -346,12 +346,12 @@ class VideoSender(
                     if (encodedCount % 30 == 0) {
                         android.util.Log.i(
                             "VideoSender",
-                            "Encoded and sent 30 frames, last size = ${au.size} bytes (key=$key, captured ${age / 1000}ms ago" +
+                            "Encoded and sent 30 frames, last size = ${au.size} bytes (key=$keyframe, captured ${age / 1000}ms ago" +
                                 (if (age == 0) ", ${clockGaps(info.presentationTimeUs)})" else ")"),
                         )
                         adaptBitrate()
                     }
-                    if (sendVideo(au, key, (sensorOrientation / 90) % 4, fps, age)) requestKeyframe()
+                    if (sendVideo(au, keyframe, (sensorOrientation / 90) % 4, fps, age)) requestKeyframe()
                 }
             }
             runCatching { enc.releaseOutputBuffer(idx, false) }

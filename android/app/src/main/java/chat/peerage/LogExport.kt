@@ -50,13 +50,80 @@ object LogExport {
         sb.append("${ctx.getString(R.string.app_name)} $ver · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             .append(" · ${Build.MANUFACTURER} ${Build.MODEL} · ${Build.SUPPORTED_ABIS.firstOrNull()}\n")
             .append("снят ${stamp()}\n\n")
+        // Снимок — первым: по нему видно, в каком состоянии была сеть, когда сняли лог.
+        sb.append("== снимок ==\n").append(snapshot(AppModel.instance.diagnosticsJson())).append("\n")
         File(ctx.filesDir, CRASH_FILE).takeIf { it.exists() }?.let {
-            sb.append("== прошлое падение ==\n").append(it.readText()).append("\n\n")
+            sb.append("== прошлое падение (Kotlin) ==\n").append(it.readText()).append("\n\n")
         }
+        exits(ctx)?.let { sb.append("== завершения прошлых запусков ==\n").append(it).append("\n") }
         sb.append("== журнал этого запуска ==\n")
         sb.append(readOwnLogcat())
         return sanitize(sb.toString())
     }
+
+    /**
+     * Снимок движка построчно: «раздел: поле число · …». JSON разбирается без org.json, чтобы
+     * функцию можно было проверить на JVM: вложенность — одна ступень, значения — числа.
+     */
+    fun snapshot(json: String?): String {
+        if (json.isNullOrBlank() || json == "{}") return "движок не поднят\n"
+        val sb = StringBuilder()
+        val section = Regex(""""(\w+)"\s*:\s*\{([^{}]*)\}""")
+        val field = Regex(""""(\w+)"\s*:\s*(-?[0-9.eE+]+|true|false)""")
+        for (s in section.findAll(json)) {
+            val fields = field.findAll(s.groupValues[2]).joinToString(" · ") { "${it.groupValues[1]} ${it.groupValues[2]}" }
+            sb.append(s.groupValues[1]).append(": ").append(fields).append('\n')
+        }
+        return sb.toString()
+    }
+
+    /**
+     * Почему завершались прошлые запуски (API 30+): здесь видно и нативное падение Rust/Go,
+     * которого обработчик Kotlin не ловит, и ANR, и убийство системой по памяти.
+     */
+    private fun exits(ctx: Context): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val am = ctx.getSystemService(android.app.ActivityManager::class.java) ?: return null
+        val list = runCatching { am.getHistoricalProcessExitReasons(ctx.packageName, 0, EXITS_MAX) }.getOrNull()
+        if (list.isNullOrEmpty()) return null
+        val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT)
+        return list.joinToString("\n") { e ->
+            val head = "${fmt.format(Date(e.timestamp))} ${exitReason(e.reason)} · статус ${e.status}" +
+                (e.description?.let { " · $it" } ?: "")
+            // След ANR — текст стеков; нативное падение — protobuf-надгробие, без инструментов
+            // его не разобрать, поэтому только размер: по нему видно, что оно было.
+            val trace = when (e.reason) {
+                android.app.ApplicationExitInfo.REASON_ANR ->
+                    runCatching { e.traceInputStream?.bufferedReader()?.use { it.readText().take(TRACE_MAX) } }.getOrNull()
+                android.app.ApplicationExitInfo.REASON_CRASH_NATIVE ->
+                    runCatching { e.traceInputStream?.use { "надгробие ${it.readBytes().size} байт" } }.getOrNull()
+                else -> null
+            }
+            if (trace.isNullOrBlank()) head else "$head\n$trace"
+        } + "\n"
+    }
+
+    private fun exitReason(r: Int): String = when (r) {
+        android.app.ApplicationExitInfo.REASON_CRASH -> "падение"
+        android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "нативное падение"
+        android.app.ApplicationExitInfo.REASON_ANR -> "ANR"
+        android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "нехватка памяти"
+        android.app.ApplicationExitInfo.REASON_SIGNALED -> "сигнал"
+        android.app.ApplicationExitInfo.REASON_EXIT_SELF -> "сам"
+        android.app.ApplicationExitInfo.REASON_USER_REQUESTED -> "остановлен человеком"
+        android.app.ApplicationExitInfo.REASON_USER_STOPPED -> "остановлен в настройках"
+        android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "перерасход ресурсов"
+        android.app.ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "сбой запуска"
+        android.app.ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "смена разрешений"
+        android.app.ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "умерла зависимость"
+        android.app.ApplicationExitInfo.REASON_FREEZER -> "заморожен системой"
+        android.app.ApplicationExitInfo.REASON_PACKAGE_STATE_CHANGE -> "смена состояния пакета"
+        android.app.ApplicationExitInfo.REASON_PACKAGE_UPDATED -> "обновление приложения"
+        else -> "причина $r"
+    }
+
+    private const val EXITS_MAX = 8
+    private const val TRACE_MAX = 6000
 
     private fun readOwnLogcat(): String = runCatching {
         val p = ProcessBuilder(

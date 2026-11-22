@@ -1025,6 +1025,11 @@ impl Messenger {
 
     /// Кто флудил с запуска: по убыванию темпа в байтах, затем объёма. Пустой
     /// список — флуда не было; идёт ли он сейчас — по ненулевому темпу.
+    /// Сессии 1:1 по состояниям — только счётчики, для снимка в логе (шаг беты 7n).
+    pub fn session_census(&self) -> peerage_core::session::Census {
+        self.shared.sessions.lock().unwrap().census(Instant::now())
+    }
+
     pub fn flood_stats(&self) -> Vec<FloodStat> {
         let now = Instant::now();
         let map = self.shared.flood.lock().unwrap();

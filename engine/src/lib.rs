@@ -2171,6 +2171,35 @@ impl Engine {
         serde_json::to_string(&list).unwrap_or_else(|_| "[]".into())
     }
 
+    /// Снимок состояния для «Сохранить лог» (шаг беты 7n): пиры и узлы меша, сессии по
+    /// состояниям, очередь, отбросы бюджета — ОДНИМИ ЧИСЛАМИ. Ни ключей, ни адресов, ни имён:
+    /// файл человек пересылает сам, и в нём не должно быть того, что прячет смена адреса.
+    pub fn diagnostics_json(&self) -> String {
+        let net = self.net_stats();
+        let out = self.outbox.lock_safe().stats();
+        let flood = self.messenger.flood_stats();
+        let tiers = self.tier_cache.lock_safe();
+        let v = serde_json::json!({
+            "net": {
+                "peers": net.peer_count,
+                "peers_up": net.peers.iter().filter(|p| p.up).count(),
+                "tree": net.tree,
+                "ping_ms": net.ping_ms,
+                "rx_rate": net.rx_rate,
+                "tx_rate": net.tx_rate,
+            },
+            "sessions": self.messenger.session_census(),
+            "outbox": { "pending": out.pending, "bytes": out.bytes, "peers": out.peers },
+            "budget_drops": {
+                "sources": flood.len(),
+                "blocked": flood.iter().filter(|f| tiers.get(&f.peer).is_some_and(|t| t.is_blocked())).count(),
+                "packets": flood.iter().map(|f| f.dropped).sum::<u64>(),
+                "bytes": flood.iter().map(|f| f.bytes).sum::<u64>(),
+            },
+        });
+        v.to_string()
+    }
+
     /// Снимок офлайн-очереди для UI: `{pending, bytes, peers, warn}`. Ничего не
     /// удаляем автоматически — по `warn` клиент показывает предупреждение, а решение
     /// (подождать или сбросить очередь) остаётся за пользователем.

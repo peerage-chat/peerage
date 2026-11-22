@@ -30,6 +30,22 @@
 
 ---
 
+## 2026-11-22 · Снимок состояния для «Сохранить лог» · ? (бета 7n)
+
+**Причина:** beta.md 7n — по логу бета-юзера не видно, в каком состоянии была сеть и сессии,
+когда что-то пошло не так.
+
+- **Контракт:** `Engine::diagnostics_json()` → `{net{peers,peers_up,tree,ping_ms,rx_rate,tx_rate},
+  sessions{peers,live,confirmed,unconfirmed,handshaking,queued,resend}, outbox{pending,bytes,peers},
+  budget_drops{sources,blocked,packets,bytes}}` — только числа. JNI `Native.diagnostics(sessionPtr)`.
+  Внутри: `peerage_core::session::Census` и `Sessions::census(now)`, `Messenger::session_census()`.
+- **Поведение:** в сеть ничего нового не уходит; снимок попадает только в файл лога, который
+  человек сохраняет сам.
+- **Схема / совместимость:** не меняются.
+- **Тесты:** `core::session::tests::census_counts_states`; `engine/tests/log_privacy.rs` — весь
+  лог движка и мессенджера (trace) и сам снимок без имён, текста и ключей целиком (проверен
+  мутантом: подставленный `log::debug!` с текстом ловится).
+
 ## 2026-11-22 · Зачистка метаданных видео, HEIC и WebP · 8bf5841 (бета 7m)
 
 **Причина:** beta.md 7m — `blob/src/scrub.rs` чистил только JPEG и PNG; видео с камеры уходило

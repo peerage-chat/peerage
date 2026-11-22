@@ -1883,6 +1883,19 @@ pub extern "system" fn Java_chat_peerage_Native_netTree<'local>(
     })
 }
 
+/// Снимок состояния для «Сохранить лог» (7n): одни числа, без ключей и адресов.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_diagnostics<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        ret(&env, &e.diagnostics_json())
+    })
+}
+
 /// Снапшот стата сети: JSON NetStats (агрегаты считает движок).
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_netStats<'local>(

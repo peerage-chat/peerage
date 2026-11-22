@@ -421,6 +421,9 @@ object Native {
     external fun netPeers(sessionPtr: Long): Int
     external fun netTree(sessionPtr: Long): Int
 
+    /** Снимок для лога (7n): JSON {net, sessions, outbox, budget_drops} — одни числа. */
+    external fun diagnostics(sessionPtr: Long): String
+
     /** Снапшот стата сети: JSON {peer_count, tree, ping_ms, rx_rate, tx_rate, peers:[…]}. */
     external fun netStats(sessionPtr: Long): String
     external fun stop(sessionPtr: Long)

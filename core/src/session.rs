@@ -318,7 +318,48 @@ pub struct Sessions {
     last_sweep: Option<Instant>,
 }
 
+/// Снимок сессий для диагностики (лог, шаг беты 7n): только счётчики, ни ключей, ни адресов.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct Census {
+    /// Собеседников, с кем есть хоть что-то: сессия, рукопожатие или очередь.
+    pub peers: usize,
+    /// Живые сессии всего; из них подтверждённые собеседником и ещё нет.
+    pub live: usize,
+    pub confirmed: usize,
+    pub unconfirmed: usize,
+    /// Рукопожатия в ходу: начатые нами и те, на которые мы ответили.
+    pub handshaking: usize,
+    /// Пакетов ждёт рукопожатия; отправленных по неподтверждённой и ждущих повтора.
+    pub queued: usize,
+    pub resend: usize,
+}
+
 impl Sessions {
+    /// Сколько сессий в каком состоянии — для снимка в логе.
+    pub fn census(&self, now: Instant) -> Census {
+        let mut c = Census::default();
+        for slot in self.slots.values() {
+            match slot {
+                Slot::Live(s) if s.usable(now) => {
+                    c.live += 1;
+                    if s.confirmed {
+                        c.confirmed += 1;
+                    } else {
+                        c.unconfirmed += 1;
+                    }
+                }
+                Slot::Live(_) => {}
+                Slot::Initiating { .. } | Slot::Responding { .. } => c.handshaking += 1,
+            }
+        }
+        for p in self.peers.values() {
+            c.queued += p.queue.len();
+            c.resend += p.unconfirmed.len();
+        }
+        c.peers = self.peers.values().filter(|p| !p.live.is_empty() || p.initiating.is_some() || !p.queue.is_empty()).count();
+        c
+    }
+
     pub fn new(me: &Identity) -> Self {
         let s = StaticSecret::from(me.session_static_secret());
         let static_pub = x25519_dalek::PublicKey::from(&s).to_bytes();
@@ -823,6 +864,25 @@ mod tests {
             .iter()
             .map(|p| to.s.receive(p, now, &mut OsRng))
             .collect()
+    }
+
+    /// Снимок для лога (7n): сколько сессий в каком состоянии и сколько ждёт в очередях.
+    #[test]
+    fn census_counts_states() {
+        let (mut a, mut b, c) = (node(), node(), node());
+        let now = Instant::now();
+        assert_eq!(a.s.census(now), Census::default(), "пусто — нули");
+
+        // К c — только начали: рукопожатие идёт, текст ждёт в очереди.
+        a.s.send(&c.id, &text("ждёт"), true, now, &mut OsRng);
+        let n = a.s.census(now);
+        assert_eq!((n.handshaking, n.queued, n.live, n.peers), (1, 1, 0, 1));
+
+        // С b — сессия есть: у инициатора подтверждена ответом b.
+        handshake(&mut a, &mut b, "привет", now);
+        let n = a.s.census(now);
+        assert_eq!((n.live, n.handshaking, n.peers), (1, 1, 2));
+        assert_eq!(n.live, n.confirmed + n.unconfirmed);
     }
 
     #[test]
