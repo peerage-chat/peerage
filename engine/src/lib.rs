@@ -27,6 +27,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use peerage_core::budget::Tier;
 use peerage_core::lookalike::same_name;
 pub use peerage_core::mention::Mention;
+use peerage_core::notify::{ChatNotify, NotifyMode};
 use peerage_core::settings::AudioSettings;
 use peerage_core::store::{
     Chat, ContactStore, GateStore, MessageStore, Profile, StoredMessage, VerifyHow,
@@ -142,6 +143,11 @@ pub(crate) enum GroupCmd {
     SetPhoto {
         gid: Vec<u8>,
         blob: String,
+    },
+    /// Режим уведомлений участникам по умолчанию; только админ.
+    SetNotifyDefault {
+        gid: Vec<u8>,
+        mode: NotifyMode,
     },
     /// Ротация ключа группы (PCS, ADR-004).
     Rekey {
@@ -295,7 +301,12 @@ struct ChatSummaryJson {
     chat: String,
     group: bool,
     pinned_at: i64,
-    muted: bool,
+    /// Свой режим уведомлений (`all` / `mentions` / `none`); нет — как по умолчанию.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notify: Option<NotifyMode>,
+    /// До какого времени свой режим (с); 0 — пока не вернут.
+    #[serde(skip_serializing_if = "is_zero")]
+    notify_until: i64,
     last: Option<StoredMessage>,
 }
 
@@ -316,9 +327,20 @@ struct GroupRowJson {
     /// Фото группы: hex блоба (пусто — нет; у архивных всегда пусто).
     #[serde(default)]
     photo: String,
+    /// Режим уведомлений по умолчанию (`all` / `mentions`), ставит админ.
+    #[serde(default = "notify_all")]
+    notify_default: String,
     /// Мы НЕ состоим в группе: история из копии, отправка недоступна.
     #[serde(default)]
     archived: bool,
+}
+
+fn is_zero(v: &i64) -> bool {
+    *v == 0
+}
+
+fn notify_all() -> String {
+    NotifyMode::All.as_str().into()
 }
 
 /// Период рассылки маячка присутствия в комнатах (пакеты крошечные).
@@ -929,7 +951,8 @@ impl Engine {
                 chat: hex::encode(&s.chat),
                 group: s.scope == 1,
                 pinned_at: s.pinned_at,
-                muted: s.muted,
+                notify: s.notify.map(|n| n.mode),
+                notify_until: s.notify.map_or(0, |n| n.until),
                 last: Some(s.last),
             })
             .collect();
@@ -937,14 +960,15 @@ impl Engine {
         // такие строки в `summaries` не попадают, добавляем их отдельно.
         let seen: HashSet<(String, bool)> =
             rows.iter().map(|r| (r.chat.clone(), r.group)).collect();
-        for (chat, scope, pinned_at, muted) in store.chat_flags() {
+        for (chat, scope, pinned_at, notify) in store.chat_flags() {
             let row = (hex::encode(&chat), scope == 1);
             if !seen.contains(&row) {
                 rows.push(ChatSummaryJson {
                     chat: row.0,
                     group: row.1,
                     pinned_at,
-                    muted,
+                    notify: notify.map(|n| n.mode),
+                    notify_until: notify.map_or(0, |n| n.until),
                     last: None,
                 });
             }
@@ -959,10 +983,16 @@ impl Engine {
         let _ = store.set_chat_pinned(chat.as_chat(), if on { now() } else { 0 });
     }
 
-    /// Выключить/включить звук чата (тоже локально).
-    pub fn set_chat_muted(&self, chat: ChatKey, muted: bool) {
+    /// Свой режим уведомлений чата (тоже локально): `None` — вернуть к умолчанию,
+    /// `until` — до какого времени (с; 0 — пока не вернут). Решение «звенеть ли»
+    /// принимает клиент по режиму, сроку и умолчанию группы.
+    pub fn set_chat_notify(&self, chat: ChatKey, mode: Option<NotifyMode>, until: i64) {
         let store = self.messages.lock_safe();
-        let _ = store.set_chat_muted(chat.as_chat(), muted);
+        let notify = mode.map(|mode| ChatNotify {
+            mode,
+            until: until.max(0),
+        });
+        let _ = store.set_chat_notify(chat.as_chat(), notify);
     }
 
     /// Мои сообщения с непросмотренными чужими реакциями — `[{"id","sender","time","row"}]`
@@ -2580,6 +2610,14 @@ impl Engine {
         }));
     }
 
+    /// Режим уведомлений участникам по умолчанию (только админ, не «ничего»).
+    /// Fire-and-forget: итог — `groups_changed`.
+    pub fn group_set_notify_default(&self, gid: Vec<u8>, mode: NotifyMode) {
+        let _ = self
+            .jobs
+            .send(Job::Cmd(GroupCmd::SetNotifyDefault { gid, mode }));
+    }
+
     /// Фото группы (только админ): scrub (PET) → блоб → рассылка ссылки. Пустое
     /// содержимое — убрать фото. Возвращает hex блоба (пусто — убрано). Итог —
     /// `groups_changed`.
@@ -2797,6 +2835,7 @@ impl Engine {
                     admin: false,
                     admin_key: String::new(),
                     photo: String::new(),
+                    notify_default: notify_all(),
                     archived: true,
                 });
             }
@@ -4780,6 +4819,12 @@ fn handle_cmd(engine: &Arc<Engine>, groups: &mut GroupManager, cmd: GroupCmd) {
         }
         GroupCmd::SetPhoto { gid, blob } => {
             if groups.set_photo(&gid, &blob) {
+                refresh_group_cache(engine, groups);
+                push_event(engine, dto::UiEvent::GroupsChanged);
+            }
+        }
+        GroupCmd::SetNotifyDefault { gid, mode } => {
+            if groups.set_notify_default(&gid, mode) {
                 refresh_group_cache(engine, groups);
                 push_event(engine, dto::UiEvent::GroupsChanged);
             }

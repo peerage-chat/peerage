@@ -225,7 +225,7 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             PRIMARY KEY (chat, scope)
         );
 
-        -- Локальные пометки чата: закреплён в списке, без звука. Это НЕ часть
+        -- Локальные пометки чата: закреплён в списке, режим уведомлений. Это НЕ часть
         -- переписки — решение только этого устройства, собеседнику оно не уходит.
         -- Отдельной таблицей, а не колонкой в контактах: пометки одинаковы для
         -- личного чата и группы, а те живут в разных местах.
@@ -233,8 +233,9 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             chat      BLOB    NOT NULL,
             scope     INTEGER NOT NULL DEFAULT 0,
             pinned_at INTEGER NOT NULL DEFAULT 0,  -- 0 = не закреплён; иначе когда
-            muted     INTEGER NOT NULL DEFAULT 0,
             autodel   INTEGER NOT NULL DEFAULT -1, -- своё правило автоудаления, −1 = как в общих
+            notify    INTEGER NOT NULL DEFAULT -1, -- свой режим (`NotifyMode::code`), −1 = умолчание чата
+            notify_until INTEGER NOT NULL DEFAULT 0, -- до какого времени (с), 0 = пока не включит
             PRIMARY KEY (chat, scope)
         );
 
@@ -247,13 +248,15 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         --   admin_key  — ключ админа (пусто — неизвестен): права на действия извне
         --   rekeyed_at — последняя ротация своего ключа (катящийся PCS, ADR-004)
         --   photo      — фото группы: hex блоба (пусто — нет), ставит админ
+        --   notify_default — режим уведомлений участникам по умолчанию (`NotifyMode::code`)
         CREATE TABLE IF NOT EXISTS group_meta (
             gid        BLOB    PRIMARY KEY,
             name       TEXT    NOT NULL,
             admin      INTEGER NOT NULL DEFAULT 0,
             admin_key  BLOB    NOT NULL DEFAULT x'',
             rekeyed_at INTEGER NOT NULL DEFAULT 0,
-            photo      TEXT    NOT NULL DEFAULT ''
+            photo      TEXT    NOT NULL DEFAULT '',
+            notify_default INTEGER NOT NULL DEFAULT 0 -- режим уведомлений по умолчанию, ставит админ
         );
         -- Кого и в какую группу мы позвали: ждём от него KeyPackage с этим gid.
         -- На диске, потому что «Вступить» могут нажать и через сутки, после нашего
@@ -290,6 +293,12 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN contact INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN autodel INTEGER NOT NULL DEFAULT -1", []);
     let _ = conn.execute("ALTER TABLE reactions ADD COLUMN seen INTEGER NOT NULL DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN notify INTEGER NOT NULL DEFAULT -1", []);
+    let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN notify_until INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE group_meta ADD COLUMN notify_default INTEGER NOT NULL DEFAULT 0", []);
+    // «Без звука» прежних версий = «ничего», пока не включит. Флаг гасим в том же запросе,
+    // чтобы перенос не повторялся на каждом запуске; на новой базе колонки нет — тихо мимо.
+    let _ = conn.execute("UPDATE chat_flags SET notify = 2, notify_until = 0, muted = 0 WHERE muted != 0", []);
     // Полнотекстовый индекс переписки: текст и имя файла вложения (поиск в чате, 2.9).
     // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
     // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5
@@ -342,5 +351,33 @@ mod fts_probe {
         let conn = super::lock(&db);
         conn.execute_batch("CREATE VIRTUAL TABLE probe USING fts5(x);")
             .expect("FTS5 должен быть в сборке SQLite");
+    }
+}
+
+#[cfg(test)]
+mod migration {
+    use rusqlite::Connection;
+
+    #[test]
+    fn old_mute_becomes_mode_nothing_once() {
+        // База прошлой версии: «без звука» — флагом muted.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE chat_flags (chat BLOB NOT NULL, scope INTEGER NOT NULL DEFAULT 0,
+                 pinned_at INTEGER NOT NULL DEFAULT 0, muted INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY (chat, scope));
+             INSERT INTO chat_flags (chat, scope, muted) VALUES (x'01', 0, 1), (x'02', 0, 0);",
+        )
+        .unwrap();
+        super::migrate(&conn).unwrap();
+        let mode = |c: &[u8]| -> i64 {
+            conn.query_row("SELECT notify FROM chat_flags WHERE chat=?1", [c], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(mode(&[1]), 2, "заглушённый — «ничего»");
+        assert_eq!(mode(&[2]), -1, "остальные — по умолчанию");
+        // Человек вернул умолчание — повторный запуск не заглушает чат обратно.
+        conn.execute("UPDATE chat_flags SET notify=-1 WHERE chat=x'01'", []).unwrap();
+        super::migrate(&conn).unwrap();
+        assert_eq!(mode(&[1]), -1);
     }
 }

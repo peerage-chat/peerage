@@ -14,6 +14,7 @@ pub mod identity;
 pub mod media;
 pub mod mention;
 pub mod noise;
+pub mod notify;
 pub mod outbox;
 pub mod pad;
 pub mod protocol;

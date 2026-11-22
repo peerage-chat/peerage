@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use peerage_core::mention::Mention;
+use peerage_core::notify::NotifyMode;
 use peerage_core::store::{Chat, GroupInviteRecord, GroupStore, MessageStore, StoredMessage};
 use peerage_core::Identity;
 use peerage_group::peek_group_id;
@@ -45,6 +46,8 @@ struct GroupRow {
     admin_key: String,
     /// Фото группы: hex блоба (пусто — нет).
     photo: String,
+    /// Режим уведомлений участникам по умолчанию (ставит админ).
+    notify_default: NotifyMode,
 }
 
 /// Карточка приглашения в группу для клиента.
@@ -65,6 +68,7 @@ struct Entry {
     admin: bool,
     /// Фото группы: hex блоба (пусто — нет).
     photo: String,
+    notify_default: NotifyMode,
 }
 
 /// Не чаще одного resync-обслуживания на пира+группу за это окно (анти-амплификация).
@@ -289,6 +293,7 @@ impl GroupManager {
                     name: g.name,
                     admin: g.admin,
                     photo: g.photo,
+                    notify_default: g.notify_default,
                 },
             );
         }
@@ -319,6 +324,7 @@ impl GroupManager {
                 name: name.to_string(),
                 admin: true,
                 photo: String::new(),
+                notify_default: NotifyMode::All,
             },
         );
         self.remember_title(&id, name);
@@ -806,6 +812,7 @@ impl GroupManager {
                 admin: e.admin,
                 admin_key: self.admin_keys.get(id).map(hex::encode).unwrap_or_default(),
                 photo: e.photo.clone(),
+                notify_default: e.notify_default,
             })
             .collect::<Vec<GroupRow>>();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
@@ -1115,6 +1122,17 @@ impl GroupManager {
                         ..Default::default()
                     }
                 }
+                // Умолчание уведомлений — только от известного админа: от прочих (и при
+                // неизвестном админе) не принимаем, иначе любой заглушил бы группу всем.
+                Some(Ok(Inbound::NotifyDefault { actor, mode })) => {
+                    let ok = self.admin_key(&gid) == Some(actor);
+                    let changed = ok && self.set_notify_default_local(&gid, mode);
+                    GroupOutcome {
+                        gid: Some(gid.clone()),
+                        renamed: changed,
+                        ..Default::default()
+                    }
+                }
                 Some(Ok(Inbound::Admin {
                     actor,
                     key,
@@ -1261,6 +1279,7 @@ impl GroupManager {
                         name,
                         admin: false,
                         photo: String::new(),
+                        notify_default: NotifyMode::All, // догонит карточкой от админа
                     },
                 );
                 self.save_group(&id);
@@ -1327,6 +1346,10 @@ impl GroupManager {
             let photo = e.photo.clone();
             let _ = e.chat.send_photo(&photo);
         }
+        if e.notify_default != NotifyMode::All {
+            let mode = e.notify_default;
+            let _ = e.chat.send_notify_default(mode);
+        }
         // Отправка двинула храповик: без сохранения после перезапуска поколение
         // повторилось бы, и участник выбросил бы следующее сообщение (инвариант MLS).
         self.save_group(gid);
@@ -1356,6 +1379,33 @@ impl GroupManager {
         self.save_group(gid); // отправка двинула храповик (инвариант MLS)
         let me = self.identity.public_key_bytes();
         self.put_event(gid, "photo", me, String::new());
+        true
+    }
+
+    /// Умолчание уведомлений у себя. true — действительно другое.
+    fn set_notify_default_local(&mut self, gid: &[u8], mode: NotifyMode) -> bool {
+        let Some(e) = self.groups.get_mut(gid) else {
+            return false;
+        };
+        if e.notify_default == mode {
+            return false;
+        }
+        e.notify_default = mode;
+        let _ = self.meta.set_notify_default(gid, mode);
+        true
+    }
+
+    /// Режим уведомлений участникам по умолчанию: только админ и не «ничего»
+    /// (notifications.md). Свой выбор участника главнее — его это не трогает.
+    pub fn set_notify_default(&mut self, gid: &[u8], mode: NotifyMode) -> bool {
+        let admin = self.groups.get(gid).is_some_and(|e| e.admin);
+        if !admin || !mode.group_default_ok() || !self.set_notify_default_local(gid, mode) {
+            return false;
+        }
+        if let Some(e) = self.groups.get_mut(gid) {
+            let _ = e.chat.send_notify_default(mode);
+        }
+        self.save_group(gid); // отправка двинула храповик (инвариант MLS)
         true
     }
 

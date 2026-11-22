@@ -12,6 +12,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use peerage_core::mention::{self, Mention};
+use peerage_core::notify::NotifyMode;
 use peerage_core::Identity;
 use peerage_group::{GroupError, Incoming, Member};
 use peerage_messenger::Messenger;
@@ -98,6 +99,10 @@ enum AppMsg {
     /// участник запрашивает у него по контент-адресу, как аватар контакта.
     #[serde(rename = "photo")]
     Photo { blob: String },
+    /// Служебное: режим уведомлений участникам по умолчанию (`NotifyMode::as_str`).
+    /// Шлёт админ вместе с карточкой группы; принимает верхний слой только от него.
+    #[serde(rename = "notify")]
+    Notify { mode: String },
 }
 
 /// Медиа-вложение группового сообщения: ссылка на блоб плюс всё, что нужно
@@ -191,6 +196,8 @@ pub enum Inbound {
     Admin { actor: PeerKey, key: PeerKey, leaving: bool },
     /// Фото группы от `actor`: hex блоба (пусто — убрать); принимается только от админа.
     Photo { actor: PeerKey, blob: String },
+    /// Умолчание уведомлений от `actor`; принимается только от админа.
+    NotifyDefault { actor: PeerKey, mode: NotifyMode },
     /// Изменён состав группы (применён Commit), его применил actor.
     Membership { actor: PeerKey, added: Vec<PeerKey>, removed: Vec<PeerKey> },
     /// Нас удалили из группы (ADR-004) — верхний слой забывает группу локально.
@@ -409,6 +416,11 @@ impl GroupChat {
         self.send_app(&AppMsg::Photo { blob: blob.to_string() })
     }
 
+    /// Разослать режим уведомлений по умолчанию (служебное, шлёт админ).
+    pub fn send_notify_default(&mut self, mode: NotifyMode) -> Result<(), GroupChatError> {
+        self.send_app(&AppMsg::Notify { mode: mode.as_str().to_string() })
+    }
+
     /// Передать права админа `key` (шаг 7j); `leaving` — и уйти из группы.
     pub fn send_admin(&mut self, key: &PeerKey, leaving: bool) -> Result<(), GroupChatError> {
         self.send_app(&AppMsg::Admin { key: hex::encode(key), leaving })
@@ -478,6 +490,12 @@ impl GroupChat {
                             Inbound::None
                         }
                     }
+                    // Неизвестный режим (пропатченный или новый клиент) и «ничего» — не
+                    // умолчание: навязать участникам тишину нельзя.
+                    Ok(AppMsg::Notify { mode }) => match NotifyMode::parse(&mode) {
+                        Some(mode) if mode.group_default_ok() => Inbound::NotifyDefault { actor: sender, mode },
+                        _ => Inbound::None,
+                    },
                     // Кривой ключ (пропатченный клиент) — не передача.
                     Ok(AppMsg::Admin { key, leaving }) => match hex::decode(&key)
                         .ok()

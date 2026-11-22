@@ -335,6 +335,24 @@ pub extern "system" fn Java_chat_peerage_Native_groupRename<'local>(
     });
 }
 
+/// Режим уведомлений участникам по умолчанию (`all` / `mentions`; только админ).
+/// Fire-and-forget: итог — `groups_changed`.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_groupSetNotifyDefault<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    gid_hex: JString<'local>,
+    mode: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return };
+        let Some(mode) = peerage_core::notify::NotifyMode::parse(&jstr(&mut env, &mode)) else { return };
+        e.group_set_notify_default(gid, mode);
+    });
+}
+
 /// Ротация ключа группы (PCS, ADR-004). Fire-and-forget.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_groupRekey<'local>(

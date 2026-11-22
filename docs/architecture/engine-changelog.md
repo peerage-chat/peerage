@@ -30,6 +30,32 @@
 
 ---
 
+## 2026-11-23 · Режим уведомлений чата со сроком; умолчание группы от админа · (хэш) (бета 7b)
+
+**Причина:** notifications.md, «Режим чата как в Discord»: вместо «без звука» — «все
+сообщения / только упоминания / ничего» с длительностью (1 ч / 8 ч / сутки / пока не включу);
+умолчание группы задаёт админ, оно едет участникам с карточкой группы. Поле — в формат до беты.
+
+- **Схема:** `chat_flags` — новые `notify` (−1 — своего нет; 0/1/2 — all/mentions/none) и
+  `notify_until` (с; 0 — бессрочно); колонка `muted` из CREATE убрана, на старой базе
+  `muted = 1` переносится в `notify = 2` (флаг гасится тем же запросом — перенос однократный).
+  `group_meta.notify_default` (0/1). Новый модуль `peerage_core::notify` (`NotifyMode`,
+  `ChatNotify`); `MessageStore::set_chat_notify` вместо `set_chat_muted`;
+  `ChatSummary.notify`, `chat_flags()` отдают свой режим; `GroupStore::set_notify_default`.
+- **Формат (MLS):** `AppMsg::Notify { mode }` (`"all"` / `"mentions"`) — шлёт админ при смене и
+  в карточке новичку (`send_card`, если не «все»). Принимается только от известного админа;
+  `"none"` и неизвестное — игнор.
+- **Контракт:** `chat_summaries_json` — вместо `muted` поля `notify` (нет — по умолчанию) и
+  `notify_until` (нет — 0); `group_list_json` — `notify_default`. Команды `set_chat_notify(chat,
+  mode, until)` (вместо `set_chat_muted`), `group_set_notify_default(gid, mode)` → итог
+  `groups_changed`. JNI: `setChatNotify(ptr, chat, isGroup, mode, until)` (пустой `mode` —
+  к умолчанию) вместо `setChatMuted`; `groupSetNotifyDefault(ptr, gid, mode)`.
+- **Поведение:** движок только хранит и разносит; звенеть ли — решает клиент по своему режиму,
+  сроку и умолчанию группы (истёкший срок = своего нет).
+- **Тесты:** `notify::names_and_codes_round_trip`, `group_default_cannot_be_nothing`;
+  `store::chat_notify_is_stored_and_reset`; `db::migration::old_mute_becomes_mode_nothing_once`;
+  `group_flow::notify_default_only_by_admin_reaches_member`.
+
 ## 2026-11-22 · Состав группы меняет только админ — проверка на приёме · d6f68fb
 
 **Причина:** запрос владельца «приглашать в группы тоже должен только админ, иначе

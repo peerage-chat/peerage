@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::{self, Db};
 use crate::identity::Identity;
+use crate::notify::{ChatNotify, NotifyMode};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -471,6 +472,8 @@ pub struct GroupRecord {
     pub rekeyed_at: i64,
     /// Фото группы: hex блоба (пусто — нет).
     pub photo: String,
+    /// Режим уведомлений участникам по умолчанию (ставит админ).
+    pub notify_default: NotifyMode,
 }
 
 /// Входящее приглашение в группу.
@@ -495,7 +498,7 @@ impl GroupStore {
 
     pub fn groups(&self) -> Vec<GroupRecord> {
         let conn = db::lock(&self.db);
-        let Ok(mut stmt) = conn.prepare("SELECT gid, name, admin, admin_key, rekeyed_at, photo FROM group_meta") else {
+        let Ok(mut stmt) = conn.prepare("SELECT gid, name, admin, admin_key, rekeyed_at, photo, notify_default FROM group_meta") else {
             return Vec::new();
         };
         let rows = stmt.query_map([], |r| {
@@ -506,6 +509,7 @@ impl GroupStore {
                 admin_key: <[u8; 32]>::try_from(r.get::<_, Vec<u8>>(3)?.as_slice()).ok(),
                 rekeyed_at: r.get(4)?,
                 photo: r.get(5)?,
+                notify_default: NotifyMode::from_code(r.get(6)?).unwrap_or_default(),
             })
         });
         rows.map(|it| it.filter_map(|r| r.ok()).collect()).unwrap_or_default()
@@ -526,6 +530,15 @@ impl GroupStore {
     /// редко и только по сообщению админа.
     pub fn set_photo(&self, gid: &[u8], photo: &str) -> Result<(), StoreError> {
         db::lock(&self.db).execute("UPDATE group_meta SET photo=?2 WHERE gid=?1", rusqlite::params![gid, photo])?;
+        Ok(())
+    }
+
+    /// Режим уведомлений по умолчанию — по сообщению админа или его собственный выбор.
+    pub fn set_notify_default(&self, gid: &[u8], mode: NotifyMode) -> Result<(), StoreError> {
+        db::lock(&self.db).execute(
+            "UPDATE group_meta SET notify_default=?2 WHERE gid=?1",
+            rusqlite::params![gid, mode.code()],
+        )?;
         Ok(())
     }
 
@@ -1200,7 +1213,13 @@ pub struct ChatSummary {
     pub last: StoredMessage,
     /// 0 — чат не закреплён; иначе время закрепления (позже закрепили — выше).
     pub pinned_at: i64,
-    pub muted: bool,
+    /// Свой режим уведомлений; `None` — как задано по умолчанию.
+    pub notify: Option<ChatNotify>,
+}
+
+/// Свой режим из колонок `chat_flags`: −1 (и неизвестное) — своего нет.
+fn chat_notify(code: i64, until: i64) -> Option<ChatNotify> {
+    NotifyMode::from_code(code).map(|mode| ChatNotify { mode, until })
 }
 
 /// Вложение из истории: чем занято место и в каком чате.
@@ -1704,7 +1723,7 @@ impl MessageStore {
         // это сотни миллисекунд на каждое входящее событие (R-039).
         let sql = format!(
             "SELECT {MSG_COLS}, m.chat, m.scope,
-                    COALESCE(f.pinned_at, 0), COALESCE(f.muted, 0)
+                    COALESCE(f.pinned_at, 0), COALESCE(f.notify, -1), COALESCE(f.notify_until, 0)
              FROM (SELECT DISTINCT chat, scope FROM chat_messages) c
              JOIN chat_messages m ON m.rowid =
                  (SELECT m2.rowid FROM chat_messages m2
@@ -1722,7 +1741,7 @@ impl MessageStore {
                 chat: r.get(n)?,
                 scope: r.get(n + 1)?,
                 pinned_at: r.get(n + 2)?,
-                muted: r.get::<_, i64>(n + 3)? != 0,
+                notify: chat_notify(r.get(n + 3)?, r.get(n + 4)?),
                 last: read_msg(r)?,
             })
         })
@@ -1740,30 +1759,32 @@ impl MessageStore {
         Ok(())
     }
 
-    /// Выключить/включить звук чата.
-    pub fn set_chat_muted(&self, chat: Chat, muted: bool) -> Result<(), StoreError> {
+    /// Свой режим уведомлений чата (`None` — вернуть к умолчанию).
+    pub fn set_chat_notify(&self, chat: Chat, notify: Option<ChatNotify>) -> Result<(), StoreError> {
+        let (mode, until) = notify.map_or((-1, 0), |n| (n.mode.code(), n.until));
         db::lock(&self.db).execute(
-            "INSERT INTO chat_flags (chat, scope, muted) VALUES (?1, ?2, ?3)
-             ON CONFLICT(chat, scope) DO UPDATE SET muted = excluded.muted",
-            rusqlite::params![chat.id(), chat.scope(), muted as i64],
+            "INSERT INTO chat_flags (chat, scope, notify, notify_until) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(chat, scope) DO UPDATE SET notify = excluded.notify,
+                 notify_until = excluded.notify_until",
+            rusqlite::params![chat.id(), chat.scope(), mode, until],
         )?;
         Ok(())
     }
 
-    /// Пометки всех чатов: `(идентификатор, вид, когда закреплён, без звука)`.
+    /// Пометки всех чатов: `(идентификатор, вид, когда закреплён, свой режим)`.
     /// Отдельно от [`summaries`], потому что пометка живёт и у чата без единого
     /// сообщения — закрепить пустой чат можно, и он обязан остаться наверху.
-    pub fn chat_flags(&self) -> Vec<(Vec<u8>, i64, i64, bool)> {
+    pub fn chat_flags(&self) -> Vec<(Vec<u8>, i64, i64, Option<ChatNotify>)> {
         let conn = db::lock(&self.db);
         let mut stmt = match conn.prepare(
-            "SELECT chat, scope, pinned_at, muted FROM chat_flags
-             WHERE pinned_at != 0 OR muted != 0",
+            "SELECT chat, scope, pinned_at, notify, notify_until FROM chat_flags
+             WHERE pinned_at != 0 OR notify != -1",
         ) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
         stmt.query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, chat_notify(r.get(3)?, r.get(4)?)))
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
         .unwrap_or_default()
@@ -2251,6 +2272,24 @@ mod tests {
         let p2 = Profile::load_or_create(&path).unwrap();
         assert_eq!(p2.identity.public_key_bytes(), key1);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn chat_notify_is_stored_and_reset() {
+        use crate::notify::{ChatNotify, NotifyMode};
+        let store = MessageStore::open(db());
+        let (c, empty) = (key(), key());
+        store.append(Chat::Dm(&c), &StoredMessage { id: 1, text: "x".into(), ..Default::default() }).unwrap();
+        let hour = ChatNotify { mode: NotifyMode::Nothing, until: 3600 };
+        store.set_chat_notify(Chat::Dm(&c), Some(hour)).unwrap();
+        store.set_chat_notify(Chat::Group(&empty), Some(ChatNotify { mode: NotifyMode::Mentions, until: 0 })).unwrap();
+        assert_eq!(store.summaries()[0].notify, Some(hour));
+        // Пустой чат с режимом — в пометках (строка в списке без переписки).
+        let flags = store.chat_flags();
+        assert!(flags.iter().any(|f| f.0 == empty.to_vec() && f.1 == 1 && f.3.map(|n| n.mode) == Some(NotifyMode::Mentions)));
+        store.set_chat_notify(Chat::Dm(&c), None).unwrap();
+        assert_eq!(store.summaries()[0].notify, None, "вернули к умолчанию");
+        assert!(!store.chat_flags().iter().any(|f| f.0 == c.to_vec()));
     }
 
     #[test]

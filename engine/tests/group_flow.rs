@@ -1300,6 +1300,40 @@ fn photo_only_by_admin_reaches_member() {
     assert!(gone, "и у участника его нет");
 }
 
+/// Режим уведомлений по умолчанию ставит админ (notifications.md): участнику он
+/// приходит, от участника — нет; «ничего» навязать нельзя.
+#[test]
+fn notify_default_only_by_admin_reaches_member() {
+    use peerage_core::notify::NotifyMode;
+    let mut c = setup_and_join(0);
+    let gid = c.gid.clone();
+    let default_of = |gm: &GroupManager| -> String {
+        let v: serde_json::Value = serde_json::from_str(&gm.list_json()).unwrap();
+        v.as_array()
+            .and_then(|a| a.iter().find(|g| g["gid"] == hex::encode(&gid)))
+            .and_then(|g| g["notify_default"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    assert_eq!(default_of(&c.gm_b), "all", "сначала — все сообщения");
+    assert!(
+        !c.gm_b.set_notify_default(&gid, NotifyMode::Mentions),
+        "участник не ставит"
+    );
+    assert!(
+        !c.gm_a.set_notify_default(&gid, NotifyMode::Nothing),
+        "«ничего» — не умолчание"
+    );
+    assert!(
+        c.gm_a.set_notify_default(&gid, NotifyMode::Mentions),
+        "админ поставил"
+    );
+    let ok = pump_until(&mut c.gm_a, &c.a_rx, &mut c.gm_b, &c.b_rx, |_, b| {
+        default_of(b) == "mentions"
+    });
+    assert!(ok, "умолчание дошло до участника");
+}
+
 /// Инвариант MLS «двинул состояние — сохрани»: служебные отправки админа (имя и фото
 /// новичку при вступлении) двигают храповик отправителя. Без сохранения после
 /// перезапуска админ повторял уже потраченное поколение, и участник молча выбрасывал

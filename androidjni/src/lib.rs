@@ -967,15 +967,17 @@ pub extern "system" fn Java_chat_peerage_Native_setChatPinned<'local>(
     })
 }
 
-/// Выключить/включить звук чата (тоже локально).
+/// Свой режим уведомлений чата: `mode` — `all` / `mentions` / `none`, пустой —
+/// вернуть к умолчанию; `until` — до какого времени (с), 0 — пока не вернут.
 #[no_mangle]
-pub extern "system" fn Java_chat_peerage_Native_setChatMuted<'local>(
+pub extern "system" fn Java_chat_peerage_Native_setChatNotify<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
     chat_hex: JString<'local>,
     is_group: jboolean,
-    muted: jboolean,
+    mode: JString<'local>,
+    until: jlong,
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
@@ -983,7 +985,13 @@ pub extern "system" fn Java_chat_peerage_Native_setChatMuted<'local>(
         else {
             return;
         };
-        e.set_chat_muted(chat, muted != 0);
+        let mode = jstr(&mut env, &mode);
+        let parsed = peerage_core::notify::NotifyMode::parse(&mode);
+        // Неизвестное имя — не «вернуть к умолчанию»: молча ничего не меняем.
+        if parsed.is_none() && !mode.is_empty() {
+            return;
+        }
+        e.set_chat_notify(chat, parsed, until);
     })
 }
 
