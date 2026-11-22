@@ -99,7 +99,10 @@ internal data class ChatSummaryDto(
     val group: Boolean = false,
     /** 0 — не закреплён; иначе время закрепления (позже закрепили — выше). */
     @SerialName("pinned_at") val pinnedAt: Long = 0,
-    val muted: Boolean = false,
+    /** Свой режим уведомлений (`all` / `mentions` / `none`); нет — как по умолчанию. */
+    val notify: String? = null,
+    /** До какого времени свой режим (с); 0 — пока не вернут. */
+    @SerialName("notify_until") val notifyUntil: Long = 0,
     val last: MessageDto? = null,
 )
 
@@ -152,6 +155,8 @@ internal data class GroupRowDto(
     @SerialName("admin_key") val adminKey: String = "",
     /** Фото группы: hex блоба (пусто — нет). */
     val photo: String = "",
+    /** Режим уведомлений участникам по умолчанию (ставит админ). */
+    @SerialName("notify_default") val notifyDefault: String = "all",
     /** Мы не состоим в группе: история из копии, писать нельзя. */
     val archived: Boolean = false,
 )

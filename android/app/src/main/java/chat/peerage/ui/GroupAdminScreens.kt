@@ -109,6 +109,24 @@ internal fun GroupEditScreen(model: AppModel, onBack: () -> Unit) {
                 lineHeight = Tokens.Font.lineHeight,
                 modifier = Modifier.padding(start = Tokens.Space.s - Tokens.Space.xxs, top = Tokens.Space.s),
             )
+            // Умолчание уведомлений участникам (notifications.md) — сразу, не по «Готово»:
+            // это не правка карточки, а отдельная настройка с своей шторкой.
+            var notify by remember(gid) { mutableStateOf(false) }
+            // Экран уже с полями панели — карточка без своих (CardSection добавил бы вторые).
+            Column(
+                Modifier.fillMaxWidth().padding(top = Tokens.Space.xxl)
+                    .clip(RoundedCornerShape(Tokens.Radius.card))
+                    .background(Tokens.Colors.surface),
+            ) {
+                NavRow(
+                    TablerIcons.Bell,
+                    stringResource(R.string.notif_default_title),
+                    value = notifyLabel(g.notifyDefault),
+                    divider = false,
+                    onClick = { notify = true },
+                )
+            }
+            if (notify) GroupNotifyDefaultSheet(model, gid) { notify = false }
         }
     }
 }

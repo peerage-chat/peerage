@@ -613,9 +613,10 @@ class AppModel private constructor() {
     /** Входящее — в шторку, если правило [MessageNotifier.shouldNotify] пускает. */
     private fun notifyIncoming(chat: ChatTarget, m: Message, onScreen: Boolean, sent: Long) {
         val ctx = appContext ?: return
-        val muted = chatSummaries[chatKey(chat.id, chat.group)]?.muted == true
+        val mode = notifyMode(chat.id, chat.group)
+        val mentionsMe = chat.group && m.mentions.any { it.key == me?.pubkey }
         val now = System.currentTimeMillis()
-        if (!MessageNotifier.shouldNotify(m.mine, m.system, m.isCall, onScreen && foreground, muted, sent, now)) return
+        if (!MessageNotifier.shouldNotify(m.mine, m.system, m.isCall, onScreen && foreground, mode, mentionsMe, sent, now)) return
         val title = if (chat.group) groups.firstOrNull { it.gid == chat.id }?.name.orEmpty() else peerName(chat.id)
         val sender = contacts.firstOrNull { it.key == m.sender }
         val line = MessageNotifier.Line(
@@ -626,7 +627,7 @@ class AppModel private constructor() {
             time = now,
             avatar = sender?.avatarId?.let { contactAvatars[it] },
         )
-        MessageNotifier.post(ctx, chat, title, mention = chat.group && m.mentions.any { it.key == me?.pubkey }, line = line)
+        MessageNotifier.post(ctx, chat, title, mention = mentionsMe, line = line)
     }
 
     /** Текст строки шторки: подпись или текст, у вложения без подписи — его вид. */
@@ -2306,8 +2307,9 @@ class AppModel private constructor() {
                 if (onScreen && !m.mine && counts) noteIncoming(m, ev.group)
                 notifyIncoming(ChatTarget(ev.chat, ev.group), m, onScreen, ev.sent)
                 if (onScreen && foreground && !m.mine && !m.system && !m.isCall) {
-                    val muted = chatSummaries[chatKey(ev.chat, ev.group)]?.muted == true
-                    appContext?.let { ChatSounds.play(it, ChatSounds.Kind.In, chatSounds, muted, ev.sent) }
+                    val mentionsMe = ev.group && m.mentions.any { it.key == me?.pubkey }
+                    val quiet = !notifyMode(ev.chat, ev.group).lets(mentionsMe)
+                    appContext?.let { ChatSounds.play(it, ChatSounds.Kind.In, chatSounds, quiet, ev.sent) }
                 }
                 // Свёрнутое приложение с открытым чатом — тоже непрочитанное: его считает «связь».
                 if (!m.mine && counts && !(onScreen && foreground)) {
@@ -2878,7 +2880,10 @@ class AppModel private constructor() {
 
     private fun refreshGroupsNow() {
         val list = decodeList<GroupRowDto>(Native.groupList(sessionPtr))
-            .map { Group(it.gid, it.name, it.members, it.admin, it.archived, it.adminKey, it.photo) }
+            .map {
+                val default = NotifyMode.parse(it.notifyDefault) ?: NotifyMode.All
+                Group(it.gid, it.name, it.members, it.admin, it.archived, it.adminKey, it.photo, default)
+            }
         groups.replaceWith(list)
         // Фото групп — в тот же кэш, что аватары контактов: ключ — контент-адрес блоба.
         list.forEach { g ->
@@ -2917,7 +2922,8 @@ class AppModel private constructor() {
                 id = s.chat,
                 group = s.group,
                 pinnedAt = s.pinnedAt,
-                muted = s.muted,
+                notify = NotifyMode.parse(s.notify),
+                notifyUntil = s.notifyUntil,
                 lastText = last?.text.orEmpty(),
                 lastMentions = last?.mentions.orEmpty(),
                 lastTime = last?.time ?: 0,
@@ -2941,10 +2947,44 @@ class AppModel private constructor() {
         refreshChatSummariesNow()
     }
 
-    /** Выключить/включить звук чата (тоже локально). */
-    fun muteChat(id: String, group: Boolean, muted: Boolean) = ops.execute {
-        Native.setChatMuted(sessionPtr, id, group, muted)
+    /** Умолчание чата: у группы — от админа, у личного — все сообщения. */
+    fun notifyDefault(id: String, group: Boolean): NotifyMode =
+        if (group) groups.firstOrNull { it.gid == id }?.notifyDefault ?: NotifyMode.All else NotifyMode.All
+
+    /** Действующий режим уведомлений чата: свой (пока не истёк) или умолчание. */
+    fun notifyMode(id: String, group: Boolean): NotifyMode {
+        val s = chatSummaries[chatKey(id, group)]
+        return NotifyMode.effective(s?.notify, s?.notifyUntil ?: 0, notifyDefault(id, group), System.currentTimeMillis() / 1000)
+    }
+
+    /** Свой выбор, если ещё действует: `(режим, до)`; `null` — по умолчанию. */
+    fun ownNotify(id: String, group: Boolean): Pair<NotifyMode, Long>? {
+        val s = chatSummaries[chatKey(id, group)] ?: return null
+        val own = s.notify ?: return null
+        val live = s.notifyUntil == 0L || System.currentTimeMillis() / 1000 < s.notifyUntil
+        return if (live) own to s.notifyUntil else null
+    }
+
+    /** Чат приглушён (вид в списке): режим не «все». */
+    fun chatQuiet(id: String, group: Boolean): Boolean = notifyMode(id, group) != NotifyMode.All
+
+    /**
+     * Свой режим уведомлений чата (локально): `mode = null` — вернуть к умолчанию; `forSec` —
+     * на сколько секунд (0 — пока не вернут).
+     */
+    fun setChatNotify(id: String, group: Boolean, mode: NotifyMode?, forSec: Long = 0) = ops.execute {
+        val until = if (mode != null && forSec > 0) System.currentTimeMillis() / 1000 + forSec else 0
+        Native.setChatNotify(sessionPtr, id, group, mode?.wire.orEmpty(), until)
         refreshChatSummariesNow()
+    }
+
+    /** «Заглушить на час» в шторке (notifications.md, п. 5). */
+    fun muteForHour(chat: ChatTarget) =
+        setChatNotify(chat.id, chat.group, NotifyMode.hourMute(chat.group), NotifyMode.DURATIONS.first())
+
+    /** Умолчание уведомлений группы (только админ): уходит участникам. */
+    fun setGroupNotifyDefault(gid: String, mode: NotifyMode) = ops.execute {
+        Native.groupSetNotifyDefault(sessionPtr, gid, mode.wire)
     }
 
     // ── Приглашения в группы (карточки на одобрение) ───────────────────────

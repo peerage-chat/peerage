@@ -147,6 +147,21 @@
     <string name="notif_sec_messages">Сообщения</string>
     <string name="notif_set_chat_sounds">Звуки в чате</string>
     <string name="notif_sec_other">Прочее</string>
+    <string name="notif_mode_title">Уведомления</string>
+    <string name="notif_mode_all">Все сообщения</string>
+    <string name="notif_mode_mentions">Только упоминания</string>
+    <string name="notif_mode_none">Ничего</string>
+    <string name="notif_mode_inherit">Как в группе</string>
+    <string name="notif_mode_cap">Звонки режим не глушит.</string>
+    <string name="notif_for_title">На сколько</string>
+    <string name="notif_for_1h">1 час</string>
+    <string name="notif_for_8h">8 часов</string>
+    <string name="notif_for_day">Сутки</string>
+    <string name="notif_for_ever">Пока не включу</string>
+    <string name="notif_until">до %1$s</string>
+    <string name="notif_default_title">Уведомления по умолчанию</string>
+    <string name="notif_default_cap">Для участников, которые не выбрали режим сами.</string>
+    <string name="notif_mute_hour">Заглушить на час</string>
     <string name="notif_ch_requests">Запросы и приглашения</string>
     <string name="notif_request_title">Запрос в контакты</string>
     <string name="notif_invite_title">Приглашение в группу</string>
@@ -871,7 +886,6 @@
         <item quantity="many">Удалить %1$d сообщений?</item>
         <item quantity="other">Удалить %1$d сообщения?</item>
     </plurals>
-    <string name="chat_menu_mute">Без звука</string>
     <string name="chat_menu_profile">Профиль</string>
     <string name="chat_menu_invite">Пригласить</string>
     <string name="chat_menu_group_info">О группе</string>

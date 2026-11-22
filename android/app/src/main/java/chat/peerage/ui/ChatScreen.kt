@@ -213,7 +213,8 @@ private fun ChatMenu(
     onMedia: () -> Unit,
     onDanger: (ChatDanger) -> Unit,
 ) {
-    val muted = model.chatSummaries[model.chatKey(key, group = false)]?.muted == true
+    var notify by remember(key) { mutableStateOf(false) }
+    if (notify) NotifySheet(model, ChatTarget(key, group = false)) { notify = false }
     PopMenu(open, onClose) {
         PopMenuItem(TablerIcons.Search, stringResource(R.string.chat_menu_search)) {
             onClose()
@@ -223,11 +224,10 @@ private fun ChatMenu(
             onClose()
             onMedia()
         }
-        PopMenuItem(
-            TablerIcons.BellOff,
-            stringResource(R.string.chat_menu_mute),
-            trailing = { Switch(checked = muted, onCheckedChange = null) },
-        ) { model.muteChat(key, group = false, muted = !muted) }
+        NotifyMenuItem(model, ChatTarget(key, group = false)) {
+            onClose()
+            notify = true
+        }
         PopMenuItem(TablerIcons.User, stringResource(R.string.chat_menu_profile)) {
             onClose()
             onProfile()

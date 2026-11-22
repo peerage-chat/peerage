@@ -47,7 +47,8 @@ internal object MessageNotifier {
 
     /**
      * Поднимать ли шторку — всё правило в одном месте. Своё, служебное и звонки (у них свой
-     * путь) — нет; лента этого чата на экране — нет, там звук (п. 4); заглушённый — нет;
+     * путь) — нет; лента этого чата на экране — нет, там звук (п. 4); режим чата не пускает
+     * ([NotifyMode.lets]: «упоминания» — только с упоминанием меня) — нет;
      * досланное старше [ChatSounds.BACKLOG_MS] по времени отправки — нет (п. 3).
      */
     fun shouldNotify(
@@ -55,10 +56,11 @@ internal object MessageNotifier {
         system: Boolean,
         call: Boolean,
         onScreen: Boolean,
-        muted: Boolean,
+        mode: NotifyMode,
+        mentionsMe: Boolean,
         sentMs: Long,
         nowMs: Long,
-    ): Boolean = !mine && !system && !call && !onScreen && !muted &&
+    ): Boolean = !mine && !system && !call && !onScreen && mode.lets(mentionsMe) &&
         !(sentMs > 0 && nowMs - sentMs > ChatSounds.BACKLOG_MS)
 
     private val chats = HashMap<ChatTarget, Chat>()
@@ -166,6 +168,13 @@ internal object MessageNotifier {
                     .setShowsUserInterface(false)
                     .build(),
             )
+            // п. 5: в группе — только упоминания на час, в личном — ничего на час.
+            .addAction(
+                NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_mute_hour), actionIntent(ctx, ACTION_MUTE_HOUR, tag, mutable = false))
+                    .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MUTE)
+                    .setShowsUserInterface(false)
+                    .build(),
+            )
         // Разговор в «Разговорах» системы — только если ярлык чата опубликован (его имя и фото
         // уходят системе только по выбору: «Чаты в меню Поделиться», 5.6).
         if (model.shareChatsInMenu) n.setShortcutId(tag)
@@ -223,6 +232,7 @@ internal object MessageNotifier {
 
     const val ACTION_REPLY = "chat.peerage.NOTIF_REPLY"
     const val ACTION_READ = "chat.peerage.NOTIF_READ"
+    const val ACTION_MUTE_HOUR = "chat.peerage.NOTIF_MUTE_HOUR"
     const val ACTION_READ_ALL = "chat.peerage.NOTIF_READ_ALL"
 }
 
@@ -238,6 +248,12 @@ class MessageActionReceiver : BroadcastReceiver() {
         val work: (AppModel) -> Unit = when (action) {
             // «Связь» есть, только пока жив процесс со службой — движок уже работает.
             MessageNotifier.ACTION_READ_ALL -> return AppModel.instance.readAll()
+            MessageNotifier.ACTION_MUTE_HOUR -> {
+                val chat = intent.getStringExtra(EXTRA_SHORTCUT_CHAT)?.let(::chatOfShortcut) ?: return
+                MessageNotifier.cancel(app, chat)
+                val w: (AppModel) -> Unit = { m -> m.muteForHour(chat) }
+                w
+            }
             MessageNotifier.ACTION_REPLY, MessageNotifier.ACTION_READ -> {
                 val chat = intent.getStringExtra(EXTRA_SHORTCUT_CHAT)?.let(::chatOfShortcut) ?: return
                 val reply = if (action == MessageNotifier.ACTION_REPLY) MessageNotifier.replyText(intent) ?: return else null

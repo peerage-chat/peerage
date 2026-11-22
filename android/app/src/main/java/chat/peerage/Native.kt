@@ -321,7 +321,7 @@ object Native {
     external fun markReactionsSeen(sessionPtr: Long, chatHex: String, isGroup: Boolean, msgId: Long, senderHex: String)
 
     /**
-     * Сводка по всем чатам для главной: JSON `[{chat, group, pinned_at, muted, last}]`,
+     * Сводка по всем чатам для главной: JSON `[{chat, group, pinned_at, notify?, notify_until?, last}]`,
      * где `last` — последнее сообщение чата (или null у пустого). Один вызов на
      * перерисовку списка: запрос на чат стоил бы тем дороже, чем больше переписок.
      */
@@ -331,7 +331,11 @@ object Native {
     external fun setChatPinned(sessionPtr: Long, chatHex: String, isGroup: Boolean, on: Boolean)
 
     /** Выключить/включить звук чата (тоже локально). */
-    external fun setChatMuted(sessionPtr: Long, chatHex: String, isGroup: Boolean, muted: Boolean)
+    /** Свой режим уведомлений чата: `mode` — `all` / `mentions` / `none`, пусто — к умолчанию; `until` — с, 0 — бессрочно. */
+    external fun setChatNotify(sessionPtr: Long, chatHex: String, isGroup: Boolean, mode: String, until: Long)
+
+    /** Режим уведомлений участникам группы по умолчанию (`all` / `mentions`; только админ). */
+    external fun groupSetNotifyDefault(sessionPtr: Long, gidHex: String, mode: String)
 
     /** Поиск в одном чате: слова по отдельности, имя файла, отправитель (`senderHex`
      *  пустой — все), листание. JSON `{total, hits: [{chat, group, ...сообщение}]}`. */

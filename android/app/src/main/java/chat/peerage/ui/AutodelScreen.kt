@@ -266,7 +266,7 @@ internal fun ChatAutodelSheet(model: AppModel, chat: ChatTarget, onClose: () -> 
 
 /** Вариант шторки с кружком выбора справа (`.opt` макета). */
 @Composable
-private fun OptionRow(text: String, sub: String? = null, on: Boolean, onClick: () -> Unit) {
+internal fun OptionRow(text: String, sub: String? = null, on: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = Tokens.Size.cardRow)
             .selectable(on, role = Role.RadioButton, onClick = onClick)

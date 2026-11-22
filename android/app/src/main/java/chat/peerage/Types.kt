@@ -205,6 +205,8 @@ data class Group(
     val adminKey: String = "",
     /** Фото группы: hex блоба (пусто — нет); байты — [AppModel.groupPhoto]. */
     val photo: String = "",
+    /** Режим уведомлений участникам по умолчанию (ставит админ). */
+    val notifyDefault: NotifyMode = NotifyMode.All,
 )
 
 /**
@@ -218,7 +220,10 @@ data class ChatSummary(
     val group: Boolean,
     /** 0 — не закреплён; иначе когда закрепили (позже — выше в списке). */
     val pinnedAt: Long = 0,
-    val muted: Boolean = false,
+    /** Свой режим уведомлений; `null` — как по умолчанию (см. [AppModel.notifyMode]). */
+    val notify: NotifyMode? = null,
+    /** До какого времени свой режим (с); 0 — пока не вернут. */
+    val notifyUntil: Long = 0,
     /** Превью последнего сообщения (текст или подпись вложения); пусто — чат пуст. */
     val lastText: String = "",
     /** Упоминания в [lastText]: превью рисует их моими именами, как лента. */

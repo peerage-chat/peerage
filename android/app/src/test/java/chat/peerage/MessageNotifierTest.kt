@@ -13,9 +13,10 @@ class MessageNotifierTest {
         system: Boolean = false,
         call: Boolean = false,
         onScreen: Boolean = false,
-        muted: Boolean = false,
+        mode: NotifyMode = NotifyMode.All,
+        mentionsMe: Boolean = false,
         sent: Long = now - 2_000,
-    ) = MessageNotifier.shouldNotify(mine, system, call, onScreen, muted, sent, now)
+    ) = MessageNotifier.shouldNotify(mine, system, call, onScreen, mode, mentionsMe, sent, now)
 
     @Test
     fun freshIncomingInAnotherChatNotifies() = assertTrue(ok())
@@ -31,7 +32,13 @@ class MessageNotifierTest {
     }
 
     @Test
-    fun mutedChatDoesNot() = assertFalse(ok(muted = true))
+    fun chatModeNothingDoesNot() = assertFalse(ok(mode = NotifyMode.Nothing, mentionsMe = true))
+
+    @Test
+    fun mentionsModeLetsOnlyMentions() {
+        assertTrue(ok(mode = NotifyMode.Mentions, mentionsMe = true))
+        assertFalse(ok(mode = NotifyMode.Mentions))
+    }
 
     @Test
     fun backlogAfterOfflineDoesNot() {

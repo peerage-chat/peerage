@@ -60,6 +60,7 @@ private data class ChatRowUi(
     val unread: Int = 0,
     /** В непрочитанном меня упомянули (только группы). */
     val mentioned: Boolean = false,
+    /** Режим уведомлений не «все» — значок и серый счётчик. */
     val muted: Boolean = false,
     val pinnedAt: Long = 0,
     val summary: ChatSummary? = null,
@@ -120,7 +121,7 @@ internal fun ContactsScreen(
                         id = g.gid, group = true, title = g.name, avatar = model.groupPhoto(g.gid),
                         unread = model.groupUnread[g.gid] ?: 0,
                         mentioned = model.groupMentioned[g.gid] == true,
-                        muted = s?.muted ?: false, pinnedAt = s?.pinnedAt ?: 0, summary = s,
+                        muted = model.chatQuiet(g.gid, true), pinnedAt = s?.pinnedAt ?: 0, summary = s,
                         inRoom = model.groupPresence[g.gid]?.size ?: 0, members = g.members,
                     ),
                 )
@@ -135,7 +136,7 @@ internal fun ContactsScreen(
                         avatar = model.contactAvatars[c.avatarId],
                         online = model.online[c.key] == true, verified = c.verified,
                         unread = model.unread[c.key] ?: 0,
-                        muted = s?.muted ?: false, pinnedAt = s?.pinnedAt ?: 0, summary = s,
+                        muted = model.chatQuiet(c.key, false), pinnedAt = s?.pinnedAt ?: 0, summary = s,
                     ),
                 )
             }
@@ -393,10 +394,13 @@ private fun ChatRowBadge(model: AppModel, row: ChatRowUi) {
     }
 }
 
-/** Меню чата по долгому нажатию: закрепить и звук. Действий больше двух, и они
+/** Меню чата по долгому нажатию: закрепить и уведомления. Действий больше двух, и они
  *  разной цены — поэтому меню, а не свайп по строке (горизонталь отдана папкам). */
 @Composable
 private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose: () -> Unit) {
+    val chat = ChatTarget(row.id, row.group)
+    var notify by remember(chat) { mutableStateOf(false) }
+    if (notify) NotifySheet(model, chat) { notify = false }
     PopMenu(open, onClose) {
         PopMenuItem(
             TablerIcons.Pin,
@@ -405,12 +409,11 @@ private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose:
             model.pinChat(row.id, row.group, !row.pinned)
             onClose()
         }
-        // Звук — переключатель: состояние видно, и пункт не меняет название под рукой.
-        PopMenuItem(
-            TablerIcons.BellOff,
-            stringResource(R.string.chat_menu_mute),
-            trailing = { Switch(checked = row.muted, onCheckedChange = null) },
-        ) { model.muteChat(row.id, row.group, !row.muted) }
+        // Режим виден справа; выбор и срок — в шторке.
+        NotifyMenuItem(model, chat) {
+            onClose()
+            notify = true
+        }
     }
 }
 

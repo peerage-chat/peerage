@@ -45,9 +45,11 @@ internal fun ContactProfileScreen(
     var renaming by remember(key) { mutableStateOf(false) }
     var confirm by remember(key) { mutableStateOf<ProfileDanger?>(null) }
     var commonOpen by remember(key) { mutableStateOf(false) }
-    // Флаг чата приходит из сводки — она же кормит список на главной, так что
-    // «без звука» здесь и значок на главной не разъедутся.
-    val muted = model.chatSummaries[model.chatKey(key, false)]?.muted == true
+    // Режим чата берётся из сводки — она же кормит список на главной, так что плитка
+    // здесь и значок на главной не разъедутся.
+    val muted = model.chatQuiet(key, false)
+    var notify by remember(key) { mutableStateOf(false) }
+    if (notify) NotifySheet(model, ChatTarget(key, group = false)) { notify = false }
 
     // Составы групп грузятся, только когда группу открывают, — без подгрузки здесь
     // «общих групп» было 0 у любого, с кем не заходили в общий чат в этой сессии.
@@ -101,11 +103,11 @@ internal fun ContactProfileScreen(
                     R.string.perm_denied_camera,
                 ) { model.callDm(key, video = true) }
             }
-            // «Без звука» — локальная пометка чата: собеседник о ней не узнаёт.
+            // Режим уведомлений — локальная пометка чата: собеседник о ней не узнаёт.
             ShowAction(
                 if (muted) TablerIcons.BellOff else TablerIcons.Bell,
                 stringResource(if (muted) R.string.profile_sound_off else R.string.profile_sound),
-            ) { model.muteChat(key, false, !muted) }
+            ) { notify = true }
         },
     ) {
         CardSection {

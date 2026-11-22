@@ -352,7 +352,8 @@ private fun GroupMenu(
     onMedia: () -> Unit,
     onLeave: () -> Unit,
 ) {
-    val muted = model.chatSummaries[model.chatKey(gid, group = true)]?.muted == true
+    var notify by remember(gid) { mutableStateOf(false) }
+    if (notify) NotifySheet(model, ChatTarget(gid, group = true)) { notify = false }
     PopMenu(open, onClose) {
         PopMenuItem(TablerIcons.Search, stringResource(R.string.chat_menu_search)) {
             onClose()
@@ -362,11 +363,10 @@ private fun GroupMenu(
             onClose()
             onMedia()
         }
-        PopMenuItem(
-            TablerIcons.BellOff,
-            stringResource(R.string.chat_menu_mute),
-            trailing = { Switch(checked = muted, onCheckedChange = null) },
-        ) { model.muteChat(gid, group = true, muted = !muted) }
+        NotifyMenuItem(model, ChatTarget(gid, group = true)) {
+            onClose()
+            notify = true
+        }
         // Приглашать в MLS-группу может только админ — остальным пункт ни к чему.
         if (model.isGroupAdmin(gid)) {
             PopMenuItem(TablerIcons.UserPlus, stringResource(R.string.chat_menu_invite)) {

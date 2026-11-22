@@ -54,7 +54,9 @@ internal fun GroupProfileScreen(
         model.loadGroupMembers(gid)
         model.refreshChatSummaries()
     }
-    val muted = model.chatSummaries[model.chatKey(gid, true)]?.muted == true
+    val muted = model.chatQuiet(gid, true)
+    var notify by remember(gid) { mutableStateOf(false) }
+    if (notify) NotifySheet(model, ChatTarget(gid, group = true)) { notify = false }
     val selfOnline = !model.offline
     fun online(k: String) = if (k == me) selfOnline else model.online[k] == true
 
@@ -94,11 +96,12 @@ internal fun GroupProfileScreen(
             ShowAction(
                 if (muted) TablerIcons.BellOff else TablerIcons.Bell,
                 stringResource(if (muted) R.string.profile_sound_off else R.string.profile_sound),
-            ) { model.muteChat(gid, true, !muted) }
+            ) { notify = true }
             ShowAction(TablerIcons.Search, stringResource(R.string.group_search), onClick = onSearch)
         },
     ) {
         CardSection {
+            ProfileNotifyRow(model, ChatTarget(gid, group = true))
             ProfileMediaEntry(model, ChatTarget(gid, group = true), onMedia)
             ProfileAutodelRow(model, ChatTarget(gid, group = true))
         }

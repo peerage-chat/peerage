@@ -149,6 +149,21 @@
     <string name="notif_sec_messages">Messages</string>
     <string name="notif_set_chat_sounds">In-chat sounds</string>
     <string name="notif_sec_other">Other</string>
+    <string name="notif_mode_title">Notifications</string>
+    <string name="notif_mode_all">All messages</string>
+    <string name="notif_mode_mentions">Only mentions</string>
+    <string name="notif_mode_none">Nothing</string>
+    <string name="notif_mode_inherit">Group default</string>
+    <string name="notif_mode_cap">Calls ring in any mode.</string>
+    <string name="notif_for_title">For how long</string>
+    <string name="notif_for_1h">1 hour</string>
+    <string name="notif_for_8h">8 hours</string>
+    <string name="notif_for_day">24 hours</string>
+    <string name="notif_for_ever">Until turned back on</string>
+    <string name="notif_until">until %1$s</string>
+    <string name="notif_default_title">Default notifications</string>
+    <string name="notif_default_cap">For members who have not picked a mode.</string>
+    <string name="notif_mute_hour">Mute for 1 hour</string>
     <string name="notif_ch_requests">Requests and invites</string>
     <string name="notif_request_title">Contact request</string>
     <string name="notif_invite_title">Group invite</string>
@@ -831,7 +846,6 @@
         <item quantity="one">Delete %1$d message?</item>
         <item quantity="other">Delete %1$d messages?</item>
     </plurals>
-    <string name="chat_menu_mute">Mute</string>
     <string name="chat_menu_profile">Profile</string>
     <string name="chat_menu_invite">Invite</string>
     <string name="chat_menu_group_info">Group info</string>
