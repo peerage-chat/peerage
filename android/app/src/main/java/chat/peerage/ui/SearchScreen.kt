@@ -208,7 +208,7 @@ private fun HitRow(model: AppModel, hit: AppModel.SearchHit, words: List<String>
 }
 
 @Composable
-private fun SearchRow(
+internal fun SearchRow(
     divider: Boolean,
     onClick: () -> Unit,
     avatar: @Composable () -> Unit,
@@ -226,7 +226,7 @@ private fun SearchRow(
 }
 
 @Composable
-private fun RowAvatar(name: String, bytes: ByteArray?, group: Boolean, saved: Boolean = false) {
+internal fun RowAvatar(name: String, bytes: ByteArray?, group: Boolean, saved: Boolean = false) {
     if (saved) {
         SquareAvatar(name, size = Tokens.Size.avatarPick, circle = true, bg = Tokens.Colors.accentMuted) {
             Icon(TablerIcons.Bookmark, null, tint = Tokens.Colors.accentSoft, modifier = Modifier.size(Tokens.Size.iconRow))

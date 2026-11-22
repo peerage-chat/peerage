@@ -493,6 +493,27 @@ class AppModel private constructor() {
             ?.edit()?.putBoolean("warn_outbox", warnOutboxGrowth)?.apply()
     }
 
+    /** Присланное другой программой («Поделиться», 7d), пока не отправлено. */
+    var shareDraft by mutableStateOf<ShareDraft?>(null)
+
+    /** Что открыть по ярлыку на значке или ярлыку чата; экран забирает и сбрасывает. */
+    var launchTarget by mutableStateOf<LaunchTarget?>(null)
+
+    /**
+     * Последние чаты в системном меню «Поделиться» (выкл по умолчанию): выключенным имена и
+     * фото чатов системе не передаются. Выключение снимает уже опубликованные ярлыки.
+     */
+    var shareChatsInMenu by mutableStateOf(false)
+        private set
+
+    fun setShareChats(on: Boolean) {
+        shareChatsInMenu = on
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("share_chats", on)?.apply()
+        // Значки чатов рисуются в битмапы — не на главном потоке.
+        appContext?.let { c -> reads.execute { ShareShortcuts.sync(c, this) } }
+    }
+
     /** Уведомлять о флуде на адрес (вкл по умолчанию). Сам учёт потока и «Сеть» — всегда. */
     var notifyFlood by mutableStateOf(true)
         private set
@@ -765,6 +786,7 @@ class AppModel private constructor() {
         showTechInfo = prefs.getBoolean("tech_info", false)
         recentEmoji = prefs.getString("recent_emoji", "")?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
         warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
+        shareChatsInMenu = prefs.getBoolean("share_chats", false)
         notifyFlood = prefs.getBoolean("notif_flood", true)
         mediaColumns = prefs.getInt("media_columns", 3).takeIf { it in MEDIA_COLUMNS } ?: 3
         val w = prefs.getInt("video_w", VideoQuality.default.width)
@@ -2713,6 +2735,7 @@ class AppModel private constructor() {
         // заставила бы список мигнуть пустотой на каждом входящем сообщении.
         chatSummaries.keys.retainAll(fresh.keys)
         chatSummaries.putAll(fresh)
+        appContext?.let { ShareShortcuts.sync(it, this) }
     }
 
     /** Закрепить чат в списке / снять. Пометка локальная — собеседник не узнает. */

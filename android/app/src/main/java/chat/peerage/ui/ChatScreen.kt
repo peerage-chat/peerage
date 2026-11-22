@@ -257,6 +257,9 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
     PagingOlder(listState, key) { model.loadOlder(key, {}) }
     val chat = ChatTarget(key, group = false)
     PagingNewer(model, listState, chat)
+    // «Поделиться» в этот чат: текст — в поле, вложения ждут над ним до «Отправить».
+    val staged = model.stagedShare(chat)
+    LaunchedEffect(model.shareDraft) { model.takeSharedText(chat)?.let { input = it } }
     val search = model.chatSearch?.takeIf { it.chat == chat }
     // Правка начинается с ТЕКУЩЕГО текста: человек исправляет, а не набирает заново.
     LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
@@ -322,7 +325,9 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
             voice = voice,
             model = model,
             hint = stringResource(if (model.isSaved(key)) R.string.saved_hint else R.string.chat_input_hint),
+            staged = staged != null,
             replyStrip = {
+                staged?.let { SharedStrip(it) { model.shareDraft = null } }
                 model.editTarget?.let {
                     EditStrip(it.text) {
                         model.editTarget = null
@@ -336,6 +341,9 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
                 if (editing != null) {
                     if (input.isNotBlank()) model.applyEdit(key, false, editing.id, input)
                     model.editTarget = null
+                    input = ""
+                } else if (staged != null) {
+                    model.sendStaged(ctx, chat, input.trim())
                     input = ""
                 } else if (input.isNotBlank()) {
                     model.send(key, input)
@@ -442,7 +450,7 @@ internal fun sendGallery(
 }
 
 /** Отправить одно вложение по content:// — блокирует поток, звать с IO. */
-private fun sendUriNow(
+internal fun sendUriNow(
     ctx: android.content.Context,
     model: AppModel,
     key: String,
@@ -614,6 +622,11 @@ internal fun ReplyStrip(model: AppModel, m: Message) {
     )
 }
 
+/** Плашка присланного через «Поделиться»: «2 фото · 4,1 МБ», имена файлов, «×» — отказаться. */
+@Composable
+internal fun SharedStrip(d: chat.peerage.ShareDraft, onCancel: () -> Unit) =
+    InputStrip(TablerIcons.Paperclip, sharedLabel(d), d.items.joinToString(", ") { it.name }, onCancel)
+
 /** Системная строка «E2E» в начале переписки. */
 /** Плашка над перепиской с тем, кто ещё не принял запрос (макет `people/Pending`). */
 @Composable
@@ -769,6 +782,8 @@ internal fun MessageInput(
     model: AppModel? = null,
     /** Подсказка пустого поля: «Сообщение», в «Сохранённом» — «Заметка себе…». */
     hint: String? = null,
+    /** Над полем ждут присланные через «Поделиться» вложения: отправка без текста — можно. */
+    staged: Boolean = false,
     /** Полоска «отвечаем на …» над полем: экран решает, чья цель ответа. */
     replyStrip: (@Composable () -> Unit)? = null,
     /** Кого можно упомянуть по набранному после «@»: пары (ключ, имя). Пусто — в
@@ -803,7 +818,7 @@ internal fun MessageInput(
     // Правка: вложить нечего (меняются только слова), отправка становится «Сохранить».
     val editing = model?.editTarget != null
     // Плашка прилегает к полю (зазор 2 dp), без неё — обычный отступ сверху.
-    val stripShown = replyStrip != null && (editing || model?.replyTarget != null)
+    val stripShown = replyStrip != null && (editing || staged || model?.replyTarget != null)
     Column(Modifier.fillMaxWidth()) {
         // Цитата видна ровно там, где человек печатает ответ: иначе легко забыть,
         // что сообщение уйдёт ответом, и получить «ответ» не на то.
@@ -969,7 +984,7 @@ internal fun MessageInput(
             }
             Spacer(Modifier.width(Tokens.Space.s))
             // Отправка (есть текст) / голосовое удержанием (поле пустое).
-            val send = value.isNotBlank()
+            val send = value.isNotBlank() || (staged && !editing)
             ComposerButton(voice, record = !send, onClick = { if (send) onSend() }) {
                 val tint = HoloAccentDark
                 SwapIcon(

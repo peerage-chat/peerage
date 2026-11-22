@@ -87,6 +87,9 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
     JumpToMessage(model, listState, msgs)
     PagingOlder(listState, gid) { model.loadOlder(gid, {}, group = true) }
     val chat = ChatTarget(gid, group = true)
+    // «Поделиться» в эту группу: текст — в поле, вложения ждут над ним до «Отправить».
+    val staged = model.stagedShare(chat)
+    LaunchedEffect(model.shareDraft) { model.takeSharedText(chat)?.let { input = it } }
     PagingNewer(model, listState, chat)
     val search = model.chatSearch?.takeIf { it.chat == chat }
 
@@ -157,7 +160,9 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
                 MessageInput(
                     value = input,
                     onChange = { input = it },
+                    staged = staged != null,
                     replyStrip = {
+                        staged?.let { SharedStrip(it) { model.shareDraft = null } }
                         model.editTarget?.let { t ->
                             EditStrip(t.text) {
                                 model.editTarget = null
@@ -180,6 +185,9 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
                         if (editing != null) {
                             if (input.isNotBlank()) model.applyEdit(gid, true, editing.id, input, mentions)
                             model.editTarget = null
+                            input = ""
+                        } else if (staged != null) {
+                            model.sendStaged(ctx, chat, input.trim())
                             input = ""
                         } else if (input.isNotBlank()) {
                             model.send(gid, input, group = true, mentions = mentions)

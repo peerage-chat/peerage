@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ярлыки на значке (макет android/Shortcuts) и цель «Поделиться» для ярлыков чатов (ShareShortcuts). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="add_contact"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_add_contact"
+        android:shortcutShortLabel="@string/title_add_contact">
+        <intent
+            android:action="chat.peerage.ADD_CONTACT"
+            android:targetClass="chat.peerage.MainActivity"
+            android:targetPackage="chat.peerage" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="my_code"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_my_code"
+        android:shortcutShortLabel="@string/my_code_title">
+        <intent
+            android:action="chat.peerage.MY_CODE"
+            android:targetClass="chat.peerage.MainActivity"
+            android:targetPackage="chat.peerage" />
+    </shortcut>
+    <share-target android:targetClass="chat.peerage.MainActivity">
+        <data android:mimeType="*/*" />
+        <category android:name="chat.peerage.SHARE_TARGET" />
+    </share-target>
+</shortcuts>

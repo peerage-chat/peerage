@@ -350,6 +350,7 @@ object Tokens {
         val avatarMention = 32.dp // аватар в подсказке «@» над полем (макет `chatact/Mention`)
         val avatarMember = 36.dp // аватар в строке участника группы (макет `prof/GroupB`)
         val avatarPick = 40.dp // аватар в строке выбора людей (макеты `people/`)
+        val shareThumb = 76.dp // миниатюра присланного на «Отправить в Peerage» (макет `android/Main`)
         val personRow = 60.dp // строка выбора людей (минимальная высота)
         val avatarChip = 28.dp // аватар в чипе выбранного человека
         val avatarSheet = 48.dp // аватар в шапке шторки человека

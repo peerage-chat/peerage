@@ -138,6 +138,24 @@ internal fun SettingsPrivacyScreen(model: AppModel, onBlocked: () -> Unit) {
             PrivacyFact(TablerIcons.InfoCircle, Tokens.Colors.fieldIcon, R.string.privacy_online, R.string.privacy_online_sub, divider = false)
             PrivacyFact(TablerIcons.InfoCircle, Tokens.Colors.fieldIcon, R.string.privacy_profile, R.string.privacy_profile_sub)
         }
+        // Чаты в системном меню «Поделиться» (5.6): имя и фото чата уходят системе — только по выбору.
+        SectionTitle(stringResource(R.string.privacy_system))
+        CardSection {
+            PrivacySwitch(
+                stringResource(R.string.privacy_share_chats),
+                stringResource(R.string.privacy_share_chats_sub),
+                model.shareChatsInMenu,
+                divider = false,
+                icon = TablerIcons.Share,
+            ) { model.setShareChats(it) }
+        }
+        Caption(
+            if (model.shareChatsInMenu) {
+                stringResource(R.string.privacy_share_chats_on)
+            } else {
+                stringResource(R.string.privacy_share_chats_off, stringResource(R.string.app_name))
+            },
+        )
         Spacer(Modifier.height(Tokens.Space.l))
         CardSection {
             ValueRow(
@@ -153,8 +171,19 @@ internal fun SettingsPrivacyScreen(model: AppModel, onBlocked: () -> Unit) {
 
 /** Переключатель «Приватности»: название и что значит текущее положение. */
 @Composable
-private fun PrivacySwitch(title: String, sub: String, checked: Boolean, divider: Boolean = true, onChange: (Boolean) -> Unit) {
+private fun PrivacySwitch(
+    title: String,
+    sub: String,
+    checked: Boolean,
+    divider: Boolean = true,
+    icon: ImageVector? = null,
+    onChange: (Boolean) -> Unit,
+) {
     CardRow(divider = divider, inset = Tokens.Space.l, modifier = Modifier.switchRow(checked, onChange = onChange)) {
+        if (icon != null) {
+            Icon(icon, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconRow))
+            Spacer(Modifier.width(Tokens.Space.m))
+        }
         Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
             Text(title, color = Color.White, fontSize = Tokens.Font.name)
             Text(sub, color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body, modifier = Modifier.padding(top = Tokens.Space.xxs))

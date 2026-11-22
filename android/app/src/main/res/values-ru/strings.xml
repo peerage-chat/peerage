@@ -1186,4 +1186,39 @@
     <string name="autodel_confirm_att">Под правило попадают %1$s вложений.</string>
     <string name="autodel_confirm_tail">Удаление только на этом телефоне, без возврата.</string>
     <string name="autodel_confirm_ok">Удалить и включить</string>
+    <!-- «Поделиться» в Peerage и чаты в системном меню (5.6, шаг 7d) -->
+    <string name="share_in_title">Отправить в %1$s</string>
+    <string name="share_in_to">Кому</string>
+    <string name="share_in_caption">Подпись</string>
+    <string name="share_in_pick">Выбрать чаты</string>
+    <string name="share_in_saved_sub">заметки себе</string>
+    <plurals name="share_in_send_to">
+        <item quantity="one">Отправить в %d чат</item>
+        <item quantity="few">Отправить в %d чата</item>
+        <item quantity="many">Отправить в %d чатов</item>
+        <item quantity="other">Отправить в %d чата</item>
+    </plurals>
+    <plurals name="share_in_photos">
+        <item quantity="one">%d фото</item>
+        <item quantity="few">%d фото</item>
+        <item quantity="many">%d фото</item>
+        <item quantity="other">%d фото</item>
+    </plurals>
+    <plurals name="share_in_videos">
+        <item quantity="one">%d видео</item>
+        <item quantity="few">%d видео</item>
+        <item quantity="many">%d видео</item>
+        <item quantity="other">%d видео</item>
+    </plurals>
+    <plurals name="share_in_files">
+        <item quantity="one">%d файл</item>
+        <item quantity="few">%d файла</item>
+        <item quantity="many">%d файлов</item>
+        <item quantity="other">%d файла</item>
+    </plurals>
+    <string name="privacy_system">Система</string>
+    <string name="privacy_share_chats">Чаты в меню «Поделиться»</string>
+    <string name="privacy_share_chats_sub">Последние чаты видны в системном меню вне приложения</string>
+    <string name="privacy_share_chats_off">Выключено: имена и фото чатов системе не передаются. %1$s остаётся в меню значком приложения.</string>
+    <string name="privacy_share_chats_on">Включено: имена и фото восьми последних чатов передаются системе для меню «Поделиться».</string>
 </resources>

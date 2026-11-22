@@ -1130,4 +1130,31 @@
     <string name="autodel_confirm_att">The rule covers %1$s of attachments.</string>
     <string name="autodel_confirm_tail">Deleted only on this phone, permanently.</string>
     <string name="autodel_confirm_ok">Delete and turn on</string>
+    <!-- Share to Peerage and chats in the system share menu (5.6, step 7d) -->
+    <string name="share_in_title">Send to %1$s</string>
+    <string name="share_in_to">To</string>
+    <string name="share_in_caption">Caption</string>
+    <string name="share_in_pick">Choose chats</string>
+    <string name="share_in_saved_sub">notes to self</string>
+    <plurals name="share_in_send_to">
+        <item quantity="one">Send to %d chat</item>
+        <item quantity="other">Send to %d chats</item>
+    </plurals>
+    <plurals name="share_in_photos">
+        <item quantity="one">%d photo</item>
+        <item quantity="other">%d photos</item>
+    </plurals>
+    <plurals name="share_in_videos">
+        <item quantity="one">%d video</item>
+        <item quantity="other">%d videos</item>
+    </plurals>
+    <plurals name="share_in_files">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
+    <string name="privacy_system">System</string>
+    <string name="privacy_share_chats">Chats in the Share menu</string>
+    <string name="privacy_share_chats_sub">Recent chats appear in the system menu outside the app</string>
+    <string name="privacy_share_chats_off">Off: chat names and photos are not passed to the system. %1$s stays in the menu as the app icon.</string>
+    <string name="privacy_share_chats_on">On: names and photos of the eight most recent chats are passed to the system for the Share menu.</string>
 </resources>

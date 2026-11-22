@@ -312,6 +312,7 @@
 | `avatarMention` | 32 | аватар в подсказке «@» над полем (`chatact/Mention`) |
 | `avatarMember` | 36 | аватар в строке участника группы (`prof/GroupB`) |
 | `avatarPick` / `personRow` | 40 / 60 | аватар и строка выбора людей (`people/GroupPick`, `Invite`) |
+| `shareThumb` | 76 | миниатюра присланного на «Отправить в Peerage» (`android/Main`) |
 | `avatarChip` | 28 | аватар в чипе выбранного человека |
 | `avatarSheet` | 48 | аватар в шапке шторки человека (`people/Member`) |
 | `groupDraftAvatar` | 72 | аватар группы на шаге «название» (`people/GroupName`) |

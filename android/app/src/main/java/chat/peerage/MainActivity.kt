@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
         // Запрашиваются в App() после гейта (onboarded) — см. requestCorePermissions.
         val dataDir = filesDir.absolutePath
         handleCallIntent(intent)
+        model.acceptIntent(this, intent)
         setContent {
             // ADR-005: класс ширины окна читается ЗДЕСЬ (единственная точка), дальше по
             // приложению ходит наш enum WidthClass — experimental-API не течёт в UI-код.
@@ -74,6 +75,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         handleCallIntent(intent)
+        model.acceptIntent(this, intent)
     }
 
     /**
@@ -270,6 +272,9 @@ internal enum class Screen {
     Network,
     Saved,
     Search,
+
+    /** «Отправить в Peerage»: выбор чатов для присланного другой программой (5.6). */
+    Share,
     NewChat,
     Storage,
     Autodel,
@@ -352,6 +357,55 @@ private fun CompactShell(model: AppModel) {
         model.openGroupRequest = null
         model.openGroup(gid)
         screen = Screen.GroupChat
+    }
+    // Открыть чат по цели: группа, «Сохранённое» или личный.
+    val openTarget: (ChatTarget) -> Unit = { t ->
+        when {
+            t.group -> {
+                model.openGroup(t.id)
+                screen = Screen.GroupChat
+            }
+            model.isSaved(t.id) -> {
+                model.openSaved()
+                screen = Screen.Saved
+            }
+            else -> {
+                model.openChat(t.id)
+                screen = Screen.Chat
+            }
+        }
+    }
+    // «Поделиться» (5.6): без выбранного чата — экран выбора; с чатом (ярлык в системном меню
+    // или один отмеченный) — сам чат, вложение ждёт в поле. Ключ — что и куда, без текста:
+    // перенос текста в поле не должен открывать чат ещё раз.
+    LaunchedEffect(model.shareDraft?.let { it.items to it.target }) {
+        val d = model.shareDraft ?: return@LaunchedEffect
+        val t = d.target?.takeIf { model.hasChat(it) }
+        if (t == null) {
+            if (d.target != null) model.shareDraft = d.copy(target = null)
+            screen = Screen.Share
+        } else {
+            if (screen == Screen.Share) nav.back()
+            openTarget(t)
+        }
+    }
+    // Ушли с «Отправить в Peerage», не выбрав чат («назад», жест) — присланное отменено, как
+    // крестиком. Не onDispose экрана: оболочку пересоздаёт старт движка, и холодный запуск
+    // из «Поделиться» терял бы присланное, не успев его показать.
+    val lastScreen = remember { arrayOf(screen) }
+    LaunchedEffect(screen) {
+        if (lastScreen[0] == Screen.Share && screen != Screen.Share && model.shareDraft?.target == null) model.shareDraft = null
+        lastScreen[0] = screen
+    }
+    // Ярлыки на значке и ярлыки чатов. Замок их не обходит: App() не рисуется, пока он закрыт.
+    LaunchedEffect(model.launchTarget) {
+        val t = model.launchTarget ?: return@LaunchedEffect
+        model.launchTarget = null
+        when (t) {
+            LaunchTarget.AddContact -> screen = Screen.Add
+            LaunchTarget.MyCode -> screen = Screen.MyCode
+            is LaunchTarget.Chat -> if (model.hasChat(t.chat)) openTarget(t.chat)
+        }
     }
     // Папки: единственный источник правды — страница пейджера. Таб и заголовок только
     // читают её (targetPage — куда пейджер движется, поэтому таб переключается сразу,
@@ -511,6 +565,10 @@ private fun CompactShell(model: AppModel) {
                                 Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = goBack)
                                 Screen.FolderEdit -> FolderEditTopBar(model, onBack = goBack)
                                 Screen.Search -> SearchTopBar(model, onBack = goBack)
+                                Screen.Share -> ShareTopBar {
+                                    model.shareDraft = null
+                                    goBack()
+                                }
                             }
                             // ── Контент экрана (без шапки) ────────────────────────────────────
                             // «Лист» (app-ui.md): под шапкой — панель со скруглённым верхом во всю
@@ -776,22 +834,9 @@ private fun CompactShell(model: AppModel) {
                                         model.openChat(peer)
                                         screen = Screen.Chat
                                     }
-                                    Screen.Search -> SearchScreen(model) { t ->
-                                        when {
-                                            t.group -> {
-                                                model.openGroup(t.id)
-                                                screen = Screen.GroupChat
-                                            }
-                                            model.isSaved(t.id) -> {
-                                                model.openSaved()
-                                                screen = Screen.Saved
-                                            }
-                                            else -> {
-                                                model.openChat(t.id)
-                                                screen = Screen.Chat
-                                            }
-                                        }
-                                    }
+                                    Screen.Search -> SearchScreen(model, onOpen = openTarget)
+                                    // Один чат открывает эффект «Поделиться» (цель уже в черновике).
+                                    Screen.Share -> ShareScreen(model, onOpenOne = {}, onSent = { nav.leave(setOf(Screen.Share)) })
                                 }
                             }
                         }

@@ -235,7 +235,7 @@ private fun PickedChips(model: AppModel, keys: MutableList<String>) {
 /** Поиск по контактам (макет: плашка во всю ширину над группой). [autoFocus] — поле открыто
  *  кнопкой, клавиатура сразу. */
 @Composable
-internal fun ContactSearch(query: String, autoFocus: Boolean = false, onQuery: (String) -> Unit) {
+internal fun ContactSearch(query: String, autoFocus: Boolean = false, hint: String? = null, onQuery: (String) -> Unit) {
     val focus = remember { FocusRequester() }
     if (autoFocus) LaunchedEffect(Unit) { focus.requestFocus() }
     Row(
@@ -249,7 +249,7 @@ internal fun ContactSearch(query: String, autoFocus: Boolean = false, onQuery: (
     ) {
         Icon(TablerIcons.Search, null, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconRow))
         Box(Modifier.weight(1f)) {
-            if (query.isEmpty()) Text(stringResource(R.string.contacts_search_hint), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.label)
+            if (query.isEmpty()) Text(hint ?: stringResource(R.string.contacts_search_hint), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.label)
             BasicTextField(
                 query,
                 onQuery,
