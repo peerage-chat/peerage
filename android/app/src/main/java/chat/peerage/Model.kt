@@ -495,6 +495,28 @@ class AppModel private constructor() {
             ?.edit()?.putBoolean("warn_outbox", warnOutboxGrowth)?.apply()
     }
 
+    /** Показать подсказку про входящий на весь экран ([checkFullScreenCalls]). */
+    var fullScreenHint by mutableStateOf(false)
+        private set
+
+    /**
+     * Android 14+ даёт полноэкранный интент не всем: без него входящий на заблокированном экране
+     * — только уведомлением. Подсказка — один раз, при первом таком звонке.
+     */
+    private fun checkFullScreenCalls(ctx: android.content.Context) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        val prefs = ctx.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean("fsi_hint_seen", false)) return
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+        if (!nm.canUseFullScreenIntent()) fullScreenHint = true
+    }
+
+    fun dismissFullScreenHint() {
+        fullScreenHint = false
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("fsi_hint_seen", true)?.apply()
+    }
+
     /** Присланное другой программой («Поделиться», 7d), пока не отправлено. */
     var shareDraft by mutableStateOf<ShareDraft?>(null)
 
@@ -2409,7 +2431,10 @@ class AppModel private constructor() {
                     val caller = contacts.firstOrNull { it.key == ev.peer }
                     val callerName = caller?.displayName ?: appContext?.getString(R.string.common_contact).orEmpty()
                     val avatar = caller?.avatarId?.let { contactAvatars[it] }
-                    appContext?.let { IncomingCallReceiver.show(it, callerName, ev.video, avatar) }
+                    appContext?.let {
+                        IncomingCallReceiver.show(it, callerName, ev.video, avatar)
+                        checkFullScreenCalls(it)
+                    }
                 }
             }
             is EngineEvent.RoomDecline -> {

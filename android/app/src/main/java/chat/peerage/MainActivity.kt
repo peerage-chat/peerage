@@ -906,6 +906,8 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
             val callShown = model.incomingCall != null || model.dmCallPeer != null
             LaunchedEffect(callShown) { if (callShown) focus.clearFocus(force = true) }
             model.incomingCall?.let { IncomingCallOverlay(model, it) }
+            // Подсказка про входящий на весь экран — когда звонок уже позади.
+            if (model.fullScreenHint && !callShown && model.currentRoom == null) FullScreenCallSheet(model)
             // Активный DM-звонок (аудио или видео) — полноэкранная комната-сетка.
             if (model.incomingCall == null) {
                 model.dmCallPeer?.let { RoomCallScreen(model, it) }

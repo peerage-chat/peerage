@@ -393,6 +393,9 @@
     <string name="notif_voice_room">Voice room · %1$s</string>
     <string name="notif_room_you">you</string>
     <string name="notif_room_line">In the voice room</string>
+    <string name="fsi_title">Full-screen incoming calls</string>
+    <string name="fsi_text">Without this permission, an incoming call on the lock screen arrives only as a notification.</string>
+    <string name="fsi_later">Not now</string>
     <string name="notif_incoming_channel">Incoming calls</string>
     <string name="notif_incoming_channel_desc">Incoming call notification</string>
     <string name="notif_conn_channel">Connection</string>
