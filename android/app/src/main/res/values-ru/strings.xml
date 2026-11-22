@@ -393,6 +393,7 @@
     <string name="notif_incoming_call">Входящий звонок</string>
     <string name="notif_accept">Принять</string>
     <string name="notif_decline">Отклонить</string>
+    <string name="notif_no_video">Без видео</string>
     <string name="notif_incoming_channel">Входящие звонки</string>
     <string name="notif_incoming_channel_desc">Уведомление о входящем звонке</string>
     <string name="notif_conn_channel">Соединение</string>
@@ -405,6 +406,10 @@
     <string name="notif_call_with">Звонок с %1$s</string>
     <string name="notif_voice_chat">В голосовом чате</string>
     <string name="notif_end">Завершить</string>
+    <string name="notif_mic_off">Выкл. микрофон</string>
+    <string name="notif_mic_on">Вкл. микрофон</string>
+    <string name="notif_leave">Выйти</string>
+    <string name="notif_room_alone">Больше никого</string>
 
     <!-- Онбординг (M4) -->
     <string name="onb_welcome_sub">Переписка и звонки без серверов. Личность — ключ на этом устройстве.</string>

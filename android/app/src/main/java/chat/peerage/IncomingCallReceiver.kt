@@ -8,13 +8,16 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
 
 /**
- * Уведомление о входящем звонке (heads-up + fullScreenIntent).
+ * Уведомление о входящем звонке: системный шаблон звонка + полноэкранный интент.
  *
- * Когда [AppModel] получает событие `room_invite`, он вызывает [show] — пользователь
- * видит баннер даже если приложение свёрнуто. Кнопки «Принять» / «Отклонить» посылают
- * broadcast сюда; receiver делегирует в [AppModel] и гасит уведомление.
+ * Когда [AppModel] получает событие `room_invite`, он вызывает [show] — человек видит
+ * звонок, даже если приложение свёрнуто. «Отклонить» приходит сюда (receiver делегирует в
+ * [AppModel] и гасит уведомление), «Ответить» и «Без видео» — сразу в активити.
  *
  * Процесс жив благодаря [ConnService] (PARTIAL_WAKE_LOCK + WifiLock), поэтому
  * [AppModel.pollThread] успевает поймать событие без FCM.
@@ -39,6 +42,9 @@ class IncomingCallReceiver : BroadcastReceiver() {
         const val ACTION_DECLINE = "chat.peerage.DECLINE_CALL"
         const val EXTRA_TOKEN = "accept_token"
 
+        /** Принять с камерой (у видеозвонка «Ответить»; «Без видео» — false). */
+        const val EXTRA_VIDEO = "accept_video"
+
         /**
          * Одноразовый токен «Принять». MainActivity экспортирована (её открывает
          * лаунчер), и без проверки любое приложение на телефоне могло бы прислать ей
@@ -55,10 +61,12 @@ class IncomingCallReceiver : BroadcastReceiver() {
             return ok
         }
 
-        fun show(ctx: Context, callerName: String) {
+        /**
+         * Входящий в системном шаблоне звонка (notifications.md, п. 7): «Отклонить / Ответить»,
+         * у видео ещё «Без видео». Полноэкранный интент — наш экран входящего на блокировке.
+         */
+        fun show(ctx: Context, callerName: String, video: Boolean, avatar: ByteArray?) {
             ensureChannel(ctx)
-            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
             val openPi = PendingIntent.getActivity(
                 ctx,
                 10,
@@ -67,17 +75,18 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            // «Принять» ведёт прямо в активити, а не через receiver: открыть активити
+            // «Ответить» ведёт прямо в активити, а не через receiver: открыть активити
             // из receiver кнопки уведомления («трамплин») Android 12+ не даёт, и
             // звонок принимался при закрытом приложении. Активити и примет, и
-            // проверит микрофон.
-            val acceptPi = PendingIntent.getActivity(
+            // проверит микрофон. Токен один на обе кнопки ответа — сгорает с первой.
+            acceptToken = java.util.UUID.randomUUID().toString()
+            fun accept(code: Int, withVideo: Boolean) = PendingIntent.getActivity(
                 ctx,
-                11,
+                code,
                 Intent(ctx, MainActivity::class.java).apply {
                     action = ACTION_ACCEPT
-                    acceptToken = java.util.UUID.randomUUID().toString()
                     putExtra(EXTRA_TOKEN, acceptToken)
+                    putExtra(EXTRA_VIDEO, withVideo)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -88,49 +97,24 @@ class IncomingCallReceiver : BroadcastReceiver() {
                 Intent(ACTION_DECLINE).apply { setPackage(ctx.packageName) },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-
-            @Suppress("DEPRECATION")
-            val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Notification.Builder(ctx, CHANNEL)
-            } else {
-                Notification.Builder(ctx)
-            }
-
-            b.setContentTitle(ctx.getString(R.string.notif_incoming_call))
-                .setContentText(callerName)
-                .setSmallIcon(android.R.drawable.stat_sys_phone_call)
-                .setCategory(Notification.CATEGORY_CALL)
-                .setAutoCancel(true)
+            val caller = Person.Builder()
+                .setName(callerName)
+                .setIcon(MessageNotifier.avatarIcon(avatar))
+                .setImportant(true)
+                .build()
+            val b = NotificationCompat.Builder(ctx, CHANNEL)
+                .setSmallIcon(R.drawable.ic_glyph)
+                .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, declinePi, accept(11, video)).setIsVideo(video))
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setOngoing(true)
                 .setContentIntent(openPi)
                 .setFullScreenIntent(openPi, true)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                b.addAction(
-                    Notification.Action.Builder(
-                        android.graphics.drawable.Icon.createWithResource(ctx, android.R.drawable.ic_menu_call),
-                        ctx.getString(R.string.notif_accept),
-                        acceptPi,
-                    ).build(),
-                )
-                b.addAction(
-                    Notification.Action.Builder(
-                        android.graphics.drawable.Icon.createWithResource(ctx, android.R.drawable.ic_delete),
-                        ctx.getString(R.string.notif_decline),
-                        declinePi,
-                    ).build(),
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                b.addAction(0, ctx.getString(R.string.notif_accept), acceptPi)
-                @Suppress("DEPRECATION")
-                b.addAction(0, ctx.getString(R.string.notif_decline), declinePi)
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) b.setTimeoutAfter(RING_MS)
+                .setTimeoutAfter(RING_MS)
+            if (video) b.addAction(0, ctx.getString(R.string.notif_no_video), accept(13, false))
             // Рингтон по кругу, пока уведомление не снято (ответ, сброс, тайм-аут).
             val n = b.build().apply { flags = flags or Notification.FLAG_INSISTENT }
-            nm.notify(NOTIF_ID, n)
+            runCatching { NotificationManagerCompat.from(ctx).notify(NOTIF_ID, n) }
         }
 
         fun cancel(ctx: Context) {

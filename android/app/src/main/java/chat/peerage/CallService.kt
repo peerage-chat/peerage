@@ -13,11 +13,16 @@ import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
 
 /**
  * Foreground-сервис активного звонка/комнаты.
  *
- * Показывает ongoing-уведомление с хронометром и кнопкой «Завершить».
+ * Уведомление (notifications.md, п. 7): личный — системный шаблон звонка с секундомером,
+ * «Выкл. микрофон» и «Завершить»; комната группы — секундомер, кто внутри, микрофон и «Выйти».
+ * Состояние (микрофон, участники) берётся у [AppModel]; меняется — зовут [refresh].
  * Тип микрофон (API 30+) — Android знает, что мы законно пишем звук.
  * Без этого сервиса Android (особенно MIUI/Doze) убьёт процесс через ~1 мин
  * после погашения экрана → аудио стопится посреди разговора.
@@ -25,21 +30,29 @@ import android.os.IBinder
 class CallService : Service() {
     private var startMs = 0L
     private var peerName = ""
+    private var room = false
+    private var started = false
     private var wifi: WifiManager.WifiLock? = null
 
     private val endReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
-            AppModel.instance.leaveRoom()
+            when (intent.action) {
+                ACTION_END_CALL -> AppModel.instance.leaveRoom()
+                ACTION_MUTE -> {
+                    AppModel.instance.toggleMute()
+                    post()
+                }
+            }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(endReceiver, IntentFilter(ACTION_END_CALL), RECEIVER_NOT_EXPORTED)
+            registerReceiver(endReceiver, filter(), RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
-            registerReceiver(endReceiver, IntentFilter(ACTION_END_CALL))
+            registerReceiver(endReceiver, filter())
         }
         // Высокопроизводительный Wi-Fi-лок ТОЛЬКО на время звонка: радио без
         // power-save → меньше потеря/джиттер медиа-пакетов. Вне звонка ConnService
@@ -66,9 +79,16 @@ class CallService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Обновление вида (микрофон, участники) — только у уже запущенного звонка.
+        if (intent.action == ACTION_REFRESH) {
+            if (started) post()
+            return START_NOT_STICKY
+        }
         peerName = intent.getStringExtra(EXTRA_PEER_NAME) ?: ""
+        room = intent.getBooleanExtra(EXTRA_ROOM, false)
         startMs = intent.getLongExtra(EXTRA_START_MS, System.currentTimeMillis())
         startForegroundCompat()
+        started = true
         return START_NOT_STICKY
     }
 
@@ -119,53 +139,53 @@ class CallService : Service() {
         }
     }
 
-    private fun buildNotification(): Notification {
-        val title = if (peerName.isNotEmpty()) getString(R.string.notif_call_with, peerName) else getString(R.string.notif_voice_chat)
+    private fun filter() = IntentFilter().apply {
+        addAction(ACTION_END_CALL)
+        addAction(ACTION_MUTE)
+    }
 
+    /** Перерисовать уведомление: состояние микрофона или состав комнаты сменились. */
+    private fun post() {
+        runCatching { NotificationManagerCompat.from(this).notify(NOTIF_ID, buildNotification()) }
+    }
+
+    private fun buildNotification(): Notification {
         val openPi = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-
-        val endPi = PendingIntent.getBroadcast(
+        fun broadcast(action: String, code: Int) = PendingIntent.getBroadcast(
             this,
-            0,
-            Intent(ACTION_END_CALL).apply { setPackage(packageName) },
+            code,
+            Intent(action).apply { setPackage(packageName) },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-
-        @Suppress("DEPRECATION")
-        val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL)
-        } else {
-            Notification.Builder(this)
-        }
-
-        b.setContentTitle(title)
-            .setSmallIcon(android.R.drawable.stat_sys_phone_call)
+        val endPi = broadcast(ACTION_END_CALL, 0)
+        val model = AppModel.instance
+        val mic = getString(if (model.muted) R.string.notif_mic_on else R.string.notif_mic_off)
+        val b = NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_glyph)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setWhen(startMs)
+            .setShowWhen(true)
             .setUsesChronometer(true)
             .setContentIntent(openPi)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            b.addAction(
-                Notification.Action.Builder(
-                    android.graphics.drawable.Icon.createWithResource(
-                        this,
-                        android.R.drawable.ic_delete,
-                    ),
-                    getString(R.string.notif_end),
-                    endPi,
-                ).build(),
-            )
+        if (room) {
+            // Комната: шаблон звонка подписал бы кнопку «Завершить», а из комнаты выходят.
+            val inside = model.roomMembers.map { model.peerName(it.peer) }
+            b.setContentTitle(peerName.ifEmpty { getString(R.string.notif_voice_chat) })
+                .setContentText(if (inside.isEmpty()) getString(R.string.notif_room_alone) else inside.joinToString(", "))
+                .addAction(0, mic, broadcast(ACTION_MUTE, 1))
+                .addAction(0, getString(R.string.notif_leave), endPi)
         } else {
-            @Suppress("DEPRECATION")
-            b.addAction(0, getString(R.string.notif_end), endPi)
+            val peer = Person.Builder().setName(peerName.ifEmpty { getString(R.string.common_contact) }).setImportant(true).build()
+            b.setStyle(NotificationCompat.CallStyle.forOngoingCall(peer, endPi))
+                .addAction(0, mic, broadcast(ACTION_MUTE, 1))
         }
-
         return b.build()
     }
 
@@ -173,12 +193,17 @@ class CallService : Service() {
         private const val CHANNEL = "peerage_call"
         const val NOTIF_ID = 2
         private const val ACTION_END_CALL = "chat.peerage.END_CALL"
+        private const val ACTION_MUTE = "chat.peerage.CALL_MUTE"
+        private const val ACTION_REFRESH = "chat.peerage.CALL_REFRESH"
         private const val EXTRA_PEER_NAME = "peer_name"
+        private const val EXTRA_ROOM = "room"
         private const val EXTRA_START_MS = "start_ms"
 
-        fun start(ctx: Context, peerName: String) {
+        /** `name` — собеседник личного звонка или название группы (`room = true`). */
+        fun start(ctx: Context, name: String, room: Boolean = false) {
             val i = Intent(ctx, CallService::class.java).apply {
-                putExtra(EXTRA_PEER_NAME, peerName)
+                putExtra(EXTRA_PEER_NAME, name)
+                putExtra(EXTRA_ROOM, room)
                 putExtra(EXTRA_START_MS, System.currentTimeMillis())
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -186,6 +211,11 @@ class CallService : Service() {
             } else {
                 ctx.startService(i)
             }
+        }
+
+        /** Микрофон или состав комнаты сменились — перерисовать (не запущен — ничего). */
+        fun refresh(ctx: Context) {
+            runCatching { ctx.startService(Intent(ctx, CallService::class.java).setAction(ACTION_REFRESH)) }
         }
 
         fun stop(ctx: Context) {

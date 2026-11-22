@@ -1485,7 +1485,12 @@ class AppModel private constructor() {
                         // Только при реальном изменении состава/флагов — иначе каждый тик
                         // (2с в звонке) форсит рекомпозицию всего экрана → рывок видео.
                         if (roomMembers != list) {
-                            onMain { if (currentRoom == gid) roomMembers.replaceWith(list) }
+                            onMain {
+                                if (currentRoom == gid && roomMembers.toList() != list) {
+                                    roomMembers.replaceWith(list)
+                                    appContext?.let { CallService.refresh(it) }
+                                }
+                            }
                         }
                     }
                     // Присутствие в группах, к которым мы НЕ подключены:
@@ -2348,9 +2353,10 @@ class AppModel private constructor() {
                 // обновляем экран входящего. От другого пира, пока заняты — игнор.
                 if (existing == null || existing.peer == ev.peer) {
                     incomingCall = IncomingRoomCall(ev.peer, ev.roomId, ev.audio, ev.video)
-                    val callerName = contacts.firstOrNull { it.key == ev.peer }?.displayName
-                        ?: appContext?.getString(R.string.common_contact).orEmpty()
-                    appContext?.let { IncomingCallReceiver.show(it, callerName) }
+                    val caller = contacts.firstOrNull { it.key == ev.peer }
+                    val callerName = caller?.displayName ?: appContext?.getString(R.string.common_contact).orEmpty()
+                    val avatar = caller?.avatarId?.let { contactAvatars[it] }
+                    appContext?.let { IncomingCallReceiver.show(it, callerName, ev.video, avatar) }
                 }
             }
             is EngineEvent.RoomDecline -> {
@@ -2375,6 +2381,7 @@ class AppModel private constructor() {
                     val rm = RoomMember(ev.peer, ev.flags and 0b01 != 0, ev.flags and 0b10 != 0)
                     val idx = roomMembers.indexOfFirst { it.peer == ev.peer }
                     if (idx >= 0) roomMembers[idx] = rm else roomMembers.add(rm)
+                    appContext?.let { CallService.refresh(it) }
                 }
             }
             // Гейт: незнакомец постучался — обновить очередь запросов (карточка в UI).
@@ -2719,6 +2726,7 @@ class AppModel private constructor() {
         muted = !muted
         roomAudio?.setMuted(muted)
         propagateAvFlags()
+        appContext?.let { CallService.refresh(it) }
     }
 
     /** Вкл/выкл свою камеру по ходу звонка (кнопка «Видео»). */
@@ -2820,7 +2828,7 @@ class AppModel private constructor() {
         val name = groups.firstOrNull { it.gid == gid }?.name ?: ""
         startCall(after) {
             Native.roomJoin(sessionPtr, gid, audio, video)
-            CallService.start(ctx, name)
+            CallService.start(ctx, name, room = true)
             startRoomMedia(ctx, gid, video)
         }
     }

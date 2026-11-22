@@ -88,7 +88,10 @@ class MainActivity : ComponentActivity() {
         // только интенту с токеном из нашего уведомления.
         if (!IncomingCallReceiver.consumeToken(i.getStringExtra(IncomingCallReceiver.EXTRA_TOKEN))) return
         IncomingCallReceiver.cancel(this)
-        if (hasPermission(Manifest.permission.RECORD_AUDIO)) model.acceptDmCall()
+        // Камеру — только если звали с видео, нажато «Ответить» и разрешение уже есть:
+        // спрашивать его из шторки некому, звонок тогда начнётся голосом.
+        val video = i.getBooleanExtra(IncomingCallReceiver.EXTRA_VIDEO, false) && hasPermission(Manifest.permission.CAMERA)
+        if (hasPermission(Manifest.permission.RECORD_AUDIO)) model.acceptDmCall(video = video)
     }
 
     /** Запрос уже на экране: onStart и кнопка замка не должны поднять второй. */

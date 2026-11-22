@@ -204,7 +204,7 @@ internal object MessageNotifier {
         )
     }
 
-    private fun avatarIcon(bytes: ByteArray?): IconCompat? = bytes?.let {
+    internal fun avatarIcon(bytes: ByteArray?): IconCompat? = bytes?.let {
         runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull()?.let(IconCompat::createWithBitmap)
     }
 
