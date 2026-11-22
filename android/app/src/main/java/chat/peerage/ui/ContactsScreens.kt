@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -351,7 +352,8 @@ private fun ChatRowBadge(model: AppModel, row: ChatRowUi) {
         row.unread > 0 -> CountBadge(badgeCount(row.unread), muted = row.muted)
         // Те же значки, что в пузыре чата: часы → одна галочка → две, прочитанное —
         // акцентом. Один и тот же факт не должен выглядеть в списке иначе, чем в ленте.
-        s != null && s.lastMine && !s.lastSystem && s.lastKind != "deleted" &&
+        // В превью строка реакции — галочке не к чему относиться.
+        s != null && s.reaction == null && s.lastMine && !s.lastSystem && s.lastKind != "deleted" &&
             s.lastKind != "call" && s.lastKind != "video_call" -> when (shownStatus(model, row.id, row.group, s.lastStatus)) {
             "read" -> Icon(
                 Icons.Filled.DoneAll,
@@ -425,6 +427,11 @@ private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose:
 @Composable
 private fun chatPreview(model: AppModel, row: ChatRowUi): String {
     val s = row.summary ?: return stringResource(R.string.chats_preview_empty)
+    // Реакция на моё новее последнего сообщения — та же строка, что в шторке.
+    s.reaction?.let { r ->
+        val ctx = LocalContext.current
+        return model.peerName(r.by) + ": " + model.reactionText(ctx, r.emoji, r.quote, r.kind)
+    }
     // Системная строка — та же, что в ленте. Автором её не подписываем: она и так
     // говорит о ком-то в третьем лице.
     if (s.lastSystem) return groupSystemLine(model, s.lastKind, s.lastSender, s.lastText).text

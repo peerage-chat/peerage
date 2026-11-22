@@ -713,12 +713,11 @@ class AppModel private constructor() {
         val onScreen = viewing == chat && foreground
         if (!MessageNotifier.shouldNotify(false, false, false, false, onScreen, notifyMode(chat.id, chat.group), false, 0, now)) return
         val title = if (chat.group) groups.firstOrNull { it.gid == chat.id }?.name.orEmpty() else peerName(chat.id)
-        val quote = previewText(ctx, news.quote, news.kind).let { if (it.length > QUOTE_MAX) it.take(QUOTE_MAX).trimEnd() + "…" else it }
         val line = MessageNotifier.Line(
             id = now,
             sender = news.by,
             name = peerName(news.by),
-            text = ctx.getString(R.string.notif_reaction, news.emoji, quote),
+            text = reactionText(ctx, news.emoji, news.quote, news.kind),
             time = now,
             avatar = contacts.firstOrNull { it.key == news.by }?.avatarId?.let { contactAvatars[it] },
         )
@@ -728,6 +727,13 @@ class AppModel private constructor() {
     /** Текст строки шторки: подпись или текст, у вложения без подписи — его вид. */
     private fun notificationText(ctx: android.content.Context, m: Message): String =
         if (m.text.isNotBlank()) Mentions.plain(m.text, m.mentions, ::mentionName) else previewText(ctx, "", m.kind)
+
+    /** «👍 к «начало»» — одна строка для шторки и списка чатов (начало — до [QUOTE_MAX]). */
+    fun reactionText(ctx: android.content.Context, emoji: String, quote: String, kind: String): String {
+        val q = previewText(ctx, quote, kind).replace('\n', ' ')
+            .let { if (it.length > QUOTE_MAX) it.take(QUOTE_MAX).trimEnd() + "…" else it }
+        return ctx.getString(R.string.notif_reaction, emoji, q)
+    }
 
     private fun previewText(ctx: android.content.Context, text: String, kind: String): String = when {
         text.isNotBlank() -> text
@@ -2559,6 +2565,7 @@ class AppModel private constructor() {
                 // Новая чужая реакция на моё в открытом чате — на «❤».
                 if (openChatTarget() == ChatTarget(ev.chat, ev.group)) loadUnseenReactions(ChatTarget(ev.chat, ev.group))
                 ev.news?.let { notifyReaction(ChatTarget(ev.chat, ev.group), it) }
+                markSummariesDirty() // строка реакции в списке чатов
             }
             is EngineEvent.MessageEdited -> {
                 val stamp = System.currentTimeMillis() / 1000
@@ -3107,6 +3114,7 @@ class AppModel private constructor() {
                 lastKind = last?.kind ?: "text",
                 lastStatus = last?.status.orEmpty(),
                 lastSystem = last?.system ?: false,
+                reaction = s.reaction?.let { ChatReaction(it.by, it.emoji, it.quote, it.kind) },
             )
         }
         // Не clear+addAll: снапшот-карта уведомляет по ключам, и полная очистка

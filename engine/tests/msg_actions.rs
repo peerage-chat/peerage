@@ -755,6 +755,50 @@ fn reaction_on_my_message_carries_news() {
         .all(|e| e.get("news").is_none()));
 }
 
+/// Строка списка чатов (beta.md 7f): чужая реакция на моё сообщение новее последнего
+/// сообщения — в сводке чата `reaction` (кто, что, начало); новое сообщение её вытесняет.
+#[test]
+fn chat_summary_shows_fresh_reaction_on_mine() {
+    let (a, b, a_key, b_key) = pair("react_row", 67, 68);
+    let id1 = a.send_text(&b_key, "шашлык на мне").unwrap() as u64;
+    assert!(wait(10, || !history(&b, &a_key).is_empty()));
+    let row = |e: &Engine, peer: &[u8; 32]| -> serde_json::Value {
+        let all: serde_json::Value = serde_json::from_str(&e.chat_summaries_json()).unwrap();
+        all.as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["chat"] == hex::encode(peer))
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert!(row(&a, &b_key).get("reaction").is_none());
+
+    // Секундная граница: реакция должна быть позже последнего сообщения.
+    std::thread::sleep(Duration::from_millis(1100));
+    assert!(b.react(
+        peerage_engine::ChatKey::Dm(a_key),
+        id1,
+        &hex::encode(a_key),
+        "👍"
+    ));
+    assert!(wait(10, || row(&a, &b_key).get("reaction").is_some()));
+    let r = &row(&a, &b_key)["reaction"];
+    assert_eq!(r["by"], hex::encode(b_key));
+    assert_eq!(r["emoji"], "👍");
+    assert_eq!(r["quote"], "шашлык на мне");
+    assert!(
+        row(&b, &a_key).get("reaction").is_none(),
+        "у ставившего строки нет"
+    );
+
+    std::thread::sleep(Duration::from_millis(1100));
+    b.send_text(&a_key, "ок").unwrap();
+    assert!(
+        wait(10, || row(&a, &b_key).get("reaction").is_none()),
+        "новое сообщение вытеснило"
+    );
+}
+
 /// Капсула «❤» (5.7): реакция собеседника на моё сообщение — непросмотренная у меня и
 /// только у меня; просмотр гасит её, новая реакция того же человека — снова новая.
 #[test]

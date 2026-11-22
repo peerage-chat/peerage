@@ -310,6 +310,20 @@ struct ChatSummaryJson {
     #[serde(skip_serializing_if = "is_zero")]
     notify_until: i64,
     last: Option<StoredMessage>,
+    /// Чужая реакция на моё сообщение новее последнего сообщения — строка «Боб: 👍 к «…»»
+    /// вместо него (beta.md 7f). Новое сообщение её вытесняет.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reaction: Option<ChatReactionJson>,
+}
+
+/// Реакция в строке списка чатов: кто, что, когда (мс) и начало сообщения.
+#[derive(serde::Serialize)]
+struct ChatReactionJson {
+    by: String,
+    emoji: String,
+    at: i64,
+    quote: String,
+    kind: String,
 }
 
 /// Строка списка групп в том виде, в каком её читает клиент. Живёт здесь, потому
@@ -946,16 +960,35 @@ impl Engine {
     /// подмешивает их из своих источников.
     pub fn chat_summaries_json(&self) -> String {
         let store = self.messages.lock_safe();
+        let mut reactions: HashMap<(Vec<u8>, i64), peerage_core::store::LastReaction> = store
+            .last_reactions(&self.me_hex())
+            .into_iter()
+            .map(|r| ((r.chat.clone(), r.scope), r))
+            .collect();
         let mut rows: Vec<ChatSummaryJson> = store
             .summaries()
             .into_iter()
-            .map(|s| ChatSummaryJson {
-                chat: hex::encode(&s.chat),
-                group: s.scope == 1,
-                pinned_at: s.pinned_at,
-                notify: s.notify.map(|n| n.mode),
-                notify_until: s.notify.map_or(0, |n| n.until),
-                last: Some(s.last),
+            .map(|s| {
+                // Реакция — только если она позже последнего сообщения (время в с).
+                let reaction = reactions
+                    .remove(&(s.chat.clone(), s.scope))
+                    .filter(|r| r.at / 1000 > s.last.time)
+                    .map(|r| ChatReactionJson {
+                        by: r.who,
+                        emoji: r.emoji,
+                        at: r.at,
+                        quote: r.quote,
+                        kind: r.kind,
+                    });
+                ChatSummaryJson {
+                    chat: hex::encode(&s.chat),
+                    group: s.scope == 1,
+                    pinned_at: s.pinned_at,
+                    notify: s.notify.map(|n| n.mode),
+                    notify_until: s.notify.map_or(0, |n| n.until),
+                    last: Some(s.last),
+                    reaction,
+                }
             })
             .collect();
         // Чат без единого сообщения тоже может быть закреплён или заглушен —
@@ -972,6 +1005,7 @@ impl Engine {
                     notify: notify.map(|n| n.mode),
                     notify_until: notify.map_or(0, |n| n.until),
                     last: None,
+                    reaction: None,
                 });
             }
         }

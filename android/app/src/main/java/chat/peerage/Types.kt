@@ -237,9 +237,14 @@ data class ChatSummary(
     /** Статус доставки СВОЕГО последнего сообщения ("" | sent | delivered | …). */
     val lastStatus: String = "",
     val lastSystem: Boolean = false,
+    /** Чужая реакция на моё сообщение новее [lastText] — превью «Боб: 👍 к «…»». */
+    val reaction: ChatReaction? = null,
 ) {
     val pinned: Boolean get() = pinnedAt > 0
 }
+
+/** Кто (hex), что и на какое сообщение (начало и вид) отреагировал. */
+data class ChatReaction(val by: String, val emoji: String, val quote: String, val kind: String)
 
 /** Входящее приглашение в группу (карточка на одобрение вместо тихого авто-входа). */
 data class GroupInvite(

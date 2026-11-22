@@ -1217,6 +1217,21 @@ pub struct ChatSummary {
     pub notify: Option<ChatNotify>,
 }
 
+/// Последняя чужая реакция на моё сообщение в чате — для строки списка чатов.
+#[derive(Debug, Clone)]
+pub struct LastReaction {
+    pub chat: Vec<u8>,
+    pub scope: i64,
+    /// hex поставившего.
+    pub who: String,
+    pub emoji: String,
+    /// Время реакции, мс.
+    pub at: i64,
+    /// Текст и вид сообщения, на которое поставили.
+    pub quote: String,
+    pub kind: String,
+}
+
 /// Свой режим из колонок `chat_flags`: −1 (и неизвестное) — своего нет.
 fn chat_notify(code: i64, until: i64) -> Option<ChatNotify> {
     NotifyMode::from_code(code).map(|mode| ChatNotify { mode, until })
@@ -1743,6 +1758,40 @@ impl MessageStore {
                 pinned_at: r.get(n + 2)?,
                 notify: chat_notify(r.get(n + 3)?, r.get(n + 4)?),
                 last: read_msg(r)?,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
+    /// По чату — последняя чужая реакция на моё сообщение ([`LastReaction`]): строка
+    /// «Боб: 👍 к «…»» в списке чатов (beta.md 7f). Одним запросом, как [`summaries`].
+    pub fn last_reactions(&self, me: &str) -> Vec<LastReaction> {
+        let conn = db::lock(&self.db);
+        let mut stmt = match conn.prepare(
+            "SELECT r.chat, r.scope, r.who, r.emoji, r.at, m.text, m.kind
+             FROM (SELECT DISTINCT chat, scope FROM reactions
+                   WHERE msg_sender = ?1 AND who != ?1 AND emoji != '') c
+             JOIN reactions r ON r.rowid =
+                 (SELECT r2.rowid FROM reactions r2
+                  WHERE r2.chat = c.chat AND r2.scope = c.scope AND r2.msg_sender = ?1 AND r2.who != ?1
+                        AND r2.emoji != ''
+                  ORDER BY r2.at DESC, r2.rowid DESC LIMIT 1)
+             JOIN chat_messages m ON m.chat = r.chat AND m.scope = r.scope
+                 AND m.id = r.msg_id AND m.sender = r.msg_sender",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map(rusqlite::params![me], |r| {
+            Ok(LastReaction {
+                chat: r.get(0)?,
+                scope: r.get(1)?,
+                who: r.get(2)?,
+                emoji: r.get(3)?,
+                at: r.get(4)?,
+                quote: r.get(5)?,
+                kind: r.get(6)?,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
@@ -2290,6 +2339,37 @@ mod tests {
         store.set_chat_notify(Chat::Dm(&c), None).unwrap();
         assert_eq!(store.summaries()[0].notify, None, "вернули к умолчанию");
         assert!(!store.chat_flags().iter().any(|f| f.0 == c.to_vec()));
+    }
+
+    /// Строка реакции в списке чатов (beta.md 7f): по чату — последняя чужая реакция на моё
+    /// сообщение, с текстом и видом этого сообщения; своя и реакция на чужое — не в счёт.
+    #[test]
+    fn last_reactions_are_others_on_mine() {
+        let store = MessageStore::open(db());
+        let (me, bob, ann) = ("aa".repeat(32), "bb".repeat(32), "cc".repeat(32));
+        let c = key();
+        let chat = Chat::Dm(&c);
+        let mine = StoredMessage { id: 1, sender: me.clone(), mine: true, text: "палатку берём?".into(), kind: "text".into(), time: 10, ..Default::default() };
+        let theirs = StoredMessage { id: 2, sender: bob.clone(), text: "берём".into(), time: 11, ..Default::default() };
+        store.append(chat, &mine).unwrap();
+        store.append(chat, &theirs).unwrap();
+        assert!(store.last_reactions(&me).is_empty(), "реакций нет");
+
+        store.react(chat, 1, &me, &me, "🔥", 20_000).unwrap(); // своя на своё
+        store.react(chat, 2, &bob, &me, "👍", 21_000).unwrap(); // моя на чужое
+        assert!(store.last_reactions(&me).is_empty(), "свои и на чужое — не в счёт");
+
+        store.react(chat, 1, &me, &bob, "❤️", 22_000).unwrap();
+        store.react(chat, 1, &me, &ann, "😂", 23_000).unwrap();
+        let got = store.last_reactions(&me);
+        assert_eq!(got.len(), 1);
+        let r = &got[0];
+        assert_eq!((r.chat.as_slice(), r.scope), (c.as_slice(), 0));
+        assert_eq!((r.who.as_str(), r.emoji.as_str(), r.at), (ann.as_str(), "😂", 23_000));
+        assert_eq!((r.quote.as_str(), r.kind.as_str()), ("палатку берём?", "text"));
+
+        store.react(chat, 1, &me, &ann, "", 24_000).unwrap(); // сняла — остаётся Боб
+        assert_eq!(store.last_reactions(&me)[0].who, bob);
     }
 
     #[test]

@@ -104,7 +104,12 @@ internal data class ChatSummaryDto(
     /** До какого времени свой режим (с); 0 — пока не вернут. */
     @SerialName("notify_until") val notifyUntil: Long = 0,
     val last: MessageDto? = null,
+    /** Чужая реакция на моё новее последнего сообщения — превью строкой о ней. */
+    val reaction: ChatReactionDto? = null,
 )
+
+@Serializable
+internal data class ChatReactionDto(val by: String = "", val emoji: String = "", val quote: String = "", val kind: String = "text")
 
 /** Находка поиска: строка истории плюс чат, где она лежит. */
 @Serializable
