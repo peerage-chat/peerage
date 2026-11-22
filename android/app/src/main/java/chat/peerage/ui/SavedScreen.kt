@@ -1,224 +1,30 @@
-@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-
 package chat.peerage.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 
 /**
- * «Сохранённое» — заметки себе.
- *
- * Хранятся как обычные сообщения в чате с самим собой: никуда не отправляются, и
- * статусов доставки у них нет — отправлять некому. Отдельного хранилища заводить
- * незачем, история уже умеет и шифрование at-rest, и поиск.
+ * Шапка «Сохранённого» (макет `misc/Main`): «назад», заголовок, поиск. Лента и ввод —
+ * общий [ChatScreen]: «Сохранённое» — личный чат с собой ([isSaved]), поэтому дни,
+ * пересланное, вложения, голосовые, правка, закреп и поиск в нём те же, что в чате.
+ * Выбор и поиск забирают шапку целиком — как в любом чате.
  */
 @Composable
-internal fun SavedScreen(model: AppModel) {
-    var input by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
-    // Выделение живёт в модели, как в чатах: панель действий рисуется НАД лентой
-    // (в отличие от чата, где её место занимает общая верхняя панель экрана).
-    val selection = model.selection
-    LaunchedEffect(Unit) { model.refreshNotes() }
-    // Лента привязана к низу, как в ChatScreen: вниз — только на НОВУЮ заметку.
-    val lastNote = model.shownNotes.lastOrNull()?.id
-    LaunchedEffect(lastNote) {
-        if (model.shownNotes.isNotEmpty()) listState.animateScrollToItem(0)
+internal fun SavedTopBar(model: AppModel, onBack: () -> Unit) {
+    val me = model.me?.pubkey ?: return
+    if (model.selection.isNotEmpty()) {
+        SelectionTopBar(model)
+        return
     }
-    PagingOlder(listState, Unit) { model.loadOlderNotes {} }
-
-    val me = model.me?.pubkey.orEmpty()
-    LaunchedEffect(me) { if (me.isNotEmpty()) model.refreshPins(me, group = false) }
-
-    // Правка начинается с текущего текста заметки.
-    LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
-
-    Column(Modifier.fillMaxSize()) {
-        ForwardSheet(model)
-        model.editTarget?.let { t ->
-            EditStrip(t.text) {
-                model.editTarget = null
-                input = ""
-            }
-        }
-        if (selection.isNotEmpty()) SavedSelectionBar(model)
-        if (me.isNotEmpty()) PinnedBar(model, me, group = false, canUnpin = true)
-        if (model.shownNotes.isEmpty()) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                EmptyState(
-                    Icons.Filled.Bookmark,
-                    stringResource(R.string.saved_empty_title),
-                    stringResource(R.string.saved_empty_hint),
-                )
-            }
-        } else {
-            LazyColumn(
-                state = listState,
-                reverseLayout = true,
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = Tokens.Space.m),
-            ) {
-                // От свежей к старой: лента привязана к низу.
-                items(model.shownNotes.asReversed(), key = { it.id }) { n ->
-                    val selected = MsgRef(n.id, n.sender) in selection
-                    Row(
-                        Modifier.fillMaxWidth().padding(bottom = Tokens.Space.s)
-                            .background(if (selected) Tokens.Colors.selectedRow else Color.Transparent),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        Box(
-                            Modifier.widthIn(max = Tokens.Size.bubbleMax).clip(RoundedCornerShape(Tokens.Radius.bubble))
-                                .background(BubbleOut)
-                                .then(
-                                    if (selected) {
-                                        Modifier.border(1.dp, HoloAccent, RoundedCornerShape(Tokens.Radius.bubble))
-                                    } else {
-                                        Modifier
-                                    },
-                                )
-                                .combinedClickable(
-                                    onLongClick = { model.toggleSelect(n) },
-                                    onClick = { if (selection.isNotEmpty()) model.toggleSelect(n) },
-                                )
-                                .padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
-                        ) {
-                            // Заметка себе: галочек нет — доставлять некому.
-                            val meta: @Composable () -> Unit = {
-                                MsgMeta(n.time, mine = false, edited = n.editedAt > 0)
-                            }
-                            BubbleText(n.text) { meta() }
-                            Box(Modifier.align(Alignment.BottomEnd)) { meta() }
-                        }
-                    }
-                }
-                item { Spacer(Modifier.height(Tokens.Space.s)) }
-            }
-        }
-
-        // Ввод как в чате, но без скрепки и микрофона: вложения себе — отдельная
-        // работа (блоб надо положить и связать), а рисовать неработающее нельзя.
-        Row(
-            Modifier.fillMaxWidth().background(HoloBg).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                // Высота — от содержимого (не меньше поля чата): при фиксированной
-                // высоте и maxLines = 4 вторая строка заметки уходила под край.
-                Modifier.weight(1f).heightIn(min = Tokens.Size.inputField)
-                    .clip(RoundedCornerShape(Tokens.Radius.button))
-                    .background(Tokens.Colors.surface)
-                    .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                androidx.compose.foundation.text.BasicTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    textStyle = Tokens.Text.base.copy(color = Color.White),
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(HoloAccent),
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth(),
-                    decorationBox = { inner ->
-                        if (input.isEmpty()) {
-                            Text(stringResource(R.string.saved_hint), color = HoloSecondary, fontSize = Tokens.Font.label)
-                        }
-                        inner()
-                    },
-                )
-            }
-            Spacer(Modifier.width(Tokens.Space.s))
-            SendButton {
-                val editing = model.editTarget
-                if (editing != null) {
-                    if (input.isNotBlank()) model.applyEdit(myKeyOrEmpty(model), false, editing.id, input.trim())
-                    model.editTarget = null
-                    input = ""
-                } else if (input.isNotBlank()) {
-                    model.saveNote(input.trim())
-                    input = ""
-                }
-            }
+    model.chatSearch?.takeIf { !it.chat.group && it.chat.id == me }?.let {
+        ChatSearchTopBar(model, it)
+        return
+    }
+    TopBar(stringResource(R.string.menu_saved), onBack = onBack) {
+        BarIcon(TablerIcons.Search, stringResource(R.string.chat_menu_search)) {
+            model.openChatSearch(ChatTarget(me, group = false))
         }
     }
 }
-
-/**
- * Действия над выделенными заметками: только копировать и удалить.
- *
- * «Удалить у всех» здесь не бывает по устройству вещи: заметка — сообщение самому
- * себе, отправлять и отзывать её не у кого.
- */
-@Composable
-private fun SavedSelectionBar(model: AppModel) {
-    val ctx = LocalContext.current
-    val sel = model.selection
-    val myKey = model.me?.pubkey.orEmpty()
-
-    Row(
-        Modifier.fillMaxWidth().background(HoloSurface).padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        BarIcon(Icons.Filled.Close, stringResource(R.string.common_cancel)) { model.clearSelection() }
-        Text(
-            sel.size.toString(),
-            color = Color.White,
-            fontSize = Tokens.Font.label,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f).padding(start = Tokens.Space.s),
-        )
-        BarIcon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.forward_action)) {
-            model.beginForward(myKey)
-        }
-        if (sel.size == 1) {
-            val ref = sel.first()
-            BarIcon(Icons.Filled.Edit, stringResource(R.string.chat_edit)) {
-                model.notes.firstOrNull { it.id == ref.id }?.let { model.editTarget = it }
-                model.clearSelection()
-            }
-        }
-        if (sel.size == 1) {
-            val ref = sel.first()
-            val note = model.notes.firstOrNull { it.id == ref.id && it.sender == ref.sender }
-            val already = model.pinned[myKey].orEmpty().any { it.id == ref.id }
-            BarIcon(TablerIcons.Pin, stringResource(R.string.pin_action)) {
-                note?.let { model.setPinned(myKey, false, it, !already) }
-                model.clearSelection()
-            }
-        }
-        BarIcon(Icons.Filled.ContentCopy, stringResource(R.string.chat_copy)) {
-            val text = model.selectedText(myKey)
-            if (text.isNotEmpty()) {
-                copyToClipboard(ctx, text, "message")
-            }
-            model.clearSelection()
-        }
-        // Заметки удаляются только здесь — значит, «Отменить» вместо подтверждения.
-        BarIcon(Icons.Filled.Delete, stringResource(R.string.chat_delete)) { model.deleteSelectedNotes() }
-    }
-}
-
-/** Свой ключ (чат «Сохранённого» — это чат с самим собой). */
-private fun myKeyOrEmpty(model: AppModel): String = model.me?.pubkey.orEmpty()

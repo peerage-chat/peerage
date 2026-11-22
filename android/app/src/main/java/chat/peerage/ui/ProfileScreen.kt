@@ -40,6 +40,7 @@ import chat.peerage.AppModel
 import chat.peerage.R
 import chat.peerage.Screen
 import chat.peerage.Tokens
+import chat.peerage.openSaved
 import chat.peerage.refreshStorage
 
 /**
@@ -101,7 +102,10 @@ internal fun ProfileScreen(model: AppModel, navigate: (Screen) -> Unit) {
                 navigate(Screen.ContactList)
             }
             NavRow(TablerIcons.Phone, stringResource(R.string.menu_calls)) { navigate(Screen.Calls) }
-            NavRow(TablerIcons.Bookmark, stringResource(R.string.menu_saved)) { navigate(Screen.Saved) }
+            NavRow(TablerIcons.Bookmark, stringResource(R.string.menu_saved)) {
+                model.openSaved()
+                navigate(Screen.Saved)
+            }
         }
 
         Spacer(Modifier.height(Tokens.Space.l))

@@ -321,6 +321,7 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
             onSendAttachments = { list, caption -> sendGallery(ctx, model, key, list, scope, caption) },
             voice = voice,
             model = model,
+            hint = stringResource(if (model.isSaved(key)) R.string.saved_hint else R.string.chat_input_hint),
             replyStrip = {
                 model.editTarget?.let {
                     EditStrip(it.text) {
@@ -379,8 +380,21 @@ private fun DmFeed(model: AppModel, msgs: List<Message>, listState: LazyListStat
         model.contacts.firstOrNull { it.key == model.currentChat }?.takeIf { it.awaiting }?.let { c ->
             item(key = "awaiting") { AwaitingBanner(c.displayName) }
         }
-        // Последний элемент = верх ленты: баннер над самой старой перепиской.
-        item { E2EBanner() }
+        // Последний элемент = верх ленты: баннер над самой старой перепиской. В чате с
+        // собой шифровать «между» некого — там вместо него пустое состояние.
+        if (!model.isSaved(model.currentChat)) {
+            item { E2EBanner() }
+        } else if (msgs.isEmpty()) {
+            item {
+                Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                    EmptyState(
+                        TablerIcons.Bookmark,
+                        stringResource(R.string.saved_empty_title),
+                        stringResource(R.string.saved_empty_hint),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -753,6 +767,8 @@ internal fun MessageInput(
     /** Запись голосовых; null — микрофона в этом поле нет. */
     voice: VoiceSession? = null,
     model: AppModel? = null,
+    /** Подсказка пустого поля: «Сообщение», в «Сохранённом» — «Заметка себе…». */
+    hint: String? = null,
     /** Полоска «отвечаем на …» над полем: экран решает, чья цель ответа. */
     replyStrip: (@Composable () -> Unit)? = null,
     /** Кого можно упомянуть по набранному после «@»: пары (ключ, имя). Пусто — в
@@ -940,7 +956,7 @@ internal fun MessageInput(
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (value.isEmpty()) {
                                 Text(
-                                    stringResource(R.string.chat_input_hint),
+                                    hint ?: stringResource(R.string.chat_input_hint),
                                     color = Tokens.Colors.tertiary,
                                     fontSize = Tokens.Font.label,
                                 )
@@ -1214,7 +1230,9 @@ internal fun MessageBubble(
     // Мета одна на все ветки пузыря: и когда она встроена в текст, и когда лежит
     // поверх вложения — это один и тот же набор значков.
     val meta: @Composable () -> Unit = {
-        MsgMeta(m.time, m.mine && m.status.isNotEmpty(), m.editedAt > 0, shownStatus(model, m, group))
+        // В «Сохранённом» доставлять некому — галочек нет.
+        val ticks = m.mine && m.status.isNotEmpty() && (group || !model.isSaved(chatId))
+        MsgMeta(m.time, ticks, m.editedAt > 0, shownStatus(model, m, group))
     }
     Row(
         modifier.fillMaxWidth().padding(bottom = blockGap(pos))

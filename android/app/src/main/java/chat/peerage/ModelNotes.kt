@@ -1,69 +1,16 @@
 package chat.peerage
 
 /**
- * «Сохранённое» — заметки самому себе.
- *
- * Вынесено из `AppModel` не по формальному признаку, а потому что это отдельная
- * тема: свой экран, свой путь в движке (`notes`/`saveNote`), и с перепиской она
- * пересекается только типом строки. Само состояние ([AppModel.notes]) осталось в
- * модели — снапшот-список обязан жить в объекте, за которым наблюдает Compose,
- * а сюда переехало поведение.
+ * «Сохранённое» — чат с самим собой (UI 5.1). Своей ленты и своего пути в движке у
+ * него нет: это обычный личный чат, где собеседник — свой ключ. Движок узнаёт
+ * получателя-себя и ничего не ставит в очередь; экрану остаётся не рисовать то, что
+ * в разговоре с собой бессмысленно (галочки, «у всех», шифрование «между»).
  */
 
-fun AppModel.refreshNotes() = ops.execute {
-    val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
-    notes.replaceWith(list)
-    atChatStart -= "notes"
-}
+/** Чат [key] — «Сохранённое». */
+internal fun AppModel.isSaved(key: String?): Boolean = key != null && key == me?.pubkey
 
-/**
- * Догрузить заметки ВЫШЕ показанных. «Сохранённое» — тот же чат (с самим собой),
- * поэтому и страницы те же: движок отдаёт хвост, остальное просим по прокрутке.
- */
-fun AppModel.loadOlderNotes(done: (Int) -> Unit) {
-    val meKey = me?.pubkey
-    val top = notes.firstOrNull { it.row != 0L }
-    if (meKey == null || top == null || "notes" in atChatStart || !loadingOlder.add("notes")) {
-        done(0)
-        return
-    }
-    ops.execute {
-        try {
-            val page = decodeList<MessageDto>(
-                Native.historyPage(sessionPtr, meKey, top.time, top.row),
-            ).map { it.toModel() }
-            if (page.isEmpty()) atChatStart += "notes"
-            if (page.isNotEmpty()) notes.addAll(0, page)
-            done(page.size)
-        } finally {
-            loadingOlder -= "notes"
-        }
-    }
+/** Открыть «Сохранённое»: тот же вход, что у любого личного чата. */
+internal fun AppModel.openSaved() {
+    me?.pubkey?.let { openChat(it) }
 }
-
-fun AppModel.saveNote(text: String) = ops.execute {
-    Native.saveNote(sessionPtr, text)
-    refreshNotes()
-}
-
-fun AppModel.deleteNote(id: Long) = ops.execute {
-    Native.deleteNote(sessionPtr, id)
-    refreshNotes()
-}
-
-/** Удалить выделенные заметки (чат с самим собой) — со снекбаром «Отменить». */
-fun AppModel.deleteSelectedNotes() {
-    val refs = selection.toList()
-    if (refs.isEmpty()) return
-    selection = emptySet()
-    val key = me?.pubkey ?: return
-    val json = wireDmRefs(refs)
-    deleteWithUndo(NOTES_KEY, refs, R.plurals.undo_notes_deleted) {
-        Native.deleteMessages(sessionPtr, key, json)
-        val list = decodeList<MessageDto>(Native.notes(sessionPtr)).map { it.toModel() }
-        notes.replaceWith(list)
-    }
-}
-
-/** Ключ заметок в скрытом-до-отмены ([AppModel.deleteWithUndo]): у ленты заметок нет [AppModel.chatKey]. */
-internal const val NOTES_KEY = "notes"

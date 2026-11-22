@@ -607,18 +607,47 @@ fn forwarded_attachment_is_a_reference_the_recipient_pulls() {
 #[test]
 fn two_notes_in_one_second_are_both_kept() {
     let net = LoopbackNet::new();
-    let a = start(&net, id(63), tmpdir("notes"));
+    let a_id = id(63);
+    let me = a_id.public_key_bytes();
+    let a = start(&net, a_id, tmpdir("notes"));
     a.save_note("первая");
     a.save_note("вторая");
     a.save_note("третья");
-    let notes: serde_json::Value = serde_json::from_str(&a.notes_json()).unwrap();
-    let texts: Vec<&str> = notes
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|n| n["text"].as_str())
-        .collect();
+    let notes = history(&a, &me);
+    let texts: Vec<&str> = notes.iter().filter_map(|n| n["text"].as_str()).collect();
     assert_eq!(texts, ["первая", "вторая", "третья"]);
+}
+
+/// «Сохранённое» — чат с самим собой (UI 5.1): текст, вложение, правка, закреп и
+/// реакция там идут обычными вызовами чата, но доставлять их некому — в очередь
+/// исходящих ничего не встаёт, а в истории всё есть.
+#[test]
+fn chat_with_self_stays_local_and_never_queues() {
+    use peerage_engine::ChatKey;
+    let net = LoopbackNet::new();
+    let a_id = id(64);
+    let me = a_id.public_key_bytes();
+    let a = start(&net, a_id, tmpdir("self"));
+    let me_hex = hex::encode(me);
+
+    let t = a.send_text(&me, "код от подъезда 4417").unwrap() as u64;
+    a.save_note("фильтр для воды");
+    a.send_media(&me, b"PNG..".to_vec(), "image/png", "plan.png")
+        .unwrap();
+    assert!(a.edit_message(ChatKey::Dm(me), t, "код от подъезда 4418"));
+    assert!(a.pin_message(ChatKey::Dm(me), t, &me_hex, true));
+    assert!(a.react(ChatKey::Dm(me), t, &me_hex, "👍"));
+
+    let h = history(&a, &me);
+    assert_eq!(h.len(), 3, "две заметки и вложение");
+    assert_eq!(
+        h[0]["text"], "код от подъезда 4418",
+        "правка легла в историю"
+    );
+    assert_eq!(h[0]["reactions"][0]["emoji"], "👍");
+    let stats: serde_json::Value = serde_json::from_str(&a.outbox_stats_json()).unwrap();
+    assert_eq!(stats["pending"], 0, "себе ничего не ставится в очередь");
+    assert_eq!(a.outbox_by_peer_json(), "[]");
 }
 
 /// Реакции в личном чате: доходят до собеседника, другая заменяет, пустая снимает —

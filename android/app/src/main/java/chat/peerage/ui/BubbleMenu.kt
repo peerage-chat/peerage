@@ -44,6 +44,7 @@ import chat.peerage.BubbleActions
 import chat.peerage.MsgRef
 import chat.peerage.R
 import chat.peerage.Tokens
+import chat.peerage.isSaved
 import kotlin.math.roundToInt
 
 /**
@@ -148,12 +149,14 @@ private fun BubbleMenuItems(model: AppModel, t: BubbleActions, close: () -> Unit
     val ctx = LocalContext.current
     val m = t.msg
     val ref = MsgRef(m.id, m.sender)
+    val saved = !t.chat.group && model.isSaved(t.chat.id)
     val act = { f: () -> Unit ->
         close()
         f()
     }
     Text(
-        statusLine(m.mine, shownStatus(model, m, t.chat.group), m.time),
+        // В «Сохранённом» доставки нет — только когда.
+        statusLine(m.mine, if (saved) "" else shownStatus(model, m, t.chat.group), m.time),
         color = Tokens.Colors.tertiary,
         fontSize = Tokens.Font.body,
         modifier = Modifier.padding(start = Tokens.Space.l, end = Tokens.Space.l, top = Tokens.Space.m, bottom = Tokens.Space.m),
@@ -182,7 +185,9 @@ private fun BubbleMenuItems(model: AppModel, t: BubbleActions, close: () -> Unit
     if (m.mine) {
         PopMenuItem(TablerIcons.Pencil, stringResource(R.string.chat_edit)) { act { model.editTarget = m } }
     }
-    PopMenuItem(TablerIcons.Bookmark, stringResource(R.string.act_save)) { act { model.saveToSaved(t.chat, m) } }
+    if (!saved) {
+        PopMenuItem(TablerIcons.Bookmark, stringResource(R.string.act_save)) { act { model.saveToSaved(t.chat, m) } }
+    }
     PopMenuItem(TablerIcons.CircleCheck, stringResource(R.string.act_select)) { act { model.toggleSelect(m) } }
     PopMenuDivider()
     PopMenuItem(TablerIcons.Trash, stringResource(R.string.chat_delete), danger = true, onClick = onDelete)
@@ -285,6 +290,16 @@ private fun NearBubble(bounds: Rect, mine: Boolean, strip: (@Composable () -> Un
  */
 @Composable
 internal fun DeleteSheet(model: AppModel, key: String, group: Boolean, refs: List<MsgRef>, onClose: () -> Unit) {
+    // «Сохранённое»: «у всех» не бывает, спрашивать не о чем — удаление сразу, со
+    // снекбаром «Отменить».
+    if (!group && model.isSaved(key)) {
+        LaunchedEffect(refs) {
+            model.deleteRefs(key, false, refs)
+            model.clearSelection()
+            onClose()
+        }
+        return
+    }
     // «У всех» — только своё и ещё не отозванное.
     val retracted = refs.any { model.isRetracted(key, group, it) }
     val allMine = !retracted && refs.all { model.isMine(it) }

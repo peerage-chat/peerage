@@ -359,7 +359,7 @@ class AppModel private constructor() {
     }
 
     /** Удалённое «у себя», пока идёт отсчёт «Отменить»: уже не видно, но в движке ещё
-     *  лежит. Ключ — [chatKey] или [NOTES_KEY]. Удалённое не возвращается, поэтому после
+     *  лежит. Ключ — [chatKey]. Удалённое не возвращается, поэтому после
      *  выполнения ссылки здесь не чистим — они просто ни на что не указывают. */
     private val hidden = mutableStateMapOf<String, Set<MsgRef>>()
 
@@ -633,9 +633,6 @@ class AppModel private constructor() {
 
     /** Результаты поиска по сообщениям (свежие первыми). */
     val searchHits = mutableStateListOf<SearchHit>()
-
-    /** Заметки себе («Сохранённое»), старые первыми. */
-    val notes = mutableStateListOf<Message>()
 
     /** Журнал звонков (свежие первыми). */
     val callLog = mutableStateListOf<CallEntry>()
@@ -1580,8 +1577,6 @@ class AppModel private constructor() {
                 loadGroupHistory(dst.id)
             } else if (!dst.group && currentChat == dst.id) {
                 loadHistory(dst.id)
-            } else if (!dst.group && dst.id == me?.pubkey) {
-                refreshNotes()
             }
         }
     }
@@ -1730,7 +1725,8 @@ class AppModel private constructor() {
     /** Удалить у себя названное (меню у пузыря — без режима выбора); со снекбаром «Отменить». */
     fun deleteRefs(key: String, group: Boolean, refs: List<MsgRef>) {
         if (refs.isEmpty()) return
-        deleteWithUndo(chatKey(key, group), refs, R.plurals.undo_msgs_deleted) {
+        val plural = if (!group && isSaved(key)) R.plurals.undo_notes_deleted else R.plurals.undo_msgs_deleted
+        deleteWithUndo(chatKey(key, group), refs, plural) {
             if (group) {
                 Native.groupDeleteMessages(sessionPtr, key, wireGroupRefs(refs))
                 // Ленту группы перечитает событие от движка.
@@ -1740,10 +1736,6 @@ class AppModel private constructor() {
             }
         }
     }
-
-    /** Заметки без тех, чьё удаление ещё можно отменить. */
-    val shownNotes: List<Message>
-        get() = hidden[NOTES_KEY]?.let { gone -> notes.filter { MsgRef(it.id, it.sender) !in gone } } ?: notes
 
     /** Отозвать выделенные СВОИ сообщения у собеседника. Чужие не трогаем. */
     fun retractSelected(key: String, group: Boolean = false) {
@@ -2190,10 +2182,6 @@ class AppModel private constructor() {
                     val i = list.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
                     // Упоминания заменяются вместе с текстом: их участки привязаны к нему.
                     if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp, mentions = ev.mentions)
-                }
-                if (ev.chat == me?.pubkey) {
-                    val i = notes.indexOfFirst { it.id == ev.id && it.sender == ev.sender }
-                    if (i >= 0) notes[i] = notes[i].copy(text = ev.text, editedAt = stamp)
                 }
             }
             // M2: контакт прислал профиль (имя/аватар) → перечитать список.

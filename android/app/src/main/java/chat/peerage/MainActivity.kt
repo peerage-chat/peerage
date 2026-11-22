@@ -500,7 +500,7 @@ private fun CompactShell(model: AppModel) {
                                 Screen.VaultLevel -> {}
                                 Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
                                 Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = goBack)
-                                Screen.Saved -> TopBar(stringResource(R.string.menu_saved), onBack = goBack)
+                                Screen.Saved -> SavedTopBar(model, onBack = goBack)
                                 Screen.Storage -> StorageHeader(model, onBack = goBack)
                                 Screen.Autodel -> TopBar(stringResource(R.string.autodel_title), onBack = goBack)
                                 Screen.Backup -> TopBar(stringResource(R.string.backup_title), onBack = goBack)
@@ -754,7 +754,9 @@ private fun CompactShell(model: AppModel) {
                                     }
                                     Screen.EditProfile -> EditProfileScreen(model) { goBack() }
                                     Screen.VaultLevel -> VaultLevelScreen(dataDir) { goBack() }
-                                    Screen.Saved -> SavedScreen(model)
+                                    Screen.Saved -> ChatScreen(model) { tab ->
+                                        model.currentChat?.let { openMedia(ChatTarget(it, group = false), tab) }
+                                    }
                                     Screen.Storage -> StorageScreen(
                                         model,
                                         onBackup = { screen = Screen.Backup },

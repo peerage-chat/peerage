@@ -3098,49 +3098,12 @@ impl Engine {
         self.call_finish(c.id, c.since.elapsed().as_secs() as i64);
     }
 
-    /// Заметка себе («Сохранённое»). Хранится как обычное сообщение в чате с самим
-    /// собой: никуда не отправляется, статусов доставки у неё нет — отправлять некому.
-    /// Отдельное хранилище заводить незачем, история уже умеет всё нужное.
+    /// Заметка себе («Сохранённое»): текст в чат с самим собой. Это обычная отправка —
+    /// мессенджер узнаёт получателя-себя и ничего не ставит в очередь, так что у чата с
+    /// собой один путь записи на текст, вложения, правки, закреп и реакции.
     pub fn save_note(&self, text: &str) -> Option<i64> {
-        let t = now();
         let me = self.me_pub;
-        let mut note = StoredMessage {
-            // id — миллисекунды: в секундах вторая заметка за ту же секунду
-            // получала id первой (R-040). Совпало и так — берём следующий.
-            id: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
-            sender: self.me_hex(),
-            text: text.to_string(),
-            mine: true,
-            time: t,
-            kind: "text".into(),
-            ..Default::default()
-        };
-        let store = self.messages.lock_safe();
-        loop {
-            match store.append(Chat::Dm(&me), &note) {
-                Ok(_) => return Some(t),
-                Err(peerage_core::store::StoreError::Duplicate) => note.id += 1,
-                Err(_) => return None,
-            }
-        }
-    }
-
-    /// Заметки себе, старые первыми (как в чате).
-    pub fn notes_json(&self) -> String {
-        let me = self.me_pub;
-        self.history_json(&me)
-    }
-
-    /// Удалить заметку по её id.
-    pub fn delete_note(&self, id: u64) {
-        let me = self.me_pub;
-        let _ = self
-            .messages
-            .lock_safe()
-            .delete_one(Chat::Dm(&me), &self.me_hex(), id);
+        self.send_text(&me, text)
     }
 
     /// Журнал звонков для UI: `[{peer, gid, incoming, outcome, started, duration, video,

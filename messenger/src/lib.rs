@@ -559,7 +559,17 @@ impl Shared {
         self.send_with(peer, payload, false)
     }
 
+    /// Получатель — мы сами: чат с собой («Сохранённое») живёт только в истории,
+    /// по сети его везти некуда. Единая точка: все отправки проходят через
+    /// [`Self::send_with`], [`Self::send_reliable_for`] или [`Self::send_durable`].
+    fn is_self(&self, peer: &PeerKey) -> bool {
+        *peer == self.identity.public_key_bytes()
+    }
+
     fn send_with(&self, peer: &PeerKey, payload: &Payload, hold: bool) -> Result<(), MessengerError> {
+        if self.is_self(peer) {
+            return Ok(());
+        }
         // ВАЖНО: сессия заведена на ЛИЧНОСТЬ, а пакеты идут на текущий АДРЕС. Это
         // разные ключи с ADR-007: сессия переживает смену адреса, а слать по
         // ключу личности — значит слать на покинутый адрес.
@@ -625,6 +635,9 @@ impl Shared {
         mk: impl FnOnce(u64) -> Payload,
     ) -> Result<u64, MessengerError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        if self.is_self(peer) {
+            return Ok(id);
+        }
         let payload = mk(id);
         self.track(peer);
         let now = Instant::now();
@@ -662,6 +675,9 @@ impl Shared {
             return self.send_reliable(peer, notify, mk);
         };
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        if self.is_self(peer) {
+            return Ok(id);
+        }
         let payload = mk(id);
         let body = payload.to_bytes()?;
         let kind = if notify { SPOOL_NOTIFY } else { SPOOL_QUIET };
@@ -911,6 +927,9 @@ impl Messenger {
     /// Один раз за жизнь мессенджера; до этого надёжные сообщения живут только в
     /// памяти.
     pub fn set_outbox(&self, store: peerage_core::outbox::OutboxStore) {
+        // До UI 5.1 правка заметки вставала в очередь «себе» и висела там вечно.
+        let me = self.public_key();
+        let _ = store.clear_peer(&me);
         let peers = store.peers().unwrap_or_default();
         if self.shared.outbox.set(store).is_err() {
             return;
