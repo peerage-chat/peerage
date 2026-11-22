@@ -634,6 +634,9 @@ class AppModel private constructor() {
     /** Результаты поиска по сообщениям (свежие первыми). */
     val searchHits = mutableStateListOf<SearchHit>()
 
+    /** Строка общего поиска: живёт в модели, потому что поле — в шапке, а находки — на панели. */
+    var globalQuery by mutableStateOf("")
+
     /** Журнал звонков (свежие первыми). */
     val callLog = mutableStateListOf<CallEntry>()
 

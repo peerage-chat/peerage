@@ -120,7 +120,6 @@
     <string name="title_add_contact">Add contact</string>
     <string name="title_new_group">New group</string>
     <string name="title_add_member">Invite</string>
-    <string name="title_search">Search</string>
     <string name="newchat_title">New chat</string>
     <string name="newchat_contacts_header">Contacts</string>
     <string name="cd_search">Search</string>
@@ -249,12 +248,18 @@
     <string name="addmember_empty">No contacts to invite.</string>
 
     <!-- ── Search ──────────────────────────────────────────────────────── -->
-    <string name="search_hint">Name, key or group title</string>
-    <string name="search_prompt">Start typing — we\'ll find contacts and groups</string>
+    <string name="search_hint">Name, group or text</string>
+    <string name="search_prompt">Search contacts, groups and message text</string>
     <string name="search_empty">Nothing found</string>
+    <string name="search_empty_hint">Only messages stored on this device are searched.</string>
+    <string name="search_people">Contacts and groups</string>
+    <string name="search_messages">Messages · %1$d</string>
+    <string name="search_recent">Recent</string>
+    <string name="search_local_caption">Searching messages on this device. The query is not sent anywhere.</string>
+    <string name="search_yesterday">yesterday</string>
     <plurals name="search_group_subtitle">
-        <item quantity="one">%1$d member · group</item>
-        <item quantity="other">%1$d members · group</item>
+        <item quantity="one">group · %1$d member</item>
+        <item quantity="other">group · %1$d members</item>
     </plurals>
 
     <!-- ── Empty states (stubs) ────────────────────────────────────────── -->

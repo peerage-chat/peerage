@@ -96,7 +96,7 @@ import java.util.TimeZone
  */
 
 /** Пауза после ввода перед запросом: не искать на каждую букву подряд. */
-private const val SEARCH_DEBOUNCE_MS = 250L
+internal const val SEARCH_DEBOUNCE_MS = 250L
 
 /** Что подсветить в пузырях: слова запроса и находка, показанная сейчас (ярче). */
 internal data class SearchMarks(val words: List<String>, val current: MsgRef?)
@@ -204,7 +204,7 @@ internal fun ChatSearchTopBar(model: AppModel, s: ChatSearch) {
 
 /** Кнопка-иконка без плашки (назад в поиске, очистить поле). Зона касания — полная. */
 @Composable
-private fun PlainIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Colors.iconBar, small: Boolean = false, onClick: () -> Unit) {
+internal fun PlainIcon(icon: ImageVector, desc: String, tint: Color = Tokens.Colors.iconBar, small: Boolean = false, onClick: () -> Unit) {
     Box(
         Modifier.size(if (small) Tokens.Size.searchClear else Tokens.Size.touch)
             .clip(CircleShape)

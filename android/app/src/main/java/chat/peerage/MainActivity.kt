@@ -432,7 +432,10 @@ private fun CompactShell(model: AppModel) {
                                     model,
                                     onProfile = { screen = Screen.Me },
                                     onNetwork = { screen = Screen.Network },
-                                    onSearch = { screen = Screen.Search },
+                                    onSearch = {
+                                        model.globalQuery = ""
+                                        screen = Screen.Search
+                                    },
                                 )
                                 Screen.Chat -> ChatTopBar(
                                     model,
@@ -507,7 +510,7 @@ private fun CompactShell(model: AppModel) {
                                 Screen.Outbox -> TopBar(stringResource(R.string.title_outbox), onBack = goBack)
                                 Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = goBack)
                                 Screen.FolderEdit -> TopBar(stringResource(R.string.folder_edit_title), onBack = goBack)
-                                Screen.Search -> TopBar(stringResource(R.string.title_search), onBack = goBack)
+                                Screen.Search -> SearchTopBar(model, onBack = goBack)
                             }
                             // ── Контент экрана (без шапки) ────────────────────────────────────
                             // «Лист» (app-ui.md): под шапкой — панель со скруглённым верхом во всю
@@ -773,17 +776,22 @@ private fun CompactShell(model: AppModel) {
                                         model.openChat(peer)
                                         screen = Screen.Chat
                                     }
-                                    Screen.Search -> SearchScreen(
-                                        model,
-                                        onOpenDm = {
-                                            model.openChat(it)
-                                            screen = Screen.Chat
-                                        },
-                                        onOpenGroup = {
-                                            model.openGroup(it)
-                                            screen = Screen.GroupChat
-                                        },
-                                    )
+                                    Screen.Search -> SearchScreen(model) { t ->
+                                        when {
+                                            t.group -> {
+                                                model.openGroup(t.id)
+                                                screen = Screen.GroupChat
+                                            }
+                                            model.isSaved(t.id) -> {
+                                                model.openSaved()
+                                                screen = Screen.Saved
+                                            }
+                                            else -> {
+                                                model.openChat(t.id)
+                                                screen = Screen.Chat
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

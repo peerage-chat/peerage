@@ -116,7 +116,6 @@
     <string name="title_add_contact">Добавить контакт</string>
     <string name="title_new_group">Новая группа</string>
     <string name="title_add_member">Пригласить</string>
-    <string name="title_search">Поиск</string>
     <string name="newchat_title">Новый чат</string>
     <string name="newchat_contacts_header">Контакты</string>
     <string name="cd_search">Поиск</string>
@@ -249,14 +248,20 @@
     <string name="addmember_empty">Нет контактов для приглашения.</string>
 
     <!-- ── Поиск ───────────────────────────────────────────────────────── -->
-    <string name="search_hint">Имя, ключ или название группы</string>
-    <string name="search_prompt">Начните вводить — найдём контакты и группы</string>
+    <string name="search_hint">Имя, группа или текст</string>
+    <string name="search_prompt">Здесь ищутся контакты, группы и текст сообщений</string>
     <string name="search_empty">Ничего не найдено</string>
+    <string name="search_empty_hint">Поиск идёт по сообщениям, которые хранятся на этом устройстве.</string>
+    <string name="search_people">Контакты и группы</string>
+    <string name="search_messages">Сообщения · %1$d</string>
+    <string name="search_recent">Недавнее</string>
+    <string name="search_local_caption">Поиск по сообщениям на этом устройстве. Запрос никуда не отправляется.</string>
+    <string name="search_yesterday">вчера</string>
     <plurals name="search_group_subtitle">
-        <item quantity="one">%1$d участник · группа</item>
-        <item quantity="few">%1$d участника · группа</item>
-        <item quantity="many">%1$d участников · группа</item>
-        <item quantity="other">%1$d участника · группа</item>
+        <item quantity="one">группа · %1$d участник</item>
+        <item quantity="few">группа · %1$d участника</item>
+        <item quantity="many">группа · %1$d участников</item>
+        <item quantity="other">группа · %1$d участника</item>
     </plurals>
 
     <!-- ── Пустые состояния ────────────────────────────────────────────── -->
