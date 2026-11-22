@@ -327,6 +327,9 @@ data class CallEntry(
     val outcome: String,
     val started: Long,
     val duration: Long,
+    val video: Boolean = false,
+    /** Сколько звонков комнаты подряд свёрнуто в строку; 1 — одиночный. */
+    val count: Int = 1,
 )
 
 /** Строка очереди отправки: кому, сколько ждёт и с какого времени. */

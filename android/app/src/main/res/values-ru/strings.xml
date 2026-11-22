@@ -549,9 +549,20 @@
     <string name="calls_in_room">Звонок в комнате · %1$s</string>
     <string name="calls_missed_one">Пропущенный</string>
     <string name="calls_declined">Отклонён</string>
-    <string name="calls_unanswered">Не дозвонился</string>
+    <string name="calls_unanswered">Без ответа</string>
     <string name="calls_incoming">Входящий · %1$s</string>
     <string name="calls_outgoing">Исходящий · %1$s</string>
+    <string name="calls_live_title">Идёт звонок в «%1$s»</string>
+    <string name="calls_incoming_video">Входящий · видео · %1$s</string>
+    <string name="calls_outgoing_video">Исходящий · видео · %1$s</string>
+    <string name="calls_join_room">Войти в комнату</string>
+    <string name="calls_call_back">Позвонить</string>
+    <plurals name="calls_live_members">
+        <item quantity="one">%1$d участник</item>
+        <item quantity="few">%1$d участника</item>
+        <item quantity="many">%1$d участников</item>
+        <item quantity="other">%1$d участника</item>
+    </plurals>
     <string name="saved_hint">Заметка себе…</string>
     <string name="saved_delete">Удалить заметку?</string>
 

@@ -534,6 +534,15 @@
     <string name="calls_unanswered">No answer</string>
     <string name="calls_incoming">Incoming · %1$s</string>
     <string name="calls_outgoing">Outgoing · %1$s</string>
+    <string name="calls_live_title">Call in progress in “%1$s”</string>
+    <string name="calls_incoming_video">Incoming · video · %1$s</string>
+    <string name="calls_outgoing_video">Outgoing · video · %1$s</string>
+    <string name="calls_join_room">Join the room</string>
+    <string name="calls_call_back">Call</string>
+    <plurals name="calls_live_members">
+        <item quantity="one">%1$d participant</item>
+        <item quantity="other">%1$d participants</item>
+    </plurals>
     <string name="saved_hint">Note to self…</string>
     <string name="saved_delete">Delete note?</string>
 

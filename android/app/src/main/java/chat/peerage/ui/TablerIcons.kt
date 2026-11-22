@@ -620,6 +620,10 @@ val TablerIcons.ArrowUpRight: ImageVector by lazy {
     tabler("arrow-up-right", "M17 7l-10 10", "M8 7l9 0l0 9")
 }
 
+val TablerIcons.ArrowDownLeft: ImageVector by lazy {
+    tabler("arrow-down-left", "M17 7l-10 10", "M16 17l-9 0l0 -9")
+}
+
 val TablerIcons.Archive: ImageVector by lazy {
     tabler(
         "archive",

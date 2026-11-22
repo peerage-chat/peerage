@@ -536,10 +536,13 @@ impl GroupStore {
     }
 
     /// Забыть группу вместе с приглашениями в неё, которые мы разослали.
+    /// Забыть группу у себя: метаданные, разосланные приглашения и звонки её комнаты в
+    /// журнале — строка «Группа (N)» без группы вела бы в никуда (app-ui.md, «Звонки»).
     pub fn delete_group(&self, gid: &[u8]) -> Result<(), StoreError> {
         let conn = db::lock(&self.db);
         conn.execute("DELETE FROM group_meta WHERE gid=?1", rusqlite::params![gid])?;
         conn.execute("DELETE FROM group_invites_sent WHERE gid=?1", rusqlite::params![gid])?;
+        conn.execute("DELETE FROM calls WHERE gid=?1", rusqlite::params![gid])?;
         Ok(())
     }
 
@@ -2061,6 +2064,39 @@ fn read_call(r: &rusqlite::Row) -> rusqlite::Result<CallRecord> {
     })
 }
 
+/// Строка журнала: звонок или серия звонков одной комнаты подряд.
+#[derive(Debug, Clone)]
+pub struct CallRun {
+    /// Последний звонок серии (его время и исход показывает строка).
+    pub last: CallRecord,
+    /// Сколько звонков в серии; 1 — одиночный.
+    pub count: u32,
+    /// Суммарная длительность серии, секунды.
+    pub duration: i64,
+}
+
+/// Свернуть подряд идущие звонки одной комнаты в строку «Группа (N)» (app-ui.md,
+/// «Звонки»). `rows` — свежие первыми. Пропущенный в серию с отвеченными не входит:
+/// вкладка «Пропущенные» должна его видеть. Личные звонки не сворачиваются —
+/// там каждый пропущенный важен сам по себе.
+pub fn collapse_rooms(rows: Vec<CallRecord>) -> Vec<CallRun> {
+    let mut out: Vec<CallRun> = Vec::new();
+    for c in rows {
+        if let Some(run) = out.last_mut() {
+            let same = !c.gid.is_empty()
+                && run.last.gid == c.gid
+                && (run.last.outcome == "missed") == (c.outcome == "missed");
+            if same {
+                run.count += 1;
+                run.duration += c.duration;
+                continue;
+            }
+        }
+        out.push(CallRun { duration: c.duration, last: c, count: 1 });
+    }
+    out
+}
+
 /// Журнал звонков. ЛОКАЛЬНЫЙ: никуда не отправляется и ни с кем не синхронизируется.
 pub struct CallStore {
     db: Db,
@@ -2932,4 +2968,55 @@ mod tests {
         let c = store.get(&k).expect("контакт на месте");
         assert_eq!((c.name.as_str(), c.verified, c.profile_name.as_str(), c.helpful), ("Аня", false, "", 0));
     }
+
+    fn call(gid: &[u8], outcome: &str, started: i64, duration: i64) -> CallRecord {
+        CallRecord {
+            id: started,
+            peer: [1; 32],
+            gid: gid.to_vec(),
+            incoming: true,
+            outcome: outcome.into(),
+            started,
+            duration,
+            video: false,
+        }
+    }
+
+    #[test]
+    fn collapse_rooms_merges_only_consecutive_same_room() {
+        let rows = vec![
+            call(b"g", "answered", 50, 10),
+            call(b"g", "answered", 40, 20),
+            call(b"", "answered", 30, 5),
+            call(b"", "answered", 25, 5),
+            call(b"g", "answered", 20, 1),
+            call(b"h", "answered", 10, 1),
+        ];
+        let runs = collapse_rooms(rows);
+        let shape: Vec<(i64, u32, i64)> = runs.iter().map(|r| (r.last.started, r.count, r.duration)).collect();
+        // Серия «g» сверху свёрнута; личные звонки не сворачиваются; «g» после
+        // перерыва — новая строка.
+        assert_eq!(shape, vec![(50, 2, 30), (30, 1, 5), (25, 1, 5), (20, 1, 1), (10, 1, 1)]);
+    }
+
+    #[test]
+    fn collapse_rooms_keeps_missed_apart() {
+        let runs = collapse_rooms(vec![call(b"g", "answered", 50, 10), call(b"g", "missed", 40, 0), call(b"g", "missed", 30, 0)]);
+        let shape: Vec<(String, u32)> = runs.iter().map(|r| (r.last.outcome.clone(), r.count)).collect();
+        assert_eq!(shape, vec![("answered".into(), 1), ("missed".into(), 2)]);
+    }
+
+    #[test]
+    fn deleting_group_drops_its_room_calls() {
+        let shared = db();
+        let calls = CallStore::new(shared.clone());
+        let groups = GroupStore::new(shared);
+        calls.start(&[1; 32], b"g", true, false, "answered", 10);
+        calls.start(&[1; 32], b"h", true, false, "answered", 20);
+        calls.start(&[1; 32], b"", true, false, "missed", 30);
+        groups.delete_group(b"g").unwrap();
+        let left: Vec<Vec<u8>> = calls.list(10).into_iter().map(|c| c.gid).collect();
+        assert_eq!(left, vec![Vec::new(), b"h".to_vec()]);
+    }
+
 }

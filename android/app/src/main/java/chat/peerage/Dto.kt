@@ -302,6 +302,8 @@ internal data class CallEntryDto(
     val outcome: String = "",
     val started: Long = 0,
     val duration: Long = 0,
+    val video: Boolean = false,
+    val count: Int = 1,
 )
 
 @Serializable

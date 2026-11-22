@@ -9,7 +9,7 @@ package chat.peerage
 
 fun AppModel.refreshCallLog() = ops.execute {
     val list = decodeList<CallEntryDto>(Native.callLog(sessionPtr, 200))
-        .map { CallEntry(it.peer, it.gid, it.incoming, it.outcome, it.started, it.duration) }
+        .map { CallEntry(it.peer, it.gid, it.incoming, it.outcome, it.started, it.duration, it.video, it.count) }
     callLog.replaceWith(list)
 }
 

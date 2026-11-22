@@ -138,6 +138,31 @@ fn group_member_is_rung_into_the_group_room_and_stranger_is_not() {
     assert_eq!(calls[0]["gid"].as_str(), Some(gid_hex.as_str()));
     assert_eq!(calls[0]["outcome"].as_str(), Some("answered"));
 
+    // A вошёл сам, без приглашения — это тоже звонок в комнате. Второй заход подряд
+    // сворачивается с первым в одну строку «Группа (2)».
+    a.room_leave(gid.clone());
+    a.room_join(gid.clone(), true, false);
+    a.room_leave(gid.clone());
+    let calls = json(&a.calls_json(10));
+    assert_eq!(
+        calls.as_array().map(Vec::len),
+        Some(1),
+        "одна строка: {calls}"
+    );
+    assert_eq!(calls[0]["gid"].as_str(), Some(gid_hex.as_str()));
+    assert_eq!(calls[0]["incoming"], false);
+    assert_eq!(calls[0]["count"], 2);
+
+    // Группа ушла у A — её звонки уходят из журнала.
+    a.group_leave(gid.clone());
+    assert!(
+        wait(10, || json(&a.calls_json(10))
+            .as_array()
+            .is_some_and(Vec::is_empty)),
+        "звонки удалённой группы убраны: {}",
+        a.calls_json(10)
+    );
+
     std::mem::forget(net);
 }
 
@@ -262,6 +287,9 @@ fn answering_a_call_during_own_ring_marks_the_right_call() {
         "длительность — у разговора с A"
     );
     assert_eq!(with_c["outcome"], "unanswered", "C не отвечал");
+    // Личный звонок в журнале — без gid: комната группы у клиента только с ним.
+    assert_eq!(with_a[0]["gid"], "", "личный звонок не выглядит комнатой");
+    assert_eq!(with_a[0]["count"], 1);
 }
 
 /// Строка звонка в ленте личного чата (2.8б): у обоих — с видом звонка и исходом;

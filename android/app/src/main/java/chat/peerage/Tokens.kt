@@ -152,6 +152,10 @@ object Tokens {
         val groupAvatar = Color(0xFF0D2A0D) // фон аватара группы/комнаты
         val disabledText = Color(0xFF7A7A84) // имя в строке, которую не выбрать («уже в группе»)
         val roomBanner = Color(0xFF12331A) // баннер «в комнате идёт звонок»
+        val missed = Color(0xFFFF8A80) // пропущенный звонок: имя и стрелка (`screens/Calls`)
+        val liveCall = Color(0xFF1E3A24) // плашка «Идёт звонок в …» над журналом звонков
+        val liveCallTitle = Color(0xFFE3F2D9) // её заголовок
+        val liveCallSub = Color(0xFFA9C79A) // её подпись (число участников)
         val destructive = error // «удалить участника», «выйти из группы» — тот же красный текста
 
         // Полоса очереди над списком главной
@@ -290,6 +294,7 @@ object Tokens {
         val voiceHold = 24.dp // выросшая кнопка микрофона
         val heroTile = 24.dp // крупная плитка-знак шага первого запуска (`onboard/KeyIntro`)
         val aboutTile = 26.dp // плитка знака на «О приложении»
+        val liveCall = 16.dp // плашка «Идёт звонок» над журналом звонков
         val group = 18.dp // группа строк на панели: 28 = 18 + отступ панели 10 (концентрично)
         val card = group // старое имя карточки-секции
         val panel = 28.dp // верх панели «листа», шторки
@@ -356,6 +361,9 @@ object Tokens {
         val avatarFound = 64.dp // аватар распознанного кода (`people/Found`)
         val contactRow = 64.dp // строка «Контактов» прямо на панели (`screens/Contacts`)
         val avatarContact = 44.dp // её аватар
+        val callRow = 68.dp // строка журнала звонков (`screens/Calls`)
+        val callAvatar = 44.dp // её аватар
+        val liveCallAvatar = 40.dp // знак группы в плашке «Идёт звонок»
         val greetingField = 96.dp // поле приветствия (`people/Found`)
         val groupEditAvatar = 104.dp // фото группы на правке (`people/GroupEdit`)
         val groupEditBadge = 36.dp // значок камеры на нём

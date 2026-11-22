@@ -2937,8 +2937,21 @@ impl Engine {
     }
 
     pub fn room_join(&self, gid: Vec<u8>, audio: bool, video: bool) {
-        // Вход по приглашению: запись заведена на RoomInvite как пропущенная.
-        self.answer_call(&gid);
+        // Вход по приглашению: запись заведена на RoomInvite как пропущенная. Вход сам
+        // (открыл комнату, «Войти» на плашке) — своя запись «Звонок в комнате»: журнал
+        // показывает и такие (app-ui.md, «Звонки»). Повторный вход в ту же комнату
+        // (переподключение) новой записи не заводит.
+        if !self.answer_call(&gid) {
+            let same = self
+                .active_call
+                .lock_safe()
+                .as_ref()
+                .is_some_and(|c| c.room == gid);
+            if !same {
+                self.end_call();
+                self.begin_call(&self.me_pub, &gid, false, video, "answered");
+            }
+        }
         self.rooms
             .lock_safe()
             .joined
@@ -3130,21 +3143,29 @@ impl Engine {
             .delete_one(Chat::Dm(&me), &self.me_hex(), id);
     }
 
-    /// Журнал звонков для UI: `[{peer, gid, incoming, outcome, started, duration}]`.
+    /// Журнал звонков для UI: `[{peer, gid, incoming, outcome, started, duration, video,
+    /// count}]`. Подряд идущие звонки одной комнаты — одной строкой (`count` > 1,
+    /// `duration` — сумма серии), см. [`peerage_core::store::collapse_rooms`].
     pub fn calls_json(&self, limit: usize) -> String {
-        let rows: Vec<dto::CallEntry> = self
-            .calls
-            .lock_safe()
-            .list(limit)
+        // Личный звонок идёт в DM-комнате и пишется с её id; клиенту `gid` — только у
+        // комнаты группы. Иначе личный звонок читался как звонок удалённой группы.
+        let mut list = self.calls.lock_safe().list(limit);
+        for c in &mut list {
+            if c.gid == peerage_core::dm_room_id(&self.me_pub, &c.peer) {
+                c.gid.clear();
+            }
+        }
+        let rows: Vec<dto::CallEntry> = peerage_core::store::collapse_rooms(list)
             .into_iter()
-            .map(|c| dto::CallEntry {
-                peer: hex::encode(c.peer),
-                gid: hex::encode(&c.gid),
-                incoming: c.incoming,
-                outcome: c.outcome,
-                started: c.started,
-                duration: c.duration,
-                video: c.video,
+            .map(|r| dto::CallEntry {
+                peer: hex::encode(r.last.peer),
+                gid: hex::encode(&r.last.gid),
+                incoming: r.last.incoming,
+                outcome: r.last.outcome,
+                started: r.last.started,
+                duration: r.duration,
+                video: r.last.video,
+                count: r.count,
             })
             .collect();
         serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
