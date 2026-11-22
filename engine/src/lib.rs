@@ -679,7 +679,7 @@ impl Engine {
         {
             Ok(id) => {
                 let t = now();
-                let _ = self.messages.lock_safe().append(
+                let _ = self.messages.lock_safe().append_live(
                     Chat::Dm(key),
                     &StoredMessage {
                         id,
@@ -1436,7 +1436,7 @@ impl Engine {
             .messenger
             .send_media_message(key, &hash, mime, name, meta.clone())
             .ok()?;
-        let _ = self.messages.lock_safe().append(
+        let _ = self.messages.lock_safe().append_live(
             Chat::Dm(key),
             &StoredMessage {
                 // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
@@ -1700,7 +1700,7 @@ impl Engine {
             return "invalid";
         };
         if !greeting.is_empty() {
-            let _ = self.messages.lock_safe().append(
+            let _ = self.messages.lock_safe().append_live(
                 Chat::Dm(&ik),
                 &StoredMessage {
                     id,
@@ -3774,8 +3774,13 @@ fn push_event(engine: &Engine, ev: dto::UiEvent) {
 /// Записать входящее личное сообщение и отдать его клиенту той же строкой.
 /// `sent` — время отправки по часам собеседника (мс, 0 — неизвестно), см. `UiEvent::Message`.
 fn push_dm_message(engine: &Engine, peer: &[u8; 32], mut msg: StoredMessage, sent: i64) {
-    if let Ok(row) = engine.messages.lock_safe().append(Chat::Dm(peer), &msg) {
+    if let Ok((row, time)) = engine
+        .messages
+        .lock_safe()
+        .append_live(Chat::Dm(peer), &msg)
+    {
         msg.row = row;
+        msg.time = time;
         push_event(
             engine,
             dto::UiEvent::Message {

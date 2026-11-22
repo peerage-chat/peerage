@@ -225,9 +225,16 @@ impl GroupManager {
 
     /// То же для входящего: `sent` — время отправки по часам автора (7b).
     fn put_sent(&mut self, gid: &[u8], msg: &StoredMessage, sent: i64) {
-        if let Ok(row) = self.messages.lock_safe().append(Chat::Group(gid), msg) {
-            self.fresh
-                .push((gid.to_vec(), StoredMessage { row, ..msg.clone() }, sent));
+        if let Ok((row, time)) = self.messages.lock_safe().append_live(Chat::Group(gid), msg) {
+            self.fresh.push((
+                gid.to_vec(),
+                StoredMessage {
+                    row,
+                    time,
+                    ..msg.clone()
+                },
+                sent,
+            ));
         }
     }
 

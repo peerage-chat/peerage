@@ -1267,28 +1267,18 @@ impl MessageStore {
     /// тихо подменить его текст и вложение в обход правки (R-041); менять
     /// записанное можно только явными путями — `edit_text`, статусы, пометки.
     pub fn append(&self, chat: Chat, msg: &StoredMessage) -> Result<i64, StoreError> {
+        insert_message(&db::lock(&self.db), chat, msg)
+    }
+
+    /// Записать только что отправленное или принятое: время — не меньше последнего в чате.
+    /// Время ставится по часам телефона, а лента упорядочена по нему; скачок часов назад
+    /// (NTP, ручная правка) иначе поставил бы новое выше старого (R-119). Возвращает номер
+    /// строки и записанное время — его и показывать.
+    pub fn append_live(&self, chat: Chat, msg: &StoredMessage) -> Result<(i64, i64), StoreError> {
         let conn = db::lock(&self.db);
-        let n = conn.execute(
-            "INSERT OR IGNORE INTO chat_messages
-                 (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
-                  size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
-                  system, fwd_from, fwd_anon, edited_at, mentions)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
-            rusqlite::params![
-                chat.id(), chat.scope(), msg.id as i64, &msg.sender, msg.mine as i64,
-                &msg.text, msg.time, &msg.status,
-                &msg.kind, &msg.blob_id, &msg.mime, &msg.name,
-                msg.size as i64, msg.duration_ms as i64, msg.width as i64, msg.height as i64,
-                &msg.thumb_id, msg.downloaded as i64,
-                msg.reply_to as i64, &msg.reply_sender, msg.system as i64, &msg.fwd_from,
-                msg.fwd_anon as i64, msg.edited_at, mentions_json(&msg.mentions),
-            ],
-        )?;
-        if n == 0 {
-            return Err(StoreError::Duplicate);
-        }
-        Ok(conn.last_insert_rowid())
+        let time = msg.time.max(last_time(&conn, chat));
+        let row = insert_message(&conn, chat, &StoredMessage { time, ..msg.clone() })?;
+        Ok((row, time))
     }
 
     /// Пометить вложение скачанным (байты блоба доехали). Ищем по контент-адресу, а
@@ -2020,13 +2010,15 @@ impl MessageStore {
     /// длительность — звонок меняется по ходу, а строка в чате одна. Возвращает её rowid.
     pub fn upsert_call(&self, chat: Chat, m: &StoredMessage) -> Result<i64, StoreError> {
         let conn = db::lock(&self.db);
+        // Новая строка звонка — тоже живая (R-119); обновление время не трогает.
+        let time = m.time.max(last_time(&conn, chat));
         conn.execute(
             "INSERT INTO chat_messages (chat, scope, id, sender, mine, text, time, kind, duration_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(chat, scope, sender, id)
              DO UPDATE SET text = excluded.text, duration_ms = excluded.duration_ms",
             rusqlite::params![
-                chat.id(), chat.scope(), m.id as i64, &m.sender, m.mine as i64, &m.text, m.time,
+                chat.id(), chat.scope(), m.id as i64, &m.sender, m.mine as i64, &m.text, time,
                 &m.kind, m.duration_ms,
             ],
         )?;
@@ -2062,6 +2054,41 @@ impl MessageStore {
         )?;
         Ok(n > 0)
     }
+}
+
+/// Время последней строки чата (0 — пусто): ниже него живое не пишется (R-119).
+fn last_time(conn: &rusqlite::Connection, chat: Chat) -> i64 {
+    conn.query_row(
+        "SELECT COALESCE(MAX(time), 0) FROM chat_messages WHERE chat = ?1 AND scope = ?2",
+        rusqlite::params![chat.id(), chat.scope()],
+        |r| r.get(0),
+    )
+    .unwrap_or(0)
+}
+
+/// Вставка строки ленты; существующую (тот же автор и id) не трогает — см. [`MessageStore::append`].
+fn insert_message(conn: &rusqlite::Connection, chat: Chat, msg: &StoredMessage) -> Result<i64, StoreError> {
+    let n = conn.execute(
+        "INSERT OR IGNORE INTO chat_messages
+             (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
+              size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
+              system, fwd_from, fwd_anon, edited_at, mentions)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+        rusqlite::params![
+            chat.id(), chat.scope(), msg.id as i64, &msg.sender, msg.mine as i64,
+            &msg.text, msg.time, &msg.status,
+            &msg.kind, &msg.blob_id, &msg.mime, &msg.name,
+            msg.size as i64, msg.duration_ms as i64, msg.width as i64, msg.height as i64,
+            &msg.thumb_id, msg.downloaded as i64,
+            msg.reply_to as i64, &msg.reply_sender, msg.system as i64, &msg.fwd_from,
+            msg.fwd_anon as i64, msg.edited_at, mentions_json(&msg.mentions),
+        ],
+    )?;
+    if n == 0 {
+        return Err(StoreError::Duplicate);
+    }
+    Ok(conn.last_insert_rowid())
 }
 
 /// То же, что [`read_msg`], но колонки начинаются не с нуля.
@@ -2321,6 +2348,34 @@ mod tests {
         let p2 = Profile::load_or_create(&path).unwrap();
         assert_eq!(p2.identity.public_key_bytes(), key1);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// R-119: часы скакнули назад — живое сообщение не встаёт выше прежних: его время не
+    /// меньше последнего в чате. Копия ([`MessageStore::import_message`]) свои времена хранит.
+    #[test]
+    fn live_append_never_goes_back_in_time() {
+        let store = MessageStore::open(db());
+        let c = key();
+        let chat = Chat::Dm(&c);
+        store.append_live(chat, &StoredMessage { id: 1, text: "раньше".into(), time: 1000, ..Default::default() }).unwrap();
+        let (_, t) = store
+            .append_live(chat, &StoredMessage { id: 2, text: "позже".into(), time: 970, ..Default::default() })
+            .unwrap();
+        assert_eq!(t, 1000, "время не меньше последнего");
+        let (_, t) = store
+            .append_live(chat, &StoredMessage { id: 3, text: "ещё".into(), time: 1005, ..Default::default() })
+            .unwrap();
+        assert_eq!(t, 1005, "часы впереди — своё время");
+        // Строка звонка — так же.
+        store
+            .upsert_call(chat, &StoredMessage { id: 4, text: "звонок".into(), time: 990, kind: "call".into(), ..Default::default() })
+            .unwrap();
+        let texts: Vec<String> = store.history(chat, None, 10).into_iter().map(|m| m.text).collect();
+        assert_eq!(texts, ["раньше", "позже", "ещё", "звонок"]);
+        // Другой чат своим временем не тянет.
+        let d = key();
+        let (_, t) = store.append_live(Chat::Dm(&d), &StoredMessage { id: 1, time: 5, ..Default::default() }).unwrap();
+        assert_eq!(t, 5);
     }
 
     #[test]
