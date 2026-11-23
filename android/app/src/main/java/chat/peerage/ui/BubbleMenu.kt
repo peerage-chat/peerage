@@ -29,7 +29,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
@@ -116,12 +115,7 @@ private fun BubbleMenuOverlay(model: AppModel, t: BubbleActions, onDelete: () ->
             .pointerInput(t) { detectTapGestures { close() } },
     ) {
         val grow = { originY: Float ->
-            Modifier.graphicsLayer {
-                val s = 0.92f + 0.08f * shown.value
-                scaleX = s
-                scaleY = s
-                transformOrigin = TransformOrigin(if (t.msg.mine) 1f else 0f, originY)
-            }
+            Modifier.menuGrow({ shown.value }, originX = if (t.msg.mine) 1f else 0f, originY = { originY })
         }
         val strip: (@Composable () -> Unit)? = if (canReact(model, t.chat)) {
             {

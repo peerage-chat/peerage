@@ -1467,7 +1467,27 @@ internal fun PopMenu(open: Boolean, onDismiss: () -> Unit, content: @Composable 
         popupPositionProvider = position,
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.PopupProperties(focusable = true),
-    ) { MenuSurface(content = content) }
+    ) {
+        // Появление — как у меню пузыря: проявление и рост от угла у якоря.
+        val shown = remember { androidx.compose.animation.core.Animatable(0f) }
+        LaunchedEffect(Unit) { shown.animateTo(1f, tween(Tokens.Anim.fast)) }
+        MenuSurface(
+            Modifier.graphicsLayer { alpha = shown.value }
+                .menuGrow({ shown.value }, originX = 1f, originY = { if (position.above) 1f else 0f }),
+            content = content,
+        )
+    }
+}
+
+/**
+ * Рост меню при появлении: от 0.92 до полного размера из точки, откуда меню пришло (угол у
+ * якоря или край пузыря). Значения читаются при отрисовке — анимация не перекомпонует меню.
+ */
+internal fun Modifier.menuGrow(progress: () -> Float, originX: Float, originY: () -> Float): Modifier = graphicsLayer {
+    val s = 0.92f + 0.08f * progress()
+    scaleX = s
+    scaleY = s
+    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(originX, originY())
 }
 
 /**
@@ -1528,6 +1548,10 @@ internal fun PopMenuDivider() {
 
 /** Правый верх меню — к правому верху якоря; не влезает вниз — вверх от низа якоря. */
 private class AnchorEndPosition(private val margin: Int) : androidx.compose.ui.window.PopupPositionProvider {
+    /** Меню встало над якорем (внизу не хватило места) — растёт снизу вверх. */
+    var above by mutableStateOf(false)
+        private set
+
     override fun calculatePosition(
         anchorBounds: androidx.compose.ui.unit.IntRect,
         windowSize: androidx.compose.ui.unit.IntSize,
@@ -1538,6 +1562,7 @@ private class AnchorEndPosition(private val margin: Int) : androidx.compose.ui.w
         val x = (anchorBounds.right - popupContentSize.width - margin).coerceIn(margin, maxX)
         val below = anchorBounds.top + popupContentSize.height <= windowSize.height - margin
         val y = if (below) anchorBounds.top else anchorBounds.bottom - popupContentSize.height
+        above = !below
         val maxY = (windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin)
         return androidx.compose.ui.unit.IntOffset(x, y.coerceIn(margin, maxY))
     }
