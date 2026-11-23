@@ -1643,12 +1643,19 @@ impl Engine {
 
     /// Что за код обмена (экран «Добавить контакт»): `{status, key, name}`, где status —
     /// `"ok"` | `"invalid"` (не код) | `"self"` (код этого телефона) | `"known"` (уже в
-    /// контактах). Ничего не меняет: решение — за [`Self::request_contact`].
+    /// контактах). Добавление — за [`Self::request_contact`]; у известного контакта
+    /// применяет подписанный адрес из кода, если он новее.
     pub fn inspect_code(&self, code: &str) -> String {
         let (parts, name) = split_code(code);
         let key = parse_key(parts[0]);
+        let status = self.code_status(key.as_ref());
+        // Код уже известного контакта — его подписанный адрес в дело, если эпоха новее:
+        // так возвращается связь, когда оба сменили адрес, не услышав друг друга (8.2).
+        if let (Some(ik), "known") = (key, status) {
+            self.apply_code_address(&ik, &parts);
+        }
         serde_json::json!({
-            "status": self.code_status(key.as_ref()),
+            "status": status,
             "key": key.map(hex::encode).unwrap_or_default(),
             "name": name.unwrap_or_default(),
         })
@@ -1674,11 +1681,6 @@ impl Engine {
         let (parts, code_name) = split_code(code);
         let key = parse_key(parts[0]);
         let status = self.code_status(key.as_ref());
-        // Код уже известного контакта — его подписанный адрес всё равно в дело: так
-        // восстанавливается связь, если оба сменили адрес, не услышав друг друга.
-        if let (Some(ik), "known") = (key, status) {
-            self.apply_code_address(&ik, &parts);
-        }
         let (Some(ik), "ok") = (key, status) else {
             return status;
         };

@@ -566,13 +566,15 @@ fn known_contacts_code_carries_its_new_address() {
     assert_eq!(b.verify_by_code(&a_key, &a.my_contact_code()), "match");
     assert_eq!(transport_of(&b, &a_key), new_addr);
 
-    // И добавление заново (код известного контакта) — тоже.
+    // И экран «Добавить контакт» со сканом кода известного контакта — тоже.
     a.rotate_transport(vec![], 0);
     assert!(wait(10, || hex::encode(
         alice.transport_public(a.transport_epoch())
     ) != new_addr
         && !a.is_offline()));
-    assert_eq!(b.request_contact(&a.my_contact_code(), "", ""), "known");
+    let seen: serde_json::Value =
+        serde_json::from_str(&b.inspect_code(&a.my_contact_code())).unwrap();
+    assert_eq!(seen["status"], "known");
     assert_eq!(
         transport_of(&b, &a_key),
         hex::encode(alice.transport_public(a.transport_epoch()))
