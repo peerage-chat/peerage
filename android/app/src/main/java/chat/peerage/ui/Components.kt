@@ -17,11 +17,13 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -1387,7 +1389,10 @@ internal fun PopMenu(open: Boolean, onDismiss: () -> Unit, content: @Composable 
     ) { MenuSurface(content = content) }
 }
 
-/** Подложка меню: ступень group с тенью и тонкой кромкой. Одна у «⋮» и у меню пузыря. */
+/**
+ * Подложка меню: ступень group с тенью и тонкой кромкой. Одна у «⋮» и у меню пузыря. Выше
+ * отведённого места (альбомная ориентация) — прокручивается, а не уходит за край.
+ */
 @Composable
 internal fun MenuSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val shape = RoundedCornerShape(Tokens.Radius.group)
@@ -1396,7 +1401,8 @@ internal fun MenuSurface(modifier: Modifier = Modifier, content: @Composable Col
             .shadow(Tokens.Size.menuShadow, shape)
             .clip(shape)
             .background(Tokens.Colors.group)
-            .border(1.dp, Tokens.Colors.menuEdge, shape),
+            .border(1.dp, Tokens.Colors.menuEdge, shape)
+            .verticalScroll(rememberScrollState()),
         content = content,
     )
 }

@@ -232,7 +232,8 @@ private fun shortWhen(time: Long): String {
 /**
  * Раскладка у пузыря: всё по ведущему краю пузыря (свой — справа, чужой — слева). Полоса
  * реакций — над пузырём (не влезает — под ним). Меню — под пузырём и полосой; не влезает
- * снизу — над ними; не влезает нигде (пузырь во весь экран) — у нижнего края.
+ * снизу — над ними; не влезает ни там, ни там (альбомная ориентация, высокий пузырь) — сбоку
+ * от пузыря, если там есть место, иначе у нижнего края. Меню выше экрана прокручивается.
  */
 @Composable
 private fun NearBubble(bounds: Rect, mine: Boolean, strip: (@Composable () -> Unit)?, menu: @Composable () -> Unit) {
@@ -247,15 +248,15 @@ private fun NearBubble(bounds: Rect, mine: Boolean, strip: (@Composable () -> Un
         strip?.invoke()
     }, Modifier.fillMaxSize()) { ms, c ->
         val loose = c.copy(minWidth = 0, minHeight = 0)
-        val p = ms[0].measure(loose)
+        val minY = insetTop + edge
+        val bottomY = c.maxHeight - insetBottom - edge
+        val p = ms[0].measure(loose.copy(maxHeight = (bottomY - minY).coerceAtLeast(0)))
         val s = ms.getOrNull(1)?.measure(loose)
         layout(c.maxWidth, c.maxHeight) {
+            val maxX = { w: Int -> (c.maxWidth - w - edge).coerceAtLeast(edge) }
             val xOf = { w: Int ->
-                val maxX = (c.maxWidth - w - edge).coerceAtLeast(edge)
-                (if (mine) bounds.right.roundToInt() - w else bounds.left.roundToInt()).coerceIn(edge, maxX)
+                (if (mine) bounds.right.roundToInt() - w else bounds.left.roundToInt()).coerceIn(edge, maxX(w))
             }
-            val minY = insetTop + edge
-            val bottomY = c.maxHeight - insetBottom - edge
             var top = bounds.top.roundToInt()
             var bottom = bounds.bottom.roundToInt()
             if (s != null) {
@@ -273,12 +274,15 @@ private fun NearBubble(bounds: Rect, mine: Boolean, strip: (@Composable () -> Un
             val maxY = (bottomY - p.height).coerceAtLeast(minY)
             val below = bottom + gap
             val above = top - gap - p.height
-            val y = when {
-                below <= maxY -> below
-                above >= minY -> above
-                else -> maxY
+            // Сбоку — с той стороны, где у пузыря свободно: у своего слева, у чужого справа.
+            val side = if (mine) bounds.left.roundToInt() - gap - p.width else bounds.right.roundToInt() + gap
+            val sideFits = side >= edge && side <= maxX(p.width)
+            when {
+                below <= maxY -> p.place(xOf(p.width), below)
+                above >= minY -> p.place(xOf(p.width), above)
+                sideFits -> p.place(side, bounds.top.roundToInt().coerceIn(minY, maxY))
+                else -> p.place(xOf(p.width), maxY)
             }
-            p.place(xOf(p.width), y)
         }
     }
 }
