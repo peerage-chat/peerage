@@ -24,6 +24,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -36,6 +40,10 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -57,6 +65,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,7 +91,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
@@ -334,6 +342,7 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
             voice = voice,
             model = model,
             hint = stringResource(if (model.isSaved(key)) R.string.saved_hint else R.string.chat_input_hint),
+            onKeyboardMedia = { model.stageKeyboardMedia(ctx, chat, it) },
             staged = staged != null,
             replyStrip = {
                 staged?.let { SharedStrip(it) { model.shareDraft = null } }
@@ -461,6 +470,19 @@ internal fun sendGallery(
         }
     }
 }
+
+/**
+ * Поле принимает картинки с клавиатуры (GIF, стикеры): их uri уходят в [onMedia], остальное
+ * (текст) — дальше, обычной вставкой.
+ */
+private fun Modifier.keyboardMedia(onMedia: (List<android.net.Uri>) -> Unit): Modifier =
+    contentReceiver { content ->
+        if (!content.hasMediaType(MediaType.Image)) return@contentReceiver content
+        val uris = mutableListOf<android.net.Uri>()
+        val rest = content.consume { item -> item.uri?.also { uris += it } != null }
+        if (uris.isNotEmpty()) onMedia(uris)
+        rest
+    }
 
 /** Отправить одно вложение по content:// — блокирует поток, звать с IO. */
 internal fun sendUriNow(
@@ -808,20 +830,39 @@ internal fun MessageInput(
     mentionCandidates: (String) -> List<Pair<String, String>> = { emptyList() },
     /** Человека выбрали из подсказки: его ключ и вставленная метка (без «@»). */
     onMentionPicked: (String, String) -> Unit = { _, _ -> },
+    /** Картинка с клавиатуры (GIF, стикер); null — поле их не принимает. Зовётся синхронно,
+     *  пока клавиатура держит доступ к uri. */
+    onKeyboardMedia: ((List<android.net.Uri>) -> Unit)? = null,
     onSend: () -> Unit,
 ) {
     // Пока идёт выбор, поле ввода не нужно: действия — в шапке выбора.
     if (model?.selection?.isNotEmpty() == true) return
-    // Поле держим как TextFieldValue: панели эмодзи нужна ПОЗИЦИЯ КУРСОРА, иначе
-    // символ всегда падал бы в конец, даже если человек правит середину строки.
-    var field by remember { mutableStateOf(TextFieldValue(value)) }
-    if (field.text != value) {
-        // Внешнее изменение (очистка после отправки) — синхронизируем, курсор в конец.
-        field = TextFieldValue(value, TextRange(value.length))
+    // Поле — TextFieldState: панели эмодзи и упоминаниям нужна ПОЗИЦИЯ КУРСОРА (иначе символ
+    // падал бы в конец), а клавиатуре — приём картинок и GIF (`contentReceiver` в Compose 1.7
+    // есть только у поля на TextFieldState).
+    val field = rememberTextFieldState(value)
+    // Последний текст, о котором знают и поле, и экран: по нему отличаем внешнюю правку
+    // (очистка после отправки, черновик) от набора, не гоняя текст по кругу.
+    var synced by remember { mutableStateOf(value) }
+    LaunchedEffect(value) {
+        if (value != synced) {
+            synced = value
+            if (field.text.toString() != value) field.setTextAndPlaceCursorAtEnd(value)
+        }
     }
-    val setField = { v: TextFieldValue ->
-        field = v
-        onChange(v.text)
+    val currentOnChange by rememberUpdatedState(onChange)
+    LaunchedEffect(field) {
+        snapshotFlow { field.text.toString() }.collect { t ->
+            if (t != synced) {
+                synced = t
+                currentOnChange(t)
+            }
+        }
+    }
+    /** Заменить [start, end) на [ins] и поставить курсор после вставки. */
+    fun replaceAt(start: Int, end: Int, ins: String) = field.edit {
+        replace(start, end, ins)
+        selection = TextRange(start + ins.length)
     }
     var emojiOpen by remember { mutableStateOf(false) }
     var attachOpen by remember { mutableStateOf(false) }
@@ -843,13 +884,11 @@ internal fun MessageInput(
         // Подсказка «кого упомянуть» — над полем, пока у курсора набирается «@…».
         // Выбор вставляет имя целиком и запоминает ключ: упоминание — ссылка на
         // человека, а не совпадение букв.
-        val query = if (field.selection.collapsed) Mentions.query(field.text, field.selection.start) else null
+        val query = if (field.selection.collapsed) Mentions.query(field.text.toString(), field.selection.start) else null
         val candidates = query?.let { mentionCandidates(it.second) }.orEmpty()
         if (query != null && candidates.isNotEmpty()) {
             MentionSuggestions(candidates) { key, name ->
-                val ins = "@$name "
-                val text = field.text.take(query.first) + ins + field.text.substring(field.selection.start)
-                setField(TextFieldValue(text, TextRange(query.first + ins.length)))
+                replaceAt(query.first, field.selection.start, "@$name ")
                 onMentionPicked(key, name)
             }
         }
@@ -893,7 +932,7 @@ internal fun MessageInput(
                 onSend = {
                     onSendAttachments(picked, value.trim())
                     close()
-                    setField(TextFieldValue(""))
+                    field.clearText()
                 },
                 onClose = close,
             )
@@ -906,23 +945,17 @@ internal fun MessageInput(
             EmojiPanel(
                 recent = model?.recentEmoji ?: emptyList(),
                 onPick = { e ->
-                    val start = field.selection.start
-                    val end = field.selection.end
-                    val text = field.text.take(start) + e + field.text.substring(end)
-                    setField(TextFieldValue(text, TextRange(start + e.length)))
+                    replaceAt(field.selection.start, field.selection.end, e)
                     model?.useEmoji(e)
                 },
                 onBackspace = {
                     val end = field.selection.end
                     if (field.selection.length > 0) {
-                        val text = field.text.take(field.selection.start) + field.text.substring(end)
-                        setField(TextFieldValue(text, TextRange(field.selection.start)))
+                        replaceAt(field.selection.start, end, "")
                     } else if (end > 0) {
                         // Удаляем ГРАФЕМУ, а не char: эмодзи — суррогатная пара, часто с
                         // модификаторами; посимвольный забой рвал бы их на половинки.
-                        val from = graphemeStart(field.text, end)
-                        val text = field.text.take(from) + field.text.substring(end)
-                        setField(TextFieldValue(text, TextRange(from)))
+                        replaceAt(graphemeStart(field.text.toString(), end), end, "")
                     }
                 },
                 onClose = { emojiOpen = false },
@@ -978,14 +1011,14 @@ internal fun MessageInput(
                     }
                 }
                 BasicTextField(
-                    value = field,
-                    onValueChange = setField,
-                    modifier = Modifier.weight(1f).padding(vertical = Tokens.Space.m),
+                    state = field,
+                    modifier = Modifier.weight(1f).padding(vertical = Tokens.Space.m)
+                        .then(if (onKeyboardMedia != null && !editing) Modifier.keyboardMedia(onKeyboardMedia) else Modifier),
                     textStyle = Tokens.Text.base.copy(color = Color.White),
                     cursorBrush = SolidColor(HoloAccent),
                     keyboardOptions = TextKeyboard,
-                    maxLines = 4,
-                    decorationBox = { inner ->
+                    lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
+                    decorator = { inner ->
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (value.isEmpty()) {
                                 Text(
@@ -1518,6 +1551,9 @@ internal fun ImageAttachment(
     // равно не крупнее 240dp, а полноразмерный битмап стоит десятки мегабайт.
     val side = if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble
     val bmp = rememberBitmap(bytes, cacheKey, side)
+    // GIF и анимированный WebP играют прямо в пузыре (Android 9+); до разбора и ниже 9 —
+    // первый кадр битмапом.
+    val anim = rememberAnimatedPainter(bytes, side)
     // [bare] — картинка САМА является пузырём: своё скругление и фон ей не нужны,
     // их даёт пузырь. Иначе внутри пузыря получалась бы вторая скруглённая рамка.
     //
@@ -1534,10 +1570,10 @@ internal fun ImageAttachment(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        if (bmp != null) {
-            Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        } else {
-            CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+        when {
+            anim != null -> Image(anim, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            bmp != null -> Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else -> CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
         }
     }
 }

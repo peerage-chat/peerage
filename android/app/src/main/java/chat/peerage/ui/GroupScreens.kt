@@ -168,6 +168,7 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
                     value = input,
                     onChange = { input = it },
                     staged = staged != null,
+                    onKeyboardMedia = { model.stageKeyboardMedia(ctx, chat, it) },
                     replyStrip = {
                         staged?.let { SharedStrip(it) { model.shareDraft = null } }
                         model.editTarget?.let { t ->

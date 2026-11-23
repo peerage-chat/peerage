@@ -40,6 +40,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.pointerInput
@@ -48,6 +49,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -551,13 +553,17 @@ private fun MediaPage(
                 // Под размер экрана: зум до 6× работает по этому же битмапу —
                 // держать ради него оригинал на 48 МБ не за что.
                 val bmp = rememberFullscreenBitmap(bytes, item.blobId)
-                if (bmp != null) {
+                // GIF играет и здесь (Android 9+): тот же Image, зум и протяжка — по нему же.
+                val cfg = LocalConfiguration.current
+                val anim = rememberAnimatedPainter(bytes, maxOf(cfg.screenWidthDp, cfg.screenHeightDp).dp)
+                val painter = anim ?: bmp?.let { remember(it) { BitmapPainter(it) } }
+                if (painter != null) {
                     // Снимок занимает ровно свой прямоугольник, а не весь экран: иначе
                     // скругление на протяжке легло бы на поля, а не на углы снимка.
                     Image(
-                        bmp,
+                        painter,
                         null,
-                        Modifier.aspectRatio(bmp.width.toFloat() / bmp.height.coerceAtLeast(1))
+                        Modifier.aspectRatio(painter.intrinsicSize.width / painter.intrinsicSize.height.coerceAtLeast(1f))
                             .then(if (motion != null) Modifier.onGloballyPositioned { motion.image = it.boundsInRoot() } else Modifier)
                             .graphicsLayer {
                                 var s = zoom

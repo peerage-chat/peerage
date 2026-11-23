@@ -186,3 +186,48 @@ internal fun AppModel.sendShared(ctx: Context, draft: ShareDraft, targets: List<
         }
     }
 }
+
+/**
+ * Картинка с клавиатуры (GIF, стикер) — вложением над полем чата [chat], как присланное через
+ * «Поделиться»: подпись дописывается, уходит по «Отправить». Доступ к uri клавиатура даёт
+ * только на время вставки, поэтому поток открывается сразу, а байты переливаются в свой кэш
+ * (`cache/keyboard/`, отдаётся через FileProvider) — отправка читает уже свою копию.
+ */
+internal fun AppModel.stageKeyboardMedia(ctx: Context, chat: ChatTarget, uris: List<Uri>) {
+    val cr = ctx.contentResolver
+    val opened = uris.mapNotNull { uri ->
+        val mime = runCatching { cr.getType(uri) }.getOrNull()?.takeIf { it.startsWith("image/") } ?: return@mapNotNull null
+        runCatching { cr.openInputStream(uri) }.getOrNull()?.let { mime to it }
+    }
+    if (opened.isEmpty()) return
+    val app = ctx.applicationContext
+    kotlin.concurrent.thread(name = "keyboard-media", isDaemon = true) {
+        val dir = java.io.File(app.cacheDir, KEYBOARD_DIR).apply { mkdirs() }
+        pruneKeyboardCache(dir)
+        val items = opened.mapNotNull { (mime, input) ->
+            runCatching {
+                val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: "img"
+                val name = "image.$ext"
+                // Своя папка на вставку: имя одно и то же, а две вставки не должны затирать друг друга.
+                val f = java.io.File(java.io.File(dir, java.util.UUID.randomUUID().toString()).apply { mkdirs() }, name)
+                input.use { i -> f.outputStream().use { o -> i.copyTo(o, 64 * 1024) } }
+                val uri = androidx.core.content.FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", f)
+                SharedItem(uri, mime, name, f.length())
+            }.getOrNull()
+        }
+        if (items.isEmpty()) return@thread
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            // Уже ждущее в этом чате — дополняется; присланное в другой чат уступает место.
+            val d = shareDraft?.takeIf { it.target == chat }
+            shareDraft = d?.copy(items = d.items + items) ?: ShareDraft(items, "", chat)
+        }
+    }
+}
+
+private const val KEYBOARD_DIR = "keyboard"
+
+/** Копии вставок старше суток уже отправлены или брошены. */
+private fun pruneKeyboardCache(dir: java.io.File) {
+    val old = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+    dir.listFiles()?.filter { it.lastModified() < old }?.forEach { it.deleteRecursively() }
+}

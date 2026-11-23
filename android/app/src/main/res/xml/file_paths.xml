@@ -4,4 +4,6 @@
     <cache-path name="shared" path="shared/" />
     <!-- Снимок с камеры кладём сюда: системная камера пишет в него по content://. -->
     <cache-path name="camera" path="camera/" />
+    <!-- Картинка с клавиатуры (GIF, стикер): своя копия, пока ждёт над полем ввода. -->
+    <cache-path name="keyboard" path="keyboard/" />
 </paths>
