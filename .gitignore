@@ -42,6 +42,7 @@ identity.key
 /fuzz/artifacts
 /fuzz/coverage
 /repro-out/
+/dist/
 
 # graphify: граф кода (пересобирается целиком) и локальные хуки Claude Code
 graphify-out/

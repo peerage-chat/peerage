@@ -15,6 +15,15 @@ ktlint {
     }
 }
 
+/** Версия приложения (semver без суффиксов): её же несёт тег релиза. */
+val APP_VERSION = "0.1.0"
+
+fun versionCodeOf(v: String): Int {
+    val parts = v.split(".").map { it.toIntOrNull() ?: error("версия $v: только числа M.m.p") }
+    require(parts.size == 3 && parts[1] < 100 && parts[2] < 100) { "версия $v: нужно M.m.p, m и p меньше 100" }
+    return parts[0] * 10000 + parts[1] * 100 + parts[2]
+}
+
 android {
     namespace = "chat.peerage"
     compileSdk = 34
@@ -23,8 +32,11 @@ android {
         applicationId = "chat.peerage"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        // Версия — одна точка: versionCode выводится из versionName (M.m.p → M·10000 + m·100 + p),
+        // так новый релиз не может уйти с прежним versionCode. Перед релизом меняется
+        // только APP_VERSION, тег — `v$APP_VERSION` (docs/release.md).
+        versionName = APP_VERSION
+        versionCode = versionCodeOf(APP_VERSION)
         // Набор ABI задаётся ниже через splits (arm64 — устройства, x86_64 — эмулятор);
         // abiFilters здесь конфликтует со splits, поэтому не используется.
     }
