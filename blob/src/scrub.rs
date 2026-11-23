@@ -180,14 +180,65 @@ fn scrub_jpeg(d: &[u8]) -> Vec<u8> {
             out.extend_from_slice(&d[i..]);
             break;
         }
-        // APP1 (EXIF/XMP), APP13 (IPTC/Photoshop), COM (комментарий) — вырезаем.
+        // APP1 (EXIF/XMP), APP13 (IPTC/Photoshop), COM (комментарий) — вырезаем. От EXIF
+        // остаётся поворот кадра: без него снимок, пиксели которого лежат боком, приходит
+        // повёрнутым, а сам по себе он ничего о снимавшем не говорит.
         let strip = matches!(marker, 0xE1 | 0xED | 0xFE);
         if !strip {
             out.extend_from_slice(&d[i..seg_end]);
+        } else if marker == 0xE1 {
+            if let Some(o) = exif_orientation(&d[i + 4..seg_end]).filter(|&o| o != 1) {
+                out.extend_from_slice(&orientation_app1(o));
+            }
         }
         i = seg_end;
     }
     out
+}
+
+/// Поворот кадра (тег 0x0112 в IFD0) из полезной нагрузки APP1; None — не EXIF, тега нет
+/// или он вне 1..=8.
+fn exif_orientation(p: &[u8]) -> Option<u16> {
+    let t = p.strip_prefix(b"Exif\0\0")?;
+    let le = match t.get(..4)? {
+        b"II\x2A\x00" => true,
+        b"MM\x00\x2A" => false,
+        _ => return None,
+    };
+    let u16_at = |i: usize| -> Option<u16> {
+        let b: [u8; 2] = t.get(i..i.checked_add(2)?)?.try_into().ok()?;
+        Some(if le {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        })
+    };
+    let u32_at = |i: usize| -> Option<u32> {
+        let b: [u8; 4] = t.get(i..i.checked_add(4)?)?.try_into().ok()?;
+        Some(if le {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        })
+    };
+    let ifd = u32_at(4)? as usize;
+    let n = u16_at(ifd)? as usize;
+    (0..n)
+        .find_map(|k| {
+            let e = ifd.checked_add(2 + k * 12)?;
+            (u16_at(e)? == 0x0112 && u16_at(e + 2)? == 3).then(|| u16_at(e + 8))?
+        })
+        .filter(|o| (1..=8).contains(o))
+}
+
+/// APP1 с одним тегом — поворотом кадра (TIFF big-endian, IFD0 из одной записи).
+fn orientation_app1(o: u16) -> Vec<u8> {
+    let mut s = vec![0xFF, 0xE1, 0x00, 34]; // длина: 2 + 32 байта нагрузки
+    s.extend_from_slice(b"Exif\0\0MM\x00\x2A\x00\x00\x00\x08"); // заголовок, IFD0 по смещению 8
+    s.extend_from_slice(&[0x00, 0x01, 0x01, 0x12, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01]); // 1 запись: 0x0112, SHORT, 1
+    s.extend_from_slice(&o.to_be_bytes());
+    s.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // добивка значения и «следующего IFD нет»
+    s
 }
 
 /// PNG: пройти по чанкам, вырезать метаданные (tEXt/zTXt/iTXt/eXIf/tIME). Критичные
@@ -272,6 +323,44 @@ mod tests {
         assert!(contains(&out, &[0xFF, 0xDA]), "SOS сохранён");
         assert!(contains(&out, &[0xFF, 0xD9]), "EOI сохранён");
         assert!(out.len() < jpeg.len());
+    }
+
+    /// JPEG: от EXIF остаётся только поворот кадра — иначе снимок с камеры, у которого
+    /// пиксели лежат боком, а поворот записан в EXIF, приходит повёрнутым. Модель,
+    /// GPS-указатель и всё прочее уходят.
+    #[test]
+    fn jpeg_keeps_only_orientation_from_exif() {
+        // TIFF little-endian, IFD0 по смещению 8: Make="Xiaomi", Orientation=6, GPS IFD.
+        let mut tiff = b"II\x2A\x00\x08\x00\x00\x00".to_vec();
+        tiff.extend_from_slice(&3u16.to_le_bytes());
+        let make_at = 8 + 2 + 3 * 12 + 4;
+        for (tag, typ, count, value) in [
+            (0x010Fu16, 2u16, 7u32, make_at as u32),
+            (0x0112, 3, 1, 6),
+            (0x8825, 4, 1, 0),
+        ] {
+            tiff.extend_from_slice(&tag.to_le_bytes());
+            tiff.extend_from_slice(&typ.to_le_bytes());
+            tiff.extend_from_slice(&count.to_le_bytes());
+            tiff.extend_from_slice(&value.to_le_bytes());
+        }
+        tiff.extend_from_slice(&0u32.to_le_bytes()); // следующего IFD нет
+        tiff.extend_from_slice(b"Xiaomi\0");
+        let mut app1 = b"Exif\0\0".to_vec();
+        app1.extend_from_slice(&tiff);
+
+        let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE1];
+        jpeg.extend_from_slice(&((app1.len() + 2) as u16).to_be_bytes());
+        jpeg.extend_from_slice(&app1);
+        jpeg.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02, 0x12, 0x34, 0xFF, 0xD9]);
+
+        let out = scrub("image/jpeg", &jpeg);
+        assert!(!contains(&out, b"Xiaomi"), "модель телефона ушла");
+        let mut want = vec![0xFF, 0xD8];
+        want.extend_from_slice(&orientation_app1(6));
+        want.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02, 0x12, 0x34, 0xFF, 0xD9]);
+        assert_eq!(out, want, "вместо EXIF — один тег поворота");
+        assert_eq!(jpeg_orientation(&out), Some(6), "поворот читается обратно");
     }
 
     /// PNG: tEXt вырезается, IHDR/IEND сохраняются.
@@ -400,6 +489,19 @@ mod tests {
                 },
             )
             .unwrap();
+    }
+
+    /// Поворот из первого APP1 файла (до SOS) — для проверки, что он читается обратно.
+    fn jpeg_orientation(d: &[u8]) -> Option<u16> {
+        let mut i = 2;
+        while i + 4 <= d.len() && d[i] == 0xFF && d[i + 1] != 0xDA {
+            let end = i + 2 + (((d[i + 2] as usize) << 8) | d[i + 3] as usize);
+            if d[i + 1] == 0xE1 {
+                return exif_orientation(d.get(i + 4..end)?);
+            }
+            i = end;
+        }
+        None
     }
 
     fn contains(hay: &[u8], needle: &[u8]) -> bool {
