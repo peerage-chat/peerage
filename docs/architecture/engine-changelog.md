@@ -30,6 +30,26 @@
 
 ---
 
+## 2026-11-23 · Отказ по эпохе адреса с доказательством · ХЭШ (бета 8.2b, R-120)
+
+**Причина:** R-120 — объявление адреса с эпохой не новее известной (восстановление с часами
+позади прошлой смены) отвергалось молча, и связь не возвращалась.
+
+- **Контракт:** `ContactStore::apply_transport_rotate` → `RotateOutcome {Applied, Stale(Option<SignedRecord>), Rejected}`;
+  `ContactStore::known_record(key)`. `Payload::AddressStale {record, sig}`;
+  `Event::TransportRotate` получил `src`; `Event::AddressStale {peer, record, sig}`;
+  `Messenger::send_address_stale(peer, src, proof)` — на адрес-источник объявления.
+  `begin_restored_epoch_at(dir, now)`.
+- **Поведение:** контакт на устаревшее объявление отвечает записью, которую знает (её
+  подписал сам владелец). Владелец проверяет свою подпись и меняет адрес на эпоху выше неё
+  с объявлением всем контактам (одна смена за раз). Чужая подпись в отказе — игнор (контакт
+  не может сдвинуть эпоху к пределу). Отказ — служебный, по размеру как Ack (M5).
+- **Схема:** `contacts.transport_rec BLOB`, `contacts.transport_sig BLOB` (ALTER на старой
+  базе; до первой записи v2 доказательства нет — отказ не шлётся).
+- **Тесты:** `engine/tests/rotate.rs::stale_announcement_is_answered_and_epoch_climbs_above`
+  (без отправки отказа падает — проверено), стор (`Stale` с доказательством, `known_record`
+  после перезапуска), `protocol::address_stale_looks_like_an_ack`.
+
 ## 2026-11-23 · Адрес из подключа с видом сети; ключ личности адресом не бывает · 18c8152 (бета 8.2)
 
 **Причина:** шаг 8 (`format-freeze.md` 8.2, ADR-015 F1) — на эпохе 0 адресом в сети был сам

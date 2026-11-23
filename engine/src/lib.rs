@@ -30,7 +30,7 @@ pub use peerage_core::mention::Mention;
 use peerage_core::notify::{ChatNotify, NotifyMode};
 use peerage_core::settings::AudioSettings;
 use peerage_core::store::{
-    Chat, ContactStore, GateStore, MessageStore, Profile, StoredMessage, VerifyHow,
+    Chat, ContactStore, GateStore, MessageStore, Profile, RotateOutcome, StoredMessage, VerifyHow,
 };
 use peerage_core::{vault, Identity};
 /// Реэкспорт: медиа-вложение группового сообщения — часть контракта движка
@@ -504,6 +504,9 @@ pub struct Engine {
     /// адреса. Отличается от «нет связи» — это осознанное состояние, и UI обязан
     /// его показывать.
     offline: AtomicBool,
+    /// Идёт смена адреса по отказу контакта (R-120): второй отказ, пока первая идёт, —
+    /// не повод для второй.
+    rotating: AtomicBool,
     /// Отчёты о прочтении и набор: переключатели и отправленное (2.10).
     receipts: Mutex<receipts::Receipts>,
     /// Чем поднимать новый узел при смене адреса. По умолчанию — настоящий
@@ -1748,7 +1751,7 @@ impl Engine {
                 .contacts
                 .lock_safe()
                 .apply_transport_rotate(ik, &record, &sig)
-                .unwrap_or(false);
+                .is_ok_and(|o| o == RotateOutcome::Applied);
             if applied {
                 self.refresh_transports();
             }
@@ -1807,12 +1810,30 @@ impl Engine {
     /// вызывающий не блокируется. Личность, история, группы и верификации не
     /// затрагиваются вовсе.
     pub fn rotate_transport(self: &Arc<Self>, recipients: Vec<[u8; 32]>, gap_secs: u64) {
-        let engine = self.clone();
-        std::thread::spawn(move || engine.rotate_transport_blocking(recipients, gap_secs));
+        self.rotate_transport_above(recipients, gap_secs, 0);
     }
 
-    fn rotate_transport_blocking(self: &Arc<Self>, recipients: Vec<[u8; 32]>, gap_secs: u64) {
-        let epoch = next_epoch(self.transport_epoch(), now());
+    /// То же, с эпохой строго выше `floor` (R-120: контакт знает наш адрес эпохи `floor`).
+    fn rotate_transport_above(
+        self: &Arc<Self>,
+        recipients: Vec<[u8; 32]>,
+        gap_secs: u64,
+        floor: u32,
+    ) {
+        let engine = self.clone();
+        std::thread::spawn(move || {
+            engine.rotate_transport_blocking(recipients, gap_secs, floor);
+            engine.rotating.store(false, Ordering::SeqCst);
+        });
+    }
+
+    fn rotate_transport_blocking(
+        self: &Arc<Self>,
+        recipients: Vec<[u8; 32]>,
+        gap_secs: u64,
+        floor: u32,
+    ) {
+        let epoch = next_epoch(self.transport_epoch().max(floor), now());
         log::info!("смена адреса: эпоха {epoch}, пауза офлайн {gap_secs}с");
         *self.rotate_round.lock_safe() = recipients.clone();
 
@@ -3590,7 +3611,12 @@ pub fn next_epoch(prev: u32, now_secs: i64) -> u32 {
 /// «сейчас». Старый адрес никто не держит, паузы офлайн не нужно; контактам новый адрес
 /// уйдёт объявлением ([`Engine::announce_later`]). Возвращает эпоху.
 pub fn begin_restored_epoch(dir: &Path) -> u32 {
-    let epoch = next_epoch(load_transport_epoch(dir), now());
+    begin_restored_epoch_at(dir, now())
+}
+
+/// То же по часам `now_secs` (они могут отставать — R-120).
+pub fn begin_restored_epoch_at(dir: &Path, now_secs: i64) -> u32 {
+    let epoch = next_epoch(load_transport_epoch(dir), now_secs);
     save_transport_epoch(dir, epoch);
     epoch
 }
@@ -4647,7 +4673,12 @@ fn handle_event(
         // проверка подписи ключом личности, и монотонность эпохи. Приняли —
         // немедленно обновляем карту адресов, иначе следующее сообщение уйдёт на
         // покинутый ключ.
-        Event::TransportRotate { peer, record, sig } => {
+        Event::TransportRotate {
+            peer,
+            src,
+            record,
+            sig,
+        } => {
             let Ok(sg) = <[u8; 64]>::try_from(sig.as_slice()) else {
                 return;
             };
@@ -4657,16 +4688,52 @@ fn handle_event(
             if matches!(gate_of(engine, &peer), Gate::Blocked) {
                 return;
             }
-            let applied = engine
+            let outcome = engine
                 .contacts
                 .lock_safe()
-                .apply_transport_rotate(&peer, &record, &sg)
-                .unwrap_or(false);
-            if applied {
-                log::info!("контакт {:02x?}… сменил адрес", &peer[..4]);
-                engine.refresh_transports();
-                push_event(engine, dto::UiEvent::ContactsChanged);
+                .apply_transport_rotate(&peer, &record, &sg);
+            match outcome {
+                Ok(RotateOutcome::Applied) => {
+                    log::info!("контакт {:02x?}… сменил адрес", &peer[..4]);
+                    engine.refresh_transports();
+                    push_event(engine, dto::UiEvent::ContactsChanged);
+                }
+                // Не новее известного (R-120): не молча — отказ с доказательством.
+                Ok(RotateOutcome::Stale(Some(proof))) => {
+                    let _ = engine.messenger.send_address_stale(&peer, &src, &proof);
+                }
+                _ => {}
             }
+        }
+        // Контакт знает наш адрес новее того, что мы объявили (R-120: восстановление с
+        // часами позади прошлой смены). Доказательство — наша же подпись; эпоха — выше
+        // известной ему, объявление — всем контактам.
+        Event::AddressStale {
+            peer: _,
+            record,
+            sig,
+        } => {
+            let Ok(sg) = <[u8; 64]>::try_from(sig.as_slice()) else {
+                return;
+            };
+            let Some(rec) =
+                peerage_core::record::AddressRecord::verify(&engine.me_pub, &record, &sg)
+            else {
+                return;
+            };
+            if rec.epoch < engine.transport_epoch() || engine.rotating.swap(true, Ordering::SeqCst)
+            {
+                return;
+            }
+            log::info!("адрес не принят контактом: он знает эпоху новее — смена адреса выше неё");
+            let all: Vec<[u8; 32]> = engine
+                .contacts
+                .lock_safe()
+                .list()
+                .iter()
+                .filter_map(|c| parse_key(&c.key))
+                .collect();
+            engine.rotate_transport_above(all, 0, rec.epoch);
         }
         // Пир просит манифест нашего блоба (аватар, вложение чата или группы).
         Event::BlobManifestRequest { peer, id } => {
@@ -5196,6 +5263,7 @@ impl Engine {
             rotate_round: Mutex::new(Vec::new()),
             transport_factory: Mutex::new(None),
             offline: AtomicBool::new(false),
+            rotating: AtomicBool::new(false),
             receipts: Mutex::new(receipts::Receipts::load(&dir)),
         });
         engine.load_rotate_pending();

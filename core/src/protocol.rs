@@ -309,6 +309,16 @@ pub enum Payload {
     /// Запрос `request` принят: приветствие легло в чат, очередь отправителя можно
     /// выпускать. Отклонение ответа не имеет — не раскрывать, что запрос прочли.
     ContactAccept { id: u64, request: u64 },
+    /// Объявление адреса не принято: эпоха не новее известной (R-120). В ответе — запись
+    /// адреса отправителя, которую получатель уже знает (подписана самим отправителем):
+    /// по ней владелец поднимает эпоху выше и объявляет снова. Шлётся на адрес, с которого
+    /// пришло объявление, — по известному адресу владельца уже нет.
+    AddressStale {
+        #[serde(with = "serde_bytes")]
+        record: Vec<u8>,
+        #[serde(with = "serde_bytes")]
+        sig: Vec<u8>,
+    },
     /// Неизвестный/будущий тип payload — forward-compat (ADR-006). Сообщения версий,
     /// которые этот клиент ещё НЕ понимает (напр. реакции/закрепы/правки — post-1.0),
     /// декодируются СЮДА и молча игнорируются, а не роняют `decode`. Так новые типы
@@ -582,6 +592,15 @@ mod tests {
 
     /// DoD M5: размеры НА ПРОВОДЕ не различают текст / медиа / звонок, а пакеты
     /// рукопожатия сессии совпадают по размеру с прикладными и управляющими.
+    /// Отказ по эпохе (R-120) служебный, как Ack: по размеру от подтверждения не отличить.
+    #[test]
+    fn address_stale_looks_like_an_ack() {
+        let rec = crate::Identity::from_seed(&[1u8; 32]).unwrap().address_record(u32::MAX);
+        let stale = Payload::AddressStale { record: rec.bytes, sig: rec.sig.to_vec() };
+        assert_eq!(stale.to_padded().unwrap().len(), Payload::Ack { id: 1 }.to_padded().unwrap().len());
+        assert_eq!(roundtrip(&stale), stale);
+    }
+
     #[test]
     fn text_media_and_call_are_indistinguishable_by_size() {
         let enc = wire;

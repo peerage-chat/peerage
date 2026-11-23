@@ -586,3 +586,66 @@ fn known_contacts_code_carries_its_new_address() {
         "связь жива"
     );
 }
+
+/// R-120: телефон восстановлен с часами позади прошлой смены адреса — его эпоха меньше
+/// той, что знает Боб. Боб не молчит: отвечает отказом с подписанной записью Алисы, и
+/// Алиса поднимает эпоху выше неё; связь жива без исправления часов.
+#[test]
+fn stale_announcement_is_answered_and_epoch_climbs_above() {
+    let net = LoopbackNet::new();
+    let alice = id(74);
+    let bob_id = id(75);
+    let (a_key, b_key) = (alice.public_key_bytes(), bob_id.public_key_bytes());
+    let factory = |net: LoopbackNet| -> peerage_engine::TransportFactory {
+        std::sync::Arc::new(move |seed: &[u8; 32]| {
+            let key = peerage_core::Identity::from_seed(seed)
+                .ok()?
+                .public_key_bytes();
+            Some(net.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
+        })
+    };
+    let a = Engine::start_with_transport(tmpdir("a-stale"), alice.clone(), net.endpoint(a_key))
+        .unwrap()
+        .engine;
+    let b = Engine::start_with_transport(tmpdir("b-stale"), bob_id, net.endpoint(b_key))
+        .unwrap()
+        .engine;
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Алиса");
+    a.set_transport_factory(factory(net.clone()));
+    a.rotate_transport(vec![b_key], 0);
+    assert!(wait(20, || a.transport_epoch() > 0));
+    let known = a.transport_epoch();
+    assert!(wait(20, || transport_of(&b, &a_key)
+        == hex::encode(alice.transport_public(known))));
+    a.shutdown(); // телефон потерян
+
+    // Новый телефон, часы на сутки позади прошлой смены.
+    let dir = tmpdir("a-stale-new");
+    let low = peerage_engine::begin_restored_epoch_at(&dir, i64::from(known) - 86_400);
+    assert!(low < known);
+    let a2 = Engine::start_with_transport(
+        dir,
+        alice.clone(),
+        net.endpoint(alice.transport_public(low)),
+    )
+    .unwrap()
+    .engine;
+    a2.set_transport_factory(factory(net.clone()));
+    a2.add_contact(&b_key, "Боб");
+
+    assert!(
+        wait(30, || a2.transport_epoch() > known),
+        "отказ Боба поднял эпоху выше известной ему: {} ≤ {known}",
+        a2.transport_epoch()
+    );
+    let now_addr = hex::encode(alice.transport_public(a2.transport_epoch()));
+    assert!(
+        wait(30, || transport_of(&b, &a_key) == now_addr),
+        "Боб принял новый адрес"
+    );
+    b.send_text(&a_key, "часы отстают, а связь есть");
+    assert!(wait(20, || a2.history_json(&b_key).contains("связь есть")));
+    a2.shutdown();
+    b.shutdown();
+}

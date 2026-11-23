@@ -75,6 +75,10 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             -- совпадает с ключом личности.
             transport_key   TEXT    NOT NULL DEFAULT '',
             transport_epoch INTEGER NOT NULL DEFAULT 0,
+            -- Принятая подписанная запись адреса v2 и её подпись (R-120): ею контакт
+            -- доказывает владельцу, какую эпоху его адреса уже знает.
+            transport_rec   BLOB,
+            transport_sig   BLOB,
             -- Когда и как сверен ключ (unix-секунды; 'code' | 'set'). Пусто — не
             -- сверен или сверен до того, как это стали хранить.
             verified_at     INTEGER NOT NULL DEFAULT 0,
@@ -293,6 +297,8 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN contact INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN autodel INTEGER NOT NULL DEFAULT -1", []);
     let _ = conn.execute("ALTER TABLE reactions ADD COLUMN seen INTEGER NOT NULL DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN transport_rec BLOB", []);
+    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN transport_sig BLOB", []);
     let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN notify INTEGER NOT NULL DEFAULT -1", []);
     let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN notify_until INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE group_meta ADD COLUMN notify_default INTEGER NOT NULL DEFAULT 0", []);

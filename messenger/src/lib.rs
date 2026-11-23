@@ -212,7 +212,10 @@ pub enum Event {
     /// теперь `transport_pub`. Подпись уже проверена приёмным слоем (иначе пакет не
     /// прошёл бы анти-спуфинг), но применять её должен верхний слой: монотонность
     /// эпохи и запись в стор — его зона.
-    TransportRotate { peer: PeerKey, record: Vec<u8>, sig: Vec<u8> },
+    TransportRotate { peer: PeerKey, src: PeerKey, record: Vec<u8>, sig: Vec<u8> },
+    /// Контакт не принял наше объявление адреса — знает эпоху новее (R-120); в `record` —
+    /// наша же подписанная запись с ней. Проверка подписи — у верхнего слоя.
+    AddressStale { peer: PeerKey, record: Vec<u8>, sig: Vec<u8> },
 }
 
 /// Метаданные вложения для карточки: их видно ДО скачивания байтов, поэтому
@@ -1301,6 +1304,21 @@ impl Messenger {
             .send_reliable(peer, false, move |id| Payload::TransportRotate { id, record, sig })
     }
 
+    /// Отказ по эпохе адреса (R-120): прямо на адрес `src`, с которого пришло объявление,
+    /// — по известному нам адресу владельца уже нет. Разово: не дошло — повторное
+    /// объявление вызовет новый отказ.
+    pub fn send_address_stale(
+        &self,
+        peer: &PeerKey,
+        src: &PeerKey,
+        proof: &peerage_core::record::SignedRecord,
+    ) -> Result<(), MessengerError> {
+        let payload = Payload::AddressStale { record: proof.bytes.clone(), sig: proof.sig.to_vec() };
+        let plaintext = payload.to_padded()?;
+        let out = self.shared.sessions.lock().unwrap().send(peer, &plaintext, true, Instant::now(), &mut OsRng);
+        self.shared.write_chat(src, out)
+    }
+
     /// Отправить медиа-СООБЩЕНИЕ чата (M2): ссылка на блоб по хэшу. Надёжно
     /// (retry-until-Ack), как текст; сами байты идут блоб-каналом отдельно.
     /// (Отличать от [`Messenger::send_media`] — realtime-датаграммы звонка.)
@@ -1952,8 +1970,11 @@ fn receive_loop(shared: Arc<Shared>) {
             // запомнить» принимает верхний слой: только он знает, какая эпоха уже
             // известна, и он же перезапишет стор и карту адресов.
             Payload::TransportRotate { id, record, sig } => {
-                shared.emit(Event::TransportRotate { peer: peer_id, record, sig });
+                shared.emit(Event::TransportRotate { peer: peer_id, src, record, sig });
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
+            }
+            Payload::AddressStale { record, sig } => {
+                shared.emit(Event::AddressStale { peer: peer_id, record, sig });
             }
             // Forward-compat (ADR-006): будущий тип, который этот клиент не знает —
             // молча игнорируем (Ack не шлём, отправитель погасит ретрай по TTL).

@@ -127,6 +127,18 @@ pub struct Contact {
     pub awaiting: bool,
 }
 
+/// Что стало с объявлением адреса контакта ([`ContactStore::apply_transport_rotate`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RotateOutcome {
+    /// Принято: адрес новее известного.
+    Applied,
+    /// Подлинное, но эпоха не новее известной; в нём — наша запись его адреса (если есть),
+    /// чтобы владелец увидел, какую эпоху мы знаем (R-120).
+    Stale(Option<crate::record::SignedRecord>),
+    /// Не его подпись, не тот вид сети, незнакомец.
+    Rejected,
+}
+
 /// Способ сверки ключа — показывается в «Сверен: 1 ноября, по коду».
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -373,25 +385,42 @@ impl ContactStore {
     ///     адрес Алисы» станет способом увести переписку;
     ///   * эпоха строго новее известной — иначе перехваченное старое объявление
     ///     можно переиграть и вернуть жертву на брошенный (возможно, флудимый) адрес.
-    pub fn apply_transport_rotate(&mut self, key: &[u8; 32], record: &[u8], sig: &[u8; 64]) -> Result<bool, StoreError> {
-        let Some(c) = self.cache.get_mut(key) else { return Ok(false) };
-        let Some(rec) = crate::record::AddressRecord::verify(key, record, sig) else { return Ok(false) };
+    pub fn apply_transport_rotate(&mut self, key: &[u8; 32], record: &[u8], sig: &[u8; 64]) -> Result<RotateOutcome, StoreError> {
+        let Some(c) = self.cache.get_mut(key) else { return Ok(RotateOutcome::Rejected) };
+        let Some(rec) = crate::record::AddressRecord::verify(key, record, sig) else {
+            return Ok(RotateOutcome::Rejected);
+        };
         // Адрес Yggdrasil — 32 байта ключа; другой сети этот профиль не знает (ADR-015).
         if rec.kind != crate::record::NetKind::Yggdrasil || rec.addr.len() != 32 {
-            return Ok(false);
+            return Ok(RotateOutcome::Rejected);
         }
         let epoch = rec.epoch;
         if epoch <= c.transport_epoch {
-            return Ok(false);
+            // Подлинное, но не новее известного (R-120): владелец мог восстановиться с
+            // часами позади прошлой смены — вернём ему нашу запись как доказательство.
+            return Ok(RotateOutcome::Stale(self.known_record(key)));
         }
         let tk = hex::encode(&rec.addr);
         db::lock(&self.db).execute(
-            "UPDATE contacts SET transport_key=?1, transport_epoch=?2 WHERE key=?3",
-            rusqlite::params![&tk, epoch as i64, key.as_slice()],
+            "UPDATE contacts SET transport_key=?1, transport_epoch=?2, transport_rec=?3, transport_sig=?4
+             WHERE key=?5",
+            rusqlite::params![&tk, epoch as i64, record, sig.as_slice(), key.as_slice()],
         )?;
         c.transport_key = tk;
         c.transport_epoch = epoch;
-        Ok(true)
+        Ok(RotateOutcome::Applied)
+    }
+
+    /// Принятая подписанная запись адреса контакта (нет — адрес не объявлялся записью v2).
+    pub fn known_record(&self, key: &[u8; 32]) -> Option<crate::record::SignedRecord> {
+        let (bytes, sig): (Option<Vec<u8>>, Option<Vec<u8>>) = db::lock(&self.db)
+            .query_row(
+                "SELECT transport_rec, transport_sig FROM contacts WHERE key=?1",
+                rusqlite::params![key.as_slice()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok()?;
+        Some(crate::record::SignedRecord { bytes: bytes?, sig: sig?.as_slice().try_into().ok()? })
     }
 
     /// Куда слать этому контакту: его текущий транспортный ключ (адрес). Для эпохи 0
@@ -2582,26 +2611,29 @@ mod tests {
         // Подписанное объявление принимается, адрес меняется.
         let tk1 = alice.transport_public(1);
         let r1 = alice.address_record(1);
-        assert!(store.apply_transport_rotate(&k, &r1.bytes, &r1.sig).unwrap());
+        assert_eq!(store.apply_transport_rotate(&k, &r1.bytes, &r1.sig).unwrap(), RotateOutcome::Applied);
         assert_eq!(store.transport_of(&k), Some(tk1));
 
         // Повтор той же (и более старой) эпохи отвергается: иначе перехваченное
         // объявление вернуло бы жертву на брошенный адрес.
-        assert!(!store.apply_transport_rotate(&k, &r1.bytes, &r1.sig).unwrap());
+        // Повтор и старая эпоха — «устарело» с доказательством: нашей записью эпохи 1.
+        let stale = RotateOutcome::Stale(Some(r1.clone()));
+        assert_eq!(store.apply_transport_rotate(&k, &r1.bytes, &r1.sig).unwrap(), stale);
         let r0 = alice.address_record(0);
-        assert!(!store.apply_transport_rotate(&k, &r0.bytes, &r0.sig).unwrap());
+        assert_eq!(store.apply_transport_rotate(&k, &r0.bytes, &r0.sig).unwrap(), stale);
         assert_eq!(store.transport_of(&k), Some(tk1), "адрес не откатился");
 
         // Чужая подпись не проходит, даже с новой эпохой.
         let mallory = Identity::from_seed(&[32u8; 32]).unwrap();
         let fake = mallory.address_record(2);
-        assert!(!store.apply_transport_rotate(&k, &fake.bytes, &fake.sig).unwrap());
+        assert_eq!(store.apply_transport_rotate(&k, &fake.bytes, &fake.sig).unwrap(), RotateOutcome::Rejected);
         assert_eq!(store.transport_of(&k), Some(tk1), "захват адреса не прошёл");
 
         // Персист через переоткрытие: адрес и эпоха переживают перезапуск.
         let s2 = ContactStore::open(shared).unwrap();
         assert_eq!(s2.transport_of(&k), Some(tk1));
         assert_eq!(s2.get(&k).unwrap().transport_epoch, 1);
+        assert_eq!(s2.known_record(&k), Some(r1), "доказательство переживает перезапуск");
     }
 
     #[test]
@@ -2612,7 +2644,7 @@ mod tests {
         let k = stranger.public_key_bytes();
         let r = stranger.address_record(1);
         let mut store = ContactStore::open(db()).unwrap();
-        assert!(!store.apply_transport_rotate(&k, &r.bytes, &r.sig).unwrap());
+        assert_eq!(store.apply_transport_rotate(&k, &r.bytes, &r.sig).unwrap(), RotateOutcome::Rejected);
         assert_eq!(store.transport_of(&k), None);
     }
 
