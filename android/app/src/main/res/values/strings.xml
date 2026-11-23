@@ -1127,6 +1127,10 @@
     <string name="add_camera_hint">Point at the other person’s code</string>
     <string name="add_paste">Paste code</string>
     <string name="add_paste_sub">If the code was sent in a message</string>
+    <string name="add_gallery">From gallery</string>
+    <string name="add_gallery_sub">A photo or screenshot of the code</string>
+    <string name="add_err_noqr">No QR code in the picture</string>
+    <string name="add_err_noqr_sub">The code must be fully visible in the picture.</string>
     <string name="add_show_code">Show my code</string>
     <string name="add_caption">Share the code in person or through any messenger: it holds the key, the network address and the name.</string>
     <string name="add_err_invalid">Not a %1$s code</string>

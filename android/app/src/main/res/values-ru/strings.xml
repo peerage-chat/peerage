@@ -1187,6 +1187,10 @@
     <string name="add_camera_hint">Навести на код собеседника</string>
     <string name="add_paste">Вставить код</string>
     <string name="add_paste_sub">Если код прислали сообщением</string>
+    <string name="add_gallery">Из галереи</string>
+    <string name="add_gallery_sub">Снимок или скриншот кода</string>
+    <string name="add_err_noqr">На снимке нет QR-кода</string>
+    <string name="add_err_noqr_sub">Код должен быть виден на снимке целиком.</string>
     <string name="add_show_code">Показать свой код</string>
     <string name="add_caption">Код передаётся лицом к лицу или любым мессенджером: в нём ключ, адрес в сети и имя.</string>
     <string name="add_err_invalid">Это не код %1$s</string>

@@ -2,6 +2,7 @@ package chat.peerage.ui
 
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -28,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,8 +48,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import chat.peerage.AppModel
 import chat.peerage.CodeInfo
+import chat.peerage.QrImage
 import chat.peerage.R
 import chat.peerage.Tokens
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * «Добавить контакт» (макеты `people/Main`, `Found`, `Errors`, шаг 7i): камера сразу, под ней
@@ -72,6 +78,24 @@ internal fun AddContactScreen(model: AppModel, onMyCode: () -> Unit, onOpenChat:
             model.inspectCode(c) { info = it }
         }
     }
+    // Код со снимка в галерее: прислали картинкой. Разбор — не на главном потоке.
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val text = withContext(Dispatchers.Default) { QrImage.fromUri(ctx, uri) }
+                if (text != null) {
+                    take(text, false)
+                } else {
+                    seen = ""
+                    pasted = false
+                    info = CodeInfo(NO_QR, "", "")
+                }
+            }
+        }
+    }
+    val pickImage = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
     val found = info?.takeIf { it.status == "ok" }
     if (found != null) {
         FoundCode(model, code, found, onSent = onOpenChat) {
@@ -79,9 +103,12 @@ internal fun AddContactScreen(model: AppModel, onMyCode: () -> Unit, onOpenChat:
             code = ""
         }
     } else {
-        ScanCode(model, info, pasted, take, onMyCode, onOpenChat)
+        ScanCode(model, info, pasted, take, pickImage, onMyCode, onOpenChat)
     }
 }
+
+/** Статус ошибки «на снимке из галереи нет QR» — своя, не из разбора кода движком. */
+private const val NO_QR = "noqr"
 
 @Composable
 private fun ScanCode(
@@ -89,6 +116,7 @@ private fun ScanCode(
     error: CodeInfo?,
     pasted: Boolean,
     take: (String, Boolean) -> Unit,
+    onGallery: () -> Unit,
     onMyCode: () -> Unit,
     onOpenChat: (String) -> Unit,
 ) {
@@ -107,6 +135,7 @@ private fun ScanCode(
                 sub = stringResource(R.string.add_paste_sub),
                 divider = false,
             ) { clipboard.getText()?.text?.let { take(it, true) } }
+            NavRow(TablerIcons.Photo, stringResource(R.string.add_gallery), sub = stringResource(R.string.add_gallery_sub), onClick = onGallery)
             NavRow(TablerIcons.Qrcode, stringResource(R.string.add_show_code), onClick = onMyCode)
         }
         Caption(stringResource(R.string.add_caption))
@@ -200,6 +229,7 @@ private fun CodeError(model: AppModel, info: CodeInfo, pasted: Boolean, onOpenCh
         Column(Modifier.weight(1f)) {
             Text(
                 when (info.status) {
+                    NO_QR -> stringResource(R.string.add_err_noqr)
                     "self" -> stringResource(R.string.add_err_self)
                     "newer" -> stringResource(R.string.add_err_newer, stringResource(R.string.app_name))
                     "foreign" -> stringResource(R.string.add_err_foreign)
@@ -212,6 +242,7 @@ private fun CodeError(model: AppModel, info: CodeInfo, pasted: Boolean, onOpenCh
             Text(
                 stringResource(
                     when {
+                        info.status == NO_QR -> R.string.add_err_noqr_sub
                         info.status == "self" -> R.string.add_err_self_sub
                         info.status == "newer" -> R.string.add_err_newer_sub
                         info.status == "foreign" -> R.string.add_err_foreign_sub
