@@ -373,21 +373,18 @@ impl ContactStore {
     ///     адрес Алисы» станет способом увести переписку;
     ///   * эпоха строго новее известной — иначе перехваченное старое объявление
     ///     можно переиграть и вернуть жертву на брошенный (возможно, флудимый) адрес.
-    pub fn apply_transport_rotate(
-        &mut self,
-        key: &[u8; 32],
-        epoch: u32,
-        transport_pub: &[u8; 32],
-        sig: &[u8; 64],
-    ) -> Result<bool, StoreError> {
+    pub fn apply_transport_rotate(&mut self, key: &[u8; 32], record: &[u8], sig: &[u8; 64]) -> Result<bool, StoreError> {
         let Some(c) = self.cache.get_mut(key) else { return Ok(false) };
+        let Some(rec) = crate::record::AddressRecord::verify(key, record, sig) else { return Ok(false) };
+        // Адрес Yggdrasil — 32 байта ключа; другой сети этот профиль не знает (ADR-015).
+        if rec.kind != crate::record::NetKind::Yggdrasil || rec.addr.len() != 32 {
+            return Ok(false);
+        }
+        let epoch = rec.epoch;
         if epoch <= c.transport_epoch {
             return Ok(false);
         }
-        if !crate::identity::verify_transport_rotate(key, epoch, transport_pub, sig) {
-            return Ok(false);
-        }
-        let tk = hex::encode(transport_pub);
+        let tk = hex::encode(&rec.addr);
         db::lock(&self.db).execute(
             "UPDATE contacts SET transport_key=?1, transport_epoch=?2 WHERE key=?3",
             rusqlite::params![&tk, epoch as i64, key.as_slice()],
@@ -2584,22 +2581,21 @@ mod tests {
 
         // Подписанное объявление принимается, адрес меняется.
         let tk1 = alice.transport_public(1);
-        let sig1 = alice.sign_transport_rotate(1, &tk1);
-        assert!(store.apply_transport_rotate(&k, 1, &tk1, &sig1).unwrap());
+        let r1 = alice.address_record(1);
+        assert!(store.apply_transport_rotate(&k, &r1.bytes, &r1.sig).unwrap());
         assert_eq!(store.transport_of(&k), Some(tk1));
 
         // Повтор той же (и более старой) эпохи отвергается: иначе перехваченное
         // объявление вернуло бы жертву на брошенный адрес.
-        assert!(!store.apply_transport_rotate(&k, 1, &tk1, &sig1).unwrap());
-        let tk0_sig = alice.sign_transport_rotate(0, &k);
-        assert!(!store.apply_transport_rotate(&k, 0, &k, &tk0_sig).unwrap());
+        assert!(!store.apply_transport_rotate(&k, &r1.bytes, &r1.sig).unwrap());
+        let r0 = alice.address_record(0);
+        assert!(!store.apply_transport_rotate(&k, &r0.bytes, &r0.sig).unwrap());
         assert_eq!(store.transport_of(&k), Some(tk1), "адрес не откатился");
 
         // Чужая подпись не проходит, даже с новой эпохой.
         let mallory = Identity::from_seed(&[32u8; 32]).unwrap();
-        let fake = mallory.transport_public(2);
-        let fake_sig = mallory.sign_transport_rotate(2, &fake);
-        assert!(!store.apply_transport_rotate(&k, 2, &fake, &fake_sig).unwrap());
+        let fake = mallory.address_record(2);
+        assert!(!store.apply_transport_rotate(&k, &fake.bytes, &fake.sig).unwrap());
         assert_eq!(store.transport_of(&k), Some(tk1), "захват адреса не прошёл");
 
         // Персист через переоткрытие: адрес и эпоха переживают перезапуск.
@@ -2614,10 +2610,9 @@ mod tests {
         // а значит и «смена адреса» — просто чужой ключ.
         let stranger = crate::Identity::from_seed(&[33u8; 32]).unwrap();
         let k = stranger.public_key_bytes();
-        let tk = stranger.transport_public(1);
-        let sig = stranger.sign_transport_rotate(1, &tk);
+        let r = stranger.address_record(1);
         let mut store = ContactStore::open(db()).unwrap();
-        assert!(!store.apply_transport_rotate(&k, 1, &tk, &sig).unwrap());
+        assert!(!store.apply_transport_rotate(&k, &r.bytes, &r.sig).unwrap());
         assert_eq!(store.transport_of(&k), None);
     }
 

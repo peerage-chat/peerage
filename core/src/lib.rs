@@ -19,6 +19,7 @@ pub mod outbox;
 pub mod pad;
 pub mod protocol;
 pub mod ratelimit;
+pub mod record;
 pub mod session;
 pub mod settings;
 pub mod store;

@@ -30,6 +30,29 @@
 
 ---
 
+## 2026-11-23 · Подписанная запись v2; смена адреса несёт её · ХЭШ (бета 8.1)
+
+**Причина:** шаг 8 (`docs/plans/format-freeze.md` 8.1; ADR-015 F2, ADR-016 E3) — подписанное
+объявление адреса не называло сеть (адрес переигрывался в другой сети) и было отдельным
+форматом; адрес, список ящиков и список устройств должны жить в одном.
+
+- **Контракт:** новый `peerage_core::record` — `"peerage:rec:v2" ‖ type ‖ signer ‖ len ‖ body`;
+  `AddressRecord {kind, epoch, addr}` (`bytes`, `sign`, `verify`), `NetKind::Yggdrasil`,
+  `SignedRecord {bytes, sig}`. `Identity::address_record(epoch)` вместо
+  `sign_transport_rotate`; `verify_transport_rotate` и `rotate_msg` (v1) удалены.
+  `Payload::TransportRotate {id, record, sig}` (было `epoch, transport_pub, sig`);
+  `Event::TransportRotate {peer, record, sig}`; `Messenger::send_transport_rotate(peer, &rec)`;
+  `ContactStore::apply_transport_rotate(key, record, sig)` — принимает только адрес
+  Yggdrasil длиной 32.
+- **Поведение:** код обмена v1 (`ик:эпоха:адрес:подпись`) тот же по виду, но подпись — от
+  записи v2 (запись собирается из полей кода). Объявление по-прежнему в бакете текста (M5).
+- **Схема:** без изменений. **Совместимость:** ломается — объявления и коды смены адреса от
+  сборок до этой не проверяются (до раздачи беты; обе стороны обновляются вместе).
+- **Тесты:** `core::record` (5: чужой автор, порча любого байта, длины, чужой вид/подписант,
+  адрес переменной длины), `identity::address_record_carries_this_epochs_transport_key`,
+  `protocol::transport_rotate_roundtrip_and_verifies_by_identity`, стор и
+  `engine/tests/rotate.rs` — на новом формате; фаззинг `fuzz/record` (40 с, ~10 тыс. прогонов).
+
 ## 2026-11-23 · Время живого сообщения не меньше последнего в чате · a8ab6ce (R-119)
 
 **Причина:** R-119 — лента упорядочена по времени, а время ставится по часам телефона; скачок

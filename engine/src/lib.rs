@@ -1624,13 +1624,13 @@ impl Engine {
             hex::encode(self.me_pub)
         } else {
             let tk = self.identity.transport_public(epoch);
-            let sig = self.identity.sign_transport_rotate(epoch, &tk);
+            let rec = self.identity.address_record(epoch);
             format!(
                 "{}:{}:{}:{}",
                 hex::encode(self.me_pub),
                 epoch,
                 hex::encode(tk),
-                hex::encode(sig)
+                hex::encode(rec.sig)
             )
         };
         let name = self.self_name();
@@ -1723,16 +1723,24 @@ impl Engine {
         if parts.len() != 4 {
             return;
         }
+        // Код v1: `эпоха:адрес:подпись` — подпись записи адреса v2 Yggdrasil (8.1);
+        // запись собирается здесь из эпохи и адреса, код v2 повезёт её целиком (8.4).
         let epoch = parts[1].parse::<u32>().unwrap_or(0);
         let tk = parse_key(parts[2]);
         let sig = hex::decode(parts[3])
             .ok()
             .and_then(|s| <[u8; 64]>::try_from(s.as_slice()).ok());
         if let (Some(tk), Some(sig)) = (tk, sig) {
+            let record = peerage_core::record::AddressRecord {
+                kind: peerage_core::record::NetKind::Yggdrasil,
+                epoch,
+                addr: tk.to_vec(),
+            }
+            .bytes();
             let applied = self
                 .contacts
                 .lock_safe()
-                .apply_transport_rotate(ik, epoch, &tk, &sig)
+                .apply_transport_rotate(ik, &record, &sig)
                 .unwrap_or(false);
             if applied {
                 self.refresh_transports();
@@ -1798,7 +1806,6 @@ impl Engine {
 
     fn rotate_transport_blocking(self: &Arc<Self>, recipients: Vec<[u8; 32]>, gap_secs: u64) {
         let epoch = next_epoch(self.transport_epoch(), now());
-        let tk = self.identity.transport_public(epoch);
         log::info!("смена адреса: эпоха {epoch}, пауза офлайн {gap_secs}с");
         *self.rotate_round.lock_safe() = recipients.clone();
 
@@ -1830,14 +1837,14 @@ impl Engine {
         // 4. Рассылаем объявление. Оно надёжное (retry-until-Ack), а тех, кто сейчас
         //    офлайн, догоняем в `announce_rotation_to` при их возвращении.
         self.offline.store(false, Ordering::Relaxed);
-        let sig = self.identity.sign_transport_rotate(epoch, &tk);
+        let rec = self.identity.address_record(epoch);
         // Список «кому ещё не сказали» переживает перезапуск: контакт может
         // отсутствовать неделями, а не узнав нового адреса, он теряет с нами связь
         // навсегда. (Грейс-период старого узла отвергнут — он держал бы старый ключ
         // в сети и отменял весь смысл ротации, см. ADR-007.)
         self.set_rotate_pending(&recipients);
         for peer in &recipients {
-            let _ = self.messenger.send_transport_rotate(peer, epoch, &tk, &sig);
+            let _ = self.messenger.send_transport_rotate(peer, &rec);
         }
         log::info!(
             "смена адреса завершена: {address} (оповещено {})",
@@ -1912,13 +1919,8 @@ impl Engine {
         if epoch == 0 {
             return;
         }
-        let tk = self.identity.transport_public(epoch);
-        let sig = self.identity.sign_transport_rotate(epoch, &tk);
-        if self
-            .messenger
-            .send_transport_rotate(peer, epoch, &tk, &sig)
-            .is_ok()
-        {
+        let rec = self.identity.address_record(epoch);
+        if self.messenger.send_transport_rotate(peer, &rec).is_ok() {
             // Ушло в надёжную отправку — из списка убираем: повторы дальше ведёт
             // сам мессенджер (retry-until-Ack).
             let rest: Vec<[u8; 32]> = {
@@ -4612,16 +4614,8 @@ fn handle_event(
         // проверка подписи ключом личности, и монотонность эпохи. Приняли —
         // немедленно обновляем карту адресов, иначе следующее сообщение уйдёт на
         // покинутый ключ.
-        Event::TransportRotate {
-            peer,
-            epoch,
-            transport_pub,
-            sig,
-        } => {
-            let (Ok(tp), Ok(sg)) = (
-                <[u8; 32]>::try_from(transport_pub.as_slice()),
-                <[u8; 64]>::try_from(sig.as_slice()),
-            ) else {
+        Event::TransportRotate { peer, record, sig } => {
+            let Ok(sg) = <[u8; 64]>::try_from(sig.as_slice()) else {
                 return;
             };
             // Заблокированному новый адрес не записываем: мы не хотим ни слать ему,
@@ -4633,10 +4627,10 @@ fn handle_event(
             let applied = engine
                 .contacts
                 .lock_safe()
-                .apply_transport_rotate(&peer, epoch, &tp, &sg)
+                .apply_transport_rotate(&peer, &record, &sg)
                 .unwrap_or(false);
             if applied {
-                log::info!("контакт {:02x?}… сменил адрес (эпоха {epoch})", &peer[..4],);
+                log::info!("контакт {:02x?}… сменил адрес", &peer[..4]);
                 engine.refresh_transports();
                 push_event(engine, dto::UiEvent::ContactsChanged);
             }

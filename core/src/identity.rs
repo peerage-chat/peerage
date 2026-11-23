@@ -146,14 +146,25 @@ impl Identity {
         SigningKey::from_bytes(&self.transport_seed(epoch)).verifying_key().to_bytes()
     }
 
-    /// Подписать объявление «мой новый адрес — вот этот» ключом ЛИЧНОСТИ.
+    /// Подписанная запись адреса v2 (ADR-015 F2) этой эпохи в Yggdrasil — то, что едет в
+    /// объявлении о смене адреса и в коде обмена.
     ///
     /// Подпись обязательна: без неё объявление превращается в вектор захвата
-    /// («привет, я новый адрес Алисы»). Домен в подписываемых байтах не даёт
-    /// переиспользовать её в другом контексте, номер эпохи — переиграть старую.
-    pub fn sign_transport_rotate(&self, epoch: u32, transport_pub: &[u8; 32]) -> [u8; 64] {
+    /// («привет, я новый адрес Алисы»). Вид сети и номер эпохи — под подписью: адрес одной
+    /// сети не годится для другой, старую эпоху не переиграть.
+    pub fn address_record(&self, epoch: u32) -> crate::record::SignedRecord {
+        crate::record::AddressRecord {
+            kind: crate::record::NetKind::Yggdrasil,
+            epoch,
+            addr: self.transport_public(epoch).to_vec(),
+        }
+        .sign(self)
+    }
+
+    /// Подпись записи v2 ключом личности ([`crate::record`]): байты с доменом уже собраны.
+    pub(crate) fn sign_record(&self, msg: &[u8]) -> [u8; 64] {
         use ed25519_dalek::Signer;
-        self.signing.sign(&rotate_msg(epoch, transport_pub)).to_bytes()
+        self.signing.sign(msg).to_bytes()
     }
 
     // ── Статический ключ сессий 1:1 (ADR-012) ───────────────────────────────
@@ -183,38 +194,6 @@ impl Identity {
     pub fn fingerprint(&self) -> String {
         self.fingerprint_words().join(" ")
     }
-}
-
-/// Домен подписи объявления о смене адреса. Входит в подписываемые байты, чтобы
-/// подпись из одного контекста не годилась в другом (SEC-5, доменное разделение).
-const ROTATE_DOMAIN: &[u8] = b"peerage:transport-rotate:v1";
-
-/// Байты, которые подписывает владелец личности при смене адреса.
-fn rotate_msg(epoch: u32, transport_pub: &[u8; 32]) -> Vec<u8> {
-    let mut m = Vec::with_capacity(ROTATE_DOMAIN.len() + 4 + 32);
-    m.extend_from_slice(ROTATE_DOMAIN);
-    m.extend_from_slice(&epoch.to_be_bytes());
-    m.extend_from_slice(transport_pub);
-    m
-}
-
-/// Проверить объявление о смене адреса: действительно ли владелец `identity_pub`
-/// заявил, что его адрес теперь `transport_pub` в эпохе `epoch`.
-///
-/// Это единственное, что связывает личность с новым адресом, поэтому проверка
-/// обязана быть строгой: сломанная подпись, чужая личность или подменённый номер
-/// эпохи — всё это `false`. Монотонность эпохи проверяет вызывающий: здесь нет
-/// знания о том, какая эпоха уже известна.
-pub fn verify_transport_rotate(
-    identity_pub: &[u8; 32],
-    epoch: u32,
-    transport_pub: &[u8; 32],
-    sig: &[u8; 64],
-) -> bool {
-    use ed25519_dalek::Verifier;
-    let Ok(vk) = VerifyingKey::from_bytes(identity_pub) else { return false };
-    vk.verify(&rotate_msg(epoch, transport_pub), &ed25519_dalek::Signature::from_bytes(sig))
-        .is_ok()
 }
 
 /// Домен подписи статического ключа сессий (ADR-012).
@@ -423,28 +402,11 @@ mod tests {
     }
 
     #[test]
-    fn rotate_announcement_verifies_only_for_its_author_epoch_and_key() {
+    fn address_record_carries_this_epochs_transport_key() {
         let alice = Identity::from_seed(&[9u8; 32]).unwrap();
-        let mallory = Identity::from_seed(&[10u8; 32]).unwrap();
-        let tk = alice.transport_public(3);
-        let sig = alice.sign_transport_rotate(3, &tk);
-
-        assert!(verify_transport_rotate(&alice.public_key_bytes(), 3, &tk, &sig));
-        // Чужая личность не может выдать свой адрес за адрес Алисы — иначе
-        // объявление становилось бы вектором захвата контакта.
-        assert!(!verify_transport_rotate(&mallory.public_key_bytes(), 3, &tk, &sig));
-        // Ни номер эпохи, ни объявляемый ключ подменить нельзя: оба под подписью.
-        assert!(!verify_transport_rotate(&alice.public_key_bytes(), 4, &tk, &sig));
-        assert!(!verify_transport_rotate(
-            &alice.public_key_bytes(),
-            3,
-            &mallory.transport_public(3),
-            &sig,
-        ));
-        // Битая подпись — не «почти верно», а нет.
-        let mut broken = sig;
-        broken[0] ^= 1;
-        assert!(!verify_transport_rotate(&alice.public_key_bytes(), 3, &tk, &broken));
+        let r = alice.address_record(3);
+        let got = crate::record::AddressRecord::verify(&alice.public_key_bytes(), &r.bytes, &r.sig).unwrap();
+        assert_eq!((got.epoch, got.addr), (3, alice.transport_public(3).to_vec()));
     }
 
     /// Набор на пару одинаков на обоих телефонах (порядок ключей не важен) и

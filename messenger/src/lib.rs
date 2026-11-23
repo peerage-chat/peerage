@@ -212,7 +212,7 @@ pub enum Event {
     /// теперь `transport_pub`. Подпись уже проверена приёмным слоем (иначе пакет не
     /// прошёл бы анти-спуфинг), но применять её должен верхний слой: монотонность
     /// эпохи и запись в стор — его зона.
-    TransportRotate { peer: PeerKey, epoch: u32, transport_pub: Vec<u8>, sig: Vec<u8> },
+    TransportRotate { peer: PeerKey, record: Vec<u8>, sig: Vec<u8> },
 }
 
 /// Метаданные вложения для карточки: их видно ДО скачивания байтов, поэтому
@@ -1287,24 +1287,18 @@ impl Messenger {
     /// контакт, отсутствовавший в момент смены, обязан узнать новый адрес по
     /// возвращении — иначе связь с ним рвётся навсегда.
     ///
-    /// `sig` строит владелец личности ([`peerage_core::Identity::sign_transport_rotate`]):
+    /// Запись строит владелец личности ([`peerage_core::Identity::address_record`]):
     /// подпись — единственное, что связывает старую личность с новым адресом.
     /// `notify=false` — это служебное объявление, в UI как «доставлено сообщение»
     /// оно показываться не должно.
     pub fn send_transport_rotate(
         &self,
         peer: &PeerKey,
-        epoch: u32,
-        transport_pub: &[u8; 32],
-        sig: &[u8; 64],
+        rec: &peerage_core::record::SignedRecord,
     ) -> Result<u64, MessengerError> {
-        let (tp, sg) = (transport_pub.to_vec(), sig.to_vec());
-        self.shared.send_reliable(peer, false, move |id| Payload::TransportRotate {
-            id,
-            epoch,
-            transport_pub: tp,
-            sig: sg,
-        })
+        let (record, sig) = (rec.bytes.clone(), rec.sig.to_vec());
+        self.shared
+            .send_reliable(peer, false, move |id| Payload::TransportRotate { id, record, sig })
     }
 
     /// Отправить медиа-СООБЩЕНИЕ чата (M2): ссылка на блоб по хэшу. Надёжно
@@ -1768,11 +1762,11 @@ fn receive_loop(shared: Arc<Shared>) {
         let bound = shared.is_bound(&from, &src);
         let self_authenticating = matches!(
             &payload,
-            Payload::TransportRotate { epoch, transport_pub, sig, .. }
-                if transport_pub.as_slice() == src.as_slice()
-                    && <[u8; 64]>::try_from(sig.as_slice())
-                        .map(|s| peerage_core::identity::verify_transport_rotate(&from, *epoch, &src, &s))
-                        .unwrap_or(false)
+            Payload::TransportRotate { record, sig, .. }
+                if <[u8; 64]>::try_from(sig.as_slice())
+                    .ok()
+                    .and_then(|s| peerage_core::record::AddressRecord::verify(&from, record, &s))
+                    .is_some_and(|r| r.addr.as_slice() == src.as_slice())
         );
         if !bound && !self_authenticating {
             continue;
@@ -1957,13 +1951,8 @@ fn receive_loop(shared: Arc<Shared>) {
             // без этого пакет не прошёл бы анти-спуфинг, — но решение «принять и
             // запомнить» принимает верхний слой: только он знает, какая эпоха уже
             // известна, и он же перезапишет стор и карту адресов.
-            Payload::TransportRotate { id, epoch, transport_pub, sig } => {
-                shared.emit(Event::TransportRotate {
-                    peer: peer_id,
-                    epoch,
-                    transport_pub,
-                    sig,
-                });
+            Payload::TransportRotate { id, record, sig } => {
+                shared.emit(Event::TransportRotate { peer: peer_id, record, sig });
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             // Forward-compat (ADR-006): будущий тип, который этот клиент не знает —

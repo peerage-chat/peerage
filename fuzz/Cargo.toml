@@ -61,3 +61,10 @@ path = "fuzz_targets/mention.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "record"
+path = "fuzz_targets/record.rs"
+test = false
+doc = false
+bench = false

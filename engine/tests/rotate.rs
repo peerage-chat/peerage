@@ -81,9 +81,8 @@ fn contact_rotation_moves_address_but_keeps_identity() {
 
     // Объявление подписано ключом личности и приходит с нового адреса: получатель
     // не знает эту связку заранее, её доказывает подпись.
-    let sig = alice.sign_transport_rotate(1, &tk1);
     a_msgr
-        .send_transport_rotate(&b_key, 1, &tk1, &sig)
+        .send_transport_rotate(&b_key, &alice.address_record(1))
         .expect("объявление ушло");
 
     assert!(
@@ -206,8 +205,7 @@ fn blocked_contact_cannot_escape_by_rotating() {
     let tk1 = mallory.transport_public(1);
     let (m_msgr, _rx) =
         Messenger::start_with_transport(mallory.clone(), net.endpoint(tk1), Config::default());
-    let sig = mallory.sign_transport_rotate(1, &tk1);
-    let _ = m_msgr.send_transport_rotate(&b_key, 1, &tk1, &sig);
+    let _ = m_msgr.send_transport_rotate(&b_key, &mallory.address_record(1));
     std::thread::sleep(Duration::from_secs(2));
     assert_eq!(
         transport_of(&b, &m_key),
@@ -249,8 +247,7 @@ fn forged_rotation_from_another_identity_is_ignored() {
     let m_tk = mallory.transport_public(1);
     let (m_msgr, _rx) =
         Messenger::start_with_transport(mallory.clone(), net.endpoint(m_tk), Config::default());
-    let sig = mallory.sign_transport_rotate(1, &m_tk);
-    let _ = m_msgr.send_transport_rotate(&b_key, 1, &m_tk, &sig);
+    let _ = m_msgr.send_transport_rotate(&b_key, &mallory.address_record(1));
 
     std::thread::sleep(Duration::from_secs(2));
     assert_eq!(transport_of(&b, &a_key), "", "адрес Алисы не подменён");

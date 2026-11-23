@@ -289,9 +289,9 @@ pub enum Payload {
     /// возвращении, иначе связь с ним теряется навсегда.
     TransportRotate {
         id: u64,
-        epoch: u32,
+        /// Подписанная запись адреса v2 ([`crate::record`]).
         #[serde(with = "serde_bytes")]
-        transport_pub: Vec<u8>,
+        record: Vec<u8>,
         #[serde(with = "serde_bytes")]
         sig: Vec<u8>,
     },
@@ -491,31 +491,20 @@ mod tests {
     fn transport_rotate_roundtrip_and_verifies_by_identity() {
         let alice = Identity::generate();
         let bob = Identity::generate();
-        let tk = alice.transport_public(5);
-        let sig = alice.sign_transport_rotate(5, &tk);
-        let payload = Payload::TransportRotate {
-            id: 77,
-            epoch: 5,
-            transport_pub: tk.to_vec(),
-            sig: sig.to_vec(),
-        };
+        let r = alice.address_record(5);
+        let payload = Payload::TransportRotate { id: 77, record: r.bytes.clone(), sig: r.sig.to_vec() };
         let decoded = roundtrip(&payload);
         assert_eq!(decoded, payload);
 
-        let Payload::TransportRotate { epoch, transport_pub, sig, .. } = decoded else {
+        let Payload::TransportRotate { record, sig, .. } = decoded else {
             panic!("не тот вариант");
         };
-        let tp = <[u8; 32]>::try_from(transport_pub.as_slice()).unwrap();
         let sg = <[u8; 64]>::try_from(sig.as_slice()).unwrap();
-        let from = alice.public_key_bytes();
-        assert!(crate::identity::verify_transport_rotate(&from, epoch, &tp, &sg));
+        use crate::record::AddressRecord;
+        let got = AddressRecord::verify(&alice.public_key_bytes(), &record, &sg).unwrap();
+        assert_eq!((got.epoch, got.addr), (5, alice.transport_public(5).to_vec()));
         // Тот же пакет, приписанный другой личности, не проходит.
-        assert!(!crate::identity::verify_transport_rotate(
-            &bob.public_key_bytes(),
-            epoch,
-            &tp,
-            &sg
-        ));
+        assert!(AddressRecord::verify(&bob.public_key_bytes(), &record, &sg).is_none());
     }
 
     #[test]
@@ -625,7 +614,7 @@ mod tests {
             // обычного сообщения — флудер не видит по проводу, что жертва прямо
             // сейчас уходит на новый адрес.
             enc(&Payload::TransportRotate {
-                id: 14, epoch: 7, transport_pub: vec![3u8; 32], sig: vec![4u8; 64],
+                id: 14, record: crate::Identity::from_seed(&[1u8; 32]).unwrap().address_record(7).bytes, sig: vec![4u8; 64],
             }),
             // msg1 и msg2 рукопожатия (ADR-012).
             crate::session::APP_PACKET,
