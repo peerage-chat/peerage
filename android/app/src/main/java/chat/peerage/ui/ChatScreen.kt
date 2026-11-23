@@ -992,7 +992,8 @@ internal fun MessageInput(
             ),
             verticalAlignment = Alignment.Bottom,
         ) {
-            // Поле ввода (макет `chatact/Main`): скрепка и эмодзи ВНУТРИ, ступень group.
+            // Поле ввода (макет `chatact/Main`): эмодзи и скрепка ВНУТРИ, ступень group. Эмодзи
+            // слева, скрепка справа — как в Telegram, к которому привыкла рука.
             Row(
                 Modifier.weight(1f).heightIn(min = Tokens.Size.composer)
                     .clip(RoundedCornerShape(Tokens.Radius.field)).background(Tokens.Colors.group),
@@ -1014,9 +1015,8 @@ internal fun MessageInput(
                         if (emojiOpen && attachOpen) closeAttach()
                     }
                 }
-                if (editing) {
-                    emojiIcon()
-                } else {
+                emojiIcon()
+                val attachIcon = @Composable {
                     PillIcon(
                         TablerIcons.Paperclip,
                         stringResource(R.string.cd_attach),
@@ -1051,7 +1051,7 @@ internal fun MessageInput(
                         }
                     },
                 )
-                if (!editing) emojiIcon()
+                if (!editing) attachIcon()
             }
             Spacer(Modifier.width(Tokens.Space.s))
             // Отправка (есть текст) / голосовое удержанием (поле пустое).
