@@ -411,13 +411,30 @@ fn failed_rotation_falls_back_to_the_old_address() {
     a.add_contact(&b_key, "Боб");
     b.add_contact(&a_key, "Алиса");
 
-    // Узел новой эпохи не поднимается; прежний (ключ личности) — поднимается.
+    // Сначала удачная смена: у Алисы — адрес эпохи E, и Боб его знает. Ключ личности
+    // адресом не бывает (ADR-015 F1), «прежний адрес» — всегда адрес прошлой смены.
+    let net_any = net.clone();
+    a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
+        let key = peerage_core::Identity::from_seed(seed)
+            .ok()?
+            .public_key_bytes();
+        Some(net_any.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
+    }));
+    a.rotate_transport(vec![b_key], 0);
+    assert!(
+        wait(15, || !transport_of(&b, &a_key).is_empty()),
+        "Боб узнал адрес эпохи E"
+    );
+    let e = a.transport_epoch();
+    let old = alice.transport_public(e);
+
+    // Узел новой эпохи не поднимается; прежний (эпохи E) — поднимается.
     let net_for_factory = net.clone();
     a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
         let key = peerage_core::Identity::from_seed(seed)
             .ok()?
             .public_key_bytes();
-        (key == a_key).then(|| {
+        (key == old).then(|| {
             net_for_factory.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>
         })
     }));
@@ -438,7 +455,7 @@ fn failed_rotation_falls_back_to_the_old_address() {
     );
     assert_eq!(failed.unwrap()["online"], true);
     assert!(!a.is_offline(), "вернулись в сеть");
-    assert_eq!(a.transport_epoch(), 0, "адрес прежний");
+    assert_eq!(a.transport_epoch(), e, "адрес прежний");
 
     b.send_text(&a_key, "ты здесь?");
     assert!(
@@ -512,4 +529,58 @@ fn restored_identity_announces_its_new_address() {
     );
     a2.shutdown();
     b.shutdown();
+}
+
+/// Оба сменили адрес, не услышав друг друга (или объявление потерялось): связь
+/// восстанавливается кодом — код известного контакта (добавление заново или сверка по
+/// коду) несёт подписанную запись адреса, и она применяется, если эпоха новее.
+#[test]
+fn known_contacts_code_carries_its_new_address() {
+    let net = LoopbackNet::new();
+    let alice = id(72);
+    let bob_id = id(73);
+    let (a_key, b_key) = (alice.public_key_bytes(), bob_id.public_key_bytes());
+    let a = Engine::start_with_transport(tmpdir("a-code"), alice.clone(), net.endpoint(a_key))
+        .unwrap()
+        .engine;
+    let b = Engine::start_with_transport(tmpdir("b-code"), bob_id, net.endpoint(b_key))
+        .unwrap()
+        .engine;
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Алиса");
+
+    // Алиса меняет адрес и никому не говорит.
+    let net_any = net.clone();
+    a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
+        let key = peerage_core::Identity::from_seed(seed)
+            .ok()?
+            .public_key_bytes();
+        Some(net_any.endpoint(key) as std::sync::Arc<dyn peerage_messenger::Transport>)
+    }));
+    a.rotate_transport(vec![], 0);
+    assert!(wait(10, || a.transport_epoch() > 0 && !a.is_offline()));
+    let new_addr = hex::encode(alice.transport_public(a.transport_epoch()));
+    assert_eq!(transport_of(&b, &a_key), "", "Боб нового адреса не знает");
+
+    // Боб сканирует её код как сверку — адрес применяется.
+    assert_eq!(b.verify_by_code(&a_key, &a.my_contact_code()), "match");
+    assert_eq!(transport_of(&b, &a_key), new_addr);
+
+    // И добавление заново (код известного контакта) — тоже.
+    a.rotate_transport(vec![], 0);
+    assert!(wait(10, || hex::encode(
+        alice.transport_public(a.transport_epoch())
+    ) != new_addr
+        && !a.is_offline()));
+    assert_eq!(b.request_contact(&a.my_contact_code(), "", ""), "known");
+    assert_eq!(
+        transport_of(&b, &a_key),
+        hex::encode(alice.transport_public(a.transport_epoch()))
+    );
+
+    b.send_text(&a_key, "нашёл тебя");
+    assert!(
+        wait(20, || a.history_json(&b_key).contains("нашёл тебя")),
+        "связь жива"
+    );
 }

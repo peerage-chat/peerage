@@ -1674,6 +1674,11 @@ impl Engine {
         let (parts, code_name) = split_code(code);
         let key = parse_key(parts[0]);
         let status = self.code_status(key.as_ref());
+        // Код уже известного контакта — его подписанный адрес всё равно в дело: так
+        // восстанавливается связь, если оба сменили адрес, не услышав друг друга.
+        if let (Some(ik), "known") = (key, status) {
+            self.apply_code_address(&ik, &parts);
+        }
         let (Some(ik), "ok") = (key, status) else {
             return status;
         };
@@ -2124,6 +2129,7 @@ impl Engine {
             Some(ik) if ik != *key => "mismatch",
             Some(_) => {
                 self.set_verified(key, Some(VerifyHow::Code));
+                self.apply_code_address(key, &parts); // адрес из кода — свежее известного?
                 "match"
             }
         }
@@ -3556,7 +3562,14 @@ fn call_params(audio: &AudioSettings) -> String {
 struct TransportMeta {
     #[serde(default)]
     epoch: u32,
+    /// Вывод адреса из seed: 2 — с видом сети в метке (ADR-015 F1); нет — старый, где
+    /// эпоха 0 была самим ключом личности.
+    #[serde(default)]
+    v: u8,
 }
+
+/// Текущий вывод адреса ([`TransportMeta::v`]).
+const ADDRESS_V: u8 = 2;
 
 fn transport_meta_path(dir: &Path) -> PathBuf {
     dir.join("transport.json")
@@ -3580,19 +3593,37 @@ pub fn begin_restored_epoch(dir: &Path) -> u32 {
     epoch
 }
 
-/// Текущая эпоха адреса. Нет файла = 0, то есть адрес совпадает с ключом личности.
+/// Текущая эпоха адреса. Нет файла = 0 (адреса ещё не было — см. [`upgrade_address`]).
 fn load_transport_epoch(dir: &Path) -> u32 {
+    load_transport_meta(dir).epoch
+}
+
+fn load_transport_meta(dir: &Path) -> TransportMeta {
     std::fs::read(transport_meta_path(dir))
         .ok()
         .and_then(|b| serde_json::from_slice::<TransportMeta>(&b).ok())
-        .map(|m| m.epoch)
-        .unwrap_or(0)
+        .unwrap_or_default()
 }
 
 fn save_transport_epoch(dir: &Path, epoch: u32) {
-    if let Ok(v) = serde_json::to_vec(&TransportMeta { epoch }) {
+    let meta = TransportMeta {
+        epoch,
+        v: ADDRESS_V,
+    };
+    if let Ok(v) = serde_json::to_vec(&meta) {
         let _ = peerage_core::fsutil::write_atomic(&transport_meta_path(dir), v);
     }
+}
+
+/// Адрес выведен по-старому или его ещё не было (новая установка): поднять на эпохе «сейчас»
+/// с текущим выводом — тем же путём, что восстановление по 24 словам (7g). `true` — адрес
+/// сменился, контактам нужно объявление ([`Engine::announce_later`]).
+pub fn upgrade_address(dir: &Path) -> bool {
+    if load_transport_meta(dir).v >= ADDRESS_V {
+        return false;
+    }
+    begin_restored_epoch(dir);
+    true
 }
 
 fn public_peer_uris() -> impl Iterator<Item = &'static str> {
@@ -5014,22 +5045,35 @@ impl Engine {
         // Не подошёл ключ — не стираем и не заводим новую личность молча: это
         // решает человек на экране восстановления (R-029).
         let identity = load_identity(&dir)?;
-        // ADR-007: узел поднимается на ТРАНСПОРТНОМ ключе текущей эпохи. Эпоха 0 —
-        // это сам ключ личности, поэтому у тех, кто адрес не менял, ничего не
-        // меняется.
+        // ADR-007: узел поднимается на ТРАНСПОРТНОМ ключе текущей эпохи. Адрес старого
+        // вывода (или его ещё нет) — сначала переезд на текущий (ADR-015 F1).
+        let upgraded = upgrade_address(&dir);
         let epoch = load_transport_epoch(&dir);
         let node = Node::start(&identity.transport_seed(epoch)).map_err(|e| e.to_string())?;
         let address = node.address();
         for uri in public_peer_uris() {
             let _ = node.add_peer(uri);
         }
-        Self::start_inner(
+        let started = Self::start_inner(
             dir,
             identity,
             Arc::new(node),
             address,
             peerage_messenger::Config::default(),
-        )
+        )?;
+        if upgraded {
+            // Контакты знают старый адрес: каждому — объявление при первой встрече.
+            let all: Vec<[u8; 32]> = started
+                .engine
+                .contacts
+                .lock_safe()
+                .list()
+                .iter()
+                .filter_map(|c| parse_key(&c.key))
+                .collect();
+            started.engine.announce_later(&all);
+        }
+        Ok(started)
     }
 
     /// Поднять движок поверх ПРОИЗВОЛЬНОГО транспорта (loopback в интеграционных
@@ -5215,6 +5259,30 @@ mod presence_tests {
         );
         assert_eq!(next_epoch(7, -5), 8, "отрицательное время");
         assert_eq!(next_epoch(u32::MAX, 0), u32::MAX);
+    }
+
+    /// ADR-015 F1: адрес старого вывода (или новая установка) при запуске переезжает на
+    /// эпоху «сейчас» с текущим выводом — один раз.
+    #[test]
+    fn old_address_derivation_upgrades_once() {
+        let dir = std::env::temp_dir().join(format!("peerage-upg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Старая установка: эпоха 5 без версии вывода.
+        std::fs::write(transport_meta_path(&dir), br#"{"epoch":5}"#).unwrap();
+        assert!(upgrade_address(&dir), "старый вывод — переезд");
+        let e = load_transport_epoch(&dir);
+        assert!(e > 5 && i64::from(e) >= now() - 5, "эпоха — сейчас: {e}");
+        assert!(!upgrade_address(&dir), "второй запуск — уже на текущем");
+        assert_eq!(load_transport_epoch(&dir), e);
+        // Новая установка: файла нет.
+        std::fs::remove_file(transport_meta_path(&dir)).unwrap();
+        assert!(upgrade_address(&dir));
+        assert!(
+            load_transport_epoch(&dir) > 0,
+            "эпохи 0 у живого адреса не бывает"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn k(b: u8) -> [u8; 32] {

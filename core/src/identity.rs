@@ -129,16 +129,14 @@ impl Identity {
 
     /// Seed транспортного ключа для эпохи `epoch` (узел Yggdrasil поднимается на нём).
     ///
-    /// **Эпоха 0 — сама идентичность** (`TK_0 == IK`): пока пользователь не менял
-    /// адрес, всё в точности как раньше, миграция не нужна. Дальше — доменный
-    /// под-ключ, то есть детерминированно из того же seed: восстановление из
-    /// мнемоники продолжает работать (seed + номер эпохи → тот же адрес), отдельный
-    /// секрет хранить не надо.
+    /// Доменный под-ключ с видом сети в метке (ADR-015 F1): детерминированно из seed —
+    /// восстановление из мнемоники даёт тот же адрес эпохи, отдельный секрет не нужен; вид
+    /// сети в метке — адреса разных сетей одной личности не связаны. Ключ личности адресом
+    /// не бывает ни на какой эпохе (`TK_0 == IK` убрано). До списка устройств (ADR-010)
+    /// секрет устройства — сам seed.
     pub fn transport_seed(&self, epoch: u32) -> [u8; SEED_LEN] {
-        if epoch == 0 {
-            return self.seed();
-        }
-        self.derive_subkey(&format!("peerage:transport:v1/{epoch}"))
+        let kind = crate::record::NetKind::Yggdrasil as u8;
+        self.derive_subkey(&format!("peerage:transport:v2/{kind}/{epoch}"))
     }
 
     /// Публичный транспортный ключ эпохи — то, что видит сеть как наш адрес.
@@ -377,13 +375,14 @@ mod tests {
         assert_ne!(a1, other.derive_subkey("peerage:blob-at-rest:v1"));
     }
 
+    /// ADR-015 F1: ключ личности не появляется в сети адресом ни на какой эпохе — даже на 0.
     #[test]
-    fn transport_epoch_zero_is_the_identity_itself() {
-        // Обратная совместимость: пока адрес не меняли, узел поднимается на том же
-        // ключе, что и раньше. Иначе существующие установки «переехали» бы молча.
+    fn no_epoch_address_is_the_identity() {
         let id = Identity::from_seed(&[7u8; 32]).unwrap();
-        assert_eq!(id.transport_seed(0), id.seed());
-        assert_eq!(id.transport_public(0), id.public_key_bytes());
+        for epoch in [0, 1, 1_700_000_000, u32::MAX] {
+            assert_ne!(id.transport_seed(epoch), id.seed(), "эпоха {epoch}");
+            assert_ne!(id.transport_public(epoch), id.public_key_bytes(), "эпоха {epoch}");
+        }
     }
 
     #[test]
