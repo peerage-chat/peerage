@@ -93,6 +93,8 @@ enum Rec {
         version: u32,
         created: i64,
         me: String,
+        /// Вид сети профиля (ADR-015 F3): копия одной сети в профиль другой не ложится.
+        kind: u8,
         parts: Parts,
     },
     // Именованные поля, а не newtype: внутренне тегированный enum (`tag = "rec"`)
@@ -314,6 +316,7 @@ impl Engine {
             version: 1,
             created: crate::now(),
             me: hex::encode(self.me_pub),
+            kind: peerage_core::record::NetKind::Yggdrasil as u8,
             parts,
         })?;
 
@@ -513,7 +516,11 @@ impl Engine {
                     let rec: Rec = serde_json::from_slice(&bytes)
                         .map_err(|e| BackupError::Parse(e.to_string()))?;
                     match rec {
-                        Rec::Manifest { me: src, .. } => {
+                        Rec::Manifest { me: src, kind, .. } => {
+                            // Копия профиля другой сети — чужая, как копия чужой личности.
+                            if kind != peerage_core::record::NetKind::Yggdrasil as u8 {
+                                return Err(BackupError::Foreign);
+                            }
                             src_me = hex::decode(&src)
                                 .ok()
                                 .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());

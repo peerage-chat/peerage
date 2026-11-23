@@ -110,16 +110,23 @@ pub struct Contact {
     /// трафик, полностью отдав блоб. Повышает его бюджет ресурсов (`budget::Tier`).
     #[serde(default)]
     pub helpful: u32,
-    /// hex ТРАНСПОРТНОГО ключа контакта — адреса, по которому он сейчас доступен
-    /// (ADR-007). Пусто = эпоха 0, адрес совпадает с ключом личности.
+    /// Подписанная запись адреса контакта v2 (hex) и её подпись (hex) — единственный
+    /// источник его адреса (ADR-015 F3): вид сети, эпоха, адрес. Пусто — адрес неизвестен.
+    /// Едет и в копии данных: запись подписана самим контактом, импорт её проверяет.
     ///
     /// Личность (`key`) не меняется никогда: на ней fingerprint, верификация и
     /// членство в группах. Адрес — расходник: контакт может сменить его, чтобы
     /// оборвать чужой флуд, и прислать подписанное объявление.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub address_record: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub address_sig: String,
+    /// Выведено из проверенной [`Self::address_record`] (не хранится): hex адреса
+    /// Yggdrasil, по которому контакт доступен; пусто — адрес неизвестен.
+    #[serde(default, skip_deserializing)]
     pub transport_key: String,
-    /// Номер эпохи адреса. Растёт строго — старое объявление не переиграет новое.
-    #[serde(default)]
+    /// Эпоха адреса из записи. Растёт строго — старое объявление не переиграет новое.
+    #[serde(default, skip_deserializing)]
     pub transport_epoch: u32,
     /// Мы послали запрос в контакты и ждём принятия (7i): наши сообщения ему лежат в
     /// очереди, кроме самого запроса. Снимается его `ContactAccept` или встречным запросом.
@@ -167,16 +174,36 @@ impl VerifyHow {
 }
 
 impl Contact {
-    /// Куда слать: транспортный ключ, если контакт объявлял смену адреса, иначе
-    /// ключ личности (эпоха 0). Одна точка правды — чтобы «слать по личности»
-    /// не размазалось по коду и не пережило первую же ротацию.
-    pub fn transport_or_identity(&self) -> String {
-        if self.transport_key.is_empty() {
-            self.key.clone()
-        } else {
-            self.transport_key.clone()
+    /// Принять подписанную запись адреса: проверить подпись этой личности и вид сети,
+    /// вывести адрес и эпоху. Неверная — адреса нет. Одна точка для загрузки, объявления
+    /// и копии данных.
+    fn set_address(&mut self, record: &[u8], sig: &[u8]) -> bool {
+        let ok = verified_address(&self.key, record, sig);
+        if let Some(rec) = &ok {
+            self.address_record = hex::encode(record);
+            self.address_sig = hex::encode(sig);
+            self.transport_key = hex::encode(&rec.addr);
+            self.transport_epoch = rec.epoch;
         }
+        ok.is_some()
     }
+
+    /// Запись и подпись в байтах (для доказательства R-120).
+    fn signed_address(&self) -> Option<crate::record::SignedRecord> {
+        Some(crate::record::SignedRecord {
+            bytes: hex::decode(&self.address_record).ok()?,
+            sig: hex::decode(&self.address_sig).ok()?.as_slice().try_into().ok()?,
+        })
+    }
+}
+
+/// Адрес Yggdrasil из записи, подписанной личностью `key_hex`: другой сети этот профиль не
+/// знает (ADR-015), у Yggdrasil адрес — 32 байта ключа.
+fn verified_address(key_hex: &str, record: &[u8], sig: &[u8]) -> Option<crate::record::AddressRecord> {
+    let key: [u8; 32] = hex::decode(key_hex).ok()?.as_slice().try_into().ok()?;
+    let sig: [u8; 64] = sig.try_into().ok()?;
+    let rec = crate::record::AddressRecord::verify(&key, record, &sig)?;
+    (rec.kind == crate::record::NetKind::Yggdrasil && rec.addr.len() == 32).then_some(rec)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -202,7 +229,7 @@ impl ContactStore {
         let conn = db::lock(&self.db);
         let mut stmt = conn.prepare(
             "SELECT key, name, fingerprint, added, verified, profile_name, avatar_id, helpful, \
-             transport_key, transport_epoch, verified_at, verified_how, awaiting FROM contacts",
+             transport_rec, transport_sig, verified_at, verified_how, awaiting FROM contacts",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -214,17 +241,17 @@ impl ContactStore {
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
                 row.get::<_, i64>(7)?,
-                row.get::<_, String>(8)?,
-                row.get::<_, i64>(9)?,
+                row.get::<_, Option<Vec<u8>>>(8)?,
+                row.get::<_, Option<Vec<u8>>>(9)?,
                 row.get::<_, i64>(10)?,
                 row.get::<_, String>(11)?,
                 row.get::<_, i64>(12)?,
             ))
         })?;
         for row in rows {
-            let (kb, name, fp, added, ver, profile_name, avatar_id, helpful, tk, tepoch, vat, vhow, awaiting) = row?;
+            let (kb, name, fp, added, ver, profile_name, avatar_id, helpful, rec, sig, vat, vhow, awaiting) = row?;
             if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
-                self.cache.insert(key, Contact {
+                let mut c = Contact {
                     key: hex::encode(key),
                     name,
                     fingerprint: fp,
@@ -235,10 +262,16 @@ impl ContactStore {
                     profile_name,
                     avatar_id,
                     helpful: helpful.max(0) as u32,
-                    transport_key: tk,
-                    transport_epoch: tepoch.max(0) as u32,
+                    address_record: String::new(),
+                    address_sig: String::new(),
+                    transport_key: String::new(),
+                    transport_epoch: 0,
                     awaiting: awaiting != 0,
-                });
+                };
+                if let (Some(rec), Some(sig)) = (rec, sig) {
+                    c.set_address(&rec, &sig);
+                }
+                self.cache.insert(key, c);
             }
         }
         Ok(())
@@ -271,6 +304,8 @@ impl ContactStore {
             helpful: 0,
             // Новый контакт живёт в эпохе 0: адрес = ключ личности, пока он сам не
             // объявит смену (ADR-007).
+            address_record: String::new(),
+            address_sig: String::new(),
             transport_key: String::new(),
             transport_epoch: 0,
             awaiting,
@@ -298,31 +333,40 @@ impl ContactStore {
     /// UI. Цена решения — после законного восстановления отпечатки сверяют заново;
     /// это ровно та работа, которую верификация и обозначает.
     ///
-    /// Транспортный ключ (адрес, ADR-007) тоже **не** переносится: он мог
-    /// протухнуть за время, пока копия лежала, а слать на мёртвый адрес хуже, чем на
-    /// ключ личности — с него связь восстановится сама при первом же объявлении.
+    /// Адрес переносится **подписанной записью** контакта: подпись — его, импорт её
+    /// проверяет; чужая или битая — адреса нет. Ключ личности адресом не бывает (8.2), так
+    /// что без записи восстановленный телефон контакта не нашёл бы. Запись могла устареть,
+    /// пока копия лежала, — тогда контакт ответит на наше объявление отказом с новой
+    /// записью (R-120) или вернётся по коду.
     pub fn import_contact(&mut self, c: &Contact) -> Result<bool, StoreError> {
         let key = decode_key(&c.key)?;
         if self.cache.contains_key(&key) {
             return Ok(false);
         }
-        db::lock(&self.db).execute(
-            "INSERT OR IGNORE INTO contacts
-                 (key, name, fingerprint, added, verified, profile_name, avatar_id, helpful, awaiting)
-             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8)",
-            rusqlite::params![
-                key.as_slice(), &c.name, &c.fingerprint, c.added,
-                &c.profile_name, &c.avatar_id, c.helpful as i64, c.awaiting as i64,
-            ],
-        )?;
-        self.cache.insert(key, Contact {
+        let mut new = Contact {
             verified: false,
             verified_at: 0,
             verified_how: None,
+            address_record: String::new(),
+            address_sig: String::new(),
             transport_key: String::new(),
             transport_epoch: 0,
             ..c.clone()
-        });
+        };
+        let (rec, sig) = (hex::decode(&c.address_record).unwrap_or_default(), hex::decode(&c.address_sig).unwrap_or_default());
+        let addressed = new.set_address(&rec, &sig);
+        db::lock(&self.db).execute(
+            "INSERT OR IGNORE INTO contacts
+                 (key, name, fingerprint, added, verified, profile_name, avatar_id, helpful, awaiting,
+                  transport_rec, transport_sig)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                key.as_slice(), &c.name, &c.fingerprint, c.added,
+                &c.profile_name, &c.avatar_id, c.helpful as i64, c.awaiting as i64,
+                addressed.then_some(&rec), addressed.then_some(&sig),
+            ],
+        )?;
+        self.cache.insert(key, new);
         Ok(true)
     }
 
@@ -387,49 +431,31 @@ impl ContactStore {
     ///     можно переиграть и вернуть жертву на брошенный (возможно, флудимый) адрес.
     pub fn apply_transport_rotate(&mut self, key: &[u8; 32], record: &[u8], sig: &[u8; 64]) -> Result<RotateOutcome, StoreError> {
         let Some(c) = self.cache.get_mut(key) else { return Ok(RotateOutcome::Rejected) };
-        let Some(rec) = crate::record::AddressRecord::verify(key, record, sig) else {
+        let Some(rec) = verified_address(&c.key, record, sig) else {
             return Ok(RotateOutcome::Rejected);
         };
-        // Адрес Yggdrasil — 32 байта ключа; другой сети этот профиль не знает (ADR-015).
-        if rec.kind != crate::record::NetKind::Yggdrasil || rec.addr.len() != 32 {
-            return Ok(RotateOutcome::Rejected);
-        }
-        let epoch = rec.epoch;
-        if epoch <= c.transport_epoch {
+        if rec.epoch <= c.transport_epoch && !c.address_record.is_empty() {
             // Подлинное, но не новее известного (R-120): владелец мог восстановиться с
             // часами позади прошлой смены — вернём ему нашу запись как доказательство.
-            return Ok(RotateOutcome::Stale(self.known_record(key)));
+            return Ok(RotateOutcome::Stale(c.signed_address()));
         }
-        let tk = hex::encode(&rec.addr);
         db::lock(&self.db).execute(
-            "UPDATE contacts SET transport_key=?1, transport_epoch=?2, transport_rec=?3, transport_sig=?4
-             WHERE key=?5",
-            rusqlite::params![&tk, epoch as i64, record, sig.as_slice(), key.as_slice()],
+            "UPDATE contacts SET transport_rec=?1, transport_sig=?2 WHERE key=?3",
+            rusqlite::params![record, sig.as_slice(), key.as_slice()],
         )?;
-        c.transport_key = tk;
-        c.transport_epoch = epoch;
+        c.set_address(record, sig);
         Ok(RotateOutcome::Applied)
     }
 
-    /// Принятая подписанная запись адреса контакта (нет — адрес не объявлялся записью v2).
+    /// Принятая подписанная запись адреса контакта (нет — адрес неизвестен).
     pub fn known_record(&self, key: &[u8; 32]) -> Option<crate::record::SignedRecord> {
-        let (bytes, sig): (Option<Vec<u8>>, Option<Vec<u8>>) = db::lock(&self.db)
-            .query_row(
-                "SELECT transport_rec, transport_sig FROM contacts WHERE key=?1",
-                rusqlite::params![key.as_slice()],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .ok()?;
-        Some(crate::record::SignedRecord { bytes: bytes?, sig: sig?.as_slice().try_into().ok()? })
+        self.cache.get(key)?.signed_address()
     }
 
-    /// Куда слать этому контакту: его текущий транспортный ключ (адрес). Для эпохи 0
-    /// это сам ключ личности. `None` — контакт неизвестен.
+    /// Куда слать этому контакту: адрес из его подписанной записи. `None` — контакт
+    /// неизвестен или его адреса ещё нет (ключ личности адресом не бывает, ADR-015 F1).
     pub fn transport_of(&self, key: &[u8; 32]) -> Option<[u8; 32]> {
         let c = self.cache.get(key)?;
-        if c.transport_key.is_empty() {
-            return Some(*key);
-        }
         let raw = hex::decode(&c.transport_key).ok()?;
         <[u8; 32]>::try_from(raw.as_slice()).ok()
     }
@@ -2569,6 +2595,8 @@ mod tests {
             profile_name: String::new(),
             avatar_id: String::new(),
             helpful: 0,
+            address_record: String::new(),
+            address_sig: String::new(),
             transport_key: String::new(),
             transport_epoch: 0,
             awaiting: false,
@@ -2604,8 +2632,8 @@ mod tests {
         let mut store = ContactStore::open(shared.clone()).unwrap();
         store.add(&k, "Алиса", 0).unwrap();
 
-        // Эпоха 0: адрес совпадает с личностью — старые записи так и живут.
-        assert_eq!(store.transport_of(&k), Some(k));
+        // Адреса ещё нет — ключ личности адресом не служит.
+        assert_eq!(store.transport_of(&k), None);
         assert_eq!(store.get(&k).unwrap().transport_epoch, 0);
 
         // Подписанное объявление принимается, адрес меняется.
@@ -2634,6 +2662,33 @@ mod tests {
         assert_eq!(s2.transport_of(&k), Some(tk1));
         assert_eq!(s2.get(&k).unwrap().transport_epoch, 1);
         assert_eq!(s2.known_record(&k), Some(r1), "доказательство переживает перезапуск");
+    }
+
+    /// Копия данных переносит адрес подписанной записью контакта (8.3): ключ личности
+    /// адресом не бывает, без записи восстановленный телефон контакта не нашёл бы. Чужая
+    /// подпись под записью — адреса нет.
+    #[test]
+    fn imported_contact_keeps_its_signed_address() {
+        let alice = Identity::from_seed(&[34u8; 32]).unwrap();
+        let k = alice.public_key_bytes();
+        let mut src = ContactStore::open(db()).unwrap();
+        src.add(&k, "Алиса", 0).unwrap();
+        let r = alice.address_record(9);
+        src.apply_transport_rotate(&k, &r.bytes, &r.sig).unwrap();
+        let copied = src.get(&k).unwrap().clone();
+
+        let mut dst = ContactStore::open(db()).unwrap();
+        assert!(dst.import_contact(&copied).unwrap());
+        assert_eq!(dst.transport_of(&k), Some(alice.transport_public(9)));
+        assert_eq!(dst.known_record(&k), Some(r));
+
+        // Запись, подписанная не этим контактом, не переносится.
+        let mallory = Identity::from_seed(&[35u8; 32]).unwrap();
+        let fake = mallory.address_record(9);
+        let forged = Contact { address_record: hex::encode(&fake.bytes), address_sig: hex::encode(fake.sig), ..copied };
+        let mut dst2 = ContactStore::open(db()).unwrap();
+        assert!(dst2.import_contact(&forged).unwrap());
+        assert_eq!(dst2.transport_of(&k), None);
     }
 
     #[test]

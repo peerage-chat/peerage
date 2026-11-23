@@ -499,3 +499,58 @@ fn own_name_and_photo_ride_along_and_do_not_overwrite() {
         "фото не было — взято из копии"
     );
 }
+
+/// ADR-015 F3: копия профиля другой сети в этот профиль не ложится — как чужая личность.
+#[test]
+fn copy_of_another_network_is_foreign() {
+    let me = id(103);
+    let key = me.derive_subkey(peerage_core::backup::SUBKEY_CONTEXT);
+    let file = tmpdir("kind").join("copy.peerage");
+    let mut w =
+        peerage_core::backup::Writer::create(std::fs::File::create(&file).unwrap(), &key, None)
+            .unwrap();
+    w.json(&serde_json::json!({
+        "rec": "manifest", "version": 1, "created": 0,
+        "me": hex::encode(me.public_key_bytes()), "kind": 2, "parts": {"contacts": true},
+    }))
+    .unwrap();
+    w.finish().unwrap();
+    let err = twin(103, "kind-dst")
+        .backup_import(&file, None)
+        .unwrap_err();
+    assert!(
+        matches!(err, peerage_core::backup::BackupError::Foreign),
+        "{err}"
+    );
+}
+
+/// 8.3: адрес контакта едет в копии его подписанной записью — восстановленный телефон
+/// знает, куда слать (ключ личности адресом не бывает).
+#[test]
+fn copy_carries_contacts_signed_address() {
+    let net = LoopbackNet::new();
+    let bob = id(105);
+    let b_key = bob.public_key_bytes();
+    let a = start(&net, id(104), tmpdir("addr-src"));
+    a.add_contact(&b_key, "Боб");
+    let code = format!(
+        "{}:9:{}:{}",
+        hex::encode(b_key),
+        hex::encode(bob.transport_public(9)),
+        hex::encode(bob.address_record(9).sig)
+    );
+    let _ = a.inspect_code(&code); // известный контакт — адрес из кода
+    let file = tmpdir("addr").join("copy.peerage");
+    a.backup_export(&file, all(), None).unwrap();
+
+    let restored = twin(104, "addr-dst");
+    restored.backup_import(&file, None).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&restored.contacts_json()).unwrap();
+    let c = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == hex::encode(b_key))
+        .unwrap();
+    assert_eq!(c["transport_key"], hex::encode(bob.transport_public(9)));
+}
