@@ -111,7 +111,7 @@ internal fun ProfileScreen(model: AppModel, navigate: (Screen) -> Unit) {
             NavRow(TablerIcons.Phone, stringResource(R.string.menu_calls)) { navigate(Screen.Calls) }
             NavRow(TablerIcons.Bookmark, stringResource(R.string.menu_saved)) {
                 model.openSaved()
-                navigate(Screen.Saved)
+                navigate(Screen.Chat)
             }
         }
 

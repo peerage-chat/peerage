@@ -46,7 +46,7 @@ class NavStateTest {
         n.go(Screen.Storage)
         n.go(Screen.Me) // к уже открытому — это возврат
         assertEquals(false, n.lastForward)
-        n.replace(Screen.Saved)
+        n.replace(Screen.Calls)
         assertEquals(true, n.lastForward)
     }
 

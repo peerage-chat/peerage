@@ -269,7 +269,7 @@ internal fun CenterMessage(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-private val CHAT_SCREENS = setOf(Screen.Chat, Screen.GroupChat, Screen.Saved)
+private val CHAT_SCREENS = setOf(Screen.Chat, Screen.GroupChat)
 
 internal enum class Screen {
     /** «Медиа и файлы» чата (3.2). */
@@ -307,7 +307,6 @@ internal enum class Screen {
 
     /** «Узлы входа»: из сборки и свои (макет `peers/`). */
     EntryNodes,
-    Saved,
     Search,
 
     /** «Отправить в Peerage»: выбор чатов для присланного другой программой (5.6). */
@@ -392,21 +391,14 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
         model.openGroup(gid)
         screen = Screen.GroupChat
     }
-    // Открыть чат по цели: группа, «Сохранённое» или личный.
+    // Открыть чат по цели: группа или личный («Сохранённое» — личный чат с собой).
     val openTarget: (ChatTarget) -> Unit = { t ->
-        when {
-            t.group -> {
-                model.openGroup(t.id)
-                screen = Screen.GroupChat
-            }
-            model.isSaved(t.id) -> {
-                model.openSaved()
-                screen = Screen.Saved
-            }
-            else -> {
-                model.openChat(t.id)
-                screen = Screen.Chat
-            }
+        if (t.group) {
+            model.openGroup(t.id)
+            screen = Screen.GroupChat
+        } else {
+            model.openChat(t.id)
+            screen = Screen.Chat
         }
     }
     // «Поделиться» (5.6): без выбранного чата — экран выбора; с чатом (ярлык в системном меню
@@ -532,12 +524,20 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                     home(Screen.Search)
                                 },
                             )
-                            Screen.Chat -> ChatTopBar(
-                                model,
-                                onBack = goBack,
-                                onProfile = { screen = Screen.Info },
-                                onMedia = { model.currentChat?.let { openMedia(ChatTarget(it, group = false), MediaTab.Media) } },
-                            )
+                            // «Сохранённое» — тот же экран чата: шапку выбирает открытый чат, а не
+                            // экран. Отдельный экран «Сохранённого» показывал ленту открытого чата
+                            // под своей шапкой — из уведомления чужой чат открывался с шапкой
+                            // «Сохранённого».
+                            Screen.Chat -> if (model.isSaved(model.currentChat)) {
+                                SavedTopBar(model, onBack = goBack)
+                            } else {
+                                ChatTopBar(
+                                    model,
+                                    onBack = goBack,
+                                    onProfile = { screen = Screen.Info },
+                                    onMedia = { model.currentChat?.let { openMedia(ChatTarget(it, group = false), MediaTab.Media) } },
+                                )
+                            }
                             Screen.Media -> MediaFilesTopBar(model, onBack = goBack)
                             Screen.Add -> TopBar(stringResource(R.string.title_add_contact), onBack = goBack)
                             Screen.Me -> TopBar(stringResource(R.string.me_title), onBack = goBack) {
@@ -599,7 +599,6 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                             Screen.VaultLevel -> {}
                             Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
                             Screen.RotateAddress -> TopBar(stringResource(R.string.rotate_title), onBack = goBack)
-                            Screen.Saved -> SavedTopBar(model, onBack = goBack)
                             Screen.Storage -> StorageHeader(model, onBack = goBack)
                             Screen.Autodel -> TopBar(stringResource(R.string.autodel_title), onBack = goBack)
                             Screen.Backup -> TopBar(stringResource(R.string.backup_title), onBack = goBack)
@@ -861,9 +860,6 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                 }
                                 Screen.EditProfile -> EditProfileScreen(model) { goBack() }
                                 Screen.VaultLevel -> VaultLevelScreen(dataDir) { goBack() }
-                                Screen.Saved -> ChatScreen(model) { tab ->
-                                    model.currentChat?.let { openMedia(ChatTarget(it, group = false), tab) }
-                                }
                                 Screen.Storage -> StorageScreen(
                                     model,
                                     onBackup = { screen = Screen.Backup },
@@ -910,7 +906,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                     Screen.Contacts -> NoChatPane()
                                     // Другой чат из списка — тот же экран с другим чатом: без
                                     // ключа он сменился бы мгновенно, а лист должен проявиться.
-                                    Screen.Chat, Screen.GroupChat, Screen.Saved -> FadeIn(model.openChatTarget()) { pane(s) }
+                                    Screen.Chat, Screen.GroupChat -> FadeIn(model.openChatTarget()) { pane(s) }
                                     else -> pane(s)
                                 }
                             }
@@ -919,7 +915,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                 }
             }
             // «Отменить» — над полем ввода в чате и над FAB на главной, у низа на прочих.
-            val overInput = screen == Screen.Contacts || screen == Screen.Chat || screen == Screen.GroupChat || screen == Screen.Saved
+            val overInput = screen == Screen.Contacts || screen == Screen.Chat || screen == Screen.GroupChat
             UndoSnackbar(
                 model.undo,
                 Modifier.align(Alignment.BottomCenter)
