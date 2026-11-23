@@ -1,0 +1,49 @@
+name: Bug report
+description: Something does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security vulnerabilities go privately, not here: see [SECURITY.md](https://github.com/peerage-chat/peerage/blob/master/docs/SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Profile → About.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Phone and Android version
+      placeholder: Pixel 7, Android 15
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What was expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: If known.
+      placeholder: |
+        1. …
+        2. …
+  - type: textarea
+    id: log
+    attributes:
+      label: Diagnostic log
+      description: |
+        Profile → About → Save log. The log contains no message text, names or keys. Read it before attaching, then drag the file here.

@@ -82,6 +82,7 @@ no iOS client, and the desktop client does not build — §7).
 | Anti-abuse | per-peer budgets from one tier (`budget::Tier`): ingress rate limit and storage cap, enforced before decryption; local reputation (served blobs → up to ×2 budget) | loop |
 | Anti-traffic-analysis | size buckets: text ≡ media on the wire, call start ≡ ack/ping | unit + mesh |
 | Address rotation | change own transport address (identity stays), ADR-007 | mesh (experiment) |
+| Interface language | English and Russian; system language or a choice in Settings (Android 13+: the system per-app language, also in system settings; below: own setting) | emu (Android 16 and Android 11) |
 
 ## 6. Security posture
 
