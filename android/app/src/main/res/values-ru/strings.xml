@@ -501,7 +501,12 @@
     <string name="onb_checking">Проверка…</string>
     <string name="emoji_recent">Недавние</string>
     <string name="emoji_backspace">Стереть</string>
-    <string name="emoji_cat_smileys">Смайлы и люди</string>
+    <string name="emoji_cat_smileys">Смайлы и эмоции</string>
+    <string name="emoji_cat_people">Люди и жесты</string>
+    <string name="emoji_cat_flags">Флаги</string>
+    <string name="emoji_search">Поиск эмодзи</string>
+    <string name="emoji_search_empty">Эмодзи не найдены</string>
+    <string name="emoji_search_clear">Очистить поиск</string>
     <string name="emoji_cat_animals">Животные и природа</string>
     <string name="emoji_cat_food">Еда и напитки</string>
     <string name="emoji_cat_activity">Активность</string>

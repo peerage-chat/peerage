@@ -489,7 +489,12 @@
     <string name="onb_checking">Checking…</string>
     <string name="emoji_recent">Recent</string>
     <string name="emoji_backspace">Backspace</string>
-    <string name="emoji_cat_smileys">Smileys and people</string>
+    <string name="emoji_cat_smileys">Smileys and emotions</string>
+    <string name="emoji_cat_people">People and body</string>
+    <string name="emoji_cat_flags">Flags</string>
+    <string name="emoji_search">Search emoji</string>
+    <string name="emoji_search_empty">No emoji found</string>
+    <string name="emoji_search_clear">Clear search</string>
     <string name="emoji_cat_animals">Animals and nature</string>
     <string name="emoji_cat_food">Food and drink</string>
     <string name="emoji_cat_activity">Activity</string>
