@@ -463,7 +463,7 @@ private fun chatPreview(model: AppModel, row: ChatRowUi): String {
         // Звонок: исход в тексте — служебное слово, показываем его по-человечески.
         s.lastKind == "call" || s.lastKind == "video_call" ->
             return callTitle(s.lastKind == "video_call", s.lastMine, s.lastText)
-        s.lastText.isNotBlank() -> Mentions.plain(s.lastText, s.lastMentions, model::mentionName)
+        s.lastText.isNotBlank() -> Markdown.plain(Mentions.plain(s.lastText, s.lastMentions, model::mentionName))
         s.lastKind == "image" -> stringResource(R.string.chats_preview_photo)
         s.lastKind == "video" -> stringResource(R.string.chats_preview_video)
         s.lastKind == "voice" -> stringResource(R.string.chats_preview_voice)

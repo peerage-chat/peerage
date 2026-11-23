@@ -106,6 +106,8 @@ object Tokens {
         val folderSelected = Color(0xFF1C3A47)
         val unreadMuted = Color(0xFF3A3A42) // счётчик чата без звука
         val selectedRow = Color(0x2933B5E5) // строка выделенного сообщения (акцент @16%)
+        val codeFill = Color(0x38000000) // подложка `кода` в пузыре (тень @22%: видна на обоих пузырях)
+        val spoiler = Color(0xFF5A6068) // скрытый текст в пузыре — сплошная плашка до тапа
         val checkEdge = Color(0xFF6B6C74) // кружок выбора, пока не отмечен
         val failEdge = Color(0xFF6B2A2E) // обводка не доставленного пузыря
         val failText = Color(0xFFFF8A8A) // «Не доставлено» под пузырём и знак в мете

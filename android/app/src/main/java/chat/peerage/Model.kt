@@ -755,7 +755,7 @@ class AppModel private constructor() {
 
     /** Текст строки шторки: подпись или текст, у вложения без подписи — его вид. */
     private fun notificationText(ctx: android.content.Context, m: Message): String =
-        if (m.text.isNotBlank()) Mentions.plain(m.text, m.mentions, ::mentionName) else previewText(ctx, "", m.kind)
+        if (m.text.isNotBlank()) Markdown.plain(Mentions.plain(m.text, m.mentions, ::mentionName)) else previewText(ctx, "", m.kind)
 
     /** «👍 к «начало»» — одна строка для шторки и списка чатов (начало — до [QUOTE_MAX]). */
     fun reactionText(ctx: android.content.Context, emoji: String, quote: String, kind: String): String {
@@ -1867,6 +1867,10 @@ class AppModel private constructor() {
      *  метками автора. Всё, что показывает сообщение вне пузыря, берёт текст отсюда. */
     fun plainText(m: Message): String = Mentions.plain(m.text, m.mentions, ::mentionName)
 
+    /** То же для показа вне пузыря (цитата, закреп, превью): без значков разметки, скрытое —
+     *  точками. Копирование берёт [plainText] — со значками, чтобы разметка не терялась. */
+    fun shownText(m: Message): String = Markdown.plain(plainText(m))
+
     /** Группы, где меня упомянули в непрочитанном. Как и счётчик, живёт в памяти. */
     val groupMentioned = mutableStateMapOf<String, Boolean>()
 
@@ -2608,7 +2612,7 @@ class AppModel private constructor() {
                     if (i >= 0) list[i] = list[i].copy(text = ev.text, editedAt = stamp, mentions = ev.mentions)
                 }
                 appContext?.let { ctx ->
-                    val text = Mentions.plain(ev.text, ev.mentions, ::mentionName)
+                    val text = Markdown.plain(Mentions.plain(ev.text, ev.mentions, ::mentionName))
                     listOf(false, true).forEach { g -> MessageNotifier.replace(ctx, ChatTarget(ev.chat, g), ev.sender, ev.id, text) }
                 }
             }

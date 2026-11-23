@@ -943,12 +943,16 @@ internal val LocalMentionClick = staticCompositionLocalOf<((String) -> Unit)?> {
  *  имя в «@» бывает длиннее или короче набранного отправителем. */
 @Composable
 internal fun BubbleText(
-    text: AnnotatedString,
+    source: AnnotatedString,
     modifier: Modifier = Modifier,
     color: Color = Color.White,
     fontSize: TextUnit = Tokens.Font.label,
     meta: @Composable () -> Unit,
 ) {
+    // Скрытое (`||…||`) — плашкой, пока по нему не тапнули; открывается всё сразу.
+    val hasSpoiler = source.getStringAnnotations(SPOILER_TAG, 0, source.length).isNotEmpty()
+    var revealed by remember(source) { mutableStateOf(false) }
+    val text = if (hasSpoiler && !revealed) source.spoilersHidden() else source
     val measurer = rememberTextMeasurer()
     val style = Tokens.Text.base.copy(color = color, fontSize = fontSize)
     val onMention = LocalMentionClick.current
@@ -959,12 +963,21 @@ internal fun BubbleText(
     // Тап по «@» и по ссылке ловим сами, а не clickable: остальной текст должен отдавать
     // жесты пузырю (долгий тап — меню), поэтому событие съедаем, только если короткий тап
     // пришёлся точно на имя или адрес.
-    val mentionTap = if (!hasMention && !hasLink) {
+    val hidden = hasSpoiler && !revealed
+    val mentionTap = if (!hasMention && !hasLink && !hidden) {
         Modifier
     } else {
-        Modifier.pointerInput(text) {
+        Modifier.pointerInput(text, hidden) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
+                if (hidden && annotationAt(layout, text, down.position, SPOILER_TAG) != null) {
+                    val up = waitForUpOrCancellation() ?: return@awaitEachGesture
+                    if (up.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis) {
+                        up.consume()
+                        revealed = true
+                    }
+                    return@awaitEachGesture
+                }
                 val url = annotationAt(layout, text, down.position, Links.TAG)
                 val key = if (url == null && hasMention) annotationAt(layout, text, down.position, Mentions.TAG) else null
                 if (url == null && key == null) return@awaitEachGesture
@@ -1073,6 +1086,53 @@ internal fun AnnotatedString.linked(mine: Boolean): AnnotatedString {
             addStyle(style, it.start, it.end)
             addStringAnnotation(Links.TAG, it.url, it.start, it.end)
         }
+    }
+}
+
+/** Тег аннотации скрытого текста (`||…||`): по нему пузырь прячет и открывает его. */
+internal const val SPOILER_TAG = "spoiler"
+
+/**
+ * Разметка [Markdown] поверх строки пузыря: значки убраны, участки — стилями. Пометки исходной
+ * строки (упоминания) переносятся кусками. Скрытое — аннотацией: прячет его [BubbleText].
+ */
+internal fun AnnotatedString.markdown(): AnnotatedString {
+    val r = Markdown.render(text)
+    if (r.spans.isEmpty() && r.text == text) return this
+    val src = this
+    val mono = androidx.compose.ui.text.font.FontFamily.Monospace
+    return buildAnnotatedString {
+        r.pieces.forEach {
+            when (it) {
+                is Markdown.Piece.Keep -> append(src.subSequence(it.start, it.end))
+                is Markdown.Piece.Insert -> append(it.text)
+            }
+        }
+        r.spans.forEach {
+            when (it.kind) {
+                Markdown.Kind.Bold -> addStyle(SpanStyle(fontWeight = FontWeight.SemiBold), it.start, it.end)
+                Markdown.Kind.Italic -> addStyle(SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), it.start, it.end)
+                Markdown.Kind.Strike -> addStyle(SpanStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough), it.start, it.end)
+                Markdown.Kind.Code, Markdown.Kind.CodeBlock ->
+                    addStyle(SpanStyle(fontFamily = mono, background = Tokens.Colors.codeFill), it.start, it.end)
+                Markdown.Kind.Spoiler -> addStringAnnotation(SPOILER_TAG, "", it.start, it.end)
+                Markdown.Kind.Quote -> {
+                    addStyle(SpanStyle(color = Tokens.Colors.secondary), it.start, it.end)
+                    addStyle(SpanStyle(color = Tokens.Colors.accent), it.start, it.start + Markdown.QUOTE_BAR.length)
+                }
+            }
+        }
+    }
+}
+
+/** Скрытое — сплошной плашкой: и буквы, и фон одного цвета. */
+private fun AnnotatedString.spoilersHidden(): AnnotatedString {
+    val hidden = getStringAnnotations(SPOILER_TAG, 0, length)
+    if (hidden.isEmpty()) return this
+    val style = SpanStyle(color = Tokens.Colors.spoiler, background = Tokens.Colors.spoiler)
+    return buildAnnotatedString {
+        append(this@spoilersHidden)
+        hidden.forEach { addStyle(style, it.start, it.end) }
     }
 }
 
@@ -1321,7 +1381,7 @@ internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: 
                 fontSize = Tokens.Font.caption,
             )
             Text(
-                model.plainText(top).ifEmpty { stringResource(R.string.pin_attachment) },
+                model.shownText(top).ifEmpty { stringResource(R.string.pin_attachment) },
                 color = Color.White,
                 fontSize = Tokens.Font.body,
                 maxLines = 1,

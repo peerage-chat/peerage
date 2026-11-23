@@ -567,7 +567,7 @@ internal fun QuoteBlock(
                 src?.let {
                     when {
                         it.deleted -> stringResource(R.string.chat_reply_gone)
-                        it.text.isNotEmpty() -> model.plainText(it)
+                        it.text.isNotEmpty() -> model.shownText(it)
                         // С миниатюрой имя файла лишнее — картинка уже сказала, что это.
                         hasThumb -> quoteKind(it.kind)
                         else -> it.name.ifEmpty { quoteKind(it.kind) }
@@ -640,7 +640,7 @@ internal fun ReplyStrip(model: AppModel, m: Message) {
             R.string.chat_reply_to,
             if (m.mine) stringResource(R.string.chat_reply_you) else groupSenderName(model, m.sender),
         ),
-        if (m.text.isNotEmpty()) model.plainText(m) else m.name.ifEmpty { quoteKind(m.kind) },
+        if (m.text.isNotEmpty()) model.shownText(m) else m.name.ifEmpty { quoteKind(m.kind) },
         onCancel = model::cancelReply,
     )
 }
@@ -1524,14 +1524,14 @@ internal fun MessageBubble(
                                 "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready, onLongClick = onLong)
                                 // Текст обтекает мету: она едет в конец последней строки
                                 // и переносится сама, если та её не вмещает.
-                                else -> BubbleText(bubbleText(model, m).linked(m.mine).marked(LocalSearchMarks.current, m)) { meta() }
+                                else -> BubbleText(bubbleText(model, m).markdown().linked(m.mine).marked(LocalSearchMarks.current, m)) { meta() }
                             }
                         }
                         // Подпись к вложению — в том же пузыре, под содержимым. Она пришла
                         // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
                         if (m.kind != "text" && m.text.isNotEmpty()) {
                             BubbleText(
-                                AnnotatedString(m.text.trimEnd()).linked(m.mine).marked(LocalSearchMarks.current, m),
+                                AnnotatedString(m.text.trimEnd()).markdown().linked(m.mine).marked(LocalSearchMarks.current, m),
                                 modifier = Modifier.padding(top = Tokens.Space.s),
                             ) { meta() }
                         }
