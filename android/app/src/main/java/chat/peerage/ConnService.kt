@@ -108,7 +108,6 @@ class ConnService : Service() {
         fun refresh(ctx: Context, state: ConnState) {
             if (state == last) return
             last = state
-            ensureChannel(ctx)
             runCatching { ctx.getSystemService(NotificationManager::class.java).notify(NOTIF_ID, build(ctx, state)) }
         }
 
@@ -118,6 +117,10 @@ class ConnService : Service() {
          * «Подключиться» вместо отдельного уведомления об офлайне.
          */
         private fun build(ctx: Context, state: ConnState): Notification {
+            // Категория — здесь, а не у вызывающих: служба показывает уведомление при
+            // старте, раньше первого тика модели, и на свежей установке категории ещё нет —
+            // Android 8+ тогда роняет процесс («invalid channel for service notification»).
+            ensureChannel(ctx)
             val open = PendingIntent.getActivity(
                 ctx,
                 0,
