@@ -71,6 +71,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -382,7 +383,7 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
 /** Лента личного чата: привязана к низу (`reverseLayout`), элемент 0 — самое свежее. */
 @Composable
 private fun DmFeed(model: AppModel, msgs: List<Message>, listState: LazyListState, appearFrom: Long) {
-    FeedFrame { DmFeedList(model, msgs, listState, appearFrom) }
+    FeedFrame(rememberDragSelect(msgs, listState)) { DmFeedList(model, msgs, listState, appearFrom) }
 }
 
 @Composable
@@ -700,8 +701,9 @@ internal fun E2EBanner() {
 
 /**
  * Шапка режима выбора (app-ui.md → «Действия», макет `chatact/Multi`): снять выбор · «Выбрано: N»
- * · Переслать · Копировать · Удалить. Ответ, правка и закреп — из меню у пузыря: они про одно
- * сообщение.
+ * · Переслать · Копировать · Удалить. Выбрано одно — ещё «Ответить» и «⋮» с меню сообщения:
+ * выбор теперь начинается долгим тапом, и у фото без подписи (тап по нему открывает просмотр)
+ * другого пути к меню нет.
  */
 @Composable
 internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
@@ -723,6 +725,8 @@ internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f).padding(start = Tokens.Space.s).politeLive(),
         )
+        val one = model.selection.singleOrNull()?.let { r -> model.chat(key, group).firstOrNull { it.id == r.id && it.sender == r.sender } }
+        if (one != null) BarIcon(TablerIcons.Reply, stringResource(R.string.chat_reply)) { model.startReply(one) }
         BarIcon(TablerIcons.Forward, stringResource(R.string.forward_action)) { model.beginForward(key, group) }
         BarIcon(TablerIcons.Copy, stringResource(R.string.chat_copy)) {
             val text = model.selectedTextOf(key, group)
@@ -730,6 +734,27 @@ internal fun SelectionTopBar(model: AppModel, group: Boolean = false) {
             model.clearSelection()
         }
         BarIcon(TablerIcons.Trash, stringResource(R.string.chat_delete)) { confirmDelete = true }
+        if (one != null) {
+            Box {
+                var more by remember { mutableStateOf(false) }
+                BarIcon(TablerIcons.DotsVertical, stringResource(R.string.common_more)) { more = true }
+                PopMenu(more, { more = false }) {
+                    BubbleMenuItems(
+                        model,
+                        BubbleActions(one, ChatTarget(key, group), Rect.Zero, RectangleShape),
+                        close = {
+                            more = false
+                            model.clearSelection()
+                        },
+                        onDelete = {
+                            more = false
+                            confirmDelete = true
+                        },
+                        fromSelection = true,
+                    )
+                }
+            }
+        }
     }
     if (confirmDelete) DeleteSheet(model, key, group, model.selection.toList()) { confirmDelete = false }
 }
@@ -822,8 +847,6 @@ internal fun MessageInput(
     onKeyboardMedia: ((List<android.net.Uri>) -> Unit)? = null,
     onSend: () -> Unit,
 ) {
-    // Пока идёт выбор, поле ввода не нужно: действия — в шапке выбора.
-    if (model?.selection?.isNotEmpty() == true) return
     // Поле — TextFieldState: панели эмодзи и упоминаниям нужна ПОЗИЦИЯ КУРСОРА (иначе символ
     // падал бы в конец), а клавиатуре — приём картинок и GIF (`contentReceiver` в Compose 1.7
     // есть только у поля на TextFieldState).
@@ -1114,10 +1137,11 @@ internal fun MessageRow(
 ) {
     // Системную строку и «Сообщение удалено» не выбирают: переслать или скопировать
     // в них нечего.
-    val selecting = model.selection.isNotEmpty() && !m.system && !m.deleted && !m.isCall
+    val selecting = model.selection.isNotEmpty() && m.selectable
     // Выбор — у всего ряда (app-ui.md → «Действия»): заливка во всю ширину и кружок у
     // ведущего края. Не обводка пузыря: обводкой отмечено упоминание меня.
-    val selected = selecting && MsgRef(m.id, m.sender) in model.selection
+    val ref = MsgRef(m.id, m.sender)
+    val selected = selecting && ref in model.selection
     // Правимое сообщение подсвечено так же (макет `chatact/Edit`): видно, что именно меняется.
     val editingThis = model.editTarget?.let { it.id == m.id && it.sender == m.sender } == true
     // Пришли сюда капсулой или по цитате (5.7): ряд подсвечен так же и гаснет плавно.
@@ -1127,10 +1151,22 @@ internal fun MessageRow(
         tween(Tokens.Anim.normal),
         label = "rowFill",
     )
+    // Кружок выбора лежит ПОВЕРХ ряда, а входящий пузырь отъезжает слоем, без перекладки:
+    // ширина пузыря не меняется, текст не переносится заново, и лента при входе в выбор не
+    // прыгает. Справа у входящего и слева у своего места на кружок хватает (пузырь ≤ 60 %).
+    val checkShown by animateFloatAsState(if (selecting) 1f else 0f, tween(Tokens.Anim.fast), label = "check")
+    val shift = with(LocalDensity.current) { (Tokens.Size.check + Tokens.Space.m).toPx() }
+    val drag = LocalDragSelect.current
+    if (drag != null && m.selectable) {
+        DisposableEffect(drag, ref) { onDispose { drag.rows.remove(ref) } }
+    }
     val press = remember { MutableInteractionSource() }
-    Row(
+    Box(
         Modifier.fillMaxWidth()
             .background(rowFill)
+            .then(
+                if (drag != null && m.selectable) Modifier.onGloballyPositioned { drag.rows[ref] = it.boundsInRoot() } else Modifier,
+            )
             .then(
                 if (selecting) {
                     Modifier.toggleable(selected, press, indication = null, role = Role.Checkbox) { model.toggleSelect(m) }
@@ -1139,18 +1175,19 @@ internal fun MessageRow(
                 },
             )
             .padding(horizontal = Tokens.Space.m),
-        verticalAlignment = Alignment.CenterVertically,
+        contentAlignment = Alignment.CenterStart,
     ) {
-        if (selecting) {
-            SelectCheck(selected)
-            Spacer(Modifier.width(Tokens.Space.m))
+        // Свайп-ответ — всегда в дереве (выключен на время выбора): пересоздай ряд посреди
+        // долгого тапа — и жест протяжки оборвался бы вместе с пузырём.
+        SwipeToReply(
+            Modifier.fillMaxWidth().graphicsLayer { if (!m.mine) translationX = shift * checkShown },
+            enabled = !selecting && m.selectable,
+            onReply = { model.startReply(m) },
+        ) {
+            MessageRowContent(model, m, pos, group, animate, far)
         }
-        if (selecting || m.system || m.deleted || m.isCall || m.id == 0L) {
-            Box(Modifier.weight(1f)) { MessageRowContent(model, m, pos, group, animate, far) }
-        } else {
-            SwipeToReply(Modifier.weight(1f), onReply = { model.startReply(m) }) {
-                MessageRowContent(model, m, pos, group, animate, far)
-            }
+        if (checkShown > 0f) {
+            Box(Modifier.graphicsLayer { alpha = checkShown }) { SelectCheck(selected) }
         }
     }
 }
@@ -1161,7 +1198,7 @@ internal fun MessageRow(
  * правого края: там системный «назад».
  */
 @Composable
-private fun SwipeToReply(modifier: Modifier, onReply: () -> Unit, content: @Composable () -> Unit) {
+private fun SwipeToReply(modifier: Modifier, enabled: Boolean, onReply: () -> Unit, content: @Composable () -> Unit) {
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -1173,7 +1210,8 @@ private fun SwipeToReply(modifier: Modifier, onReply: () -> Unit, content: @Comp
     )
     val latestReply by rememberUpdatedState(onReply)
     Box(
-        modifier.pointerInput(Unit) {
+        modifier.pointerInput(enabled) {
+            if (!enabled) return@pointerInput
             var active = false
             var armed = false
             val settle = { scope.launch { offset.animateTo(0f, tween(Tokens.Anim.normal)) } }
@@ -1311,9 +1349,16 @@ internal fun MessageBubble(
     // Где пузырь лежит в окне — для меню у него. Не состояние: прокрутка двигает пузырь
     // каждый кадр, а читается место только в момент долгого нажатия.
     val place = remember { BubblePlace() }
-    // Долгое нажатие — меню у пузыря; в режиме выбора — переключить выбор. Вложения
-    // зовут то же: иначе палец на картинке съедал бы жест целиком.
+    // Тап — меню у пузыря; долгое нажатие — выбор, и не отпуская пальца можно выбрать
+    // подряд (протяжка, как в Telegram). В режиме выбора тап переключает. Вложения зовут
+    // то же долгое нажатие: иначе палец на картинке съедал бы жест целиком.
+    val drag = LocalDragSelect.current
     val onLong = {
+        if (m.selectable) {
+            if (drag != null) drag.start(model, m) else model.toggleSelect(m)
+        }
+    }
+    val onTap = {
         if (selecting) {
             model.toggleSelect(m)
         } else if (chatId != null && m.id != 0L) {
@@ -1372,12 +1417,9 @@ internal fun MessageBubble(
                             else -> Modifier
                         },
                     )
-                    // Длинный тап — меню у пузыря; в режиме выбора короткий тап переключает,
+                    // Тап — меню у пузыря, долгий — выбор; в режиме выбора тап переключает,
                     // а не открывает вложение (иначе выбор был бы ловушкой).
-                    .combinedClickable(
-                        onLongClick = onLong,
-                        onClick = { if (selecting) model.toggleSelect(m) },
-                    )
+                    .combinedClickable(onLongClick = onLong, onClick = onTap)
                     .then(
                         if (photoBubble) Modifier else Modifier.padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
                     ),

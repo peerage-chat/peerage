@@ -229,7 +229,7 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
 /** Лента группы: привязана к низу, как в личном чате; системные строки разрывают серии. */
 @Composable
 private fun GroupFeed(model: AppModel, msgs: List<Message>, listState: LazyListState) {
-    FeedFrame { GroupFeedList(model, msgs, listState) }
+    FeedFrame(rememberDragSelect(msgs, listState)) { GroupFeedList(model, msgs, listState) }
 }
 
 @Composable

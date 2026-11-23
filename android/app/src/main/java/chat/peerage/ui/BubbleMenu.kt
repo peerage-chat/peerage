@@ -138,8 +138,9 @@ private fun BubbleMenuOverlay(model: AppModel, t: BubbleActions, onDelete: () ->
     }
 }
 
+/** Пункты меню сообщения. Из шапки выбора ([fromSelection]) — без «Выбрать»: оно уже выбрано. */
 @Composable
-private fun BubbleMenuItems(model: AppModel, t: BubbleActions, close: () -> Unit, onDelete: () -> Unit) {
+internal fun BubbleMenuItems(model: AppModel, t: BubbleActions, close: () -> Unit, onDelete: () -> Unit, fromSelection: Boolean = false) {
     val ctx = LocalContext.current
     val m = t.msg
     val ref = MsgRef(m.id, m.sender)
@@ -182,7 +183,9 @@ private fun BubbleMenuItems(model: AppModel, t: BubbleActions, close: () -> Unit
     if (!saved) {
         PopMenuItem(TablerIcons.Bookmark, stringResource(R.string.act_save)) { act { model.saveToSaved(t.chat, m) } }
     }
-    PopMenuItem(TablerIcons.CircleCheck, stringResource(R.string.act_select)) { act { model.toggleSelect(m) } }
+    if (!fromSelection) {
+        PopMenuItem(TablerIcons.CircleCheck, stringResource(R.string.act_select)) { act { model.toggleSelect(m) } }
+    }
     PopMenuDivider()
     PopMenuItem(TablerIcons.Trash, stringResource(R.string.chat_delete), danger = true, onClick = onDelete)
 }

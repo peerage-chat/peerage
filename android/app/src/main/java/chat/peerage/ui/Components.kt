@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -1605,16 +1606,30 @@ private fun SwapLayer(shown: Float, content: @Composable () -> Unit) {
 internal val LocalBubbleMax = androidx.compose.runtime.staticCompositionLocalOf { Tokens.Size.bubbleMax }
 
 /**
- * Рамка ленты: ширины пузырей для углов у стыков (5.8) и предел пузыря по ширине самой
- * ленты — доля ленты, как в макетах (`home/SheetTablet`: 460 при 760), но не уже телефонного.
+ * Рамка ленты: ширины пузырей для углов у стыков (5.8), предел пузыря по ширине самой
+ * ленты — доля ленты, как в макетах (`home/SheetTablet`: 460 при 760), но не уже телефонного, —
+ * и выбор протяжкой ([DragSelect]). Лента задаёт [DragSelect.order] и [DragSelect.scrollBy].
  */
 @Composable
-internal fun FeedFrame(content: @Composable () -> Unit) {
-    androidx.compose.foundation.layout.BoxWithConstraints {
+internal fun FeedFrame(drag: DragSelect, content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().dragSelect(drag)) {
         val max = (maxWidth * 0.6f).coerceIn(Tokens.Size.bubbleMax, Tokens.Size.bubbleMaxWide)
         androidx.compose.runtime.CompositionLocalProvider(
             LocalBubbleWidths provides remember { androidx.compose.runtime.mutableStateMapOf() },
             LocalBubbleMax provides max,
+            LocalDragSelect provides drag,
         ) { content() }
     }
+}
+
+/** Выбор протяжкой для ленты [msgs]: какие сообщения выбираются и как ленту прокрутить. */
+@Composable
+internal fun rememberDragSelect(msgs: List<Message>, listState: androidx.compose.foundation.lazy.LazyListState): DragSelect {
+    val drag = remember { DragSelect() }
+    val latest by androidx.compose.runtime.rememberUpdatedState(msgs)
+    androidx.compose.runtime.SideEffect {
+        drag.order = { latest.filter { it.selectable }.map { MsgRef(it.id, it.sender) } }
+        drag.scrollBy = { px -> listState.scrollBy(px) }
+    }
+    return drag
 }
