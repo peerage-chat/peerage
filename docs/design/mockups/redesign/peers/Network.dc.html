@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Сеть</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;family=Roboto+Mono&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.ib{width:40px;height:40px;border-radius:14px;background:#16171B;border:none;display:flex;align-items:center;justify-content:center;padding:0;flex:none}
+.mt{flex:1;background:#16171B;border-radius:18px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.mv{font-size:22px;font-weight:700;color:#ECEDEF}
+.mv small{font-size:13px;font-weight:500;color:#8E8E98;margin-left:3px}
+.ml{font-size:12px;color:#8E8E98}
+.grp{background:#1C1D22;border-radius:18px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+.r{display:flex;align-items:center;gap:14px;min-height:56px;padding:8px 14px;background:none;border:none;width:100%;box-sizing:border-box;font-family:inherit;color:#ECEDEF;font-size:16px;text-align:left}
+.lb{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sub{font-size:13px;line-height:18px;color:#8E8E98}
+.mono{font-family:'Roboto Mono',monospace;font-size:13px}
+.v{color:#8E8E98;font-size:14px;flex:none}
+.dv{height:1px;background:#26272D;margin-left:14px}
+.hd{font-size:13px;font-weight:500;color:#8E8E98;padding:0 6px;margin-bottom:-6px}
+.tg{width:44px;height:26px;border-radius:13px;background:#33B5E5;position:relative;flex:none}
+.tg i{position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#04222E}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden;">
+
+<div style="display: flex; align-items: center; gap: 10px; padding: 14px 12px 6px 8px;">
+<button class="ib" style="background: none;" aria-label="Назад"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+<div style="flex: 1; display: flex; flex-direction: column;">
+<div style="font-size: 22px; font-weight: 700; color: #ECEDEF;">Сеть</div>
+<div style="font-size: 12px; color: #8BC34A;">Подключено к мешу</div>
+</div>
+</div>
+
+<div style="display: flex; gap: 10px; padding: 10px 16px 18px;">
+<div class="mt"><span class="mv">8</span><span class="ml">Пиры</span></div>
+<div class="mt"><span class="mv">42<small>мс</small></span><span class="ml">Пинг</span></div>
+<div class="mt"><span class="mv">12<small>КБ/с</small></span><span class="ml">Трафик</span></div>
+</div>
+
+<div style="flex: 1; min-height: 0; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; gap: 14px; padding: 10px; overflow: hidden;">
+
+<div class="hd">Мой узел</div>
+<div class="grp">
+<button class="r"><span class="lb"><span class="sub">Адрес</span><span class="mono" style="color:#ECEDEF;">200:7f3a:1c09:4e2b::91c2</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9AA3AD" stroke-width="1.5" stroke-linejoin="round" aria-label="Скопировать адрес" role="img"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"></path></svg></button>
+<div class="dv"></div>
+<button class="r"><span class="lb"><span>Сменить адрес</span><span class="sub">Оборвать поток от того, кто узнал старый · менялся 2 раза</span></span></button>
+</div>
+
+<div class="hd">Режим участия</div>
+<div class="grp">
+<div class="r"><span class="lb"><span>Узел сети</span><span class="sub">Пока приложение в сети, телефон пересылает чужой трафик — на этом меш и держится. Выше расход батареи и трафика.</span></span><span class="tg"><i></i></span></div>
+</div>
+
+<div class="hd">Пиры · 8</div>
+<div class="grp">
+<div class="r"><span class="lb"><span class="mono" style="color:#ECEDEF;">200:5c1e:8a40::07fd</span><span class="sub">Исходящее</span></span><span class="v">38 мс</span></div>
+<div class="dv"></div>
+<div class="r"><span class="lb"><span class="mono" style="color:#ECEDEF;">201:a93b:22f1::4c10</span><span class="sub">Входящее</span></span><span class="v">55 мс</span></div>
+<div class="dv"></div>
+<button class="r" style="color:#33B5E5;font-size:15px;">Все пиры</button>
+</div>
+
+<div class="grp">
+<button class="r"><span class="lb"><span>Узлы входа</span><span class="sub">8 из сборки · 2 своих</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9AA3AD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+<div class="dv"></div>
+<button class="r"><span class="lb"><span>Офлайн-очередь · 3</span><span class="sub">Доставится, когда получатель появится</span></span></button>
+<div class="dv"></div>
+<button class="r"><span class="lb"><span>Замер скорости</span><span class="sub">Скорость меша до выбранного контакта</span></span></button>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

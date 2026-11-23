@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Добавить узел</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;700&amp;family=Roboto+Mono&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#33B5E5}a:hover{color:#7FD0EE}
+.grp{background:#1C1D22;border-radius:18px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+.r{display:flex;align-items:center;gap:10px;min-height:56px;padding:8px 14px;box-sizing:border-box;color:#ECEDEF;font-size:16px}
+.lb{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sub{font-size:13px;line-height:18px;color:#8E8E98}
+.ok{font-size:13px;line-height:18px;color:#8BC34A}
+.mono{font-family:'Roboto Mono',monospace;font-size:14px;color:#ECEDEF}
+.dv{height:1px;background:#222328;margin-left:14px}
+.tg{width:44px;height:26px;border-radius:13px;background:#33B5E5;position:relative;flex:none}
+.tg i{position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#04222E}
+.fld{width:100%;box-sizing:border-box;height:52px;border-radius:14px;background:#1C1D22;border:1px solid #33B5E5;padding:0 14px;color:#ECEDEF;font-family:'Roboto Mono',monospace;font-size:16px;outline:none}
+.btn{flex:1;height:48px;border-radius:24px;border:none;font-family:inherit;font-size:15px;font-weight:500}
+</style>
+</helmet>
+<div style="width: 412px; height: 892px; box-sizing: border-box; background: #08090B; font-family: 'Golos Text', system-ui, sans-serif; position: relative; overflow: hidden;">
+
+<div aria-hidden="true" style="display: flex; flex-direction: column; height: 100%;">
+<div style="display: flex; align-items: center; gap: 10px; padding: 14px 12px 14px 8px;">
+<div style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E6E7EA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg></div>
+<div style="flex: 1; display: flex; flex-direction: column;">
+<div style="font-size: 22px; font-weight: 700; color: #ECEDEF;">Узлы входа</div>
+<div style="font-size: 12px; color: #8BC34A;">Связь с 3 узлами</div>
+</div>
+</div>
+<div style="flex: 1; background: #16171B; border-radius: 28px 28px 0 0; display: flex; flex-direction: column; gap: 14px; padding: 10px;">
+<div class="grp"><div class="r"><span class="lb"><span>Узлы из сборки</span><span class="sub">8 публичных узлов · обновляются с приложением</span></span><span class="tg"><i></i></span></div></div>
+<div class="grp">
+<div class="r"><span class="lb"><span class="mono">tls://ygg.home.example:443</span><span class="ok">Подключено · 31 мс</span></span></div>
+<div class="dv"></div>
+<div class="r"><span class="lb"><span class="mono">quic://203.0.113.7:9001</span><span class="sub">Нет связи · повтор через 40 с</span></span></div>
+</div>
+</div>
+</div>
+
+<div style="position: absolute; inset: 0; background: rgba(0,0,0,0.6);"></div>
+
+<div style="position: absolute; left: 0; right: 0; bottom: 0; background: #16171B; border-radius: 28px 28px 0 0; padding: 10px 16px 24px; display: flex; flex-direction: column; gap: 16px;">
+<div style="width: 36px; height: 4px; border-radius: 2px; background: #3A3B42; align-self: center;"></div>
+<div style="font-size: 20px; font-weight: 700; color: #ECEDEF;">Добавить узел</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label for="uri" style="font-size: 13px; font-weight: 500; color: #8E8E98; padding: 0 4px;">Адрес узла</label>
+<input id="uri" class="fld" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="tls://host:port" value="tls://ygg.home.example:443" readonly="">
+<div class="sub" style="padding: 0 4px;">tls://, tcp:// или quic:// с портом</div>
+</div>
+<div style="display: flex; gap: 10px;">
+<button class="btn" style="background: #26272D; color: #ECEDEF;">Отмена</button>
+<button class="btn" style="background: #33B5E5; color: #04222E;">Добавить</button>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":412,"height":892}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
