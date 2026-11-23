@@ -50,3 +50,10 @@ graphify-out/
 
 # APK из scripts/build-apk.sh
 peerage-*.apk
+*.idsig
+
+# Ключи подписи и базы паролей — никогда в репозиторий
+*.p12
+*.jks
+*.keystore
+*.kdbx
