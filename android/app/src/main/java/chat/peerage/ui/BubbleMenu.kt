@@ -227,10 +227,11 @@ private fun shortWhen(time: Long): String {
 }
 
 /**
- * Раскладка у пузыря: всё по ведущему краю пузыря (свой — справа, чужой — слева). Полоса
- * реакций — над пузырём (не влезает — под ним). Меню — под пузырём и полосой; не влезает
- * снизу — над ними; не влезает ни там, ни там (альбомная ориентация, высокий пузырь) — сбоку
- * от пузыря, если там есть место, иначе у нижнего края. Меню выше экрана прокручивается.
+ * Раскладка у пузыря: всё по ведущему краю пузыря (свой — справа, чужой — слева). Обычно
+ * полоса реакций над пузырём, меню под ним. Не влезает — полоса и меню встают ОДНИМ блоком
+ * (полоса над меню): под пузырём, над ним, сбоку (альбомная) или у нижнего края поверх
+ * пузыря. Друг на друга они не налезают никогда: меню мерится по месту, оставшемуся от
+ * полосы, и прокручивается.
  */
 @Composable
 private fun NearBubble(bounds: Rect, mine: Boolean, strip: (@Composable () -> Unit)?, menu: @Composable () -> Unit) {
@@ -241,44 +242,43 @@ private fun NearBubble(bounds: Rect, mine: Boolean, strip: (@Composable () -> Un
     val stripGap = with(density) { Tokens.Space.m.roundToPx() }
     val edge = with(density) { Tokens.Space.m.roundToPx() }
     Layout({
-        menu()
         strip?.invoke()
+        menu()
     }, Modifier.fillMaxSize()) { ms, c ->
         val loose = c.copy(minWidth = 0, minHeight = 0)
         val minY = insetTop + edge
         val bottomY = c.maxHeight - insetBottom - edge
-        val p = ms[0].measure(loose.copy(maxHeight = (bottomY - minY).coerceAtLeast(0)))
-        val s = ms.getOrNull(1)?.measure(loose)
+        val s = if (strip != null) ms[0].measure(loose) else null
+        val sH = s?.height ?: 0
+        val sGap = if (s != null) gap else 0
+        val p = ms.last().measure(loose.copy(maxHeight = (bottomY - minY - sH - sGap).coerceAtLeast(0)))
         layout(c.maxWidth, c.maxHeight) {
             val maxX = { w: Int -> (c.maxWidth - w - edge).coerceAtLeast(edge) }
             val xOf = { w: Int ->
                 (if (mine) bounds.right.roundToInt() - w else bounds.left.roundToInt()).coerceIn(edge, maxX(w))
             }
-            var top = bounds.top.roundToInt()
-            var bottom = bounds.bottom.roundToInt()
-            if (s != null) {
-                val above = top - stripGap - s.height
-                val below = bottom + stripGap
-                val y = when {
-                    above >= minY -> above
-                    below + s.height <= bottomY -> below
-                    else -> minY
-                }
-                s.place(xOf(s.width), y)
-                top = minOf(top, y)
-                bottom = maxOf(bottom, y + s.height)
-            }
-            val maxY = (bottomY - p.height).coerceAtLeast(minY)
-            val below = bottom + gap
-            val above = top - gap - p.height
             // Сбоку — с той стороны, где у пузыря свободно: у своего слева, у чужого справа.
-            val side = if (mine) bounds.left.roundToInt() - gap - p.width else bounds.right.roundToInt() + gap
-            val sideFits = side >= edge && side <= maxX(p.width)
+            val sideOf = { w: Int -> if (mine) bounds.left.roundToInt() - gap - w else bounds.right.roundToInt() + gap }
+            val top = bounds.top.roundToInt()
+            val bottom = bounds.bottom.roundToInt()
+            // Как задумано: полоса над пузырём, меню под ним.
+            if (s != null && top - stripGap - sH >= minY && bottom + gap + p.height <= bottomY) {
+                s.place(xOf(s.width), top - stripGap - sH)
+                p.place(xOf(p.width), bottom + gap)
+                return@layout
+            }
+            val blockH = sH + sGap + p.height
+            val blockW = maxOf(s?.width ?: 0, p.width)
+            val block = { x: (Int) -> Int, y: Int ->
+                s?.place(x(s.width), y)
+                p.place(x(p.width), y + sH + sGap)
+            }
+            val sideFits = sideOf(blockW).let { it >= edge && it <= maxX(blockW) }
             when {
-                below <= maxY -> p.place(xOf(p.width), below)
-                above >= minY -> p.place(xOf(p.width), above)
-                sideFits -> p.place(side, bounds.top.roundToInt().coerceIn(minY, maxY))
-                else -> p.place(xOf(p.width), maxY)
+                bottom + gap + blockH <= bottomY -> block(xOf, bottom + gap)
+                top - gap - blockH >= minY -> block(xOf, top - gap - blockH)
+                sideFits -> block(sideOf, top.coerceIn(minY, (bottomY - blockH).coerceAtLeast(minY)))
+                else -> block(xOf, (bottomY - blockH).coerceAtLeast(minY))
             }
         }
     }
