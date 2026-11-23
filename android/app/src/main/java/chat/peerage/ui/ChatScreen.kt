@@ -94,6 +94,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
@@ -1344,6 +1346,8 @@ internal fun MessageBubble(
             // пометка пересылки НЕ возвращают: они уходят шапкой НАД картинкой, на
             // своей подложке, и сама картинка остаётся голой (так в Telegram).
             val photoBubble = (m.kind == "image" || m.kind == "video") && !pending && m.text.isEmpty()
+            // Рамка снимка — по его пропорциям; шапка над голым снимком берёт её ширину.
+            val frame = mediaFrame(m.width, m.height, if (photoBubble) PhotoBubbleSize else Tokens.Size.photoInBubble)
             // Шапка над фото: пометка пересылки и цитата ответа.
             val photoHeader = photoBubble &&
                 (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
@@ -1423,7 +1427,7 @@ internal fun MessageBubble(
                         }
                         if (photoHeader) {
                             Column(
-                                Modifier.width(PhotoBubbleSize)
+                                Modifier.width(frame.width)
                                     .background(if (m.mine) BubbleOut else BubbleIn)
                                     .padding(horizontal = Tokens.Space.bubbleH, vertical = Tokens.Space.bubbleV),
                             ) { head() }
@@ -1454,6 +1458,7 @@ internal fun MessageBubble(
                                 "image" -> Box(Modifier.mediaSpot(MsgRef(m.id, m.sender))) {
                                     ImageAttachment(
                                         blobBytes,
+                                        frame,
                                         onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
                                         bare = photoBubble,
                                         onLongClick = onLong,
@@ -1465,6 +1470,7 @@ internal fun MessageBubble(
                                 // файл наружу системному плееру.
                                 "video" -> VideoAttachment(
                                     model.blob(m.thumbId),
+                                    frame,
                                     ready,
                                     m.durationMs,
                                     onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
@@ -1545,15 +1551,34 @@ private class BubblePlace {
     var rect = androidx.compose.ui.geometry.Rect.Zero
 }
 
-/** Сторона снимка, который сам себе пузырь. Шапка над ним (цитата, «Переслано»)
- *  берёт ту же ширину — иначе она торчала бы за край картинки. */
+/** Наибольшая ширина снимка, который сам себе пузырь. Шапка над ним (цитата, «Переслано»)
+ *  берёт ширину снимка — иначе она торчала бы за край картинки. */
 internal val PhotoBubbleSize = Tokens.Size.photoBubble
+
+/**
+ * Рамка снимка в ленте по его пропорциям: ширина — до [maxW], высота — по пропорции, но не
+ * выше 4/3 и не ниже 0,4 ширины; высокий кадр сужается (не уже 0,55 [maxW]). Что не влезло в
+ * пределы — обрезается по краям. Размер неизвестен (старые сообщения) — квадрат.
+ */
+internal fun mediaFrame(w: Int, h: Int, maxW: Dp): DpSize {
+    if (w <= 0 || h <= 0) return DpSize(maxW, maxW)
+    val ratio = h.toFloat() / w
+    val maxH = maxW * (4f / 3f)
+    var width = maxW
+    var height = maxW * ratio
+    if (height > maxH) {
+        height = maxH
+        width = (maxH / ratio).coerceAtLeast(maxW * 0.55f)
+    }
+    return DpSize(width, height.coerceAtLeast(maxW * 0.4f))
+}
 
 /** Картинка-вложение в пузыре: миниатюра (тап → полный экран) или плейсхолдер, пока
  *  байты докачиваются. */
 @Composable
 internal fun ImageAttachment(
     bytes: ByteArray?,
+    frame: DpSize,
     onOpen: () -> Unit,
     bare: Boolean = false,
     onLongClick: () -> Unit = {},
@@ -1561,7 +1586,7 @@ internal fun ImageAttachment(
 ) {
     // Снимок декодируется под сторону пузыря, а не в оригинале: в ленте он всё
     // равно не крупнее 240dp, а полноразмерный битмап стоит десятки мегабайт.
-    val side = if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble
+    val side = maxOf(frame.width, frame.height)
     val bmp = rememberBitmap(bytes, cacheKey, side)
     // GIF и анимированный WebP играют прямо в пузыре (Android 9+); до разбора и ниже 9 —
     // первый кадр битмапом.
@@ -1573,7 +1598,7 @@ internal fun ImageAttachment(
     // `clickable` на картинке съедал жест целиком, и выделить сообщение-фото было
     // нельзя — палец всегда попадал в картинку, а не в поля пузыря.
     Box(
-        Modifier.size(if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble)
+        Modifier.size(frame)
             .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).background(HoloSurface).imageOutline(RoundedCornerShape(Tokens.Radius.chip)))
             .combinedClickable(
                 enabled = bmp != null,
@@ -1599,6 +1624,7 @@ internal fun ImageAttachment(
 @Composable
 internal fun VideoAttachment(
     thumb: ByteArray?,
+    frame: DpSize,
     ready: Boolean,
     durationMs: Int,
     onOpen: () -> Unit,
@@ -1608,10 +1634,9 @@ internal fun VideoAttachment(
 ) {
     // Кадр — миниатюра, приехавшая с сообщением. Сам файл ради картинки не
     // читаем: раньше видео целиком шло в память и расшифрованной копией на диск.
-    val side = if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble
-    val frame = rememberBitmap(thumb, cacheKey, side)
+    val still = rememberBitmap(thumb, cacheKey, maxOf(frame.width, frame.height))
     Box(
-        Modifier.size(if (bare) PhotoBubbleSize else Tokens.Size.photoInBubble)
+        Modifier.size(frame)
             .then(if (bare) Modifier else Modifier.clip(RoundedCornerShape(Tokens.Radius.chip)).imageOutline(RoundedCornerShape(Tokens.Radius.chip)))
             .background(Color.Black)
             .combinedClickable(
@@ -1621,8 +1646,8 @@ internal fun VideoAttachment(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        if (frame != null) {
-            Image(frame, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (still != null) {
+            Image(still, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
         if (!ready) {
             CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)

@@ -76,10 +76,17 @@ internal object Bitmaps {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        // Поворот из EXIF: пиксели снимка с камеры часто лежат боком.
+        val o = chat.peerage.JpegOrientation.read(bytes)
+        val swap = chat.peerage.JpegOrientation.swapsSides(o)
         val opts = BitmapFactory.Options().apply {
-            inSampleSize = sampleFor(bounds.outWidth, bounds.outHeight, maxW, maxH)
+            inSampleSize = if (swap) {
+                sampleFor(bounds.outHeight, bounds.outWidth, maxW, maxH)
+            } else {
+                sampleFor(bounds.outWidth, bounds.outHeight, maxW, maxH)
+            }
         }
-        val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
+        val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.let { oriented(it, o) } ?: return null
         // `inSampleSize` даёт только степень двойки, поэтому после него картинка
         // может остаться заметно крупнее нужного — дожимаем и отпускаем исходник.
         val k = minOf(maxW.toFloat() / raw.width, maxH.toFloat() / raw.height, 1f)
@@ -96,6 +103,31 @@ internal object Bitmaps {
             scaled.asImageBitmap()
         }
     }.getOrNull()
+
+    /** Повернуть/отразить кадр по EXIF-повороту [o] (1..8); исходник отпускается. */
+    fun oriented(src: Bitmap, o: Int): Bitmap {
+        if (o !in 2..8) return src
+        val m = android.graphics.Matrix().apply {
+            when (o) {
+                2 -> postScale(-1f, 1f)
+                3 -> postRotate(180f)
+                4 -> postScale(1f, -1f)
+                5 -> {
+                    postRotate(90f)
+                    postScale(-1f, 1f)
+                }
+                6 -> postRotate(90f)
+                7 -> {
+                    postRotate(-90f)
+                    postScale(-1f, 1f)
+                }
+                8 -> postRotate(-90f)
+            }
+        }
+        val out = Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true)
+        if (out !== src) src.recycle()
+        return out
+    }
 }
 
 /**

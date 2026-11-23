@@ -49,16 +49,24 @@ data class MediaMeta(
         private fun imageMeta(bytes: ByteArray): MediaMeta = runCatching {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            // Размеры и превью — уже повёрнутые по EXIF: у получателя рамка снимка строится
+            // по ним, а превью едет без EXIF.
+            val o = JpegOrientation.read(bytes)
             // Превью делаем только для крупных: мелкая картинка и так качается сразу.
             val thumb = if (bytes.size > 512 * 1024) {
                 val opts = BitmapFactory.Options().apply {
                     inSampleSize = sampleFor(bounds.outWidth, bounds.outHeight)
                 }
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.let { jpeg(it) }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.let { jpeg(chat.peerage.ui.Bitmaps.oriented(it, o)) }
             } else {
                 null
             }
-            MediaMeta(width = bounds.outWidth, height = bounds.outHeight, thumb = thumb)
+            val swap = JpegOrientation.swapsSides(o)
+            MediaMeta(
+                width = if (swap) bounds.outHeight else bounds.outWidth,
+                height = if (swap) bounds.outWidth else bounds.outHeight,
+                thumb = thumb,
+            )
         }.getOrDefault(MediaMeta())
 
         private fun videoMeta(ctx: Context, uri: Uri): MediaMeta = withRetriever(ctx, uri) { r ->
