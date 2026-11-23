@@ -177,10 +177,11 @@ impl Identity {
         self.derive_subkey("peerage:session-static:v1")
     }
 
-    /// Подписать свой статический ключ сессий ключом ЛИЧНОСТИ.
-    pub fn sign_session_static(&self, static_pub: &[u8; 32]) -> [u8; 64] {
+    /// Подписать ключом ЛИЧНОСТИ свой статический ключ сессий и `hello` — версию
+    /// протокола и возможности (8.5, E1): их не подменить, не сломав подпись.
+    pub fn sign_session_static(&self, static_pub: &[u8; 32], hello: &[u8]) -> [u8; 64] {
         use ed25519_dalek::Signer;
-        self.signing.sign(&session_static_msg(static_pub)).to_bytes()
+        self.signing.sign(&session_static_msg(static_pub, hello)).to_bytes()
     }
 
     /// Fingerprint — 8 слов BIP39 из SHA-256(публичный ключ).
@@ -195,18 +196,18 @@ impl Identity {
 }
 
 /// Домен подписи статического ключа сессий (ADR-012).
-const SESSION_STATIC_DOMAIN: &[u8] = b"peerage:session-static:v1";
+const SESSION_STATIC_DOMAIN: &[u8] = b"peerage:session-static:v2";
 
-fn session_static_msg(static_pub: &[u8; 32]) -> Vec<u8> {
-    [SESSION_STATIC_DOMAIN, static_pub.as_slice()].concat()
+fn session_static_msg(static_pub: &[u8; 32], hello: &[u8]) -> Vec<u8> {
+    [SESSION_STATIC_DOMAIN, static_pub.as_slice(), hello].concat()
 }
 
-/// Проверить, что статический ключ сессий `static_pub` принадлежит `identity_pub`.
+/// Проверить, что статический ключ сессий `static_pub` и `hello` подписаны `identity_pub`.
 /// Строгая проверка (`verify_strict`): ключ малого порядка и неканоничная подпись
 /// не проходят — проверяется подпись, пришедшая от кого угодно.
-pub fn verify_session_static(identity_pub: &[u8; 32], static_pub: &[u8; 32], sig: &[u8; 64]) -> bool {
+pub fn verify_session_static(identity_pub: &[u8; 32], static_pub: &[u8; 32], hello: &[u8], sig: &[u8; 64]) -> bool {
     let Ok(vk) = VerifyingKey::from_bytes(identity_pub) else { return false };
-    vk.verify_strict(&session_static_msg(static_pub), &ed25519_dalek::Signature::from_bytes(sig))
+    vk.verify_strict(&session_static_msg(static_pub, hello), &ed25519_dalek::Signature::from_bytes(sig))
         .is_ok()
 }
 

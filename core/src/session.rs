@@ -11,17 +11,23 @@
 //!
 //! ```text
 //! msg1  sender_idx(4) | e(32) | e1(1184) | mac1(16)                    | случайная добивка
-//! msg2  receiver_idx(4) | sender_idx(4) | e(32) | ekem1(1104) | s(48) | auth(112) | добивка
-//! msg3  receiver_idx(4) | s(48) | auth(112)                            | добивка
+//! msg2  receiver_idx(4) | sender_idx(4) | e(32) | ekem1(1104) | s(48) | auth(118) | добивка
+//! msg3  receiver_idx(4) | s(48) | auth(118)                            | добивка
 //! data  receiver_idx(4) | counter(8) | AEAD(текст с паддингом бакета)
 //! ```
 //!
 //! Открытого поля «тип» нет: получатель узнаёт пакет по своему индексу в первых
 //! четырёх байтах, а msg1 — по размеру и `mac1`. msg1 и msg2 добиты до размера
 //! прикладного пакета данных, msg3 — до управляющего (M5: по размеру рукопожатие
-//! не отличить от текста и ack). `auth` — ключ личности и её подпись над
-//! статическим ключом сессий: так статический ключ связан с личностью, а сама
-//! личность едет только внутри шифрования.
+//! не отличить от текста и ack). `auth` — ключ личности, [`Hello`] (версии протокола и
+//! возможности) и подпись личности над статическим ключом сессий и `Hello`: так
+//! статический ключ связан с личностью, а сама личность едет только внутри шифрования.
+//!
+//! Версия (8.5, E1): каждый называет старшую и младшую версию, которые говорит; общая —
+//! меньшая из старших, если она не ниже большей из младших. Общей нет — рукопожатие
+//! кончается [`Received::Incompatible`], а не порчей сессии: инициатор всё равно шлёт
+//! msg3, чтобы и ответчик узнал, в чём дело. Совместимое расширение — бит [`Caps`],
+//! неизвестные биты не мешают.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
@@ -67,7 +73,7 @@ const REJECT_AFTER_MESSAGES: u64 = u64::MAX - (1 << 13);
 
 const PROLOGUE: &[u8] = b"peerage:dm-session:v2";
 const TAG: usize = 16;
-const AUTH_LEN: usize = 32 + 64;
+const AUTH_LEN: usize = 32 + Hello::LEN + 64;
 const MAC_LEN: usize = 16;
 const MSG1_LEN: usize = 4 + 32 + KEM_PK_LEN + MAC_LEN;
 const MSG2_LEN: usize = 8 + 32 + KEM_CT_LEN + TAG + 32 + TAG + AUTH_LEN + TAG;
@@ -79,6 +85,59 @@ pub const APP_PACKET: usize = DATA_OVERHEAD + APP_BUCKET;
 /// Пакет данных управляющего бакета — и размер msg3.
 pub const CONTROL_PACKET: usize = DATA_OVERHEAD + CONTROL_BUCKET;
 const _: () = assert!(MSG1_LEN <= APP_PACKET && MSG2_LEN <= APP_PACKET && MSG3_LEN <= CONTROL_PACKET);
+
+/// Версия протокола 1:1: несовместимое изменение провода или смысла поднимает её,
+/// совместимое — бит [`Caps`].
+pub const PROTOCOL_VERSION: u8 = 1;
+/// Младшая версия, которую этот узел ещё говорит.
+const MIN_PROTOCOL_VERSION: u8 = 1;
+/// Сколько не начинаем рукопожатие с тем, с кем общей версии нет: он сам постучится,
+/// когда обновится (ответчиком мы открыты всегда).
+pub const INCOMPATIBLE_BACKOFF: Duration = Duration::from_secs(600);
+
+/// Возможности узла (E1): битовое поле, неизвестные биты пропускаются.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Caps(pub u32);
+
+impl Caps {
+    /// Держит почтовый ящик для других (ADR-016; механизм — после беты).
+    pub const MAILBOX: Caps = Caps(1);
+
+    pub fn has(self, c: Caps) -> bool {
+        self.0 & c.0 == c.0
+    }
+}
+
+/// Что узел говорит о себе в рукопожатии (под подписью личности).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hello {
+    /// Старшая и младшая версии протокола, которые узел говорит.
+    pub max: u8,
+    pub min: u8,
+    pub caps: Caps,
+}
+
+impl Hello {
+    const LEN: usize = 6;
+    /// Этот узел.
+    pub const OURS: Hello = Hello { max: PROTOCOL_VERSION, min: MIN_PROTOCOL_VERSION, caps: Caps(0) };
+
+    fn bytes(&self) -> [u8; Self::LEN] {
+        let c = self.caps.0.to_le_bytes();
+        [self.max, self.min, c[0], c[1], c[2], c[3]]
+    }
+
+    fn parse(b: &[u8]) -> Option<Self> {
+        let &[max, min, c0, c1, c2, c3] = b else { return None };
+        Some(Hello { max, min, caps: Caps(u32::from_le_bytes([c0, c1, c2, c3])) })
+    }
+
+    /// Общая версия с `other` или `None`, если её нет.
+    pub fn agree(&self, other: &Hello) -> Option<u8> {
+        let v = self.max.min(other.max);
+        (v >= self.min.max(other.min)).then_some(v)
+    }
+}
 
 /// Ключ `mac1` для msg1, адресованного личности `identity`: посчитать его может
 /// только тот, кто эту личность уже знает. Без верного `mac1` мы молчим, и новый
@@ -283,6 +342,8 @@ struct Peer {
     unconfirmed: VecDeque<(Instant, Vec<u8>)>,
     /// С какого момента шлём, ничего не получая в ответ.
     unanswered_since: Option<Instant>,
+    /// Общей версии нет: до этого момента сами не начинаем ([`INCOMPATIBLE_BACKOFF`]).
+    incompatible_until: Option<Instant>,
 }
 
 /// Что вышло из принятого пакета.
@@ -296,6 +357,9 @@ pub enum Received {
     Reply(Vec<u8>),
     /// Рукопожатие с `peer` завершено; `out` отправить на его адрес.
     Established { peer: PeerKey, out: Vec<Vec<u8>> },
+    /// Подлинный `peer` говорит только версии `theirs.min..=theirs.max`, общей с
+    /// нами нет: сессии не будет. `out` (msg3, если мы инициатор) — на его адрес.
+    Incompatible { peer: PeerKey, theirs: Hello, out: Vec<Vec<u8>> },
     /// Индекс нам не знаком: например, мы перезапустились, а собеседник ещё шлёт
     /// по старой сессии. Мессенджер может сам начать рукопожатие со своим.
     UnknownIndex,
@@ -308,8 +372,9 @@ pub enum Received {
 #[derive(Clone)]
 pub struct Sessions {
     s: StaticSecret,
-    /// Своя личность и подпись над статическим ключом — payload msg2/msg3.
+    /// Своя личность, `Hello` и подпись над статическим ключом — payload msg2/msg3.
     auth: [u8; AUTH_LEN],
+    hello: Hello,
     mac1_mine: [u8; 32],
     slots: HashMap<u32, Slot>,
     peers: HashMap<PeerKey, Peer>,
@@ -361,15 +426,22 @@ impl Sessions {
     }
 
     pub fn new(me: &Identity) -> Self {
+        Self::with_hello(me, Hello::OURS)
+    }
+
+    /// Узел, говорящий о себе `hello` — для проверки встречи разных версий.
+    pub fn with_hello(me: &Identity, hello: Hello) -> Self {
         let s = StaticSecret::from(me.session_static_secret());
         let static_pub = x25519_dalek::PublicKey::from(&s).to_bytes();
         let identity = me.public_key_bytes();
         let mut auth = [0u8; AUTH_LEN];
         auth[..32].copy_from_slice(&identity);
-        auth[32..].copy_from_slice(&me.sign_session_static(&static_pub));
+        auth[32..32 + Hello::LEN].copy_from_slice(&hello.bytes());
+        auth[32 + Hello::LEN..].copy_from_slice(&me.sign_session_static(&static_pub, &hello.bytes()));
         Sessions {
             s,
             auth,
+            hello,
             mac1_mine: mac1_key(&identity),
             slots: HashMap::new(),
             peers: HashMap::new(),
@@ -569,6 +641,9 @@ impl Sessions {
     }
 
     fn initiate<R: RngCore + CryptoRng>(&mut self, peer: &PeerKey, now: Instant, rng: &mut R) -> Option<Vec<u8>> {
+        if self.peers.get(peer).and_then(|p| p.incompatible_until).is_some_and(|t| now < t) {
+            return None;
+        }
         let idx = self.new_index(rng);
         let mut hs = HandshakeState::new(&XX_HFS, true, PROLOGUE, self.s.clone());
         let noise = hs.write_message(&[], rng).ok()?;
@@ -621,15 +696,16 @@ impl Sessions {
         let Some(remote) = index_at(pkt, 4) else { return Received::Rejected };
         let Ok(auth) = hs.read_message(&pkt[8..MSG2_LEN]) else { return Received::Rejected };
         // Отвечать обязан именно тот, кому мы звонили.
-        if check_auth(&auth, &hs, Some(&peer)).is_none() {
-            return Received::Rejected;
-        }
+        let Some((_, theirs)) = check_auth(&auth, &hs, Some(&peer)) else { return Received::Rejected };
         let Ok(noise) = hs.write_message(&self.auth, rng) else { return Received::Rejected };
         let Ok(keys) = hs.split() else { return Received::Rejected };
         let mut m3 = Vec::with_capacity(CONTROL_PACKET);
         m3.extend_from_slice(&remote.to_le_bytes());
         m3.extend_from_slice(&noise);
         let m3 = pad_random(m3, CONTROL_PACKET, rng);
+        if self.hello.agree(&theirs).is_none() {
+            return self.incompatible(idx, peer, theirs, vec![m3], now);
+        }
         let mut out = vec![m3.clone()];
         let session = Session {
             peer,
@@ -662,9 +738,12 @@ impl Sessions {
         }
         let (mut hs, remote) = (hs.clone(), *remote);
         let Ok(auth) = hs.read_message(&pkt[4..MSG3_LEN]) else { return Received::Rejected };
-        let Some(peer) = check_auth(&auth, &hs, None) else { return Received::Rejected };
+        let Some((peer, theirs)) = check_auth(&auth, &hs, None) else { return Received::Rejected };
         let Ok(keys) = hs.split() else { return Received::Rejected };
         self.responding.retain(|i| *i != idx);
+        if self.hello.agree(&theirs).is_none() {
+            return self.incompatible(idx, peer, theirs, vec![], now);
+        }
         let session = Session {
             peer,
             remote,
@@ -726,9 +805,23 @@ impl Sessions {
 
     /// Новая живая сессия `idx` с `peer`: записать, лишние старые выбросить,
     /// очередь ожидания зашифровать по ней.
+    /// Рукопожатие `idx` с подлинным `peer` кончилось без общей версии: слота нет,
+    /// очередь ему не дойдёт, сами не стучимся [`INCOMPATIBLE_BACKOFF`].
+    fn incompatible(&mut self, idx: u32, peer: PeerKey, theirs: Hello, out: Vec<Vec<u8>>, now: Instant) -> Received {
+        self.slots.remove(&idx);
+        let p = self.peers.entry(peer).or_default();
+        if p.initiating.is_some_and(|(i, _)| i == idx) {
+            p.initiating = None;
+        }
+        p.queue.clear();
+        p.incompatible_until = Some(now + INCOMPATIBLE_BACKOFF);
+        Received::Incompatible { peer, theirs, out }
+    }
+
     fn adopt(&mut self, peer: PeerKey, idx: u32, now: Instant) -> Vec<Vec<u8>> {
         let p = self.peers.entry(peer).or_default();
         p.unanswered_since = None;
+        p.incompatible_until = None;
         p.live.push(idx);
         while p.live.len() > MAX_LIVE_PER_PEER {
             let old = p.live.remove(0);
@@ -775,7 +868,10 @@ impl Sessions {
             }
             p.queue.retain(|(t, _)| now.duration_since(*t) < QUEUE_TTL);
             p.unconfirmed.retain(|(t, _)| now.duration_since(*t) < QUEUE_TTL);
-            !p.live.is_empty() || p.initiating.is_some() || !p.queue.is_empty()
+            if p.incompatible_until.is_some_and(|t| now >= t) {
+                p.incompatible_until = None;
+            }
+            !p.live.is_empty() || p.initiating.is_some() || !p.queue.is_empty() || p.incompatible_until.is_some()
         });
     }
 }
@@ -788,20 +884,22 @@ fn push_bounded(q: &mut VecDeque<(Instant, Vec<u8>)>, e: (Instant, Vec<u8>)) {
 }
 
 /// Проверить `auth` собеседника: подпись его личности над статическим ключом,
-/// который он только что доказал рукопожатием. `expect` — кого мы ждём.
-fn check_auth(auth: &[u8], hs: &HandshakeState, expect: Option<&PeerKey>) -> Option<PeerKey> {
+/// который он только что доказал рукопожатием, и над его [`Hello`]. `expect` — кого
+/// мы ждём.
+fn check_auth(auth: &[u8], hs: &HandshakeState, expect: Option<&PeerKey>) -> Option<(PeerKey, Hello)> {
     if auth.len() != AUTH_LEN {
         return None;
     }
-    let mut id = [0u8; 32];
-    id.copy_from_slice(&auth[..32]);
-    let mut sig = [0u8; 64];
-    sig.copy_from_slice(&auth[32..]);
+    let (id, rest) = auth.split_at(32);
+    let (hello, sig) = rest.split_at(Hello::LEN);
+    let id: PeerKey = id.try_into().ok()?;
+    let sig: [u8; 64] = sig.try_into().ok()?;
     if expect.is_some_and(|e| *e != id) {
         return None;
     }
     let rs = hs.remote_static()?;
-    verify_session_static(&id, &rs, &sig).then_some(id)
+    let theirs = Hello::parse(hello)?;
+    verify_session_static(&id, &rs, hello, &sig).then_some((id, theirs))
 }
 
 #[cfg(test)]
@@ -883,6 +981,56 @@ mod tests {
         let n = a.s.census(now);
         assert_eq!((n.live, n.handshaking, n.peers), (1, 1, 2));
         assert_eq!(n.live, n.confirmed + n.unconfirmed);
+    }
+
+    fn node_with(hello: Hello) -> Node {
+        let i = Identity::generate();
+        Node { id: i.public_key_bytes(), s: Sessions::with_hello(&i, hello) }
+    }
+
+    #[test]
+    fn common_version_is_the_lower_top_not_below_either_floor() {
+        let h = |max, min| Hello { max, min, caps: Caps(0) };
+        assert_eq!(h(1, 1).agree(&h(1, 1)), Some(1));
+        assert_eq!(h(1, 1).agree(&h(3, 1)), Some(1), "новый говорит со старым по-старому");
+        assert_eq!(h(3, 2).agree(&h(4, 1)), Some(3));
+        assert_eq!(h(1, 1).agree(&h(3, 2)), None, "новый старый уже не говорит");
+        assert_eq!(h(3, 2).agree(&h(1, 1)), None, "и это видят обе стороны");
+    }
+
+    /// Новый узел, ещё говорящий нашу версию, — обычная сессия; неизвестные биты
+    /// возможностей ей не мешают.
+    #[test]
+    fn newer_peer_with_unknown_caps_still_talks() {
+        let mut a = node();
+        let mut b = node_with(Hello { max: 2, min: 1, caps: Caps(0x8000_0003) });
+        let t = Instant::now();
+        assert_eq!(handshake(&mut a, &mut b, "привет", t), ["привет"]);
+        assert_eq!(handshake(&mut b, &mut node_with(Hello::OURS), "и так", t), ["и так"]);
+        assert!(Caps(0x8000_0003).has(Caps::MAILBOX));
+    }
+
+    /// Общей версии нет: обе стороны получают понятный отказ, сессии нет, инициатор
+    /// не долбит рукопожатием до [`INCOMPATIBLE_BACKOFF`].
+    #[test]
+    fn no_common_version_is_a_clear_refusal() {
+        let mut a = node();
+        let newer = Hello { max: 3, min: 2, caps: Caps(0) };
+        let mut b = node_with(newer);
+        let t = Instant::now();
+        let m1 = a.s.send(&b.id, &text("привет"), true, t, &mut OsRng);
+        let Received::Reply(m2) = b.s.receive(&m1[0], t, &mut OsRng) else { panic!("msg2") };
+        let Received::Incompatible { peer, theirs, out } = a.s.receive(&m2, t, &mut OsRng) else { panic!("отказ") };
+        assert_eq!((peer, theirs), (b.id, newer));
+        assert_eq!(out.len(), 1, "msg3 уходит — пусть и ответчик узнает");
+        let r = b.s.receive(&out[0], t, &mut OsRng);
+        assert_eq!(r, Received::Incompatible { peer: a.id, theirs: Hello::OURS, out: vec![] });
+        assert!(!a.s.has_session(&b.id, t) && !b.s.has_session(&a.id, t));
+
+        assert!(a.s.send(&b.id, &text("ещё"), true, t + Duration::from_secs(5), &mut OsRng).is_empty());
+        assert!(a.s.tick(t + Duration::from_secs(30), &mut OsRng).is_empty(), "тик тоже не стучится");
+        let later = t + INCOMPATIBLE_BACKOFF;
+        assert_eq!(a.s.send(&b.id, &text("обновился?"), true, later, &mut OsRng).len(), 1, "после паузы — снова msg1");
     }
 
     #[test]

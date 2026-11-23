@@ -60,8 +60,8 @@ A session is created by a `Noise_XXhfs_25519+MLKEM768_ChaChaPoly_BLAKE2s` handsh
 
 ```text
 msg1  sender_idx(4) | e(32) | e1(1184) | mac1(16)                   | random padding → 4124 B
-msg2  receiver_idx(4) | sender_idx(4) | e(32) | ekem1(1104) | s(48) | auth(112) | padding → 4124 B
-msg3  receiver_idx(4) | s(48) | auth(112)                           | padding → 284 B
+msg2  receiver_idx(4) | sender_idx(4) | e(32) | ekem1(1104) | s(48) | auth(118) | padding → 4124 B
+msg3  receiver_idx(4) | s(48) | auth(118)                           | padding → 284 B
 data  receiver_idx(4) | counter(8) | ChaCha20-Poly1305(padded payload), AD = the 12-byte header
 ```
 
@@ -72,11 +72,18 @@ data  receiver_idx(4) | counter(8) | ChaCha20-Poly1305(padded payload), AD = the
 - **`mac1`** = first 16 bytes of `BLAKE3-keyed(derive_key("peerage:session-mac1:v1",
   responder_identity), msg1 without mac1)`. Without it the responder stays silent: only
   someone who already knows our identity can make us reveal it (address rotation, ADR-007).
-- **`auth`** = identity public key (32) ‖ Ed25519 signature by that identity over
-  `"peerage:session-static:v1" ‖ static_pub` (64), encrypted inside the handshake. The
-  static X25519 key is `derive_subkey("peerage:session-static:v1")`. The initiator
-  requires the responder's identity to be the peer it called; the responder learns the
-  initiator's identity from msg3.
+- **`auth`** = identity public key (32) ‖ hello (6) ‖ Ed25519 signature by that identity
+  over `"peerage:session-static:v2" ‖ static_pub ‖ hello` (64), encrypted inside the
+  handshake. The static X25519 key is `derive_subkey("peerage:session-static:v1")`. The
+  initiator requires the responder's identity to be the peer it called; the responder
+  learns the initiator's identity from msg3.
+- **hello** (step 8.5, ADR-016 E1) = `max_version(1) ‖ min_version(1) ‖ caps(4, LE)`: the
+  protocol versions the node speaks and a capability bitset (bit 0 — holds a mailbox,
+  ADR-016). The common version is the lower of the two `max`, if it is not below the higher
+  of the two `min`. Without one the handshake ends in a clear refusal, not a session: the
+  initiator still sends msg3 so the responder learns it too, and does not initiate to that
+  peer again for 10 min (it stays reachable as a responder). Unknown capability bits are
+  ignored. This build: version 1..=1, no capability bits set.
 - **Data:** the counter is the AEAD nonce; a 2048-packet sliding window rejects replays
   and anything older. An empty padded plaintext is a keepalive: the responder sends one
   right after msg3 so the initiator knows the session is confirmed.

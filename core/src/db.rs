@@ -4,8 +4,11 @@
 //! до вызова [`open`]). При отсутствии ключа база остаётся незашифрованной
 //! (только в dev/test окружении).
 //!
-//! Схема описана ОДИН раз — в `migrate()`, без ALTER: совместимость со старыми
-//! базами не поддерживается, новая колонка добавляется прямо в `CREATE TABLE`.
+//! Версия схемы — `PRAGMA user_version` (8.5). Схема на момент заморозки формата —
+//! версия 1: её создаёт [`schema_v1`] (вместе с доводкой баз, созданных до заморозки).
+//! Каждое изменение после — шаг в [`STEPS`] под следующим номером, в своей транзакции
+//! вместе с номером: прерванная миграция повторяется целиком. База новее приложения
+//! не открывается — явная ошибка вместо молчаливой порчи.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -53,7 +56,42 @@ pub fn lock(db: &Db) -> MutexGuard<'_, Connection> {
     db.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// Миграции после заморозки: `STEPS[i]` переводит схему `i + 1` в `i + 2`.
+const STEPS: &[fn(&Connection) -> rusqlite::Result<()>] = &[];
+
+/// Версия схемы этой сборки.
+pub const SCHEMA_VERSION: i64 = 1 + STEPS.len() as i64;
+
+/// База создана сборкой новее этой (схема `found`, эта знает до `SCHEMA_VERSION`).
+#[derive(Debug, thiserror::Error)]
+#[error("база данных новее приложения: схема {found}, эта сборка знает до {SCHEMA_VERSION}")]
+pub struct NewerSchema {
+    pub found: i64,
+}
+
 pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    let found: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if found > SCHEMA_VERSION {
+        let code = rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN);
+        return Err(rusqlite::Error::SqliteFailure(code, Some(NewerSchema { found }.to_string())));
+    }
+    for to in found + 1..=SCHEMA_VERSION {
+        let tx = conn.unchecked_transaction()?;
+        if to == 1 {
+            schema_v1(&tx)?;
+        } else {
+            STEPS[(to - 2) as usize](&tx)?;
+        }
+        tx.pragma_update(None, "user_version", to)?;
+        tx.commit()?;
+    }
+    search_index(conn);
+    Ok(())
+}
+
+/// Схема 1 (заморозка формата, шаг 8). На базе без номера — новой или созданной до
+/// заморозки (эмуляторы, телефон владельца) — доводит её до той же схемы.
+fn schema_v1(conn: &Connection) -> rusqlite::Result<()> {
     // 7i: запросом было первое сообщение незнакомца (`first_text`); теперь это свой
     // payload с приветствием. Старые висящие запросы не переносятся: принять их по
     // новому протоколу нельзя (до беты формат ломать можно).
@@ -306,6 +344,12 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     // «Без звука» прежних версий = «ничего», пока не включит. Флаг гасим в том же запросе,
     // чтобы перенос не повторялся на каждом запуске; на новой базе колонки нет — тихо мимо.
     let _ = conn.execute("UPDATE chat_flags SET notify = 2, notify_until = 0, muted = 0 WHERE muted != 0", []);
+    Ok(())
+}
+
+/// Полнотекстовый индекс — при каждом открытии: его может не быть в сборке SQLite, и
+/// тогда поиск обязан деградировать, а не ронять запуск.
+fn search_index(conn: &Connection) {
     // Полнотекстовый индекс переписки: текст и имя файла вложения (поиск в чате, 2.9).
     // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
     // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5
@@ -346,7 +390,6 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if fresh {
         let _ = conn.execute("INSERT INTO chat_search(chat_search) VALUES ('rebuild')", []);
     }
-    Ok(())
 }
 
 
@@ -386,5 +429,33 @@ mod migration {
         conn.execute("UPDATE chat_flags SET notify=-1 WHERE chat=x'01'", []).unwrap();
         super::migrate(&conn).unwrap();
         assert_eq!(mode(&[1]), -1);
+    }
+
+    fn version(conn: &Connection) -> i64 {
+        conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap()
+    }
+
+    /// Новая база получает номер схемы; повторное открытие ничего не ломает.
+    #[test]
+    fn fresh_base_is_numbered_and_reopens() {
+        let conn = Connection::open_in_memory().unwrap();
+        super::migrate(&conn).unwrap();
+        assert_eq!(version(&conn), super::SCHEMA_VERSION);
+        conn.execute("INSERT INTO blocklist (key, blocked) VALUES (x'01', 1)", []).unwrap();
+        super::migrate(&conn).unwrap();
+        assert_eq!(version(&conn), super::SCHEMA_VERSION);
+        let n: i64 = conn.query_row("SELECT count(*) FROM blocklist", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "данные на месте");
+    }
+
+    /// База от сборки новее — понятный отказ, данные не тронуты.
+    #[test]
+    fn newer_base_is_refused() {
+        let conn = Connection::open_in_memory().unwrap();
+        super::migrate(&conn).unwrap();
+        conn.pragma_update(None, "user_version", super::SCHEMA_VERSION + 1).unwrap();
+        let err = super::migrate(&conn).unwrap_err();
+        assert!(err.to_string().contains("новее приложения"), "{err}");
+        assert_eq!(version(&conn), super::SCHEMA_VERSION + 1);
     }
 }

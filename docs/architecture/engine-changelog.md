@@ -30,6 +30,30 @@
 
 ---
 
+## 2026-11-23 · Версия протокола и возможности в рукопожатии; номер схемы базы · ХЭШ (бета 8.5)
+
+**Причина:** шаг 8 (`format-freeze.md` 8.5, ADR-016 E1, политика `beta.md` → «Шаг 8») —
+после раздачи беты разные версии встретятся в сети, а у рукопожатия не было ни версии, ни
+битов возможностей; у базы не было номера схемы, миграции шли «ALTER на авось».
+
+- **Контракт:** `core::session::{PROTOCOL_VERSION = 1, Hello {max, min, caps}, Caps
+  (MAILBOX = бит 0), INCOMPATIBLE_BACKOFF}`, `Sessions::with_hello`, `Hello::agree`;
+  `Received::Incompatible {peer, theirs, out}`. `Identity::sign_session_static(static, hello)`
+  и `verify_session_static(id, static, hello, sig)` — подпись покрывает `hello`, метка
+  `peerage:session-static:v2`. `core::db::{SCHEMA_VERSION, NewerSchema}`.
+- **Поведение / провод:** `auth` = личность(32) ‖ hello(6) ‖ подпись(64) — 102 байта
+  (msg3 по-прежнему в управляющем бакете). Общая версия — меньшая из старших, не ниже
+  большей из младших; нет — отказ с обеих сторон (инициатор шлёт msg3), сессии нет,
+  инициатор не стучится 10 мин, мессенджер пишет в лог. Неизвестные биты возможностей
+  не мешают. **Совместимость:** сборки до 8.5 и после не договорятся (подпись по новой
+  метке) — обновить все устройства.
+- **Схема:** `PRAGMA user_version`; схема заморозки — 1 (`schema_v1`: таблицы и доводка баз,
+  созданных до заморозки), дальше — шаги `STEPS`, каждый в транзакции с номером. База новее
+  сборки — `SQLITE_CANTOPEN` с текстом «база данных новее приложения».
+- **Тесты:** `session` — `common_version_is_the_lower_top_not_below_either_floor`,
+  `newer_peer_with_unknown_caps_still_talks`, `no_common_version_is_a_clear_refusal`;
+  `db::migration` — `fresh_base_is_numbered_and_reopens`, `newer_base_is_refused`.
+
 ## 2026-11-23 · Код обмена v2 · 09de1a9 (бета 8.4)
 
 **Причина:** шаг 8 (`format-freeze.md` 8.4, ADR-015 F3, ADR-016 E2/E4) — код

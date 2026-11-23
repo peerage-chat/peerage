@@ -73,7 +73,9 @@ practical difference is small, and the failure modes of A are far simpler.
   static X25519 key derived from its seed with its own domain label
   (`peerage:session-static:v1`) and **signed by the Ed25519 identity**. The signature
   travels in the handshake payload next to the identity key; the receiver checks it and
-  that the identity is the one it expects. Precedent: libp2p's Noise handshake signs its
+  that the identity is the one it expects. Since step 8.5 the signature also covers the
+  node's protocol versions and capability bits (`hello`, ADR-016 E1; layout in
+  `protocol-spec.md`), under the label `peerage:session-static:v2`. Precedent: libp2p's Noise handshake signs its
   static key with the peer's identity key the same way.
 - **XX, not IK.** IK requires the initiator to know the responder's static key in advance,
   and a separate static key cannot be derived from the identity — that is its point. In XX
