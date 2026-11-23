@@ -338,7 +338,11 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
             onPickFile = { filePicker.launch(arrayOf("*/*")) },
             onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
             onCamera = openCamera,
-            onSendAttachments = { list, caption -> sendGallery(ctx, model, key, list, scope, caption) },
+            onSendAttachments = { list, caption ->
+                model.stageGallery(ctx, chat, list)
+                model.sendStaged(ctx, chat, caption)
+            },
+            onStageAttachments = { model.stageGallery(ctx, chat, it) },
             voice = voice,
             model = model,
             hint = stringResource(if (model.isSaved(key)) R.string.saved_hint else R.string.chat_input_hint),
@@ -447,28 +451,6 @@ internal fun sendUriAttachment(
     group: Boolean = false,
 ) {
     scope.launch(Dispatchers.IO) { sendUriNow(ctx, model, key, uri, fallbackName, caption, group) }
-}
-
-/**
- * Снимки из шторки «Прикрепить» — по одному и в порядке выбора: номер на плитке обещает
- * порядок в ленте. Параллельная отправка его не держала — меньший файл обгонял. Подпись —
- * у первого: серия из пяти фото с одной подписью на каждом читалась бы как спам.
- */
-internal fun sendGallery(
-    ctx: android.content.Context,
-    model: AppModel,
-    key: String,
-    items: List<GalleryItem>,
-    scope: kotlinx.coroutines.CoroutineScope,
-    caption: String,
-    group: Boolean = false,
-) {
-    scope.launch(Dispatchers.IO) {
-        items.forEachIndexed { i, g ->
-            val fallback = if (g.isVideo) "video.mp4" else "photo.jpg"
-            sendUriNow(ctx, model, key, g.uri, fallback, if (i == 0) caption else "", group)
-        }
-    }
 }
 
 /**
@@ -816,6 +798,8 @@ internal fun MessageInput(
     onPickAudio: () -> Unit = {},
     onCamera: () -> Unit = {},
     onSendAttachments: (List<GalleryItem>, String) -> Unit = { _, _ -> },
+    /** Шторку закрыли с выбранным: оно ждёт над полем; null — выбор пропадает. */
+    onStageAttachments: ((List<GalleryItem>) -> Unit)? = null,
     /** Запись голосовых; null — микрофона в этом поле нет. */
     voice: VoiceSession? = null,
     model: AppModel? = null,
@@ -907,10 +891,15 @@ internal fun MessageInput(
         if (attachOpen) {
             // Отправка из шторки: текст поля — подпись к первому вложению. Подпись не
             // отдельным сообщением: фото с подписью иначе — два пакета, и наблюдатель
-            // узнаёт их по характерной паре (M5).
+            // узнаёт их по характерной паре (M5). Закрыли, не отправив, — выбранное ждёт
+            // над полем, подпись набирается там же.
             val close = {
                 attachOpen = false
                 picked = emptyList()
+            }
+            val keep = {
+                if (picked.isNotEmpty()) onStageAttachments?.invoke(picked)
+                close()
             }
             AttachSheet(
                 selected = picked,
@@ -918,15 +907,15 @@ internal fun MessageInput(
                     picked = if (picked.any { it.uri == g.uri }) picked.filterNot { it.uri == g.uri } else picked + g
                 },
                 onCamera = {
-                    close()
+                    keep()
                     onCamera()
                 },
                 onPickFile = {
-                    close()
+                    keep()
                     onPickFile()
                 },
                 onPickAudio = {
-                    close()
+                    keep()
                     onPickAudio()
                 },
                 onSend = {
@@ -934,7 +923,7 @@ internal fun MessageInput(
                     close()
                     field.clearText()
                 },
-                onClose = close,
+                onClose = keep,
             )
         }
         AnimatedVisibility(

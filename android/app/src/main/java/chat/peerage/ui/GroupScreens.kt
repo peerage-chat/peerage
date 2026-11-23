@@ -182,7 +182,11 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
                     onPickFile = { filePicker.launch(arrayOf("*/*")) },
                     onPickAudio = { audioPicker.launch(arrayOf("audio/*")) },
                     onCamera = openCamera,
-                    onSendAttachments = { list, caption -> sendGallery(ctx, model, gid, list, scope, caption, group = true) },
+                    onSendAttachments = { list, caption ->
+                        model.stageGallery(ctx, chat, list)
+                        model.sendStaged(ctx, chat, caption)
+                    },
+                    onStageAttachments = { model.stageGallery(ctx, chat, it) },
                     voice = voice,
                     model = model,
                     mentionCandidates = mentionCandidates,

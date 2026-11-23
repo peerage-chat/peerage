@@ -269,6 +269,8 @@ internal fun CenterMessage(text: String, modifier: Modifier = Modifier) {
     }
 }
 
+private val CHAT_SCREENS = setOf(Screen.Chat, Screen.GroupChat, Screen.Saved)
+
 internal enum class Screen {
     /** «Медиа и файлы» чата (3.2). */
     Media,
@@ -416,7 +418,9 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
         if (t == null) {
             if (d.target != null) model.shareDraft = d.copy(target = null)
             screen = Screen.Share
-        } else {
+        } else if (t != model.openChatTarget() || screen !in CHAT_SCREENS) {
+            // Ждущее в уже открытом чате (шторка, клавиатура) — чат не открывается заново:
+            // это сбросило бы начатый ответ, правку и выбор.
             if (screen == Screen.Share) nav.back()
             openTarget(t)
         }

@@ -216,12 +216,31 @@ internal fun AppModel.stageKeyboardMedia(ctx: Context, chat: ChatTarget, uris: L
             }.getOrNull()
         }
         if (items.isEmpty()) return@thread
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            // Уже ждущее в этом чате — дополняется; присланное в другой чат уступает место.
-            val d = shareDraft?.takeIf { it.target == chat }
-            shareDraft = d?.copy(items = d.items + items) ?: ShareDraft(items, "", chat)
-        }
+        android.os.Handler(android.os.Looper.getMainLooper()).post { stageItems(chat, items) }
     }
+}
+
+/**
+ * Выбранное в шторке «Прикрепить» — над полем чата [chat]: шторку закрыли, не отправив, а
+ * выбор не пропадает, и набранный текст уходит подписью. Отправка из шторки идёт этим же
+ * путём, поэтому ждавшее раньше уходит вместе с выбранным.
+ */
+internal fun AppModel.stageGallery(ctx: Context, chat: ChatTarget, picked: List<chat.peerage.ui.GalleryItem>) {
+    val cr = ctx.contentResolver
+    stageItems(
+        chat,
+        picked.map { g ->
+            val mime = runCatching { cr.getType(g.uri) }.getOrNull() ?: if (g.isVideo) "video/mp4" else "image/jpeg"
+            SharedItem(g.uri, mime, if (g.isVideo) "video.mp4" else "photo.jpg", g.size)
+        },
+    )
+}
+
+/** Вложения — над полем чата [chat]: ждущее там дополняется, ждущее в другом чате уступает место. */
+private fun AppModel.stageItems(chat: ChatTarget, items: List<SharedItem>) {
+    if (items.isEmpty()) return
+    val d = shareDraft?.takeIf { it.target == chat }
+    shareDraft = d?.copy(items = d.items + items) ?: ShareDraft(items, "", chat)
 }
 
 private const val KEYBOARD_DIR = "keyboard"
