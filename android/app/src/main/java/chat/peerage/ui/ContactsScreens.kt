@@ -68,6 +68,8 @@ private data class ChatRowUi(
     /** Сколько человек сейчас в комнате (только для групп; 0 — никого). */
     val inRoom: Int = 0,
     val members: Int = 0,
+    /** «Сохранённое» — чат с собой: своя аватарка, без галочек, сети и уведомлений. */
+    val saved: Boolean = false,
 ) {
     val time: Long get() = summary?.lastTime ?: 0
     val pinned: Boolean get() = pinnedAt > 0
@@ -107,12 +109,19 @@ internal fun ContactsScreen(
     val showInv = activeFilter == "all" || activeFilter == "room" || activeFilter == RequestsFolder
     val requests = if (showReq) model.contactRequests.sortedByDescending { it.time } else emptyList()
     val invites = if (showInv) model.groupInvites.toList() else emptyList()
-    val dmList = if (folder == null) model.contacts else model.contacts.filter { model.folderHasDm(folder, it.key) }
+    val dmList = (if (folder == null) model.contacts else model.contacts.filter { model.folderHasDm(folder, it.key) })
+        .filterNot { model.isSaved(it.key) }
+    // «Сохранённое» — строкой среди чатов, виден всегда: по времени последней заметки, без
+    // заметок — в самом низу. В своей папке — если папка берёт личные чаты.
+    val me = model.me?.pubkey
+    val savedTitle = stringResource(R.string.menu_saved)
+    val savedSummary = me?.let { model.chatSummaries[model.chatKey(it, false)] }
     val groupList = if (folder == null) model.groups else model.groups.filter { model.folderHasGroup(folder, it.gid) }
 
     // Один список: закреплённые сверху (позже закрепили — выше), дальше по времени
     // последнего сообщения. Чаты без переписки уходят в конец по алфавиту — иначе
-    // новый пустой контакт с временем 0 встал бы ниже годовалой переписки случайно.
+    // новый пустой контакт с временем 0 встал бы ниже годовалой переписки случайно;
+    // пустое «Сохранённое» — под ними.
     val rows = buildList {
         if (showRoom) {
             groupList.forEach { g ->
@@ -141,10 +150,14 @@ internal fun ContactsScreen(
                     ),
                 )
             }
+            if (me != null && (folder == null || model.folderHasDm(folder, me))) {
+                add(ChatRowUi(id = me, group = false, title = savedTitle, pinnedAt = savedSummary?.pinnedAt ?: 0, summary = savedSummary, saved = true))
+            }
         }
     }.sortedWith(
         compareByDescending<ChatRowUi> { it.pinnedAt }
             .thenByDescending { it.time }
+            .thenBy { it.saved }
             .thenBy { it.title.lowercase() },
     )
 
@@ -165,7 +178,8 @@ internal fun ContactsScreen(
         }
     }
     when {
-        model.contacts.isEmpty() && model.groups.isEmpty() &&
+        // Совсем новый профиль — пустая главная с действиями; «Сохранённое» и так в профиле.
+        model.contacts.isEmpty() && model.groups.isEmpty() && savedSummary == null &&
             model.contactRequests.isEmpty() && model.groupInvites.isEmpty() -> Column(Modifier.fillMaxSize()) {
             strips()
             HomeEmpty(nav)
@@ -262,14 +276,21 @@ private fun ChatListRow(
                     .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SquareAvatar(
-                    row.title,
-                    size = Tokens.Size.avatarRow,
-                    online = if (row.group) null else row.online,
-                    avatarBytes = row.avatar,
-                    circle = !row.group, // человек — круг, сущность — скруглённый квадрат
-                    ring = bg,
-                )
+                if (row.saved) {
+                    // Сущность, а не человек — скруглённый квадрат с закладкой (макет home/HomeSections).
+                    SquareAvatar(row.title, size = Tokens.Size.avatarRow, bg = Tokens.Colors.avatar, ring = bg) {
+                        Icon(TablerIcons.Bookmark, null, tint = Tokens.Colors.iconChrome, modifier = Modifier.size(Tokens.Size.iconRow))
+                    }
+                } else {
+                    SquareAvatar(
+                        row.title,
+                        size = Tokens.Size.avatarRow,
+                        online = if (row.group) null else row.online,
+                        avatarBytes = row.avatar,
+                        circle = !row.group, // человек — круг, сущность — скруглённый квадрат
+                        ring = bg,
+                    )
+                }
                 Spacer(Modifier.width(Tokens.Space.m))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -317,7 +338,7 @@ private fun ChatListRow(
                         Modifier.heightIn(min = Tokens.Size.badge),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        val typing = !row.group && isTyping(model, row.id)
+                        val typing = !row.group && !row.saved && isTyping(model, row.id)
                         Text(
                             if (typing) stringResource(R.string.status_typing) else chatPreview(model, row),
                             color = if (typing) Tokens.Colors.accent else Tokens.Colors.secondary,
@@ -353,7 +374,7 @@ private fun ChatRowBadge(model: AppModel, row: ChatRowUi) {
         // Те же значки, что в пузыре чата: часы → одна галочка → две, прочитанное —
         // акцентом. Один и тот же факт не должен выглядеть в списке иначе, чем в ленте.
         // В превью строка реакции — галочке не к чему относиться.
-        s != null && s.reaction == null && s.lastMine && !s.lastSystem && s.lastKind != "deleted" &&
+        s != null && !row.saved && s.reaction == null && s.lastMine && !s.lastSystem && s.lastKind != "deleted" &&
             s.lastKind != "call" && s.lastKind != "video_call" -> when (shownStatus(model, row.id, row.group, s.lastStatus)) {
             "read" -> Icon(
                 Icons.Filled.DoneAll,
@@ -411,10 +432,12 @@ private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose:
             model.pinChat(row.id, row.group, !row.pinned)
             onClose()
         }
-        // Режим виден справа; выбор и срок — в шторке.
-        NotifyMenuItem(model, chat) {
-            onClose()
-            notify = true
+        // Режим виден справа; выбор и срок — в шторке. Себе уведомлений не приходит.
+        if (!row.saved) {
+            NotifyMenuItem(model, chat) {
+                onClose()
+                notify = true
+            }
         }
     }
 }
@@ -426,7 +449,7 @@ private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose:
  */
 @Composable
 private fun chatPreview(model: AppModel, row: ChatRowUi): String {
-    val s = row.summary ?: return stringResource(R.string.chats_preview_empty)
+    val s = row.summary ?: return stringResource(if (row.saved) R.string.chats_saved_empty else R.string.chats_preview_empty)
     // Реакция на моё новее последнего сообщения — та же строка, что в шторке.
     s.reaction?.let { r ->
         val ctx = LocalContext.current
@@ -448,6 +471,7 @@ private fun chatPreview(model: AppModel, row: ChatRowUi): String {
         else -> stringResource(R.string.chats_preview_empty)
     }.replace('\n', ' ')
     val who = when {
+        row.saved -> "" // всё в «Сохранённом» — своё
         s.lastMine -> stringResource(R.string.chats_preview_you)
         row.group -> model.peerName(s.lastSender) + ":"
         else -> ""

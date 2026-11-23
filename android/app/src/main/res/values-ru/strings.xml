@@ -1302,6 +1302,7 @@
     <string name="share_in_caption">Подпись</string>
     <string name="share_in_pick">Выбрать чаты</string>
     <string name="share_in_saved_sub">заметки себе</string>
+    <string name="chats_saved_empty">Заметки себе</string>
     <plurals name="share_in_send_to">
         <item quantity="one">Отправить в %d чат</item>
         <item quantity="few">Отправить в %d чата</item>

@@ -1236,6 +1236,7 @@
     <string name="share_in_caption">Caption</string>
     <string name="share_in_pick">Choose chats</string>
     <string name="share_in_saved_sub">notes to self</string>
+    <string name="chats_saved_empty">Notes to self</string>
     <plurals name="share_in_send_to">
         <item quantity="one">Send to %d chat</item>
         <item quantity="other">Send to %d chats</item>
