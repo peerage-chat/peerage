@@ -33,8 +33,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1012,6 +1015,22 @@ internal fun bubbleShape(mine: Boolean, pos: BlockPos, far: FarCut = FarCut.None
         RoundedCornerShape(if (topSeam) seam else r, farTop, farBottom, if (bottomSeam) seam else r)
     }
 }
+
+/**
+ * Обрезка по форме рисованием (clipPath), а не контуром слоя, как у `Modifier.clip`. До Android 13
+ * слой не умеет обрезать по контуру с разными углами, и Compose 1.7 обходит это сам — но при смене
+ * формы с одинаковых углов на разные (пузырь был один, пришёл следующий: Solo → First) обрезка
+ * терялась, и углы становились прямыми до перезахода в чат. Здесь один путь на всех версиях.
+ */
+internal fun Modifier.clipDrawn(shape: androidx.compose.ui.graphics.Shape): Modifier =
+    this.then(
+        Modifier.drawWithCache {
+            val path = androidx.compose.ui.graphics.Path().apply {
+                addOutline(shape.createOutline(size, layoutDirection, this@drawWithCache))
+            }
+            onDrawWithContent { clipPath(path) { this@onDrawWithContent.drawContent() } }
+        },
+    )
 
 /**
  * Срез дальних углов пузыря у стыков серии (макет `bubbles/Adaptive`, UI 5.8): угол 6, если

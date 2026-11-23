@@ -1311,7 +1311,7 @@ internal fun MessageBubble(
                         val ref = MsgRef(m.id, m.sender)
                         if (widths != null && widths[ref] != it.size.width) widths[ref] = it.size.width
                     }
-                    .clip(shape)
+                    .clipDrawn(shape)
                     .then(
                         if (photoBubble) Modifier else Modifier.background(if (m.mine) BubbleOut else BubbleIn),
                     )
