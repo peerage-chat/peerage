@@ -374,6 +374,17 @@ val TablerIcons.Video: ImageVector by lazy {
     )
 }
 
+val TablerIcons.Language: ImageVector by lazy {
+    tabler(
+        "language",
+        "M4 5h7",
+        "M9 3v2c0 4.418 -2.239 8 -5 8",
+        "M5 9c0 2.144 2.952 3.908 6.7 4",
+        "M12 20l4 -9l4 9",
+        "M19.1 18h-6.2",
+    )
+}
+
 val TablerIcons.InfoCircle: ImageVector by lazy {
     tabler(
         "info-circle",

@@ -35,6 +35,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(AppLanguage.wrap(base))
+
     // Синглтон на процесс: переживает пересоздание Activity (фон/возврат), иначе
     // утекают второй нативный узел и дублирующие poll/ticker-циклы.
     private val model = AppModel.instance
@@ -44,6 +46,7 @@ class MainActivity : ComponentActivity() {
         LogExport.install(applicationContext)
         model.appContext = applicationContext
         AppLock.load(applicationContext)
+        ConnService.invalidate()
         // Разрешения НЕ просим здесь: во время онбординга системный диалог не нужен.
         // Запрашиваются в App() после гейта (onboarded) — см. requestCorePermissions.
         val dataDir = Profiles.main(this).absolutePath
@@ -347,7 +350,12 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
     val dataDir = Profiles.main(LocalContext.current).absolutePath
     val nav = remember {
         val fromNotif = activity?.intent?.getBooleanExtra(FloodNotifier.EXTRA_OPEN_ROTATE, false) == true
-        NavState(if (fromNotif) Screen.RotateAddress else debugStartScreen(activity) ?: Screen.Contacts)
+        val start = when {
+            fromNotif -> Screen.RotateAddress
+            AppLanguage.consumeReopen() -> Screen.Me
+            else -> debugStartScreen(activity) ?: Screen.Contacts
+        }
+        NavState(start)
     }
     var screen by nav
     // id редактируемой папки (null — создаём новую).

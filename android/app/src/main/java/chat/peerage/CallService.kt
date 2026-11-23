@@ -28,6 +28,8 @@ import androidx.core.app.Person
  * после погашения экрана → аудио стопится посреди разговора.
  */
 class CallService : Service() {
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(AppLanguage.wrap(base))
+
     private var startMs = 0L
     private var peerName = ""
     private var room = false

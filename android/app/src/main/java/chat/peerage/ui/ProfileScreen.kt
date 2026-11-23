@@ -1,5 +1,6 @@
 package chat.peerage.ui
 
+import android.app.Activity
 import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -21,7 +22,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
+import chat.peerage.AppLanguage
 import chat.peerage.AppModel
 import chat.peerage.R
 import chat.peerage.Screen
@@ -53,6 +58,8 @@ internal fun ProfileScreen(model: AppModel, navigate: (Screen) -> Unit) {
     val me = model.me ?: return
     LaunchedEffect(Unit) { model.refreshStorage() }
     val name = model.selfName.ifBlank { stringResource(R.string.common_you) }
+    val ctx = LocalContext.current
+    var langSheet by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(top = Tokens.Space.xl, bottom = Tokens.Space.xxl),
@@ -133,7 +140,45 @@ internal fun ProfileScreen(model: AppModel, navigate: (Screen) -> Unit) {
                 navigate(Screen.SettingsNotifications)
             }
             NavRow(TablerIcons.Video, stringResource(R.string.settings_cat_media)) { navigate(Screen.SettingsMedia) }
+            NavRow(
+                TablerIcons.Language,
+                stringResource(R.string.settings_cat_language),
+                AppLanguage.currentName(ctx) ?: stringResource(R.string.lang_system),
+            ) { langSheet = true }
             NavRow(TablerIcons.InfoCircle, stringResource(R.string.settings_cat_about)) { navigate(Screen.SettingsAbout) }
+        }
+    }
+    if (langSheet) LanguageSheet(onClose = { langSheet = false })
+}
+
+/** Выбор языка интерфейса: как в системе или один из переводов. Окно перерисуется на выбранном. */
+@Composable
+private fun LanguageSheet(onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val current = remember { AppLanguage.current(ctx) }
+    val options = listOf("" to stringResource(R.string.lang_system)) + AppLanguage.choices
+    SheetFrame(onClose = onClose) {
+        Text(
+            stringResource(R.string.settings_cat_language),
+            color = Color.White,
+            fontSize = Tokens.Font.sheet,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = Tokens.Space.xs),
+        )
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.group)).background(Tokens.Colors.raised)) {
+            options.forEachIndexed { i, (tag, label) ->
+                CardRow(
+                    onClick = {
+                        onClose()
+                        if (tag != current) (ctx as? Activity)?.let { AppLanguage.set(it, tag) }
+                    },
+                    divider = i > 0,
+                    inset = Tokens.Space.l,
+                ) {
+                    Text(label, color = Color.White, fontSize = Tokens.Font.name, modifier = Modifier.weight(1f))
+                    if (tag == current) Icon(TablerIcons.Check, null, tint = Tokens.Colors.accent, modifier = Modifier.size(Tokens.Size.iconRow))
+                }
+            }
         }
     }
 }

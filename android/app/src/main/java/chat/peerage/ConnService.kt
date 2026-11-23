@@ -33,6 +33,8 @@ import android.os.PowerManager
  * поднимает сервис заново.
  */
 class ConnService : Service() {
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(AppLanguage.wrap(base))
+
     private var wake: PowerManager.WakeLock? = null
 
     private val disconnectReceiver = object : BroadcastReceiver() {
@@ -103,6 +105,14 @@ class ConnService : Service() {
 
         /** Последнее показанное состояние: перестраиваем уведомление только при смене. */
         @Volatile private var last: ConnState? = null
+
+        /**
+         * Перерисовать «связь» при следующем [refresh], даже если состояние то же: окно создаётся
+         * заново, в том числе после смены языка, — строки уведомления могли смениться.
+         */
+        fun invalidate() {
+            last = null
+        }
 
         /** Привести «связь» к состоянию [state] (тикер модели, раз в секунду). */
         fun refresh(ctx: Context, state: ConnState) {
