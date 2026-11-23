@@ -88,8 +88,14 @@ SDK build tools:
 apksigner verify --print-certs peerage-<version>-arm64-v8a.apk
 ```
 
-The `certificate SHA-256 digest` line must match the fingerprint in the release notes. If
-it does not, do not install the file.
+The `certificate SHA-256 digest` line must match this fingerprint (it is also in every
+release's notes):
+
+```
+04ca852072eb8de62c748e6edbecfb6c6005c759296166f8c013450f41a7cca2
+```
+
+If it does not match, do not install the file.
 
 ### Updates with Obtainium
 
