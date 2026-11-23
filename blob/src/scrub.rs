@@ -3,7 +3,8 @@
 //! Работает **без перекодирования** (без потери качества, без тяжёлых зависимостей):
 //! вырезает или зануляет известные места с метаданными. Снимает стандартный приватный слой —
 //! **EXIF/GPS, XMP, IPTC, текстовые комментарии, время**:
-//! - JPEG, PNG, WebP — вырезанием сегментов и чанков;
+//! - JPEG, PNG, WebP, GIF — вырезанием сегментов, чанков и блоков (у GIF — комментарии и
+//!   XMP; петля анимации и кадры остаются);
 //! - ISO BMFF (MP4/MOV/3GP, HEIC/HEIF/AVIF) — на месте, без сдвига байтов ([`crate::bmff`]):
 //!   видео и HEIC так можно чистить и файлом на диске ([`scrub_file`]).
 //!
@@ -23,6 +24,8 @@ pub fn scrub(_mime: &str, data: &[u8]) -> Vec<u8> {
         scrub_png(data)
     } else if is_webp(data) {
         scrub_webp(data)
+    } else if is_gif(data) {
+        scrub_gif(data)
     } else if crate::bmff::looks_like(data) {
         let mut c = Cursor::new(data.to_vec());
         let len = data.len() as u64;
@@ -64,6 +67,90 @@ fn is_webp(d: &[u8]) -> bool {
 
 fn is_png(d: &[u8]) -> bool {
     d.len() >= 8 && d[..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+}
+
+fn is_gif(d: &[u8]) -> bool {
+    d.len() >= 13 && (&d[..6] == b"GIF87a" || &d[..6] == b"GIF89a")
+}
+
+/// Длина палитры по упакованному байту дескриптора (флаг 0x80, размер 2^(n+1) цветов × 3).
+fn gif_palette_len(packed: u8) -> usize {
+    if packed & 0x80 != 0 {
+        3 << ((packed & 7) + 1)
+    } else {
+        0
+    }
+}
+
+/// Конец цепочки подблоков, начатой в `i`: позиция после нулевого подблока. None — обрыв.
+fn gif_sub_blocks_end(d: &[u8], mut i: usize) -> Option<usize> {
+    loop {
+        let n = *d.get(i)? as usize;
+        i += 1 + n;
+        if n == 0 {
+            return Some(i);
+        }
+        if i > d.len() {
+            return None;
+        }
+    }
+}
+
+/// Какие расширения GIF оставить: управление кадром (0xF9), текстовый слой (0x01 — это
+/// изображение) и петлю анимации (NETSCAPE2.0 / ANIMEXTS1.0). Комментарии (0xFE) и прочие
+/// расширения приложений (так в GIF лежит XMP) — нет.
+fn gif_keep_extension(label: u8, body: &[u8]) -> bool {
+    match label {
+        0xF9 | 0x01 => true,
+        0xFF => {
+            body.len() >= 12
+                && body[0] == 11
+                && matches!(&body[1..12], b"NETSCAPE2.0" | b"ANIMEXTS1.0")
+        }
+        _ => false,
+    }
+}
+
+/// GIF: пройти по блокам, вырезать комментарии и расширения приложений (кроме петли
+/// анимации), всё после трейлера отбросить. Кадры копируются как есть. На обрыве остаток
+/// отдаётся без изменений — как у PNG и JPEG.
+fn scrub_gif(d: &[u8]) -> Vec<u8> {
+    let mut i = 13 + gif_palette_len(d[10]); // заголовок, дескриптор экрана, палитра
+    if i > d.len() {
+        return d.to_vec();
+    }
+    let mut out = Vec::with_capacity(d.len());
+    out.extend_from_slice(&d[..i]);
+    while i < d.len() {
+        let end = match d[i] {
+            0x3B => {
+                out.push(0x3B); // трейлер: хвост за ним декодеру не нужен — его не отдаём
+                break;
+            }
+            0x21 if i + 1 < d.len() => gif_sub_blocks_end(d, i + 2).inspect(|&end| {
+                if gif_keep_extension(d[i + 1], &d[i + 2..end]) {
+                    out.extend_from_slice(&d[i..end]);
+                }
+            }),
+            // Кадр: дескриптор (10 байт с 0x2C), локальная палитра, байт LZW, подблоки.
+            0x2C if i + 10 <= d.len() => {
+                let data = i + 10 + gif_palette_len(d[i + 9]) + 1;
+                (data <= d.len())
+                    .then(|| gif_sub_blocks_end(d, data))
+                    .flatten()
+                    .inspect(|&end| out.extend_from_slice(&d[i..end]))
+            }
+            _ => None,
+        };
+        match end {
+            Some(end) => i = end,
+            None => {
+                out.extend_from_slice(&d[i..]);
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// JPEG: пройти по маркерам, вырезать APP1 (EXIF/XMP), APP13 (IPTC) и COM. APP0
@@ -256,20 +343,53 @@ mod tests {
         assert_eq!(riff, out.len() - 8, "размер RIFF пересчитан");
     }
 
+    /// GIF: комментарий, XMP (расширение приложения) и хвост после трейлера уходят; петля
+    /// анимации (NETSCAPE2.0), управление кадром и сам кадр — на месте, байт в байт.
+    #[test]
+    fn gif_strips_comment_and_xmp_keeps_animation() {
+        let head: &[u8] = b"GIF89a\x02\x00\x02\x00\x80\x00\x00"; // 2×2, глобальная палитра 2 цвета
+        let palette: &[u8] = &[0, 0, 0, 255, 255, 255];
+        let looping: &[u8] = b"\x21\xFF\x0BNETSCAPE2.0\x03\x01\x00\x00\x00";
+        let xmp: &[u8] = b"\x21\xFF\x0BXMP DataXMP\x0C<x:xmpmeta/>\x00";
+        let comment: &[u8] = b"\x21\xFE\x11GPS 55.75N 37.61E\x00";
+        let control: &[u8] = &[0x21, 0xF9, 0x04, 0x04, 0x0A, 0x00, 0x00, 0x00];
+        // Кадр: дескриптор без локальной палитры, затем LZW (минимальный код, подблок, конец).
+        let descriptor: &[u8] = &[0x2C, 0, 0, 0, 0, 2, 0, 2, 0, 0x00];
+        let lzw: &[u8] = &[0x02, 0x02, 0x44, 0x01, 0x00];
+        let frame = [descriptor, lzw].concat();
+        let frame = frame.as_slice();
+        let mut gif = [head, palette, looping, xmp, comment, control, frame].concat();
+        gif.push(0x3B);
+        gif.extend_from_slice(b"hidden tail");
+
+        let out = scrub("image/gif", &gif);
+        assert!(!contains(&out, b"GPS"), "комментарий ушёл");
+        assert!(
+            !contains(&out, b"xmpmeta") && !contains(&out, b"XMP DataXMP"),
+            "XMP ушёл"
+        );
+        assert!(!contains(&out, b"hidden tail"), "хвост после трейлера ушёл");
+        let want = [head, palette, looping, control, frame, &[0x3B]].concat();
+        assert_eq!(out, want, "петля, управление кадром и кадр — байт в байт");
+    }
+
     /// Битые входы любой формы не роняют разбор и не меняют длину ISO BMFF.
     #[test]
     fn garbage_never_panics() {
         use proptest::prelude::*;
         let mut runner = proptest::test_runner::TestRunner::default();
-        let heads: [&[u8]; 4] = [b"ftyp", b"moov", b"RIFF", b"\xff\xd8"];
+        let heads: [&[u8]; 5] = [b"ftyp", b"moov", b"RIFF", b"\xff\xd8", b"GIF8"];
         runner
             .run(
-                &(0usize..4, proptest::collection::vec(any::<u8>(), 0..400)),
+                &(0usize..5, proptest::collection::vec(any::<u8>(), 0..400)),
                 |(h, tail)| {
                     let mut d = vec![0, 0, 0, 24];
                     d.extend_from_slice(heads[h]);
                     if h == 2 {
                         d = b"RIFF\0\0\0\0WEBP".to_vec();
+                    }
+                    if h == 4 {
+                        d = b"GIF89a".to_vec();
                     }
                     d.extend(tail);
                     let out = scrub("x", &d);
