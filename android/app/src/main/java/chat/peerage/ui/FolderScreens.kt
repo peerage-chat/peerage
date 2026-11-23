@@ -257,6 +257,7 @@ private fun NameField(value: String, onChange: (String) -> Unit) {
             singleLine = true,
             textStyle = Tokens.Text.base.copy(color = Color.White, fontSize = Tokens.Font.name),
             cursorBrush = SolidColor(Tokens.Colors.accent),
+            keyboardOptions = TextKeyboard,
             modifier = Modifier.fillMaxWidth(),
         )
     }

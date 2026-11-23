@@ -271,6 +271,7 @@ private fun FoundCode(model: AppModel, code: String, info: CodeInfo, onSent: (St
                     { if (it.length <= GreetingMax) greeting = it },
                     textStyle = TextStyle(color = Color.White, fontSize = Tokens.Font.name, lineHeight = Tokens.Font.lineHeightLoose),
                     cursorBrush = SolidColor(Tokens.Colors.accent),
+                    keyboardOptions = TextKeyboard,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

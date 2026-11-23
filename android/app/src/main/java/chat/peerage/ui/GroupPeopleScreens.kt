@@ -279,6 +279,7 @@ internal fun FormInput(value: String, hint: String, modifier: Modifier = Modifie
             singleLine = true,
             textStyle = TextStyle(color = Color.White, fontSize = Tokens.Font.name),
             cursorBrush = SolidColor(Tokens.Colors.accent),
+            keyboardOptions = TextKeyboard,
             modifier = Modifier.fillMaxWidth(),
         )
     }

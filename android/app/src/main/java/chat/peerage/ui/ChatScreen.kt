@@ -983,6 +983,7 @@ internal fun MessageInput(
                     modifier = Modifier.weight(1f).padding(vertical = Tokens.Space.m),
                     textStyle = Tokens.Text.base.copy(color = Color.White),
                     cursorBrush = SolidColor(HoloAccent),
+                    keyboardOptions = TextKeyboard,
                     maxLines = 4,
                     decorationBox = { inner ->
                         Box(contentAlignment = Alignment.CenterStart) {

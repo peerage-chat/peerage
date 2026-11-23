@@ -1090,6 +1090,14 @@ internal fun copyToClipboard(ctx: android.content.Context, text: String, label: 
  * учит набранное и потом подсказывает его в других приложениях — пароль от
  * хранилища или копии оказывался в её словаре.
  */
+/**
+ * Свободный текст (сообщение, приветствие, имена): первая буква предложения заглавная. Поле
+ * Compose по умолчанию её не ставит, в отличие от EditText с textCapSentences.
+ */
+internal val TextKeyboard = androidx.compose.foundation.text.KeyboardOptions(
+    capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences,
+)
+
 internal val PasswordKeyboard = androidx.compose.foundation.text.KeyboardOptions(
     keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
     autoCorrect = false,

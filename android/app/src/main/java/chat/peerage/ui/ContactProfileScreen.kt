@@ -216,6 +216,7 @@ private fun RenameDialog(model: AppModel, key: String, current: String, onClose:
                     singleLine = true,
                     textStyle = Tokens.Text.base.copy(color = Color.White),
                     cursorBrush = SolidColor(HoloAccent),
+                    keyboardOptions = TextKeyboard,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

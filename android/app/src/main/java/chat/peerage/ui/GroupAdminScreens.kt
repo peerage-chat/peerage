@@ -99,6 +99,7 @@ internal fun GroupEditScreen(model: AppModel, onBack: () -> Unit) {
                     singleLine = true,
                     textStyle = TextStyle(color = Color.White, fontSize = Tokens.Font.name),
                     cursorBrush = SolidColor(Tokens.Colors.accent),
+                    keyboardOptions = TextKeyboard,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
