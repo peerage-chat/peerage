@@ -25,10 +25,32 @@ fn tmpdir(tag: &str) -> PathBuf {
 }
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
-    let key = ident.public_key_bytes();
+    // Как на телефоне: узел на транспортном ключе эпохи, не на ключе личности.
+    let key = ident.transport_public(peerage_engine::node_epoch(&dir));
     Engine::start_with_transport(dir, ident, net.endpoint(key))
         .unwrap()
         .engine
+}
+
+/// Знакомство, как на телефоне: оба добавляют друг друга по коду (встречные запросы
+/// принимают друг друга). Голый ключ адресом не бывает — контакт по одному ключу
+/// недостижим. `b_name` — как A подписывает B, `a_name` — как B подписывает A.
+fn befriend(a: &Engine, b: &Engine, b_name: &str, a_name: &str) {
+    assert_eq!(a.request_contact(&b.my_contact_code(), b_name, ""), "sent");
+    assert_eq!(b.request_contact(&a.my_contact_code(), a_name, ""), "sent");
+    let settled = |e: &Engine| {
+        let v: serde_json::Value = serde_json::from_str(&e.contacts_json()).unwrap();
+        v.as_array()
+            .is_some_and(|cs| cs.len() == 1 && cs[0]["awaiting"] == false)
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !(settled(a) && settled(b)) {
+        assert!(
+            Instant::now() < deadline,
+            "знакомство по коду не состоялось"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn jpeg_with_exif() -> Vec<u8> {
@@ -76,11 +98,10 @@ fn await_profile(b: &Engine, a_hex: &str, name: &str, avatar_id: &str) -> Vec<u8
 fn profile_propagates_name_and_avatar_by_hash() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(1), id(2));
-    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a_key = a_id.public_key_bytes();
     let a = start(&net, a_id, tmpdir("a"));
     let b = start(&net, b_id, tmpdir("b"));
-    a.add_contact(&b_key, "B");
-    b.add_contact(&a_key, "A-note"); // локальная заметка B об A — НЕ должна затереться
+    befriend(&a, &b, "B", "A-note"); // локальная заметка B об A — НЕ должна затереться
 
     // A задаёт профиль → broadcast_profile шлёт ProfileUpdate контакту B.
     a.set_self_name("Алиса");
@@ -127,11 +148,10 @@ fn profile_propagates_name_and_avatar_by_hash() {
 fn profile_change_repropagates_by_new_hash() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(3), id(4));
-    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a_key = a_id.public_key_bytes();
     let a = start(&net, a_id, tmpdir("a2"));
     let b = start(&net, b_id, tmpdir("b2"));
-    a.add_contact(&b_key, "B");
-    b.add_contact(&a_key, "A-note");
+    befriend(&a, &b, "B", "A-note");
     let a_hex = hex::encode(a_key);
 
     // Первая версия профиля.
@@ -168,11 +188,10 @@ fn profile_change_repropagates_by_new_hash() {
 fn cleared_avatar_reaches_contact() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(13), id(14));
-    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a_key = a_id.public_key_bytes();
     let a = start(&net, a_id, tmpdir("a7"));
     let b = start(&net, b_id, tmpdir("b7"));
-    a.add_contact(&b_key, "B");
-    b.add_contact(&a_key, "A-note");
+    befriend(&a, &b, "B", "A-note");
     let a_hex = hex::encode(a_key);
     a.set_self_name("Алиса");
     let id1 = a.set_self_avatar(jpeg_variant(0x21, 0x43), "image/jpeg");
@@ -214,7 +233,7 @@ fn cleared_avatar_reaches_contact() {
 fn accepted_contact_keeps_blank_name_so_self_name_shows() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(5), id(6));
-    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a_key = a_id.public_key_bytes();
     let a = start(&net, a_id, tmpdir("a3"));
     let b = start(&net, b_id, tmpdir("b3"));
     // A добавляет B по коду (без имени в коде) — у B запрос.

@@ -129,7 +129,10 @@ pub enum Event {
     },
     /// Запрос в контакты (7i): приветствие (обрезано до `MAX_GREETING` байт) и
     /// самоназвание отправителя — как есть, чистит движок.
-    ContactRequest { peer: PeerKey, id: u64, greeting: String, name: String },
+    /// `record`/`sig` — его подписанная запись адреса (уже проверена: связывает его
+    /// личность с адресом, с которого пришёл запрос); движок хранит её с запросом и
+    /// при принятии кладёт в контакт.
+    ContactRequest { peer: PeerKey, id: u64, greeting: String, name: String, record: Vec<u8>, sig: Vec<u8> },
     /// Пир принял наш запрос `request`.
     ContactAccept { peer: PeerKey, request: u64 },
     /// Пир просит удалить своё сообщение `target` («удалить у всех»).
@@ -529,6 +532,18 @@ pub struct FloodStat {
     pub bps: f64,
 }
 
+/// Пакеты, которые сами доказывают адрес отправителя: подписанная запись адреса внутри.
+/// Объявление о смене адреса приходит уже с нового адреса; запрос в контакты — от
+/// незнакомца, чей адрес ещё неизвестен.
+fn address_proof(p: &Payload) -> Option<(&[u8], &[u8])> {
+    match p {
+        Payload::TransportRotate { record, sig, .. } | Payload::ContactRequest { record, sig, .. } => {
+            Some((record, sig))
+        }
+        _ => None,
+    }
+}
+
 impl Shared {
     fn now_unix() -> i64 {
         SystemTime::now()
@@ -845,6 +860,18 @@ impl Shared {
     }
 
     /// Пакет от `peer` пришёл с адреса `src`, который за этой личностью числится.
+    /// Запомнить адрес незнакомца до следующей карты от движка (`set_peer_transports`).
+    /// Только для пира без известного адреса: адрес контакта меняет лишь проверенное
+    /// по эпохе объявление.
+    fn learn_address(&self, peer: &PeerKey, addr: &PeerKey) {
+        let mut t = self.transports.lock().unwrap();
+        if t.contains_key(peer) {
+            return;
+        }
+        t.insert(*peer, *addr);
+        self.identities.lock().unwrap().insert(*addr, *peer);
+    }
+
     fn is_bound(&self, peer: &PeerKey, src: &PeerKey) -> bool {
         peer == src || self.transport_of(peer) == *src
     }
@@ -1235,10 +1262,19 @@ impl Messenger {
     /// обязана доехать позже — иначе «удалил» означало бы «удалил, если повезло».
     /// Запрос в контакты (7i). Надёжно и через офлайн-очередь; статус доставки UI не
     /// нужен — «дошло» здесь значит лишь «ждёт решения», итог приносит `ContactAccept`.
-    pub fn send_contact_request(&self, peer: &PeerKey, greeting: &str, name: &str) -> Result<u64, MessengerError> {
+    /// `address` — наша подписанная запись адреса текущей эпохи: по ней незнакомец
+    /// узнаёт, что этот адрес — наш, и может ответить.
+    pub fn send_contact_request(
+        &self,
+        peer: &PeerKey,
+        greeting: &str,
+        name: &str,
+        address: &peerage_core::record::SignedRecord,
+    ) -> Result<u64, MessengerError> {
         let greeting = truncate_bytes(greeting, peerage_core::protocol::MAX_GREETING);
         let name = name.to_string();
-        self.shared.send_durable(peer, false, move |id| Payload::ContactRequest { id, greeting, name })
+        let (record, sig) = (address.bytes.clone(), address.sig.to_vec());
+        self.shared.send_durable(peer, false, move |id| Payload::ContactRequest { id, greeting, name, record, sig })
     }
 
     /// Принять запрос `request` пира.
@@ -1808,16 +1844,20 @@ fn receive_loop(shared: Arc<Shared>) {
         //     from → src (самоподтверждающийся случай, иначе новый адрес
         //     невозможно узнать: он приходит уже С нового адреса).
         let bound = shared.is_bound(&from, &src);
-        let self_authenticating = matches!(
-            &payload,
-            Payload::TransportRotate { record, sig, .. }
-                if <[u8; 64]>::try_from(sig.as_slice())
-                    .ok()
-                    .and_then(|s| peerage_core::record::AddressRecord::verify(&from, record, &s))
-                    .is_some_and(|r| r.addr.as_slice() == src.as_slice())
-        );
+        let self_authenticating = address_proof(&payload).is_some_and(|(record, sig)| {
+            <[u8; 64]>::try_from(sig)
+                .ok()
+                .and_then(|s| peerage_core::record::AddressRecord::verify(&from, record, &s))
+                .is_some_and(|r| r.addr.as_slice() == src.as_slice())
+        });
         if !bound && !self_authenticating {
             continue;
+        }
+        // Незнакомец с запросом в контакты доказал свой адрес — запоминаем связку
+        // сразу: Ack и всё, что ему ответят, идут на этот адрес, а не на ключ
+        // личности. Постоянной связку делает движок (запрос хранит запись).
+        if !bound && matches!(payload, Payload::ContactRequest { .. }) {
+            shared.learn_address(&from, &src);
         }
         // Дальше пир везде идентифицируется ЛИЧНОСТЬЮ (`from`), а не адресом:
         // контакты, история, бюджет и события завязаны на неё, и после смены
@@ -1880,9 +1920,9 @@ fn receive_loop(shared: Arc<Shared>) {
                 }
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
-            Payload::ContactRequest { id, greeting, name } => {
+            Payload::ContactRequest { id, greeting, name, record, sig } => {
                 let greeting = truncate_bytes(&greeting, peerage_core::protocol::MAX_GREETING);
-                shared.emit(Event::ContactRequest { peer: peer_id, id, greeting, name });
+                shared.emit(Event::ContactRequest { peer: peer_id, id, greeting, name, record, sig });
                 let _ = shared.send(&peer_id, &Payload::Ack { id });
             }
             Payload::ContactAccept { id, request } => {

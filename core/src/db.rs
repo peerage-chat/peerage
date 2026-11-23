@@ -57,7 +57,18 @@ pub fn lock(db: &Db) -> MutexGuard<'_, Connection> {
 }
 
 /// Миграции после заморозки: `STEPS[i]` переводит схему `i + 1` в `i + 2`.
-const STEPS: &[fn(&Connection) -> rusqlite::Result<()>] = &[];
+const STEPS: &[fn(&Connection) -> rusqlite::Result<()>] = &[v2_request_address];
+
+/// Схема 2: запрос в контакты хранит подписанную запись адреса отправителя — по ней
+/// ответ уходит на его адрес, а при принятии она становится адресом контакта. У запросов
+/// из схемы 1 записи нет (пусто): такой запрос принять можно, но ответ дойдёт, только
+/// когда отправитель пришлёт запрос заново.
+fn v2_request_address(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "ALTER TABLE contact_requests ADD COLUMN record     BLOB NOT NULL DEFAULT x'';
+         ALTER TABLE contact_requests ADD COLUMN record_sig BLOB NOT NULL DEFAULT x'';",
+    )
+}
 
 /// Версия схемы этой сборки.
 pub const SCHEMA_VERSION: i64 = 1 + STEPS.len() as i64;
@@ -375,6 +386,28 @@ mod migration {
         assert_eq!(version(&conn), super::SCHEMA_VERSION);
         let n: i64 = conn.query_row("SELECT count(*) FROM blocklist", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1, "данные на месте");
+    }
+
+    /// База схемы 1 с запросом в контакты доходит до текущей: запрос на месте,
+    /// записи адреса у него нет.
+    #[test]
+    fn v1_request_survives_and_gets_empty_address() {
+        let conn = Connection::open_in_memory().unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        super::schema_v1(&tx).unwrap();
+        tx.pragma_update(None, "user_version", 1).unwrap();
+        tx.commit().unwrap();
+        conn.execute(
+            "INSERT INTO contact_requests (key, fingerprint, greeting, time) VALUES (x'01', 'f', 'привет', 5)",
+            [],
+        )
+        .unwrap();
+        super::migrate(&conn).unwrap();
+        assert_eq!(version(&conn), super::SCHEMA_VERSION);
+        let (greeting, record): (String, Vec<u8>) = conn
+            .query_row("SELECT greeting, record FROM contact_requests", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!((greeting.as_str(), record.len()), ("привет", 0));
     }
 
     /// База от сборки новее — понятный отказ, данные не тронуты.

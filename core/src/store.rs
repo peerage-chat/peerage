@@ -783,6 +783,12 @@ pub struct ContactRequest {
     pub request_id: u64,
     /// Когда пришёл — и время приветствия в чате.
     pub time: i64,
+    /// Подписанная запись адреса отправителя (`crate::record`) и подпись: куда ему
+    /// отвечать. Пусто — запрос из схемы 1. Наружу (в UI) не уходит.
+    #[serde(skip)]
+    pub record: Vec<u8>,
+    #[serde(skip)]
+    pub record_sig: Vec<u8>,
 }
 
 /// Строка блок-листа для экрана «Заблокированные».
@@ -817,23 +823,29 @@ impl GateStore {
         let conn = db::lock(&self.db);
         {
             let mut stmt = conn
-                .prepare("SELECT key, fingerprint, name, greeting, request_id, time FROM contact_requests")?;
+                .prepare(
+                    "SELECT key, fingerprint, name, greeting, request_id, time, record, record_sig \
+                     FROM contact_requests",
+                )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, Vec<u8>>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
+                    ContactRequest {
+                        key: String::new(),
+                        fingerprint: row.get(1)?,
+                        name: row.get(2)?,
+                        greeting: row.get(3)?,
+                        request_id: row.get::<_, i64>(4)? as u64,
+                        time: row.get(5)?,
+                        record: row.get(6)?,
+                        record_sig: row.get(7)?,
+                    },
                 ))
             })?;
             for row in rows {
-                let (kb, fingerprint, name, greeting, request_id, time) = row?;
+                let (kb, r) = row?;
                 if let Ok(key) = <[u8; 32]>::try_from(kb.as_slice()) {
-                    self.requests.insert(key, ContactRequest {
-                        key: hex::encode(key), fingerprint, name, greeting, request_id: request_id as u64, time,
-                    });
+                    self.requests.insert(key, ContactRequest { key: hex::encode(key), ..r });
                 }
             }
         }
@@ -854,6 +866,8 @@ impl GateStore {
     /// Записать входящий запрос. Повторный от того же пира (переотправил, добавил
     /// заново) НЕ заменяет первый — анти-DoS: на незнакомца приходится одна карточка
     /// ограниченного размера. Возвращает `true`, если запрос новый (показать в UI).
+    ///
+    /// `address` — запись адреса отправителя и подпись (проверены мессенджером).
     pub fn upsert_request(
         &mut self,
         key: &[u8; 32],
@@ -861,14 +875,18 @@ impl GateStore {
         greeting: &str,
         request_id: u64,
         time: i64,
+        address: (&[u8], &[u8]),
     ) -> Result<bool, StoreError> {
         if self.requests.contains_key(key) {
             return Ok(false);
         }
         let fingerprint = crate::identity::fingerprint_words(key).join(" ");
+        let (record, record_sig) = address;
         db::lock(&self.db).execute(
-            "INSERT OR IGNORE INTO contact_requests (key, fingerprint, name, greeting, request_id, time)              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![key.as_slice(), &fingerprint, name, greeting, request_id as i64, time],
+            "INSERT OR IGNORE INTO contact_requests \
+             (key, fingerprint, name, greeting, request_id, time, record, record_sig) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![key.as_slice(), &fingerprint, name, greeting, request_id as i64, time, record, record_sig],
         )?;
         self.requests.insert(*key, ContactRequest {
             key: hex::encode(key),
@@ -877,6 +895,8 @@ impl GateStore {
             greeting: greeting.to_string(),
             request_id,
             time,
+            record: record.to_vec(),
+            record_sig: record_sig.to_vec(),
         });
         Ok(true)
     }
@@ -3104,8 +3124,8 @@ mod tests {
         let shared = db();
         {
             let mut g = GateStore::open(shared.clone()).unwrap();
-            assert!(g.upsert_request(&k, "Лена", "здравствуйте", 7, 100).unwrap(), "новый");
-            assert!(!g.upsert_request(&k, "Спам", "ещё раз", 8, 200).unwrap(), "повтор не заменяет");
+            assert!(g.upsert_request(&k, "Лена", "здравствуйте", 7, 100, (b"rec", b"sig")).unwrap(), "новый");
+            assert!(!g.upsert_request(&k, "Спам", "ещё раз", 8, 200, (b"", b"")).unwrap(), "повтор не заменяет");
         }
         let mut g2 = GateStore::open(shared).unwrap();
         let r = g2.take_request(&k).unwrap();
@@ -3113,6 +3133,7 @@ mod tests {
             (r.name.as_str(), r.greeting.as_str(), r.request_id, r.time),
             ("Лена", "здравствуйте", 7, 100)
         );
+        assert_eq!((r.record.as_slice(), r.record_sig.as_slice()), (&b"rec"[..], &b"sig"[..]), "адрес пережил перезапуск");
         assert!(!g2.has_request(&k));
         assert!(g2.take_request(&k).is_none(), "повторный take — пусто");
     }
@@ -3123,7 +3144,7 @@ mod tests {
         let shared = db();
         {
             let mut g = GateStore::open(shared.clone()).unwrap();
-            g.upsert_request(&k, "", "спам", 1, 1).unwrap();
+            g.upsert_request(&k, "", "спам", 1, 1, (b"", b"")).unwrap();
             g.block(&k, 2, None).unwrap();
             assert!(g.is_blocked(&k));
             assert!(!g.has_request(&k)); // блок снял запрос

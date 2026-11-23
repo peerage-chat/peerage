@@ -27,7 +27,8 @@ fn tmpdir(tag: &str) -> PathBuf {
 }
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
-    let key = ident.public_key_bytes();
+    // Как на телефоне: узел на транспортном ключе эпохи, не на ключе личности.
+    let key = ident.transport_public(peerage_engine::node_epoch(&dir));
     Engine::start_with_transport(dir, ident, net.endpoint(key))
         .unwrap()
         .engine

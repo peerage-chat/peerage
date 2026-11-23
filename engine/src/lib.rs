@@ -1664,9 +1664,11 @@ impl Engine {
         // раньше, чем пир узнал, кто это.
         self.refresh_budgets();
         let greeting = clip_bytes(greeting.trim(), peerage_core::protocol::MAX_GREETING);
-        let Ok(id) = self
-            .messenger
-            .send_contact_request(&ik, &greeting, self.self_name().trim())
+        // Своя запись адреса — в запросе: незнакомцу больше неоткуда узнать, куда отвечать.
+        let address = self.identity.address_record(self.transport_epoch());
+        let Ok(id) =
+            self.messenger
+                .send_contact_request(&ik, &greeting, self.self_name().trim(), &address)
         else {
             return "invalid";
         };
@@ -1963,7 +1965,7 @@ impl Engine {
     /// принятого объявления о смене адреса — без этого сообщения продолжали бы
     /// уходить на покинутый ключ.
     fn refresh_transports(&self) {
-        let map: Vec<([u8; 32], [u8; 32])> = self
+        let mut map: Vec<([u8; 32], [u8; 32])> = self
             .contacts
             .lock_safe()
             .list()
@@ -1975,6 +1977,15 @@ impl Engine {
                 Some((ik, tk))
             })
             .collect();
+        // Незнакомцы с запросом: адрес из подписанной записи запроса — туда уходят Ack и
+        // принятие. Замки по очереди, не оба разом (порядок захвата — см. refresh_budgets).
+        map.extend(
+            self.gate
+                .lock_safe()
+                .list_requests()
+                .iter()
+                .filter_map(|r| request_address(r)),
+        );
         self.messenger.set_peer_transports(&map);
     }
 
@@ -2163,6 +2174,15 @@ impl Engine {
         if !req.name.is_empty() {
             let _ = self.contacts.lock_safe().set_profile(key, &req.name, "");
         }
+        // Адрес из запроса становится адресом контакта — с той же проверкой подписи и
+        // эпохи, что у объявления о смене адреса.
+        if let Ok(sig) = <[u8; 64]>::try_from(req.record_sig.as_slice()) {
+            let _ = self
+                .contacts
+                .lock_safe()
+                .apply_transport_rotate(key, &req.record, &sig);
+        }
+        self.refresh_transports();
         put_greeting(self, key, req.request_id, &req.greeting, req.time);
         self.refresh_budgets();
         self.messenger.poke(key);
@@ -2173,7 +2193,11 @@ impl Engine {
 
     /// Отклонить запрос: тихо убрать из очереди (пир об этом не узнаёт).
     pub fn decline_contact_request(&self, key: &[u8; 32]) -> bool {
-        self.gate.lock_safe().take_request(key).is_some()
+        let taken = self.gate.lock_safe().take_request(key).is_some();
+        if taken {
+            self.refresh_transports();
+        }
+        taken
     }
 
     /// Заблокировать пира: будущие сообщения тихо дропаются, запрос снят, из контактов
@@ -2189,6 +2213,7 @@ impl Engine {
         });
         let _ = self.gate.lock_safe().block(key, now(), who.as_deref());
         let _ = self.contacts.lock_safe().remove(key);
+        self.refresh_transports();
         self.refresh_budgets();
         true
     }
@@ -3653,6 +3678,14 @@ pub fn ensure_address(dir: &Path) {
     }
 }
 
+/// Эпоха, на ключе которой поднимается узел: заводит первую, если адреса ещё не было.
+/// Тесты поверх loopback берут её же — узел на `transport_public(эпоха)`, как телефон,
+/// а не на ключе личности (им адресом он не бывает).
+pub fn node_epoch(dir: &Path) -> u32 {
+    ensure_address(dir);
+    load_transport_epoch(dir)
+}
+
 // ── Внутренняя оркестрация: event_pump + обработчики ────────────────────────
 
 /// Гейт входящего сообщения (замена TOFU-автодобавления).
@@ -3686,6 +3719,7 @@ fn on_contact_request(
     id: u64,
     greeting: String,
     name: String,
+    address: (&[u8], &[u8]),
 ) {
     match gate_of(engine, &peer) {
         Gate::Blocked => {}
@@ -3693,8 +3727,12 @@ fn on_contact_request(
             let is_new = engine
                 .gate
                 .lock_safe()
-                .upsert_request(&peer, &clean_name(&name), &greeting, id, now())
+                .upsert_request(&peer, &clean_name(&name), &greeting, id, now(), address)
                 .unwrap_or(false);
+            if is_new {
+                // Адрес запроса — в карту мессенджера: ответы идут на него.
+                engine.refresh_transports();
+            }
             push_event(
                 engine,
                 dto::UiEvent::ContactRequest {
@@ -3711,6 +3749,15 @@ fn on_contact_request(
             push_event(engine, dto::UiEvent::ContactsChanged);
         }
     }
+}
+
+/// Личность и адрес незнакомца по записи из его запроса (подпись проверяется заново:
+/// запись лежит в базе). Нет записи или не сходится — `None`.
+fn request_address(r: &peerage_core::store::ContactRequest) -> Option<([u8; 32], [u8; 32])> {
+    let ik = parse_key(&r.key)?;
+    let sig = <[u8; 64]>::try_from(r.record_sig.as_slice()).ok()?;
+    let rec = peerage_core::record::AddressRecord::verify(&ik, &r.record, &sig)?;
+    Some((ik, <[u8; 32]>::try_from(rec.addr.as_slice()).ok()?))
 }
 
 /// Пир принял наш запрос `request`: очередь к нему выпускается, приветствие — «доставлено».
@@ -4391,7 +4438,9 @@ fn handle_event(
             id,
             greeting,
             name,
-        } => on_contact_request(engine, peer, id, greeting, name),
+            record,
+            sig,
+        } => on_contact_request(engine, peer, id, greeting, name, (&record, &sig)),
         Event::ContactAccept { peer, request } => on_contact_accept(engine, peer, request),
         Event::Ack { peer, id } => {
             let _ = engine
@@ -5109,8 +5158,7 @@ impl Engine {
         // решает человек на экране восстановления (R-029).
         let identity = load_identity(&dir)?;
         // ADR-007: узел поднимается на ТРАНСПОРТНОМ ключе текущей эпохи.
-        ensure_address(&dir);
-        let epoch = load_transport_epoch(&dir);
+        let epoch = node_epoch(&dir);
         let node = Node::start(&identity.transport_seed(epoch)).map_err(|e| e.to_string())?;
         let address = node.address();
         for uri in peers::PeerConfig::load(&dir).uris() {

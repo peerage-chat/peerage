@@ -25,6 +25,25 @@ fn tiny_jpeg(a: u8, b: u8) -> Vec<u8> {
     j
 }
 
+/// Логгер в stderr со временем от старта — пример не тянет ради этого зависимостей.
+struct StderrLog;
+static STDERR_LOG: StderrLog = StderrLog;
+static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+impl log::Log for StderrLog {
+    fn enabled(&self, _: &log::Metadata) -> bool {
+        true
+    }
+    fn log(&self, r: &log::Record) {
+        let t = T0
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_secs_f32();
+        eprintln!("{t:7.2} {:5} {}: {}", r.level(), r.target(), r.args());
+    }
+    fn flush(&self) {}
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let dir = PathBuf::from(
@@ -42,6 +61,9 @@ fn main() {
     let mut group_retract_after: Option<u32> = None;
     let mut auto_join = false;
     let mut adds: Vec<String> = Vec::new();
+    // Код обмена второй стороны: добавить по нему и послать запрос в контакты (7i) —
+    // так, как это делает телефон (адрес берётся из кода, не из ключа).
+    let mut request: Option<String> = None;
     let mut rest = args.collect::<Vec<_>>().into_iter();
     while let Some(a) = rest.next() {
         match a.as_str() {
@@ -51,6 +73,7 @@ fn main() {
                     adds.push(h);
                 }
             }
+            "--request" => request = rest.next(),
             "--avatar" => avatar = true,
             "--avatar-file" => avatar_file = rest.next(),
             "--send-media" => send_media = rest.next(),
@@ -72,10 +95,22 @@ fn main() {
     // Фиксированный vault-ключ: шифрует ТОЛЬКО локальную БД at-rest (не личность),
     // для тест-узла достаточно константы, стабильной между рестартами.
     let key = [0x42u8; 32];
+    // Логи движка — в stderr (на телефоне их несёт logcat). Уровень — PEERAGE_LOG
+    // (error/warn/info/debug/trace), по умолчанию info.
+    let level = std::env::var("PEERAGE_LOG")
+        .ok()
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(log::LevelFilter::Info);
+    let _ = log::set_logger(&STDERR_LOG).map(|()| log::set_max_level(level));
     let start = Engine::start(dir, Some(key)).expect("engine start");
     let engine = start.engine;
     println!("PUB {}", hex::encode(start.pubkey));
     println!("ADDR {}", start.address);
+    println!("CODE {}", engine.my_contact_code());
+    if let Some(code) = &request {
+        let r = engine.request_contact(code, "peer", "hello from mesh_node");
+        println!("REQUEST {r}");
+    }
 
     // Добавляем контактов ДО имени/аватара — тогда broadcast_profile сразу их достанет.
     for h in &adds {

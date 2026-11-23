@@ -29,15 +29,63 @@ fn tmpdir(tag: &str) -> PathBuf {
 }
 
 fn start(net: &LoopbackNet, ident: Identity, dir: PathBuf) -> Arc<Engine> {
-    let key = ident.public_key_bytes();
+    // Как на телефоне: узел на транспортном ключе эпохи, не на ключе личности.
+    let key = ident.transport_public(peerage_engine::node_epoch(&dir));
     Engine::start_with_transport(dir, ident, net.endpoint(key))
         .unwrap()
         .engine
 }
 
-/// Голый мессенджер: умеет слать любые пакеты, гейтов и движка у него нет.
+/// Знакомство, как на телефоне: оба добавляют друг друга по коду (встречные запросы
+/// принимают друг друга). Голый ключ адресом не бывает — контакт по одному ключу
+/// недостижим. `b_name` — как A подписывает B, `a_name` — как B подписывает A.
+fn befriend(a: &Engine, b: &Engine, b_name: &str, a_name: &str) {
+    assert_eq!(a.request_contact(&b.my_contact_code(), b_name, ""), "sent");
+    assert_eq!(b.request_contact(&a.my_contact_code(), a_name, ""), "sent");
+    let settled = |e: &Engine| {
+        let v: serde_json::Value = serde_json::from_str(&e.contacts_json()).unwrap();
+        v.as_array()
+            .is_some_and(|cs| cs.len() == 1 && cs[0]["awaiting"] == false)
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !(settled(a) && settled(b)) {
+        assert!(
+            Instant::now() < deadline,
+            "знакомство по коду не состоялось"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Адрес движка — из его кода обмена (подписанная запись).
+fn addr_of(e: &Engine) -> [u8; 32] {
+    let code =
+        peerage_core::code::ContactCode::parse(&e.my_contact_code(), peerage_engine::NET).unwrap();
+    let a = code.address.unwrap();
+    let rec =
+        peerage_core::record::AddressRecord::verify(&code.identity, &a.bytes, &a.sig).unwrap();
+    rec.addr.as_slice().try_into().unwrap()
+}
+
+/// Код обмена голого мессенджера (у него нет движка, код собираем сами): по нему
+/// движок узнаёт адрес атакующего, как узнал бы адрес настоящего контакта.
+fn attacker_code(ident: &Identity) -> String {
+    peerage_core::code::ContactCode {
+        kind: peerage_engine::NET,
+        identity: ident.public_key_bytes(),
+        address: Some(ident.address_record(ATTACKER_EPOCH)),
+        name: None,
+    }
+    .encode()
+}
+
+/// Эпоха адреса атакующего: узел на её транспортном ключе, запись — в его запросе.
+const ATTACKER_EPOCH: u32 = 1;
+
+/// Голый мессенджер: умеет слать любые пакеты, гейтов и движка у него нет. Сидит на
+/// транспортном ключе, как настоящий узел.
 fn attacker(net: &LoopbackNet, ident: Identity) -> Messenger {
-    let key = ident.public_key_bytes();
+    let key = ident.transport_public(ATTACKER_EPOCH);
     let (m, rx) = Messenger::start_with_transport(ident, net.endpoint(key), Config::default());
     std::mem::forget(rx); // события атакующего не интересуют, но канал должен жить
     m
@@ -96,10 +144,12 @@ fn forged_presence_in_dm_room_is_dropped() {
     );
     let a = start(&net, a_id, tmpdir("a"));
     let b = start(&net, b_id, tmpdir("b"));
+    let m_code = attacker_code(&m_id);
     let m = attacker(&net, m_id);
-    a.add_contact(&b_key, "B");
-    a.add_contact(&m_key, "M");
-    b.add_contact(&a_key, "A");
+    befriend(&a, &b, "B", "A");
+    // M у A — контакт (ждёт принятия, но адрес известен из кода).
+    assert_eq!(a.request_contact(&m_code, "M", ""), "sent");
+    m.set_peer_transports(&[(a_key, addr_of(&a))]);
 
     let room = a.room_join_dm(b_key, true, false);
     assert_eq!(room, peerage_core::dm_room_id(&a_key, &b_key).to_vec());
@@ -129,19 +179,27 @@ fn stranger_cannot_ring_or_invite_to_group() {
     let net = LoopbackNet::new();
     let (a_id, m_id) = (id(74), id(75));
     let (a_key, m_key) = (a_id.public_key_bytes(), m_id.public_key_bytes());
-    let a = start(&net, a_id, tmpdir("a2"));
+    let dir = tmpdir("a2");
+    let a_addr = a_id.transport_public(peerage_engine::node_epoch(&dir));
+    let a = start(&net, a_id, dir);
+    let record = m_id.address_record(ATTACKER_EPOCH);
     let m = attacker(&net, m_id);
+    // Адрес A — из его кода, как у настоящего отправителя запроса.
+    m.set_peer_transports(&[(a_key, a_addr)]);
 
-    let room = peerage_core::dm_room_id(&a_key, &m_key);
-    m.send_room_invite(&a_key, &room, true, false).unwrap();
-    m.send_group_invite(&a_key, &[7u8; 32], "Бесплатные призы")
+    // Сначала запрос: с ним A узнаёт адрес незнакомца, и звонок с карточкой ниже
+    // доходят до гейта, а не режутся анти-спуфингом раньше него.
+    m.send_contact_request(&a_key, "привет", "", &record)
         .unwrap();
-    // Точка синхронизации: запрос в контакты (7i) пришёл позже звонка и карточки.
-    m.send_contact_request(&a_key, "привет", "").unwrap();
     assert!(
         wait(15, || has_request(&a, &hex::encode(m_key))),
         "запрос незнакомца дошёл"
     );
+    let room = peerage_core::dm_room_id(&a_key, &m_key);
+    m.send_room_invite(&a_key, &room, true, false).unwrap();
+    m.send_group_invite(&a_key, &[7u8; 32], "Бесплатные призы")
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(1500));
 
     assert!(!drained_room_invite(&a), "звонок незнакомца не звонит");
     assert_eq!(
@@ -163,11 +221,10 @@ fn stranger_cannot_ring_or_invite_to_group() {
 fn contact_still_rings() {
     let net = LoopbackNet::new();
     let (a_id, b_id) = (id(76), id(77));
-    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a_key = a_id.public_key_bytes();
     let a = start(&net, a_id, tmpdir("a3"));
     let b = start(&net, b_id, tmpdir("b3"));
-    a.add_contact(&b_key, "B");
-    b.add_contact(&a_key, "A");
+    befriend(&a, &b, "B", "A");
 
     b.room_invite_dm(a_key, true, false);
     let mut rung = false;
@@ -194,9 +251,11 @@ fn hangup_stops_our_audio_at_once_under_peer_flood() {
     let (a_id, m_id) = (id(78), id(79));
     let (a_key, m_key) = (a_id.public_key_bytes(), m_id.public_key_bytes());
     let a = start(&net, a_id, tmpdir("a-flood"));
+    let m_code = attacker_code(&m_id);
     let m = Arc::new(attacker(&net, m_id));
     let heard = m.media_channel(8192);
-    a.add_contact(&m_key, "M");
+    assert_eq!(a.request_contact(&m_code, "M", ""), "sent");
+    m.set_peer_transports(&[(a_key, addr_of(&a))]);
 
     let room = a.room_invite_dm(m_key, true, false);
     m.send_room_presence(&a_key, &room, 0b01).unwrap();

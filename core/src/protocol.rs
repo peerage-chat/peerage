@@ -305,7 +305,21 @@ pub enum Payload {
     /// коду; пока нет [`Payload::ContactAccept`], остальное ему не уходит — ждёт в
     /// очереди отправителя. `greeting` — до [`MAX_GREETING`] байт, может быть пустым;
     /// фото — только после принятия, вместе с профилем. Надёжно (`id` + `Ack`).
-    ContactRequest { id: u64, greeting: String, name: String },
+    ///
+    /// `record`/`sig` — подписанная запись адреса отправителя ([`crate::record`]), как в
+    /// [`Payload::TransportRotate`]. Незнакомец приходит с транспортного ключа, а не с
+    /// ключа личности, и получателю больше неоткуда узнать связку «личность → адрес»:
+    /// без неё запрос не прошёл бы анти-спуфинг, а ответ (Ack, принятие) ушёл бы на
+    /// ключ личности, где никого нет.
+    ContactRequest {
+        id: u64,
+        greeting: String,
+        name: String,
+        #[serde(with = "serde_bytes")]
+        record: Vec<u8>,
+        #[serde(with = "serde_bytes")]
+        sig: Vec<u8>,
+    },
     /// Запрос `request` принят: приветствие легло в чат, очередь отправителя можно
     /// выпускать. Отклонение ответа не имеет — не раскрывать, что запрос прочли.
     ContactAccept { id: u64, request: u64 },
@@ -672,10 +686,17 @@ mod tests {
     }
 
     /// Запрос в контакты и принятие (7i) — надёжные и по размеру неотличимы от текста,
-    /// даже с самым длинным приветствием и именем.
+    /// даже с самым длинным приветствием и именем и с записью адреса.
     #[test]
     fn contact_request_and_accept_hide_among_text() {
-        let req = Payload::ContactRequest { id: 5, greeting: "я".repeat(MAX_GREETING / 2), name: "Ж".repeat(64) };
+        let addr = crate::identity::Identity::from_seed(&[1; 32]).unwrap().address_record(u32::MAX);
+        let req = Payload::ContactRequest {
+            id: 5,
+            greeting: "я".repeat(MAX_GREETING / 2),
+            name: "Ж".repeat(64),
+            record: addr.bytes.clone(),
+            sig: addr.sig.to_vec(),
+        };
         let acc = Payload::ContactAccept { id: 6, request: u64::MAX };
         let text = Payload::Text {
             id: 1, text: "привет".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false, sent: 0,
