@@ -57,7 +57,9 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
@@ -949,22 +951,26 @@ internal fun BubbleText(
     val measurer = rememberTextMeasurer()
     val style = Tokens.Text.base.copy(color = color, fontSize = fontSize)
     val onMention = LocalMentionClick.current
-    val tappable = onMention != null && text.getStringAnnotations(Mentions.TAG, 0, text.length).isNotEmpty()
+    val ctx = LocalContext.current
+    val hasMention = onMention != null && text.getStringAnnotations(Mentions.TAG, 0, text.length).isNotEmpty()
+    val hasLink = text.getStringAnnotations(Links.TAG, 0, text.length).isNotEmpty()
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    // Тап по «@» ловим сами, а не clickable: остальной текст должен отдавать жесты
-    // пузырю (долгий тап — выделение), поэтому событие съедаем, только если короткий
-    // тап пришёлся точно на имя.
-    val mentionTap = if (!tappable) {
+    // Тап по «@» и по ссылке ловим сами, а не clickable: остальной текст должен отдавать
+    // жесты пузырю (долгий тап — меню), поэтому событие съедаем, только если короткий тап
+    // пришёлся точно на имя или адрес.
+    val mentionTap = if (!hasMention && !hasLink) {
         Modifier
     } else {
         Modifier.pointerInput(text) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                val key = mentionAt(layout, text, down.position) ?: return@awaitEachGesture
+                val url = annotationAt(layout, text, down.position, Links.TAG)
+                val key = if (url == null && hasMention) annotationAt(layout, text, down.position, Mentions.TAG) else null
+                if (url == null && key == null) return@awaitEachGesture
                 val up = waitForUpOrCancellation() ?: return@awaitEachGesture
                 if (up.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis) {
                     up.consume()
-                    onMention?.invoke(key)
+                    if (url != null) openLink(ctx, url) else key?.let { onMention?.invoke(it) }
                 }
             }
         }
@@ -1041,12 +1047,39 @@ internal fun BubbleColumn(content: @Composable () -> Unit) {
 
 /** Ключ упомянутого под точкой `pos`, если она попала в сам глиф «@имени», а не
  *  просто ближе всего к нему (тап справа от конца строки — это тап по пузырю). */
-private fun mentionAt(layout: TextLayoutResult?, text: AnnotatedString, pos: androidx.compose.ui.geometry.Offset): String? {
+private fun annotationAt(layout: TextLayoutResult?, text: AnnotatedString, pos: androidx.compose.ui.geometry.Offset, tag: String): String? {
     val l = layout ?: return null
     val o = l.getOffsetForPosition(pos)
     return listOf(o, o - 1).filter { it in text.indices }
         .firstOrNull { l.getBoundingBox(it).contains(pos) }
-        ?.let { i -> text.getStringAnnotations(Mentions.TAG, i, i + 1).firstOrNull()?.item }
+        ?.let { i -> text.getStringAnnotations(tag, i, i + 1).firstOrNull()?.item }
+}
+
+/**
+ * Ссылки ([Links]) — подчёркнутые, цветом упоминаний, с адресом в аннотации: тап по ним
+ * ловит [BubbleText]. В своём пузыре — светлый цвет, в чужом — акцент.
+ */
+internal fun AnnotatedString.linked(mine: Boolean): AnnotatedString {
+    val links = Links.find(text)
+    if (links.isEmpty()) return this
+    val style = SpanStyle(
+        color = if (mine) Tokens.Colors.mentionOnOut else Tokens.Colors.accent,
+        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+    )
+    return buildAnnotatedString {
+        append(this@linked)
+        links.forEach {
+            addStyle(style, it.start, it.end)
+            addStringAnnotation(Links.TAG, it.url, it.start, it.end)
+        }
+    }
+}
+
+/** Открыть ссылку браузером. Нечем открыть — молча: тап ничего не ломает. */
+private fun openLink(ctx: android.content.Context, url: String) {
+    val uri = android.net.Uri.parse(url)
+    if (uri.scheme != "https" && uri.scheme != "http") return
+    runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
 }
 
 /** Форма пузыря: «шов» внутри блока — со стороны отправителя. Внешние углы серии

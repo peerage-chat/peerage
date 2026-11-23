@@ -1482,14 +1482,14 @@ internal fun MessageBubble(
                                 "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready, onLongClick = onLong)
                                 // Текст обтекает мету: она едет в конец последней строки
                                 // и переносится сама, если та её не вмещает.
-                                else -> BubbleText(bubbleText(model, m).marked(LocalSearchMarks.current, m)) { meta() }
+                                else -> BubbleText(bubbleText(model, m).linked(m.mine).marked(LocalSearchMarks.current, m)) { meta() }
                             }
                         }
                         // Подпись к вложению — в том же пузыре, под содержимым. Она пришла
                         // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
                         if (m.kind != "text" && m.text.isNotEmpty()) {
                             BubbleText(
-                                AnnotatedString(m.text.trimEnd()).marked(LocalSearchMarks.current, m),
+                                AnnotatedString(m.text.trimEnd()).linked(m.mine).marked(LocalSearchMarks.current, m),
                                 modifier = Modifier.padding(top = Tokens.Space.s),
                             ) { meta() }
                         }
