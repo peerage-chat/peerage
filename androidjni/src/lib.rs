@@ -195,7 +195,7 @@ pub extern "system" fn Java_chat_peerage_Native_importSeedPhrase<'local>(
         match peerage_core::Identity::from_phrase(&phrase) {
             Ok(identity) => {
                 let path = std::path::Path::new(&dir).join("profile.json");
-                match (peerage_core::store::Profile { identity }).save(&path) {
+                match peerage_core::store::Profile::new(identity, peerage_engine::NET).save(&path) {
                     Ok(()) => {
                         // Шаг 7g: на эпохе «сейчас» — прошлой эпохи телефон не знает.
                         peerage_engine::begin_restored_epoch(std::path::Path::new(&dir));
@@ -271,7 +271,7 @@ pub extern "system" fn Java_chat_peerage_Native_restoreSeedPhrase<'local>(
         }
         let Ok(identity) = peerage_core::Identity::from_phrase(&phrase) else { return JNI_FALSE };
         let path = std::path::Path::new(&dir).join("profile.json");
-        if (peerage_core::store::Profile { identity }).save(&path).is_err() {
+        if peerage_core::store::Profile::new(identity, peerage_engine::NET).save(&path).is_err() {
             return JNI_FALSE;
         }
         // Шаг 7g: данные отложены вместе с эпохой — поднимаемся на «сейчас».

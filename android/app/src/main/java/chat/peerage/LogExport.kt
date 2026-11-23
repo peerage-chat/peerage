@@ -22,7 +22,7 @@ import java.util.Locale
  * (ADR-007) прячет, и в пересланном файле ему не место.
  */
 object LogExport {
-    private const val CRASH_FILE = "last-crash.txt"
+    const val CRASH_FILE = "last-crash.txt"
 
     @Volatile private var installed = false
 

@@ -26,7 +26,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         val app = ctx.applicationContext
         if (!isOnboarded(app)) return
-        if (VaultKeyManager.needsPassword(app.filesDir)) {
+        if (VaultKeyManager.needsPassword(Profiles.main(app))) {
             showLocked(app)
             return
         }

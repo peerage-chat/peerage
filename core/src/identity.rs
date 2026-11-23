@@ -116,6 +116,18 @@ impl Identity {
         blake3::derive_key(context, &self.signing.to_bytes())
     }
 
+    /// Профиль `n` из тех же 24 слов (ADR-015 §3, F5): 0 — сама эта личность (так
+    /// прежние установки сохраняют её), n > 0 — `derive_subkey("peerage:profile:v1/{n}")`.
+    /// По умолчанию у профиля своя фраза (общая связывает профили для того, кто её
+    /// знает); здесь закреплено только правило.
+    pub fn profile(&self, n: u32) -> Self {
+        if n == 0 {
+            return self.clone();
+        }
+        Self::from_seed(&self.derive_subkey(&format!("peerage:profile:v1/{n}")))
+            .expect("32 байта — годный seed")
+    }
+
     // ── Транспортный ключ (ADR-007) ─────────────────────────────────────────
     //
     // Адрес Yggdrasil = функция ключа узла, поэтому «сменить адрес» = «сменить
@@ -357,6 +369,19 @@ mod tests {
     fn address_is_deterministic() {
         let id = Identity::generate();
         assert_eq!(id.yggdrasil_address(), id.yggdrasil_address());
+    }
+
+    /// F5: профиль 0 — та же личность (прежние установки её не теряют); остальные —
+    /// свои и воспроизводимые из тех же слов.
+    #[test]
+    fn profile_zero_is_this_seed_and_others_differ() {
+        let me = Identity::generate();
+        assert_eq!(me.profile(0).seed(), me.seed());
+        let (p1, p2) = (me.profile(1), me.profile(2));
+        assert_ne!(p1.public_key_bytes(), me.public_key_bytes());
+        assert_ne!(p1.public_key_bytes(), p2.public_key_bytes());
+        let again = Identity::from_phrase(&me.seed_phrase()).unwrap().profile(1);
+        assert_eq!(again.public_key_bytes(), p1.public_key_bytes(), "из тех же слов — тот же");
     }
 
     #[test]

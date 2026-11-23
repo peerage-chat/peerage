@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
         AppLock.load(applicationContext)
         // Разрешения НЕ просим здесь: во время онбординга системный диалог не нужен.
         // Запрашиваются в App() после гейта (onboarded) — см. requestCorePermissions.
-        val dataDir = filesDir.absolutePath
+        val dataDir = Profiles.main(this).absolutePath
         handleCallIntent(intent)
         model.acceptIntent(this, intent)
         setContent {
@@ -341,7 +341,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
     // человек уже принял решение, незачем заставлять его искать пункт меню.
     // Каталог данных — тот же, что при старте движка; берём из контекста, чтобы не
     // тащить его параметром через оболочку.
-    val dataDir = LocalContext.current.filesDir.absolutePath
+    val dataDir = Profiles.main(LocalContext.current).absolutePath
     val nav = remember {
         val fromNotif = activity?.intent?.getBooleanExtra(FloodNotifier.EXTRA_OPEN_ROTATE, false) == true
         NavState(if (fromNotif) Screen.RotateAddress else debugStartScreen(activity) ?: Screen.Contacts)

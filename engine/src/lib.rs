@@ -569,7 +569,7 @@ pub fn parse_key(s: &str) -> Option<[u8; 32]> {
 }
 
 /// Вид сети этого профиля (ADR-015): пока единственный адаптер — Yggdrasil.
-const NET: peerage_core::record::NetKind = peerage_core::record::NetKind::Yggdrasil;
+pub const NET: peerage_core::record::NetKind = peerage_core::record::NetKind::Yggdrasil;
 
 /// Разобрать код обмена v2 (8.4) для сети этого профиля.
 fn parse_code(code: &str) -> Result<ContactCode, CodeError> {
@@ -5003,11 +5003,13 @@ pub const QUARANTINE_DIR: &str = "quarantine";
 /// клиент) и сам карантин.
 const QUARANTINE_KEEP: &[&str] = &[QUARANTINE_DIR, "vault.key.enc", "vault.meta"];
 
-/// Загрузить личность из `profile.json` (или создать новую, если её нет). Если
+/// Загрузить личность из `profile.json` (или создать новую в сети этой сборки). Если
 /// профиль есть, но не расшифровывается, — [`START_VAULT_MISMATCH`]: ничего не
 /// стирается и новая личность не создаётся.
 pub fn load_identity(dir: &Path) -> Result<Identity, String> {
-    match Profile::load_or_create(&dir.join("profile.json")) {
+    match Profile::load_or_create(&dir.join("profile.json"), NET) {
+        // Профиль другой сети (ADR-015): его контакты и адреса — не отсюда.
+        Ok(p) if p.kind != NET => Err(format!("профиль другой сети (вид {})", p.kind as u8)),
         Ok(p) => Ok(p.identity),
         Err(peerage_core::store::StoreError::Vault(peerage_core::vault::VaultError::Decrypt)) => {
             log::warn!(

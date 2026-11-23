@@ -31,25 +31,44 @@ pub enum StoreError {
     Db(#[from] rusqlite::Error),
     #[error("сообщение с таким автором и id уже есть")]
     Duplicate,
+    #[error("неизвестный вид сети профиля: {0}")]
+    UnknownKind(u8),
 }
 
 // ---- Профиль (идентичность) ------------------------------------------------
 
+/// `profile.json` (ADR-015 F4): личность, вид сети, «скрытый». Лежит в каталоге профиля
+/// под ключом хранилища — снаружи по нему не понять, что это за профиль.
 #[derive(Serialize, Deserialize)]
 struct ProfileFile {
     version: u8,
     seed: String,
+    /// Нет — файл до заморозки формата (шаг 8.7): тогда был только Yggdrasil.
+    #[serde(default)]
+    kind: Option<u8>,
+    #[serde(default)]
+    hidden: bool,
 }
 
-/// Профиль пользователя — хранит идентичность в profile.json.
+const PROFILE_VERSION: u8 = 2;
+
+/// Профиль: личность и в какой сети он живёт (ADR-015: один профиль — одна сеть).
 pub struct Profile {
     pub identity: Identity,
+    pub kind: crate::record::NetKind,
+    /// Скрытый профиль (ADR-015 §5): ни одного маячка. Пока всегда `false`.
+    pub hidden: bool,
 }
 
 impl Profile {
-    pub fn load_or_create(path: &Path) -> Result<Profile, StoreError> {
+    pub fn new(identity: Identity, kind: crate::record::NetKind) -> Self {
+        Profile { identity, kind, hidden: false }
+    }
+
+    /// Загрузить профиль или завести новую личность в сети `kind`.
+    pub fn load_or_create(path: &Path, kind: crate::record::NetKind) -> Result<Profile, StoreError> {
         if path.exists() { Self::load(path) } else {
-            let profile = Profile { identity: Identity::generate() };
+            let profile = Profile::new(Identity::generate(), kind);
             profile.save(path)?;
             Ok(profile)
         }
@@ -60,7 +79,14 @@ impl Profile {
         let pf: ProfileFile = serde_json::from_slice(&data)?;
         let seed = hex::decode(&pf.seed)?;
         let identity = Identity::from_seed(&seed).map_err(|_| StoreError::BadLength)?;
-        Ok(Profile { identity })
+        let k = pf.kind.unwrap_or(crate::record::NetKind::Yggdrasil as u8);
+        let kind = crate::record::NetKind::from_u8(k).ok_or(StoreError::UnknownKind(k))?;
+        let profile = Profile { identity, kind, hidden: pf.hidden };
+        // Файл до заморозки — переписать в нынешнем виде один раз.
+        if pf.version < PROFILE_VERSION || pf.kind.is_none() {
+            profile.save(path)?;
+        }
+        Ok(profile)
     }
 
     pub fn save(&self, path: &Path) -> Result<(), StoreError> {
@@ -69,7 +95,12 @@ impl Profile {
                 std::fs::create_dir_all(parent)?;
             }
         }
-        let pf = ProfileFile { version: 1, seed: hex::encode(self.identity.seed()) };
+        let pf = ProfileFile {
+            version: PROFILE_VERSION,
+            seed: hex::encode(self.identity.seed()),
+            kind: Some(self.kind as u8),
+            hidden: self.hidden,
+        };
         let json = serde_json::to_vec_pretty(&pf)?;
         crate::fsutil::write_atomic_private(path, &crate::vault::seal(&profile_purpose(), &json))?;
         Ok(())
@@ -2395,10 +2426,33 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("test-prof-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("profile.json");
-        let p1 = Profile::load_or_create(&path).unwrap();
+        let p1 = Profile::load_or_create(&path, crate::record::NetKind::Yggdrasil).unwrap();
         let key1 = p1.identity.public_key_bytes();
-        let p2 = Profile::load_or_create(&path).unwrap();
+        let p2 = Profile::load_or_create(&path, crate::record::NetKind::Yggdrasil).unwrap();
         assert_eq!(p2.identity.public_key_bytes(), key1);
+        assert_eq!((p2.kind, p2.hidden), (crate::record::NetKind::Yggdrasil, false));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 8.7: файл до заморозки (без вида сети) читается как Yggdrasil и переписывается;
+    /// неизвестный вид — ошибка, а не чужая сеть под видом своей.
+    #[test]
+    fn profile_file_carries_network_kind() {
+        let dir = std::env::temp_dir().join(format!("test-prof-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("profile.json");
+        let id = Identity::generate();
+        let write = |json: String| {
+            std::fs::write(&path, crate::vault::seal(&profile_purpose(), json.as_bytes())).unwrap()
+        };
+        write(format!(r#"{{"version":1,"seed":"{}"}}"#, hex::encode(id.seed())));
+        let p = Profile::load(&path).unwrap();
+        assert_eq!((p.identity.public_key_bytes(), p.kind), (id.public_key_bytes(), crate::record::NetKind::Yggdrasil));
+        let raw = crate::vault::open(&profile_purpose(), &std::fs::read(&path).unwrap()).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!((v["version"].as_u64(), v["kind"].as_u64()), (Some(2), Some(1)), "переписан");
+        write(format!(r#"{{"version":2,"seed":"{}","kind":9}}"#, hex::encode(id.seed())));
+        assert!(matches!(Profile::load(&path), Err(StoreError::UnknownKind(9))));
         std::fs::remove_dir_all(&dir).ok();
     }
 

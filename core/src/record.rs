@@ -50,7 +50,7 @@ pub enum NetKind {
 }
 
 impl NetKind {
-    fn from_u8(b: u8) -> Option<Self> {
+    pub fn from_u8(b: u8) -> Option<Self> {
         match b {
             1 => Some(Self::Yggdrasil),
             _ => None,

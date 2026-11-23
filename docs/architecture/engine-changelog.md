@@ -30,6 +30,25 @@
 
 ---
 
+## 2026-11-23 · Профиль знает свою сеть; правило профиля n · ХЭШ (бета 8.7)
+
+**Причина:** шаг 8 (`format-freeze.md` 8.7, ADR-015 F4/F5) — `profile.json` хранил только
+seed: какой сети профиль, не знал никто, и профиль другой сети открылся бы как свой.
+
+- **Контракт:** `core::store::Profile {identity, kind, hidden}`, `Profile::new(identity, kind)`,
+  `Profile::load_or_create(path, kind)`; `StoreError::UnknownKind`. `NetKind::from_u8` —
+  публичный. `peerage_engine::NET` — публичный. `Identity::profile(n)` — правило F5
+  (`derive_subkey("peerage:profile:v1/{n}")`, 0 — сама личность).
+- **Поведение:** `load_identity` не открывает профиль другой сети (ошибка старта).
+  Каталог данных клиента — `files/profiles/main/` (клиент, `Profiles.kt`; движку путь
+  передаётся как раньше).
+- **Схема / файлы:** `profile.json` v2: `{version: 2, seed, kind, hidden}` под ключом
+  хранилища; файл v1 (до заморозки) читается как Yggdrasil и переписывается один раз.
+- **Тесты:** `store::profile_file_carries_network_kind`,
+  `identity::profile_zero_is_this_seed_and_others_differ`; клиент — `ProfilesTest` (перенос,
+  прерванный перенос, повторный старт). Эмулятор Alice: старые данные переехали в
+  `profiles/main`, чаты и сеть на месте.
+
 ## 2026-11-23 · Досылка из очереди по своему расписанию · ac6133c (бета 8.6)
 
 **Причина:** шаг 8 (`format-freeze.md` 8.6, ADR-016 E5) — по истечении срока частых

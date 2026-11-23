@@ -144,7 +144,7 @@ private fun ImportKeyStep(model: AppModel, onBack: () -> Unit) {
     ) { phrase ->
         busy = true
         result = null
-        model.importIdentity(ctx.filesDir.absolutePath, phrase) { r ->
+        model.importIdentity(Profiles.main(ctx).absolutePath, phrase) { r ->
             busy = false
             if (r == RecoverResult.OK) relaunchApp(ctx) else result = r
         }

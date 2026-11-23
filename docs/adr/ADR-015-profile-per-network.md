@@ -277,6 +277,13 @@ Decided by the owner 2026-11-19 (the alternative was a visible list of profiles)
 - **The main profile may keep Keystore and biometric unlock** (the vault levels that exist
   today, `VaultKeyManager`). Other profiles use the `PASSWORD` level only: biometrics and the
   device PIN belong to the device, not to a profile.
+- **The main profile's container is `profiles/main/`** (decided 2026-11-23, step 8.7). It may
+  have no password, so its name cannot come from one. A Keystore-held secret for an opaque
+  name was rejected: the main profile is usually the largest container and stands out by
+  size anyway, while the secret would add a point of failure (lost Keystore → the container
+  cannot be found even with a password) and a rename on every change of vault level. A fixed
+  name tells nothing about the other profiles: their count leaks through the directory count
+  either way, and decoy slots hide it equally with both choices.
 - **What else must not name a profile:**
   - notification channels (generic ones, shared by all profiles);
   - notification and foreground-service texts (no profile name);

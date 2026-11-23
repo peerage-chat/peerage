@@ -190,11 +190,11 @@ class ConnService : Service() {
          * не у кого. Повторный вызов ничего не делает. true — движок работает.
          */
         fun startEngineNow(app: Context): Boolean {
-            if (!BootReceiver.isOnboarded(app) || VaultKeyManager.needsPassword(app.filesDir)) return false
+            if (!BootReceiver.isOnboarded(app) || VaultKeyManager.needsPassword(Profiles.main(app))) return false
             val model = AppModel.instance
             if (model.appContext == null) model.appContext = app
             AppLock.load(app)
-            return model.start(app.filesDir.absolutePath)
+            return model.start(Profiles.main(app).absolutePath)
         }
 
         /** Системные настройки категории (Android 8+: категория; раньше — уведомления приложения). */

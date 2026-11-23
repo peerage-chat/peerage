@@ -41,12 +41,12 @@ fn main() {
 
     // 1. Персистентность профиля: создать → перезагрузить → ключ стабилен.
     let pa = dir.join("a/profile.json");
-    let id_a = Profile::load_or_create(&pa).unwrap().identity;
-    let id_a_reloaded = Profile::load_or_create(&pa).unwrap().identity;
+    let id_a = Profile::load_or_create(&pa, peerage_core::record::NetKind::Yggdrasil).unwrap().identity;
+    let id_a_reloaded = Profile::load_or_create(&pa, peerage_core::record::NetKind::Yggdrasil).unwrap().identity;
     assert_eq!(id_a.public_key_bytes(), id_a_reloaded.public_key_bytes());
     println!("✓ профиль сохранён и перезагружен (ключ стабилен)");
 
-    let id_b = Profile::load_or_create(&dir.join("b/profile.json")).unwrap().identity;
+    let id_b = Profile::load_or_create(&dir.join("b/profile.json"), peerage_core::record::NetKind::Yggdrasil).unwrap().identity;
     let pk_a = id_a.public_key_bytes();
     let pk_b = id_b.public_key_bytes();
 
