@@ -340,12 +340,8 @@ internal fun splitSize(s: String): Pair<String, String> {
     return if (i < 0) clean to "" else clean.substring(0, i) to clean.substring(i + 1)
 }
 
-/** Дата смены адреса: эпоха — секунды Unix (шаг 7g). Эпоха 0 и старые счётчики — null. */
-internal fun rotatedOn(epoch: Int): String? =
-    if (epoch < EPOCH_TIME_FLOOR) null else fmtSince(epoch.toLong())
-
-/** Эпохи-счётчики до 7g были малыми числами; время смены — заведомо больше. */
-private const val EPOCH_TIME_FLOOR = 1_000_000_000
+/** Дата смены адреса: эпоха — секунды Unix (шаг 7g); 0 — адреса ещё нет. */
+internal fun rotatedOn(epoch: Int): String? = if (epoch <= 0) null else fmtSince(epoch.toLong())
 
 /** Карточка-контейнер (тёмная поверхность, скругление) для разделов Сети. */
 @Composable

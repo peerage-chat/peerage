@@ -5,7 +5,7 @@
 //! (только в dev/test окружении).
 //!
 //! Версия схемы — `PRAGMA user_version` (8.5). Схема на момент заморозки формата —
-//! версия 1: её создаёт [`schema_v1`] (вместе с доводкой баз, созданных до заморозки).
+//! версия 1: её создаёт [`schema_v1`].
 //! Каждое изменение после — шаг в [`STEPS`] под следующим номером, в своей транзакции
 //! вместе с номером: прерванная миграция повторяется целиком. База новее приложения
 //! не открывается — явная ошибка вместо молчаливой порчи.
@@ -89,15 +89,9 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// Схема 1 (заморозка формата, шаг 8). На базе без номера — новой или созданной до
-/// заморозки (эмуляторы, телефон владельца) — доводит её до той же схемы.
+/// Схема 1 (заморозка формата, шаг 8): база без номера — новая. Базы, созданные до
+/// заморозки, не доводятся (решение владельца 2026-11-23: до раздачи беты — `pm clear`).
 fn schema_v1(conn: &Connection) -> rusqlite::Result<()> {
-    // 7i: запросом было первое сообщение незнакомца (`first_text`); теперь это свой
-    // payload с приветствием. Старые висящие запросы не переносятся: принять их по
-    // новому протоколу нельзя (до беты формат ломать можно).
-    if conn.prepare("SELECT first_text FROM contact_requests LIMIT 0").is_ok() {
-        conn.execute("DROP TABLE contact_requests", [])?;
-    }
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS contacts (
             key          BLOB PRIMARY KEY,
@@ -321,29 +315,6 @@ fn schema_v1(conn: &Connection) -> rusqlite::Result<()> {
             requested  INTEGER NOT NULL
         );
     ")?;
-    // Колонки, появившиеся после первых установок: на старой базе ALTER добавит их
-    // один раз, на новой (колонка уже в CREATE) — тихо ничего не сделает.
-    let _ = conn.execute("ALTER TABLE outbox ADD COLUMN failed INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE calls ADD COLUMN video INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE group_meta ADD COLUMN photo TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN verified_at INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN verified_how TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN awaiting INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN name TEXT NOT NULL DEFAULT ''", []);
-    let _ = conn.execute("ALTER TABLE blocklist ADD COLUMN contact INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN autodel INTEGER NOT NULL DEFAULT -1", []);
-    let _ = conn.execute("ALTER TABLE reactions ADD COLUMN seen INTEGER NOT NULL DEFAULT 1", []);
-    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN transport_rec BLOB", []);
-    let _ = conn.execute("ALTER TABLE contacts ADD COLUMN transport_sig BLOB", []);
-    // Адрес hex-ключом без вида сети (до 8.3) — не держим: источник теперь запись.
-    let _ = conn.execute("ALTER TABLE contacts DROP COLUMN transport_key", []);
-    let _ = conn.execute("ALTER TABLE contacts DROP COLUMN transport_epoch", []);
-    let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN notify INTEGER NOT NULL DEFAULT -1", []);
-    let _ = conn.execute("ALTER TABLE chat_flags ADD COLUMN notify_until INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE group_meta ADD COLUMN notify_default INTEGER NOT NULL DEFAULT 0", []);
-    // «Без звука» прежних версий = «ничего», пока не включит. Флаг гасим в том же запросе,
-    // чтобы перенос не повторялся на каждом запуске; на новой базе колонки нет — тихо мимо.
-    let _ = conn.execute("UPDATE chat_flags SET notify = 2, notify_until = 0, muted = 0 WHERE muted != 0", []);
     Ok(())
 }
 
@@ -354,24 +325,8 @@ fn search_index(conn: &Connection) {
     // `content='chat_messages'` — индекс без копии текста: строки остаются в основной
     // таблице, FTS хранит только словарь. Всё в `let _`: на сборке SQLite без FTS5
     // поиск обязан деградировать до LIKE, а не ронять запуск (см. `MessageStore::search_page`).
-    //
-    // Прежний индекс `messages_fts` знал только текст: убираем его с триггерами, а новый
-    // при первом создании наполняем из истории (`rebuild`) — иначе старая переписка
-    // осталась бы ненайденной.
-    let fresh: bool = conn
-        .query_row(
-            "SELECT count(*) = 0 FROM sqlite_master WHERE name = 'chat_search'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(false);
     let _ = conn.execute_batch(
-        "DROP TRIGGER IF EXISTS chat_messages_ai;
-         DROP TRIGGER IF EXISTS chat_messages_ad;
-         DROP TRIGGER IF EXISTS chat_messages_au;
-         DROP TABLE IF EXISTS messages_fts;
-
-         CREATE VIRTUAL TABLE IF NOT EXISTS chat_search
+        "CREATE VIRTUAL TABLE IF NOT EXISTS chat_search
              USING fts5(text, name, content='chat_messages', content_rowid='rowid');
 
          CREATE TRIGGER IF NOT EXISTS chat_search_ai AFTER INSERT ON chat_messages BEGIN
@@ -387,9 +342,6 @@ fn search_index(conn: &Connection) {
              INSERT INTO chat_search(rowid, text, name) VALUES (new.rowid, new.text, new.name);
          END;",
     );
-    if fresh {
-        let _ = conn.execute("INSERT INTO chat_search(chat_search) VALUES ('rebuild')", []);
-    }
 }
 
 
@@ -407,29 +359,6 @@ mod fts_probe {
 #[cfg(test)]
 mod migration {
     use rusqlite::Connection;
-
-    #[test]
-    fn old_mute_becomes_mode_nothing_once() {
-        // База прошлой версии: «без звука» — флагом muted.
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE chat_flags (chat BLOB NOT NULL, scope INTEGER NOT NULL DEFAULT 0,
-                 pinned_at INTEGER NOT NULL DEFAULT 0, muted INTEGER NOT NULL DEFAULT 0,
-                 PRIMARY KEY (chat, scope));
-             INSERT INTO chat_flags (chat, scope, muted) VALUES (x'01', 0, 1), (x'02', 0, 0);",
-        )
-        .unwrap();
-        super::migrate(&conn).unwrap();
-        let mode = |c: &[u8]| -> i64 {
-            conn.query_row("SELECT notify FROM chat_flags WHERE chat=?1", [c], |r| r.get(0)).unwrap()
-        };
-        assert_eq!(mode(&[1]), 2, "заглушённый — «ничего»");
-        assert_eq!(mode(&[2]), -1, "остальные — по умолчанию");
-        // Человек вернул умолчание — повторный запуск не заглушает чат обратно.
-        conn.execute("UPDATE chat_flags SET notify=-1 WHERE chat=x'01'", []).unwrap();
-        super::migrate(&conn).unwrap();
-        assert_eq!(mode(&[1]), -1);
-    }
 
     fn version(conn: &Connection) -> i64 {
         conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap()

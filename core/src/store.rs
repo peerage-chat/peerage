@@ -33,6 +33,8 @@ pub enum StoreError {
     Duplicate,
     #[error("неизвестный вид сети профиля: {0}")]
     UnknownKind(u8),
+    #[error("profile.json версии {0}: эта сборка читает только 2")]
+    ProfileVersion(u8),
 }
 
 // ---- Профиль (идентичность) ------------------------------------------------
@@ -43,10 +45,7 @@ pub enum StoreError {
 struct ProfileFile {
     version: u8,
     seed: String,
-    /// Нет — файл до заморозки формата (шаг 8.7): тогда был только Yggdrasil.
-    #[serde(default)]
-    kind: Option<u8>,
-    #[serde(default)]
+    kind: u8,
     hidden: bool,
 }
 
@@ -79,14 +78,11 @@ impl Profile {
         let pf: ProfileFile = serde_json::from_slice(&data)?;
         let seed = hex::decode(&pf.seed)?;
         let identity = Identity::from_seed(&seed).map_err(|_| StoreError::BadLength)?;
-        let k = pf.kind.unwrap_or(crate::record::NetKind::Yggdrasil as u8);
-        let kind = crate::record::NetKind::from_u8(k).ok_or(StoreError::UnknownKind(k))?;
-        let profile = Profile { identity, kind, hidden: pf.hidden };
-        // Файл до заморозки — переписать в нынешнем виде один раз.
-        if pf.version < PROFILE_VERSION || pf.kind.is_none() {
-            profile.save(path)?;
+        if pf.version != PROFILE_VERSION {
+            return Err(StoreError::ProfileVersion(pf.version));
         }
-        Ok(profile)
+        let kind = crate::record::NetKind::from_u8(pf.kind).ok_or(StoreError::UnknownKind(pf.kind))?;
+        Ok(Profile { identity, kind, hidden: pf.hidden })
     }
 
     pub fn save(&self, path: &Path) -> Result<(), StoreError> {
@@ -98,7 +94,7 @@ impl Profile {
         let pf = ProfileFile {
             version: PROFILE_VERSION,
             seed: hex::encode(self.identity.seed()),
-            kind: Some(self.kind as u8),
+            kind: self.kind as u8,
             hidden: self.hidden,
         };
         let json = serde_json::to_vec_pretty(&pf)?;
@@ -2434,8 +2430,8 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// 8.7: файл до заморозки (без вида сети) читается как Yggdrasil и переписывается;
-    /// неизвестный вид — ошибка, а не чужая сеть под видом своей.
+    /// 8.7: файл до заморозки не читается (двух форматов не держим); неизвестный вид —
+    /// ошибка, а не чужая сеть под видом своей.
     #[test]
     fn profile_file_carries_network_kind() {
         let dir = std::env::temp_dir().join(format!("test-prof-kind-{}", std::process::id()));
@@ -2445,13 +2441,12 @@ mod tests {
         let write = |json: String| {
             std::fs::write(&path, crate::vault::seal(&profile_purpose(), json.as_bytes())).unwrap()
         };
-        write(format!(r#"{{"version":1,"seed":"{}"}}"#, hex::encode(id.seed())));
+        write(format!(r#"{{"version":2,"seed":"{}","kind":1,"hidden":false}}"#, hex::encode(id.seed())));
         let p = Profile::load(&path).unwrap();
         assert_eq!((p.identity.public_key_bytes(), p.kind), (id.public_key_bytes(), crate::record::NetKind::Yggdrasil));
-        let raw = crate::vault::open(&profile_purpose(), &std::fs::read(&path).unwrap()).unwrap();
-        let v: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-        assert_eq!((v["version"].as_u64(), v["kind"].as_u64()), (Some(2), Some(1)), "переписан");
-        write(format!(r#"{{"version":2,"seed":"{}","kind":9}}"#, hex::encode(id.seed())));
+        write(format!(r#"{{"version":1,"seed":"{}"}}"#, hex::encode(id.seed())));
+        assert!(Profile::load(&path).is_err(), "файл до заморозки");
+        write(format!(r#"{{"version":2,"seed":"{}","kind":9,"hidden":false}}"#, hex::encode(id.seed())));
         assert!(matches!(Profile::load(&path), Err(StoreError::UnknownKind(9))));
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3082,35 +3077,6 @@ mod tests {
         assert_eq!((page.total, page.items.iter().map(|m| m.id).collect::<Vec<_>>()), (2, vec![1]));
         assert_eq!(MediaTab::parse("links"), Some(MediaTab::Links));
         assert_eq!(MediaTab::parse("photo"), None);
-    }
-
-    /// Старая база: строки, лёгшие до нового индекса, находятся после миграции.
-    #[test]
-    fn search_index_is_rebuilt_from_existing_history() {
-        let (me, peer) = (key(), key());
-        let d = db();
-        let store = MessageStore::open(d.clone());
-        store
-            .append(Chat::Dm(&peer), &StoredMessage {
-                id: 1,
-                sender: hex::encode(me),
-                text: "старое сообщение".into(),
-                mine: true,
-                time: 1,
-                ..Default::default()
-            })
-            .unwrap();
-        {
-            // База до 2.9: индекс был другой, нового нет.
-            let conn = db::lock(&d);
-            conn.execute_batch(
-                "DROP TRIGGER chat_search_ai; DROP TRIGGER chat_search_ad; DROP TRIGGER chat_search_au;
-                 DROP TABLE chat_search;",
-            )
-            .unwrap();
-            db::migrate(&conn).unwrap();
-        }
-        assert_eq!(store.search("старое", None, 10).len(), 1);
     }
 
     /// Репутация копится только у контактов и переживает переоткрытие.
