@@ -71,7 +71,8 @@ say so, and both sides need the new version.
 Android 7.0 or newer on an arm64 phone.
 
 1. Download `peerage-<version>-arm64-v8a.apk` from the
-   [latest release](https://github.com/peerage-chat/peerage/releases/latest).
+   [releases page](https://github.com/peerage-chat/peerage/releases) (the newest one is on
+   top; beta releases are marked as pre-releases).
 2. Check the signing certificate before the first install (below).
 3. Open the APK on the phone and allow installing from this source.
 
@@ -97,9 +98,9 @@ releases:
 
 - **Source URL:** `https://github.com/peerage-chat/peerage`
 - **APK filter:** `arm64-v8a\.apk$`
+- **Include prereleases:** on (beta releases are pre-releases)
 
-Each release also carries `update.json` (version, file hash, certificate fingerprint) at a
-stable address. The format is in [docs/release.md](docs/release.md). The app does not check
+Each release also carries `update.json` (version, file hash, certificate fingerprint). The format is in [docs/release.md](docs/release.md). The app does not check
 for updates by itself: a request to GitHub would reveal the IP address and the fact of
 using Peerage.
 
