@@ -324,3 +324,43 @@ fn late_dm_carries_send_time() {
     a.shutdown();
     b2.shutdown();
 }
+
+/// 8.6 (ADR-016 E5): досылка не ждёт «встречи». Связь моргнула дольше срока ретраев,
+/// но меньше офлайн-порога: сессия жива, контакт так и числится в сети — ни новой
+/// сессии, ни перехода «офлайн → онлайн» не будет. Сообщение всё равно уходит — на
+/// очередном такте связи с этим контактом.
+#[test]
+fn blink_longer_than_retries_still_delivers() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(95), id(96));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let cfg = peerage_messenger::Config {
+        message_ttl: Duration::from_secs(1),
+        retry_interval: Duration::from_millis(200),
+        ping_interval: Duration::from_millis(500),
+        offline_after: Duration::from_secs(60),
+        ..Default::default()
+    };
+    let start = |ident: Identity, tag: &str| {
+        let key = ident.public_key_bytes();
+        Engine::start_with_transport_cfg(tmpdir(tag), ident, net.endpoint(key), cfg.clone())
+            .unwrap()
+            .engine
+    };
+    let (a, b) = (start(a_id, "blink-a"), start(b_id, "blink-b"));
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+    a.send_text(&b_key, "прогрев").unwrap();
+    assert!(wait(10, || find(&b, &a_key, "прогрев").is_some()));
+
+    net.set_cut(true);
+    a.send_text(&b_key, "сквозь моргание").unwrap();
+    std::thread::sleep(Duration::from_secs(2)); // ретраи в памяти выдохлись
+    net.set_cut(false);
+    assert!(
+        wait(5, || find(&b, &a_key, "сквозь моргание").is_some()),
+        "дошло без новой сессии и без перехода в онлайн"
+    );
+    a.shutdown();
+    b.shutdown();
+}

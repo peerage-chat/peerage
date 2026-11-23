@@ -354,6 +354,9 @@ struct Pending {
     /// Должно уйти заново по новой сессии с собеседником (прежняя отправка ушла
     /// туда, где её не прочтут). Уходит через `pump` — темпом и по порядку.
     owed: bool,
+    /// Срок частых ретраев вышел, а запись в очереди: уходит заново на тактах связи с
+    /// пиром — пробе или keepalive (8.6, ADR-016 E5), а не ждёт «встречи».
+    slow: bool,
 }
 
 /// Сколько сообщений одному пиру держим в полёте. Остальные ждут в очереди и
@@ -667,6 +670,7 @@ impl Shared {
                 notify,
                 durable: false,
                 owed: false,
+                slow: false,
             },
         );
         if let Err(e) = self.send_pending(peer, &payload) {
@@ -776,6 +780,7 @@ impl Shared {
                                 notify,
                                 durable: true,
                                 owed: false,
+                                slow: false,
                             },
                         );
                         to_send.push(payload);
@@ -2052,8 +2057,8 @@ fn maintenance_loop(shared: Arc<Shared>) {
         for key in went_offline {
             shared.emit(Event::Presence { peer: key, online: false });
         }
-        for key in to_ping {
-            shared.probe(&key);
+        for key in &to_ping {
+            shared.probe(key);
         }
 
         // Повтор недоставленных сообщений; отсев по TTL.
@@ -2064,16 +2069,28 @@ fn maintenance_loop(shared: Arc<Shared>) {
         // обрыва связи сообщения доходили в порядке «чей таймер сработал первым»
         // (живой прогон 2026-10-26: 2, 5, 1, 3, 4). Тот же `pump` подтягивает из
         // очереди и выпавшее из памяти по сроку, так что новое не обгоняет и его.
+        //
+        // Срок частых ретраев вышел у записи из очереди — она не выпадает, а уходит на
+        // тактах связи с пиром (проба офлайн-пира, keepalive онлайн-пира): доставка
+        // идёт по своему расписанию, а не ждёт новой сессии или перехода в онлайн
+        // (8.6). Проба и так начинает рукопожатие — пакетов в сети не прибавляется.
         let mut due: HashSet<PeerKey> = HashSet::new();
         let mut expired = Vec::new();
         {
             let mut pending = shared.pending.lock().unwrap();
             pending.retain(|id, p| {
-                if now.duration_since(p.created) > p.ttl {
+                if !p.slow && now.duration_since(p.created) > p.ttl {
                     expired.push((*id, p.peer, p.notify));
-                    return false;
+                    if !p.durable {
+                        return false;
+                    }
+                    p.slow = true;
                 }
-                if !p.owed && now.duration_since(p.last_sent) >= shared.cfg.retry_interval {
+                if p.slow {
+                    if to_ping.contains(&p.peer) {
+                        due.insert(p.peer);
+                    }
+                } else if !p.owed && now.duration_since(p.last_sent) >= shared.cfg.retry_interval {
                     due.insert(p.peer);
                 }
                 true

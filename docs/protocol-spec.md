@@ -99,6 +99,12 @@ data  receiver_idx(4) | counter(8) | ChaCha20-Poly1305(padded payload), AD = the
   the messenger resends its whole in-flight window to that peer — paced (20/s) and in id
   order, the same path as the outbox. Holding it in the session queue too would deliver
   what the messenger had already withdrawn (a hung-up call, an expired ring).
+- **Resend schedule** (step 8.6, ADR-016 E5): a reliable payload is retried every 3 s for
+  5 min; one from the outbox does not stop after that. It goes out again on every tick of
+  the link with that peer — each probe of an offline contact (2 s doubling to 300 s) and
+  each keepalive of an online one. A new session or a peer coming online only speeds this
+  up; delivery does not wait for either. A probe starts the handshake anyway, so this adds
+  no packets to an offline contact.
 - **Duplicates:** the receiver remembers delivered (peer, id) pairs of reliable payloads
   (`Payload::reliable_id`); a repeat is acked again but not passed up.
 - **Probes** (`Ping` to an offline contact) are not queued either: the handshake itself is
