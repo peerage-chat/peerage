@@ -155,7 +155,7 @@ payload-format отдельно от envelope-version.
 **Решение:** Multi-queue с приоритетами (calls > text > presence). Или
 типизированные подписки (consumer регистрирует интерес в определённых типах).
 
-> ⚡ **Частично решено на уровне транспорта** (`e4d4f80`): `ygg.go` теперь маршрутизирует
+> ⚡ **Частично решено на уровне транспорта** (`1a58ab5`): `ygg.go` теперь маршрутизирует
 > write-запросы в две очереди — `reliableCh` (аудио + чат, blocking) и `videoCh`
 > (video/screen, try-send drop). `writerLoop` всегда дренирует reliable-очередь перед
 > видео. Это решает приоритизацию на сетевом уровне. **App-level Event-очередь**
@@ -218,7 +218,7 @@ static ROOM_CALL: Mutex<Option<RoomCall>> = Mutex::new(None);
 **Решение:** Ввести `Session`-объект с идентификатором. JNI принимает session_id.
 RoomCall → `HashMap<gid, RoomCall>`. Тестирование через отдельные сессии.
 
-> ✅ **Частично решено** (`235ee6b`): `Session`-объект введён, `APP`/`CALL`/`ROOM_CALL`
+> ✅ **Частично решено** (`db8aa45`): `Session`-объект введён, `APP`/`CALL`/`ROOM_CALL`
 > статики мигрированы в session-based подход. RoomCall per-group пока не реализован
 > (один ROOM_CALL на процесс), но deadlock-риск снижен и основа для H4 есть.
 

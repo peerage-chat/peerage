@@ -79,7 +79,7 @@ The MLS ratchet moves on sending too. If the sending ratchet is not saved, after
 you send from an "old" generation → the receiver has already deleted that secret for
 forward secrecy → `"secret deleted to preserve forward secrecy"` → messages stop arriving.
 See `engine/src/groups.rs` (`send_text`/`on_group`/`on_key_reply` all call `save_group`)
-and the fixes 7e5fc2a/a86248c. Since ADR-004 a lagging member is healed by resync
+and the fixes 620ddae/f39a4a2. Since ADR-004 a lagging member is healed by resync
 (Remove + Add); a group that diverged before that has to be re-created.
 
 The save itself must be crash-safe — see §11.
