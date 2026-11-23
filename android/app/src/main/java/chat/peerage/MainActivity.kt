@@ -645,7 +645,9 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                             },
                                             openOutbox = { home(Screen.Outbox) },
                                             myCode = { home(Screen.MyCode) },
-                                            scan = { home(Screen.Scanner) },
+                                            // Добавление сканирует камерой на своём экране (там же «Вставить
+                                            // код»); Screen.Scanner — только для сверки ключа.
+                                            scan = { home(Screen.Add) },
                                             newGroup = {
                                                 groupDraft = GroupDraft()
                                                 home(Screen.CreateGroup)
