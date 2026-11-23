@@ -16,11 +16,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -117,22 +114,20 @@ private fun rememberThumb(item: GalleryItem): ImageBitmap? {
 }
 
 /**
- * Шторка «Прикрепить» (app-ui.md → «Поле ввода», макет `chatact/Attach`): камера и последние
- * снимки сеткой с номерами выбора, «Файл», «Аудио», «Отправить N фото · размер». Подпись —
- * текст поля: он уйдёт с первым вложением. Закрыли шторку с выбранным — оно ждёт над полем
- * (решает вызывающий), и подпись набирается там.
+ * Панель «Прикрепить» (app-ui.md → «Поле ввода», макет `chatact/Attach`): выезжает из строки
+ * ввода, как эмодзи, — поле остаётся под ней, и подпись набирается сразу. Камера и последние
+ * снимки сеткой с номерами выбора, «Файл», «Аудио»; под ними — сколько выбрано и вес.
+ * Отправляет кнопка поля: текст поля — подпись к первому вложению.
  *
  * @param selected выбранные элементы в порядке выбора (номер на плитке = позиция)
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun AttachSheet(
+internal fun AttachPanel(
     selected: List<GalleryItem>,
     onToggle: (GalleryItem) -> Unit,
     onCamera: () -> Unit,
     onPickFile: () -> Unit,
     onPickAudio: () -> Unit,
-    onSend: () -> Unit,
     onClose: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -142,17 +137,14 @@ internal fun AttachSheet(
     LaunchedEffect(granted) { if (granted) items = loadGallery(ctx) }
     val gap = Tokens.Space.xs + Tokens.Space.xxs
 
-    ModalBottomSheet(
-        onDismissRequest = onClose,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Tokens.Colors.group,
-        tonalElevation = 0.dp,
-        shape = RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel),
-        dragHandle = { SheetHandle() },
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(topStart = Tokens.Radius.panel, topEnd = Tokens.Radius.panel))
+            .background(Tokens.Colors.group),
     ) {
+        PanelGrip(onClose)
         Column(
-            Modifier.fillMaxWidth().navigationBarsPadding()
-                .padding(start = Tokens.Space.l, end = Tokens.Space.l, bottom = Tokens.Space.l),
+            Modifier.fillMaxWidth().padding(start = Tokens.Space.l, end = Tokens.Space.l, bottom = Tokens.Space.m),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
         ) {
             if (granted) {
@@ -182,19 +174,19 @@ internal fun AttachSheet(
                 PlateButton(stringResource(R.string.attach_file), TablerIcons.File, Modifier.weight(1f), onClick = onPickFile)
                 PlateButton(stringResource(R.string.attach_audio), TablerIcons.Music, Modifier.weight(1f), onClick = onPickAudio)
             }
-            // Вес — на кнопке: в сети без серверов размер решает, поедут байты сразу или
+            // Вес — на виду: в сети без серверов размер решает, поедут байты сразу или
             // получателю прилетит карточка «скачать».
             if (selected.isNotEmpty()) {
                 val n = selected.size
                 val size = fmtSizeLong(selected.sumOf { it.size })
-                AccentButton(
+                Text(
                     if (selected.none { it.isVideo }) {
-                        pluralStringResource(R.plurals.attach_send_photos, n, n, size)
+                        pluralStringResource(R.plurals.attach_picked_photos, n, n, size)
                     } else {
-                        pluralStringResource(R.plurals.attach_send_items, n, n, size)
+                        pluralStringResource(R.plurals.attach_picked_items, n, n, size)
                     },
-                    Modifier.fillMaxWidth().heightIn(min = Tokens.Size.touch),
-                    onClick = onSend,
+                    color = Tokens.Colors.accent,
+                    fontSize = Tokens.Font.body,
                 )
             }
         }

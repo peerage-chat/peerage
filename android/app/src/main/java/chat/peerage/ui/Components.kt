@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -593,6 +594,53 @@ internal fun SheetFrame(onClose: () -> Unit, content: @Composable ColumnScope.()
 }
 
 /** Ручка шторки: показывает, что её можно утянуть вниз. */
+/**
+ * Открыта ли экранная клавиатура. Окно не «от края до края» (adjustResize), поэтому инсеты
+ * Compose пусты — спрашиваем инсеты корневого View на каждой раскладке.
+ */
+@Composable
+internal fun rememberImeVisible(): Boolean {
+    val view = androidx.compose.ui.platform.LocalView.current
+    var shown by remember { mutableStateOf(false) }
+    DisposableEffect(view) {
+        val check = android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            shown = androidx.core.view.ViewCompat.getRootWindowInsets(view)
+                ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true
+        }
+        view.viewTreeObserver.addOnGlobalLayoutListener(check)
+        onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(check) }
+    }
+    return shown
+}
+
+/**
+ * Ручка панели, выехавшей из строки ввода (эмодзи, «Прикрепить»): потянуть вниз или тапнуть —
+ * панель закрывается. Ручка обещает этот жест — без него она учила бы не доверять интерфейсу.
+ */
+@Composable
+internal fun PanelGrip(onClose: () -> Unit) {
+    var dragged by remember { mutableStateOf(0f) }
+    val closeThreshold = with(androidx.compose.ui.platform.LocalDensity.current) { 48.dp.toPx() }
+    Box(
+        Modifier.fillMaxWidth()
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragEnd = {
+                        if (dragged > closeThreshold) onClose()
+                        dragged = 0f
+                    },
+                    onDragCancel = { dragged = 0f },
+                ) { _, dy -> dragged += dy }
+            }
+            // Тап по ручке закрывает тоже: до неё уже дотянулся палец.
+            .clickable { onClose() }
+            .padding(vertical = Tokens.Space.s),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(HoloSecondary))
+    }
+}
+
 @Composable
 internal fun SheetHandle() {
     Box(

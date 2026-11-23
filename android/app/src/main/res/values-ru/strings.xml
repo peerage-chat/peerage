@@ -509,17 +509,17 @@
     <string name="emoji_cat_objects">Предметы</string>
     <string name="emoji_cat_symbols">Символы</string>
     <string name="attach_audio">Аудио</string>
-    <plurals name="attach_send_photos">
-        <item quantity="one">Отправить %1$d фото · %2$s</item>
-        <item quantity="few">Отправить %1$d фото · %2$s</item>
-        <item quantity="many">Отправить %1$d фото · %2$s</item>
-        <item quantity="other">Отправить %1$d фото · %2$s</item>
+    <plurals name="attach_picked_photos">
+        <item quantity="one">%1$d фото · %2$s</item>
+        <item quantity="few">%1$d фото · %2$s</item>
+        <item quantity="many">%1$d фото · %2$s</item>
+        <item quantity="other">%1$d фото · %2$s</item>
     </plurals>
-    <plurals name="attach_send_items">
-        <item quantity="one">Отправить %1$d вложение · %2$s</item>
-        <item quantity="few">Отправить %1$d вложения · %2$s</item>
-        <item quantity="many">Отправить %1$d вложений · %2$s</item>
-        <item quantity="other">Отправить %1$d вложения · %2$s</item>
+    <plurals name="attach_picked_items">
+        <item quantity="one">%1$d вложение · %2$s</item>
+        <item quantity="few">%1$d вложения · %2$s</item>
+        <item quantity="many">%1$d вложений · %2$s</item>
+        <item quantity="other">%1$d вложения · %2$s</item>
     </plurals>
     <string name="attach_camera">Камера</string>
     <string name="attach_need_gallery">Чтобы показывать здесь последние снимки, нужен доступ к галерее. Файл при этом можно отправить через пикер выше.</string>

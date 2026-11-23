@@ -85,6 +85,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
@@ -851,11 +852,23 @@ internal fun MessageInput(
     var emojiOpen by remember { mutableStateOf(false) }
     var attachOpen by remember { mutableStateOf(false) }
     var picked by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
-    // Открытую панель «назад» закрывает, а не уводит из чата.
-    BackHandler(enabled = emojiOpen) {
-        emojiOpen = false
+    // Закрыть «Прикрепить»: выбранное не пропадает — ложится плашкой над полем.
+    val closeAttach = {
+        if (picked.isNotEmpty()) onStageAttachments?.invoke(picked)
         attachOpen = false
+        picked = emptyList()
     }
+    // Открытую панель «назад» закрывает, а не уводит из чата.
+    BackHandler(enabled = emojiOpen || attachOpen) {
+        emojiOpen = false
+        if (attachOpen) closeAttach()
+    }
+    // Клавиатура и панель «Прикрепить» вместе не помещаются: открыли панель — клавиатура
+    // уходит; вернулась клавиатура (тап по полю) — панель уступает, выбранное ждёт над полем.
+    val keyboard = LocalSoftwareKeyboardController.current
+    val imeShown = rememberImeVisible()
+    LaunchedEffect(attachOpen) { if (attachOpen) keyboard?.hide() }
+    LaunchedEffect(imeShown) { if (imeShown && attachOpen) closeAttach() }
 
     // Правка: вложить нечего (меняются только слова), отправка становится «Сохранить».
     val editing = model?.editTarget != null
@@ -888,42 +901,31 @@ internal fun MessageInput(
             fadeIn(tween(Tokens.Anim.normal))
         val panelExit = shrinkVertically(tween(Tokens.Anim.normal), shrinkTowards = Alignment.Bottom) +
             fadeOut(tween(Tokens.Anim.fast))
-        if (attachOpen) {
-            // Отправка из шторки: текст поля — подпись к первому вложению. Подпись не
-            // отдельным сообщением: фото с подписью иначе — два пакета, и наблюдатель
-            // узнаёт их по характерной паре (M5). Закрыли, не отправив, — выбранное ждёт
-            // над полем, подпись набирается там же.
-            val close = {
-                attachOpen = false
-                picked = emptyList()
-            }
-            val keep = {
-                if (picked.isNotEmpty()) onStageAttachments?.invoke(picked)
-                close()
-            }
-            AttachSheet(
+        // «Прикрепить» выезжает из строки ввода, как эмодзи: поле под панелью — подпись
+        // набирается сразу, отправляет кнопка поля.
+        AnimatedVisibility(
+            visible = attachOpen,
+            enter = panelEnter,
+            exit = panelExit,
+        ) {
+            AttachPanel(
                 selected = picked,
                 onToggle = { g ->
                     picked = if (picked.any { it.uri == g.uri }) picked.filterNot { it.uri == g.uri } else picked + g
                 },
                 onCamera = {
-                    keep()
+                    closeAttach()
                     onCamera()
                 },
                 onPickFile = {
-                    keep()
+                    closeAttach()
                     onPickFile()
                 },
                 onPickAudio = {
-                    keep()
+                    closeAttach()
                     onPickAudio()
                 },
-                onSend = {
-                    onSendAttachments(picked, value.trim())
-                    close()
-                    field.clearText()
-                },
-                onClose = keep,
+                onClose = closeAttach,
             )
         }
         AnimatedVisibility(
@@ -984,7 +986,7 @@ internal fun MessageInput(
                         tint = if (emojiOpen) HoloAccent else Tokens.Colors.secondary,
                     ) {
                         emojiOpen = !emojiOpen
-                        if (emojiOpen) attachOpen = false
+                        if (emojiOpen && attachOpen) closeAttach()
                     }
                 }
                 if (editing) {
@@ -995,8 +997,12 @@ internal fun MessageInput(
                         stringResource(R.string.cd_attach),
                         tint = if (attachOpen) HoloAccent else Tokens.Colors.secondary,
                     ) {
-                        attachOpen = !attachOpen
-                        if (attachOpen) emojiOpen = false
+                        if (attachOpen) {
+                            closeAttach()
+                        } else {
+                            attachOpen = true
+                            emojiOpen = false
+                        }
                     }
                 }
                 BasicTextField(
@@ -1024,8 +1030,25 @@ internal fun MessageInput(
             }
             Spacer(Modifier.width(Tokens.Space.s))
             // Отправка (есть текст) / голосовое удержанием (поле пустое).
-            val send = value.isNotBlank() || (staged && !editing)
-            ComposerButton(voice, record = !send, onClick = { if (send) onSend() }) {
+            val send = value.isNotBlank() || (staged && !editing) || picked.isNotEmpty()
+            ComposerButton(
+                voice,
+                record = !send,
+                onClick = {
+                    when {
+                        // Выбранное в панели — с текстом поля подписью к первому вложению. Не
+                        // отдельным сообщением: фото с подписью иначе — два пакета, и
+                        // наблюдатель узнаёт их по характерной паре (M5).
+                        picked.isNotEmpty() -> {
+                            onSendAttachments(picked, value.trim())
+                            picked = emptyList()
+                            attachOpen = false
+                            field.clearText()
+                        }
+                        send -> onSend()
+                    }
+                },
+            ) {
                 val tint = HoloAccentDark
                 SwapIcon(
                     send,
