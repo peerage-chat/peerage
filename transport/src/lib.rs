@@ -28,6 +28,7 @@ mod ffi {
         pub fn ygg_peers_json(h: u64, out: *mut c_char, out_cap: c_int) -> c_int;
         pub fn ygg_tree_count(h: u64) -> c_int;
         pub fn ygg_add_peer(h: u64, uri: *const c_char) -> c_int;
+        pub fn ygg_remove_peer(h: u64, uri: *const c_char) -> c_int;
         pub fn ygg_write(h: u64, dst_pub: *const u8, data: *const u8, data_len: c_int) -> c_int;
         pub fn ygg_write_media(
             h: u64,
@@ -143,6 +144,17 @@ impl Node {
     pub fn add_peer(&self, uri: &str) -> Result<(), YggError> {
         let c = CString::new(uri)?;
         let r = unsafe { ffi::ygg_add_peer(self.handle, c.as_ptr()) };
+        if r < 0 {
+            return Err(YggError::OpFailed);
+        }
+        Ok(())
+    }
+
+    /// Перестать подключаться к пиру `uri`, добавленному [`Node::add_peer`].
+    /// Соединение рвётся не сразу.
+    pub fn remove_peer(&self, uri: &str) -> Result<(), YggError> {
+        let c = CString::new(uri)?;
+        let r = unsafe { ffi::ygg_remove_peer(self.handle, c.as_ptr()) };
         if r < 0 {
             return Err(YggError::OpFailed);
         }

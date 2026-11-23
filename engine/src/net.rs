@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct PeerStat {
     pub key: String,
+    /// Адрес, по которому идёт соединение: у исходящих — URI узла входа (по нему
+    /// экран «Узлы входа» ставит статус), у входящих — откуда пришли.
+    #[serde(default)]
+    pub uri: String,
     pub inbound: bool,
     pub up: bool,
     pub latency_ms: f64,
@@ -93,6 +97,7 @@ mod tests {
     fn peer(up: bool, lat: f64, rx: u64, tx: u64) -> PeerStat {
         PeerStat {
             key: "ab".into(),
+            uri: String::new(),
             inbound: false,
             up,
             latency_ms: lat,

@@ -285,7 +285,7 @@ func ygg_peer_count(h C.uint64_t) C.int {
 
 //export ygg_peers_json
 // JSON-массив активных пиров для UI/стата сети:
-// [{key, inbound, up, latency_ms, rx_rate, tx_rate, rx_bytes, tx_bytes, uptime_s}].
+// [{key, uri, inbound, up, latency_ms, rx_rate, tx_rate, rx_bytes, tx_bytes, uptime_s}].
 // -1 если не влезло.
 func ygg_peers_json(h C.uint64_t, out *C.char, outCap C.int) C.int {
 	n := get(h)
@@ -294,6 +294,7 @@ func ygg_peers_json(h C.uint64_t, out *C.char, outCap C.int) C.int {
 	}
 	type peerJSON struct {
 		Key       string  `json:"key"`
+		URI       string  `json:"uri"`
 		Inbound   bool    `json:"inbound"`
 		Up        bool    `json:"up"`
 		LatencyMs float64 `json:"latency_ms"`
@@ -310,6 +311,7 @@ func ygg_peers_json(h C.uint64_t, out *C.char, outCap C.int) C.int {
 	for _, p := range peers {
 		arr = append(arr, peerJSON{
 			Key:       hex.EncodeToString(p.Key),
+			URI:       p.URI,
 			Inbound:   p.Inbound,
 			Up:        p.Up,
 			LatencyMs: float64(p.Latency.Microseconds()) / 1000.0,
@@ -349,6 +351,24 @@ func ygg_add_peer(h C.uint64_t, uri *C.char) C.int {
 		return -1
 	}
 	if err := n.core.AddPeer(u, ""); err != nil {
+		return -1
+	}
+	return 0
+}
+
+//export ygg_remove_peer
+// Убирает пир, добавленный ygg_add_peer: узел перестаёт к нему подключаться,
+// соединение рвётся не сразу. Возвращает 0 или -1 (такого пира не было).
+func ygg_remove_peer(h C.uint64_t, uri *C.char) C.int {
+	n := get(h)
+	if n == nil {
+		return -1
+	}
+	u, err := url.Parse(C.GoString(uri))
+	if err != nil {
+		return -1
+	}
+	if err := n.core.RemovePeer(u, ""); err != nil {
 		return -1
 	}
 	return 0

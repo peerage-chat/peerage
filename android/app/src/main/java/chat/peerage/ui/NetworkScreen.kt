@@ -72,7 +72,9 @@ internal fun NetworkScreen(
     onOpenOutbox: () -> Unit,
     onFlood: () -> Unit,
     onRotate: () -> Unit,
+    onEntryNodes: () -> Unit,
 ) {
+    LaunchedEffect(Unit) { model.refreshPeerSettings() }
     // Счётчик «Офлайн-очередь» — свежий на входе: событий о каждой постановке в очередь нет.
     LaunchedEffect(Unit) { model.refreshOutbox() }
     val me = model.me ?: return
@@ -168,9 +170,15 @@ internal fun NetworkScreen(
         Spacer(Modifier.height(Tokens.Space.l))
         CardSection {
             NetRow(
+                stringResource(R.string.entry_title),
+                entryNodesSummary(model.peerSettings),
+                divider = false,
+                chevron = true,
+                onClick = onEntryNodes,
+            )
+            NetRow(
                 stringResource(R.string.net_offline_queue, queued),
                 stringResource(R.string.net_offline_queue_desc),
-                divider = false,
                 onClick = onOpenOutbox,
             )
             // Замер — диагностика: контакт выбирают явно, объём назван до запуска. Кнопкой в
@@ -237,6 +245,7 @@ private fun NetRow(
     sub: String,
     divider: Boolean = true,
     inset: Dp = Tokens.Space.l,
+    chevron: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
     CardRow(
@@ -253,6 +262,10 @@ private fun NetRow(
                 lineHeight = Tokens.Font.lineHeight,
                 modifier = Modifier.padding(top = Tokens.Space.xxs),
             )
+        }
+        if (chevron) {
+            Spacer(Modifier.width(Tokens.Space.m))
+            Icon(TablerIcons.ChevronRight, null, tint = Tokens.Colors.secondary, modifier = Modifier.size(Tokens.Size.iconRow))
         }
     }
 }

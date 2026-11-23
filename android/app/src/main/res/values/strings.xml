@@ -1259,4 +1259,42 @@
     <string name="jump_reactions">New reactions: %1$d</string>
     <string name="jump_mentions">Mentions: %1$d</string>
     <string name="jump_back">Back to reply</string>
+    <string name="entry_title">Entry nodes</string>
+    <string name="entry_row_builtin">%1$d built-in</string>
+    <plurals name="entry_row_own">
+        <item quantity="one">%d own</item>
+        <item quantity="other">%d own</item>
+    </plurals>
+    <string name="entry_row_none">No nodes</string>
+    <plurals name="entry_status_n">
+        <item quantity="one">Connected to %d node</item>
+        <item quantity="other">Connected to %d nodes</item>
+    </plurals>
+    <string name="entry_status_none">No mesh connection</string>
+    <string name="entry_builtin">Built-in nodes</string>
+    <plurals name="entry_builtin_count">
+        <item quantity="one">%d public node</item>
+        <item quantity="other">%d public nodes</item>
+    </plurals>
+    <string name="entry_builtin_on">%1$s · updated with the app</string>
+    <string name="entry_builtin_off">%1$s · off</string>
+    <string name="entry_own_label">Own nodes · %1$d</string>
+    <string name="entry_own_label_empty">Own nodes</string>
+    <string name="entry_own_none">No own nodes</string>
+    <string name="entry_add">Add node</string>
+    <string name="entry_remove">Remove node</string>
+    <string name="entry_builtin_label">Built-in · %1$d</string>
+    <string name="entry_show_all">Show all %1$d</string>
+    <string name="entry_up_ms">Connected · %1$s</string>
+    <string name="entry_up">Connected</string>
+    <string name="entry_down">No connection</string>
+    <string name="entry_ip_note">An entry node sees this phone\'s IP address.</string>
+    <string name="entry_empty_title">No nodes to connect to</string>
+    <string name="entry_empty_sub">Without entry nodes there is no mesh connection. Messages wait in the offline queue.</string>
+    <string name="entry_empty_action">Turn on built-in nodes</string>
+    <string name="entry_add_field">Node address</string>
+    <string name="entry_add_hint">tls://, tcp:// or quic:// with a port</string>
+    <string name="entry_add_err_invalid">Use an address like tls://, tcp:// or quic:// with a port</string>
+    <string name="entry_add_err_duplicate">This node is already in the list</string>
+    <string name="entry_add_confirm">Add</string>
 </resources>

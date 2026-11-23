@@ -1944,6 +1944,63 @@ pub extern "system" fn Java_chat_peerage_Native_reconnectPeers<'local>(
     });
 }
 
+/// Узлы входа для экрана: JSON PeerSettings.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_peerSettings<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+) -> jstring {
+    jni_safe!(ret(&env, "{}"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
+        ret(&env, &serde_json::to_string(&e.peer_settings()).unwrap_or_else(|_| "{}".into()))
+    })
+}
+
+/// Добавить свой узел входа: "ok" | "invalid" | "duplicate".
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_peersAdd<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    uri: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "invalid"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "invalid") };
+        let uri = jstr(&mut env, &uri);
+        ret(&env, e.peers_add(&uri).map_or_else(|err| err.code(), |()| "ok"))
+    })
+}
+
+/// Убрать свой узел входа.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_peersRemove<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    uri: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let uri = jstr(&mut env, &uri);
+        e.peers_remove(&uri);
+    });
+}
+
+/// Узлы из сборки: вкл/выкл.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_peersSetBuiltin<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    on: jboolean,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        e.peers_set_builtin(on != JNI_FALSE);
+    });
+}
+
 #[cfg(test)]
 mod tests {
     /// Инвариант №1: каждая точка входа JNI обёрнута в `jni_safe!`. Паника, прошедшая

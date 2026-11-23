@@ -435,8 +435,16 @@ object Native {
     external fun netStats(sessionPtr: Long): String
     external fun stop(sessionPtr: Long)
 
-    /** Принудительный реконнект к публичным пирам (обход Yggdrasil backoff). */
+    /** Принудительный реконнект к узлам входа (обход Yggdrasil backoff). */
     external fun reconnectPeers(sessionPtr: Long)
+
+    /** Узлы входа: JSON {builtin_on, builtin:[uri], own:[uri]}. */
+    external fun peerSettings(sessionPtr: Long): String
+
+    /** Добавить свой узел входа: "ok" | "invalid" | "duplicate". */
+    external fun peersAdd(sessionPtr: Long, uri: String): String
+    external fun peersRemove(sessionPtr: Long, uri: String)
+    external fun peersSetBuiltin(sessionPtr: Long, on: Boolean)
 
     // ── Группы (MLS) ──────────────────────────────────────────────────────
     /** Создать группу и позвать [inviteJson] (JSON hex-ключей) — fire-and-forget.

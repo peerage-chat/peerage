@@ -266,7 +266,12 @@ data class NetPeer(
     val uptimeS: Double,
     /** Адрес меша (выводит движок из ключа); пусто — соединение не поднялось. */
     val addr: String = "",
+    /** URI соединения: у исходящих — узел входа, по нему ставится его статус. */
+    val uri: String = "",
 )
+
+/** Узлы входа (`peers.json` движка): из сборки — включены ли и какие; свои. */
+data class PeerSettings(val builtinOn: Boolean, val builtin: List<String>, val own: List<String>)
 
 /** Снапшот стата сети (агрегаты считает движок). */
 data class NetStats(

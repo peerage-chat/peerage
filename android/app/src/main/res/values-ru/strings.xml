@@ -1333,4 +1333,48 @@
     <string name="jump_reactions">Новые реакции: %1$d</string>
     <string name="jump_mentions">Упоминания: %1$d</string>
     <string name="jump_back">Назад к ответу</string>
+    <string name="entry_title">Узлы входа</string>
+    <string name="entry_row_builtin">%1$d из сборки</string>
+    <plurals name="entry_row_own">
+        <item quantity="one">%d свой</item>
+        <item quantity="few">%d своих</item>
+        <item quantity="many">%d своих</item>
+        <item quantity="other">%d своих</item>
+    </plurals>
+    <string name="entry_row_none">Узлов нет</string>
+    <plurals name="entry_status_n">
+        <item quantity="one">Связь с %d узлом</item>
+        <item quantity="few">Связь с %d узлами</item>
+        <item quantity="many">Связь с %d узлами</item>
+        <item quantity="other">Связь с %d узлами</item>
+    </plurals>
+    <string name="entry_status_none">Нет связи с мешем</string>
+    <string name="entry_builtin">Узлы из сборки</string>
+    <plurals name="entry_builtin_count">
+        <item quantity="one">%d публичный узел</item>
+        <item quantity="few">%d публичных узла</item>
+        <item quantity="many">%d публичных узлов</item>
+        <item quantity="other">%d публичного узла</item>
+    </plurals>
+    <string name="entry_builtin_on">%1$s · обновляются с приложением</string>
+    <string name="entry_builtin_off">%1$s · выключены</string>
+    <string name="entry_own_label">Свои узлы · %1$d</string>
+    <string name="entry_own_label_empty">Свои узлы</string>
+    <string name="entry_own_none">Своих узлов нет</string>
+    <string name="entry_add">Добавить узел</string>
+    <string name="entry_remove">Убрать узел</string>
+    <string name="entry_builtin_label">Из сборки · %1$d</string>
+    <string name="entry_show_all">Показать все %1$d</string>
+    <string name="entry_up_ms">Подключено · %1$s</string>
+    <string name="entry_up">Подключено</string>
+    <string name="entry_down">Нет связи</string>
+    <string name="entry_ip_note">Узел входа видит IP-адрес телефона.</string>
+    <string name="entry_empty_title">Нет узлов для подключения</string>
+    <string name="entry_empty_sub">Без узлов входа связи с мешем нет. Сообщения ждут в офлайн-очереди.</string>
+    <string name="entry_empty_action">Включить узлы из сборки</string>
+    <string name="entry_add_field">Адрес узла</string>
+    <string name="entry_add_hint">tls://, tcp:// или quic:// с портом</string>
+    <string name="entry_add_err_invalid">Нужен адрес вида tls://, tcp:// или quic:// с портом</string>
+    <string name="entry_add_err_duplicate">Такой узел уже есть</string>
+    <string name="entry_add_confirm">Добавить</string>
 </resources>

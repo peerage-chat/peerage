@@ -327,6 +327,7 @@ internal data class CallParamsDto(
 @Serializable
 internal data class NetPeerDto(
     val key: String = "",
+    val uri: String = "",
     val inbound: Boolean = false,
     val up: Boolean = false,
     @SerialName("latency_ms") val latencyMs: Double = 0.0,
@@ -334,6 +335,13 @@ internal data class NetPeerDto(
     @SerialName("tx_rate") val txRate: Long = 0,
     @SerialName("uptime_s") val uptimeS: Double = 0.0,
     val addr: String = "",
+)
+
+@Serializable
+internal data class PeerSettingsDto(
+    @SerialName("builtin_on") val builtinOn: Boolean = true,
+    val builtin: List<String> = emptyList(),
+    val own: List<String> = emptyList(),
 )
 
 @Serializable

@@ -14,6 +14,7 @@ pub mod blobs;
 pub mod dto;
 pub mod groups;
 pub mod net;
+pub mod peers;
 pub mod receipts;
 pub mod room_call;
 
@@ -371,8 +372,6 @@ const PRESENCE_LEFT: u8 = 0x80;
 
 pub const BENCH_TRACK: u8 = 200;
 
-const PUBLIC_PEERS: &str = include_str!("../../peers/public-peers.txt");
-
 /// Присутствие в комнатах-звонках (Discord-style).
 #[derive(Default)]
 pub(crate) struct RoomState {
@@ -492,6 +491,8 @@ pub struct Engine {
     /// Единый бюджет (M3): тир каждого известного пира. Читают ingress-лимитер
     /// (через messenger) и офлайн-очередь (через замыкание) — одна точка истины.
     tier_cache: Arc<Mutex<HashMap<[u8; 32], Tier>>>,
+    /// Узлы входа (`peers.json`): к кому узел подключается сам.
+    peers: Mutex<peers::PeerConfig>,
     /// Каталог данных: нужен смене адреса (ADR-007), которая хранит свою эпоху.
     data_dir: PathBuf,
     /// Кому ещё не доехало объявление о смене адреса (был офлайн). Догоняем по
@@ -1838,8 +1839,8 @@ impl Engine {
             Some(f) => f(&seed),
             None => match Node::start(&seed) {
                 Ok(n) => {
-                    for uri in public_peer_uris() {
-                        let _ = n.add_peer(uri);
+                    for uri in self.peers.lock_safe().uris() {
+                        let _ = n.add_peer(&uri);
                     }
                     Some(Arc::new(n))
                 }
@@ -2477,12 +2478,76 @@ impl Engine {
         NetStats::aggregate(peers, self.net_tree())
     }
 
-    /// Принудительно переподключить публичных пиров (обход backoff).
+    /// Принудительно переподключить узлы входа (обход backoff).
     pub fn reconnect_peers(&self) {
-        for uri in public_peer_uris() {
-            self.messenger.add_peer(uri);
+        for uri in self.peers.lock_safe().uris() {
+            self.messenger.add_peer(&uri);
         }
-        log::info!("reconnect_peers: re-added public peers");
+        log::info!("reconnect_peers: узлы входа добавлены заново");
+    }
+
+    /// Узлы входа для экрана: из сборки (и включены ли), свои.
+    pub fn peer_settings(&self) -> peers::PeerSettings {
+        peers::PeerSettings::from(&*self.peers.lock_safe())
+    }
+
+    /// Добавить свой узел входа: проверить адрес, сохранить и сразу подключиться.
+    pub fn peers_add(&self, uri: &str) -> Result<(), peers::AddError> {
+        let uri = {
+            let mut c = self.peers.lock_safe();
+            let uri = c.add(uri)?;
+            self.save_peers(&c);
+            uri
+        };
+        self.messenger.add_peer(&uri);
+        log::info!("узел входа добавлен");
+        Ok(())
+    }
+
+    /// Убрать свой узел входа: из настройки и из транспорта.
+    pub fn peers_remove(&self, uri: &str) {
+        {
+            let mut c = self.peers.lock_safe();
+            if !c.remove(uri) {
+                return;
+            }
+            self.save_peers(&c);
+        }
+        self.messenger.remove_peer(uri);
+        log::info!("узел входа убран");
+    }
+
+    /// Включить или выключить узлы из сборки разом.
+    pub fn peers_set_builtin(&self, on: bool) {
+        {
+            let mut c = self.peers.lock_safe();
+            if c.builtin == on {
+                return;
+            }
+            c.builtin = on;
+            self.save_peers(&c);
+        }
+        for uri in peers::builtin() {
+            if on {
+                self.messenger.add_peer(uri);
+            } else {
+                self.messenger.remove_peer(uri);
+            }
+        }
+        log::info!(
+            "узлы из сборки: {}",
+            if on {
+                "включены"
+            } else {
+                "выключены"
+            }
+        );
+    }
+
+    fn save_peers(&self, c: &peers::PeerConfig) {
+        if let Err(e) = c.save(&self.data_dir) {
+            log::error!("peers.json: {e}");
+        }
     }
 
     // — Группы (MLS) — мутации fire-and-forget через актора, чтение из кэша —
@@ -3586,13 +3651,6 @@ pub fn ensure_address(dir: &Path) {
     if load_transport_epoch(dir) == 0 {
         begin_restored_epoch(dir);
     }
-}
-
-fn public_peer_uris() -> impl Iterator<Item = &'static str> {
-    PUBLIC_PEERS
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
 }
 
 // ── Внутренняя оркестрация: event_pump + обработчики ────────────────────────
@@ -5055,8 +5113,8 @@ impl Engine {
         let epoch = load_transport_epoch(&dir);
         let node = Node::start(&identity.transport_seed(epoch)).map_err(|e| e.to_string())?;
         let address = node.address();
-        for uri in public_peer_uris() {
-            let _ = node.add_peer(uri);
+        for uri in peers::PeerConfig::load(&dir).uris() {
+            let _ = node.add_peer(&uri);
         }
         let started = Self::start_inner(
             dir,
@@ -5181,6 +5239,7 @@ impl Engine {
             bench: Mutex::new(None),
             blob_dir: dir.join("blobs"),
             tier_cache,
+            peers: Mutex::new(peers::PeerConfig::load(&dir)),
             data_dir: dir.clone(),
             rotate_pending: Mutex::new(std::collections::HashSet::new()),
             rotate_round: Mutex::new(Vec::new()),

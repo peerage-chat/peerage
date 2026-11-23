@@ -52,6 +52,11 @@ pub trait Transport: Send + Sync {
     fn tree_count(&self) -> i32;
     fn peers_json(&self) -> String;
     fn add_peer(&self, uri: &str) -> Result<(), YggError>;
+    /// Перестать подключаться к узлу `uri` (соединение рвётся не сразу). По
+    /// умолчанию — no-op: транспорту-двойнику из тестов узлы входа не нужны.
+    fn remove_peer(&self, _uri: &str) -> Result<(), YggError> {
+        Ok(())
+    }
     fn stop(&self);
     /// Отбрасывать пакеты от этого ключа как можно раньше (в транспорте), не
     /// поднимая их в прикладной слой. Приёмный бюджет режет их и так, но каждый
@@ -86,6 +91,9 @@ impl Transport for Node {
     }
     fn add_peer(&self, uri: &str) -> Result<(), YggError> {
         Node::add_peer(self, uri)
+    }
+    fn remove_peer(&self, uri: &str) -> Result<(), YggError> {
+        Node::remove_peer(self, uri)
     }
     fn block(&self, key: &PeerKey) {
         Node::block(self, key)
@@ -1158,6 +1166,11 @@ impl Messenger {
     /// форсирует немедленную попытку реконнекта (например, после флика WiFi).
     pub fn add_peer(&self, uri: &str) {
         let _ = self.shared.node().add_peer(uri);
+    }
+
+    /// Перестать подключаться к узлу по URI.
+    pub fn remove_peer(&self, uri: &str) {
+        let _ = self.shared.node().remove_peer(uri);
     }
 
     /// Остановить мессенджер: останавливает транспортный узел и фоновые потоки.

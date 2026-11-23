@@ -299,6 +299,9 @@ internal enum class Screen {
     ContactList,
     Calls,
     Network,
+
+    /** «Узлы входа»: из сборки и свои (макет `peers/`). */
+    EntryNodes,
     Saved,
     Search,
 
@@ -579,6 +582,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                             }
                             Screen.Calls -> TopBar(stringResource(R.string.menu_calls), onBack = goBack)
                             Screen.Network -> NetworkHeader(model, onBack = goBack)
+                            Screen.EntryNodes -> EntryNodesHeader(model, onBack = goBack)
                             Screen.EditProfile -> {}
                             Screen.VaultLevel -> {}
                             Screen.Flood -> TopBar(stringResource(R.string.flood_screen_title), onBack = goBack)
@@ -827,7 +831,9 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                     onOpenOutbox = { screen = Screen.Outbox },
                                     onFlood = { screen = Screen.Flood },
                                     onRotate = { screen = Screen.RotateAddress },
+                                    onEntryNodes = { screen = Screen.EntryNodes },
                                 )
+                                Screen.EntryNodes -> EntryNodesScreen(model)
                                 Screen.Flood -> FloodScreen(model) { screen = Screen.RotateAddress }
                                 // Пока идёт смена адреса, экран выбора подменяется ходом
                                 // операции: пользователь минуту офлайн и должен видеть, почему.

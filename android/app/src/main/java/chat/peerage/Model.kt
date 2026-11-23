@@ -384,6 +384,35 @@ class AppModel private constructor() {
     /** Снапшот стата сети (экран «Сеть»). Обновляется тикером на переднем плане. */
     var netStats by mutableStateOf<NetStats?>(null)
 
+    /** Узлы входа (экран «Узлы входа», строка в «Сети»). null — ещё не прочитаны. */
+    var peerSettings by mutableStateOf<PeerSettings?>(null)
+        private set
+
+    fun refreshPeerSettings() = ops.execute { loadPeerSettings() }
+
+    private fun loadPeerSettings() {
+        val d = decodeOrNull<PeerSettingsDto>(Native.peerSettings(sessionPtr)) ?: return
+        val s = PeerSettings(d.builtinOn, d.builtin, d.own)
+        onMain { peerSettings = s }
+    }
+
+    /** Добавить свой узел входа; итог ("ok" | "invalid" | "duplicate") — в [done]. */
+    fun addEntryNode(uri: String, done: (String) -> Unit) = ops.execute {
+        val r = Native.peersAdd(sessionPtr, uri)
+        if (r == "ok") loadPeerSettings()
+        onMain { done(r) }
+    }
+
+    fun removeEntryNode(uri: String) = ops.execute {
+        Native.peersRemove(sessionPtr, uri)
+        loadPeerSettings()
+    }
+
+    fun setBuiltinNodes(on: Boolean) = ops.execute {
+        Native.peersSetBuiltin(sessionPtr, on)
+        loadPeerSettings()
+    }
+
     // Диагностика: тест пропускной способности меша.
     var benchRecv by mutableStateOf(false) // режим приёмника включён
     var benchRecvMbps by mutableStateOf(0.0) // живая скорость приёма
@@ -1570,7 +1599,7 @@ class AppModel private constructor() {
                                 n.rxRate,
                                 n.txRate,
                                 n.peers.map {
-                                    NetPeer(it.key, it.inbound, it.up, it.latencyMs, it.rxRate, it.txRate, it.uptimeS, it.addr)
+                                    NetPeer(it.key, it.inbound, it.up, it.latencyMs, it.rxRate, it.txRate, it.uptimeS, it.addr, it.uri)
                                 },
                             )
                             onMain { netStats = stats }
