@@ -169,7 +169,8 @@ private fun Corners(inset: Dp) {
     }
 }
 
-/** Что не так с кодом (макет `people/Errors`): не код, свой код, уже в контактах. */
+/** Что не так с кодом (макет `people/Errors`): не код, код новой версии или другой сети,
+ *  свой код, уже в контактах. */
 @Composable
 private fun CodeError(model: AppModel, info: CodeInfo, pasted: Boolean, onOpenChat: (String) -> Unit) {
     Row(
@@ -198,10 +199,11 @@ private fun CodeError(model: AppModel, info: CodeInfo, pasted: Boolean, onOpenCh
         Icon(TablerIcons.AlertTriangle, null, tint = Tokens.Colors.stateWarnText, modifier = Modifier.size(Tokens.Size.iconRow))
         Column(Modifier.weight(1f)) {
             Text(
-                if (info.status == "self") {
-                    stringResource(R.string.add_err_self)
-                } else {
-                    stringResource(R.string.add_err_invalid, stringResource(R.string.app_name))
+                when (info.status) {
+                    "self" -> stringResource(R.string.add_err_self)
+                    "newer" -> stringResource(R.string.add_err_newer, stringResource(R.string.app_name))
+                    "foreign" -> stringResource(R.string.add_err_foreign)
+                    else -> stringResource(R.string.add_err_invalid, stringResource(R.string.app_name))
                 },
                 color = Tokens.Colors.onDark,
                 fontSize = Tokens.Font.label,
@@ -211,6 +213,8 @@ private fun CodeError(model: AppModel, info: CodeInfo, pasted: Boolean, onOpenCh
                 stringResource(
                     when {
                         info.status == "self" -> R.string.add_err_self_sub
+                        info.status == "newer" -> R.string.add_err_newer_sub
+                        info.status == "foreign" -> R.string.add_err_foreign_sub
                         pasted -> R.string.add_err_invalid_paste_sub
                         else -> R.string.add_err_invalid_sub
                     },

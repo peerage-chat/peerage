@@ -219,7 +219,7 @@ fn accepted_contact_keeps_blank_name_so_self_name_shows() {
     let b = start(&net, b_id, tmpdir("b3"));
     // A добавляет B по коду (без имени в коде) — у B запрос.
     assert_eq!(
-        a.request_contact(&hex::encode(b_key), "B", "постучался"),
+        a.request_contact(&b.my_contact_code(), "B", "постучался"),
         "sent"
     );
 
@@ -277,7 +277,10 @@ fn names_set_before_contact_reach_both_sides_on_accept() {
     let b = start(&net, b_id, tmpdir("b4"));
     a.set_self_name("Алиса");
     b.set_self_name("Боб");
-    assert_eq!(a.request_contact(&hex::encode(b_key), "", "привет"), "sent");
+    assert_eq!(
+        a.request_contact(&b.my_contact_code(), "", "привет"),
+        "sent"
+    );
 
     let (a_hex, b_hex) = (hex::encode(a_key), hex::encode(b_key));
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -319,24 +322,22 @@ fn names_set_before_contact_reach_both_sides_on_accept() {
 
 /// Код обмена (QR) несёт самоназвание: добавивший по нему сразу видит имя, а не
 /// обрывок ключа. Пустое локальное имя остаётся пустым — иначе заглушка навсегда
-/// перекрыла бы самоназвание. Кривой хвост имени не мешает добавлению.
+/// перекрыла бы самоназвание.
 #[test]
 fn contact_code_carries_self_name() {
+    use peerage_core::code::ContactCode;
+    use peerage_core::record::NetKind;
     let net = LoopbackNet::new();
-    let (a_id, b_id, c_id) = (id(9), id(10), id(11));
+    let (a_id, b_id) = (id(9), id(10));
     let a_key = a_id.public_key_bytes();
     let a = start(&net, a_id, tmpdir("a5"));
     let b = start(&net, b_id, tmpdir("b5"));
-    let c = start(&net, c_id, tmpdir("c5"));
 
-    // Без имени — код как раньше, голый hex.
-    assert_eq!(a.my_contact_code(), hex::encode(a_key));
+    let name_in = |code: &str| ContactCode::parse(code, NetKind::Yggdrasil).unwrap().name;
+    assert_eq!(name_in(&a.my_contact_code()), None, "без имени — поля нет");
     a.set_self_name("Алиса");
     let code = a.my_contact_code();
-    assert!(
-        code.starts_with(&format!("{}#", hex::encode(a_key))),
-        "имя хвостом: {code}"
-    );
+    assert_eq!(name_in(&code).as_deref(), Some("Алиса"));
 
     assert_eq!(b.request_contact(&code, "", ""), "sent");
     let cj: serde_json::Value = serde_json::from_str(&b.contacts_json()).unwrap();
@@ -349,13 +350,6 @@ fn contact_code_carries_self_name() {
     assert_eq!(c0["profile_name"], "Алиса");
     assert_eq!(c0["name"], "", "без заглушки: локальное имя пустое");
 
-    // Хвост не hex — ключ всё равно добавляется, имя просто не берётся.
-    assert_eq!(
-        c.request_contact(&format!("{}#не-hex", hex::encode(a_key)), "", ""),
-        "sent"
-    );
-
     a.shutdown();
     b.shutdown();
-    c.shutdown();
 }

@@ -1132,6 +1132,10 @@
     <string name="add_err_invalid_paste_sub">The text has no key. Links and other codes do not open here.</string>
     <string name="add_err_self">This is this phone’s code</string>
     <string name="add_err_self_sub">This phone cannot be added to its own contacts — use the other person’s code.</string>
+    <string name="add_err_newer">A code from a newer %1$s</string>
+    <string name="add_err_newer_sub">This version of the app cannot read it — an update is needed.</string>
+    <string name="add_err_foreign">A code from another network’s profile</string>
+    <string name="add_err_foreign_sub">A contact can only be added to a profile on the same network.</string>
     <string name="add_err_known">%1$s is already in contacts</string>
     <string name="add_open_chat">Open chat</string>
     <string name="add_key_start">key %1$s…</string>

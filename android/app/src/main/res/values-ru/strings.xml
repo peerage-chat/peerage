@@ -1192,6 +1192,10 @@
     <string name="add_err_invalid_paste_sub">В тексте нет ключа. Ссылки и другие коды здесь не открываются.</string>
     <string name="add_err_self">Это код этого телефона</string>
     <string name="add_err_self_sub">Себя в контакты не добавить — нужен код собеседника.</string>
+    <string name="add_err_newer">Код новой версии %1$s</string>
+    <string name="add_err_newer_sub">Эта версия приложения такой код не читает — нужно обновление.</string>
+    <string name="add_err_foreign">Код профиля другой сети</string>
+    <string name="add_err_foreign_sub">Контакт добавляется только в профиль той же сети.</string>
     <string name="add_err_known">%1$s уже в контактах</string>
     <string name="add_open_chat">Открыть чат</string>
     <string name="add_key_start">ключ %1$s…</string>

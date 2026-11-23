@@ -145,11 +145,11 @@ object Native {
     /** Расшифровать блоб в файл потоково (крупное вложение не идёт в память). */
     external fun blobExport(sessionPtr: Long, idHex: String, path: String): Boolean
 
-    /** Что за код обмена: JSON `{status, key, name}`, status — "ok" | "invalid" | "self" | "known". */
+    /** Что за код обмена: JSON `{status, key, name}`, status — "ok" | "invalid" | "newer" | "foreign" | "self" | "known". */
     external fun inspectCode(sessionPtr: Long, code: String): String
 
-    /** Добавить по коду (hex личности или `личность:эпоха:адрес:подпись#имя`, ADR-007) и
-     *  послать запрос в контакты с приветствием (7i). "sent" | "invalid" | "self" | "known". */
+    /** Добавить по коду обмена (v2, `PEERAGE:…`; формат — движка) и
+     *  послать запрос в контакты с приветствием (7i). "sent" | статус кода. */
     external fun requestContact(sessionPtr: Long, code: String, name: String, greeting: String): String
 
     /** Текст в группу ответом на сообщение автора `replySender` (hex; `replyTo = 0` —

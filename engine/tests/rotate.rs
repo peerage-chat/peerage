@@ -357,8 +357,12 @@ fn contact_code_carries_signed_address() {
         .unwrap()
         .engine;
 
-    // До ротации код — это просто hex личности (старые сканеры продолжают работать).
-    assert_eq!(a.my_contact_code(), hex::encode(a_key));
+    // До ротации у двойника адреса нет — код без записи адреса.
+    let parse = |code: &str| {
+        peerage_core::code::ContactCode::parse(code, peerage_core::record::NetKind::Yggdrasil)
+            .unwrap()
+    };
+    assert_eq!(parse(&a.my_contact_code()).address, None);
 
     let net_for_factory = net.clone();
     a.set_transport_factory(std::sync::Arc::new(move |seed: &[u8; 32]| {
@@ -373,7 +377,7 @@ fn contact_code_carries_signed_address() {
 
     // Кэрол добавляет Алису по коду и сразу знает её текущий адрес.
     let code = a.my_contact_code();
-    assert!(code.contains(':'), "после ротации код расширенный: {code}");
+    assert_eq!(parse(&code).address, Some(alice.address_record(epoch)));
     assert_eq!(c.request_contact(&code, "Алиса", ""), "sent");
     assert_eq!(
         transport_of(&c, &a_key),
@@ -561,6 +565,17 @@ fn known_contacts_code_carries_its_new_address() {
     assert!(wait(10, || a.transport_epoch() > 0 && !a.is_offline()));
     let new_addr = hex::encode(alice.transport_public(a.transport_epoch()));
     assert_eq!(transport_of(&b, &a_key), "", "Боб нового адреса не знает");
+
+    // Код ходит через третьи руки: запись с испорченной подписью не применяется.
+    let mut forged = peerage_core::code::ContactCode::parse(
+        &a.my_contact_code(),
+        peerage_core::record::NetKind::Yggdrasil,
+    )
+    .unwrap();
+    forged.address.as_mut().unwrap().sig[0] ^= 1;
+    let seen: serde_json::Value = serde_json::from_str(&b.inspect_code(&forged.encode())).unwrap();
+    assert_eq!(seen["status"], "known");
+    assert_eq!(transport_of(&b, &a_key), "", "подделка адрес не двигает");
 
     // Боб сканирует её код как сверку — адрес применяется.
     assert_eq!(b.verify_by_code(&a_key, &a.my_contact_code()), "match");

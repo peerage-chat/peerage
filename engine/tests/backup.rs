@@ -533,12 +533,13 @@ fn copy_carries_contacts_signed_address() {
     let b_key = bob.public_key_bytes();
     let a = start(&net, id(104), tmpdir("addr-src"));
     a.add_contact(&b_key, "Боб");
-    let code = format!(
-        "{}:9:{}:{}",
-        hex::encode(b_key),
-        hex::encode(bob.transport_public(9)),
-        hex::encode(bob.address_record(9).sig)
-    );
+    let code = peerage_core::code::ContactCode {
+        kind: peerage_core::record::NetKind::Yggdrasil,
+        identity: b_key,
+        address: Some(bob.address_record(9)),
+        name: None,
+    }
+    .encode();
     let _ = a.inspect_code(&code); // известный контакт — адрес из кода
     let file = tmpdir("addr").join("copy.peerage");
     a.backup_export(&file, all(), None).unwrap();

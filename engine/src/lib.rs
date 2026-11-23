@@ -25,6 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use peerage_core::budget::Tier;
+use peerage_core::code::{clean_name, CodeError, ContactCode};
 use peerage_core::lookalike::same_name;
 pub use peerage_core::mention::Mention;
 use peerage_core::notify::{ChatNotify, NotifyMode};
@@ -567,37 +568,12 @@ pub fn parse_key(s: &str) -> Option<[u8; 32]> {
     hex::decode(s.trim()).ok()?.as_slice().try_into().ok()
 }
 
-/// Самое длинное самоназвание из кода обмена, в символах. Код приходит от кого
-/// угодно (переслали в переписке) — без предела он раздул бы карточку контакта.
-const CODE_NAME_MAX: usize = 64;
+/// Вид сети этого профиля (ADR-015): пока единственный адаптер — Yggdrasil.
+const NET: peerage_core::record::NetKind = peerage_core::record::NetKind::Yggdrasil;
 
-/// Самоназвание из хвоста кода обмена (`#<hex UTF-8>`). Кривой хвост — не повод
-/// отказать в добавлении: ключ разобран отдельно, имя просто не берём. Управляющие
-/// символы выбрасываем — им не место в имени.
-/// Разобрать код обмена: части `личность[:эпоха:адрес:подпись]` и самоназвание из хвоста.
-fn split_code(code: &str) -> (Vec<&str>, Option<String>) {
-    let (body, name) = match code.trim().split_once('#') {
-        Some((c, tail)) => (c, code_name(tail)),
-        None => (code.trim(), None),
-    };
-    (body.split(':').collect(), name)
-}
-
-fn code_name(tail: &str) -> Option<String> {
-    let bytes = hex::decode(tail.trim()).ok()?;
-    let name = clean_name(&String::from_utf8(bytes).ok()?);
-    (!name.is_empty()).then_some(name)
-}
-
-/// Самоназвание из чужих рук (код, запрос в контакты): без управляющих символов, не
-/// длиннее [`CODE_NAME_MAX`] символов.
-fn clean_name(s: &str) -> String {
-    let name: String = s
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(CODE_NAME_MAX)
-        .collect();
-    name.trim().to_string()
+/// Разобрать код обмена v2 (8.4) для сети этого профиля.
+fn parse_code(code: &str) -> Result<ContactCode, CodeError> {
+    ContactCode::parse(code, NET)
 }
 
 /// Обрезать до `max` БАЙТ по границе символа.
@@ -1607,86 +1583,70 @@ impl Engine {
 
     // — Контакты (TOFU) —
     /// Добавить контакт. Возвращает "added" | "known" | "error".
-    /// Строка обмена контактом (QR / «скопировать ключ»).
+    /// Код обмена v2 (QR / «скопировать код», 8.4; формат — [`peerage_core::code`]):
+    /// личность, ПОДПИСАННАЯ запись текущего адреса и самоназвание.
     ///
-    /// Пока адрес не менялся — это просто hex личности, ровно как раньше: старые
-    /// коды и сканеры продолжают работать. После смены адреса к личности
-    /// добавляется ПОДПИСАННАЯ привязка к текущему адресу — иначе тот, кто добавит
-    /// нас по такому коду, будет слать на покинутый ключ и не достучится.
-    ///
-    /// Подпись здесь не формальность: код часто пересылают через третьи руки
-    /// (переписка, форум), и без неё посредник мог бы подменить адрес, оставив
-    /// личность.
-    ///
-    /// Если задано самоназвание, оно едет хвостом `#<hex UTF-8>`: добавивший сразу
-    /// видит имя, а не обрывок ключа. Хвост не подписан и подписи не требует — это
-    /// то же самоназвание, что придёт в профиле, и профиль его перезапишет.
+    /// Без адреса добавивший слал бы на ключ, которого в сети нет. Подпись — не
+    /// формальность: код пересылают через третьи руки, и без неё посредник подменил бы
+    /// адрес, оставив личность. Самоназвание не подписано: добавивший сразу видит имя,
+    /// а профиль его потом перезапишет.
     pub fn my_contact_code(&self) -> String {
         let epoch = self.transport_epoch();
-        let mut code = if epoch == 0 {
-            hex::encode(self.me_pub)
-        } else {
-            let tk = self.identity.transport_public(epoch);
-            let rec = self.identity.address_record(epoch);
-            format!(
-                "{}:{}:{}:{}",
-                hex::encode(self.me_pub),
-                epoch,
-                hex::encode(tk),
-                hex::encode(rec.sig)
-            )
-        };
         let name = self.self_name();
-        if !name.trim().is_empty() {
-            code.push('#');
-            code.push_str(&hex::encode(name.trim()));
+        ContactCode {
+            kind: NET,
+            identity: self.me_pub,
+            address: (epoch != 0).then(|| self.identity.address_record(epoch)),
+            name: Some(name.trim().to_string()).filter(|n| !n.is_empty()),
         }
-        code
+        .encode()
     }
 
     /// Что за код обмена (экран «Добавить контакт»): `{status, key, name}`, где status —
-    /// `"ok"` | `"invalid"` (не код) | `"self"` (код этого телефона) | `"known"` (уже в
-    /// контактах). Добавление — за [`Self::request_contact`]; у известного контакта
+    /// `"ok"` | `"invalid"` (не код) | `"newer"` (код новой версии — обновить приложение) |
+    /// `"foreign"` (код профиля другой сети) | `"self"` (код этого телефона) | `"known"`
+    /// (уже в контактах). Добавление — за [`Self::request_contact`]; у известного контакта
     /// применяет подписанный адрес из кода, если он новее.
     pub fn inspect_code(&self, code: &str) -> String {
-        let (parts, name) = split_code(code);
-        let key = parse_key(parts[0]);
-        let status = self.code_status(key.as_ref());
+        let parsed = parse_code(code);
+        let status = self.code_status(&parsed);
+        let parsed = parsed.ok();
         // Код уже известного контакта — его подписанный адрес в дело, если эпоха новее:
         // так возвращается связь, когда оба сменили адрес, не услышав друг друга (8.2).
-        if let (Some(ik), "known") = (key, status) {
-            self.apply_code_address(&ik, &parts);
+        if let (Some(c), "known") = (&parsed, status) {
+            self.apply_code_address(&c.identity, c.address.as_ref());
         }
         serde_json::json!({
             "status": status,
-            "key": key.map(hex::encode).unwrap_or_default(),
-            "name": name.unwrap_or_default(),
+            "key": parsed.as_ref().map(|c| hex::encode(c.identity)).unwrap_or_default(),
+            "name": parsed.and_then(|c| c.name).unwrap_or_default(),
         })
         .to_string()
     }
 
-    fn code_status(&self, key: Option<&[u8; 32]>) -> &'static str {
-        match key {
-            None => "invalid",
-            Some(k) if *k == self.me_pub => "self",
-            Some(k) if self.contacts.lock_safe().contains(k) => "known",
-            Some(_) => "ok",
+    fn code_status(&self, code: &Result<ContactCode, CodeError>) -> &'static str {
+        match code {
+            Err(CodeError::NotACode) => "invalid",
+            Err(CodeError::Version) => "newer",
+            Err(CodeError::ForeignNetwork) => "foreign",
+            Ok(c) if c.identity == self.me_pub => "self",
+            Ok(c) if self.contacts.lock_safe().contains(&c.identity) => "known",
+            Ok(_) => "ok",
         }
     }
 
     /// Добавить по коду обмена и послать запрос в контакты с приветствием (шаг 7i).
-    /// Код — голый hex личности или `личность:эпоха:адрес:подпись` (привязку к адресу
-    /// принимаем только с верной подписью, как объявление о смене адреса), плюс
-    /// `#самоназвание`. `name` — как подписать у себя. До принятия контакт `awaiting`:
+    /// Адрес из кода принимаем только с верной подписью, как объявление о смене
+    /// адреса. `name` — как подписать у себя. До принятия контакт `awaiting`:
     /// приветствие и всё, что ему напишут, ждёт в очереди. Итог — `"sent"` или статус
     /// из [`Self::inspect_code`].
     pub fn request_contact(&self, code: &str, name: &str, greeting: &str) -> &'static str {
-        let (parts, code_name) = split_code(code);
-        let key = parse_key(parts[0]);
-        let status = self.code_status(key.as_ref());
-        let (Some(ik), "ok") = (key, status) else {
+        let parsed = parse_code(code);
+        let status = self.code_status(&parsed);
+        let (Ok(parsed), "ok") = (parsed, status) else {
             return status;
         };
+        let ik = parsed.identity;
         if self
             .contacts
             .lock_safe()
@@ -1695,10 +1655,10 @@ impl Engine {
         {
             return "invalid";
         }
-        if let Some(n) = code_name {
-            let _ = self.contacts.lock_safe().set_profile(&ik, &n, "");
+        if let Some(n) = &parsed.name {
+            let _ = self.contacts.lock_safe().set_profile(&ik, n, "");
         }
-        self.apply_code_address(&ik, &parts);
+        self.apply_code_address(&ik, parsed.address.as_ref());
         // Сначала держим очередь, потом шлём: иначе написанное сразу следом ушло бы
         // раньше, чем пир узнал, кто это.
         self.refresh_budgets();
@@ -1728,33 +1688,21 @@ impl Engine {
         "sent"
     }
 
-    /// Привязка к адресу из расширенного кода (`личность:эпоха:адрес:подпись`).
-    fn apply_code_address(&self, ik: &[u8; 32], parts: &[&str]) {
-        if parts.len() != 4 {
-            return;
-        }
-        // Код v1: `эпоха:адрес:подпись` — подпись записи адреса v2 Yggdrasil (8.1);
-        // запись собирается здесь из эпохи и адреса, код v2 повезёт её целиком (8.4).
-        let epoch = parts[1].parse::<u32>().unwrap_or(0);
-        let tk = parse_key(parts[2]);
-        let sig = hex::decode(parts[3])
-            .ok()
-            .and_then(|s| <[u8; 64]>::try_from(s.as_slice()).ok());
-        if let (Some(tk), Some(sig)) = (tk, sig) {
-            let record = peerage_core::record::AddressRecord {
-                kind: peerage_core::record::NetKind::Yggdrasil,
-                epoch,
-                addr: tk.to_vec(),
-            }
-            .bytes();
-            let applied = self
-                .contacts
-                .lock_safe()
-                .apply_transport_rotate(ik, &record, &sig)
-                .is_ok_and(|o| o == RotateOutcome::Applied);
-            if applied {
-                self.refresh_transports();
-            }
+    /// Подписанный адрес из кода обмена: проверяется и применяется так же, как
+    /// объявление о смене адреса (подпись личности, эпоха новее известной).
+    fn apply_code_address(
+        &self,
+        ik: &[u8; 32],
+        address: Option<&peerage_core::record::SignedRecord>,
+    ) {
+        let Some(a) = address else { return };
+        let applied = self
+            .contacts
+            .lock_safe()
+            .apply_transport_rotate(ik, &a.bytes, &a.sig)
+            .is_ok_and(|o| o == RotateOutcome::Applied);
+        if applied {
+            self.refresh_transports();
         }
     }
 
@@ -2146,13 +2094,12 @@ impl Engine {
     /// трогаем; не код Peerage — `"invalid"`. Сверяется только личность: адрес и
     /// самоназвание в коде меняются.
     pub fn verify_by_code(&self, key: &[u8; 32], code: &str) -> &'static str {
-        let (parts, _) = split_code(code);
-        match parse_key(parts[0]) {
-            None => "invalid",
-            Some(ik) if ik != *key => "mismatch",
-            Some(_) => {
+        match parse_code(code) {
+            Err(_) => "invalid",
+            Ok(c) if c.identity != *key => "mismatch",
+            Ok(c) => {
                 self.set_verified(key, Some(VerifyHow::Code));
-                self.apply_code_address(key, &parts); // адрес из кода — свежее известного?
+                self.apply_code_address(key, c.address.as_ref()); // адрес из кода — свежее известного?
                 "match"
             }
         }

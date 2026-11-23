@@ -186,7 +186,7 @@ data class BubbleActions(
 data class MsgRef(val id: Long, val sender: String)
 
 /** Идентичность пользователя (своя «визитка»). */
-/** Что за код обмена (экран «Добавить контакт»): status — "ok" | "invalid" | "self" | "known". */
+/** Что за код обмена (экран «Добавить контакт»): status — "ok" | "invalid" | "newer" | "foreign" | "self" | "known". */
 data class CodeInfo(val status: String, val key: String, val name: String)
 
 /** Набор сверки на пару: 12 знаков (hex) и 8 слов — одинаковые на обоих телефонах. */
