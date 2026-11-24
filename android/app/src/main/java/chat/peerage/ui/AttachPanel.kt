@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** Снимок из галереи устройства. */
@@ -98,24 +99,46 @@ private suspend fun loadGallery(ctx: Context, from: Int, limit: Int = GALLERY_PA
     out
 }
 
-/** Миниатюра под размер плитки. Грузим по требованию: полная галерея в память не влезет. */
+/**
+ * Не больше стольких миниатюр декодируется разом. Блокирующий вызов отменой не прервать:
+ * на быстрой прокрутке без предела в общем IO-пуле копились бы десятки декодирований
+ * плиток, давно ушедших с экрана.
+ */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+private val thumbIo = Dispatchers.IO.limitedParallelism(4)
+
+/**
+ * Миниатюра под размер плитки. Грузим по требованию и держим, пока плитка на экране: полная
+ * галерея в память не влезет. Плитка, ушедшая с экрана в очереди, не декодируется вовсе.
+ */
 @Composable
 private fun rememberThumb(item: GalleryItem): ImageBitmap? {
     val ctx = LocalContext.current
     var bmp by remember(item.uri) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(item.uri) {
-        bmp = withContext(Dispatchers.IO) {
-            runCatching {
-                if (Build.VERSION.SDK_INT >= 29) {
-                    ctx.contentResolver.loadThumbnail(item.uri, android.util.Size(256, 256), null)
-                } else {
-                    @Suppress("DEPRECATION")
-                    MediaStore.Images.Media.getBitmap(ctx.contentResolver, item.uri)
-                }
-            }.getOrNull()?.asImageBitmap()
+        bmp = withContext(thumbIo) {
+            ensureActive()
+            runCatching { galleryThumb(ctx, item) }.getOrNull()?.asImageBitmap()
         }
     }
     return bmp
+}
+
+/**
+ * Миниатюра снимка или видео от системы. До Android 10 — готовые MINI_KIND (≈512×384) из
+ * MediaStore: раньше там декодировался оригинал (`Media.getBitmap`) — фото 12 Мп это ~48 МБ на
+ * плитку, и десяток плиток ронял приложение по памяти; у видео превью не было вовсе.
+ */
+private fun galleryThumb(ctx: Context, item: GalleryItem): android.graphics.Bitmap? {
+    val cr = ctx.contentResolver
+    if (Build.VERSION.SDK_INT >= 29) return cr.loadThumbnail(item.uri, android.util.Size(256, 256), null)
+    val id = android.content.ContentUris.parseId(item.uri)
+    @Suppress("DEPRECATION")
+    return if (item.isVideo) {
+        MediaStore.Video.Thumbnails.getThumbnail(cr, id, MediaStore.Video.Thumbnails.MINI_KIND, null)
+    } else {
+        MediaStore.Images.Thumbnails.getThumbnail(cr, id, MediaStore.Images.Thumbnails.MINI_KIND, null)
+    }
 }
 
 /**
