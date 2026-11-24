@@ -13,8 +13,11 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import chat.peerage.NavState
 import chat.peerage.Screen
@@ -50,6 +53,11 @@ internal fun ScreenTransitions(
     LaunchedEffect(target) {
         if (seek.currentState != target || seek.targetState != target) seek.animateTo(target, tween(Tokens.Anim.screen, easing = FastOutSlowInEasing))
     }
+    val latestEnabled = rememberUpdatedState(backEnabled)
+    val latestBack = rememberUpdatedState(onBack)
+    val scope = rememberCoroutineScope()
+    // Свайп вправо по экрану (п. 40) — тот же переход за пальцем, что и предиктивный «назад».
+    val swipe = remember { SwipeBack(scope, seek, nav, { latestEnabled.value }) { latestBack.value() } }
     PredictiveBackHandler(enabled = backEnabled) { progress ->
         val prev = nav.previous ?: return@PredictiveBackHandler
         try {
@@ -85,5 +93,5 @@ internal fun ScreenTransitions(
         },
         contentKey = { it },
         modifier = Modifier,
-    ) { s -> content(s) }
+    ) { s -> CompositionLocalProvider(LocalSwipeBack provides swipe) { content(s) } }
 }

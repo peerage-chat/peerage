@@ -1774,7 +1774,9 @@ internal val LocalBubbleMax = androidx.compose.runtime.staticCompositionLocalOf 
  */
 @Composable
 internal fun FeedFrame(drag: DragSelect, content: @Composable () -> Unit) {
-    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().dragSelect(drag)) {
+    // Свайп вправо по ленте — назад к списку (п. 40); во время выбора протяжкой молчит.
+    val back = LocalSwipeBack.current
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().swipeBack(back) { drag.active }.dragSelect(drag)) {
         val max = (maxWidth * 0.6f).coerceIn(Tokens.Size.bubbleMax, Tokens.Size.bubbleMaxWide)
         androidx.compose.runtime.CompositionLocalProvider(
             LocalBubbleWidths provides remember { androidx.compose.runtime.mutableStateMapOf() },
