@@ -1052,7 +1052,6 @@
     <string name="key_check_show">Показать слова ещё раз</string>
     <string name="key_no_device_lock">На устройстве нет блокировки экрана</string>
     <string name="settings_key_check">Проверить ключ</string>
-    <string name="settings_key_show">Показать ключ</string>
     <string name="settings_key_checked">Проверена %1$s</string>
     <string name="settings_key_failed">Проверка не пройдена</string>
     <string name="undo_action">Отменить</string>

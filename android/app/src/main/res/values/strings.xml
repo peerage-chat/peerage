@@ -1000,7 +1000,6 @@
     <string name="key_check_show">Show the words again</string>
     <string name="key_no_device_lock">No screen lock on this device</string>
     <string name="settings_key_check">Check key</string>
-    <string name="settings_key_show">Show key</string>
     <string name="settings_key_checked">Checked %1$s</string>
     <string name="settings_key_failed">Check failed</string>
     <string name="undo_action">Undo</string>

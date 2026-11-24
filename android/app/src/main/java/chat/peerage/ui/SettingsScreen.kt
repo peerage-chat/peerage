@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -51,7 +50,9 @@ internal fun SettingsSecurityScreen(
         Spacer(Modifier.height(Tokens.Space.m))
         CardSection {
             // Копия ключа отмечается сделанной только проверкой трёх слов: «записал» без
-            // проверки — обещание, а не копия.
+            // проверки — обещание, а не копия. Строка копии всегда ведёт к словам (оттуда —
+            // «Проверить запись»), «Проверить ключ» — проверка по памяти без показа: двух
+            // строк на одно действие нет (п. 28).
             val facts = model.backupFacts
             SettingRow(
                 Icons.Filled.Key,
@@ -63,9 +64,8 @@ internal fun SettingsSecurityScreen(
                 },
                 valueColor = if (facts.keyDone && !facts.keyFailed) HoloOnline else HoloWarn,
                 divider = false,
-            ) { onKeyFlow(!facts.keyDone) }
+            ) { onKeyFlow(true) }
             SettingRow(Icons.Filled.Check, stringResource(R.string.settings_key_check), null) { onKeyFlow(false) }
-            SettingRow(Icons.Filled.Visibility, stringResource(R.string.settings_key_show), null) { onKeyFlow(true) }
             // Блокировка: подтверждение — системное (биометрия/PIN устройства), своего
             // секрета мы не храним. Без экрана блокировки на устройстве включать нечего.
             SettingSwitchRow(
