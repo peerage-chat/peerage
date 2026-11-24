@@ -74,15 +74,12 @@ internal fun HomeTopBar(model: AppModel, onProfile: () -> Unit, onNetwork: () ->
                 .clickable(role = Role.Button, onClickLabel = profile) { onProfile() },
             contentAlignment = Alignment.Center,
         ) {
-            // Аватар уезжает в карточку «Профиля» общим элементом (app-ui.md → «Движение»).
-            Box(Modifier.sharedElement(SELF_AVATAR)) {
-                SquareAvatar(
-                    model.selfName.ifBlank { model.me?.pubkey ?: "?" },
-                    size = Tokens.Size.avatarTop,
-                    avatarBytes = model.selfAvatar,
-                    circle = true,
-                )
-            }
+            SquareAvatar(
+                model.selfName.ifBlank { model.me?.pubkey ?: "?" },
+                size = Tokens.Size.avatarTop,
+                avatarBytes = model.selfAvatar,
+                circle = true,
+            )
         }
         Column(
             Modifier.weight(1f)
