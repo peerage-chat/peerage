@@ -20,9 +20,7 @@ use peerage_blob::{Hash, Limits, Manifest, ManifestAssembler, ManifestPart, Reas
 use peerage_core::vault;
 use peerage_messenger::{Messenger, PeerKey};
 
-/// Сколько чанков одной докачки держим запрошенными. Больше — отдающий режет
-/// всплеск и половина запросов уходит впустую; меньше — простаивает канал.
-const WINDOW: usize = 64;
+use crate::blob_window::Window;
 
 /// Чанк не пришёл за это время — переспрашиваем ИМЕННО его.
 const CHUNK_TIMEOUT: Duration = Duration::from_secs(2);
@@ -125,8 +123,10 @@ impl Sink {
 struct Incoming {
     peer: PeerKey,
     sink: Sink,
-    /// Запрошенные и ещё не пришедшие чанки: индекс → когда спросили.
-    inflight: HashMap<usize, Instant>,
+    /// Запрошенные и ещё не пришедшие чанки: индекс → когда спросили и переспрашивали ли.
+    inflight: HashMap<usize, (Instant, bool)>,
+    /// Сколько держать запрошенными — по задержке ([`Window`]): докачка уступает переписке.
+    window: Window,
     /// Следующий ни разу не запрошенный индекс.
     next: usize,
     last_chunk: Instant,
@@ -272,6 +272,7 @@ impl BlobManager {
             peer,
             sink,
             inflight: HashMap::new(),
+            window: Window::new(now),
             next: 0,
             last_chunk: now,
             last_pct: 0,
@@ -281,11 +282,11 @@ impl BlobManager {
         None
     }
 
-    /// Дозапросить чанки, пока в полёте меньше [`WINDOW`].
+    /// Дозапросить чанки, пока в полёте меньше окна.
     fn fill_window(&self, id: &Hash, inc: &mut Incoming) {
         let n = inc.sink.manifest().chunks.len();
         let now = Instant::now();
-        while inc.inflight.len() < WINDOW && inc.next < n {
+        while inc.inflight.len() < inc.window.size() && inc.next < n {
             let index = inc.next;
             inc.next += 1;
             if inc.sink.has(index) {
@@ -294,7 +295,7 @@ impl BlobManager {
             let _ = self
                 .messenger
                 .send_blob_request(&inc.peer, id, index as u32);
-            inc.inflight.insert(index, now);
+            inc.inflight.insert(index, (now, false));
         }
     }
 
@@ -413,8 +414,13 @@ impl BlobManager {
             self.incoming.insert(id, inc);
             return None;
         }
-        inc.inflight.remove(&index);
-        inc.last_chunk = Instant::now();
+        let now = Instant::now();
+        // Задержку меряем только по чанку, спрошенному один раз: у переспрошенного не
+        // понять, на какой из запросов пришёл ответ.
+        if let Some((asked, false)) = inc.inflight.remove(&index) {
+            inc.window.on_sample(now.duration_since(asked), now);
+        }
+        inc.last_chunk = now;
         self.messenger.boost_peer(&peer, BLOB_BOOST);
         let complete = match &inc.sink {
             Sink::Ram(re) => re.is_complete(),
@@ -453,13 +459,19 @@ impl BlobManager {
         self.incoming
             .retain(|_, inc| now.duration_since(inc.last_chunk) < STALL_AFTER);
         for (id, inc) in self.incoming.iter_mut() {
-            for (index, asked) in inc.inflight.iter_mut() {
+            let mut lost = false;
+            for (index, (asked, retried)) in inc.inflight.iter_mut() {
                 if now.duration_since(*asked) >= CHUNK_TIMEOUT {
                     *asked = now;
+                    *retried = true;
+                    lost = true;
                     let _ = self
                         .messenger
                         .send_blob_request(&inc.peer, id, *index as u32);
                 }
+            }
+            if lost {
+                inc.window.on_loss(now);
             }
         }
         self.outgoing

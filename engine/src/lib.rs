@@ -10,6 +10,7 @@
 
 pub mod autodel;
 pub mod backup;
+mod blob_window;
 pub mod blobs;
 pub mod dto;
 pub mod groups;
