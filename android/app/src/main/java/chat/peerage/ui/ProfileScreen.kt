@@ -72,7 +72,12 @@ internal fun ProfileScreen(model: AppModel, navigate: (Screen) -> Unit) {
             OpenableAvatar(model, name, model.selfAvatar) {
                 SquareAvatar(name, size = Tokens.Size.avatarProfile, avatarBytes = model.selfAvatar, circle = true)
             }
-            Column(Modifier.weight(1f)) {
+            // Имя ведёт туда же, что карандаш в шапке (п. 31): имя и фото меняют, нажимая на них.
+            val editLabel = stringResource(R.string.cd_edit_profile)
+            Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(Tokens.Radius.button))
+                    .clickable(role = Role.Button, onClickLabel = editLabel) { navigate(Screen.EditProfile) },
+            ) {
                 Text(
                     name,
                     color = Color.White,
