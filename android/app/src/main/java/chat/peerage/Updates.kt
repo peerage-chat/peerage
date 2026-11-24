@@ -153,6 +153,8 @@ sealed interface UpdateState {
  */
 object Updates {
     private const val REPO = "peerage-chat/peerage"
+    private const val TAG = "Updates"
+    private const val ATTEMPTS = 5
     private const val MAX_TEXT = 1 shl 20
 
     var state by mutableStateOf<UpdateState>(UpdateState.Idle)
@@ -168,7 +170,10 @@ object Updates {
 
     private fun now() = System.currentTimeMillis() / 1000
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    private fun dir(ctx: Context) = File(ctx.cacheDir, "updates")
+
+    // Не cacheDir: при нехватке места Android чистит кэши, и сверенный файл пропадал бы
+    // между загрузкой и «Установить». Здесь чистим сами — при старте процесса.
+    private fun dir(ctx: Context) = File(ctx.noBackupFilesDir, "updates")
 
     /** Процесс поднялся: факты с диска, недокачанное и уже поставленное — прочь. */
     fun init(ctx: Context) {
@@ -208,7 +213,12 @@ object Updates {
         if (state is UpdateState.Checking || state is UpdateState.Downloading) return
         state = UpdateState.Checking
         worker.execute {
-            val next = runCatching { fetch(ctx) }.getOrElse { UpdateState.CheckFailed }
+            val next = try {
+                fetch(ctx)
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "check failed", e)
+                UpdateState.CheckFailed
+            }
             main.post {
                 change { copy(checkedAt = now()) }
                 // Пока шла проверка, могли начать загрузку — её не перебиваем.
@@ -229,19 +239,25 @@ object Updates {
         state = UpdateState.Downloading(info, 0)
         worker.execute {
             val file = File(dir(ctx), info.file)
-            val next = runCatching {
-                if (fetchApk(info, file) && verify(ctx, file, info)) {
-                    install(ctx, file)
-                    UpdateState.Ready(info, file)
-                } else if (cancelled) {
-                    file.delete()
-                    UpdateState.Available(info)
-                } else {
-                    file.delete()
-                    UpdateState.Rejected
+            val next = try {
+                when {
+                    !fetchApk(info, file) -> {
+                        file.delete()
+                        if (cancelled) UpdateState.Available(info) else UpdateState.Rejected
+                    }
+                    !verify(ctx, file, info) -> {
+                        file.delete()
+                        UpdateState.Rejected
+                    }
+                    else -> {
+                        installLogged(ctx, file)
+                        UpdateState.Ready(info, file)
+                    }
                 }
-            }.getOrElse {
-                file.delete()
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "download failed", e)
+                // Недокачанное остаётся: «Повторить» продолжит с того же места.
+                if (cancelled) file.delete()
                 if (cancelled) UpdateState.Available(info) else UpdateState.DownloadFailed(info)
             }
             main.post { state = next }
@@ -256,7 +272,22 @@ object Updates {
     fun installAgain() {
         val ctx = app ?: return
         val s = state as? UpdateState.Ready ?: return
-        worker.execute { runCatching { install(ctx, s.file) } }
+        worker.execute {
+            if (s.file.exists()) {
+                installLogged(ctx, s.file)
+            } else {
+                main.post { if (state == s) state = UpdateState.Available(s.info) }
+            }
+        }
+    }
+
+    /** Сбой установщика — не сбой сети: файл сверен и остаётся, полоса «Установить» тоже. */
+    private fun installLogged(ctx: Context, file: File) {
+        try {
+            install(ctx, file)
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "installer failed", e)
+        }
     }
 
     /** Ответ установщика ([UpdateReceiver]). */
@@ -307,26 +338,61 @@ object Updates {
         }
     }
 
-    /** Скачать APK, считая SHA-256 по ходу. false — отменили или не совпало с манифестом. */
+    /**
+     * Скачать APK, считая SHA-256 по ходу. Обрыв — докачка с того же места (`Range`), до
+     * [ATTEMPTS] раз подряд; недокачанный файл остаётся, и «Повторить» продолжает его.
+     * false — отменили или не совпало с манифестом; IOException — сеть так и не дала докачать.
+     */
     private fun fetchApk(info: UpdateInfo, file: File): Boolean {
         file.parentFile?.mkdirs()
-        val c = open("https://github.com/$REPO/releases/download/${info.tag}/${info.file}")
         val md = MessageDigest.getInstance("SHA-256")
-        var done = 0L
+        if (file.length() > info.size) file.delete()
+        // Уже скачанное — в хэш заново: между запусками хэш не хранится.
+        if (file.exists()) file.inputStream().use { input -> input.copyTo(DigestSink(md)) }
+        var done = file.length()
+        var failures = 0
+        while (done < info.size) {
+            if (cancelled) return false
+            try {
+                val before = done
+                done = fetchFrom(info, file, md, done) ?: return false
+                if (done > before) failures = 0
+            } catch (e: java.io.IOException) {
+                if (++failures >= ATTEMPTS) throw e
+                android.util.Log.w(TAG, "download interrupted at $done, resuming: ${e.message}")
+                done = file.length()
+            }
+        }
+        val sha = md.digest().toHex()
+        if (done != info.size || sha != info.sha256) android.util.Log.w(TAG, "rejected: $done bytes, sha256 $sha")
+        return done == info.size && sha == info.sha256
+    }
+
+    /** Одна попытка с позиции [from]. null — сервер отдал не то, что просили (или отмена). */
+    private fun fetchFrom(info: UpdateInfo, file: File, md: MessageDigest, from: Long): Long? {
+        val c = open("https://github.com/$REPO/releases/download/${info.tag}/${info.file}")
+        if (from > 0) c.setRequestProperty("Range", "bytes=$from-")
+        var done = from
         try {
-            if (c.responseCode != 200) error("HTTP ${c.responseCode}")
+            val code = c.responseCode
+            if (code != 200 && !(from > 0 && code == 206)) error("HTTP $code")
+            // Сервер не умеет Range и отдал файл целиком — заново с нуля.
+            if (code == 200 && from > 0) {
+                md.reset()
+                done = 0
+            }
             c.inputStream.use { input ->
-                file.outputStream().use { out ->
+                java.io.FileOutputStream(file, done > 0).use { out ->
                     val buf = ByteArray(64 * 1024)
-                    var shown = 0L
+                    var shown = done
                     while (true) {
-                        if (cancelled) return false
+                        if (cancelled) return null
                         val n = input.read(buf)
                         if (n < 0) break
-                        done += n
-                        if (done > info.size) return false
+                        if (done + n > info.size) return null
                         md.update(buf, 0, n)
                         out.write(buf, 0, n)
+                        done += n
                         if (done - shown >= 256 * 1024) {
                             shown = done
                             val d = done
@@ -338,20 +404,29 @@ object Updates {
         } finally {
             c.disconnect()
         }
-        return done == info.size && md.digest().toHex() == info.sha256
+        return done
+    }
+
+    /** Поток в хэш — для дочитывания уже скачанной части. */
+    private class DigestSink(private val md: MessageDigest) : java.io.OutputStream() {
+        override fun write(b: Int) = md.update(b.toByte())
+        override fun write(b: ByteArray, off: Int, len: Int) = md.update(b, off, len)
     }
 
     /** APK — наш пакет, новее установленного, подписан тем же ключом (не полем манифеста). */
     private fun verify(ctx: Context, file: File, info: UpdateInfo): Boolean {
         val pm = ctx.packageManager
-        val arch = archiveInfo(pm, file) ?: return false
+        val arch = archiveInfo(pm, file) ?: return false.also { android.util.Log.w(TAG, "rejected: not an APK") }
         val installed = installedInfo(ctx)
         val code = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(arch)
         val have = certs(installed)
-        return arch.packageName == ctx.packageName &&
+        val got = certs(arch)
+        val ok = arch.packageName == ctx.packageName &&
             code == info.versionCode &&
             code > androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(installed) &&
-            have.isNotEmpty() && certs(arch) == have
+            have.isNotEmpty() && got == have
+        if (!ok) android.util.Log.w(TAG, "rejected: ${arch.packageName} $code, certs $got vs $have")
+        return ok
     }
 
     private fun install(ctx: Context, file: File) {
