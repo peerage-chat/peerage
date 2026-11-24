@@ -293,8 +293,8 @@ data class NetStats(
     val peers: List<NetPeer>,
 )
 
-/** Присутствие группы «N уч · M в сети» — агрегат (MLS-ростер ∩ presence) считает движок. */
-data class GroupRoster(val total: Int, val online: Int)
+/** Группа по присутствию: всего людей (со мной), сколько в сети и сколько на связи ([AppModel.presence]). */
+data class GroupHeadcount(val total: Int, val inApp: Int, val reachable: Int)
 
 /** Источник флуда для UI: сколько отброшено с запуска и с каким темпом (ADR-007).
  *  Темп ноль — поток стих; объём остаётся. */

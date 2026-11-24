@@ -822,6 +822,7 @@
     <string name="chat_delete">Delete</string>
     <string name="chat_delete_note_foreign">Messages from others can only be removed on your side — rewriting someone else\'s history is not possible.</string>
     <string name="chat_delete_for_me">Delete for me</string>
+    <string name="saved_delete_note">Notes exist only on this device: there is no other copy.</string>
     <string name="chat_delete_for_all">Delete for everyone</string>
     <string name="chat_reply_to">Reply to %1$s</string>
     <string name="chat_reply_you">You</string>
@@ -1054,6 +1055,7 @@
     <string name="group_add">Add</string>
     <string name="group_search">Search</string>
     <string name="group_online_n">%1$d online</string>
+    <string name="group_reachable_n">%1$d reachable</string>
     <string name="group_members_title">Members · %1$d</string>
     <string name="group_add_member">Add member</string>
     <string name="group_all_members">All members (%1$d)</string>

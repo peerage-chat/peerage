@@ -62,18 +62,12 @@ import chat.peerage.Message
 import chat.peerage.R
 import chat.peerage.Tokens
 
-/** Шесть частых реакций полосы над пузырём (макет `chatact/ActMenu`). */
-private val QuickReactions = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
-
-/** Реакции есть везде, кроме «Сохранённого»: там некому их показывать. */
-internal fun canReact(model: AppModel, chat: ChatTarget): Boolean = chat.group || chat.id != model.me?.pubkey
-
 /**
- * Полоса реакций над пузырём: шесть частых и «+» — полная панель. Своя реакция
+ * Полоса реакций над пузырём: шесть частых своих ([ReactionUsage]) и «+» — полная панель. Своя реакция
  * подсвечена: нажатие на неё снимает.
  */
 @Composable
-internal fun ReactionStrip(mine: String?, onPick: (String) -> Unit, onMore: () -> Unit, modifier: Modifier = Modifier) {
+internal fun ReactionStrip(quick: List<String>, mine: String?, onPick: (String) -> Unit, onMore: () -> Unit, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(percent = 50)
     Row(
         modifier.shadow(Tokens.Size.menuShadow, shape)
@@ -83,7 +77,7 @@ internal fun ReactionStrip(mine: String?, onPick: (String) -> Unit, onMore: () -
             .padding(Tokens.Space.xs),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs),
     ) {
-        QuickReactions.forEach { e ->
+        quick.forEach { e ->
             val label = stringResource(R.string.react_with, e)
             Box(
                 Modifier.size(Tokens.Size.reactButton)

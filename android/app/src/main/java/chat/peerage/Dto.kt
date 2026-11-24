@@ -354,10 +354,6 @@ internal data class NetStatsDto(
     val peers: List<NetPeerDto> = emptyList(),
 )
 
-/** «N участников · M в сети» — агрегат считает движок, клиент только рисует. */
-@Serializable
-internal data class GroupRosterDto(val total: Int = 1, val online: Int = 1)
-
 /** Ответ `Native.start`: либо сессия, либо человекочитаемая ошибка. */
 @Serializable
 internal data class StartResultDto(

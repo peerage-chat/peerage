@@ -71,8 +71,11 @@ object Tokens {
         // ── Статусы ───────────────────────────────────────────────────────────
         val online = Color(0xFF8BC34A) // «в сети»: приложение открыто
         val reachable = Color(0xFFE2C541) // «на связи»: узел отвечает, приложение свёрнуто
-        val verified = Color(0xFF4CAF50)
-        val verifiedTile = Color(0xFF1E3A24) // плитка «Ключ сверен» в профиле (`prof/`)
+
+        // Сверенный контакт — акцентом (п. 25 с телефона): зелёный уже значит «в сети», и галочка
+        // рядом с точкой присутствия читалась как второй статус сети.
+        val verified = accent
+        val verifiedTile = accentMuted // плитка «Ключ сверен» в профиле (`prof/`)
         val warnTile = Color(0xFF3A3020) // плитка «Ключ не сверен» — тот же тон, что warn, приглушённый
         val stateWarn = Color(0xFF2A2116) // плашка «Ключ не сверен» на экране сверки (`security/Pair`)
         val stateWarnText = Color(0xFFF2C98A) // её заголовок и щит
@@ -350,10 +353,8 @@ object Tokens {
         val avatarProfile = 64.dp // аватар в карточке «Профиля»
         val rowIcon = 36.dp // плитка иконки в строке группы
         val navRow = 56.dp // строка-раздел в группе «Профиля» и категорий
-        val avatarHead = 38.dp // аватар в шапке чата
-        val avatarSeries = 30.dp // аватар у последнего сообщения серии (макет `screens/GroupChat`)
+        val avatarHead = 38.dp // аватар в шапке чата; он же у автора в ленте группы (п. 21: группа не мельче личного)
         val avatarMention = 32.dp // аватар в подсказке «@» над полем (макет `chatact/Mention`)
-        val avatarMember = 36.dp // аватар в строке участника группы (макет `prof/GroupB`)
         val avatarPick = 40.dp // аватар в строке выбора людей (макеты `people/`)
         val shareThumb = 76.dp // миниатюра присланного на «Отправить в Peerage» (макет `android/Main`)
         val personRow = 60.dp // строка выбора людей (минимальная высота)

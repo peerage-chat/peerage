@@ -43,7 +43,7 @@ use peerage_messenger::{Event, Messenger};
 use peerage_ygg::Node;
 
 use groups::GroupManager;
-use net::{GroupPresence, NetStats, PeerStat};
+use net::{NetStats, PeerStat};
 use room_call::RoomCallEngine;
 
 /// Отказоустойчивый захват мьютекса: если другой поток паниковал держа его,
@@ -2983,19 +2983,6 @@ impl Engine {
             .get(gid)
             .cloned()
             .unwrap_or_else(|| "[]".into())
-    }
-
-    /// Снапшот присутствия группы «N уч · M в сети» (ростер ∩ online). Презенс
-    /// динамичен → считаем на момент чтения. Кэш `members` — ДРУГИЕ (без себя).
-    pub fn group_presence(&self, gid: &[u8]) -> GroupPresence {
-        let json = self.group_members_json(gid);
-        let others: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
-        let online_others = others
-            .iter()
-            .filter_map(|h| parse_key(h))
-            .filter(|k| self.messenger.is_online(k))
-            .count();
-        GroupPresence::compute(others.len(), online_others)
     }
 
     // — Комнаты-звонки (присутствие, Discord-style) —

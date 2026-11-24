@@ -117,20 +117,18 @@ private fun BubbleMenuOverlay(model: AppModel, t: BubbleActions, onDelete: () ->
         val grow = { originY: Float ->
             Modifier.menuGrow({ shown.value }, originX = if (t.msg.mine) 1f else 0f, originY = { originY })
         }
-        val strip: (@Composable () -> Unit)? = if (canReact(model, t.chat)) {
-            {
-                ReactionStrip(
-                    model.myReaction(t.msg),
-                    onPick = { e ->
-                        close()
-                        model.react(t.chat, t.msg, e)
-                    },
-                    onMore = onMoreReactions,
-                    modifier = grow(1f),
-                )
-            }
-        } else {
-            null
+        // Реакции — везде, и в «Сохранённом» тоже (п. 23): пометить заметку — тоже дело.
+        val strip: @Composable () -> Unit = {
+            ReactionStrip(
+                model.quickReactions,
+                model.myReaction(t.msg),
+                onPick = { e ->
+                    close()
+                    model.react(t.chat, t.msg, e)
+                },
+                onMore = onMoreReactions,
+                modifier = grow(1f),
+            )
         }
         NearBubble(t.bounds, t.msg.mine, strip) {
             MenuSurface(grow(0f)) { BubbleMenuItems(model, t, close, onDelete) }
@@ -291,13 +289,20 @@ private fun NearBubble(bounds: Rect, mine: Boolean, strip: (@Composable () -> Un
  */
 @Composable
 internal fun DeleteSheet(model: AppModel, key: String, group: Boolean, refs: List<MsgRef>, onClose: () -> Unit) {
-    // «Сохранённое»: «у всех» не бывает, спрашивать не о чем — удаление сразу, со
-    // снекбаром «Отменить».
+    // «Сохранённое»: «у всех» не бывает, но удаление всё равно подтверждается (п. 22 с телефона):
+    // заметка есть только здесь, и случайный тап не должен её стирать.
     if (!group && model.isSaved(key)) {
-        LaunchedEffect(refs) {
-            model.deleteRefs(key, false, refs)
-            model.clearSelection()
-            onClose()
+        ActionSheet(
+            pluralStringResource(R.plurals.delete_title, refs.size, refs.size),
+            stringResource(R.string.saved_delete_note),
+            onClose,
+        ) {
+            PlateButton(stringResource(R.string.chat_delete), modifier = Modifier.fillMaxWidth(), danger = true) {
+                model.deleteRefs(key, false, refs)
+                model.clearSelection()
+                onClose()
+            }
+            GhostButton(stringResource(R.string.common_cancel), color = Tokens.Colors.secondary, modifier = Modifier.fillMaxWidth(), onClick = onClose)
         }
         return
     }

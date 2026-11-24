@@ -232,6 +232,12 @@ internal fun presenceLabel(p: Presence): String = stringResource(
     },
 )
 
+/** «3 участника · 1 в сети · 1 на связи»: «на связи» — только когда такие есть. */
+@Composable
+internal fun groupHeadcountLine(h: GroupHeadcount): String =
+    pluralOf(R.plurals.group_presence, h.total.toLong(), h.inApp) +
+        if (h.reachable > 0) " · " + stringResource(R.string.group_reachable_n, h.reachable) else ""
+
 /**
  * Аватар: буква имени на детерминированном цвете, картинка профиля или своя
  * иконка ([content]); опционально presence-точка в правом-нижнем углу.
@@ -245,11 +251,10 @@ internal fun presenceLabel(p: Presence): String = stringResource(
 internal fun SquareAvatar(
     name: String,
     size: Dp = 44.dp,
-    online: Boolean? = null,
     bg: Color? = null,
     avatarBytes: ByteArray? = null,
     circle: Boolean = false,
-    /** Точка статуса по [Presence] (п. 9); задан — [online] не нужен. */
+    /** Точка статуса человека ([AppModel.presence]); null — без точки. */
     presence: Presence? = null,
     ring: Color = Tokens.Colors.surface,
     content: (@Composable () -> Unit)? = null,
@@ -281,7 +286,7 @@ internal fun SquareAvatar(
                 )
             }
         }
-        val dot = presence?.let(::presenceDot) ?: online?.let { if (it) HoloOnline else OfflineDot }
+        val dot = presence?.let(::presenceDot)
         if (dot != null) {
             Box(
                 Modifier.size(size * 0.30f).clip(CircleShape)

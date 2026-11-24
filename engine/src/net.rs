@@ -72,24 +72,6 @@ impl NetStats {
     }
 }
 
-/// Присутствие группы «N уч · M в сети» (MLS-ростер ∩ presence).
-#[derive(Serialize, Debug, PartialEq)]
-pub struct GroupPresence {
-    pub total: usize,
-    pub online: usize,
-}
-
-impl GroupPresence {
-    /// `total_others`/`online_others` — ДРУГИЕ участники (без себя); +1 = мы сами,
-    /// мы всегда «в сети» в своей группе. Чистая функция.
-    pub fn compute(total_others: usize, online_others: usize) -> GroupPresence {
-        GroupPresence {
-            total: total_others + 1,
-            online: online_others + 1,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,29 +137,5 @@ mod tests {
         // up-пир с latency 0 (ещё не измерен) не должен давать ping_ms=0 ложно.
         let s = NetStats::aggregate(vec![peer(true, 0.0, 1, 1), peer(true, 80.0, 1, 1)], 1);
         assert_eq!(s.ping_ms, 80.0);
-    }
-
-    #[test]
-    fn group_presence_self_only() {
-        // группа из одного меня: 0 других → total 1, online 1.
-        assert_eq!(
-            GroupPresence::compute(0, 0),
-            GroupPresence {
-                total: 1,
-                online: 1
-            }
-        );
-    }
-
-    #[test]
-    fn group_presence_counts_self_as_online() {
-        // 3 других, 1 из них онлайн → total 4, online 2 (я + 1).
-        assert_eq!(
-            GroupPresence::compute(3, 1),
-            GroupPresence {
-                total: 4,
-                online: 2
-            }
-        );
     }
 }

@@ -280,11 +280,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
     val gid = model.currentGroup
     val g = gid?.let { model.groups.firstOrNull { it.gid == gid } }
     val name = g?.name ?: stringResource(R.string.group_default_name)
-    // Агрегат «всего/в сети» считает движок (groupPresence); до первого тика —
-    // фолбэк на число участников из списка групп.
-    val roster = model.currentGroupRoster
-    val total = roster?.total ?: g?.members ?: 1
-    val onlineN = roster?.online ?: 1
+    val headcount = gid?.let { model.groupHeadcount(it) } ?: GroupHeadcount(1, 1, 0)
     Row(
         Modifier.fillMaxWidth().background(HoloBg).height(Tokens.Size.topBar).padding(horizontal = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
@@ -313,7 +309,7 @@ internal fun GroupChatTopBar(model: AppModel, onBack: () -> Unit, onInfo: () -> 
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(pluralOf(R.plurals.group_presence, total.toLong(), onlineN), color = HoloSecondary, fontSize = Tokens.Font.caption)
+                Text(groupHeadcountLine(headcount), color = HoloSecondary, fontSize = Tokens.Font.caption)
             }
         }
         if (gid != null) {

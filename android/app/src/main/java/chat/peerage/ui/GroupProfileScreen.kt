@@ -57,19 +57,16 @@ internal fun GroupProfileScreen(
     val muted = model.chatQuiet(gid, true)
     var notify by remember(gid) { mutableStateOf(false) }
     if (notify) NotifySheet(model, ChatTarget(gid, group = true)) { notify = false }
-    val selfOnline = !model.offline
-    fun online(k: String) = if (k == me) selfOnline else model.online[k] == true
-
     // Себя — первым, дальше админ, кто в сети, остальные по имени: в длинном списке
     // нужнее те, кому можно написать сейчас.
     val others = model.groupMemberKeys[gid].orEmpty().filter { it != me }
         .sortedWith(
             compareBy<String> { it != g.adminKey }
-                .thenBy { model.online[it] != true }
+                .thenByDescending { model.presence(it).ordinal }
                 .thenBy { model.peerName(it).lowercase() },
         )
     val members = listOfNotNull(me) + others
-    val onlineCount = members.count(::online)
+    val headcount = model.groupHeadcount(gid)
     val shown = if (members.size > MEMBERS_SHOWN && !showAll) members.take(MEMBERS_SHOWN) else members
     val join = rememberRoomJoin(model)
 
@@ -88,7 +85,14 @@ internal fun GroupProfileScreen(
                     color = Tokens.Colors.tertiary,
                     fontSize = Tokens.Font.body,
                 )
-                Text(stringResource(R.string.group_online_n, onlineCount), color = Tokens.Colors.online, fontSize = Tokens.Font.body)
+                Text(stringResource(R.string.group_online_n, headcount.inApp), color = Tokens.Colors.online, fontSize = Tokens.Font.body)
+                if (headcount.reachable > 0) {
+                    Text(
+                        " · " + stringResource(R.string.group_reachable_n, headcount.reachable),
+                        color = Tokens.Colors.reachable,
+                        fontSize = Tokens.Font.body,
+                    )
+                }
             }
         },
         actions = {
@@ -134,7 +138,7 @@ internal fun GroupProfileScreen(
                         k,
                         self = k == me,
                         admin = k == g.adminKey,
-                        online = online(k),
+                        presence = model.presence(k),
                         divider = i > 0 || (isAdmin && !g.archived),
                     ) { if (k != me) sheetFor = k }
                 }
@@ -158,7 +162,7 @@ internal fun GroupProfileScreen(
         MemberSheet(
             model,
             k,
-            online(k),
+            model.presence(k),
             admin = isAdmin,
             onClose = { sheetFor = null },
             onMessage = { onMessage(k) },
@@ -191,7 +195,7 @@ internal fun GroupProfileScreen(
 }
 
 /** Отступ разделителя у строки участника: поле карточки + аватар + зазор. */
-private val ProfileMemberInset = Tokens.Space.l + Tokens.Size.avatarMember + Tokens.Space.m
+private val ProfileMemberInset = Tokens.Space.l + Tokens.Size.avatarContact + Tokens.Space.m
 
 /** Участник группы: аватар с точкой присутствия, имя («(вы)» у себя), статус, метка «админ». */
 @Composable
@@ -200,7 +204,7 @@ private fun MemberRow(
     key: String,
     self: Boolean,
     admin: Boolean,
-    online: Boolean,
+    presence: Presence,
     divider: Boolean,
     onClick: () -> Unit,
 ) {
@@ -209,8 +213,8 @@ private fun MemberRow(
     CardRow(onClick = onClick, divider = divider, inset = ProfileMemberInset) {
         SquareAvatar(
             name,
-            size = Tokens.Size.avatarMember,
-            online = online,
+            size = Tokens.Size.avatarContact,
+            presence = presence,
             avatarBytes = model.peerAvatar(key),
             circle = true,
         )
@@ -228,8 +232,8 @@ private fun MemberRow(
                 if (self) Text(" " + stringResource(R.string.group_you_mark), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.name)
             }
             Text(
-                stringResource(if (online) R.string.status_in_network else R.string.status_offline),
-                color = if (online) Tokens.Colors.online else Tokens.Colors.tertiary,
+                presenceLabel(presence),
+                color = presenceText(presence),
                 fontSize = Tokens.Font.body,
             )
         }
@@ -257,7 +261,7 @@ private fun MemberRow(
 private fun MemberSheet(
     model: AppModel,
     key: String,
-    online: Boolean,
+    presence: Presence,
     admin: Boolean,
     onClose: () -> Unit,
     onMessage: () -> Unit,
@@ -278,7 +282,7 @@ private fun MemberSheet(
             Column {
                 Text(name, color = Color.White, fontSize = Tokens.Font.sheetName, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    stringResource(if (online) R.string.status_in_network else R.string.status_offline) + " · " +
+                    presenceLabel(presence) + " · " +
                         stringResource(if (contact) R.string.group_member_in_contacts else R.string.group_member_not_contact),
                     color = Tokens.Colors.tertiary,
                     fontSize = Tokens.Font.body,

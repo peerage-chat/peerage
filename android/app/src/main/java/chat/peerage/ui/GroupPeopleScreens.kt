@@ -132,7 +132,6 @@ internal fun GroupNameScreen(model: AppModel, draft: GroupDraft, onCreated: () -
                         model.selfName.ifBlank { model.peerName(me) },
                         stringResource(R.string.group_creator_admin),
                         divider = false,
-                        online = !model.offline,
                     ) { RowTag(stringResource(R.string.group_admin_mark), accent = true) }
                 }
             }
@@ -311,14 +310,12 @@ private fun PersonLine(
     status: String?,
     divider: Boolean,
     dim: Boolean = false,
-    /** Своё присутствие — не из списка пиров; null — смотреть по ключу. */
-    online: Boolean? = null,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    val online = online ?: (model.online[key] == true)
+    val presence = model.presence(key)
     CardRow(onClick = onClick, divider = divider, inset = PersonInset, modifier = Modifier.heightIn(min = Tokens.Size.personRow)) {
-        SquareAvatar(name, size = Tokens.Size.avatarPick, online = online, avatarBytes = model.peerAvatar(key), circle = true)
+        SquareAvatar(name, size = Tokens.Size.avatarPick, presence = presence, avatarBytes = model.peerAvatar(key), circle = true)
         Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
         Column(Modifier.weight(1f)) {
             Text(
@@ -330,8 +327,8 @@ private fun PersonLine(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                status ?: stringResource(if (online) R.string.status_in_network else R.string.status_offline),
-                color = Tokens.Colors.tertiary,
+                status ?: presenceLabel(presence),
+                color = if (status == null) presenceText(presence) else Tokens.Colors.tertiary,
                 fontSize = Tokens.Font.body,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

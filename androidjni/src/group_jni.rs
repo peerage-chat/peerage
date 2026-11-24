@@ -457,18 +457,3 @@ pub extern "system" fn Java_chat_peerage_Native_groupInvited<'local>(
         ret(&env, &e.group_invited_json(&gid))
     })
 }
-
-/// Снапшот присутствия группы: JSON {total, online}. Агрегат считает движок.
-#[no_mangle]
-pub extern "system" fn Java_chat_peerage_Native_groupPresence<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    session_ptr: jlong,
-    gid_hex: JString<'local>,
-) -> jstring {
-    jni_safe!(ret(&env, "{}"), {
-        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "{}") };
-        let Ok(gid) = hex::decode(jstr(&mut env, &gid_hex).trim()) else { return ret(&env, "{}") };
-        ret(&env, &serde_json::to_string(&e.group_presence(&gid)).unwrap_or_else(|_| "{}".into()))
-    })
-}

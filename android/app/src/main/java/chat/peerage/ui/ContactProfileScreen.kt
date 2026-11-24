@@ -122,7 +122,7 @@ internal fun ContactProfileScreen(
                 } else {
                     stringResource(R.string.profile_key_todo_sub)
                 },
-                iconTint = if (c.verified) Tokens.Colors.online else Tokens.Colors.warn,
+                iconTint = if (c.verified) Tokens.Colors.verified else Tokens.Colors.warn,
                 iconBg = if (c.verified) Tokens.Colors.verifiedTile else Tokens.Colors.warnTile,
                 divider = false,
                 onClick = onVerify,

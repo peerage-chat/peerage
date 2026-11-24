@@ -227,19 +227,19 @@ internal fun LeaveGroupSheet(model: AppModel, gid: String, onLeft: () -> Unit, o
 @Composable
 private fun HeirRow(model: AppModel, key: String, on: Boolean, onClick: () -> Unit) {
     val name = model.peerName(key)
-    val online = model.online[key] == true
+    val presence = model.presence(key)
     Row(
         Modifier.fillMaxWidth().heightIn(min = Tokens.Size.personRow).clickable(onClick = onClick)
             .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SquareAvatar(name, size = Tokens.Size.avatarPick, online = online, avatarBytes = model.peerAvatar(key), circle = true)
+        SquareAvatar(name, size = Tokens.Size.avatarPick, presence = presence, avatarBytes = model.peerAvatar(key), circle = true)
         Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
         Column(Modifier.weight(1f)) {
             Text(name, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                stringResource(if (online) R.string.status_in_network else R.string.status_offline),
-                color = Tokens.Colors.tertiary,
+                presenceLabel(presence),
+                color = presenceText(presence),
                 fontSize = Tokens.Font.body,
             )
         }

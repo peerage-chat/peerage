@@ -537,9 +537,6 @@ object Native {
     /** Ключи участников группы (hex): JSON-массив. */
     external fun groupMembers(sessionPtr: Long, gid: String): String
 
-    /** Снапшот присутствия группы: JSON {total, online} (агрегат считает движок). */
-    external fun groupPresence(sessionPtr: Long, gid: String): String
-
     // ── Комнаты-звонки (присутствие, Discord-style) ───────────────────────
     /** DM-звонок: создать комнату, отправить RoomInvite пиру. Возвращает room_id hex. */
     external fun roomInviteDm(sessionPtr: Long, peerHex: String, audio: Boolean, video: Boolean): String

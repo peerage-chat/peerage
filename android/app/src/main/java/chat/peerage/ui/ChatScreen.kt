@@ -590,7 +590,7 @@ private fun DeletedRow(model: AppModel, m: Message, group: Boolean) {
     val shape = RoundedCornerShape(Tokens.Radius.bubble)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
         // Входящие группы стоят правее колонки аватаров — и надгробие с ними.
-        if (group && !m.mine) Spacer(Modifier.width(Tokens.Size.avatarSeries + Tokens.Space.s))
+        if (group && !m.mine) Spacer(Modifier.width(Tokens.Size.avatarHead + Tokens.Space.s))
         Row(
             Modifier.clip(shape)
                 .background(Tokens.Colors.group)
@@ -1283,15 +1283,15 @@ private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group:
                 Box(Modifier.alignBy { it.measuredHeight }) {
                     SquareAvatar(
                         who,
-                        size = Tokens.Size.avatarSeries,
-                        online = model.online[m.sender] == true,
+                        size = Tokens.Size.avatarHead,
+                        presence = model.presence(m.sender),
                         avatarBytes = model.peerAvatar(m.sender),
                         circle = true,
                         ring = Tokens.Colors.panel, // лента — на листе
                     )
                 }
             } else {
-                Spacer(Modifier.width(Tokens.Size.avatarSeries))
+                Spacer(Modifier.width(Tokens.Size.avatarHead))
             }
             Spacer(Modifier.width(Tokens.Space.s))
             MessageBubble(

@@ -347,8 +347,13 @@ class AppModel private constructor() {
     /** У контакта открыто приложение (п. 9, «в сети»); без связи не бывает. */
     val inApp = mutableStateMapOf<String, Boolean>()
 
-    /** Статус контакта для точки и подписи: «в сети» → «на связи» → «не в сети». */
+    /**
+     * Статус человека для точки и подписи: «в сети» → «на связи» → «не в сети». ЕДИНСТВЕННЫЙ
+     * источник присутствия человека в интерфейсе: личный чат, лента и состав группы, списки
+     * людей — все спрашивают здесь (п. 26). Себя я вижу «в сети», пока есть сеть.
+     */
     fun presence(key: String): Presence = when {
+        key == me?.pubkey -> if (offline) Presence.Offline else Presence.InApp
         online[key] != true -> Presence.Offline
         inApp[key] == true -> Presence.InApp
         else -> Presence.Reachable
@@ -440,9 +445,14 @@ class AppModel private constructor() {
     val groupUnread = mutableStateMapOf<String, Int>()
     var currentGroup by mutableStateOf<String?>(null)
 
-    /** Присутствие открытой группы «N уч · M в сети» — агрегат отдаёт движок
-     *  (groupPresence). Обновляется тикером, пока групповой чат открыт. */
-    var currentGroupRoster by mutableStateOf<GroupRoster?>(null)
+    /** Сколько в группе людей и кто из них в сети / на связи — по [presence] каждого (п. 26).
+     *  Пока состав не загружен — только число из списка групп. */
+    fun groupHeadcount(gid: String): GroupHeadcount {
+        val keys = groupMemberKeys[gid]
+            ?: return GroupHeadcount(groups.firstOrNull { it.gid == gid }?.members ?: 1, 1, 0)
+        val all = (keys + listOfNotNull(me?.pubkey)).distinct().map(::presence)
+        return GroupHeadcount(all.size, all.count { it == Presence.InApp }, all.count { it == Presence.Reachable })
+    }
 
     // Комната-звонок (Discord-style присутствие). gid комнаты, где мы сейчас.
     var currentRoom by mutableStateOf<String?>(null)
@@ -895,6 +905,8 @@ class AppModel private constructor() {
      */
     fun react(chat: ChatTarget, msg: Message, emoji: String) {
         val next = if (myReaction(msg) == emoji) "" else emoji
+        // Снятая реакция не считается: ряд — про то, что ставят, а не что убирают.
+        if (next.isNotEmpty()) countReaction(next)
         ops.execute { Native.react(sessionPtr, chat.id, chat.group, msg.id, msg.sender, next) }
     }
 
@@ -1045,9 +1057,22 @@ class AppModel private constructor() {
             ?.putString("recent_emoji", recentEmoji.joinToString(" "))?.apply()
     }
 
+    /** Сколько раз я ставил каждую реакцию: из этого собирается быстрый ряд ([ReactionUsage]). */
+    private var reactionCounts by mutableStateOf<Map<String, Int>>(emptyMap())
+
+    /** Быстрый ряд над пузырём: частые свои реакции, добранные рядом по умолчанию. */
+    val quickReactions: List<String> get() = ReactionUsage.quick(reactionCounts)
+
+    private fun countReaction(e: String) {
+        reactionCounts = reactionCounts + (e to (reactionCounts[e] ?: 0) + 1)
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)?.edit()
+            ?.putString("reaction_counts", ReactionUsage.format(reactionCounts))?.apply()
+    }
+
     private fun loadSettings() {
         val prefs = appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) ?: return
         showTechInfo = prefs.getBoolean("tech_info", false)
+        reactionCounts = ReactionUsage.parse(prefs.getString("reaction_counts", null))
         recentEmoji = prefs.getString("recent_emoji", "")?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
         warnOutboxGrowth = prefs.getBoolean("warn_outbox", true)
         shareChatsInMenu = prefs.getBoolean("share_chats", false)
@@ -1616,14 +1641,6 @@ class AppModel private constructor() {
                                 },
                             )
                             onMain { netStats = stats }
-                        }
-                    }
-                    // Присутствие открытой группы «N уч · M в сети» — агрегат
-                    // (ростер ∩ онлайн) считает движок, клиент лишь рендерит.
-                    currentGroup?.let { gid ->
-                        decodeOrNull<GroupRosterDto>(Native.groupPresence(sessionPtr, gid))?.let {
-                            val roster = GroupRoster(it.total, it.online)
-                            onMain { if (currentGroup == gid) currentGroupRoster = roster }
                         }
                     }
                     // Присутствие в комнате: кто сейчас внутри (по свежим маячкам).
@@ -3349,7 +3366,6 @@ class AppModel private constructor() {
     fun openGroup(gid: String) {
         leaveChat()
         currentGroup = gid
-        currentGroupRoster = null // тикер подтянет свежий агрегат
         // Сколько пришло, пока чат был закрыт: среди этого ищутся упоминания для «@».
         val unreadN = groupUnread[gid] ?: 0
         groupUnread[gid] = 0
