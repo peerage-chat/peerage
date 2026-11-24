@@ -43,7 +43,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: без него Compose в релизе заметно медленнее — неоптимизированный dex, а
+            // снимочные коллекции ART помечает «failed lock verification and will run slower»
+            // (строка из лога с телефона, 0.2.0). Имена НЕ переименовываем (proguard-rules.pro:
+            // -dontobfuscate): трассы падений из лога бета-тестеров читаются без mapping-файла.
+            isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
