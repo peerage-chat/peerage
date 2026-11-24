@@ -512,6 +512,8 @@
         <item quantity="other">%1$d attachments · %2$s</item>
     </plurals>
     <string name="attach_camera">Camera</string>
+    <string name="attach_view_title">Gallery</string>
+    <string name="attach_view_picked">Selected · #%1$d</string>
     <string name="attach_need_gallery">To show your recent photos here, the app needs access to the gallery. Files can still be sent through the picker above.</string>
     <string name="attach_allow">Allow</string>
     <string name="attach_gallery_denied">Gallery access denied</string>

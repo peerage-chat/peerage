@@ -528,6 +528,8 @@
         <item quantity="other">%1$d вложения · %2$s</item>
     </plurals>
     <string name="attach_camera">Камера</string>
+    <string name="attach_view_title">Галерея</string>
+    <string name="attach_view_picked">Выбрано · №%1$d</string>
     <string name="attach_need_gallery">Чтобы показывать здесь последние снимки, нужен доступ к галерее. Файл при этом можно отправить через пикер выше.</string>
     <string name="attach_allow">Разрешить</string>
     <string name="attach_gallery_denied">Доступ к галерее не выдан</string>

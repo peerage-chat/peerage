@@ -151,6 +151,7 @@ private fun galleryThumb(ctx: Context, item: GalleryItem): android.graphics.Bitm
  */
 @Composable
 internal fun AttachPanel(
+    model: AppModel,
     selected: List<GalleryItem>,
     onToggle: (GalleryItem) -> Unit,
     onCamera: () -> Unit,
@@ -163,6 +164,8 @@ internal fun AttachPanel(
     var items by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     val runWithPerm = rememberPermissionRunner()
     val grid = rememberLazyGridState()
+    // Открытый во весь экран снимок (п. 34): нажатие на плитку смотрит, кружок в углу выбирает.
+    var viewing by remember { mutableStateOf<android.net.Uri?>(null) }
     // Галерея страницами (п. 15 с телефона): прежде показывались только последние 120.
     // Следующая — когда до конца загруженного осталось меньше двух экранов плиток.
     LaunchedEffect(granted) {
@@ -186,6 +189,7 @@ internal fun AttachPanel(
             .background(Tokens.Colors.group),
     ) {
         PanelGrip(onClose)
+        viewing?.let { u -> GalleryViewer(model, items, u, selected, onToggle) { viewing = null } }
         Column(
             Modifier.fillMaxWidth().padding(start = Tokens.Space.l, end = Tokens.Space.l, bottom = Tokens.Space.m),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
@@ -200,7 +204,7 @@ internal fun AttachPanel(
                 ) {
                     item { CameraTile(onCamera) }
                     items(items) { g ->
-                        GalleryTile(g, selected.indexOfFirst { it.uri == g.uri }) { onToggle(g) }
+                        GalleryTile(g, selected.indexOfFirst { it.uri == g.uri }, onOpen = { viewing = g.uri }) { onToggle(g) }
                     }
                 }
             } else {
@@ -238,6 +242,81 @@ internal fun AttachPanel(
 }
 
 /** Плитка «Камера» — первая в сетке. */
+/**
+ * Снимок галереи во весь экран (п. 34) — тем же просмотрщиком, что фото в чате: листается по
+ * загруженной галерее, протяжка уводит снимок обратно в плитку. В «⋮» — выбрать или снять выбор.
+ */
+@Composable
+private fun GalleryViewer(
+    model: AppModel,
+    items: List<GalleryItem>,
+    start: android.net.Uri,
+    selected: List<GalleryItem>,
+    onToggle: (GalleryItem) -> Unit,
+    onClose: () -> Unit,
+) {
+    val pages = remember(items) {
+        items.map { ViewerPage(it.uri, blobId = "", video = it.isVideo, mime = "", name = "", uri = it.uri) }
+    }
+    val pager = androidx.compose.foundation.pager.rememberPagerState(
+        items.indexOfFirst { it.uri == start }.coerceAtLeast(0),
+    ) { pages.size }
+    val g = items[pager.currentPage.coerceIn(0, items.lastIndex)]
+    val picked = selected.indexOfFirst { it.uri == g.uri }
+    ViewerFrame(
+        model,
+        pages,
+        pager,
+        bytesOf = { p -> if (p.video) null else rememberUriBytes(p.uri) },
+        title = stringResource(R.string.attach_view_title),
+        // «N из M» здесь нет: галерея грузится страницами, и M было бы лишь загруженным куском.
+        sub = if (picked >= 0) stringResource(R.string.attach_view_picked, picked + 1) else "",
+        onClose = onClose,
+        menu = { vm ->
+            PopMenuItem(
+                if (picked >= 0) TablerIcons.X else TablerIcons.Check,
+                stringResource(if (picked >= 0) R.string.select_clear else R.string.act_select),
+            ) {
+                vm.dismiss()
+                onToggle(g)
+            }
+        },
+    )
+}
+
+/** Байты снимка галереи для просмотра — с диска, не на главном потоке; огромное не читаем. */
+@Composable
+private fun rememberUriBytes(uri: android.net.Uri?): ByteArray? {
+    val ctx = LocalContext.current
+    return produceState<ByteArray?>(null, uri) {
+        if (uri == null) return@produceState
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                ctx.contentResolver.openInputStream(uri)?.use { s ->
+                    // Предел — чтобы панорама на сотни мегабайт не уронила приложение: такой
+                    // снимок отправляется так же, только без предпросмотра.
+                    val buf = s.readNBytesCompat(VIEW_MAX_BYTES + 1)
+                    buf.takeIf { it.size <= VIEW_MAX_BYTES }
+                }
+            }.getOrNull()
+        }
+    }.value
+}
+
+/** Больше этого снимок галереи во весь экран не открывается. */
+private const val VIEW_MAX_BYTES = 40 * 1024 * 1024
+
+private fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val chunk = ByteArray(64 * 1024)
+    while (out.size() < limit) {
+        val n = read(chunk, 0, minOf(chunk.size, limit - out.size()))
+        if (n < 0) break
+        out.write(chunk, 0, n)
+    }
+    return out.toByteArray()
+}
+
 @Composable
 private fun CameraTile(onClick: () -> Unit) {
     Column(
@@ -254,27 +333,34 @@ private fun CameraTile(onClick: () -> Unit) {
 
 /** Плитка галереи: превью и номер выбора; у видео — длительность. */
 @Composable
-private fun GalleryTile(g: GalleryItem, pickedAt: Int, onClick: () -> Unit) {
+private fun GalleryTile(g: GalleryItem, pickedAt: Int, onOpen: () -> Unit, onToggle: () -> Unit) {
     val bmp = rememberThumb(g)
     val shape = RoundedCornerShape(Tokens.Radius.inner)
     Box(
-        Modifier.fillMaxWidth().aspectRatio(1f).clip(shape).background(Tokens.Colors.avatar)
-            .imageOutline(shape).toggleable(pickedAt >= 0, role = Role.Checkbox) { onClick() },
+        Modifier.fillMaxWidth().aspectRatio(1f).mediaSpot(g.uri).clip(shape).background(Tokens.Colors.avatar)
+            .imageOutline(shape).clickable(role = Role.Image, onClickLabel = stringResource(R.string.avatar_open)) { onOpen() },
     ) {
         if (bmp != null) {
             Image(bmp, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
         // Номер выбора — видно порядок, в котором уйдут файлы. Светлая обводка
         // обязательна: без неё кружок теряется на светлом кадре.
+        // Зона касания кружка — палец, а не 22 dp: иначе вместо выбора открывался бы просмотр.
         Box(
-            Modifier.align(Alignment.TopEnd).padding(Tokens.Space.xs + Tokens.Space.xxs).size(Tokens.Size.check)
-                .clip(CircleShape)
-                .background(if (pickedAt >= 0) HoloAccent else Tokens.Colors.tileScrim)
-                .then(if (pickedAt >= 0) Modifier else Modifier.border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape)),
-            contentAlignment = Alignment.Center,
+            Modifier.align(Alignment.TopEnd).size(Tokens.Size.touch)
+                .toggleable(pickedAt >= 0, role = Role.Checkbox, indication = null, interactionSource = null) { onToggle() },
+            contentAlignment = Alignment.TopEnd,
         ) {
-            if (pickedAt >= 0) {
-                Text("${pickedAt + 1}", color = HoloAccentDark, fontSize = Tokens.Font.small, fontWeight = FontWeight.Bold)
+            Box(
+                Modifier.padding(Tokens.Space.xs + Tokens.Space.xxs).size(Tokens.Size.check)
+                    .clip(CircleShape)
+                    .background(if (pickedAt >= 0) HoloAccent else Tokens.Colors.tileScrim)
+                    .then(if (pickedAt >= 0) Modifier else Modifier.border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (pickedAt >= 0) {
+                    Text("${pickedAt + 1}", color = HoloAccentDark, fontSize = Tokens.Font.small, fontWeight = FontWeight.Bold)
+                }
             }
         }
         if (g.durationMs > 0) TileChip(fmtDuration(g.durationMs.toInt()), Alignment.BottomEnd)

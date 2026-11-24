@@ -150,6 +150,8 @@ internal class ViewerPage(
     val mime: String,
     val name: String,
     val caption: String = "",
+    /** Снимок из галереи телефона (выбор вложения): видео играет прямо с него, без копии. */
+    val uri: android.net.Uri? = null,
 )
 
 private fun Message.page() = ViewerPage(ref(), blobId, isVideo(), mime, name, text.trim())
@@ -282,7 +284,8 @@ internal fun ViewerFrame(
     model: AppModel,
     pages: List<ViewerPage>,
     pager: androidx.compose.foundation.pager.PagerState,
-    bytesOf: (ViewerPage) -> ByteArray?,
+    /** Байты снимка; composable — галерее их надо дочитать с диска, не на главном потоке. */
+    bytesOf: @Composable (ViewerPage) -> ByteArray?,
     title: String,
     sub: String,
     onClose: () -> Unit,
@@ -693,7 +696,8 @@ private fun VideoSurface(model: AppModel, item: ViewerPage, muted: Boolean, chro
     // оно не поднимается. Копия живёт, пока открыт просмотр.
     var file by remember(item.blobId) { mutableStateOf<java.io.File?>(null) }
     LaunchedEffect(item.blobId) {
-        model.exportBlob(item.blobId, "viewer", "${item.blobId.take(16)}-${item.name}") { file = it }
+        // Видео из галереи телефона играет со своего адреса: копировать нечего.
+        if (item.uri == null) model.exportBlob(item.blobId, "viewer", "${item.blobId.take(16)}-${item.name}") { file = it }
     }
     var mine by remember(item.blobId) { mutableStateOf<android.widget.VideoView?>(null) }
     var playing by remember(item.blobId) { mutableStateOf(true) }
@@ -725,13 +729,13 @@ private fun VideoSurface(model: AppModel, item: ViewerPage, muted: Boolean, chro
     }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val f = file
-        if (f == null) {
+        if (f == null && item.uri == null) {
             CircularProgressIndicator(color = HoloAccent, modifier = Modifier.size(36.dp), strokeWidth = 2.dp)
         } else {
             AndroidView(
                 factory = { c ->
                     android.widget.VideoView(c).apply {
-                        setVideoPath(f.absolutePath)
+                        if (item.uri != null) setVideoURI(item.uri) else setVideoPath(f!!.absolutePath)
                         setOnPreparedListener { mp ->
                             // Зациклено: короткое видео из чата пересматривают, и
                             // жать «заново» после каждого прохода — работа на

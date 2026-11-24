@@ -833,7 +833,7 @@ internal fun MessageInput(
     onStageAttachments: ((List<GalleryItem>) -> Unit)? = null,
     /** Запись голосовых; null — микрофона в этом поле нет. */
     voice: VoiceSession? = null,
-    model: AppModel? = null,
+    model: AppModel,
     /** Подсказка пустого поля: «Сообщение», в «Сохранённом» — «Заметка себе…». */
     hint: String? = null,
     /** Над полем ждут присланные через «Поделиться» вложения: отправка без текста — можно. */
@@ -899,9 +899,9 @@ internal fun MessageInput(
     LaunchedEffect(imeShown) { if (imeShown && attachOpen) closeAttach() }
 
     // Правка: вложить нечего (меняются только слова), отправка становится «Сохранить».
-    val editing = model?.editTarget != null
+    val editing = model.editTarget != null
     // Плашка прилегает к полю (зазор 2 dp), без неё — обычный отступ сверху.
-    val stripShown = replyStrip != null && (editing || staged || model?.replyTarget != null)
+    val stripShown = replyStrip != null && (editing || staged || model.replyTarget != null)
     Column(Modifier.fillMaxWidth()) {
         // Цитата видна ровно там, где человек печатает ответ: иначе легко забыть,
         // что сообщение уйдёт ответом, и получить «ответ» не на то.
@@ -912,7 +912,7 @@ internal fun MessageInput(
         val query = if (field.selection.collapsed) Mentions.query(field.text.toString(), field.selection.start) else null
         val candidates = query?.let { mentionCandidates(it.second) }.orEmpty()
         if (query != null && candidates.isNotEmpty()) {
-            MentionSuggestions(candidates, { model?.peerAvatar(it) }) { key, name ->
+            MentionSuggestions(candidates, { model.peerAvatar(it) }) { key, name ->
                 replaceAt(query.first, field.selection.start, "@$name ")
                 onMentionPicked(key, name)
             }
@@ -937,6 +937,7 @@ internal fun MessageInput(
             exit = panelExit,
         ) {
             AttachPanel(
+                model = model,
                 selected = picked,
                 onToggle = { g ->
                     picked = if (picked.any { it.uri == g.uri }) picked.filterNot { it.uri == g.uri } else picked + g
@@ -962,10 +963,10 @@ internal fun MessageInput(
             exit = panelExit,
         ) {
             EmojiPanel(
-                recent = model?.recentEmoji ?: emptyList(),
+                recent = model.recentEmoji,
                 onPick = { e ->
                     replaceAt(field.selection.start, field.selection.end, e)
-                    model?.useEmoji(e)
+                    model.useEmoji(e)
                 },
                 onBackspace = {
                     val end = field.selection.end
