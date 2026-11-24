@@ -857,7 +857,6 @@ internal fun MessageInput(
     // падал бы в конец), а клавиатуре — приём картинок и GIF (`contentReceiver` в Compose 1.7
     // есть только у поля на TextFieldState).
     val field = rememberTextFieldState(value)
-    val reveal = rememberTypeReveal(field)
     // Последний текст, о котором знают и поле, и экран: по нему отличаем внешнюю правку
     // (очистка после отправки, черновик) от набора, не гоняя текст по кругу.
     var synced by remember { mutableStateOf(value) }
@@ -1045,9 +1044,8 @@ internal fun MessageInput(
                     cursorBrush = SolidColor(HoloAccent),
                     keyboardOptions = TextKeyboard,
                     lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
-                    onTextLayout = { getResult -> reveal.layout = getResult },
                     decorator = { inner ->
-                        Box(with(reveal) { Modifier.revealOver(Tokens.Colors.group) }, contentAlignment = Alignment.CenterStart) {
+                        Box(contentAlignment = Alignment.CenterStart) {
                             if (value.isEmpty()) {
                                 Text(
                                     hint ?: stringResource(R.string.chat_input_hint),
