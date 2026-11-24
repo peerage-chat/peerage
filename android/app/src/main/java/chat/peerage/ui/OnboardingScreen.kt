@@ -6,10 +6,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
-import android.os.PowerManager
-import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -889,11 +886,12 @@ private fun PermissionsStep(onBack: () -> Unit, onDone: () -> Unit) {
         notifGranted = it
     }
     // Состояние «в фоне» перечитываем после возврата из системных настроек.
-    var bgGranted by remember { mutableStateOf(ctx.ignoresBatteryOptimizations()) }
+    var bgGranted by remember { mutableStateOf(Background.ignoresBatteryOptimizations(ctx)) }
     val bgLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        bgGranted = ctx.ignoresBatteryOptimizations()
+        bgGranted = Background.ignoresBatteryOptimizations(ctx)
     }
     val autostart = remember { Autostart.intent(ctx) }
+    val vendor = remember { Background.vendor(ctx) }
     OnbPage(
         bar = OnbStep.Perms.bar,
         onBack = onBack,
@@ -910,7 +908,15 @@ private fun PermissionsStep(onBack: () -> Unit, onDone: () -> Unit) {
                 }
             }
             PermRow(TablerIcons.BatteryCharging, R.string.onb_perm_bg, R.string.onb_perm_bg_desc, first = !showNotif, bgGranted, R.string.onb_allow) {
-                bgLauncher.launch(batteryOptimizationIntent(ctx))
+                bgLauncher.launch(Background.batteryOptimizationIntent(ctx))
+            }
+            if (vendor != null) {
+                // Системное «не оптимизировать» прошивку не убеждает (п. 50): на Xiaomi
+                // останавливает «Контроль активности», пока там не «Нет ограничений».
+                val (title, desc) = vendorStrings(vendor)
+                PermRow(TablerIcons.BatteryCharging, title, desc, first = false, granted = false, R.string.onb_open) {
+                    Background.openVendor(ctx, vendor)
+                }
             }
             if (autostart != null) {
                 // Включён ли автозапуск, прошивка не говорит — кнопка остаётся.
@@ -938,26 +944,8 @@ private fun PermRow(icon: ImageVector, title: Int, desc: Int, first: Boolean, gr
     }
 }
 
-/** Приложение уже выведено из-под оптимизации батареи? */
-private fun Context.ignoresBatteryOptimizations(): Boolean {
-    val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-    return pm.isIgnoringBatteryOptimizations(packageName)
-}
-
-/**
- * Прямой диалог «не оптимизировать» (требует REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).
- *
- * На части прошивок (проверено на MIUI) этот экшен ловят ДВА обработчика, и вместо
- * диалога система показывает выбор «Что использовать?». Поэтому целимся явно в
- * системные настройки; если их нет — отдаём неявный интент, а в крайнем случае
- * общий список батарейных исключений (он есть всегда).
- */
-private fun batteryOptimizationIntent(ctx: Context): Intent {
-    val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
-    val settings = Intent(direct).setPackage("com.android.settings")
-    return when {
-        settings.resolveActivity(ctx.packageManager) != null -> settings
-        direct.resolveActivity(ctx.packageManager) != null -> direct
-        else -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-    }
+/** Подписи строки батареи прошивки: на MIUI — её название экрана, иначе — общее. */
+internal fun vendorStrings(v: Background.Vendor): Pair<Int, Int> = when (v) {
+    Background.Vendor.MIUI -> R.string.bg_vendor_miui to R.string.bg_vendor_miui_desc
+    Background.Vendor.APP_INFO -> R.string.bg_vendor_app to R.string.bg_vendor_app_desc
 }

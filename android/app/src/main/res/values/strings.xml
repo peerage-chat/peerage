@@ -1347,4 +1347,14 @@
     <string name="update_retry">Retry</string>
     <string name="update_rejected">Update failed verification</string>
     <string name="update_rejected_sub">The file did not match the app signature and was deleted.</string>
+
+    <!-- Работа в фоне (п. 50, app-ui.md → «Работа в фоне») -->
+    <string name="bg_section">Background activity</string>
+    <string name="bg_android">Android battery optimization</string>
+    <string name="bg_android_free">Off</string>
+    <string name="bg_android_limited">On: Android puts the app to sleep in the background</string>
+    <string name="bg_vendor_miui">Battery saver</string>
+    <string name="bg_vendor_miui_desc">Needs “No restrictions”: otherwise MIUI stops the app in the background</string>
+    <string name="bg_vendor_app">App battery</string>
+    <string name="bg_vendor_app_desc">Allow background activity: otherwise the firmware stops the app</string>
 </resources>
