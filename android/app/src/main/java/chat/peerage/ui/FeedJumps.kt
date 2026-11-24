@@ -64,6 +64,7 @@ internal fun FeedSeen(model: AppModel, listState: LazyListState, msgs: List<Mess
             Triple(seen, listState.firstVisibleItemIndex <= 1, marks.reactions.size + marks.mentions.size + marks.below.size)
         }.distinctUntilChanged().collect { (seen, atBottom, _) ->
             model.feedAtBottom = atBottom
+            model.feedMarks.onScreen = seen
             model.sawMessages(chat, seen)
         }
     }

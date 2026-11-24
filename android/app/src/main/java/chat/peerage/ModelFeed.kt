@@ -22,6 +22,10 @@ class FeedMarks {
 
     /** Стек возвратов: ответы, с которых уходили по цитате. «Вниз» снимает верхний. */
     val quoteBack = mutableStateListOf<FeedSpot>()
+
+    /** Что из ленты сейчас на экране (ставит [chat.peerage.ui.FeedSeen]): возврат к ответу,
+     *  который и так виден, — не возврат. */
+    var onScreen: Set<MsgRef> = emptySet()
 }
 
 /** Место в ленте: ссылка и где оно в переписке — чтобы открыть окно, если его нет в ленте. */
@@ -98,16 +102,30 @@ internal fun AppModel.jumpToMention(chat: ChatTarget) {
  * (удалено у себя) — переходить некуда.
  */
 internal fun AppModel.followQuote(chat: ChatTarget, from: Message, to: Message) {
+    // Тот же ответ — одно место в стеке: десять тапов по одной цитате не должны стоить
+    // десяти нажатий «вниз» (п. 11 с телефона).
+    feedMarks.quoteBack.removeAll { it.ref == MsgRef(from.id, from.sender) }
     feedMarks.quoteBack += from.spot()
     goToSpot(chat, to.spot())
 }
 
-/** «Вниз» со стеком — назад к ответу, с которого ушли. false — стек пуст, дело ленты. */
+/**
+ * «Вниз» со стеком — назад к ответу, с которого ушли. Ответы, что и так на экране, снимаются
+ * без перехода: к ним уже вернулись. false — возвращаться некуда, дело ленты (к хвосту).
+ */
 internal fun AppModel.popQuoteBack(chat: ChatTarget): Boolean {
-    val s = feedMarks.quoteBack.removeLastOrNull() ?: return false
-    goToSpot(chat, s)
-    return true
+    val back = feedMarks.quoteBack
+    while (back.isNotEmpty()) {
+        val s = back.removeAt(back.lastIndex)
+        if (s.ref in feedMarks.onScreen) continue
+        goToSpot(chat, s)
+        return true
+    }
+    return false
 }
+
+/** Тап по плашке закрепа — к закреплённому сообщению, ряд подсвечен. */
+internal fun AppModel.jumpToPinned(chat: ChatTarget, m: Message) = goToSpot(chat, m.spot())
 
 private fun AppModel.goToSpot(chat: ChatTarget, s: FeedSpot, reaction: Boolean = false) {
     flash = Flash(s.ref, reaction)

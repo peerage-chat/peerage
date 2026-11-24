@@ -843,6 +843,7 @@
     <string name="forward_hide_author_hint">The recipient sees “forwarded” but not from whom. The author key is not sent at all.</string>
     <string name="forward_from_hidden">Forwarded</string>
     <string name="pin_action">Pin</string>
+    <string name="pin_go">Go to pinned message</string>
     <string name="pin_title">Pinned</string>
     <string name="pin_title_many">Pinned · %1$d</string>
     <string name="pin_remove">Unpin</string>

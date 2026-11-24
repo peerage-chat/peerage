@@ -1363,13 +1363,20 @@ internal fun JumpToMessage(model: AppModel, listState: LazyListState, msgs: List
             // Сначала доехать, потом гасить: смена цели перезапускает эффект и
             // оборвала бы прокрутку на полпути.
             val index = msgs.size - 1 - i // лента перевёрнута: индекс от конца
-            listState.animateScrollToItem(index)
             // Цель — на трети высоты от низа: виден и контекст над ней, и следующее под ней.
-            // Отступ считаем от того места, где она на деле встала: у краёв истории
-            // прокрутка до элемента упирается и ставит его не к низу.
-            listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.let { item ->
-                val want = listState.layoutInfo.viewportSize.height / 3
-                listState.animateScrollBy((item.offset - want).toFloat())
+            // Одним движением (п. 12 с телефона): прокрутка «до элемента» и следом доводка
+            // на треть дёргали ленту дважды — выше, потом обратно. Цель на экране — плавно
+            // на место; дальше — сразу на место, куда пришли, показывает подсветка.
+            val want = listState.layoutInfo.viewportSize.height / 3
+            val seen = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+            if (seen != null) {
+                listState.animateScrollBy((seen.offset - want).toFloat())
+            } else {
+                listState.scrollToItem(index)
+                // У краёв истории элемент встаёт не к низу — доводим от того, где встал.
+                listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.let { item ->
+                    listState.scrollBy((item.offset - want).toFloat())
+                }
             }
             model.jumpTo = null
         }
@@ -1386,11 +1393,19 @@ internal fun JumpToMessage(model: AppModel, listState: LazyListState, msgs: List
 @Composable
 internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: Boolean) {
     val list = model.pinned[chat].orEmpty()
-    val top = list.firstOrNull() ?: return
+    if (list.isEmpty()) return
+    // Тап — к закреплённому (п. 13 с телефона); их несколько — следующий тап к следующему,
+    // по кругу, и плашка показывает то, куда поведёт.
+    var at by remember(chat) { mutableStateOf(0) }
+    val top = list[at % list.size]
     // Полоса, а не карточка: закреплённое читается как продолжение шапки и не
     // спорит с пузырями за внимание. Слева — акцентная риска вместо иконки.
     Row(
         Modifier.fillMaxWidth().background(HoloSurface)
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.pin_go)) {
+                model.jumpToPinned(ChatTarget(chat, group), top)
+                at = (at + 1) % list.size
+            }
             .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
