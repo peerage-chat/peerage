@@ -1652,13 +1652,16 @@ internal fun Modifier.menuGrow(progress: () -> Float, originX: Float, originY: (
 
 /**
  * Подложка меню: ступень group с тенью и тонкой кромкой. Одна у «⋮» и у меню пузыря. Выше
- * отведённого места (альбомная ориентация) — прокручивается, а не уходит за край.
+ * отведённого места (альбомная ориентация) — прокручивается, а не уходит за край. Ширина —
+ * по самой длинной строке в пределах [Tokens.Size.menuMin]…[Tokens.Size.menu]: на постоянной
+ * ширине меню из двух коротких пунктов было в полтора раза шире подписей (п. 29).
  */
 @Composable
 internal fun MenuSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val shape = RoundedCornerShape(Tokens.Radius.group)
     Column(
-        modifier.width(Tokens.Size.menu)
+        modifier.widthIn(min = Tokens.Size.menuMin, max = Tokens.Size.menu)
+            .width(IntrinsicSize.Max)
             .shadow(Tokens.Size.menuShadow, shape)
             .clip(shape)
             .background(Tokens.Colors.group)
