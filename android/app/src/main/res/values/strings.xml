@@ -93,7 +93,6 @@
     <string name="common_menu">Menu</string>
 
     <!-- ── App states ──────────────────────────────────────────────────── -->
-    <string name="app_connecting">Connecting to network…</string>
     <string name="app_error">Error: %1$s</string>
 
     <!-- ── Navigation / drawer / folders ───────────────────────────────── -->

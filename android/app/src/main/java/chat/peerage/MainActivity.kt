@@ -249,7 +249,7 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
 
     when {
         model.error != null -> CenterMessage(stringResource(R.string.app_error, model.error.orEmpty()), Modifier.background(HoloBg))
-        model.me == null -> CenterMessage(stringResource(R.string.app_connecting), Modifier.background(HoloBg))
+        model.me == null -> StartupScreen()
         !onboarded -> OnboardingFlow(model) {
             prefs.edit().putBoolean("onboarded", true).apply()
             onboarded = true
@@ -266,6 +266,28 @@ internal fun App(model: AppModel, dataDir: String, width: WidthClass) {
 internal fun CenterMessage(text: String, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(text, color = HoloSecondary, fontSize = Tokens.Font.body)
+    }
+}
+
+/**
+ * Пока движок открывает данные (локально, сеть он не ждёт): фон приложения без надписи —
+ * прежнее «Подключение к сети…» обещало ожидание сети, которого нет (п. 14 с телефона).
+ * Затянулся старт (медленный телефон, большая база) — через полторы секунды индикатор.
+ */
+@Composable
+private fun StartupScreen() {
+    val slow by produceState(false) {
+        kotlinx.coroutines.delay(1500)
+        value = true
+    }
+    Box(Modifier.fillMaxSize().background(HoloBg), contentAlignment = Alignment.Center) {
+        if (slow) {
+            androidx.compose.material3.CircularProgressIndicator(
+                color = HoloAccent,
+                strokeWidth = Tokens.Size.progressStroke,
+                modifier = Modifier.size(Tokens.Size.iconL),
+            )
+        }
     }
 }
 
