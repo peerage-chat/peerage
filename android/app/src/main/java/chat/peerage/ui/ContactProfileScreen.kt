@@ -66,7 +66,7 @@ internal fun ContactProfileScreen(
         editDesc = stringResource(R.string.profile_rename),
         header = {
             val photo = model.contactAvatars[c.avatarId]
-            OpenableAvatar(photo) {
+            OpenableAvatar(model, c.displayName, photo) {
                 SquareAvatar(
                     c.displayName,
                     size = Tokens.Size.avatarHero,

@@ -90,21 +90,21 @@ private fun Message.ref() = MsgRef(id, sender)
  * окне, и общая для двух окон система отсчёта — только экран.
  */
 internal object MediaSpots {
-    private val spots = HashMap<MsgRef, Rect>()
+    private val spots = HashMap<Any, Rect>()
 
-    fun put(ref: MsgRef, r: Rect) {
-        spots[ref] = r
+    fun put(key: Any, r: Rect) {
+        spots[key] = r
     }
 
-    fun remove(ref: MsgRef) {
-        spots.remove(ref)
+    fun remove(key: Any) {
+        spots.remove(key)
     }
 
-    fun get(ref: MsgRef): Rect? = spots[ref]?.takeIf { it.width > 0f && it.height > 0f }
+    fun get(key: Any): Rect? = spots[key]?.takeIf { it.width > 0f && it.height > 0f }
 }
 
-/** Отметить снимок ленты как место возврата просмотрщика. */
-internal fun Modifier.mediaSpot(ref: MsgRef): Modifier = composed {
+/** Отметить снимок ленты (или аватар) как место возврата просмотрщика; [ref] — ключ страницы. */
+internal fun Modifier.mediaSpot(ref: Any): Modifier = composed {
     val view = LocalView.current
     DisposableEffect(ref) { onDispose { MediaSpots.remove(ref) } }
     onGloballyPositioned {
@@ -139,12 +139,40 @@ private class CloseMotion {
 private const val DRAG_SHRINK = 0.5f
 
 /**
- * Полноэкранный просмотр фото и видео (app-ui.md → «Просмотр», макеты `viewer/`).
- *
- * Экран сознательно «голый»: чёрный фон, никаких поверхностей. Хром — шапка сверху,
- * подпись и таймлайн снизу — лежит на затемнении поверх снимка, прячется по тапу и сам
- * через пять секунд. Жесты: щипок — до 6×, двойной тап у фото — 1× ↔ 2.5×, вбок —
- * соседнее вложение, вниз — снимок уходит в свой пузырь ([CloseMotion]).
+ * Страница просмотрщика: что показать и откуда взять. Один вид на вложение чата и на фото
+ * профиля — просмотрщик у них один (п. 30).
+ */
+internal class ViewerPage(
+    /** Ключ страницы и место возврата в [MediaSpots]: ссылка на сообщение или ключ аватара. */
+    val key: Any,
+    val blobId: String,
+    val video: Boolean,
+    val mime: String,
+    val name: String,
+    val caption: String = "",
+)
+
+private fun Message.page() = ViewerPage(ref(), blobId, isVideo(), mime, name, text.trim())
+
+/** Меню просмотрщика: закрыть его и общие для любого снимка «Сохранить» / «Поделиться». */
+internal class ViewerMenuScope(val dismiss: () -> Unit, val save: () -> Unit, val share: () -> Unit)
+
+/** «Сохранить» и «Поделиться» — есть у любого снимка. */
+@Composable
+internal fun SaveShareItems(vm: ViewerMenuScope) {
+    ViewerMenuItem(TablerIcons.Download, R.string.viewer_save) {
+        vm.dismiss()
+        vm.save()
+    }
+    ViewerMenuItem(TablerIcons.Share, R.string.viewer_share) {
+        vm.dismiss()
+        vm.share()
+    }
+}
+
+/**
+ * Полноэкранный просмотр фото и видео чата (app-ui.md → «Просмотр», макеты `viewer/`):
+ * каркас [ViewerFrame] и меню действий над сообщением.
  *
  * Листается ВСЁ медиа чата (запрос к движку), а не подгруженный кусок ленты: [seed] —
  * то, что есть сразу, пока список едет, и «N из M» считает по чату.
@@ -162,14 +190,10 @@ internal fun MediaViewer(
 ) {
     var list by remember { mutableStateOf(seed.filter { viewable(model, it) }) }
     if (list.isEmpty()) return
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val storagePerm = rememberPermissionRunner()
     val pager = rememberPagerState(list.indexOfFirst { it.ref() == start }.coerceAtLeast(0)) { list.size }
     val m = list[pager.currentPage.coerceIn(0, list.lastIndex)]
-    val video = m.isVideo()
-    // Видео в память не читаем: оно проигрывается и отдаётся файлом (см. [Content]).
-    val bytes = if (video) null else model.blob(m.blobId)
+    val pages = remember(list) { list.map { it.page() } }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     // Полный список медиа чата подменяет затравку на той же странице: снимок под
     // пальцем не меняется, меняется только «N из M».
@@ -185,9 +209,96 @@ internal fun MediaViewer(
         }
     }
 
+    ViewerFrame(
+        model,
+        pages,
+        pager,
+        bytesOf = { p -> if (p.video) null else model.blob(p.blobId) },
+        title = viewerAuthor(model, chat, m),
+        sub = if (list.size > 1) {
+            stringResource(R.string.viewer_of, fmtViewerDate(m.time), pager.currentPage + 1, list.size)
+        } else {
+            fmtViewerDate(m.time)
+        },
+        onClose = onClose,
+        menu = { vm ->
+            if (onReply != null) {
+                ViewerMenuItem(TablerIcons.Reply, R.string.chat_reply) {
+                    vm.dismiss()
+                    onReply(m)
+                    onClose()
+                }
+            }
+            ViewerMenuItem(TablerIcons.Forward, R.string.forward_action) {
+                vm.dismiss()
+                // Пересылка — через выделение, как из панели чата: «переслать»
+                // везде означает одно. Шторку рисует экран под просмотрщиком.
+                model.selection = setOf(m.ref())
+                model.beginForward(chat.id, chat.group)
+                onClose()
+            }
+            SaveShareItems(vm)
+            ViewerMenuItem(TablerIcons.Message, R.string.viewer_show_in_chat) {
+                vm.dismiss()
+                onShowInChat(m)
+                onClose()
+            }
+            PopMenuDivider()
+            ViewerMenuItem(TablerIcons.Trash, R.string.viewer_delete, danger = true) {
+                vm.dismiss()
+                confirmDelete = true
+            }
+        },
+    ) {
+        if (confirmDelete) {
+            ConfirmSheet(
+                title = stringResource(R.string.viewer_delete),
+                text = stringResource(R.string.viewer_delete_confirm),
+                ok = stringResource(R.string.folder_delete_ok),
+                onOk = {
+                    model.selection = setOf(m.ref())
+                    model.deleteSelected(chat.id, chat.group)
+                    onDeleted(m.ref())
+                    onClose()
+                },
+                onClose = { confirmDelete = false },
+            )
+        }
+    }
+}
+
+/**
+ * Каркас просмотрщика — один на вложения чата и на фото профиля.
+ *
+ * Экран сознательно «голый»: чёрный фон, никаких поверхностей. Хром — шапка сверху,
+ * подпись и таймлайн снизу — лежит на затемнении поверх снимка, прячется по тапу и сам
+ * через пять секунд. Жесты: щипок — до 6×, двойной тап у фото — 1× ↔ 2.5×, вбок —
+ * соседняя страница, вниз — снимок уходит туда, откуда открыт ([CloseMotion]).
+ * [title] и [sub] — шапка текущей страницы, [menu] — пункты «⋮», [overlay] — шторки
+ * поверх просмотра (в том же окне).
+ */
+@Composable
+internal fun ViewerFrame(
+    model: AppModel,
+    pages: List<ViewerPage>,
+    pager: androidx.compose.foundation.pager.PagerState,
+    bytesOf: (ViewerPage) -> ByteArray?,
+    title: String,
+    sub: String,
+    onClose: () -> Unit,
+    menu: @Composable ColumnScope.(ViewerMenuScope) -> Unit,
+    overlay: @Composable () -> Unit = {},
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val storagePerm = rememberPermissionRunner()
+    val p = pages[pager.currentPage.coerceIn(0, pages.lastIndex)]
+    val video = p.video
+    // Видео в память не читаем: оно проигрывается и отдаётся файлом (см. [Content]).
+    val bytes = bytesOf(p)
+
     var chrome by remember { mutableStateOf(true) }
-    var menu by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
     var muted by remember { mutableStateOf(false) }
     val motion = remember { CloseMotion() }
     // Пороги — в dp: в пикселях жест на плотном экране требовал протянуть вдвое дальше.
@@ -198,8 +309,8 @@ internal fun MediaViewer(
     // Хром уходит сам: пока он на экране, он закрывает часть кадра. Отсчёт
     // перезапускается на каждое переключение и на смену страницы; открытое меню
     // держит его — иначе пункты исчезали бы из-под пальца.
-    LaunchedEffect(chrome, pager.currentPage, menu) {
-        if (chrome && !menu) {
+    LaunchedEffect(chrome, pager.currentPage, menuOpen) {
+        if (chrome && !menuOpen) {
             kotlinx.coroutines.delay(5000)
             chrome = false
         }
@@ -213,7 +324,7 @@ internal fun MediaViewer(
                 if (video) {
                     onClose()
                 } else {
-                    motion.target = MediaSpots.get(m.ref())?.let { r ->
+                    motion.target = MediaSpots.get(p.key)?.let { r ->
                         val at = IntArray(2).also { view.getLocationOnScreen(it) }
                         r.translate(-at[0].toFloat(), -at[1].toFloat())
                     }
@@ -234,11 +345,11 @@ internal fun MediaViewer(
             contentAlignment = Alignment.Center,
         ) {
             HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = motion.dragY == 0f) { page ->
-                val it = list[page]
+                val it = pages[page]
                 MediaPage(
                     model,
                     it,
-                    if (it.isVideo()) null else model.blob(it.blobId),
+                    bytesOf(it),
                     muted,
                     chrome,
                     motion = if (page == pager.currentPage) motion else null,
@@ -256,77 +367,27 @@ internal fun MediaViewer(
             // Шапка поверх снимка, а не над ним: отдельная полоса откусывала бы
             // высоту у самого изображения ради подписи, которую и так знают.
             AnimatedVisibility(shown, Modifier.align(Alignment.TopCenter), enter = fadeIn(), exit = fadeOut()) {
-                ViewerTop(
-                    author = viewerAuthor(model, chat, m),
-                    sub = if (list.size > 1) {
-                        stringResource(R.string.viewer_of, fmtViewerDate(m.time), pager.currentPage + 1, list.size)
-                    } else {
-                        fmtViewerDate(m.time)
-                    },
-                    onClose = onClose,
-                    onMenu = { menu = true },
-                ) {
-                    PopMenu(menu, onDismiss = { menu = false }) {
-                        if (onReply != null) {
-                            ViewerMenuItem(TablerIcons.Reply, R.string.chat_reply) {
-                                menu = false
-                                onReply(m)
-                                onClose()
-                            }
-                        }
-                        ViewerMenuItem(TablerIcons.Forward, R.string.forward_action) {
-                            menu = false
-                            // Пересылка — через выделение, как из панели чата: «переслать»
-                            // везде означает одно. Шторку рисует экран под просмотрщиком.
-                            model.selection = setOf(m.ref())
-                            model.beginForward(chat.id, chat.group)
-                            onClose()
-                        }
-                        ViewerMenuItem(TablerIcons.Download, R.string.viewer_save) {
-                            menu = false
-                            withContent(model, m, bytes) { saveWithPermission(ctx, storagePerm, it, m) }
-                        }
-                        ViewerMenuItem(TablerIcons.Share, R.string.viewer_share) {
-                            menu = false
-                            withContent(model, m, bytes) { shareFile(ctx, it, m.mime, m.name) }
-                        }
-                        ViewerMenuItem(TablerIcons.Message, R.string.viewer_show_in_chat) {
-                            menu = false
-                            onShowInChat(m)
-                            onClose()
-                        }
-                        PopMenuDivider()
-                        ViewerMenuItem(TablerIcons.Trash, R.string.viewer_delete, danger = true) {
-                            menu = false
-                            confirmDelete = true
-                        }
+                ViewerTop(author = title, sub = sub, onClose = onClose, onMenu = { menuOpen = true }) {
+                    PopMenu(menuOpen, onDismiss = { menuOpen = false }) {
+                        menu(
+                            ViewerMenuScope(
+                                dismiss = { menuOpen = false },
+                                save = { withContent(model, p, bytes) { saveWithPermission(ctx, storagePerm, it, p) } },
+                                share = { withContent(model, p, bytes) { shareFile(ctx, it, p.mime, p.name) } },
+                            ),
+                        )
                     }
                 }
             }
 
             // Подпись и таймлайн — один нижний слой: прячутся вместе с шапкой.
-            val caption = m.text.trim()
-            if (caption.isNotEmpty() || video) {
+            if (p.caption.isNotEmpty() || video) {
                 AnimatedVisibility(shown, Modifier.align(Alignment.BottomCenter), enter = fadeIn(), exit = fadeOut()) {
-                    ViewerBottom(caption, video, muted) { muted = it }
+                    ViewerBottom(p.caption, video, muted) { muted = it }
                 }
             }
         }
-
-        if (confirmDelete) {
-            ConfirmSheet(
-                title = stringResource(R.string.viewer_delete),
-                text = stringResource(R.string.viewer_delete_confirm),
-                ok = stringResource(R.string.folder_delete_ok),
-                onOk = {
-                    model.selection = setOf(m.ref())
-                    model.deleteSelected(chat.id, chat.group)
-                    onDeleted(m.ref())
-                    onClose()
-                },
-                onClose = { confirmDelete = false },
-            )
-        }
+        overlay()
     }
 }
 
@@ -414,25 +475,25 @@ private fun saveWithPermission(
     ctx: Context,
     ask: (Array<String>, Int, () -> Unit) -> Unit,
     content: Content,
-    m: Message,
+    p: ViewerPage,
 ) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        saveToGallery(ctx, content, m.mime, m.name)
+        saveToGallery(ctx, content, p.mime, p.name)
     } else {
         ask(
             arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
             R.string.perm_denied_storage,
-        ) { saveToGallery(ctx, content, m.mime, m.name) }
+        ) { saveToGallery(ctx, content, p.mime, p.name) }
     }
 }
 
-/** Достать содержимое вложения и отдать его `use` на главном потоке. */
-private fun withContent(model: AppModel, m: Message, bytes: ByteArray?, use: (Content) -> Unit) {
-    if (!m.isVideo()) {
+/** Достать содержимое страницы и отдать его `use` на главном потоке. */
+private fun withContent(model: AppModel, p: ViewerPage, bytes: ByteArray?, use: (Content) -> Unit) {
+    if (!p.video) {
         bytes?.let { use(Content.Bytes(it)) }
         return
     }
-    model.exportBlob(m.blobId, "shared", m.name.ifBlank { defaultName(true) }) { f ->
+    model.exportBlob(p.blobId, "shared", p.name.ifBlank { defaultName(true) }) { f ->
         f?.let { use(Content.OnDisk(it)) }
     }
 }
@@ -446,7 +507,7 @@ private fun ViewerMenuItem(icon: ImageVector, labelRes: Int, danger: Boolean = f
 @Composable
 private fun MediaPage(
     model: AppModel,
-    item: Message,
+    item: ViewerPage,
     bytes: ByteArray?,
     muted: Boolean,
     chrome: Boolean,
@@ -456,12 +517,12 @@ private fun MediaPage(
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit,
 ) {
-    var scale by remember(item.blobId) { mutableFloatStateOf(1f) }
-    var offX by remember(item.blobId) { mutableFloatStateOf(0f) }
-    var offY by remember(item.blobId) { mutableFloatStateOf(0f) }
+    var scale by remember(item.key) { mutableFloatStateOf(1f) }
+    var offX by remember(item.key) { mutableFloatStateOf(0f) }
+    var offY by remember(item.key) { mutableFloatStateOf(0f) }
     var box by remember { mutableStateOf(IntSize.Zero) }
     val zoom by animateFloatAsState(scale, label = "zoom")
-    val video = item.isVideo()
+    val video = item.video
     val radius = with(LocalDensity.current) { Tokens.Radius.bubble.toPx() }
 
     // Дальше своих краёв снимок не уезжает: без этого его можно утащить за экран
@@ -478,7 +539,7 @@ private fun MediaPage(
     // снимку. Раньше на увеличенном потреблялось любое касание, и распознаватель
     // тапов переставал их получать (основная фаза идёт от последнего модификатора
     // к первому): из зума нельзя было выйти двойным тапом, а хром не возвращался.
-    val zoomable = Modifier.pointerInput(item.blobId) {
+    val zoomable = Modifier.pointerInput(item.key) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)
             var moved = false
@@ -507,7 +568,7 @@ private fun MediaPage(
         }
     }
 
-    val taps = Modifier.pointerInput(item.blobId, video) {
+    val taps = Modifier.pointerInput(item.key, video) {
         detectTapGestures(
             onTap = { onChrome() },
             onDoubleTap = {
@@ -527,7 +588,7 @@ private fun MediaPage(
 
     // Закрытие протяжкой вниз — только на единичном масштабе: увеличенный снимок
     // двигают, а не закрывают.
-    val closeDrag = Modifier.pointerInput(item.blobId) {
+    val closeDrag = Modifier.pointerInput(item.key) {
         detectVerticalDragGestures(
             onDragEnd = { onDragEnd() },
             onDragCancel = { onDragEnd() },
@@ -552,7 +613,7 @@ private fun MediaPage(
             else -> {
                 // Под размер экрана: зум до 6× работает по этому же битмапу —
                 // держать ради него оригинал на 48 МБ не за что.
-                val bmp = rememberFullscreenBitmap(bytes, item.blobId)
+                val bmp = rememberFullscreenBitmap(bytes, item.blobId.ifEmpty { null })
                 // GIF играет и здесь (Android 9+): тот же Image, зум и протяжка — по нему же.
                 val cfg = LocalConfiguration.current
                 val anim = rememberAnimatedPainter(bytes, maxOf(cfg.screenWidthDp, cfg.screenHeightDp).dp)
@@ -627,7 +688,7 @@ private const val PLAYER_POLL_MS = 250L
  * «play» не за что. Байты кладём в приватный кэш, откуда их никто не читает.
  */
 @Composable
-private fun VideoSurface(model: AppModel, item: Message, muted: Boolean, chrome: Boolean) {
+private fun VideoSurface(model: AppModel, item: ViewerPage, muted: Boolean, chrome: Boolean) {
     // Видео расшифровывается в приватный кэш потоково, по чанку: в память целиком
     // оно не поднимается. Копия живёт, пока открыт просмотр.
     var file by remember(item.blobId) { mutableStateOf<java.io.File?>(null) }

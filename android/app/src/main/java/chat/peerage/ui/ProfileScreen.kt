@@ -69,7 +69,7 @@ internal fun ProfileScreen(model: AppModel, navigate: (Screen) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
         ) {
-            OpenableAvatar(model.selfAvatar) {
+            OpenableAvatar(model, name, model.selfAvatar) {
                 SquareAvatar(name, size = Tokens.Size.avatarProfile, avatarBytes = model.selfAvatar, circle = true)
             }
             Column(Modifier.weight(1f)) {

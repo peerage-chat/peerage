@@ -262,7 +262,6 @@
     <string name="search_in_chat">Search in chat</string>
     <string name="search_close">Close search</string>
     <string name="avatar_open">Open photo</string>
-    <string name="avatar_close">Close photo</string>
     <string name="search_clear">Clear</string>
     <string name="search_refine">Refine</string>
     <string name="search_from_member">From member</string>
@@ -556,6 +555,7 @@
     <string name="storage_backup">Data backup</string>
     <string name="storage_backup_none">No backup yet</string>
     <string name="viewer_of">%1$s · %2$d of %3$d</string>
+    <string name="viewer_avatar">Profile photo</string>
     <string name="viewer_show_in_chat">Show in chat</string>
     <string name="viewer_delete">Delete</string>
     <string name="viewer_delete_confirm">Delete this message together with the attachment?</string>

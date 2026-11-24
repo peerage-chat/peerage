@@ -77,7 +77,7 @@ internal fun GroupProfileScreen(
         editDesc = stringResource(R.string.group_edit_desc),
         header = {
             val photo = model.groupPhoto(gid)
-            OpenableAvatar(photo, square = true) { SquareAvatar(g.name, size = Tokens.Size.avatarHero, avatarBytes = photo) }
+            OpenableAvatar(model, g.name, photo, square = true) { SquareAvatar(g.name, size = Tokens.Size.avatarHero, avatarBytes = photo) }
             ShowcaseName(g.name)
             Row {
                 Text(
