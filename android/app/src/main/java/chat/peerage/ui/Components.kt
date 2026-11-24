@@ -1002,10 +1002,6 @@ internal fun BubbleText(
         // Стиль ОДИН на измерение и на показ: разойдись они хоть на межбуквенный
         // интервал — расчёт «влезает ли мета» пойдёт по одной ширине строки, а
         // нарисуется другая, и время слипнется с текстом.
-        val textP = subcompose("text") {
-            Text(text, style = style, onTextLayout = { layout = it }, modifier = mentionTap)
-        }.first().measure(constraints)
-
         // Решаем САМИ, влезает ли мета в конец последней строки: меряем текст и
         // смотрим, где эта строка кончается. Прежний вариант — невидимая вставка
         // размера меты в конце текста — отдавал решение движку переноса, и тот
@@ -1017,6 +1013,14 @@ internal fun BubbleText(
             style,
             constraints = Constraints(maxWidth = constraints.maxWidth),
         )
+        // Перенесённый текст занимает всю доступную ширину, хотя самая длинная строка
+        // короче: пузырь раздувало пустым местом справа. Ширина — по самой длинной строке
+        // (переносы при ней те же, она в неё влезает по построению).
+        val widest = (0 until m.lineCount).maxOf { m.getLineRight(it) - m.getLineLeft(it) }
+        val tight = kotlin.math.ceil(widest).toInt().coerceIn(constraints.minWidth, constraints.maxWidth)
+        val textP = subcompose("text") {
+            Text(text, style = style, onTextLayout = { layout = it }, modifier = mentionTap)
+        }.first().measure(constraints.copy(maxWidth = tight))
         val lastRight = m.getLineRight(m.lineCount - 1).toInt()
         val fits = lastRight + gap + metaW <= constraints.maxWidth
 
