@@ -775,7 +775,11 @@ internal fun DateChip(label: String) {
 /** Список «кого упомянуть» над полем ввода. Не больше пяти строк: дальше человек
  *  уточняет имя, а не листает. */
 @Composable
-private fun MentionSuggestions(candidates: List<Pair<String, String>>, onPick: (String, String) -> Unit) {
+private fun MentionSuggestions(
+    candidates: List<Pair<String, String>>,
+    avatarOf: (String) -> ByteArray?,
+    onPick: (String, String) -> Unit,
+) {
     Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s).padding(top = Tokens.Space.s)) {
         Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.button)).background(HoloSurface),
@@ -786,7 +790,9 @@ private fun MentionSuggestions(candidates: List<Pair<String, String>>, onPick: (
                         .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SquareAvatar(name, size = Tokens.Size.avatarMention)
+                    // Фото человека, как в ленте и у участников: по одной букве в подсказке
+                    // своих не узнать (с телефона).
+                    SquareAvatar(name, size = Tokens.Size.avatarMention, avatarBytes = avatarOf(key), circle = true)
                     Spacer(Modifier.width(Tokens.Space.m))
                     Text(
                         name,
@@ -910,7 +916,7 @@ internal fun MessageInput(
         val query = if (field.selection.collapsed) Mentions.query(field.text.toString(), field.selection.start) else null
         val candidates = query?.let { mentionCandidates(it.second) }.orEmpty()
         if (query != null && candidates.isNotEmpty()) {
-            MentionSuggestions(candidates) { key, name ->
+            MentionSuggestions(candidates, { model?.peerAvatar(it) }) { key, name ->
                 replaceAt(query.first, field.selection.start, "@$name ")
                 onMentionPicked(key, name)
             }
